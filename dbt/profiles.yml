@@ -1,0 +1,12 @@
+thestacks:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_USER', 'stacks_dbt') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'postgres') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'stacks_dev') }}"
+      schema: wh
+      threads: 4

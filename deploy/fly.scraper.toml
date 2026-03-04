@@ -1,0 +1,28 @@
+app = "thestacks-scraper"
+primary_region = "jnb"
+kill_signal = "SIGTERM"
+kill_timeout = "5s"
+
+[build]
+  dockerfile = "Dockerfile.scraper"
+
+[env]
+  RUST_LOG = "info"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3000
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

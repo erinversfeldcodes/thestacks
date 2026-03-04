@@ -1,0 +1,26 @@
+# Build stage
+FROM rust:1.84-alpine AS builder
+
+RUN apk add --no-cache musl-dev
+RUN rustup target add x86_64-unknown-linux-musl
+
+WORKDIR /app
+COPY apps/scraper/Cargo.toml apps/scraper/Cargo.lock* ./
+COPY apps/scraper/src ./src
+
+RUN cargo build --release --target x86_64-unknown-linux-musl
+
+# Runtime stage
+FROM alpine:3.21.2
+
+RUN apk add --no-cache ca-certificates
+RUN addgroup -S stacks && adduser -S stacks -G stacks
+
+WORKDIR /app
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/stacks-scraper ./stacks-scraper
+
+USER stacks
+
+EXPOSE 3000
+
+CMD ["./stacks-scraper"]

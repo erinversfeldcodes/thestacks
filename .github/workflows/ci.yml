@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      elixir: ${{ steps.filter.outputs.elixir }}
+      elm: ${{ steps.filter.outputs.elm }}
+      rust: ${{ steps.filter.outputs.rust }}
+      python: ${{ steps.filter.outputs.python }}
+      proto: ${{ steps.filter.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            elixir:
+              - 'apps/core/**'
+              - 'mix.exs'
+              - 'mix.lock'
+            elm:
+              - 'frontend/**'
+            rust:
+              - 'apps/scraper/**'
+            python:
+              - 'apps/vision/**'
+            proto:
+              - 'proto/**'
+
+  test-elixir:
+    needs: changes
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - run: mix sobelow --config
+      - run: mix deps.audit
+      - run: mix test
+
+  test-elm:
+    needs: changes
+    if: needs.changes.outputs.elm == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.elm
+          key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
+          restore-keys: elm-${{ runner.os }}-
+      - run: npm install --save-dev elm elm-format elm-test
+      - run: npx elm-format --validate src/
+      - run: npx elm-test
+      - run: npm audit
+
+  test-rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/scraper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/scraper/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+      - run: cargo install cargo-audit --locked && cargo audit
+
+  test-python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/vision
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy app/
+      - run: pytest
+
+  lint-proto:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1.47.2
+      - run: buf lint proto/
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  hadolint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.core
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.vision
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.scraper
+
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep scan --config auto --error
+
+  checkov:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: deploy/
+
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
