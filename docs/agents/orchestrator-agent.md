@@ -138,20 +138,24 @@ Your prompt must include:
 
 ### 2B — Delegate Review
 
-After implementation is reported complete, delegate to **Reviewer** via Agent tool:
-- Embed full content of `docs/agents/orchestrator/reviewer-agent.md`
+After implementation is reported complete, delegate to the **stack-specific reviewer** via Agent tool. Use the Reviewer Routing table in `AGENTS.md` to select the correct reviewer(s). If a phase touches multiple stacks, invoke multiple reviewers in parallel.
+
+- Embed full content of the relevant reviewer `.md` file from `docs/agents/reviewers/`
 - Include: phase objective, files modified, DoD items, standards paths
 
 ### 2C — Act on Review Result
 
 **If APPROVED:**
-- Present phase summary to the human
-- Write `plans/<NNN>-<slug>-phase-N-complete.md`
+- Present the reviewer's full report to the human for mediation
+- The human decides: accept the verdict, request further changes, or override
+- On human acceptance: write `plans/<NNN>-<slug>-phase-N-complete.md`
 - Provide commit message (see Git Commit Style Guide)
 - **MANDATORY STOP.** Wait for human to commit before proceeding to next phase.
 
 **If NEEDS_REVISION:**
-- Return to 2A with the Reviewer's specific revision requirements.
+- Present the reviewer's report to the human for mediation
+- The human decides which revisions to accept, modify, or dismiss
+- Return to 2A with the human-approved revision requirements
 - Limit to 2 revision cycles. If still failing, stop and consult human.
 
 **If FAILED:**
