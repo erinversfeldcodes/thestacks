@@ -14,11 +14,12 @@ Agents are plain .md files. Invoke the Orchestrator as:
 
 ## Agent Registry
 
+### Implementation Agents
+
 | Agent | File | Domain |
 |---|---|---|
 | orchestrator | docs/agents/orchestrator-agent.md | System conductor — plans, delegates, reviews |
 | researcher | docs/agents/orchestrator/researcher-agent.md | Research subagent — codebase + doc analysis |
-| reviewer | docs/agents/orchestrator/reviewer-agent.md | Code review subagent |
 | elixir-agent | docs/agents/elixir-agent.md | Phoenix, Oban, EDA, contexts, partner API |
 | elm-agent | docs/agents/elm-agent.md | Elm SPA, shelves, spines, cork board, partner dashboard |
 | python-agent | docs/agents/python-agent.md | FastAPI vision sidecar, content moderation |
@@ -30,6 +31,41 @@ Agents are plain .md files. Invoke the Orchestrator as:
 | security-agent | docs/agents/security-agent.md | GDPR, auth, AI safety, scanning, threat model |
 | principle-engineer | docs/agents/principle-engineer-agent.md | Code quality audit, architectural review |
 | testing-coordinator | docs/agents/testing-coordinator-agent.md | 12-layer test strategy, 4 environments |
+
+### Review Agents
+
+Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, (2) language community standards, (3) project coding standards per `docs/agents/standards/`.
+
+| Reviewer | File | Reviews Work By |
+|---|---|---|
+| elixir-reviewer | docs/agents/reviewers/elixir-reviewer.md | elixir-agent, partner-agent (Elixir portions) |
+| elm-reviewer | docs/agents/reviewers/elm-reviewer.md | elm-agent |
+| rust-reviewer | docs/agents/reviewers/rust-reviewer.md | rust-agent |
+| python-reviewer | docs/agents/reviewers/python-reviewer.md | python-agent |
+| database-reviewer | docs/agents/reviewers/database-reviewer.md | database-agent |
+| platform-reviewer | docs/agents/reviewers/platform-reviewer.md | platform-agent |
+| protobuf-reviewer | docs/agents/reviewers/protobuf-reviewer.md | protobuf-agent |
+
+### Review Protocol
+
+1. Implementation agent completes its task and produces a completion report
+2. Orchestrator invokes the matching review agent with the completion report, DoD, and file list
+3. Reviewer returns a verdict: APPROVED, NEEDS_REVISION, or FAILED
+4. **Human mediates**: orchestrator presents the review to the human, who decides whether to accept, request further changes, or override
+5. If NEEDS_REVISION: implementer acts on feedback, reviewer re-reviews (max 2 cycles before human escalation)
+
+### Reviewer Routing
+
+| Implementation Agent | Reviewer(s) |
+|---|---|
+| elixir-agent | elixir-reviewer |
+| elm-agent | elm-reviewer |
+| rust-agent | rust-reviewer |
+| python-agent | python-reviewer |
+| database-agent | database-reviewer |
+| platform-agent | platform-reviewer |
+| protobuf-agent | protobuf-reviewer |
+| partner-agent | elixir-reviewer + protobuf-reviewer (depending on files touched) |
 
 ## Domain Routing Table
 
