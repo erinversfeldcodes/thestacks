@@ -27,11 +27,7 @@ models:
       +materialized: table
       +schema: marts
 
-seeds:
-  thestacks:
-    +schema: op
-    audit_log:
-      +schema: audit
-    books:
-      +column_types:
-        isbn: text
+# Seeds are managed via apps/core/priv/repo/seeds.exs (Ecto) rather than dbt CSV seeds.
+# dbt seeds are reserved for future wh-schema lookup tables that dbt fully owns.
+# seeds:
+#   thestacks: ...

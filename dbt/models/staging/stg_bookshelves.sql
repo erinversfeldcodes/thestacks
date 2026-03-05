@@ -6,6 +6,8 @@ select
     id,
     user_id,
     name,
+    visibility,
+    visibility_group_id,
     created_at,
     updated_at
 from {{ source('op', 'bookshelves') }}

@@ -306,7 +306,7 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 
 - **The Author:** Author name, a link to their website, and their RSS feed. The latest RSS post is shown as a small card (title, date, first sentence, link). Upcoming events or new releases are highlighted if available.
 
-- **My Writing:** A section where the user can link their own blog posts, reviews, or topical essays about this book or related subjects. Displayed as a list of links with titles and dates. An "Add link" button opens a small form.
+- **My Writing:** A section showing the user's own blog posts that the platform's LLM has associated with this book, plus any posts the user has manually linked. Displayed as a list of post titles, dates, and a one-line excerpt. An "Add post" button allows the user to manually associate a native blog post. External writing links are not supported here — a single website/blog URL lives on the user's profile.
 
 - **Move to Shelf:** A dropdown styled as a wooden shelf label. The user can move the book to any shelf (Library, AntiLibrary, WishList, Reading Pile). The transition is recorded in the book's history.
 
@@ -707,8 +707,8 @@ The moderation pipeline runs automatically on every upload:
 2. A listing flow begins:
    - The user uploads 1–3 photos of the actual physical copy (showing condition — cover, spine, any damage).
    - The user selects a condition grade: New, Good, Fair, or Poor.
-   - The user chooses a pricing model: fixed price (entered in ZAR) OR open to offers (with an optional minimum price, or fully seller-declinable).
-3. The listing is published.
+   - The user chooses a pricing model: fixed price (entered in ZAR), open to offers (with an optional minimum price, or fully seller-declinable), OR closed bid (invited users only, sealed offers, no public Q&A).
+3. The listing is published. Open and fixed-price listings are visible to all platform users by default. Closed bid listings are visible only to users the seller explicitly invites.
 
 **What they see on the page:**
 - The "Looking for a New Home" shelf has its own distinct aesthetic (to be designed — perhaps a window ledge with books propped up, or a market stall).
@@ -730,13 +730,16 @@ The moderation pipeline runs automatically on every upload:
 1. The buyer navigates to the marketplace section.
 2. They browse or search for books.
 3. They view a listing: condition photos, grade, price or offer option.
-4. For fixed-price books: they click "Buy" and proceed to checkout.
-5. For open-to-offers books: they submit an offer amount. The seller can accept or decline.
-6. Payment is processed via Stitch Money (payment initiation, payouts to sellers).
-7. Shipping is calculated at checkout via Pargo integration.
+4. The buyer may post a public question on the listing (visible to all platform users). The seller answers publicly. Block filtering applies — blocked users cannot see each other's questions or answers.
+5. For fixed-price books: they click "Buy" and proceed to checkout.
+6. For open-to-offers books: they submit an offer amount via a private offer thread visible only to buyer and seller. The seller can accept, decline, or counter.
+7. Payment is processed via Stitch Money (payment initiation, payouts to sellers).
+8. Shipping is calculated at checkout via Pargo integration.
 
 **What they see on the page:**
 - Listing detail shows: book metadata (title, author, cover), condition photos in a small gallery, condition grade badge, seller's price or "Make an offer" button, and estimated shipping cost.
+- A public Q&A section below the listing: questions and answers displayed chronologically. A "Ask a question" input at the bottom.
+- Private offer thread is accessible via "Make an offer" — opens a message-style panel visible only to the two parties.
 - Checkout flow: delivery address, Pargo shipping options and costs, payment via Stitch Money.
 - Order confirmation with tracking information.
 
@@ -878,7 +881,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 3. They submit the registration request.
 4. The platform owner receives a notification on their Metrics Dashboard under a new "Partner Requests" section.
 5. The owner reviews the request and approves or declines it.
-6. On approval, the partner receives an API key and access to the partner dashboard.
+6. On approval, the partner receives an API key and access to the partner dashboard. The owner can optionally enable manual review for all subsequent inventory and event submissions from this partner — by default, approved partners' submissions go live automatically.
 
 **What they see on the page:**
 - A clean registration form on parchment background, styled consistently with The Stacks but with a "Partner" badge in the header.
@@ -1120,6 +1123,357 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 - A subtle divider with "Available at" in the same serif font as shelf labels.
 - Partner cards styled as small index cards: partner logo (or placeholder initial), name, price in local currency, book condition as a discrete badge (New, Like New, Good, Acceptable).
 - On the bookshelf view: books with local availability show a small green dot on the spine's bottom edge — unobtrusive but discoverable.
+
+---
+
+---
+
+## 10. Visibility & Privacy
+
+### 10.1 Profile Visibility
+
+#### US-10.1.1 Set Profile Visibility
+
+**As a** user, **I want to** control who can see my profile **so that** I can choose whether to be discoverable on the platform or remain completely private.
+
+**How they accomplish it:**
+1. The user navigates to Profile Settings → Privacy.
+2. They choose a profile visibility level:
+   - **Owner only** — the profile is completely invisible to all other users. No one can find, follow, or see any trace of this account. Effectively a ghost mode.
+   - **Platform users** — any logged-in user can find the profile and see whichever shelves, posts, and placements are set to platform-level visibility.
+3. The change takes effect immediately.
+
+**What they see on the page:**
+- A privacy settings panel with a clear two-option toggle: "Private (only me)" and "Discoverable (platform members)".
+- Ghost mode is explained plainly: "Your profile won't appear in search results or anyone's suggested readers. You can still browse the platform normally."
+- A note that the `looking_for_home` shelf defaults to "Platform users" visibility — but only when the profile itself is set to "Platform users". If the profile is set to "Owner only", the ceiling applies and `looking_for_home` is also owner only. The user can make `looking_for_home` more restrictive than the profile default at any time via shelf settings.
+
+**Ceiling rule:** all shelves, placements, and blog posts are subject to the profile visibility ceiling — content cannot be more visible than the profile that contains it. The `looking_for_home` shelf is not exempt from this rule; it simply has a different *default* visibility that activates when the profile is discoverable.
+
+---
+
+#### US-10.1.2 Block a User
+
+**As a** user, **I want to** block another user **so that** they cannot see my profile, content, or interact with me anywhere on the platform.
+
+**How they accomplish it:**
+1. From any profile page, listing, comment, or Q&A, the user selects "Block [name]" from the overflow menu.
+2. The system confirms: "Block [name]? They won't be able to see your profile or content, and you won't see theirs."
+3. The user confirms.
+
+**Effects of blocking:**
+- The blocked user's profile becomes invisible to the blocker, and vice versa.
+- In shared spaces (blog comments, marketplace Q&A), neither party can see the other's contributions. Sub-threads rooted in a blocked user's comment collapse entirely rather than showing a `[hidden]` placeholder.
+- The block is not notified to the blocked user — they simply cannot find the blocker.
+
+**What they see on the page:**
+- A confirmation modal in the platform's dark-parchment style: "You've blocked [name]. You can undo this any time in Privacy Settings."
+- A blocked users list in Privacy Settings where blocks can be reviewed and removed.
+
+---
+
+### 10.2 Content Visibility
+
+#### US-10.2.1 Set Shelf Visibility
+
+**As a** user, **I want to** control who can see each of my shelves **so that** I can share some reading lists while keeping others private.
+
+**How they accomplish it:**
+1. On any shelf page, the user opens the shelf settings menu (gear icon on the shelf header).
+2. They choose a visibility level:
+   - **Only me** — shelf is not visible to anyone else (default for all shelves except `looking_for_home`).
+   - **Platform users** — any logged-in user can see the shelf and its contents.
+   - **Group** — visible only to members of a specific group the user owns or belongs to.
+   - **Specific people** — visible only to a named list of users.
+3. The shelf's visibility is bounded by the profile ceiling. If the profile is set to "Only me", shelf-level settings have no effect.
+
+**Age-gating note:** age-gated books (US-1.1.4) always require age verification before their detail pages are accessible — regardless of the shelf's visibility level. Shelf visibility controls *discoverability*; age verification controls *access to content*. These are independent gates and apply equally to marketplace listings, partner availability data, and review aggregation for age-gated titles.
+
+**What they see on the page:**
+- A shelf settings drawer slides in from the right. The visibility section is labelled "Who can see this shelf?"
+- A segmented control: Only me / Platform / Group / Specific people.
+- Selecting Group shows a dropdown of the user's groups. Selecting Specific people shows a user search field where names can be added.
+- The current visibility is shown as a small icon on the shelf header (a padlock, a globe, a group silhouette, or a person icon).
+
+---
+
+#### US-10.2.2 Override Placement Visibility
+
+**As a** user, **I want to** make an individual book on a shelf less visible than the shelf itself **so that** I can hide specific books from people who can otherwise see the shelf.
+
+**What the user wants to accomplish:** The shelf is visible to close friends, but one book on it is too personal to share — hide just that book without hiding the whole shelf.
+
+**How they accomplish it:**
+1. On any book spine or detail page, the user opens the book's context menu and selects "Visibility for this copy".
+2. They choose a visibility level that is equal to or more restrictive than the shelf's current setting.
+3. The book remains on the shelf but is hidden from anyone outside the chosen visibility level.
+
+**Ceiling rule:** a placement cannot be made *more* visible than its shelf. The options shown are always a subset of or equal to the shelf's current visibility.
+
+**What they see on the page:**
+- The context menu item "Visibility for this copy" shows the current setting with a small icon.
+- A modal with the same visibility options as shelf settings, but greyed-out options that would exceed the shelf's ceiling, with a tooltip: "This shelf is set to [level] — placements can't be more visible than their shelf."
+- On the shelf view, hidden books show as a faint outline spine to the owner only — a visual reminder that something is there but not shown to others.
+
+---
+
+#### US-10.2.3 Set Blog Post Visibility
+
+**As a** user, **I want to** control who can read each of my blog posts **so that** I can publish some posts widely and keep others within a trusted group.
+
+**How they accomplish it:**
+1. When writing or editing a post, the user sets the visibility before publishing (or can change it at any time).
+2. Visibility options: Only me / Platform users / Group / Specific people — subject to the profile visibility ceiling.
+3. A post set to "Only me" is saved as a draft-like private post. It does not appear in the user's public blog listing.
+
+**What they see on the page:**
+- The post editor has a visibility selector in the publish bar at the bottom, styled as a small dropdown with an icon.
+- Unpublished/private posts appear in the user's own blog view with a padlock icon on the post card. They are invisible to everyone else.
+
+---
+
+### 10.3 View As
+
+#### US-10.3.1 Preview Content Visibility
+
+**As a** user, **I want to** preview how my profile and content appear to different audiences **so that** I can verify my visibility settings are correct before assuming they work.
+
+**What the user wants to accomplish:** "I set my shelf to close-friends only — I want to confirm my mum can't see it even though my profile is discoverable."
+
+**How they accomplish it:**
+1. From Profile Settings → Privacy, the user clicks "Preview as…"
+2. They choose a viewing perspective:
+   - **Not logged in** — simulates an unauthenticated visitor. Confirms no content is visible to scrapers or non-members.
+   - **Anyone on the platform** — simulates a logged-in stranger with no relationship to the user.
+   - **Specific user** — the user types a name and previews exactly what that person would see (respecting blocks, group memberships, and individual grants).
+   - **Group member** — the user selects one of their groups and previews as a generic member of that group.
+3. The platform renders a read-only view of the profile as that audience would see it. A persistent banner reads "Previewing as [perspective] — this is not your live view."
+4. The user can navigate shelves, posts, and placements within the preview. Clicking "Exit preview" returns to their normal view.
+
+**What they see on the page:**
+- The preview banner is styled in muted amber — unobtrusive but clearly visible. It shows the current perspective and an "Exit preview" button.
+- All edit controls and navigation menus are hidden in preview mode.
+- If "Not logged in" is selected and any content is visible, a warning badge appears: "Some content may be visible to unauthenticated visitors — review your settings."
+
+---
+
+### 10.4 Search Engine Privacy
+
+#### US-10.4.1 Search Engine Privacy
+
+**As a** user, **I want to** know that my profile and reading history will never appear in search engine results **so that** my presence on the platform remains private from the wider internet.
+
+**How they accomplish it:** No action required — this is a platform-wide guarantee enforced automatically.
+
+**What the platform does:**
+- All user-generated pages include `<meta name="robots" content="noindex, nofollow">`.
+- `robots.txt` disallows all crawlers from user profile, shelf, and post URLs.
+- Unauthenticated requests to any user-data endpoint return no personal data — they receive either a redirect to the login page or an empty response.
+
+**What they see:**
+- In Privacy Settings, a single line: "Your profile and content will never appear in search engine results. This applies to all users and cannot be changed."
+
+---
+
+## 11. Social Graph
+
+### 11.1 Groups
+
+#### US-11.1.1 Create a Group
+
+**As a** user, **I want to** create a group **so that** I can share content with a defined set of people using the right sharing model for my intent.
+
+**How they accomplish it:**
+1. From Profile → Groups → "New Group".
+2. The user names the group and selects a type:
+   - **Close friends** — bidirectional, members are aware they share a space (e.g. a trusted reading circle). Members see each other's display names in interactive spaces like comments.
+   - **Broadcast** — owner pushes content to members. Members cannot see each other. Good for sharing reading notes with followers who opted in.
+   - **Subscription** — members opt in to follow the owner's content. Owner accepts or ignores follow requests. Natural fit for blog readership.
+3. The group is created. The owner can immediately invite members or share a join link (for subscription type).
+
+**What they see on the page:**
+- A creation flow with a group name field and three styled cards describing each type — illustrated with small vignettes consistent with the platform aesthetic.
+- After creation, a group page shows: name, type badge, member count (visible to owner only for broadcast/close friends), and an "Invite" button.
+
+---
+
+#### US-11.1.2 Invite Members to a Group
+
+**As a** group owner, **I want to** invite specific users to a close friends or broadcast group **so that** they can see the content I've scoped to that group.
+
+**How they accomplish it:**
+1. From the group page, the owner clicks "Invite".
+2. They search for a platform user by display name and send an invitation.
+3. The invited user receives a notification: "[Name] has invited you to their group '[Group name]'." They can accept or decline.
+4. Accepted invitations add the user to the group. Declined invitations are silent — the owner is not notified of the decline.
+
+**What they see on the page:**
+- An invitation modal with a user search field.
+- Pending invitations are shown in the group member list as "Invited" with a muted style.
+- The invited user sees a notification card with "Accept" and "Decline" buttons. No pressure framing — declining feels low-stakes.
+
+---
+
+#### US-11.1.3 Leave a Group
+
+**As a** group member, **I want to** leave a group **so that** I no longer receive that group's content without having to explain myself to the owner.
+
+**How they accomplish it:**
+1. From the group's page (accessible from their own Groups list), the member clicks "Leave group".
+2. A confirmation: "Leave [group name]? You'll no longer see content shared with this group."
+3. The member is removed. The owner receives no notification.
+
+**What they see on the page:**
+- A simple confirmation modal. No drama, no guilt framing.
+- After leaving, the group disappears from the member's Groups list and any content scoped to that group becomes invisible to them.
+
+---
+
+#### US-11.1.4 Manage Group Members
+
+**As a** group owner, **I want to** review and remove members from my group **so that** I can keep the group relevant and maintain control over who sees my content.
+
+**How they accomplish it:**
+1. From the group page, the owner views the member list (visible only to them).
+2. They can remove any member. The removed member receives no notification and the content scoped to the group becomes invisible to them immediately.
+3. For subscription groups, the owner can accept or ignore incoming follow requests.
+
+**What they see on the page:**
+- A member list with display names and join dates.
+- A "Remove" option on each member row, styled as a small ghost button — present but not prominent.
+- For subscription groups, a "Follow requests" tab showing pending requests with Accept/Ignore actions.
+
+---
+
+## 12. Blog
+
+### 12.1 Writing
+
+#### US-12.1.1 Write a Blog Post
+
+**As a** user, **I want to** write and publish native blog posts on the platform **so that** I can share my thoughts on reading, books, and ideas with my audience.
+
+**How they accomplish it:**
+1. From their profile, the user navigates to "Writing" → "New Post".
+2. They write in a minimal rich-text editor: title, body (with basic formatting — bold, italic, headings, blockquote, links).
+3. They set visibility before publishing (see US-10.2.3).
+4. They click "Publish". The post is timestamped and appears in their writing archive.
+
+**What they see on the page:**
+- The editor is clean and distraction-free: white or parchment background, serif typeface, no sidebar. Consistent with the platform's reading-first aesthetic.
+- A word count appears subtly at the bottom.
+- The publish bar at the bottom contains: visibility selector, a "Save draft" button, and a "Publish" button.
+- Published posts appear on the user's profile under "Writing", displayed as a vertical list of cards — title, date, first two lines of body, and a visibility icon.
+
+---
+
+#### US-12.1.2 LLM Book Associations on a Post
+
+**As a** user, **I want** the platform to surface connections between my writing and my reading history **so that** readers can explore the books that informed a post, and I can discover patterns in my own reading and thinking.
+
+**What the platform does:**
+1. After a post is published (or when the user requests it on a draft), an Oban job runs the post body through an LLM.
+2. The LLM is given the post content and the user's full book catalogue (title, author, description, subjects).
+3. It returns a ranked list of books from the catalogue that relate to the post, with a one-sentence reasoning for each association.
+4. Associations are stored in `post_book_associations` with a confidence score. The top three are surfaced on the post by default.
+5. The user can review, accept, dismiss, or manually add associations.
+
+**What they see on the page:**
+- Below each published post: a "Books from my shelves" section showing up to three book spines (small, inline) with the association reasoning as a tooltip on hover.
+- An edit panel where the user can see all suggested associations, toggle them on/off, and manually link additional books from their collection.
+- A subtle "Suggested by AI — you can edit these" label below the section.
+
+---
+
+#### US-12.1.3 Browse Another User's Blog
+
+**As a** platform user, **I want to** read another user's blog posts **so that** I can follow their reading life and thinking.
+
+**How they accomplish it:**
+1. From a public profile, the user navigates to the "Writing" tab.
+2. They see a list of posts scoped to their visibility level (only posts the author has made visible to this viewer).
+3. They click a post to read it in full.
+
+**What they see on the page:**
+- The writing tab shows post cards: title, date, opening lines, and a read-time estimate.
+- The post page is clean and typographic — the author's name and date at the top, the body in a readable serif, and the book associations section at the bottom.
+- No algorithmic recommendations or infinite scroll. The archive is a simple reverse-chronological list.
+
+---
+
+## 13. Comments
+
+### 13.1 Blog Comments
+
+#### US-13.1.1 Comment on a Blog Post
+
+**As a** reader, **I want to** leave a comment on a blog post **so that** I can respond to the author's writing and participate in the conversation.
+
+**How they accomplish it:**
+1. At the bottom of any blog post they can see, the reader clicks "Leave a comment".
+2. They type a comment (plain text, no rich formatting) and submit.
+3. Comments are threaded — readers can reply to a specific comment, creating a sub-thread.
+4. The author can delete any comment on their own post. Commenters can delete their own comments.
+
+**What they see on the page:**
+- A comment section below the book associations. Each comment shows: display name, avatar initial, timestamp, and body.
+- A reply link under each comment that opens an inline reply input.
+- The author's comments are marked with a subtle "(author)" label next to their name.
+- Deleted comments show nothing — no `[deleted]` placeholder. The sub-thread collapses if the root comment is deleted.
+
+---
+
+#### US-13.1.2 Block Filtering in Comments
+
+**As a** user, **I want** comments from users I've blocked — and comments visible to users who have blocked me — to be filtered out of every thread I read **so that** I am not exposed to people I've chosen not to interact with.
+
+**How the platform handles it:**
+- Comment threads are filtered per-viewer at render time.
+- If viewer A has blocked user B (or B has blocked A), B's comments are invisible to A, and A's comments are invisible to B.
+- If B's comment is the root of a sub-thread, the entire sub-thread collapses for A — not replaced with a placeholder, simply absent.
+- This filtering applies silently. Neither party is aware of the other's experience.
+
+**What they see on the page:**
+- No visible indication of filtering. The thread reads as a natural conversation with no gaps or `[hidden]` markers.
+
+---
+
+### 13.2 Marketplace Q&A
+
+#### US-13.2.1 Ask a Question on a Listing
+
+**As a** buyer, **I want to** ask a public question on a book listing **so that** the seller can answer and other interested buyers can benefit from the response.
+
+**How they accomplish it:**
+1. On any open listing, the buyer scrolls to the Q&A section and clicks "Ask a question".
+2. They type their question and submit. The question is immediately visible to all platform users who can see the listing (subject to block filtering).
+3. The seller is notified and can respond. The answer appears beneath the question.
+4. Questions and answers are visible to all viewers — they function as a public FAQ for the listing.
+
+**What they see on the page:**
+- A Q&A section below the condition photos and price. Existing questions and answers are displayed chronologically.
+- The question input is at the bottom: a single text field and a "Post question" button.
+- Each Q&A pair shows: asker's display name, question, seller's answer (if given), and timestamps.
+- Block filtering applies: blocked users cannot see each other's questions or answers.
+
+---
+
+#### US-13.2.2 Private Offer Thread
+
+**As a** buyer, **I want to** make a private offer on a book **so that** my negotiation with the seller is not visible to other buyers.
+
+**How they accomplish it:**
+1. On any open-to-offers or fixed-price listing, the buyer clicks "Make an offer" (or "Message seller").
+2. An offer thread opens — a private message panel visible only to this buyer and the seller.
+3. For open-to-offers: the buyer enters a ZAR amount. The seller can accept, decline, or counter.
+4. For fixed-price: the thread is a general enquiry channel (e.g. "Can you confirm the edition?").
+5. If the seller accepts an offer, the listing moves to checkout for that buyer and is marked as pending.
+
+**What they see on the page:**
+- A slide-in message panel styled as a private correspondence thread: warm paper background, handwritten-style dividers between messages.
+- Offer amounts are shown as styled chips: buyer offer in one colour, seller counter in another.
+- Accept and Decline buttons appear on the seller's view next to each buyer offer.
+- "Pending" badge appears on the listing spine for all other viewers once an offer is accepted.
 
 ---
 

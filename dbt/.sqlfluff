@@ -1,0 +1,32 @@
+[sqlfluff]
+dialect = postgres
+# jinja templater works offline (no dbt profile/DB needed).
+# CI overrides to dbt templater for full macro resolution: --templater dbt
+templater = jinja
+# Exclude dbt-managed directories
+exclude_rules = RF05
+
+[sqlfluff:layout:type:comma]
+# Trailing commas (consistent with our style: comma at end of line)
+line_position = trailing
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:convention.select_trailing_comma]
+select_clause_trailing_comma = forbid

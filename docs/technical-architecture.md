@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.0
-> **Last updated:** 2026-03-05
+> **Version:** 1.1
+> **Last updated:** 2026-03-06
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -36,6 +36,8 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 24. [RSS / OPDS](#rss--opds)
 25. [Marketplace (Future)](#marketplace-future)
 26. [Potential OSS Contributions](#potential-oss-contributions)
+27. [Visibility & Privacy Architecture](#visibility--privacy-architecture)
+28. [Blog & LLM Associations](#blog--llm-associations)
 
 ---
 
@@ -639,6 +641,8 @@ The user account. Single-user initially, multi-user ready.
 | `city` | `TEXT` | `NULL`. Used for third space location filtering. |
 | `consent_analytics` | `BOOLEAN` | Default `false`, with timestamp |
 | `consent_analytics_at` | `TIMESTAMPTZ` | `NULL` |
+| `profile_visibility` | `ENUM('owner', 'platform')` | Default `'owner'`. Controls profile discoverability. |
+| `website_url` | `TEXT` | `NULL` — single external blog/portfolio URL, shown on profile. |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
@@ -646,32 +650,38 @@ The user account. Single-user initially, multi-user ready.
 - No KYC documents are stored — only the boolean result and provider reference.
 - Location (country, city) is user-configured, not device-derived.
 - Consent fields track GDPR consent per use with timestamps.
+- `profile_visibility = 'owner'` is ghost mode — the profile is completely invisible to other platform users.
 
 ### Entity Relationship Overview
 
 ```
 users 1──* shelves 1──* shelf_placements *──1 books *──1 authors
-                              │                  │          │
-                     shelf_placement_history      │          │
-                                                  │          │
-                              ┌──────────────────┘          │
-                              │                              │
-                   review_snapshots                          │
-                   price_snapshots ──* bookstores            │
-                   uploaded_images                           │
-                   my_writing_links            bookstore_events
-                                               third_spaces ──* third_space_events
-                                               discovered_sources
+      │                    │    │                │          │
+      │          shelf_placement_history          │          │
+      │                         │                │          │
+      │              ┌──────────┘     review_snapshots      │
+      │              │                price_snapshots──*bookstores
+      │        offer_threads──* offer_messages               │
+      │                                        uploaded_images
+      │                                                       │
+      1──* blog_posts ──* post_book_associations ────────────┘
+      │         │
+      │         └──* comments (threaded, polymorphic)
+      │
+      1──* groups ──* group_members
+      │          └──* group_invitations
+      │
+      1──* user_blocks
+      │
+      └──* visibility_grants (polymorphic — shelves, placements, posts)
 
 partners 1──* partner_inventory *──? books (via ISBN)
          1──* partner_events
          1──* partner_spaces
 
-books 1──* listings 1──* offers
-                    1──1 transactions
-users 1──* listings (as seller)
-      1──* offers (as buyer)
-      1──* transactions (as buyer or seller)
+third_spaces ──* third_space_events
+discovered_sources
+bookstore_events ──1 bookstores
 
 event_log (standalone — references aggregates by type + ID)
 audit_log (standalone — references resources by type + ID)
@@ -726,6 +736,14 @@ A user has exactly five shelves, named by the fixed enum.
 | `id` | `UUID` | Primary key |
 | `user_id` | `UUID` | Foreign key to `users` |
 | `name` | `ENUM('antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home')` | |
+| `visibility` | `ENUM('owner', 'group', 'platform')` | Default `'owner'` for all shelves except `looking_for_home` which defaults to `'platform'`. Ceiling: cannot exceed `users.profile_visibility`. |
+| `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when `visibility = 'group'`. |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+**Notes:**
+- `looking_for_home` defaults to `'platform'` visibility but this default only activates when the user's profile is also set to `'platform'`. If profile is `'owner'`, the ceiling applies.
+- Individual user allowlists/denylists for shelves are managed via `visibility_grants` and `user_blocks` rather than on this table.
 
 ### `shelf_placements`
 
@@ -742,6 +760,12 @@ A book's placement on a shelf, with metadata. Soft-delete via `removed_at` prese
 | `formats` | `TEXT[]` | e.g. `['hardcover', 'kindle', 'audiobook']` |
 | `personal_rating` | `INTEGER` | `NULL` — optional |
 | `notes` | `TEXT` | `NULL`, encrypted (Tier 2) |
+| `visibility` | `ENUM('owner', 'group', 'platform')` | `NULL` — inherits shelf visibility when NULL. Can only be equal to or more restrictive than the shelf's visibility. |
+| `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when placement `visibility = 'group'`. |
+| `listing_mode` | `ENUM('open', 'offers', 'closed_bid')` | `NULL` — only set for `looking_for_home` placements. |
+| `listing_status` | `ENUM('active', 'pending', 'sold')` | `NULL` — only set for `looking_for_home` placements. |
+| `listing_price_cents` | `INTEGER` | `NULL` — fixed price in smallest currency unit. |
+| `listing_min_price_cents` | `INTEGER` | `NULL` — minimum acceptable offer for `offers` mode. |
 
 **Unique constraint:** `UNIQUE(book_id, shelf_id, removed_at)` — a book can only be on a shelf once at a time, but can be re-added after removal.
 
@@ -853,9 +877,9 @@ Events at third spaces, including recurring ones.
 | `source_url` | `TEXT` | |
 | `scraped_at` | `TIMESTAMPTZ` | |
 
-### `my_writing_links`
+### `my_writing_links` ⚠️ DEPRECATED
 
-Personal writing links (blog posts, essays, reviews) that the user wants to associate with books.
+> **Deprecated in v1.1.** This table will be dropped in the next migration batch. External writing link functionality has been replaced by: (1) `users.website_url` for a single external blog/portfolio URL, and (2) the native `blog_posts` table with LLM-generated `post_book_associations`. A migration is required to drop this table and confirm no live data exists.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -865,6 +889,186 @@ Personal writing links (blog posts, essays, reviews) that the user wants to asso
 | `url` | `TEXT` | |
 | `tags` | `TEXT[]` | |
 | `added_at` | `TIMESTAMPTZ` | |
+
+### `user_blocks`
+
+Bidirectional block relationships. A block makes both parties invisible to each other in all contexts.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `blocker_id` | `UUID` | Foreign key to `users` |
+| `blocked_id` | `UUID` | Foreign key to `users` |
+| `created_at` | `TIMESTAMPTZ` | |
+
+**Unique constraint:** `UNIQUE(blocker_id, blocked_id)`
+
+**Notes:**
+- Blocks are bidirectional in effect but unidirectional in storage (A blocks B ≠ B blocks A, but both result in mutual invisibility).
+- Enforced server-side at the `resolve_visibility/2` layer — never client-side only.
+- Profile-level: a blocked user cannot find the blocker's profile at all. Returns 404, not 403.
+
+---
+
+### `groups`
+
+Named groups for scoped content sharing. Three types with distinct sharing semantics.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `owner_id` | `UUID` | Foreign key to `users` |
+| `name` | `TEXT` | `NOT NULL` |
+| `type` | `ENUM('close_friends', 'broadcast', 'subscription')` | `NOT NULL` |
+| `visibility` | `ENUM('invite_only', 'platform')` | Default `'invite_only'`. `'platform'` allows users to find and request to join (subscription type only). |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+**Type semantics:**
+- `close_friends` — bidirectional trust circle. Members are aware they share a space. Member list visible only to owner.
+- `broadcast` — owner pushes content to members. Members cannot see each other.
+- `subscription` — members opt in. Owner accepts or ignores requests. Natural fit for blog readership.
+
+---
+
+### `group_members`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `group_id` | `UUID` | Foreign key to `groups` |
+| `user_id` | `UUID` | Foreign key to `users` |
+| `role` | `ENUM('member', 'moderator')` | Default `'member'` |
+| `joined_at` | `TIMESTAMPTZ` | |
+
+**Unique constraint:** `UNIQUE(group_id, user_id)`
+
+---
+
+### `group_invitations`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `group_id` | `UUID` | Foreign key to `groups` |
+| `invited_by` | `UUID` | Foreign key to `users` |
+| `invited_user_id` | `UUID` | Foreign key to `users` |
+| `status` | `ENUM('pending', 'accepted', 'declined')` | Default `'pending'` |
+| `created_at` | `TIMESTAMPTZ` | |
+| `responded_at` | `TIMESTAMPTZ` | `NULL` |
+
+**Notes:** Declined invitations do not notify the inviter. Owner is not notified when members leave.
+
+---
+
+### `visibility_grants`
+
+Per-resource individual access grants. Used when visibility is set to "specific people".
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `resource_type` | `TEXT` | `NOT NULL` — e.g. `'shelf'`, `'blog_post'`, `'shelf_placement'` |
+| `resource_id` | `UUID` | `NOT NULL` |
+| `granted_to` | `UUID` | Foreign key to `users` |
+| `granted_by` | `UUID` | Foreign key to `users` |
+| `created_at` | `TIMESTAMPTZ` | |
+
+**Unique constraint:** `UNIQUE(resource_type, resource_id, granted_to)`
+
+---
+
+### `blog_posts`
+
+Native blog posts authored on the platform.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `user_id` | `UUID` | Foreign key to `users` |
+| `title` | `TEXT` | `NOT NULL` |
+| `body` | `TEXT` | `NOT NULL` — stored as Markdown |
+| `visibility` | `ENUM('owner', 'group', 'platform')` | Default `'owner'`. Ceiling: cannot exceed `users.profile_visibility`. |
+| `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when `visibility = 'group'`. |
+| `published_at` | `TIMESTAMPTZ` | `NULL` — NULL means draft/private. Set on first publish. |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+---
+
+### `post_book_associations`
+
+LLM-generated associations between blog posts and books in the author's collection. Stored after an Oban job processes the post body against the user's book catalogue.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `post_id` | `UUID` | Foreign key to `blog_posts` |
+| `book_id` | `UUID` | Foreign key to `books` |
+| `confidence` | `FLOAT` | LLM confidence score `[0.0, 1.0]` |
+| `reasoning` | `TEXT` | One-sentence LLM-generated explanation of the association |
+| `source` | `ENUM('llm', 'manual')` | Whether the association was generated or manually added by the author |
+| `visible` | `BOOLEAN` | Default `true`. Author can dismiss individual associations. |
+| `created_at` | `TIMESTAMPTZ` | |
+
+---
+
+### `comments`
+
+Polymorphic comments. Parents are either a `blog_post` or a `shelf_placement` (marketplace listing Q&A).
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `parent_type` | `TEXT` | `NOT NULL` — `'blog_post'` or `'shelf_placement'` |
+| `parent_id` | `UUID` | `NOT NULL` — references the parent resource |
+| `parent_comment_id` | `UUID` | `NULL` — self-referential FK for threading. `NULL` = top-level comment. |
+| `user_id` | `UUID` | Foreign key to `users` |
+| `body` | `TEXT` | `NOT NULL` — plain text, no rich formatting |
+| `deleted_at` | `TIMESTAMPTZ` | `NULL` — soft delete. Deleted comments AND their sub-threads are hidden entirely (no `[deleted]` placeholder). |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+**Index:** `CREATE INDEX idx_comments_parent ON comments (parent_type, parent_id, created_at ASC)` for efficient thread loading.
+
+**Notes:**
+- Block filtering is applied at query time via a recursive CTE that excludes sub-trees rooted in comments by blocked users.
+- Sub-thread collapse on block: if the root comment author is blocked by the viewer, the entire sub-thread is excluded — not replaced with a placeholder.
+
+---
+
+### `offer_threads`
+
+Private negotiation threads on marketplace listings. One thread per buyer-listing pair.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `placement_id` | `UUID` | Foreign key to `shelf_placements` (the listing) |
+| `buyer_id` | `UUID` | Foreign key to `users` |
+| `status` | `ENUM('open', 'accepted', 'declined', 'expired')` | Default `'open'` |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+**Unique constraint:** `UNIQUE(placement_id, buyer_id)` — one thread per buyer per listing.
+
+---
+
+### `offer_messages`
+
+Individual messages within an offer thread. Includes both conversational messages and formal offer amounts.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `thread_id` | `UUID` | Foreign key to `offer_threads` |
+| `sender_id` | `UUID` | Foreign key to `users` |
+| `type` | `ENUM('message', 'offer', 'counter', 'accept', 'decline')` | `NOT NULL` |
+| `body` | `TEXT` | `NULL` — for `message` type |
+| `amount_cents` | `INTEGER` | `NULL` — for `offer` and `counter` types |
+| `created_at` | `TIMESTAMPTZ` | |
+
+---
 
 ### `uploaded_images`
 
@@ -4434,8 +4638,20 @@ Every event follows a standard envelope, defined in `proto/stacks/internal/event
 | Partner | `event.created` | Partner pushes event | Third Spaces cork board |
 | Partner | `space.registered` | Partner registers a space | Owner approval queue |
 | Marketplace | `listing.created` | User lists book for sale | Notification, moderation |
+| Marketplace | `listing.status_changed` | Offer accepted / sold | Pending badge update, checkout initiation |
 | Marketplace | `offer.made` | Buyer makes offer | Seller notification |
+| Marketplace | `offer.accepted` | Seller accepts offer | Listing marked pending, checkout initiated |
+| Marketplace | `offer.declined` | Seller declines offer | Buyer notification |
 | Marketplace | `payment.completed` | Stitch Money callback | Shipping initiation, audit |
+| Social | `group.created` | User creates group | Audit log |
+| Social | `group.member_joined` | Invitation accepted | Group member list updated |
+| Social | `group.member_left` | Member leaves group | Group member list updated (no owner notification) |
+| Social | `user.blocked` | User blocks another | Visibility index invalidation |
+| Blog | `post.published` | User publishes post | `PostBookAssociationWorker` enqueued, visibility index |
+| Blog | `post.updated` | User edits published post | Re-enqueue `PostBookAssociationWorker` if body changed |
+| Blog | `post.deleted` | User deletes post | Association cleanup, comment soft-delete cascade |
+| Comments | `comment.created` | User posts a comment | Author notification |
+| Comments | `comment.deleted` | Author or commenter deletes | Sub-thread cascade soft-delete |
 
 ### Subscriber Registry
 
@@ -4799,18 +5015,235 @@ OPDS support enables integration with e-reader apps like KOReader, Calibre, and 
 
 ## Marketplace (Future)
 
-A Yaga-style marketplace for secondhand books, initially ZA-only.
+A Depop/Vinted-style marketplace for secondhand books, initially ZA-only.
 
 ### Design
 
 | Aspect | Decision |
 |--------|----------|
-| Pricing | Fixed price OR make-an-offer (seller sets minimum or declines freely) |
+| Interaction model | **Depop/Vinted**: public Q&A on listings (visible to all platform users) + private offer threads (buyer + seller only) |
+| Pricing modes | Fixed price, open-to-offers (with optional minimum), or closed bid (invited users only, sealed offers, no public Q&A) |
 | Listings | Photos required + condition grading (new / good / fair / poor) |
 | Payments | Stitch Money for payment initiation and payouts |
 | Shipping | Pargo for calculated shipping at checkout |
 | Trust | KYC required for sellers (Smile Identity / Yoti / Sumsub) |
 | Open source | Others fork the platform and swap in local equivalents for payments, shipping, and KYC |
+
+### Interaction Model Detail
+
+**Open and offers listings:**
+- Public Q&A section on each listing — questions and answers visible to all platform users who can see the listing.
+- Block filtering applies to Q&A identically to blog comments (see Section 27).
+- Private offer thread per buyer — one `offer_thread` row per `(placement_id, buyer_id)` pair.
+- Offer thread supports: plain messages, formal offer amounts, counter-offers, accept, and decline.
+- On offer acceptance: `listing_status` transitions to `'pending'`, listing is locked from new offers, checkout is initiated.
+
+**Closed bid listings:**
+- `listing_mode = 'closed_bid'` on the `shelf_placements` row.
+- No public Q&A rendered.
+- Visibility scoped to individually invited users via `visibility_grants`.
+- Offers submitted blindly (buyers cannot see competing offer amounts).
+- Seller accepts one offer; all others are declined automatically.
+
+### State Machine
+
+```
+looking_for_home placement:
+  active ──(offer accepted)──► pending ──(payment complete)──► sold
+  active ──(seller removes)──► [removed_at set, placement soft-deleted]
+  pending ──(payment fails / expires)──► active
+```
+
+---
+
+## Visibility & Privacy Architecture
+
+### The Visibility Model
+
+Content visibility on The Stacks is controlled by four ordered levels:
+
+| Level | Meaning |
+|-------|---------|
+| `owner` | Visible only to the owning user. Default for profiles, shelves, posts, and placements. |
+| `group` | Visible to members of a specific named group. Requires a `visibility_group_id` reference. |
+| `platform` | Visible to any authenticated platform user. |
+| *(specific users)* | Managed via `visibility_grants` table — a named allowlist layered on top of `owner` or `group` visibility. |
+
+**Ceiling rule:** a child resource cannot be more visible than its parent.
+- Placement visibility ≤ shelf visibility
+- Shelf visibility ≤ profile visibility
+- Blog post visibility ≤ profile visibility
+
+### Anti-Scraping
+
+The platform's URLs are shareable but not search-engine-indexable:
+
+- All user-generated pages include `<meta name="robots" content="noindex, nofollow">`.
+- `robots.txt` disallows crawlers from all `/u/`, `/shelf/`, `/post/`, and `/listing/` path prefixes.
+- Unauthenticated requests to any user-data endpoint return a redirect to `/login` — no personal data is returned without authentication.
+- API responses never include PII for unauthenticated callers.
+
+### `resolve_visibility/2`
+
+A single context function is the authoritative gate for all content access decisions. Every read path that touches user-generated content calls it:
+
+```elixir
+@type viewer ::
+  :unauthenticated
+  | {:platform_user, user_id :: Ecto.UUID.t()}
+  | {:group_member, group_id :: Ecto.UUID.t()}
+  | {:specific_user, user_id :: Ecto.UUID.t()}
+
+@spec resolve_visibility(resource :: struct(), viewer :: viewer()) ::
+  :visible | :hidden
+
+def resolve_visibility(resource, viewer) do
+  with :ok <- check_profile_ceiling(resource, viewer),
+       :ok <- check_block(resource, viewer),
+       :ok <- check_age_gate(resource, viewer),
+       :ok <- check_resource_visibility(resource, viewer) do
+    :visible
+  else
+    _ -> :hidden
+  end
+end
+```
+
+**Clauses evaluated in order:**
+
+1. **Profile ceiling** — if the owner's profile is `'owner'` visibility, return `:hidden` for all resources unless viewer is the owner.
+2. **Block check** — if either party has blocked the other, return `:hidden`.
+3. **Age gate** — if `books.visibility_tier = 'age_gated'` and viewer is not age-verified, return `:hidden`. This is independent of ownership visibility — it always applies.
+4. **Resource visibility** — evaluate the resource's own `visibility` field against the viewer's relationship (group membership, individual grant, or platform user status).
+
+Returns `:hidden` in all ambiguous or error cases. On `:hidden`, controllers return **404, not 403** — revealing that a resource exists is itself an information leak.
+
+### "View As" Mode
+
+Owners can preview their own content as different audiences. The viewer context is threaded through the request via a Plug-assigned conn field:
+
+```elixir
+# Set by ViewAsPlug when the query param is present
+conn.assigns[:view_as_context] :: viewer()
+```
+
+The `ViewAsPlug` validates that:
+- The requesting user owns the profile being previewed (cannot view-as for other people's profiles).
+- The target specific user (if chosen) exists on the platform.
+- The target group (if chosen) is owned by or includes the requesting user.
+
+Four modes map to viewer types:
+
+| Mode | Viewer context |
+|------|---------------|
+| Not logged in | `:unauthenticated` |
+| Anyone on the platform | `{:platform_user, nil}` |
+| Specific user | `{:specific_user, user_id}` |
+| Group member | `{:group_member, group_id}` |
+
+### Comment Thread Block Filtering
+
+Comment threads are filtered using a recursive CTE that excludes entire sub-trees when the root comment author is blocked:
+
+```sql
+WITH RECURSIVE visible_comments AS (
+  -- Base case: top-level comments not authored by blocked users
+  SELECT c.*
+  FROM comments c
+  WHERE c.parent_comment_id IS NULL
+    AND c.parent_type = $1
+    AND c.parent_id = $2
+    AND c.deleted_at IS NULL
+    AND c.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $viewer_id)
+    AND c.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id = $viewer_id)
+
+  UNION ALL
+
+  -- Recursive case: replies whose parent is already visible
+  SELECT c.*
+  FROM comments c
+  INNER JOIN visible_comments vc ON c.parent_comment_id = vc.id
+  WHERE c.deleted_at IS NULL
+    AND c.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $viewer_id)
+    AND c.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id = $viewer_id)
+)
+SELECT * FROM visible_comments ORDER BY created_at ASC;
+```
+
+Sub-threads rooted in a blocked user's comment collapse entirely — no `[hidden]` placeholder is shown.
+
+### Security Requirements
+
+- Block filtering is enforced **server-side only**. Client receives filtered data; filtering is never delegated to the client.
+- `ViewAsPlug` is owner-authenticated — it cannot be invoked by a third party to spy on another user's visibility configuration.
+- Offer threads are scoped to exactly `(placement_id, buyer_id)` — Phoenix controllers validate the session user is one of the two parties before returning thread data.
+- GDPR: `user_blocks`, `group_members`, `group_invitations`, `offer_threads`, `offer_messages`, `comments`, `blog_posts`, and `post_book_associations` all contain personal data and must be included in right-to-export (US-8.1) and right-to-erasure (US-8.2) flows.
+
+---
+
+## Blog & LLM Associations
+
+### Post Model
+
+Blog posts are native first-class content stored in `blog_posts`. Body is stored as Markdown, rendered to HTML in the Elm frontend. Visibility follows the same model as shelves (see Section 27).
+
+Posts are standalone — they are not required to reference a book. The connection to books is surfaced post-hoc by the LLM association worker.
+
+### `PostBookAssociationWorker` (Oban)
+
+Fires when a post is published or its body is updated:
+
+```elixir
+defmodule Stacks.Blog.PostBookAssociationWorker do
+  use Oban.Worker, queue: :vision, max_attempts: 3
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"post_id" => post_id}}) do
+    post = Stacks.Blog.get_post!(post_id)
+    books = Stacks.Shelving.list_books_for_user(post.user_id)
+
+    case Stacks.Vision.Client.associate_post_to_books(post.body, books) do
+      {:ok, associations} ->
+        Stacks.Blog.upsert_associations(post_id, associations)
+        :ok
+
+      {:error, reason} ->
+        # Graceful fallback: post publishes fine without associations.
+        # Worker retries up to max_attempts before discarding.
+        {:error, reason}
+    end
+  end
+end
+```
+
+**Graceful fallback:** if the LLM call fails after all retries, the post remains published with no associations. Associations are additive — their absence does not block publishing.
+
+### LLM Interface
+
+The Python vision sidecar gains a second endpoint for text-to-book association:
+
+```
+POST /associate
+{
+  "post_body": "...",
+  "books": [{"id": "uuid", "title": "...", "author": "...", "description": "...", "subjects": [...]}]
+}
+
+→ {
+  "associations": [
+    {"book_id": "uuid", "confidence": 0.87, "reasoning": "The post discusses epistemic humility, a central theme in this book."},
+    ...
+  ]
+}
+```
+
+The LLM is instructed to return only books from the provided catalogue (no hallucinated ISBNs), ranked by relevance. The top three associations by confidence score are surfaced on the post by default. Authors can accept, dismiss, or manually add associations.
+
+### GDPR Consideration
+
+`post_book_associations` are derived data generated from the post body. On right-to-erasure:
+- The source `blog_post` row is deleted (or body scrubbed if referenced in audit log).
+- All associated `post_book_associations` rows are deleted — they are derived and have no independent value without the post.
 
 ---
 

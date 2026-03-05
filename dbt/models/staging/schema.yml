@@ -45,6 +45,11 @@ models:
           - not_null
           - accepted_values:
               values: ['owner', 'user']
+      - name: profile_visibility
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['owner', 'group', 'platform']
 
   - name: stg_bookshelves
     columns:
@@ -63,6 +68,11 @@ models:
           - not_null
           - accepted_values:
               values: ['antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home']
+      - name: visibility
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['owner', 'group', 'platform']
 
   - name: stg_bookshelf_placements
     columns:
@@ -82,6 +92,19 @@ models:
           - relationships:
               to: ref('stg_bookshelves')
               field: id
+      - name: visibility
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['owner', 'group', 'platform']
+      - name: listing_mode
+        tests:
+          - accepted_values:
+              values: ['open_bid', 'closed_bid']
+      - name: listing_status
+        tests:
+          - accepted_values:
+              values: ['draft', 'active', 'sold', 'removed', 'expired']
 
   - name: stg_bookshelf_placement_history
     columns:

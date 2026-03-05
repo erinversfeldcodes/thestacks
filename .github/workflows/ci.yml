@@ -70,9 +70,15 @@ jobs:
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix credo --strict
+      - run: mix dialyzer
       - run: mix sobelow --config
       - run: mix deps.audit
       - run: mix test
@@ -186,8 +192,7 @@ jobs:
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
-      - name: Create schemas and run migrations
-        working-directory: apps/core
+      - name: Create schemas, run migrations, and load seeds
         env:
           MIX_ENV: dev
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
@@ -195,13 +200,23 @@ jobs:
           mix deps.get
           mix ecto.create
           mix ecto.migrate
+          mix run apps/core/priv/repo/seeds.exs
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dbt-postgres
-        run: pip install dbt-postgres
-      - name: Run dbt seed + run + test
+      - name: Install dbt-postgres and sqlfluff
+        run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt
+      - name: Lint SQL models
+        working-directory: dbt
+        env:
+          DBT_HOST: localhost
+          DBT_PORT: "5432"
+          DBT_USER: postgres
+          DBT_PASSWORD: postgres
+          DBT_DBNAME: stacks_dev
+        run: sqlfluff lint models/ --templater dbt
+      - name: Run dbt run + test (staging layer)
         working-directory: dbt
         env:
           DBT_HOST: localhost
@@ -210,8 +225,6 @@ jobs:
           DBT_PASSWORD: postgres
           DBT_DBNAME: stacks_dev
         run: |
-          dbt deps
-          dbt seed
           dbt run --select staging
           dbt test --select staging
 

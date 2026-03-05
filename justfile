@@ -20,7 +20,7 @@ test: test-elixir test-elm test-rust test-python test-dbt
 
 # Elixir tests
 test-elixir:
-    cd apps/core && mix test
+    mix test
 
 # Elm tests
 test-elm:
@@ -34,40 +34,62 @@ test-rust:
 test-python:
     cd apps/vision && pytest
 
-# Run all linters
+# Run all linters (check only — no modifications)
 lint:
-    cd apps/core && mix format --check-formatted && mix credo --strict
-    cd frontend && npx elm-format --validate src/
-    cd apps/scraper && cargo fmt --check && cargo clippy -- -D warnings
-    cd apps/vision && ruff check . && ruff format --check .
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mix format --check-formatted && mix credo --strict && mix dialyzer
+    (cd frontend && npx elm-format --validate src/)
+    (cd apps/scraper && cargo fmt --check && cargo clippy -- -D warnings)
+    (cd apps/vision && ruff check . && ruff format --check . && mypy app/)
     buf lint proto/
+    # jinja templater: works offline, no dbt profile/DB required
+    (cd dbt && sqlfluff lint models/ --templater jinja)
 
-# Format all code
+# Auto-fix all fixable lint and formatting issues
 format:
-    cd apps/core && mix format
-    cd frontend && npx elm-format --yes src/
-    cd apps/scraper && cargo fmt
-    cd apps/vision && ruff format .
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mix format
+    (cd frontend && npx elm-format --yes src/)
+    (cd apps/scraper && cargo fmt)
+    # ruff check --fix handles auto-fixable lint violations; ruff format handles style
+    (cd apps/vision && ruff check --fix . && ruff format .)
+    (cd dbt && sqlfluff fix models/ --templater jinja)
 
 # Create database
 db-create:
-    cd apps/core && mix ecto.create
+    mix ecto.create
 
 # Run database migrations
 db-migrate:
-    cd apps/core && mix ecto.migrate
+    mix ecto.migrate
 
 # Verify all migrations are reversible
 db-rollback-check:
-    cd apps/core && mix ecto.rollback --all --quiet && mix ecto.migrate --quiet
+    mix ecto.rollback --all --quiet && mix ecto.migrate --quiet
 
 # Reset database (drop + create + migrate)
 db-reset:
-    cd apps/core && mix ecto.reset
+    mix ecto.reset
 
-# Run dbt seed + run + test
+# Run dbt run + test (staging layer only)
+# Resets the DB, loads Ecto seeds, then validates dbt staging models.
 test-dbt:
-    cd dbt && dbt seed && dbt run && dbt test
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mix ecto.drop --quiet
+    mix ecto.create --quiet
+    mix ecto.migrate --quiet
+    mix run apps/core/priv/repo/seeds.exs
+    (cd dbt && dbt run --select staging && dbt test --select staging)
+
+# Security scans (SAST + secrets + deps)
+test-security:
+    mix deps.audit
+    (cd apps/scraper && cargo audit)
+    mix sobelow --config
+    gitleaks detect --source . --no-git
 
 # Lint protobuf schemas
 buf-lint:

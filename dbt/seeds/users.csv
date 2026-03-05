@@ -1,2 +1,0 @@
-id,email,display_name,role,age_verified,age_verified_at,age_verification_provider,country_code,city,consent_analytics,consent_analytics_at,created_at,updated_at
-a1b2c3d4-0000-0000-0000-000000000001,owner@thestacks.app,Platform Owner,owner,true,2026-01-01T00:00:00.000000Z,,ZA,Johannesburg,true,2026-01-01T00:00:00.000000Z,2026-01-01T00:00:00.000000Z,2026-01-01T00:00:00.000000Z
