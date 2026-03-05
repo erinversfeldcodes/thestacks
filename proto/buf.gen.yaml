@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/elixir
+    out: ../apps/core/lib/proto/gen
+  - remote: buf.build/protocolbuffers/python
+    out: ../apps/vision/app/proto/gen
+  - remote: buf.build/protocolbuffers/rust
+    out: ../apps/scraper/src/proto/gen
