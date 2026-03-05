@@ -2,8 +2,17 @@ defmodule Core.Repo.Migrations.CreateBookshelfPlacements do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.listing_mode AS ENUM ('open_bid', 'closed_bid')")
-    execute("CREATE TYPE op.listing_status AS ENUM ('draft', 'active', 'sold', 'removed', 'expired')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.listing_mode AS ENUM ('open_bid', 'closed_bid');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
+
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.listing_status AS ENUM ('draft', 'active', 'sold', 'removed', 'expired');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:bookshelf_placements, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

@@ -15,47 +15,64 @@ dev:
     (cd apps/scraper && cargo run) &
     wait
 
+# Bootstrap the full development environment (idempotent)
+setup:
+    bash setup.sh
+
+# Run every CI check locally in CI order (sequential, all groups)
+# Optionally pass group names to run a subset: just ci elixir dbt
+ci *GROUPS:
+    scripts/ci.sh {{GROUPS}}
+
 # Run all tests
 test: test-elixir test-elm test-rust test-python test-dbt
 
 # Elixir tests
 test-elixir:
-    mix test
+    scripts/test-elixir.sh
 
 # Elm tests
 test-elm:
-    cd frontend && npx elm-test
+    scripts/test-elm.sh
 
 # Rust tests
 test-rust:
-    cd apps/scraper && cargo test
+    scripts/test-rust.sh
 
 # Python tests
 test-python:
-    cd apps/vision && pytest
+    scripts/test-python.sh
 
 # Run all linters (check only — no modifications)
-lint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mix format --check-formatted && mix credo --strict && mix dialyzer
-    (cd frontend && npx elm-format --validate src/)
-    (cd apps/scraper && cargo fmt --check && cargo clippy -- -D warnings)
-    (cd apps/vision && ruff check . && ruff format --check . && mypy app/)
-    buf lint proto/
-    # jinja templater: works offline, no dbt profile/DB required
-    (cd dbt && sqlfluff lint models/ --templater jinja)
+lint: lint-elixir lint-elm lint-rust lint-python lint-proto lint-sql
+
+# Elixir lint
+lint-elixir:
+    scripts/lint-elixir.sh
+
+# Elm lint
+lint-elm:
+    scripts/lint-elm.sh
+
+# Rust lint
+lint-rust:
+    scripts/lint-rust.sh
+
+# Python lint
+lint-python:
+    scripts/lint-python.sh
+
+# Protobuf lint
+lint-proto:
+    scripts/lint-proto.sh
+
+# SQL lint
+lint-sql:
+    scripts/lint-sql.sh
 
 # Auto-fix all fixable lint and formatting issues
 format:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mix format
-    (cd frontend && npx elm-format --yes src/)
-    (cd apps/scraper && cargo fmt)
-    # ruff check --fix handles auto-fixable lint violations; ruff format handles style
-    (cd apps/vision && ruff check --fix . && ruff format .)
-    (cd dbt && sqlfluff fix models/ --templater jinja)
+    scripts/format.sh
 
 # Create database
 db-create:
@@ -76,24 +93,15 @@ db-reset:
 # Run dbt run + test (staging layer only)
 # Resets the DB, loads Ecto seeds, then validates dbt staging models.
 test-dbt:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mix ecto.drop --quiet
-    mix ecto.create --quiet
-    mix ecto.migrate --quiet
-    mix run apps/core/priv/repo/seeds.exs
-    (cd dbt && dbt run --select staging && dbt test --select staging)
+    scripts/test-dbt.sh
 
-# Security scans (SAST + secrets + deps)
+# Security scans (SAST + secrets + deps + IaC)
 test-security:
-    mix deps.audit
-    (cd apps/scraper && cargo audit)
-    mix sobelow --config
-    gitleaks detect --source . --no-git
+    scripts/security.sh
 
-# Lint protobuf schemas
+# Lint protobuf schemas (alias for lint-proto)
 buf-lint:
-    buf lint proto/
+    scripts/lint-proto.sh
 
 # Generate code from protobuf schemas
 buf-generate:

@@ -1,0 +1,16 @@
+# .mise.toml — runtime version pins for mise (https://mise.jdx.dev)
+# Mirrors the versions in flake.nix and the Dockerfiles exactly.
+# Install mise: brew install mise
+# Activate:     mise install
+
+[tools]
+elixir  = "1.18.1-otp-27"
+erlang  = "27.2.1"
+node    = "22"
+python  = "3.12"
+rust    = "1.84"
+
+[env]
+# Point Mix to the correct build dir and prevent Hex prompts in CI
+MIX_HOME    = "{{env.HOME}}/.mix"
+HEX_HOME    = "{{env.HOME}}/.hex"
