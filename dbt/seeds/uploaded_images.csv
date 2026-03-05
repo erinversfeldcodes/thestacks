@@ -1,0 +1,2 @@
+id,book_id,storage_path,status,rejection_reason,uploaded_at,expires_at
+a1b2c3d4-0000-0000-0000-000000000601,a1b2c3d4-0000-0000-0000-000000000201,uploads/republic-cover.jpg,resolved,,2026-01-15T00:00:00.000000Z,2026-02-14T00:00:00.000000Z

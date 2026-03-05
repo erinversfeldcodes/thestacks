@@ -16,7 +16,7 @@ dev:
     wait
 
 # Run all tests
-test: test-elixir test-elm test-rust test-python
+test: test-elixir test-elm test-rust test-python test-dbt
 
 # Elixir tests
 test-elixir:
@@ -57,9 +57,17 @@ db-create:
 db-migrate:
     cd apps/core && mix ecto.migrate
 
+# Verify all migrations are reversible
+db-rollback-check:
+    cd apps/core && mix ecto.rollback --all --quiet && mix ecto.migrate --quiet
+
 # Reset database (drop + create + migrate)
 db-reset:
     cd apps/core && mix ecto.reset
+
+# Run dbt seed + run + test
+test-dbt:
+    cd dbt && dbt seed && dbt run && dbt test
 
 # Lint protobuf schemas
 buf-lint:

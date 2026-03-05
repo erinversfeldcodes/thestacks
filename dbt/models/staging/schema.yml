@@ -1,0 +1,127 @@
+version: 2
+
+models:
+  - name: stg_books
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: isbn
+        tests:
+          - not_null
+          - unique
+      - name: title
+        tests:
+          - not_null
+      - name: author_id
+        tests:
+          - relationships:
+              to: ref('stg_authors')
+              field: id
+
+  - name: stg_authors
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: name
+        tests:
+          - not_null
+
+  - name: stg_users
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: email
+        tests:
+          - not_null
+          - unique
+      - name: role
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['owner', 'user']
+
+  - name: stg_bookshelves
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_users')
+              field: id
+      - name: name
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home']
+
+  - name: stg_bookshelf_placements
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+      - name: bookshelf_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_bookshelves')
+              field: id
+
+  - name: stg_bookshelf_placement_history
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+      - name: moved_at
+        tests:
+          - not_null
+
+  - name: stg_uploaded_images
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['pending', 'resolved', 'rejected']
+
+  - name: stg_audit_log
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: action
+        tests:
+          - not_null
+      - name: resource_type
+        tests:
+          - not_null
+      - name: occurred_at
+        tests:
+          - not_null

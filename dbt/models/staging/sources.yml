@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: op
+    schema: op
+    tables:
+      - name: books
+      - name: authors
+      - name: bookshelves
+      - name: bookshelf_placements
+      - name: bookshelf_placement_history
+      - name: uploaded_images
+      - name: users
+      - name: bookstores
+      - name: price_snapshots
+      - name: review_snapshots
+      - name: discovered_sources
+      - name: bookstore_events
+      - name: third_spaces
+      - name: third_space_events
+      - name: event_log
+      - name: my_writing_links
+
+  - name: audit
+    schema: audit
+    tables:
+      - name: audit_log

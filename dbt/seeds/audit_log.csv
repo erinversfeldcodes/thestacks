@@ -1,0 +1,2 @@
+id,user_id,action,resource_type,resource_id,metadata,ip_address,occurred_at
+a1b2c3d4-0000-0000-0000-000000000701,a1b2c3d4-0000-0000-0000-000000000001,create,book,a1b2c3d4-0000-0000-0000-000000000201,"{}",127.0.0.1,2026-01-01T00:00:00.000000Z
