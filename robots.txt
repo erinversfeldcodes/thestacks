@@ -1,0 +1,62 @@
+# robots.txt — The Stacks
+# https://github.com/erinversfeldcodes/thestacks
+#
+# Disallows all crawling, with explicit entries for known AI training crawlers.
+# See also: ai.txt and LICENSE
+
+# Default: disallow all
+User-agent: *
+Disallow: /
+
+# OpenAI
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+# Google
+User-agent: Google-Extended
+Disallow: /
+
+# Anthropic
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+# Cohere
+User-agent: cohere-ai
+Disallow: /
+
+# Common Crawl (used by many model training pipelines)
+User-agent: CCBot
+Disallow: /
+
+# Meta
+User-agent: FacebookBot
+Disallow: /
+
+# Diffbot
+User-agent: Diffbot
+Disallow: /
+
+# ByteDance
+User-agent: Bytespider
+Disallow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Disallow: /
+
+# Imagesift
+User-agent: ImagesiftBot
+Disallow: /
+
+# Omgilibot
+User-agent: Omgilibot
+Disallow: /
