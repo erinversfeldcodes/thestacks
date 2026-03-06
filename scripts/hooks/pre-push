@@ -39,15 +39,14 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     # Never run on main/master — those are merge targets, not feature branches
     [[ "$branch" == "main" || "$branch" == "master" ]] && continue
 
-    is_first_push=false
-    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
-        is_first_push=true
-    fi
+    # Gate on PR existence, not first-push flag. This handles two cases cleanly:
+    #   - True first push: no PR exists yet → create issue (if needed) + CI + PR
+    #   - Recovery: branch exists on remote but PR creation previously failed →
+    #     same path, but issue lookup finds the existing issue instead of creating a duplicate
+    local pr_num
+    pr_num="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
 
-    if $is_first_push; then
-        # create_issue_and_pr runs CI internally before creating the PR, so the
-        # draft opens with real results. Skip update_pr_ci_summary to avoid
-        # running CI a second time on the same push.
+    if [[ -z "$pr_num" || "$pr_num" == "null" ]]; then
         create_issue_and_pr "$branch"
     else
         update_pr_ci_summary "$branch"
