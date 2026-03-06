@@ -84,20 +84,14 @@ _Last run: ${timestamp} · push \`--no-verify\` to skip_
 EOF
 }
 
-# update_pr_ci_summary <branch>
-# Used on subsequent pushes — finds the open PR and updates its CI summary section.
+# update_pr_ci_summary <branch> <pr_num>
+# Used on subsequent pushes — updates the CI summary section of an open PR.
+# pr_num is passed in from the pre-push hook to avoid a redundant gh pr list call.
 update_pr_ci_summary() {
     local branch="$1"
+    local pr_num="$2"
     local repo_root
     repo_root="$(git rev-parse --show-toplevel)"
-
-    local pr_num
-    pr_num="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
-
-    if [[ -z "$pr_num" || "$pr_num" == "null" ]]; then
-        echo "[hook] No open PR found for branch '$branch' — skipping CI summary update." >&2
-        return 0
-    fi
 
     echo "[hook] Running CI checks for PR #${pr_num} (push --no-verify to skip)..." >&2
 
