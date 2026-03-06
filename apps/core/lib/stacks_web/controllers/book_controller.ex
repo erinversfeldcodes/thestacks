@@ -4,6 +4,7 @@ defmodule StacksWeb.BookController do
   use CoreWeb, :controller
 
   alias Stacks.Books
+  alias StacksWeb.Plugs.AgeGate
 
   @doc "GET /api/books/:id — retrieve a book by UUID."
   def show(conn, %{"id" => id}) do
@@ -14,7 +15,13 @@ defmodule StacksWeb.BookController do
         |> json(%{error: "not_found"})
 
       book ->
-        json(conn, %{book: format_book(book)})
+        conn = AgeGate.enforce(conn, book)
+
+        if conn.halted do
+          conn
+        else
+          json(conn, %{book: format_book(book)})
+        end
     end
   end
 
@@ -27,7 +34,13 @@ defmodule StacksWeb.BookController do
         |> json(%{error: "not_found"})
 
       book ->
-        json(conn, %{book: format_book(book)})
+        conn = AgeGate.enforce(conn, book)
+
+        if conn.halted do
+          conn
+        else
+          json(conn, %{book: format_book(book)})
+        end
     end
   end
 
