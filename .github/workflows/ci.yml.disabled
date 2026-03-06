@@ -76,23 +76,13 @@ jobs:
           key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
-      - run: mix format --check-formatted
-      - run: mix credo --strict
-      - run: mix dialyzer
-      - run: mix sobelow --config
-      - run: mix deps.audit
-      - run: mix test
-      - name: Verify migration rollback
-        working-directory: apps/core
-        run: mix ecto.rollback --all --quiet
+      - run: scripts/lint-elixir.sh
+      - run: scripts/test-elixir.sh
 
   test-elm:
     needs: changes
     if: needs.changes.outputs.elm == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -103,18 +93,15 @@ jobs:
           path: ~/.elm
           key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
           restore-keys: elm-${{ runner.os }}-
-      - run: npm install --save-dev elm elm-format elm-test
-      - run: npx elm-format --validate src/
-      - run: npx elm-test
-      - run: npm audit
+      - working-directory: frontend
+        run: npm install --save-dev elm elm-format elm-test
+      - run: scripts/lint-elm.sh
+      - run: scripts/test-elm.sh
 
   test-rust:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/scraper
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -128,29 +115,24 @@ jobs:
             apps/scraper/target
           key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
-      - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test
-      - run: cargo install cargo-audit --locked && cargo audit
+      - run: cargo install cargo-audit --locked
+      - run: scripts/lint-rust.sh
+      - run: scripts/test-rust.sh
 
   test-python:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/vision
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: mypy app/
-      - run: pytest
+      - working-directory: apps/vision
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: scripts/lint-python.sh
+      - run: scripts/test-python.sh
 
   lint-proto:
     needs: changes
@@ -159,7 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1.47.2
-      - run: buf lint proto/
+      - run: scripts/lint-proto.sh
 
   test-dbt:
     needs: changes
@@ -192,41 +174,30 @@ jobs:
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
-      - name: Create schemas, run migrations, and load seeds
+      - name: Install Elixir deps
         env:
           MIX_ENV: dev
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
-        run: |
-          mix deps.get
-          mix ecto.create
-          mix ecto.migrate
-          mix run apps/core/priv/repo/seeds.exs
+        run: mix deps.get
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install dbt-postgres and sqlfluff
         run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt
-      - name: Lint SQL models
-        working-directory: dbt
+      - name: Seed and test dbt staging layer
         env:
+          MIX_ENV: dev
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
           DBT_HOST: localhost
           DBT_PORT: "5432"
           DBT_USER: postgres
           DBT_PASSWORD: postgres
           DBT_DBNAME: stacks_dev
-        run: sqlfluff lint models/ --templater dbt
-      - name: Run dbt run + test (staging layer)
-        working-directory: dbt
-        env:
-          DBT_HOST: localhost
-          DBT_PORT: "5432"
-          DBT_USER: postgres
-          DBT_PASSWORD: postgres
-          DBT_DBNAME: stacks_dev
+          SQLFLUFF_TEMPLATER: dbt
         run: |
-          dbt run --select staging
-          dbt test --select staging
+          scripts/lint-sql.sh
+          scripts/test-dbt.sh
 
   gitleaks:
     runs-on: ubuntu-latest

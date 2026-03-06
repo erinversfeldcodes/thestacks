@@ -2,7 +2,11 @@ defmodule Core.Repo.Migrations.CreateReviewSnapshots do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.review_source AS ENUM ('goodreads', 'reddit', 'storygraph', 'other')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.review_source AS ENUM ('goodreads', 'reddit', 'storygraph', 'other');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:review_snapshots, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

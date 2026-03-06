@@ -2,7 +2,11 @@ defmodule Core.Repo.Migrations.CreateThirdSpaces do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.space_type AS ENUM ('reading_group', 'cafe', 'bookshop', 'festival', 'market')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.space_type AS ENUM ('reading_group', 'cafe', 'bookshop', 'festival', 'market');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:third_spaces, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

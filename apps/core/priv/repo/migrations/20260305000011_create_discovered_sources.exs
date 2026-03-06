@@ -2,8 +2,17 @@ defmodule Core.Repo.Migrations.CreateDiscoveredSources do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.source_type AS ENUM ('bookshop', 'review_site', 'community', 'event_source')")
-    execute("CREATE TYPE op.source_status AS ENUM ('pending_review', 'approved', 'dismissed')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.source_type AS ENUM ('bookshop', 'review_site', 'community', 'event_source');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
+
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.source_status AS ENUM ('pending_review', 'approved', 'dismissed');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:discovered_sources, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

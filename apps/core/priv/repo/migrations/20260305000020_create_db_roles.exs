@@ -63,8 +63,16 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
     execute("REVOKE USAGE ON SCHEMA op FROM stacks_readonly")
     execute("REVOKE USAGE ON SCHEMA wh FROM stacks_readonly")
 
-    execute("DROP ROLE IF EXISTS stacks_readonly")
-    execute("DROP ROLE IF EXISTS stacks_dbt")
-    execute("DROP ROLE IF EXISTS stacks_app")
+    # Roles are cluster-wide. DROP ROLE fails if the role still has privileges
+    # in other databases (e.g. stacks_dev when rolling back stacks_test).
+    # We attempt the drop and silently ignore dependency errors so the rollback
+    # can complete; the roles will be removed when the last DB is torn down.
+    execute("""
+    DO $$ BEGIN
+      BEGIN DROP ROLE IF EXISTS stacks_readonly; EXCEPTION WHEN dependent_objects_still_exist THEN NULL; END;
+      BEGIN DROP ROLE IF EXISTS stacks_dbt;      EXCEPTION WHEN dependent_objects_still_exist THEN NULL; END;
+      BEGIN DROP ROLE IF EXISTS stacks_app;      EXCEPTION WHEN dependent_objects_still_exist THEN NULL; END;
+    END $$;
+    """)
   end
 end

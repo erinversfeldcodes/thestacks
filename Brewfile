@@ -1,0 +1,43 @@
+# Brewfile — all Homebrew dependencies for The Stacks
+# Install everything: brew bundle
+# Check what's missing: brew bundle check
+
+# ── Taps ──────────────────────────────────────────────────────────────────────
+tap "bufbuild/buf"           # buf (protobuf toolchain)
+tap "oven-sh/bun"            # bun (optional JS runtime, not required)
+tap "superfly/tap"           # flyctl
+
+# ── Runtime version manager ───────────────────────────────────────────────────
+# mise manages Elixir, Erlang, Node, Python, and Rust at the exact versions
+# declared in .mise.toml (mirroring flake.nix / Dockerfiles).
+brew "mise"
+
+# ── Database ──────────────────────────────────────────────────────────────────
+brew "postgresql@16"
+
+# ── Protobuf ──────────────────────────────────────────────────────────────────
+brew "bufbuild/buf/buf"
+
+# ── Task runner ───────────────────────────────────────────────────────────────
+brew "just"
+
+# ── Docker / container runtime ────────────────────────────────────────────────
+# Colima is a lightweight Docker-compatible runtime for macOS.
+brew "colima"
+brew "docker"
+brew "docker-compose"
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+brew "superfly/tap/flyctl"
+
+# ── Security scanning (for scripts/security.sh / CI) ─────────────────────────
+brew "gitleaks"
+brew "hadolint"
+brew "semgrep"
+brew "trivy"
+# checkov is installed via pip (see setup.sh) — no Homebrew formula
+
+# ── Misc dev tools ────────────────────────────────────────────────────────────
+brew "git"
+brew "curl"
+brew "jq"

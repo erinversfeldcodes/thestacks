@@ -2,7 +2,11 @@ defmodule Core.Repo.Migrations.CreateBookshelves do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.bookshelf_name AS ENUM ('antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.bookshelf_name AS ENUM ('antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:bookshelves, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

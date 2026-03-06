@@ -2,7 +2,11 @@ defmodule Core.Repo.Migrations.CreateBooks do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.visibility_tier AS ENUM ('public', 'age_gated')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.visibility_tier AS ENUM ('public', 'age_gated');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:books, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

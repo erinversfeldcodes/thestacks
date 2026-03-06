@@ -2,8 +2,17 @@ defmodule Core.Repo.Migrations.CreateUsers do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.user_role AS ENUM ('owner', 'user')")
-    execute("CREATE TYPE op.visibility_level AS ENUM ('owner', 'group', 'platform')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.user_role AS ENUM ('owner', 'user');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
+
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.visibility_level AS ENUM ('owner', 'group', 'platform');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:users, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true

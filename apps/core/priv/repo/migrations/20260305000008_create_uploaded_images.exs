@@ -2,7 +2,11 @@ defmodule Core.Repo.Migrations.CreateUploadedImages do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE op.image_status AS ENUM ('pending', 'resolved', 'rejected')")
+    execute("""
+    DO $$ BEGIN
+      CREATE TYPE op.image_status AS ENUM ('pending', 'resolved', 'rejected');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """)
 
     create table(:uploaded_images, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
