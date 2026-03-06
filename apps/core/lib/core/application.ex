@@ -8,6 +8,9 @@ defmodule Core.Application do
     children = [
       Core.Repo,
       {Phoenix.PubSub, name: Core.PubSub},
+      {Finch, name: Stacks.Finch},
+      StacksWeb.Plugs.RateLimiter.Server,
+      Stacks.AI.BudgetTracker,
       {Oban, Application.fetch_env!(:core, Oban)},
       CoreWeb.Telemetry,
       CoreWeb.Endpoint

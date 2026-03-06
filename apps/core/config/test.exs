@@ -18,6 +18,8 @@ config :core, CoreWeb.Endpoint,
     "test-only-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-to-accept-it",
   server: false
 
-config :core, Oban, testing: :inline
+config :core, Oban, testing: :manual
+
+config :core, :vision_client, Stacks.AI.MockClient
 
 config :logger, level: :warning
