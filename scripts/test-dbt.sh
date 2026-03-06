@@ -23,6 +23,13 @@ export DBT_DBNAME="${DBT_DBNAME:-stacks_dev}"
 
 ensure_postgres
 
+# Terminate any open connections before dropping so this is safe to run after
+# other test suites (e.g. test-elixir) that leave DB pool connections alive.
+_pg_bin="$(_find_pg_isready)"; _pg_bin="${_pg_bin%pg_isready}"
+"${_pg_bin}psql" -h localhost -U postgres -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'stacks_dev' AND pid <> pg_backend_pid();" \
+    -o /dev/null 2>/dev/null || true
+
 # Always start from a clean DB so Ecto seeds load without FK ordering issues.
 mix ecto.drop --quiet
 mix ecto.create --quiet
