@@ -1,5 +1,6 @@
 # Plan: The Stacks — Consolidated Implementation Roadmap
 **Created**: 2026-03-05
+**Updated**: 2026-03-06
 **Status**: Draft
 **Branch**: `main` (greenfield — no existing code)
 
@@ -7,9 +8,9 @@
 
 ## Context
 
-The Stacks is a greenfield, open-source, self-hosted book management and discovery platform. This plan sequences every deliverable from empty repository to feature-complete across 5 phases, with cross-cutting infrastructure woven in. The build sequence derives from the ordered dependency graph in `docs/implementation-mapping.md` (items 1–49).
+The Stacks is a greenfield, open-source, self-hosted book management and discovery platform. This plan sequences every deliverable from empty repository to feature-complete across 5 phases, with cross-cutting infrastructure woven in. The build sequence derives from the ordered dependency graph in `docs/implementation-mapping.md`.
 
-**Target user**: A single book-obsessive who wants a beautiful, private, self-hosted library that enriches their reading life with price tracking, review aggregation, author intelligence, local bookshop discovery, and community reading spaces. NOT a social network. NOT a corporate tool.
+**Target user**: A book-obsessive who self-hosts a beautiful private library that enriches their reading life with price tracking, review aggregation, author intelligence, local bookshop discovery, and community reading spaces. The platform is visibility-first: content defaults to owner-only and is selectively shared with close friends, curated groups, or the broader platform community. NOT a public social network. NOT a corporate tool.
 
 **Aesthetic**: Dark-academic-meets-cottage-core. Walnut shelves, botanical prints, parchment textures, hand-lettered flyers, cork boards.
 
@@ -44,7 +45,9 @@ The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indi
 | Phase 2 (Enrichment) | **Opus 4.6** | External API integration, scraper architecture, LLM guardrails — judgment required |
 | Phase 3 (Partner + EDA) | **Opus 4.6** | Event bus design, Protobuf schema authoring, partner auth — security-critical |
 | Phase 4 (Polish) | **Sonnet 4.6** | Third Spaces, RSS feeds, metrics — well-specified features |
-| Phase 5 (Marketplace) | **Opus 4.6** | Payment integration, KYC, state machines — high stakes |
+| Phase 5 (Marketplace) | **Opus 4.6** | Payment integration, KYC, offer thread state machines — high stakes |
+| Phase 6 (Social Graph & Visibility) | **Opus 4.6** | Visibility architecture, block graph, groups — security-critical |
+| Phase 7 (Blog & Comments) | **Sonnet 4.6** | Blog posts, LLM association, comment threads — well-specified |
 
 ---
 
@@ -150,19 +153,19 @@ thestacks/
 
 **Migrations to create** (in order):
 
-1. `create_users` — `op.users` table per schema spec
-2. `create_books` — `op.books` with ISBN unique index, GIN index on title tsvector
+1. `create_schemas` — create `op`, `wh`, `audit` schemas; set `search_path`
+2. `create_users` — `op.users` with `profile_visibility`, `website_url`; role enum
 3. `create_authors` — `op.authors`
-4. `create_shelves` — `op.shelves` with enum type for shelf names
-5. `create_shelf_placements` — `op.shelf_placements` with unique constraint `(book_id, shelf_id, removed_at)`
-6. `create_shelf_placement_history` — `op.shelf_placement_history`
-7. `create_uploaded_images` — `op.uploaded_images`
-8. `create_my_writing_links` — `op.my_writing_links`
-9. `create_audit_log` — `op.audit_log` (append-only, partitioned by month)
+4. `create_books` — `op.books` with ISBN unique index, GIN index on title tsvector
+5. `create_bookshelves` — `op.bookshelves` with `visibility`, `visibility_group_id`
+6. `create_bookshelf_placements` — `op.bookshelf_placements` with `visibility`, `listing_mode`, `listing_status`, `listing_price_cents`, `listing_min_price_cents`
+7. `create_bookshelf_placement_history` — `op.bookshelf_placement_history`
+8. `create_uploaded_images` — `op.uploaded_images`
+9. `create_audit_log` — `audit.audit_log` (append-only)
 10. `create_discovered_sources` — `op.discovered_sources`
 11. `create_review_snapshots` — `op.review_snapshots`
-12. `create_price_snapshots` — `op.price_snapshots`
-13. `create_bookstores` — `op.bookstores`
+12. `create_bookstores` — `op.bookstores`
+13. `create_price_snapshots` — `op.price_snapshots`
 14. `create_bookstore_events` — `op.bookstore_events`
 15. `create_third_spaces` — `op.third_spaces`
 16. `create_third_space_events` — `op.third_space_events`
@@ -170,17 +173,24 @@ thestacks/
 18. `create_oban_tables` — Oban migration (`Oban.Migration`)
 19. `create_db_roles` — SQL migration for `stacks_app`, `stacks_dbt`, `stacks_readonly` roles with appropriate grants
 
+> **Note**: `my_writing_links` table is not created — the feature is superseded by native `blog_posts` (Phase 7). `website_url` on `users` covers the external-link use case.
+
 **dbt setup:**
 - `profiles.yml` pointing to `stacks_dbt` role
-- Staging models: `stg_books`, `stg_authors`, `stg_shelves`, `stg_shelf_placements`, `stg_shelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`
+- `dbt_project.yml` with `+materialized: view` for staging, `+schema` routing per schema
+- `macros/generate_schema_name.sql` — custom macro so seeds land in `op`/`audit` without target-schema prefix
+- Staging models: `stg_books`, `stg_authors`, `stg_users`, `stg_bookshelves`, `stg_bookshelf_placements`, `stg_bookshelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`
+- Seed fixtures in `dbt/seeds/` for all 8 staging tables (small CSVs, internally-consistent UUIDs)
 - Empty intermediate and mart directories with `.gitkeep`
 
 **Files created:**
 - `apps/core/priv/repo/migrations/` — 19 migration files
-- `dbt/models/staging/` — 7 staging model SQL files
+- `dbt/models/staging/` — 8 staging model SQL files
+- `dbt/seeds/` — 8 CSV seed files
+- `dbt/macros/generate_schema_name.sql`
 - `dbt/profiles.yml`, `dbt/dbt_project.yml`
 
-**Test command**: `mix ecto.create && mix ecto.migrate && mix test`
+**Test command**: `just test-dbt`
 **DoD:**
 - [ ] All 19 migrations run without error
 - [ ] `mix ecto.rollback --all` succeeds (migrations are reversible)
@@ -384,6 +394,8 @@ thestacks/
 | `POST` | `/extract` | Send image, receive extracted text (title, author, potential ISBN) |
 | `POST` | `/classify` | Send image, receive classification (book / not_book / ambiguous) |
 | `GET` | `/health` | Health check |
+
+> **Deferred to Phase 7**: `POST /associate` — accept blog post text, return book ISBNs with confidence scores (LLM association for `post_book_associations`).
 
 **Files:**
 - `apps/vision/app/main.py` — FastAPI app with 3 endpoints
@@ -795,38 +807,191 @@ After all tracks merge:
 
 ## GROUP 5: Marketplace (Phase 5, Future)
 
-> Listings, payments, shipping. Deferred until the core platform is stable.
+> Listings, public Q&A, private offer threads, payments, shipping. Depop/Vinted interaction model. Deferred until core platform is stable.
 
 ### Phase 5A — Marketplace Tables (database-agent)
-**Objective**: `listings`, `offers`, `transactions` tables exist.
+**Objective**: Marketplace tables exist. Listing columns already on `bookshelf_placements` (Phase 1A); these are the transaction and communication tables.
 
 Migrations:
-1. `create_listings` — state machine: draft -> active -> sold -> removed -> expired
-2. `create_offers` — status: pending -> accepted -> declined -> withdrawn -> expired
-3. `create_transactions` — payment_status, shipping_status
+1. `create_offer_threads` — `listing_mode` context (open_bid | closed_bid); status: pending -> accepted -> declined -> withdrawn -> expired
+2. `create_offer_messages` — individual messages within an offer thread; `message_type`: offer | counter_offer | question | answer | system
+3. `create_transactions` — `payment_status`, `shipping_status`, FK to accepted `offer_thread_id`
+
+> **Listing state machine** (on `bookshelf_placements.listing_status`): draft → active → sold → removed → expired
+> **Offer state machine** (on `offer_threads.status`): pending → accepted / declined / withdrawn / expired
+> **Closed bid mode**: buyer submits private offer; no public Q&A; seller sees price only (not buyer identity until accepted)
 
 ---
 
 ### Phase 5B — Marketplace Backend (elixir-agent)
-**Objective**: Listing, offer, and transaction flows with Stitch Money and Pargo integration.
+**Objective**: Listing, Q&A, offer thread, and transaction flows with Stitch Money and Pargo integration. KYC for sellers.
 
-- `Stacks.Marketplace` context — `create_listing/1`, listing state machine
-- `Stacks.Marketplace.Transactions` — `create_offer/1`, `accept_offer/1`, `initiate_payment/1`, `create_shipment/1`
-- `Stacks.Marketplace.SellerVerification` — extends `Stacks.Accounts.Verification`
-- Oban workers: `ListingExpiryJob`, `PaymentCallbackJob`, `ShipmentTrackingJob`
-- Webhook handlers for Stitch and Pargo callbacks
+- `Stacks.Marketplace` context — `create_listing/1`, `update_listing/2`, listing state machine
+- `Stacks.Marketplace.QnA` — `post_question/2`, `post_answer/2` (public; moderation applies)
+- `Stacks.Marketplace.Offers` — `create_offer_thread/2`, `send_message/2`, `accept_offer/1`, `decline_offer/1`, `withdraw_offer/1`; closed bid mode enforces price-only visibility
+- `Stacks.Marketplace.Transactions` — `initiate_payment/1`, `confirm_payment/1`, `create_shipment/1`
+- `Stacks.Marketplace.SellerVerification` — KYC via Smile Identity / Yoti / Sumsub
+- Oban workers: `ListingExpiryJob`, `OfferExpiryJob`, `PaymentCallbackJob`, `ShipmentTrackingJob`
+- Webhook handlers for Stitch Money and Pargo callbacks
+
+**dbt models:**
+- `stg_offer_threads`, `stg_offer_messages`
+- `int_offer_activity`
+- `mart_marketplace_offers`, `mart_marketplace_activity`, `mart_transaction_volume`, `mart_marketplace_revenue`
 
 ---
 
 ### Phase 5C — Marketplace Frontend (elm-agent)
-**Objective**: Listing creation, browsing, purchase flow, seller onboarding.
+**Objective**: Listing creation, public Q&A, private offer threads, purchase flow, seller onboarding.
 
-- `Page.Marketplace.CreateListing`, `Browse`, `Checkout`, `SellerOnboarding`
-- `Components.ConditionGrader`, `Components.OfferModal`
+- `Page.Marketplace.CreateListing` — condition grader, price, listing mode toggle (open/closed bid)
+- `Page.Marketplace.ListingDetail` — public Q&A thread, "Make an Offer" button
+- `Page.Marketplace.OfferThread` — private offer/counter-offer/accept/decline flow
+- `Page.Marketplace.Checkout` — payment via Stitch Money
+- `Page.Marketplace.SellerOnboarding` — KYC flow
+- `Components.ConditionGrader`, `Components.OfferModal`, `Components.QnAThread`
 
 #### Phase 5 Integration Test
-- [ ] Seller verification -> list book -> buyer makes offer -> payment -> shipping
+- [ ] Seller KYC -> list book (open bid) -> buyer posts public question -> seller answers -> buyer makes offer -> seller accepts -> payment -> shipping
+- [ ] Closed bid: seller lists, buyer submits private offer, seller sees price only until accepted
 - [ ] Listing expires automatically after configured period
+- [ ] Offer expires automatically if no response
+
+---
+
+## GROUP 6: Social Graph & Visibility (Phase 6, Future)
+
+> Fine-grained visibility controls, groups, block graph. Prerequisite for public profiles and selective sharing.
+
+### Phase 6A — Social Graph Tables (database-agent)
+**Objective**: All social graph and visibility tables exist.
+
+Migrations:
+1. `create_user_blocks` — bidirectional blocks; unique `(blocker_id, blocked_id)`
+2. `create_groups` — `group_type` enum: `broadcast | close_friends | subscription`; owner-only creation
+3. `create_group_members` — `role` enum: `owner | moderator | member`
+4. `create_group_invitations` — token-based invitations with expiry
+5. `create_visibility_grants` — per-object grants to specific users (`grantee_id`, `resource_type`, `resource_id`)
+
+**Visibility columns** (already on tables from Phase 1A):
+- `users.profile_visibility` — `owner | group | platform`
+- `bookshelves.visibility`, `bookshelves.visibility_group_id`
+- `bookshelf_placements.visibility`
+
+**Ceiling rule**: child visibility ≤ parent visibility. Enforced at write time in context layer.
+
+---
+
+### Phase 6B — Visibility & Social Graph Backend (elixir-agent)
+**Objective**: `resolve_visibility/2` gate, block graph, group management, `ViewAsPlug`.
+
+- `Stacks.Visibility` context
+  - `resolve_visibility/2` — single authoritative gate; viewer contexts: `:unauthenticated`, `{:platform_user}`, `{:specific_user, user_id}`, `{:group_member, group_id}`
+  - `can_view?/2`, `viewable_shelves/2`, `viewable_placements/2`
+  - Ceiling rule enforcement on write: `validate_visibility_ceiling/3`
+- `Stacks.Social` context
+  - `block_user/2`, `unblock_user/2`, `is_blocked?/2`, `blocked_by?/2`
+  - `create_group/2`, `invite_member/3`, `accept_invitation/2`, `remove_member/2`, `leave_group/2`, `dissolve_group/1`
+  - `visible_groups/1` — member-list never exposed outside interactive spaces
+- `StacksWeb.Plugs.ViewAsPlug` — owner sets `?view_as=user_id` param; plug sets viewer context; 403 for non-owners
+- Retrofit: all existing content endpoints route through `resolve_visibility/2`
+
+**Events emitted:**
+- `social.user_blocked`, `social.group_created`, `social.member_joined`, `social.member_removed`
+
+**dbt models:**
+- `stg_user_blocks`, `stg_groups`, `stg_group_members`
+- `int_group_activity`, `int_visibility_resolution`
+- `mart_social_graph_health`
+
+**DoD:**
+- [ ] `resolve_visibility/2` passes all ceiling-rule and block-graph scenarios
+- [ ] Blocked users see 404 (not 403) for owner-profile content
+- [ ] `ViewAsPlug` correctly impersonates viewer context for owner
+- [ ] Group member list not exposed in API responses
+- [ ] Leave group produces no owner notification
+- [ ] All shelf/placement writes enforce ceiling rule
+
+---
+
+### Phase 6C — Visibility Frontend (elm-agent)
+**Objective**: Privacy settings, group management, "View As" mode.
+
+- `Page.Settings.Privacy` — profile visibility selector, per-shelf overrides, ceiling rule UI hint
+- `Page.Settings.Groups` — create/manage groups, invite flow
+- `Page.Groups.Detail` — members (visible to owner only), content list
+- `Components.VisibilityBadge` — lock icon with tooltip per visibility level
+- `Components.ViewAsBar` — sticky banner when viewing as another user
+
+**DoD:**
+- [ ] Privacy settings page saves and reflects current visibility per shelf
+- [ ] Group invite link generates and can be accepted
+- [ ] "View As" banner appears and correctly restricts visible content
+
+---
+
+## GROUP 7: Blog & Comments (Phase 7, Future)
+
+> Native blog, LLM-powered book associations, comment threads with block-filtering.
+
+### Phase 7A — Blog & Comment Tables (database-agent)
+**Objective**: Blog and comment tables exist.
+
+Migrations:
+1. `create_blog_posts` — `visibility` (`owner | group | platform`); `published_at TIMESTAMPTZ`
+2. `create_post_book_associations` — `confidence NUMERIC(4,3)`, `association_type` (`manual | llm_suggested | confirmed`); FK to `books` and `blog_posts`
+3. `create_comments` — polymorphic (`commentable_type`, `commentable_id`); `parent_comment_id` for threading; `hidden_at` for moderation
+
+---
+
+### Phase 7B — Blog & Comment Backend (elixir-agent)
+**Objective**: Blog CRUD, LLM book-association worker, comment threading with block-filtered CTE.
+
+- `Stacks.Blog` context
+  - `create_post/2`, `update_post/2`, `publish_post/1`, `delete_post/1`
+  - `get_post/2` — routes through `resolve_visibility/2`
+  - Visibility ceiling: post visibility ≤ profile visibility
+- `Stacks.Blog.BookAssociations`
+  - `associate_manually/3`, `confirm_suggestion/2`, `dismiss_suggestion/2`
+- `Stacks.Workers.PostBookAssociationWorker` — Oban worker triggered on `blog.post_published`; calls Python sidecar `/associate`; stores suggestions with confidence; fires `blog.associations_suggested` event
+- `Stacks.Comments` context
+  - `create_comment/3`, `delete_comment/1`, `hide_comment/1` (moderation)
+  - `get_comment_tree/2` — recursive CTE with block-graph filter; hidden sub-trees collapse (not shown with `[hidden]`)
+- Python sidecar `POST /associate` endpoint — accept post text, return `[{isbn, confidence}]` (deferred from Phase 1D)
+
+**Events emitted:**
+- `blog.post_published`, `blog.associations_suggested`
+- `comment.created`, `comment.hidden`
+
+**dbt models:**
+- `stg_blog_posts`, `stg_post_book_associations`, `stg_comments`
+- `int_blog_engagement`, `int_comment_threads`
+- `mart_blog_activity`
+
+**DoD:**
+- [ ] Blog post CRUD with visibility ceiling enforcement
+- [ ] `PostBookAssociationWorker` fires after publish; suggestions appear for owner review
+- [ ] Manual book tagging on posts
+- [ ] Comment tree with block-filtered sub-tree collapse
+- [ ] Comment moderation: hide hides full sub-tree
+- [ ] Python `/associate` endpoint returns ISBN + confidence list
+
+---
+
+### Phase 7C — Blog & Comment Frontend (elm-agent)
+**Objective**: Blog editor, post detail with book associations, comment threads.
+
+- `Page.Blog.New`, `Page.Blog.Edit` — rich text editor (markdown), visibility selector, publish action
+- `Page.Blog.Post` — post detail with associated books sidebar, comment thread
+- `Components.BookAssociations` — owner sees suggestions with confirm/dismiss; readers see confirmed associations
+- `Components.CommentThread` — threaded display with reply, collapse, report actions
+- `Components.CommentComposer`
+
+**DoD:**
+- [ ] Blog post can be written, saved as draft, published
+- [ ] LLM suggestions appear after publish and can be confirmed/dismissed
+- [ ] Comment thread renders with correct nesting
+- [ ] Blocked users' comment sub-trees collapse silently
 
 ---
 
@@ -841,6 +1006,8 @@ Security is not a separate phase — it's woven into every phase. The security-a
 | Phase 2B | Circuit breakers (Fuse) on all external calls, AI budget controls, LLM output validation |
 | Phase 3C | Partner API key auth (Argon2 hash), partner rate limiting (separate tier), Protobuf schema validation, text blocklist |
 | Phase 5B | PCI considerations for payment flow, KYC webhook verification |
+| Phase 6B | `resolve_visibility/2` gate on all content endpoints, block graph prevents information leakage, `ViewAsPlug` owner-only guard, `noindex`/`nofollow` meta on non-platform-visible content, `robots.txt` disallow for auth-walled routes |
+| Phase 7B | LLM output validation (never trust `/associate` without ISBN verification), comment moderation pipeline, blog content CSP |
 
 ---
 
@@ -867,6 +1034,12 @@ Security is not a separate phase — it's woven into every phase. The security-a
 | 5A | database-agent | principle-engineer-agent |
 | 5B | elixir-agent | security-agent |
 | 5C | elm-agent | elixir-agent |
+| 6A | database-agent | principle-engineer-agent |
+| 6B | elixir-agent | security-agent |
+| 6C | elm-agent | elixir-agent |
+| 7A | database-agent | principle-engineer-agent |
+| 7B | elixir-agent + python-agent | security-agent |
+| 7C | elm-agent | elixir-agent |
 
 ---
 
@@ -887,4 +1060,13 @@ All agents updating this file during implementation must use:
 
 ## Progress Notes
 
-(Updated by agents during execution.)
+[2026-03-06] - Claude Code - Design review + roadmap update
+- Completed: Phase 1A DB foundation (19 migrations, dbt staging layer + seeds, custom generate_schema_name macro, CI workflow)
+- Completed: Justfile audit and fixes (search_path persistence, rollback check, test-dbt recipe)
+- Completed: User story authoring — sections 10 (Visibility & Privacy), 11 (Social Graph), 12 (Blog), 13 (Comments)
+- Completed: technical-architecture.md updated to v1.1 — new tables, ER diagram, Sections 25/27/28
+- Completed: implementation-mapping.md updated — phases table, service matrix, dbt model inventory
+- Completed: consolidated-roadmap.md updated — Phases 6 & 7 added, Phase 5 updated to Depop/Vinted model, my_writing_links deprecated
+- Note: my_writing_links table not created in Phase 1A (superseded by blog_posts); website_url on users covers external-link use case
+- Note: /associate Python endpoint deferred from Phase 1D to Phase 7B
+- In Progress: Phase 1B–1E implementation not yet started

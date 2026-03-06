@@ -32,8 +32,10 @@
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, and source discovery. |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, US-5.1.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (Metrics), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace | US-7.1.1, US-7.2.1, US-7.3.1 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. |
-| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1.1, US-4.1.2, US-8.1.1, US-8.1.2, US-8.1.3, US-8.1.4, US-8.1.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3 but benefit all phases. |
+| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. Depop/Vinted model: public Q&A + private offer threads. Closed bid mode. |
+| **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups. Requires `resolve_visibility/2` context and `ViewAsPlug`. |
+| **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-13.1.1, US-13.1.2 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering. Requires Phase 6 visibility infrastructure. |
+| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `offer_threads`, `groups`, `user_blocks`. |
 
 ---
 
@@ -74,9 +76,27 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
 | US-5.1.1 | RW (dashboard) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
-| US-7.1.1 | RW (listing form) | RW (listing) | -- | -- | RW (books, uploaded_images) | -- | -- |
-| US-7.2.1 | RW (purchase flow) | RW (transaction) | -- | -- | RW (books, audit_log) | -- | Stitch Money, Pargo |
-| US-7.3.1 | RW (KYC flow) | RW (verification) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
+| US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (shelf_placements, uploaded_images) | -- | -- |
+| US-7.2 | RW (purchase flow) | RW (transaction) | -- | -- | RW (shelf_placements, offer_threads, offer_messages, audit_log) | -- | Stitch Money, Pargo |
+| US-7.3 | RW (KYC flow) | RW (verification) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
+| US-10.1.1 | RW (privacy settings) | RW (profile visibility) | -- | -- | RW (users) | -- | -- |
+| US-10.1.2 | RW (block UI) | RW (block) | -- | -- | RW (user_blocks) | -- | -- |
+| US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (shelves, groups) | -- | -- |
+| US-10.2.2 | RW (placement menu) | RW (placement visibility) | -- | -- | RW (shelf_placements, visibility_grants) | -- | -- |
+| US-10.2.3 | RW (post editor) | RW (post visibility) | -- | -- | RW (blog_posts, groups) | -- | -- |
+| US-10.3.1 | RW (preview mode) | R (resolve_visibility as viewer) | -- | -- | R (all user content tables, user_blocks, group_members) | -- | -- |
+| US-10.4.1 | -- | R (noindex headers) | -- | -- | -- | -- | -- |
+| US-11.1.1 | RW (group creation) | RW (group) | -- | -- | RW (groups) | -- | -- |
+| US-11.1.2 | RW (invite UI) | RW (invitation) | -- | -- | RW (group_invitations, group_members) | -- | -- |
+| US-11.1.3 | RW (leave group) | RW (membership) | -- | -- | RW (group_members) | -- | -- |
+| US-11.1.4 | RW (member list) | RW (member mgmt) | -- | -- | RW (group_members, group_invitations) | -- | -- |
+| US-12.1.1 | RW (post editor) | RW (post) | -- | -- | RW (blog_posts) | -- | -- |
+| US-12.1.2 | R (associations display) | R (associations) | RW (LLM call) | -- | RW (post_book_associations) | -- | Together AI / Replicate |
+| US-12.1.3 | R (blog archive) | R (posts) | -- | -- | R (blog_posts, post_book_associations) | -- | -- |
+| US-13.1.1 | RW (comment UI) | RW (comment) | -- | -- | RW (comments) | -- | -- |
+| US-13.1.2 | R (filtered thread) | R (recursive CTE) | -- | -- | R (comments, user_blocks) | -- | -- |
+| US-13.2.1 | RW (Q&A UI) | RW (comment) | -- | -- | RW (comments) | -- | -- |
+| US-13.2.2 | RW (offer thread) | RW (thread + message) | -- | -- | RW (offer_threads, offer_messages) | -- | -- |
 | US-8.1.1 | RW (export UI) | RW (export gen) | -- | -- | R (all user data) | -- | -- |
 | US-8.1.2 | RW (delete flow) | RW (cascade) | -- | -- | RW (all user data, wh anonymise) | -- | -- |
 | US-8.1.3 | RW (consent UI) | RW (consent) | -- | -- | RW (audit_log) | -- | -- |
@@ -1526,3 +1546,20 @@ Which user stories touch each database table:
 | `mart_partner_engagement` | Mart | US-9.5.1 | US-9.5.1 |
 | `mart_partner_stock_coverage` | Mart | US-9.2.1 | US-5.1.1 |
 | `mart_event_bus_health` | Mart | EDA (cross-cutting) | US-5.1.1 |
+| `stg_users` | Staging | US-10.1.1, US-11.1.1 | US-10.x, US-11.x |
+| `stg_user_blocks` | Staging | US-11.2.1 | US-10.x, US-11.x |
+| `stg_groups` | Staging | US-11.1.1 | US-11.1.x |
+| `stg_group_members` | Staging | US-11.1.2 | US-11.1.x |
+| `stg_bookshelves` | Staging | US-10.1.1 | US-10.x |
+| `stg_blog_posts` | Staging | US-12.1.1 | US-12.x, US-13.x |
+| `stg_comments` | Staging | US-13.1.1 | US-13.x |
+| `stg_offer_threads` | Staging | US-7.1.1, US-13.2.2 | US-7.x |
+| `stg_post_book_associations` | Staging | US-12.2.1 | US-12.2.1 |
+| `int_visibility_resolution` | Intermediate | US-10.1.1--5 | US-10.x, US-12.x, US-13.x |
+| `int_comment_threads` | Intermediate | US-13.1.1 | US-13.1.1 |
+| `int_offer_activity` | Intermediate | US-7.1.1, US-13.2.2 | US-5.1.1 |
+| `int_blog_engagement` | Intermediate | US-12.1.1 | US-5.1.1 |
+| `int_group_activity` | Intermediate | US-11.1.1 | US-5.1.1 |
+| `mart_social_graph_health` | Mart | US-11.x | US-5.1.1 |
+| `mart_blog_activity` | Mart | US-12.x | US-5.1.1 |
+| `mart_marketplace_offers` | Mart | US-7.1.1, US-13.2.2 | US-5.1.1 |

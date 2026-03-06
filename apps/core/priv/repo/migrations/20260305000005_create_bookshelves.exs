@@ -8,6 +8,10 @@ defmodule Core.Repo.Migrations.CreateBookshelves do
       add :id, :binary_id, primary_key: true
       add :user_id, references(:users, type: :binary_id, prefix: "op", on_delete: :delete_all), null: false
       add :name, :bookshelf_name, null: false
+      # visibility ceiling: child shelf ≤ parent user profile_visibility
+      # visibility_group_id FK to groups added in Phase 6A migration
+      add :visibility, :visibility_level, default: "owner", null: false
+      add :visibility_group_id, :binary_id
 
       timestamps(type: :utc_datetime_usec)
     end

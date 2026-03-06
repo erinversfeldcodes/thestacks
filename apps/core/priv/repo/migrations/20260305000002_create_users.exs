@@ -3,6 +3,7 @@ defmodule Core.Repo.Migrations.CreateUsers do
 
   def up do
     execute("CREATE TYPE op.user_role AS ENUM ('owner', 'user')")
+    execute("CREATE TYPE op.visibility_level AS ENUM ('owner', 'group', 'platform')")
 
     create table(:users, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
@@ -10,6 +11,8 @@ defmodule Core.Repo.Migrations.CreateUsers do
       add :password_hash, :text, null: false
       add :display_name, :text
       add :role, :user_role, default: "user", null: false
+      add :profile_visibility, :visibility_level, default: "owner", null: false
+      add :website_url, :text
       add :age_verified, :boolean, default: false
       add :age_verified_at, :utc_datetime_usec
       add :age_verification_provider, :text
@@ -26,6 +29,7 @@ defmodule Core.Repo.Migrations.CreateUsers do
 
   def down do
     drop table(:users, prefix: "op")
+    execute("DROP TYPE IF EXISTS op.visibility_level")
     execute("DROP TYPE IF EXISTS op.user_role")
   end
 end

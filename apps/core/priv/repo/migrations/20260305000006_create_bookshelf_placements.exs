@@ -2,6 +2,9 @@ defmodule Core.Repo.Migrations.CreateBookshelfPlacements do
   use Ecto.Migration
 
   def up do
+    execute("CREATE TYPE op.listing_mode AS ENUM ('open_bid', 'closed_bid')")
+    execute("CREATE TYPE op.listing_status AS ENUM ('draft', 'active', 'sold', 'removed', 'expired')")
+
     create table(:bookshelf_placements, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :book_id, references(:books, type: :binary_id, prefix: "op", on_delete: :nothing), null: false
@@ -12,6 +15,13 @@ defmodule Core.Repo.Migrations.CreateBookshelfPlacements do
       add :formats, {:array, :text}
       add :personal_rating, :integer
       add :notes, :text
+      # visibility ceiling: placement ≤ parent bookshelf visibility
+      add :visibility, :visibility_level, default: "owner", null: false
+      # marketplace columns (null when not listed)
+      add :listing_mode, :listing_mode
+      add :listing_status, :listing_status
+      add :listing_price_cents, :integer
+      add :listing_min_price_cents, :integer
 
       timestamps(type: :utc_datetime_usec)
     end
@@ -28,5 +38,7 @@ defmodule Core.Repo.Migrations.CreateBookshelfPlacements do
 
   def down do
     drop table(:bookshelf_placements, prefix: "op")
+    execute("DROP TYPE IF EXISTS op.listing_status")
+    execute("DROP TYPE IF EXISTS op.listing_mode")
   end
 end

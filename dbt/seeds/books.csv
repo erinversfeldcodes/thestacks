@@ -1,4 +1,0 @@
-id,isbn,title,author_id,description,cover_image_url,page_count,publisher,publication_year,language,subjects,bisac_codes,visibility_tier,open_library_id,google_books_id,created_at,updated_at
-a1b2c3d4-0000-0000-0000-000000000201,9780140449136,The Republic,a1b2c3d4-0000-0000-0000-000000000101,,,416,Penguin Classics,2007,en,"{philosophy,classics}","{}",public,OL7353617M,,2026-01-01T00:00:00.000000Z,2026-01-01T00:00:00.000000Z
-a1b2c3d4-0000-0000-0000-000000000202,9780060512750,The Left Hand of Darkness,a1b2c3d4-0000-0000-0000-000000000102,,,304,Ace Books,2000,en,"{science_fiction}","{}",public,OL7517874M,,2026-01-01T00:00:00.000000Z,2026-01-01T00:00:00.000000Z
-a1b2c3d4-0000-0000-0000-000000000203,9780060929879,The Dispossessed,a1b2c3d4-0000-0000-0000-000000000102,,,387,Harper Voyager,1994,en,"{science_fiction,utopia}","{}",public,OL7517875M,,2026-01-01T00:00:00.000000Z,2026-01-01T00:00:00.000000Z
