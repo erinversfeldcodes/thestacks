@@ -36,10 +36,13 @@ create_issue_and_pr() {
         echo "[hook] Found existing GitHub issue #${issue_num}: $title" >&2
     else
         echo "[hook] Creating GitHub issue: $title" >&2
+        local gh_user
+        gh_user="$(gh api user --jq '.login' 2>/dev/null)"
         local issue_url
         issue_url="$(gh issue create \
             --title "$title" \
             --body-file "$issue_file" \
+            ${gh_user:+--assignee "$gh_user"} \
             2>&1)"
 
         if [[ $? -ne 0 ]] || [[ -z "$issue_url" ]]; then
