@@ -1,3 +1,3 @@
 import Config
 
-import_config "../apps/*/config/config.exs"
+import_config "../apps/core/config/config.exs"

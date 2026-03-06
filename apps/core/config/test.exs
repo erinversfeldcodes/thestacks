@@ -5,6 +5,7 @@ config :core, Core.Repo,
   password: "postgres",
   hostname: "localhost",
   database: "stacks_test#{System.get_env("MIX_TEST_PARTITION")}",
+  parameters: [search_path: "op,public"],
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 

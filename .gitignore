@@ -1,0 +1,63 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Elixir / Phoenix
+_build/
+deps/
+*.ez
+*.beam
+.elixir_ls/
+core-*.tar
+erl_crash.dump
+
+# Elm
+elm-stuff/
+frontend/node_modules/
+
+# Rust
+apps/scraper/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Nix
+result
+.direnv/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Protobuf generated (except Elm decoders which are checked in)
+proto/gen/
+!proto/gen/elm/
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+*.tar.gz
+
+# Fly.io
+.fly/
