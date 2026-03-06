@@ -45,10 +45,13 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     fi
 
     if $is_first_push; then
+        # create_issue_and_pr runs CI internally before creating the PR, so the
+        # draft opens with real results. Skip update_pr_ci_summary to avoid
+        # running CI a second time on the same push.
         create_issue_and_pr "$branch"
+    else
+        update_pr_ci_summary "$branch"
     fi
-
-    update_pr_ci_summary "$branch"
 done
 
 # Always exit 0 — this hook is informational, never a push gate.
