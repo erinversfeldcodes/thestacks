@@ -67,6 +67,33 @@ See roadmap: `plans/consolidated-roadmap.md` § Phase 1C.
 ## Dependencies
 - Issue #001 — context interfaces must be defined before final API wiring (can develop with mocked responses until then)
 
+## Pre-work Required Before This Issue Can Start
+
+The following gaps were identified in the Issue #001 changeset during final verification. They must be resolved before the elm-agent begins, or the Elm work will hit hard blockers mid-flight.
+
+### 1. CORS — hard blocker
+No CORS middleware exists in the Phoenix app. The browser will reject every API call from the Elm SPA. Add `Corsica` (or equivalent) to the `:api` pipeline in `core_web/router.ex` before any Elm work begins. This is a one-file change but without it nothing works.
+
+### 2. `page_count` missing from shelf listing — `Components.Spine` goes blind
+`ShelfController.format_placement/1` returns minimal book fields: `id`, `isbn`, `title`, `cover_image_url`. It does not include `page_count`. `Components.Spine` uses `page_count` to compute spine thickness — it is the primary visual element of every shelf view. Add `page_count` to the book sub-map in `ShelfController.format_placement/1` before the Spine component is built.
+
+**File:** `apps/core/lib/stacks_web/controllers/shelf_controller.ex`
+
+### 3. `PUT /api/settings/age_verification` route missing
+`Page.Settings.AgeVerification` requires an API endpoint to toggle the `age_verified` field on the current user. No such route exists. The `age_verified` field is present on the User schema but there is no controller action or route to set it.
+
+**Required:** Add route + controller action (can live in `AuthController` or a new `UserSettingsController`).
+
+### 4. `PUT /api/placements/:id/formats` route missing
+`Components.FormatPicker` requires an endpoint to update `formats` on a placement. `Books.update_placement_formats/2` exists in the domain layer but is not routed.
+
+**Required:** Add route + controller action in `ShelfPlacementController`.
+
+### 5. Async upload result — design decision needed before `Page.Upload`
+`POST /api/upload` returns `{status: "accepted", image_id: image_id}` immediately (HTTP 202). The actual identification result is produced asynchronously by `IdentifyBookJob`. `Page.Upload` must show the result (or error variants) to the user — but there is no mechanism for the API to push the result back.
+
+**Decision required:** Does `Page.Upload` poll a `GET /api/upload/:image_id/status` endpoint, or does the app use Phoenix channels / SSE? This decision determines the shape of the upload page's `Model` and `Msg` types. Resolve this before the elm-agent begins `Page.Upload`.
+
 ## Agent Assignment
 - **elm-agent** (`docs/agents/elm-agent.md`)
 - **Reviewer**: elm-reviewer (`docs/agents/reviewers/elm-reviewer.md`)
