@@ -38,48 +38,86 @@ extract_issue_title() {
 }
 
 # extract_section <file> <heading>
-# Prints the content of a ## section (strips blank lines, collapses whitespace).
+# Prints the full content of a ## section, preserving line breaks and formatting.
 extract_section() {
     local file="$1"
     local heading="$2"
     awk -v h="$heading" '
         $0 ~ ("^## " h) { found=1; next }
         found && /^## /  { exit }
-        found && NF      { print }
-    ' "$file" | head -10 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+        found            { print }
+    ' "$file" | sed 's/^[[:space:]]*$//;s/[[:space:]]*$//'
 }
 
 # build_pr_description <issue_file> <gh_issue_number> [ci_section]
-# Prints the PR body. ci_section is the pre-formatted sentinel block from
-# run_ci_and_get_section; omit it to get the "not yet run" placeholder.
+# Reads .github/pull_request_template.md and substitutes <!-- pr:field --> markers
+# with content extracted from the issue file.
+# Goal/Approach/Verification are set once at PR creation and never overwritten —
+# only the CI sentinel block is replaced on subsequent pushes via _replace_sentinel.
 build_pr_description() {
     local file="$1"
     local issue_num="$2"
     local ci_section="${3:-}"
+
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
+    local template="$repo_root/.github/pull_request_template.md"
+
+    if [[ ! -f "$template" ]]; then
+        echo "[hook] WARNING: .github/pull_request_template.md not found — PR body will be empty." >&2
+        echo "Closes #${issue_num}"
+        return
+    fi
 
     local goal approach verification
     goal="$(extract_section "$file" "Goal")"
     approach="$(extract_section "$file" "Technical Requirements")"
     verification="$(extract_section "$file" "Definition of Done")"
 
-    local prose
-    prose="$(printf "**Goal**: %s\n\n**Approach**: %s\n\n**Verification**: %s" \
-        "$goal" "$approach" "$verification")"
+    # Write each multi-line substitution to a temp file so awk can insert it cleanly.
+    local goal_file approach_file verification_file ci_file
+    goal_file="$(mktemp)"
+    approach_file="$(mktemp)"
+    verification_file="$(mktemp)"
+    ci_file="$(mktemp)"
 
-    if [[ -z "$ci_section" ]]; then
-        ci_section="$(cat <<'PLACEHOLDER'
-<!-- ci-summary-start -->
-⏳ CI checks not yet run. Push without `--no-verify` to run checks.
-<!-- ci-summary-end -->
-PLACEHOLDER
-)"
+    printf '%s\n' "$goal"         > "$goal_file"
+    printf '%s\n' "$approach"     > "$approach_file"
+    printf '%s\n' "$verification" > "$verification_file"
+
+    if [[ -n "$ci_section" ]]; then
+        printf '%s\n' "$ci_section" > "$ci_file"
+    else
+        # Keep the placeholder already in the template — write nothing so awk
+        # leaves the <!-- pr:* --> marker untouched and the template's own CI
+        # sentinel block is preserved as-is.
+        : > "$ci_file"
     fi
 
-    cat <<EOF
-Closes #${issue_num}
+    awk \
+        -v issue_num="$issue_num" \
+        -v goal_file="$goal_file" \
+        -v approach_file="$approach_file" \
+        -v verification_file="$verification_file" \
+        '
+        /<!-- pr:issue_num -->/ {
+            gsub(/<!-- pr:issue_num -->/, issue_num)
+            print; next
+        }
+        /<!-- pr:goal -->/ {
+            while ((getline line < goal_file) > 0) print line
+            close(goal_file); next
+        }
+        /<!-- pr:approach -->/ {
+            while ((getline line < approach_file) > 0) print line
+            close(approach_file); next
+        }
+        /<!-- pr:verification -->/ {
+            while ((getline line < verification_file) > 0) print line
+            close(verification_file); next
+        }
+        { print }
+        ' "$template"
 
-${prose}
-
-${ci_section}
-EOF
+    rm -f "$goal_file" "$approach_file" "$verification_file" "$ci_file"
 }
