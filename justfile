@@ -19,6 +19,10 @@ dev:
 setup:
     bash setup.sh
 
+# Install git hooks (symlinks scripts/hooks/* into .git/hooks/)
+install-hooks:
+    bash scripts/install-hooks.sh
+
 # Run every CI check locally in CI order (sequential, all groups)
 # Optionally pass group names to run a subset: just ci elixir dbt
 ci *GROUPS:

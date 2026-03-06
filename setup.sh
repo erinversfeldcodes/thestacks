@@ -228,7 +228,12 @@ else
     fi
 fi
 
-# ── 11. Summary ────────────────────────────────────────────────────────────────
+# ── 11. Git hooks ──────────────────────────────────────────────────────────────
+step "Git hooks"
+bash "$REPO_ROOT/scripts/install-hooks.sh"
+success "Git hooks installed"
+
+# ── 12. Summary ────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${GREEN}${BOLD}  The Stacks dev environment is ready.${RESET}"

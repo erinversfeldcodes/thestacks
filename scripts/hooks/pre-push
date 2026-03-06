@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# pre-push hook — runs before every `git push`.
+#
+# On first push of a branch:
+#   1. Creates a GitHub issue from issues/<branch>.md
+#   2. Opens a draft PR linked to the issue
+#
+# On every push (including first):
+#   3. Runs `just ci` and updates the PR description with a CI summary table
+#
+# Skip everything: git push --no-verify
+#   The PR description will retain whatever it last showed (or "not yet run"
+#   if this is the first push).
+#
+# This hook lives in scripts/hooks/ and is installed by scripts/install-hooks.sh.
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOKS_LIB="$REPO_ROOT/scripts/hooks/lib"
+
+# shellcheck source=scripts/hooks/lib/create-issue-and-pr.sh
+source "$HOOKS_LIB/create-issue-and-pr.sh"
+# shellcheck source=scripts/hooks/lib/update-pr-ci.sh
+source "$HOOKS_LIB/update-pr-ci.sh"
+
+remote="$1"
+# $2 is the remote URL — unused but received
+
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+    # Skip deletions (pushing an empty ref)
+    [[ "$local_sha" == "0000000000000000000000000000000000000000" ]] && continue
+
+    # Only handle branch pushes
+    [[ "$local_ref" != refs/heads/* ]] && continue
+
+    branch="${local_ref#refs/heads/}"
+
+    # Never run on main/master — those are merge targets, not feature branches
+    [[ "$branch" == "main" || "$branch" == "master" ]] && continue
+
+    is_first_push=false
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+        is_first_push=true
+    fi
+
+    if $is_first_push; then
+        create_issue_and_pr "$branch"
+    fi
+
+    update_pr_ci_summary "$branch"
+done
+
+# Always exit 0 — this hook is informational, never a push gate.
+exit 0

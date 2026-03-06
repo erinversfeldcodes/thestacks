@@ -92,6 +92,41 @@ To run multiple subagents in parallel, make multiple Agent tool calls in a singl
 
 ---
 
+## Phase 0: Issue & Branch Setup
+
+Run this phase **before** planning whenever starting work on a new feature or roadmap item. Skip it if an issue file already exists for this task.
+
+### Steps
+
+1. Determine the next available issue number by listing `issues/` and finding the highest `NNN` prefix, then incrementing by 1.
+
+2. Ask the human for:
+   - Issue title (one short sentence)
+   - Priority (P0 / P1 / P2 / P3)
+   - Any constraints or context not already captured in the roadmap
+
+3. Write a draft issue file at `issues/NNN-<slug>.md` using `issues/TEMPLATE.md` as the template. Fill in:
+   - Title, priority, summary (from human input + roadmap)
+   - User Stories (from `docs/user-stories.md` if relevant)
+   - Goal, Technical Requirements, Definition of Done (draft — mark unclear items with `[TBD]`)
+   - Agent Assignment (from the Domain Routing Table in `AGENTS.md`)
+   - Leave Progress Notes blank
+
+   The slug must match the intended branch name: lowercase, hyphens, no special characters. Example: `042-bookshelf-placement-history`.
+
+4. **Present the draft issue to the human. MANDATORY STOP.**
+   Wait for explicit approval or edits before proceeding.
+
+5. On approval: write the final issue file, then create the branch:
+   ```
+   git checkout -b NNN-slug main
+   ```
+   Confirm the branch was created before proceeding.
+
+6. Proceed to Phase 1. The pre-push hook will create the GitHub issue and draft PR automatically on first push.
+
+---
+
 ## Phase 1: Planning
 
 ### Steps
