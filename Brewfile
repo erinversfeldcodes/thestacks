@@ -38,6 +38,7 @@ brew "trivy"
 # checkov is installed via pip (see setup.sh) — no Homebrew formula
 
 # ── Misc dev tools ────────────────────────────────────────────────────────────
+brew "gh"
 brew "git"
 brew "curl"
 brew "jq"
