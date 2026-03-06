@@ -1,0 +1,53 @@
+# ai.txt — AI training opt-out for The Stacks
+# https://github.com/erinversfeldcodes/thestacks
+#
+# This file signals that the contents of this repository are NOT licensed
+# for use in AI or machine learning training, fine-tuning, evaluation, or
+# dataset construction of any kind.
+#
+# See LICENSE for the full legal terms.
+
+User-agent: *
+Disallow: /
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Omgilibot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
