@@ -4,21 +4,26 @@
 
 # find_issue_file <branch>
 # Prints the absolute path to the issue file matching the branch name, or empty string.
+# Handles branches with a type prefix (refactor/, feat/, fix/, etc.) by stripping
+# everything up to and including the first slash before matching.
 find_issue_file() {
     local branch="$1"
     local repo_root
     repo_root="$(git rev-parse --show-toplevel)"
 
-    # Exact match: issues/NNN-some-slug.md
-    local exact="$repo_root/issues/${branch}.md"
+    # Strip optional type prefix (e.g. refactor/000-slug → 000-slug)
+    local slug="${branch#*/}"
+
+    # Exact match on slug: issues/NNN-some-slug.md
+    local exact="$repo_root/issues/${slug}.md"
     if [[ -f "$exact" ]]; then
         echo "$exact"
         return
     fi
 
-    # Prefix match by issue number: branch 042-foo matches issues/042-*.md
+    # Prefix match by issue number extracted from slug: 042-foo matches issues/042-*.md
     local num
-    num="$(echo "$branch" | grep -oE '^[0-9]+')"
+    num="$(echo "$slug" | grep -oE '^[0-9]+')"
     if [[ -n "$num" ]]; then
         local found
         found="$(find "$repo_root/issues" -maxdepth 1 -name "${num}-*.md" | head -1)"
