@@ -111,6 +111,25 @@ defmodule Stacks.ShelvingTest do
       assert {:ok, new_placement} = Shelving.reread_book(placement.id)
       refute new_placement.id == placement.id
     end
+
+    test "writes a PlacementHistory record from the original shelf to library", %{
+      user: user,
+      shelf: shelf,
+      placement: placement
+    } do
+      assert {:ok, _new_placement} = Shelving.reread_book(placement.id)
+
+      library_shelf = Repo.get_by(Stacks.Shelving.Bookshelf, user_id: user.id, name: "library")
+
+      history =
+        Repo.get_by(PlacementHistory,
+          book_id: placement.book_id,
+          from_bookshelf: shelf.id,
+          to_bookshelf: library_shelf.id
+        )
+
+      assert history != nil
+    end
   end
 
   describe "abandon_book/2" do

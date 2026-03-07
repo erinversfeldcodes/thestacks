@@ -4,6 +4,7 @@ defmodule StacksWeb.GDPRController do
   use CoreWeb, :controller
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Audit
   alias Stacks.GDPR.Consent
   alias Stacks.Workers.AccountDeletionJob
   alias Stacks.Workers.DataExportJob
@@ -25,6 +26,11 @@ defmodule StacksWeb.GDPRController do
   @doc "DELETE /api/gdpr/account — enqueue an account deletion job."
   def delete_account(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
+
+    Audit.log(user.id, "user.deletion_requested",
+      resource_type: "user",
+      resource_id: user.id
+    )
 
     {:ok, _job} =
       %{"user_id" => user.id}

@@ -130,19 +130,56 @@ defmodule Stacks.Shelving do
 
   @doc """
   Adds the book to the library shelf again (re-read flow).
-  Creates a new placement rather than reusing the old one.
+  Creates a new placement rather than reusing the old one, and writes a
+  PlacementHistory record capturing the move from the original shelf to
+  the library shelf.
   """
   @spec reread_book(binary()) :: {:ok, Placement.t()} | {:error, Ecto.Changeset.t()}
   def reread_book(placement_id) do
     placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
-    bookshelf = get_or_create_shelf(placement.bookshelf.user_id, "library")
+    user_id = placement.bookshelf.user_id
+    original_bookshelf_id = placement.bookshelf.id
+    library_shelf = get_or_create_shelf(user_id, "library")
 
-    %Placement{}
-    |> Placement.changeset(%{
-      book_id: placement.book_id,
-      bookshelf_id: bookshelf.id
-    })
-    |> Repo.insert()
+    Multi.new()
+    |> Multi.insert(
+      :placement,
+      Placement.changeset(%Placement{}, %{
+        book_id: placement.book_id,
+        bookshelf_id: library_shelf.id
+      })
+    )
+    |> Multi.insert(:history, fn _ ->
+      PlacementHistory.changeset(%PlacementHistory{}, %{
+        book_id: placement.book_id,
+        from_bookshelf: original_bookshelf_id,
+        to_bookshelf: library_shelf.id,
+        moved_at: DateTime.utc_now()
+      })
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
+      Events.emit(%{
+        event_type: "placement.reread",
+        aggregate_type: "placement",
+        aggregate_id: p.id,
+        payload: %{book_id: placement.book_id, to_shelf: "library"}
+      })
+
+      {:ok, p}
+    end)
+    |> Multi.run(:audit, fn _repo, %{placement: p} ->
+      Audit.log(user_id, "placement.reread",
+        resource_type: "placement",
+        resource_id: p.id,
+        metadata: %{book_id: placement.book_id, to_shelf: "library"}
+      )
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{placement: new_placement}} -> {:ok, new_placement}
+      {:error, :placement, changeset, _} -> {:error, changeset}
+      {:error, _, reason, _} -> {:error, reason}
+    end
   end
 
   @doc """
