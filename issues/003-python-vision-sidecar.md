@@ -56,6 +56,26 @@ See roadmap: `plans/consolidated-roadmap.md` § Phase 1D.
 ## Dependencies
 - Repository scaffolding complete ✅ (`apps/vision/` skeleton exists)
 
+## Architecture Decision: Endpoint Naming
+
+The Phoenix `AI.Client` calls `call_vision/2` with semantic names (`"is_book"`, `"extract_isbn"`) and currently constructs URLs by appending the name directly to the base URL. The Python sidecar defines REST resource paths (`/extract`, `/classify`).
+
+**Decision: keep the Python paths as specified. Fix the mapping in Elixir.**
+
+The Python paths (`/extract`, `/classify`) are idiomatic REST — they name the resource/operation from an HTTP perspective. Renaming them to verb phrases like `/is_book` or `/extract_isbn` would be non-idiomatic FastAPI.
+
+The Elixir fix is a small private mapping function in `Stacks.AI.Client`:
+
+```elixir
+defp endpoint_path("is_book"), do: "classify"
+defp endpoint_path("extract_isbn"), do: "extract"
+defp endpoint_path(other), do: other
+```
+
+This is idiomatic Elixir pattern matching. The domain layer continues to use intent-describing names; the HTTP path is an implementation detail of the client.
+
+**The python-agent must not change endpoint paths to match Elixir naming.** The Elixir mapping fix is tracked as pre-work in Issue #001.
+
 ## Agent Assignment
 - **python-agent** (`docs/agents/python-agent.md`)
 - **Reviewer**: python-reviewer (`docs/agents/reviewers/python-reviewer.md`)
