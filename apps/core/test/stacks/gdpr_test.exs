@@ -8,6 +8,8 @@ defmodule Stacks.GDPRTest do
   alias Stacks.GDPR.Consent
   alias Stacks.GDPR.Deletion
   alias Stacks.GDPR.Export
+  alias Stacks.GDPR.ImageRetention
+  alias Stacks.Workers.ImageRetentionJob
 
   describe "Export.export_user_data/2" do
     test "returns a map with user data" do
@@ -147,7 +149,7 @@ defmodule Stacks.GDPRTest do
         prefix: "op"
       )
 
-      assert {:ok, 1} = Stacks.GDPR.ImageRetention.cleanup_expired_images()
+      assert {:ok, 1} = ImageRetention.cleanup_expired_images()
     end
   end
 
@@ -188,14 +190,14 @@ defmodule Stacks.GDPRTest do
         prefix: "op"
       )
 
-      assert {:ok, 1} = Stacks.GDPR.ImageRetention.cleanup_stuck_images()
+      assert {:ok, 1} = ImageRetention.cleanup_stuck_images()
     end
   end
 
   describe "ImageRetentionJob" do
     test "perform/1 calls cleanup_stuck_images and cleanup_expired_images" do
       # No images to clean up — should return :ok without error
-      assert :ok = Stacks.Workers.ImageRetentionJob.perform(%Oban.Job{args: %{}})
+      assert :ok = ImageRetentionJob.perform(%Oban.Job{args: %{}})
     end
   end
 end

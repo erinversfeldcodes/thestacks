@@ -9,7 +9,10 @@ defmodule Stacks.AI.Client do
   All callers go through `call_vision/2`, which delegates to the configured module.
   """
 
-  @behaviour Stacks.AI.ClientBehaviour
+  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.ClientBehaviour
+
+  @behaviour ClientBehaviour
 
   @fuse_name :vision_sidecar
 
@@ -20,14 +23,15 @@ defmodule Stacks.AI.Client do
 
   @doc false
   def do_call_vision(endpoint, payload) do
-    with :ok <- Stacks.AI.BudgetTracker.check_budget(:together_ai) do
-      :fuse.ask(@fuse_name, :sync)
-      |> case do
-        :ok -> make_vision_request(endpoint, payload)
-        :blown -> {:error, :circuit_open}
-      end
-    else
-      {:error, reason} -> {:error, reason}
+    case BudgetTracker.check_budget(:together_ai) do
+      :ok ->
+        case :fuse.ask(@fuse_name, :sync) do
+          :ok -> make_vision_request(endpoint, payload)
+          :blown -> {:error, :circuit_open}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
