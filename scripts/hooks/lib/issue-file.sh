@@ -49,29 +49,37 @@ extract_section() {
     ' "$file" | head -10 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-# build_pr_description <issue_file> <gh_issue_number>
-# Prints the initial PR body (≤100 words of prose + CI sentinel).
+# build_pr_description <issue_file> <gh_issue_number> [ci_section]
+# Prints the PR body. ci_section is the pre-formatted sentinel block from
+# run_ci_and_get_section; omit it to get the "not yet run" placeholder.
 build_pr_description() {
     local file="$1"
     local issue_num="$2"
+    local ci_section="${3:-}"
 
     local goal approach verification
     goal="$(extract_section "$file" "Goal")"
     approach="$(extract_section "$file" "Technical Requirements")"
     verification="$(extract_section "$file" "Definition of Done")"
 
-    # Truncate combined prose to 100 words
     local prose
     prose="$(printf "**Goal**: %s\n\n**Approach**: %s\n\n**Verification**: %s" \
         "$goal" "$approach" "$verification")"
+
+    if [[ -z "$ci_section" ]]; then
+        ci_section="$(cat <<'PLACEHOLDER'
+<!-- ci-summary-start -->
+⏳ CI checks not yet run. Push without `--no-verify` to run checks.
+<!-- ci-summary-end -->
+PLACEHOLDER
+)"
+    fi
 
     cat <<EOF
 Closes #${issue_num}
 
 ${prose}
 
-<!-- ci-summary-start -->
-⏳ CI checks not yet run. Push without \`--no-verify\` to run checks.
-<!-- ci-summary-end -->
+${ci_section}
 EOF
 }

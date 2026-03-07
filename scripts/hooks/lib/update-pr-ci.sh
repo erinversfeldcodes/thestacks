@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs `just ci`, formats results, and updates the open PR's CI summary section.
+# CI running, report formatting, and PR description updating.
 # Source this file; do not execute directly.
 
 # _strip_ansi <string>
@@ -55,23 +55,13 @@ _replace_sentinel() {
     rm -f "$body_file" "$new_file" "$out_file"
 }
 
-# update_pr_ci_summary <branch>
-update_pr_ci_summary() {
-    local branch="$1"
-    local repo_root
-    repo_root="$(git rev-parse --show-toplevel)"
+# run_ci_and_get_section <repo_root>
+# Runs `just ci`, prints output to the terminal, and returns the formatted
+# ci-summary sentinel block (including the sentinel comments) on stdout.
+# Shared by create_issue_and_pr (first push) and update_pr_ci_summary (subsequent pushes).
+run_ci_and_get_section() {
+    local repo_root="$1"
 
-    local pr_num
-    pr_num="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
-
-    if [[ -z "$pr_num" || "$pr_num" == "null" ]]; then
-        echo "[hook] No open PR found for branch '$branch' — skipping CI summary update." >&2
-        return 0
-    fi
-
-    echo "[hook] Running CI checks for PR #${pr_num} (press Ctrl-C to abort, or re-push with --no-verify to skip)..." >&2
-
-    # Run CI, show output on the terminal, capture it.
     local tmpfile
     tmpfile="$(mktemp)"
     just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
@@ -85,22 +75,40 @@ update_pr_ci_summary() {
     local table
     table="$(_parse_ci_output "$ci_output")"
 
-    local new_section
-    new_section="$(cat <<EOF
+    cat <<EOF
 <!-- ci-summary-start -->
 ${table}
 
 _Last run: ${timestamp} · push \`--no-verify\` to skip_
 <!-- ci-summary-end -->
 EOF
-)"
+}
+
+# update_pr_ci_summary <branch>
+# Used on subsequent pushes — finds the open PR and updates its CI summary section.
+update_pr_ci_summary() {
+    local branch="$1"
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
+
+    local pr_num
+    pr_num="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
+
+    if [[ -z "$pr_num" || "$pr_num" == "null" ]]; then
+        echo "[hook] No open PR found for branch '$branch' — skipping CI summary update." >&2
+        return 0
+    fi
+
+    echo "[hook] Running CI checks for PR #${pr_num} (push --no-verify to skip)..." >&2
+
+    local ci_section
+    ci_section="$(run_ci_and_get_section "$repo_root")"
 
     local current_body
     current_body="$(gh pr view "$pr_num" --json body --jq '.body')"
 
     local new_body
-    new_body="$(_replace_sentinel "$current_body" "$new_section")"
-
+    new_body="$(_replace_sentinel "$current_body" "$ci_section")"
 
     echo "[hook] Updating PR #${pr_num} CI summary..." >&2
     gh pr edit "$pr_num" --body "$new_body"

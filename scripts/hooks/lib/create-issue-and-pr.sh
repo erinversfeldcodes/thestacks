@@ -7,6 +7,8 @@ source "$(git rev-parse --show-toplevel)/scripts/hooks/lib/issue-file.sh"
 
 create_issue_and_pr() {
     local branch="$1"
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
 
     local issue_file
     issue_file="$(find_issue_file "$branch")"
@@ -39,8 +41,21 @@ create_issue_and_pr() {
     issue_num="$(echo "$issue_url" | grep -oE '[0-9]+$')"
     echo "[hook] Issue #${issue_num} created: $issue_url" >&2
 
+    # Run CI before pushing so the draft PR opens with real results, not a placeholder.
+    # run_ci_and_get_section is provided by update-pr-ci.sh, sourced in the pre-push hook.
+    echo "[hook] Running CI checks before creating PR (push --no-verify to skip)..." >&2
+    local ci_section
+    ci_section="$(run_ci_and_get_section "$repo_root")"
+
     local pr_body
-    pr_body="$(build_pr_description "$issue_file" "$issue_num")"
+    pr_body="$(build_pr_description "$issue_file" "$issue_num" "$ci_section")"
+
+    # The pre-push hook fires before git transfers any objects, so the branch does
+    # not yet exist on the remote when we reach this point. Push it now (with
+    # --no-verify to avoid recursive hook invocation) so that gh pr create can
+    # find the branch on GitHub. The outer git push will be a no-op afterwards.
+    echo "[hook] Pushing branch to remote..." >&2
+    git push --no-verify origin "HEAD:refs/heads/${branch}" >/dev/null 2>&1 || true
 
     echo "[hook] Creating draft PR: $title" >&2
     local pr_url
