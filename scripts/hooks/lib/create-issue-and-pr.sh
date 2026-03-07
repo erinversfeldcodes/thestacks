@@ -60,25 +60,39 @@ create_issue_and_pr() {
     local pr_body
     pr_body="$(build_pr_description "$issue_file" "$issue_num" "$ci_section")"
 
-    # The pre-push hook fires before git transfers any objects, so the branch may
-    # not yet exist on the remote. Push it now (--no-verify to avoid recursive
-    # hook invocation) so gh pr create can find it. The outer git push becomes
-    # a no-op for this branch afterwards.
-    git push --no-verify origin "HEAD:refs/heads/${branch}" >/dev/null 2>&1 || true
+    # We cannot push the branch from within the pre-push hook — doing so advances
+    # the remote ref, which causes git's outer push to fail with a ref-lock error.
+    # Instead, spawn a background process that polls git ls-remote until the outer
+    # push lands the branch on the remote, then creates the PR.
+    #
+    # Variables are captured in the subshell at spawn time, so closing over
+    # branch/title/pr_body is safe even after this function returns.
+    (
+        attempts=0
+        while [[ $attempts -lt 20 ]]; do
+            if git ls-remote --exit-code origin "refs/heads/${branch}" &>/dev/null 2>&1; then
+                pr_url="$(gh pr create \
+                    --draft \
+                    --title "$title" \
+                    --body "$pr_body" \
+                    --base main \
+                    --head "$branch" \
+                    2>/dev/null)"
+                if [[ -n "$pr_url" ]]; then
+                    echo "[hook] Draft PR created: $pr_url" >&2
+                else
+                    echo "[hook] WARNING: Failed to create draft PR. Run 'git push' again to retry." >&2
+                fi
+                break
+            fi
+            sleep 2
+            ((attempts++))
+        done
+        if [[ $attempts -ge 20 ]]; then
+            echo "[hook] WARNING: Timed out waiting for branch '$branch' on remote. Run 'git push' again to create the PR." >&2
+        fi
+    ) &
+    disown $!
 
-    echo "[hook] Creating draft PR: $title" >&2
-    local pr_url
-    pr_url="$(gh pr create \
-        --draft \
-        --title "$title" \
-        --body "$pr_body" \
-        --base main \
-        2>&1)"
-
-    if [[ $? -ne 0 ]]; then
-        echo "[hook] WARNING: Failed to create draft PR." >&2
-        return 0
-    fi
-
-    echo "[hook] Draft PR created: $pr_url" >&2
+    echo "[hook] PR creation running in background — check GitHub in a moment." >&2
 }
