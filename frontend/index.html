@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Stacks</title>
+    <link rel="stylesheet" href="css/main.css" />
+  </head>
+  <body>
+    <div id="elm"></div>
+
+    <script src="elm.js"></script>
+    <script>
+      var app = Elm.Main.init({ node: document.getElementById("elm") });
+
+      // Swipe gesture detection for bookshelf navigation (mobile).
+      // Sends "left" (next bookshelf) or "right" (previous bookshelf) to the
+      // Elm onSwipe port when a horizontal swipe exceeds 50px and dominates
+      // the vertical delta.
+      (function (app) {
+        var startX = 0;
+        var startY = 0;
+
+        document.addEventListener(
+          "touchstart",
+          function (e) {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+          },
+          { passive: true }
+        );
+
+        document.addEventListener(
+          "touchend",
+          function (e) {
+            var dx = e.changedTouches[0].clientX - startX;
+            var dy = e.changedTouches[0].clientY - startY;
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+              app.ports.onSwipe.send(dx < 0 ? "left" : "right");
+            }
+          },
+          { passive: true }
+        );
+      })(app);
+    </script>
+  </body>
+</html>
