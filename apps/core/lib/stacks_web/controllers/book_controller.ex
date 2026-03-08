@@ -14,15 +14,15 @@ defmodule StacksWeb.BookController do
         |> put_status(201)
         |> json(%{book: format_book(book)})
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "isbn_not_found"})
-
-      {:error, changeset} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(422)
         |> json(%{error: "validation_failed", details: format_changeset_errors(changeset)})
+
+      {:error, _} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "isbn_not_found"})
     end
   end
 
