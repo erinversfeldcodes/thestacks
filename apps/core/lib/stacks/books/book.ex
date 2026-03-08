@@ -30,6 +30,8 @@ defmodule Stacks.Books.Book do
              :updated_at
            ]}
 
+  @type t :: %__MODULE__{}
+
   schema "books" do
     field :isbn, :string
     field :title, :string

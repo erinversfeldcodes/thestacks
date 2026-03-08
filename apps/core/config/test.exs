@@ -20,6 +20,7 @@ config :core, CoreWeb.Endpoint,
 
 config :core, Oban, testing: :manual
 
+config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
 config :core, :vision_hmac_secret, "test-hmac-secret"
 
