@@ -84,8 +84,11 @@ Use the Agent tool:
     ## COMPLETION REPORT FORMAT
     1. Summary of what was implemented
     2. Files created/modified (absolute paths)
-    3. Test commands run and results
-    4. DoD items satisfied for this phase
+    3. Spec Coverage Matrix — every item named in the Technical Requirements section:
+       | Item | Implemented | Tested (happy + error) | Notes |
+       Any ❌ without justification is a blocker.
+    4. Test commands run with verbatim exit code
+    5. DoD items satisfied — with file:line evidence for each
 ```
 
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
@@ -171,14 +174,32 @@ Your prompt must include:
 - The issue file path for Progress Notes updates
 - The constraint: complete only this phase
 
-### 2B — Delegate Review
+### 2B — Spec Coverage Gate (before review)
 
-After implementation is reported complete, delegate to the **stack-specific reviewer** via Agent tool. Use the Reviewer Routing table in `AGENTS.md` to select the correct reviewer(s). If a phase touches multiple stacks, invoke multiple reviewers in parallel.
+Before delegating to the reviewer, **you** must verify the agent's Spec Coverage Matrix:
+
+1. Extract the full list of required items from the issue's Technical Requirements section.
+2. Compare against the Spec Coverage Matrix in the agent's completion report.
+3. If any required item has ❌ with **no justification** in the matrix — or is **absent from the
+   matrix entirely** — return to 2A with a targeted prompt to fill the gap. Do not proceed to
+   review with unjustified gaps.
+4. If all ❌ rows have explicit justifications (deferred, blocked, out-of-scope), proceed to
+   review, including the matrix in the reviewer prompt so the reviewer can independently verify.
+
+This gate exists because the reviewer audits code quality; coverage completeness is your
+responsibility as Orchestrator.
+
+### 2C — Delegate Review
+
+After the spec coverage gate passes, delegate to the **stack-specific reviewer** via Agent tool.
+Use the Reviewer Routing table in `AGENTS.md` to select the correct reviewer(s). If a phase
+touches multiple stacks, invoke multiple reviewers in parallel.
 
 - Embed full content of the relevant reviewer `.md` file from `docs/agents/reviewers/`
-- Include: phase objective, files modified, DoD items, standards paths
+- Include: phase objective, files modified, DoD items, standards paths, and the agent's
+  Spec Coverage Matrix (so the reviewer can run their independent Step 0 audit against it)
 
-### 2C — Act on Review Result
+### 2D — Act on Review Result
 
 **If APPROVED:**
 - Present the reviewer's full report to the human for mediation
@@ -196,7 +217,7 @@ After implementation is reported complete, delegate to the **stack-specific revi
 **If FAILED:**
 - Stop immediately. Present failure details and wait for instructions.
 
-### 2D — Next Phase
+### 2E — Next Phase
 
 After the human confirms the commit, proceed to the next plan phase.
 

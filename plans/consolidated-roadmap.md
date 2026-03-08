@@ -1,6 +1,6 @@
 # Plan: The Stacks — Consolidated Implementation Roadmap
 **Created**: 2026-03-05
-**Updated**: 2026-03-06
+**Updated**: 2026-03-07
 **Status**: Draft
 **Branch**: `main` (greenfield — no existing code)
 
@@ -41,6 +41,8 @@ The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indi
 | Phase 1B (Elixir contexts) | **Opus 4.6** | Architectural judgment — context boundaries, Ecto.Multi patterns, event emission design |
 | Phase 1C (Elm frontend) | **Sonnet 4.6** | TEA patterns are mechanical once types are defined |
 | Phase 1D (Python sidecar) | **Sonnet 4.6** | Small, well-specified FastAPI service |
+| Phase 1D.1 (Vision benchmark) | **Sonnet 4.6** | Benchmark harness is mechanical; corpus assembly and model decision are human |
+| Phase 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
 | Phase 1E (Platform + CI) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
 | Phase 2 (Enrichment) | **Opus 4.6** | External API integration, scraper architecture, LLM guardrails — judgment required |
 | Phase 3 (Partner + EDA) | **Opus 4.6** | Event bus design, Protobuf schema authoring, partner auth — security-critical |
@@ -423,6 +425,83 @@ thestacks/
 - [ ] All responses have Pydantic model validation
 - [ ] `ruff check` and `ruff format --check` pass
 - [ ] Type hints on all functions
+
+---
+
+### Phase 1D.1 — Vision Model Benchmark (python-agent + human)
+**Objective**: Validate that the chosen Together AI model performs acceptably across all real-world identification paths before the first production deployment. Establish a quantitative baseline and select the production model.
+
+**Starts after**: Phase 1D committed and Phase 1E infrastructure provisioned (Together AI key available).
+**Blocks**: Phase 1E go-live. Do not deploy to production until the benchmark passes or a model change is made.
+**Issue**: `issues/005-vision-model-benchmark.md`
+
+**Why now**: The ISBN hard gate means identification accuracy is critical from day one. Qwen2.5-VL-7B was chosen as a starting point but has not been validated against real book photos across all identification paths — including images with no barcode, where the model must derive information from title text, spine, or cover art. A model failure here produces silent bad data (wrong ISBNs, wrong books on shelves).
+
+**Corpus** (human task — assembled before running the harness):
+
+| Category | Count | Notes |
+|----------|-------|-------|
+| Clean barcode visible | 10 | Standard retail shot, ISBN scannable |
+| Barcode obscured/worn | 5 | Sticker over barcode, worn spine edge |
+| Title/spine only (no barcode) | 10 | Older books pre-ISBN barcodes, spines |
+| Cover art dominant | 10 | Heavy illustration, minimal text |
+| Angled / low-res | 5 | Phone shot in poor light |
+| Non-book (must reject) | 10 | Objects, documents, people |
+
+**Models under test**:
+1. `Qwen/Qwen2.5-VL-7B-Instruct` — current default (smallest, cheapest)
+2. `Qwen/Qwen2.5-VL-72B-Instruct` — higher OCR accuracy, ~10× cost
+3. `meta-llama/Llama-3.2-11B-Vision-Instruct` — alternative architecture
+
+**Pass thresholds** (confirm before running):
+- Classification accuracy on book images: ≥ 90%
+- False positive rate on non-book images: ≤ 5%
+- ISBN extraction success (barcode-visible): ≥ 85%
+- Title extraction success (title/spine, no barcode): ≥ 70%
+
+**Outputs**:
+- `apps/vision/benchmark/results/YYYY-MM-DD.json` — raw per-image results
+- `apps/vision/benchmark/REPORT.md` — per-category accuracy, latency p50/p95, cost per 1,000 uploads, go/no-go recommendation per model
+- Model selection recorded in `apps/vision/app/config.py` comment with rationale
+
+**DoD:**
+- [ ] Corpus assembled (≥ 50 images, all categories)
+- [ ] Benchmark harness (`benchmark/run_benchmark.py`) implemented and runnable
+- [ ] All three models evaluated
+- [ ] REPORT.md written with go/no-go recommendation
+- [ ] Production `model_name` confirmed or updated in `config.py`
+
+---
+
+### Phase 1D.2 — Local OCR Pre-pass (python-agent)
+**Objective**: Add an in-process Tesseract/EasyOCR pass for ISBN barcodes before calling the Together AI VLM. When a barcode is cleanly readable locally, skip the VLM entirely — reducing API cost and latency for the common case.
+
+**Starts after**: Phase 1D.1 benchmark complete. Implement only if the benchmark confirms that a meaningful fraction of images have clean, machine-readable barcodes (expected: ≥ 30% of real-world uploads).
+**Parallel with**: Phase 1E (does not block deployment).
+
+**Why after the benchmark**: The benchmark establishes how often the VLM is actually needed. If most images are clean barcodes, the local pre-pass saves significant cost. If most images are title/cover-art cases, the savings are narrow and the added complexity isn't justified. The benchmark data makes this decision evidence-based rather than speculative.
+
+**Implementation** (in-process, no new service):
+- Add `pytesseract` (wraps system Tesseract) and/or `pyzbar` (pure-Python barcode decoder) to `requirements.txt`
+- New function `local_isbn_scan(image_bytes) -> str | None` in `app/services/local_ocr.py`
+- In `POST /extract`: attempt local scan first → if ISBN found with high confidence, return immediately without calling Together AI → if not found or low confidence, fall through to VLM
+- Threshold for "high confidence local result" is configurable via `app/config.py` (`local_ocr_confidence_threshold`, default `0.9`)
+- The VLM path is always the fallback — local OCR failure is silent (not an error)
+
+**Files:**
+- `apps/vision/app/services/local_ocr.py` — barcode + basic OCR scan
+- `apps/vision/app/config.py` — `local_ocr_enabled: bool = True`, `local_ocr_confidence_threshold: float = 0.9`
+- `apps/vision/tests/test_local_ocr.py`
+- `deploy/Dockerfile.vision` — add `tesseract-ocr` system package
+
+**DoD:**
+- [ ] `local_isbn_scan` returns a valid ISBN string or `None`
+- [ ] `/extract` skips VLM when local scan returns high-confidence result
+- [ ] `/extract` falls through to VLM when local scan returns `None` or low confidence
+- [ ] `local_ocr_enabled = False` disables the pre-pass entirely (escape hatch)
+- [ ] Tests cover: clean barcode (local succeeds), no barcode (falls through), low confidence (falls through)
+- [ ] Dockerfile updated with `tesseract-ocr` apt package
+- [ ] `ruff check` passes
 
 ---
 
