@@ -88,6 +88,27 @@ def test_classify_confidence_is_between_0_and_1() -> None:
     assert 0.0 <= data["confidence"] <= 1.0
 
 
+def test_classify_with_invalid_base64_returns_422() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/classify",
+            json={"image": "not!!valid!!base64!!!"},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_classify_with_oversized_image_returns_422() -> None:
+    """Image whose decoded size exceeds max_image_size_bytes should be rejected with 422."""
+    with patch("app.main.settings.max_image_size_bytes", 1), TestClient(app) as client:
+        response = client.post(
+            "/classify",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
 def test_classify_unknown_classification_falls_back_to_ambiguous() -> None:
     """Unknown classification string from model should default to ambiguous."""
     mock_output = _mock_together_response({"classification": "unknown_value", "confidence": 0.3})

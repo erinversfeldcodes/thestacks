@@ -57,6 +57,10 @@ install-hooks:
 ci *GROUPS:
     scripts/ci.sh {{GROUPS}}
 
+# Install Python dev dependencies (pytest, ruff, mypy, pip-audit, etc.)
+install-python-dev:
+    cd apps/vision && pip install -r requirements-dev.txt
+
 # Run all tests
 test: test-elixir test-elm test-rust test-python test-dbt
 

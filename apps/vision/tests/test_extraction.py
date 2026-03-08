@@ -89,6 +89,41 @@ def test_extract_with_empty_images_returns_422() -> None:
     assert response.status_code == 422
 
 
+def test_extract_with_oversized_image_returns_422() -> None:
+    """Image whose decoded size exceeds max_image_size_bytes should be rejected with 422."""
+    with patch("app.main.settings.max_image_size_bytes", 1), TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_extract_with_non_json_model_output_returns_empty_fields() -> None:
+    """Non-JSON model output should not raise — all fields fall back to None/empty."""
+    mock_output = {"choices": [{"message": {"content": "not valid json at all"}}]}
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=mock_output,
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] is None
+    assert data["author"] is None
+    assert data["potential_isbns"] == []
+
+
 def test_extract_partial_model_output_is_returned() -> None:
     """Model output missing fields should result in None values, not an error."""
     mock_output = _mock_together_response({"raw_text": "Some text only"})

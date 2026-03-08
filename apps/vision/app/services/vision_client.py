@@ -1,9 +1,24 @@
+from typing import TypedDict
+
 import httpx
 from fastapi import HTTPException
 
 from app.config import settings
 
 _TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
+
+
+class _TogetherMessage(TypedDict):
+    content: str
+
+
+class _TogetherChoice(TypedDict):
+    message: _TogetherMessage
+
+
+class TogetherResponse(TypedDict):
+    choices: list[_TogetherChoice]
+
 
 _EXTRACT_SYSTEM_PROMPT = (
     "Extract the book title, author name, and any ISBN numbers visible in this image. "
@@ -21,9 +36,13 @@ class VisionClient:
     """HTTP client for Together AI vision model."""
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=settings.request_timeout_seconds)
+        self._client = httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            # Single outbound host (Together AI). Pool sized for low-concurrency sidecar use.
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
 
-    async def extract(self, images: list[str]) -> dict:  # type: ignore[type-arg]
+    async def extract(self, images: list[str]) -> TogetherResponse:
         """Call Together AI to extract text from images. Returns raw model output."""
         image_content = [
             {
@@ -38,7 +57,7 @@ class VisionClient:
         ]
         return await self._call_api(messages)
 
-    async def classify(self, image: str) -> dict:  # type: ignore[type-arg]
+    async def classify(self, image: str) -> TogetherResponse:
         """Call Together AI to classify if image is a book."""
         messages = [
             {"role": "system", "content": _CLASSIFY_SYSTEM_PROMPT},
@@ -54,7 +73,7 @@ class VisionClient:
         ]
         return await self._call_api(messages)
 
-    async def _call_api(self, messages: list[dict]) -> dict:  # type: ignore[type-arg]
+    async def _call_api(self, messages: list[dict[str, object]]) -> TogetherResponse:
         """Send a request to Together AI chat completions endpoint."""
         payload = {
             "model": settings.model_name,
@@ -67,7 +86,7 @@ class VisionClient:
         try:
             response = await self._client.post(_TOGETHER_API_URL, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()  # type: ignore[no-any-return]
+            return response.json()
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
         except httpx.HTTPStatusError as exc:
