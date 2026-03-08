@@ -29,47 +29,82 @@ defmodule Stacks.Workers.IdentifyBookJob do
     case Moderation.run_pipeline(context) do
       {:ok, book} ->
         Logger.info("IdentifyBookJob: identified book #{book.id} (ISBN: #{book.isbn})")
-        delete_uploaded_image(image_id)
+        mark_resolved(image_id, book.id)
         :ok
 
       {:error, :not_a_book} ->
         Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
-        delete_uploaded_image(image_id)
+        mark_rejected(image_id, "not_a_book")
         {:cancel, "image does not contain a book"}
 
       {:error, :isbn_not_found} ->
         Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
-        {:error, "isbn_not_found"}
+        # Cancel rather than retry — the image content won't change on retry.
+        mark_rejected(image_id, "isbn_not_found")
+        {:cancel, "isbn_not_found"}
 
       {:error, reason} ->
         Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
+        # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
         {:error, reason}
     end
   end
 
-  defp delete_uploaded_image(image_id) do
+  # Marks an image as resolved and records which book was identified.
+  defp mark_resolved(image_id, book_id) do
     import Ecto.Query
 
     {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
+    {:ok, book_id_bin} = Ecto.UUID.dump(book_id)
 
-    query =
-      from(i in "uploaded_images",
-        where: i.id == ^image_id_bin
-      )
+    query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
 
     {count, _} =
-      Repo.update_all(query, [set: [status: "resolved", updated_at: DateTime.utc_now()]],
+      Repo.update_all(
+        query,
+        [set: [status: "resolved", book_id: book_id_bin, updated_at: DateTime.utc_now()]],
         prefix: "op"
       )
 
     if count > 0 do
-      Logger.info("IdentifyBookJob: marked image #{image_id} as resolved")
+      Logger.info("IdentifyBookJob: resolved image #{image_id} → book #{book_id}")
     else
-      Logger.warning("IdentifyBookJob: image #{image_id} not found for cleanup")
+      Logger.warning("IdentifyBookJob: image #{image_id} not found for resolve")
     end
   rescue
     error ->
-      Logger.error("IdentifyBookJob: failed to clean up image #{image_id}: #{inspect(error)}")
+      Logger.error("IdentifyBookJob: failed to resolve image #{image_id}: #{inspect(error)}")
+  end
+
+  # Marks an image as rejected with a reason so the poll endpoint can surface it.
+  defp mark_rejected(image_id, reason) do
+    import Ecto.Query
+
+    {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
+
+    query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
+
+    {count, _} =
+      Repo.update_all(
+        query,
+        [
+          set: [
+            status: "rejected",
+            rejection_reason: reason,
+            updated_at: DateTime.utc_now()
+          ]
+        ],
+        prefix: "op"
+      )
+
+    if count > 0 do
+      Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
+    else
+      Logger.warning("IdentifyBookJob: image #{image_id} not found for reject")
+    end
+  rescue
+    error ->
+      Logger.error("IdentifyBookJob: failed to reject image #{image_id}: #{inspect(error)}")
   end
 
   defp build_image_url(image_id) do

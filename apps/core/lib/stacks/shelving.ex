@@ -20,6 +20,21 @@ defmodule Stacks.Shelving do
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
+  Returns true if the user has at least one active (non-removed) placement for
+  the given book on any of their bookshelves. Used for duplicate detection
+  during the upload identification flow.
+  """
+  @spec book_on_any_shelf?(binary(), binary()) :: boolean()
+  def book_on_any_shelf?(user_id, book_id) do
+    from(p in Placement,
+      join: s in Bookshelf,
+      on: s.id == p.bookshelf_id,
+      where: s.user_id == ^user_id and p.book_id == ^book_id and is_nil(p.removed_at)
+    )
+    |> Repo.exists?(prefix: "op")
+  end
+
+  @doc """
   Returns all active (non-removed) placements for a user on the named bookshelf,
   with books preloaded.
   """
