@@ -1,13 +1,13 @@
 module Page.Upload exposing
     ( Model
-    , Msg
+    , Msg(..)
     , UploadResult(..)
     , init
     , update
     , view
     )
 
-import Api exposing (UploadResponse)
+import Api exposing (PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
@@ -17,8 +17,17 @@ import Html.Events exposing (onClick, onInput, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
+import Process
+import Task
 import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
+
+
+{-| Maximum number of poll attempts before giving up (~30 seconds at 2s intervals).
+-}
+maxPollCount : Int
+maxPollCount =
+    15
 
 
 type UploadResult
@@ -32,7 +41,10 @@ type UploadResult
 
 type alias Model =
     { file : Maybe File
-    , uploadState : RemoteData Http.Error UploadResponse
+
+    -- Loading = upload in flight; Success imageId = upload accepted, polling in progress.
+    , uploadState : RemoteData Http.Error String
+    , pollCount : Int
     , result : UploadResult
     , manualIsbn : String
     , showIsbnError : Bool
@@ -46,8 +58,10 @@ type Msg
     = GotFiles File (List File)
     | DragOver
     | DragLeave
-    | RequestFilePicker
-    | UploadCompleted (Result Http.Error UploadResponse)
+    | FilepickerRequested
+    | UploadAccepted (Result Http.Error String)
+    | CheckStatus
+    | StatusReceived (Result Http.Error PollResponse)
     | GotIdentifiedBook (Result Http.Error Book)
     | GotDuplicateBook (Result Http.Error Book)
     | ManualIsbnChanged String
@@ -63,6 +77,7 @@ init : Model
 init =
     { file = Nothing
     , uploadState = NotAsked
+    , pollCount = 0
     , result = NoResult
     , manualIsbn = ""
     , showIsbnError = False
@@ -70,6 +85,11 @@ init =
     , duplicateShelf = "library"
     , duplicateMoveState = NotAsked
     }
+
+
+sleepThenPoll : Cmd Msg
+sleepThenPoll =
+    Task.perform (\_ -> CheckStatus) (Process.sleep 2000)
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
@@ -80,7 +100,7 @@ update msg model maybeToken =
                 cmd =
                     case maybeToken of
                         Just token ->
-                            Api.uploadImage file token UploadCompleted
+                            Api.uploadImage file token UploadAccepted
 
                         Nothing ->
                             Cmd.none
@@ -88,6 +108,7 @@ update msg model maybeToken =
             ( { model
                 | file = Just file
                 , uploadState = Loading
+                , pollCount = 0
                 , isDragging = False
               }
             , cmd
@@ -99,61 +120,64 @@ update msg model maybeToken =
         DragLeave ->
             ( { model | isDragging = False }, Cmd.none )
 
-        RequestFilePicker ->
+        FilepickerRequested ->
             ( model, Select.files [ "image/*" ] GotFiles )
 
-        UploadCompleted result ->
+        UploadAccepted result ->
             case result of
-                Ok response ->
-                    case response.status of
-                        "identified" ->
-                            case ( response.bookId, maybeToken ) of
-                                ( Just bookId, Just token ) ->
-                                    ( { model | uploadState = Success response }
-                                    , Api.getBook bookId token GotIdentifiedBook
-                                    )
-
-                                _ ->
-                                    ( { model
-                                        | uploadState = Success response
-                                        , result = IdentificationFailed
-                                      }
-                                    , Cmd.none
-                                    )
-
-                        "not_a_book" ->
-                            ( { model
-                                | uploadState = Success response
-                                , result = NotABook
-                              }
-                            , Cmd.none
-                            )
-
-                        "duplicate" ->
-                            case ( response.bookId, maybeToken ) of
-                                ( Just bookId, Just token ) ->
-                                    ( { model | uploadState = Success response }
-                                    , Api.getBook bookId token GotDuplicateBook
-                                    )
-
-                                _ ->
-                                    ( { model
-                                        | uploadState = Success response
-                                        , result = IdentificationFailed
-                                      }
-                                    , Cmd.none
-                                    )
-
-                        _ ->
-                            ( { model
-                                | uploadState = Success response
-                                , result = IdentificationFailed
-                              }
-                            , Cmd.none
-                            )
+                Ok imageId ->
+                    -- Upload accepted; begin polling for the identification result.
+                    ( { model | uploadState = Success imageId }, sleepThenPoll )
 
                 Err err ->
                     ( { model | uploadState = Failure err }, Cmd.none )
+
+        CheckStatus ->
+            case ( model.uploadState, maybeToken ) of
+                ( Success imageId, Just token ) ->
+                    if model.pollCount >= maxPollCount then
+                        -- Timed out waiting for the vision pipeline.
+                        ( { model | result = IdentificationFailed }, Cmd.none )
+
+                    else
+                        ( { model | pollCount = model.pollCount + 1 }
+                        , Api.pollUploadStatus imageId token StatusReceived
+                        )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        StatusReceived result ->
+            case result of
+                Ok response ->
+                    case response.status of
+                        Resolved ->
+                            case ( response.bookId, maybeToken ) of
+                                ( Just bookId, Just token ) ->
+                                    let
+                                        -- Route to GotDuplicateBook when the server reports
+                                        -- the book is already on one of the user's shelves.
+                                        callback =
+                                            if response.isDuplicate == Just True then
+                                                GotDuplicateBook
+
+                                            else
+                                                GotIdentifiedBook
+                                    in
+                                    ( model, Api.getBook bookId token callback )
+
+                                _ ->
+                                    -- Resolved without book_id means not_a_book.
+                                    ( { model | result = NotABook }, Cmd.none )
+
+                        Rejected ->
+                            ( { model | result = IdentificationFailed }, Cmd.none )
+
+                        Pending ->
+                            ( model, sleepThenPoll )
+
+                Err _ ->
+                    ( { model | result = IdentificationFailed }, Cmd.none )
 
         GotIdentifiedBook result ->
             case result of
@@ -271,6 +295,13 @@ viewUploadArea model =
                 Loading ->
                     div [ class "upload-area__loading" ]
                         [ span [ class "spinner" ] []
+                        , p [] [ text "Uploading..." ]
+                        ]
+
+                Success _ ->
+                    -- Upload accepted; polling the vision pipeline.
+                    div [ class "upload-area__loading" ]
+                        [ span [ class "spinner" ] []
                         , p [] [ text "Identifying your book..." ]
                         ]
 
@@ -282,9 +313,6 @@ viewUploadArea model =
                         ]
 
                 NotAsked ->
-                    viewDropPrompt
-
-                Success _ ->
                     viewDropPrompt
             ]
         , div [ class "upload-manual-link" ]
@@ -305,7 +333,7 @@ viewDropPrompt =
         , p [ class "upload-area__or" ] [ text "or" ]
         , button
             [ class "btn btn--primary"
-            , onClick RequestFilePicker
+            , onClick FilepickerRequested
             ]
             [ text "Choose Photo" ]
         ]

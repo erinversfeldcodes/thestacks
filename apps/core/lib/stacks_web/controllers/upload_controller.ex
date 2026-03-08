@@ -8,6 +8,7 @@ defmodule StacksWeb.UploadController do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
+  alias Stacks.Shelving
 
   @doc "POST /api/upload — accepts a multipart image upload and enqueues IdentifyBookJob."
   def create(conn, %{"image" => %Plug.Upload{} = upload}) do
@@ -39,7 +40,11 @@ defmodule StacksWeb.UploadController do
         result =
           from(i in "uploaded_images",
             where: i.id == ^image_id_bin,
-            select: %{status: i.status}
+            select: %{
+              status: i.status,
+              book_id: i.book_id,
+              rejection_reason: i.rejection_reason
+            }
           )
           |> Repo.one(prefix: "op")
 
@@ -49,8 +54,28 @@ defmodule StacksWeb.UploadController do
             |> put_status(404)
             |> json(%{error: "not found"})
 
-          %{status: status} ->
-            json(conn, %{image_id: image_id, status: status})
+          %{status: status, book_id: book_id_bin, rejection_reason: rejection_reason} ->
+            book_id_str =
+              case book_id_bin do
+                nil -> nil
+                bin -> elem(Ecto.UUID.load(bin), 1)
+              end
+
+            user = Guardian.Plug.current_resource(conn)
+
+            is_duplicate =
+              case book_id_str do
+                nil -> false
+                bid -> Shelving.book_on_any_shelf?(user.id, bid)
+              end
+
+            json(conn, %{
+              image_id: image_id,
+              status: status,
+              book_id: book_id_str,
+              rejection_reason: rejection_reason,
+              is_duplicate: is_duplicate
+            })
         end
 
       :error ->

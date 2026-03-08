@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
@@ -6,10 +6,13 @@ import Browser
 import Browser.Navigation as Nav
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (class, href)
+import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route(..))
+import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
 import Page.Bookshelf.AntiLibrary as AntiLibrary
 import Page.Bookshelf.Library as Library
+import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Bookshelf.WishList as WishList
 import Page.Search as Search
@@ -18,6 +21,9 @@ import Page.Settings.Consent as Consent
 import Page.Upload as Upload
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
+
+
+port onSwipe : (Decode.Value -> msg) -> Sub msg
 
 
 main : Program () Model Msg
@@ -42,6 +48,7 @@ type Page
     | PageAntiLibrary AntiLibrary.Model
     | PageWishList WishList.Model
     | PageReadingPile ReadingPile.Model
+    | PageLookingForHome LookingForHome.Model
     | PageBookDetail BookDetail.Model
     | PageUpload Upload.Model
     | PageSearch Search.Model
@@ -126,6 +133,13 @@ initPage route maybeAuth maybePreviousRoute =
             in
             ( PageReadingPile model, Cmd.map ReadingPileMsg cmd )
 
+        LookingForHome ->
+            let
+                ( model, cmd ) =
+                    LookingForHome.init maybeToken
+            in
+            ( PageLookingForHome model, Cmd.map LookingForHomeMsg cmd )
+
         BookDetail bookId ->
             let
                 ( model, cmd ) =
@@ -160,11 +174,14 @@ type Msg
     | AntiLibraryMsg AntiLibrary.Msg
     | WishListMsg WishList.Msg
     | ReadingPileMsg ReadingPile.Msg
+    | LookingForHomeMsg LookingForHome.Msg
     | BookDetailMsg BookDetail.Msg
     | UploadMsg Upload.Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
+    | SwipeReceived String
+    | SwipeIgnored
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -203,12 +220,26 @@ update msg model =
             case model.page of
                 PageLibrary subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Library.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageLibrary newSubModel }
+
+                        baseCmd =
+                            Cmd.map LibraryMsg subCmd
                     in
-                    ( { model | page = PageLibrary newSubModel }
-                    , Cmd.map LibraryMsg subCmd
-                    )
+                    case outMsg of
+                        Library.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Library.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -217,12 +248,26 @@ update msg model =
             case model.page of
                 PageAntiLibrary subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AntiLibrary.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageAntiLibrary newSubModel }
+
+                        baseCmd =
+                            Cmd.map AntiLibraryMsg subCmd
                     in
-                    ( { model | page = PageAntiLibrary newSubModel }
-                    , Cmd.map AntiLibraryMsg subCmd
-                    )
+                    case outMsg of
+                        AntiLibrary.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        AntiLibrary.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -231,12 +276,26 @@ update msg model =
             case model.page of
                 PageWishList subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             WishList.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageWishList newSubModel }
+
+                        baseCmd =
+                            Cmd.map WishListMsg subCmd
                     in
-                    ( { model | page = PageWishList newSubModel }
-                    , Cmd.map WishListMsg subCmd
-                    )
+                    case outMsg of
+                        WishList.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        WishList.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -245,12 +304,54 @@ update msg model =
             case model.page of
                 PageReadingPile subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             ReadingPile.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageReadingPile newSubModel }
+
+                        baseCmd =
+                            Cmd.map ReadingPileMsg subCmd
                     in
-                    ( { model | page = PageReadingPile newSubModel }
-                    , Cmd.map ReadingPileMsg subCmd
-                    )
+                    case outMsg of
+                        ReadingPile.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        ReadingPile.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        LookingForHomeMsg subMsg ->
+            case model.page of
+                PageLookingForHome subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            LookingForHome.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageLookingForHome newSubModel }
+
+                        baseCmd =
+                            Cmd.map LookingForHomeMsg subCmd
+                    in
+                    case outMsg of
+                        LookingForHome.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        LookingForHome.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -324,8 +425,11 @@ update msg model =
             case model.page of
                 PageSettingsConsent subModel ->
                     let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
                         ( newSubModel, subCmd ) =
-                            Consent.update subMsg subModel
+                            Consent.update subMsg subModel maybeToken
                     in
                     ( { model | page = PageSettingsConsent newSubModel }
                     , Cmd.map ConsentMsg subCmd
@@ -338,8 +442,11 @@ update msg model =
             case model.page of
                 PageSettingsAgeVerification subModel ->
                     let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
                         ( newSubModel, subCmd ) =
-                            AgeVerification.update subMsg subModel
+                            AgeVerification.update subMsg subModel maybeToken
                     in
                     ( { model | page = PageSettingsAgeVerification newSubModel }
                     , Cmd.map AgeVerificationMsg subCmd
@@ -347,6 +454,25 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+        SwipeReceived direction ->
+            let
+                maybeNext =
+                    if direction == "left" then
+                        SwipeNavigation.swipeLeft model.route
+
+                    else
+                        SwipeNavigation.swipeRight model.route
+            in
+            case maybeNext of
+                Just nextRoute ->
+                    ( model, Nav.pushUrl model.key (Route.toPath nextRoute) )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        SwipeIgnored ->
+            ( model, Cmd.none )
 
 
 transitionClass : Route -> Route -> String
@@ -368,7 +494,17 @@ transitionClass from to =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.none
+    onSwipe decodeSwipe
+
+
+decodeSwipe : Decode.Value -> Msg
+decodeSwipe value =
+    case Decode.decodeValue Decode.string value of
+        Ok direction ->
+            SwipeReceived direction
+
+        Err _ ->
+            SwipeIgnored
 
 
 
@@ -418,6 +554,9 @@ pageTitle route =
         ReadingPile ->
             "Reading Pile — The Stacks"
 
+        LookingForHome ->
+            "Looking for a Home — The Stacks"
+
         BookDetail _ ->
             "Book — The Stacks"
 
@@ -448,6 +587,7 @@ viewNav model =
                 , navItem model.route AntiLibrary "Antilibrary"
                 , navItem model.route WishList "Wish List"
                 , navItem model.route ReadingPile "Reading Pile"
+                , navItem model.route LookingForHome "Looking for a Home"
                 , navItem model.route Search "Search"
                 , navItem model.route Upload "Add Book"
                 ]
@@ -491,6 +631,9 @@ viewPage model =
 
         PageReadingPile subModel ->
             Html.map ReadingPileMsg (ReadingPile.view subModel)
+
+        PageLookingForHome subModel ->
+            Html.map LookingForHomeMsg (LookingForHome.view subModel)
 
         PageBookDetail subModel ->
             Html.map BookDetailMsg (BookDetail.view subModel)
