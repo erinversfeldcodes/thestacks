@@ -1,0 +1,9 @@
+# Generated files — not subject to SAST
+frontend/elm.js
+
+# Dependencies
+**/node_modules/
+**/deps/
+**/_build/
+**/target/
+**/.elixir_ls/

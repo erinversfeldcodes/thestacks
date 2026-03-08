@@ -76,7 +76,7 @@ pollStatusDecoder =
             )
 
 
-{-| Response from GET /api/upload/:image_id/status.
+{-| Response from GET /api/upload/:image\_id/status.
 bookId is present only when status is Resolved and a book was identified.
 isDuplicate is true when the identified book is already on one of the user's shelves.
 -}
@@ -136,7 +136,7 @@ login body toMsg =
         }
 
 
-{-| POST /api/upload — returns the image_id from the 202 accepted response.
+{-| POST /api/upload — returns the image\_id from the 202 accepted response.
 -}
 uploadImage :
     File
@@ -155,7 +155,7 @@ uploadImage file token toMsg =
         }
 
 
-{-| GET /api/upload/:image_id/status — poll for the identification result.
+{-| GET /api/upload/:image\_id/status — poll for the identification result.
 -}
 pollUploadStatus :
     String
@@ -283,7 +283,7 @@ saveConsent consent token toMsg =
         }
 
 
-{-| PUT /api/settings/age_verification — save the user's age verification status.
+{-| PUT /api/settings/age\_verification — save the user's age verification status.
 -}
 updateAgeVerification :
     Bool
