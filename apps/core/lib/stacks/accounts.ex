@@ -6,6 +6,11 @@ defmodule Stacks.Accounts do
   Passwords are hashed with Argon2. Authentication returns a Guardian JWT token.
   """
 
+  # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
+  # opaque subterms after Multi.new() and fires call_without_opaque on every
+  # chained call. This is a known false positive.
+  @dialyzer :no_opaque
+
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Accounts.User
