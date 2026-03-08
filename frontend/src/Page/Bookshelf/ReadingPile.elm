@@ -1,4 +1,4 @@
-module Page.Shelf.WishList exposing
+module Page.Bookshelf.ReadingPile exposing
     ( Model
     , Msg
     , init
@@ -7,8 +7,7 @@ module Page.Shelf.WishList exposing
     )
 
 import Api
-import Components.EmptyShelf exposing (emptyShelf)
-import Components.Spine exposing (WearLevel(..), spine)
+import Components.EmptyBookshelf exposing (emptyBookshelf)
 import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
 import Http
@@ -31,7 +30,7 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    Api.getShelf "wishlist" token BooksLoaded
+                    Api.getBookshelf "reading_pile" token BooksLoaded
 
                 Nothing ->
                     Cmd.none
@@ -53,42 +52,36 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--shelf shelf-wishlist" ]
-        [ h1 [ class "page__title" ] [ text "Wish List" ]
+    div [ class "page page--shelf shelf-reading-pile" ]
+        [ h1 [ class "page__title" ] [ text "Reading Pile" ]
         , case model.books of
             NotAsked ->
                 text ""
 
             Loading ->
-                div [ class "loading" ] [ text "Loading your wish list..." ]
+                div [ class "loading" ] [ text "Loading your reading pile..." ]
 
             Failure _ ->
                 p [ class "error" ]
-                    [ text "Could not load your wish list. Please try again." ]
+                    [ text "Could not load your reading pile. Please try again." ]
 
             Success placements ->
                 if List.isEmpty placements then
-                    emptyShelf
-                        { shelf = "wishlist"
+                    emptyBookshelf
+                        { bookshelf = "reading_pile"
                         , message =
-                            "Nothing on your wishlist yet — snap photos of books you want to remember."
+                            "Your reading pile is empty — time to pick something up."
                         }
 
                 else
-                    div [ class "bookshelf" ]
-                        [ div [ class "bookshelf__row" ]
-                            (List.map viewSpine placements)
-                        ]
+                    div [ class "pile-view" ]
+                        (List.map viewCover placements)
         ]
 
 
-viewSpine : Placement -> Html Msg
-viewSpine _ =
-    div [ class "bookshelf__book" ]
-        [ spine
-            { pageCount = 200
-            , wearLevel = Pristine
-            , title = "Book"
-            , author = "Author"
-            }
+viewCover : Placement -> Html Msg
+viewCover _ =
+    div [ class "pile-view__book" ]
+        [ div [ class "pile-view__cover" ]
+            [ text "📖" ]
         ]

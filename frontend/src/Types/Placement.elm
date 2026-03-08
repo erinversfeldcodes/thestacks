@@ -9,7 +9,7 @@ module Types.Placement exposing
     )
 
 import Json.Decode as Decode exposing (Decoder)
-import Types.Bookshelf exposing (Bookshelf, bookshelfFromString)
+import Types.Book exposing (Book, bookDecoder)
 
 
 type Format
@@ -53,10 +53,9 @@ formatDecoder =
 
 type alias Placement =
     { id : String
-    , bookId : String
-    , bookshelf : Bookshelf
+    , book : Maybe Book
+    , position : Int
     , placedAt : String
-    , removedAt : Maybe String
     , formats : List Format
     , personalRating : Maybe Int
     , notes : Maybe String
@@ -67,28 +66,13 @@ type alias PlacementHistory =
     List Placement
 
 
-bookshelfDecoder : Decoder Bookshelf
-bookshelfDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case bookshelfFromString s of
-                    Just b ->
-                        Decode.succeed b
-
-                    Nothing ->
-                        Decode.fail ("Unknown bookshelf: " ++ s)
-            )
-
-
 placementDecoder : Decoder Placement
 placementDecoder =
-    Decode.map8 Placement
+    Decode.map7 Placement
         (Decode.field "id" Decode.string)
-        (Decode.field "book_id" Decode.string)
-        (Decode.field "shelf_name" bookshelfDecoder)
+        (Decode.maybe (Decode.field "book" bookDecoder))
+        (Decode.field "position" Decode.int)
         (Decode.field "placed_at" Decode.string)
-        (Decode.maybe (Decode.field "removed_at" Decode.string))
         (Decode.oneOf
             [ Decode.field "formats" (Decode.list formatDecoder)
             , Decode.succeed []

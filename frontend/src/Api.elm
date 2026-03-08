@@ -3,7 +3,7 @@ module Api exposing
     , UploadResponse
     , authResponseDecoder
     , getBook
-    , getShelf
+    , getBookshelf
     , login
     , moveBook
     , register
@@ -106,7 +106,7 @@ uploadImage file token toMsg =
     Http.request
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/upload"
+        , url = baseUrl ++ "/api/upload"
         , body = Http.multipartBody [ Http.filePart "image" file ]
         , expect = Http.expectJson toMsg uploadResponseDecoder
         , timeout = Nothing
@@ -148,18 +148,18 @@ searchBooks query token toMsg =
         }
 
 
-getShelf :
+getBookshelf :
     String
     -> String
     -> (Result Http.Error (List Placement) -> msg)
     -> Cmd msg
-getShelf shelfName token toMsg =
+getBookshelf shelfName token toMsg =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/shelves/" ++ shelfName
+        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.list placementDecoder)
+        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementDecoder))
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -171,15 +171,15 @@ moveBook :
     -> String
     -> (Result Http.Error () -> msg)
     -> Cmd msg
-moveBook bookId targetShelf token toMsg =
+moveBook placementId targetBookshelf token toMsg =
     Http.request
-        { method = "POST"
+        { method = "PUT"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/move"
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/move"
         , body =
             Http.jsonBody
                 (Encode.object
-                    [ ( "shelf", Encode.string targetShelf ) ]
+                    [ ( "bookshelf", Encode.string targetBookshelf ) ]
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -192,11 +192,11 @@ removeBook :
     -> String
     -> (Result Http.Error () -> msg)
     -> Cmd msg
-removeBook bookId token toMsg =
+removeBook placementId token toMsg =
     Http.request
         { method = "DELETE"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/placement"
+        , url = baseUrl ++ "/api/placements/" ++ placementId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
