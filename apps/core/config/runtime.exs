@@ -1,5 +1,22 @@
 import Config
 
+cloak_key =
+  System.get_env("CLOAK_KEY") ||
+    raise "environment variable CLOAK_KEY is missing. Generate with: :crypto.strong_rand_bytes(32) |> Base.encode64()"
+
+config :core, Stacks.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1", key: Base.decode64!(cloak_key), iv_length: 12
+    }
+  ]
+
+config :core,
+       :vision_hmac_secret,
+       System.get_env("VISION_HMAC_SECRET") ||
+         raise("environment variable VISION_HMAC_SECRET is missing.")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
