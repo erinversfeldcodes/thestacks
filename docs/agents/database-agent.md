@@ -99,6 +99,23 @@ DO: Write migrations, Ecto schemas, dbt models, and return a completion report.
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. Migration commands run and results
-4. dbt test results (if dbt models changed)
-5. DoD items satisfied for this phase
+3. **Spec Coverage Matrix** — enumerate every table, index, Ecto schema, and dbt model named in
+   the Technical Requirements section of the issue. For each item, record:
+
+   | Item | Migration written | Schema module written | dbt model written | Tested | Notes |
+   |------|-------------------|----------------------|-------------------|--------|-------|
+   | books table | ✅ | ✅ | ✅ stg_books | ❌ | deferred |
+
+   Any row with ❌ in a required column **must** have an explicit justification. A row with ❌
+   and no justification is a blocker — do not submit.
+
+4. Migration and test commands run with **verbatim exit code**:
+   ```
+   $ mix ecto.migrate
+   ...
+   $ mix test
+   ...XX tests passed
+   $ dbt test
+   ...XX passed
+   ```
+5. DoD items satisfied — cite file:line evidence for each checked item.

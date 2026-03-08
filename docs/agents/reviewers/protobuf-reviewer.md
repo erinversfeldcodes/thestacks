@@ -81,6 +81,15 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — file organisation, schema evolution rules, code generation, event upcasting, Elm decoder exception
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, clarity, comments as documentation
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What message types, field names, or enum values does it depend on from the current schemas?
+  - Are those present with the correct types and field numbers? Can they be extended additively?
+  - Are there any schema decisions here that will require a field rename, type change, or reserved-number migration in a future issue?
+- State a clear verdict: **READY** or **GAPS**
+
 ---
 
 ## Review Process
@@ -89,8 +98,13 @@ Load and check against:
 2. Read every `.proto` file, `buf.yaml`, `buf.gen.yaml`, and generated code listed in the completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run buf checks** — execute from `proto/` and record exact output:
+   - `buf lint` — any lint rule violations
+   - `buf breaking --against '.git#branch=main'` — any breaking changes vs main
+   Either failing is an automatic **FAILED** verdict. Do not skip this step.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the current schemas can be extended additively for downstream work without breaking changes.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -104,6 +118,10 @@ Load and check against:
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `buf lint`: [clean / N violations — list them]
+- `buf breaking`: [clean / N breaking changes — list them]
 
 ### Schema Concordance
 For each integration point:
@@ -141,6 +159,11 @@ For each integration point:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What schema additions it needs] — [Additive extension possible? Y/N] — [Any field numbers or types that will need changing]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file:line]

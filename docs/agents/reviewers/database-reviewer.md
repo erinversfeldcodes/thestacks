@@ -95,16 +95,43 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — migration rollback tests, dbt schema tests, changeset tests
 - `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — role isolation, column encryption, append-only audit, event log PII
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What tables, columns, indexes, or Ecto schema shapes does it query or write to?
+  - Does the current schema support those access patterns without a breaking migration?
+  - Are there any column names, FK relationships, or enum values that downstream issues will need to be different from what was shipped?
+- State a clear verdict: **READY** (downstream work builds directly on this schema) or **GAPS** (list exactly what will need a follow-up migration or schema change)
+
 ---
 
 ## Review Process
+
+0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
+   - Extract the full inventory of required items from the issue's Technical Requirements section:
+     every table, index, Ecto schema module, and dbt model named there.
+   - List the actual file tree under `apps/core/priv/repo/migrations/`,
+     `apps/core/lib/stacks/`, and `dbt/models/`.
+   - For every required item, check: does the migration exist? does the schema module exist?
+     does the dbt model exist? is there a test?
+   - Any required item absent from the file tree is a **FAILED** finding — record it in the
+     Spec Coverage Audit section, regardless of what the completion report claims.
+   - The spec is the ground truth. The completion report is not.
 
 1. Read the phase objective, DoD items, and all user stories from the invoking prompt
 2. Read every migration, schema, and dbt model file listed in the completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run the test suite** — execute and record exact output:
+   - `mix test` from `apps/core/` — total test count, failure count (covers changeset and constraint tests)
+   - `cd dbt && dbt compile` — verify Jinja syntax and source references
+   - `cd dbt && dbt test` — record schema test results (not_null, unique, relationships, accepted_values)
+   If migration rollback is safe in the current environment: `mix ecto.rollback --all && mix ecto.migrate`
+   Any failures are **required revisions**. Do not skip this step.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the current schema provides adequate foundations for downstream work without requiring breaking migrations.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -115,9 +142,21 @@ Load and check against:
 
 ### Verdict: APPROVED | NEEDS_REVISION | FAILED
 
+### Spec Coverage Audit
+Items required by the Technical Requirements section, cross-checked against the file tree:
+- [x] Item name (migration: `YYYYMMDD_name.exs`, schema: `path/to/schema.ex`, dbt: `stg_name.sql`)
+- [ ] Item name (MISSING — no migration found)
+- [ ] Item name (UNTESTED — migration present, no changeset or dbt schema test)
+
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `mix test`: [X tests, N failures — paste exact summary line]
+- `dbt compile`: [clean / errors found]
+- `dbt test`: [X pass, N fail — list any failures]
+- Migration rollback: [verified / skipped — reason]
 
 ### User Story Concordance
 For each story:
@@ -158,6 +197,11 @@ For each story:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What schema/data it needs from this work] — [Provided? Y/N] — [Any gaps or schema decisions that will require a follow-up migration]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file:line]
