@@ -15,7 +15,13 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: [
+      dialyzer: [ignore_warnings: ".dialyzer_ignore.exs"]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test
@@ -46,6 +52,7 @@ defmodule Core.MixProject do
       {:cloak_ecto, "~> 1.3"},
       {:jason, "~> 1.4"},
       {:plug_cowboy, "~> 2.7"},
+      {:cors_plug, "~> 3.0"},
       {:prom_ex, "~> 1.9"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.1"},
@@ -55,7 +62,10 @@ defmodule Core.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
-      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:finch, "~> 0.19"},
+      {:ex_machina, "~> 2.8", only: :test},
+      {:stream_data, "~> 1.1", only: [:dev, :test]}
     ]
   end
 

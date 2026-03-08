@@ -235,7 +235,7 @@ Repo.insert_all(
       action: "user.registered",
       resource_type: "user",
       resource_id: user1,
-      metadata: %{},
+      metadata: nil,
       occurred_at: jan_01
     }
   ],

@@ -136,5 +136,22 @@ DO:
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. Test commands run and results
-4. DoD items satisfied for this phase
+3. **Spec Coverage Matrix** — enumerate every context, controller, Oban worker, and plug named
+   in the Technical Requirements section of the issue. For each item, record:
+
+   | Item | Implemented | Tested (happy + error path) | Notes |
+   |------|-------------|----------------------------|-------|
+   | Stacks.Moderation | ✅ | ❌ | deferred — reason here |
+
+   Any row with ❌ in either column **must** have an explicit justification (deferred, blocked,
+   out-of-scope). A row with ❌ and no justification is a blocker — do not submit.
+
+4. Test commands run with **verbatim exit code** (not a summary). Example:
+   ```
+   $ mix test
+   ...45 tests, 0 failures
+   $ mix credo --strict
+   ...no issues found
+   ```
+5. DoD items satisfied — cite file:line evidence for each checked item. Do not tick an item
+   without evidence.
