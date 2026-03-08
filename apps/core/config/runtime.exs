@@ -8,15 +8,14 @@ config :core, Stacks.Vault,
   ciphers: [
     default: {
       Cloak.Ciphers.AES.GCM,
-      tag: "AES.GCM.V1",
-      key: Base.decode64!(cloak_key),
-      iv_length: 12
+      tag: "AES.GCM.V1", key: Base.decode64!(cloak_key), iv_length: 12
     }
   ]
 
-config :core, :vision_hmac_secret,
-  System.get_env("VISION_HMAC_SECRET") ||
-    raise "environment variable VISION_HMAC_SECRET is missing."
+config :core,
+       :vision_hmac_secret,
+       System.get_env("VISION_HMAC_SECRET") ||
+         raise("environment variable VISION_HMAC_SECRET is missing.")
 
 if config_env() == :prod do
   database_url =

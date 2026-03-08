@@ -43,7 +43,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
     cond do
       not ets_available?() ->
-        Logger.error("RateLimiter: ETS table unavailable — request allowed through without limiting")
+        Logger.error(
+          "RateLimiter: ETS table unavailable — request allowed through without limiting"
+        )
+
         conn
 
       rate_limited?(key, bucket, limit) ->

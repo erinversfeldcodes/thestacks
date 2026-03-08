@@ -29,9 +29,20 @@ defmodule StacksWeb.BookshelfController do
   defp format_placement(placement) do
     book =
       case placement.book do
-        %Ecto.Association.NotLoaded{} -> nil
-        nil -> nil
-        b -> %{id: b.id, isbn: b.isbn, title: b.title, cover_image_url: b.cover_image_url, page_count: b.page_count}
+        %Ecto.Association.NotLoaded{} ->
+          nil
+
+        nil ->
+          nil
+
+        b ->
+          %{
+            id: b.id,
+            isbn: b.isbn,
+            title: b.title,
+            cover_image_url: b.cover_image_url,
+            page_count: b.page_count
+          }
       end
 
     %{
