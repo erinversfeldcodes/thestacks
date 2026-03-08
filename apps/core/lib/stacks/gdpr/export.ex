@@ -18,22 +18,22 @@ defmodule Stacks.GDPR.Export do
   def export_user_data(user_id, _opts \\ []) do
     user = Accounts.get_user!(user_id)
 
-    shelves =
+    bookshelves =
       Bookshelf
       |> where([bs], bs.user_id == ^user_id)
       |> Repo.all()
 
-    shelf_ids = Enum.map(shelves, & &1.id)
+    bookshelf_ids = Enum.map(bookshelves, & &1.id)
 
     placements =
       Placement
-      |> where([p], p.bookshelf_id in ^shelf_ids)
+      |> where([p], p.bookshelf_id in ^bookshelf_ids)
       |> preload(:book)
       |> Repo.all()
 
     histories =
       PlacementHistory
-      |> where([h], h.from_bookshelf in ^shelf_ids or h.to_bookshelf in ^shelf_ids)
+      |> where([h], h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids)
       |> Repo.all()
 
     export = %{
@@ -49,7 +49,7 @@ defmodule Stacks.GDPR.Export do
         consent_analytics_at: user.consent_analytics_at,
         created_at: user.created_at
       },
-      shelves: Enum.map(shelves, &shelf_to_map/1),
+      bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),
       placements: Enum.map(placements, &placement_to_map/1),
       placement_history: Enum.map(histories, &history_to_map/1)
     }
@@ -59,12 +59,12 @@ defmodule Stacks.GDPR.Export do
     error -> {:error, error}
   end
 
-  defp shelf_to_map(shelf) do
+  defp bookshelf_to_map(bookshelf) do
     %{
-      id: shelf.id,
-      name: shelf.name,
-      visibility: shelf.visibility,
-      created_at: shelf.created_at
+      id: bookshelf.id,
+      name: bookshelf.name,
+      visibility: bookshelf.visibility,
+      created_at: bookshelf.created_at
     }
   end
 

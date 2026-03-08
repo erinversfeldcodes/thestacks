@@ -41,7 +41,7 @@ defmodule Stacks.Accounts do
     Multi.new()
     |> Multi.insert(:user, User.registration_changeset(%User{}, attrs))
     |> Multi.run(:emit_event, fn _repo, %{user: user} ->
-      Events.emit(%{
+      Events.emit_safe(%{
         event_type: "user.registered",
         aggregate_type: "user",
         aggregate_id: user.id,
@@ -80,6 +80,17 @@ defmodule Stacks.Accounts do
     else
       {:error, :invalid_credentials}
     end
+  end
+
+  @doc """
+  Updates the age_verified flag for a user.
+  """
+  @spec update_age_verification(binary(), boolean()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_age_verification(user_id, age_verified) when is_boolean(age_verified) do
+    user_id
+    |> get_user!()
+    |> User.settings_changeset(%{age_verified: age_verified})
+    |> Repo.update()
   end
 
   defp maybe_assign_owner_role(attrs) do

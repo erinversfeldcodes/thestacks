@@ -17,9 +17,9 @@ defmodule Stacks.Workers.RecalculateWearJobTest do
   describe "perform/1" do
     test "returns :ok for an existing placement_id" do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      placement = insert(:placement, bookshelf: shelf, book: book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
 
       assert :ok = perform_job(RecalculateWearJob, %{"placement_id" => placement.id})
     end

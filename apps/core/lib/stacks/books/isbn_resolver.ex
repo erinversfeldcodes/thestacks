@@ -26,10 +26,11 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp resolve_open_library(isbn) do
-    :fuse.ask(@open_library_fuse, :sync)
-    |> case do
+    case :fuse.ask(@open_library_fuse, :sync) do
       :ok -> do_open_library_request(isbn)
       :blown -> {:error, :circuit_open}
+      # Fuse not yet installed (e.g. test env without full OTP startup)
+      {:error, :not_found} -> do_open_library_request(isbn)
     end
   end
 
@@ -47,10 +48,11 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp resolve_google_books(isbn) do
-    :fuse.ask(@google_books_fuse, :sync)
-    |> case do
+    case :fuse.ask(@google_books_fuse, :sync) do
       :ok -> do_google_books_request(isbn)
       :blown -> {:error, :circuit_open}
+      # Fuse not yet installed (e.g. test env without full OTP startup)
+      {:error, :not_found} -> do_google_books_request(isbn)
     end
   end
 

@@ -35,17 +35,22 @@ defmodule Stacks.AI.Client do
     end
   end
 
+  defp endpoint_path("is_book"), do: "classify"
+  defp endpoint_path("extract_isbn"), do: "extract"
+  defp endpoint_path(other), do: other
+
   defp make_vision_request(endpoint, payload) do
     base_url = Application.get_env(:core, :vision_sidecar_url, "http://localhost:8000")
-    url = "#{base_url}/#{endpoint}"
+    url = "#{base_url}/#{endpoint_path(endpoint)}"
 
     body = Jason.encode!(payload)
+    signature = hmac_signature(body)
 
     req =
       Finch.build(
         :post,
         url,
-        [{"content-type", "application/json"}],
+        [{"content-type", "application/json"}, {"x-stacks-signature", signature}],
         body
       )
 
@@ -61,6 +66,11 @@ defmodule Stacks.AI.Client do
         :fuse.melt(@fuse_name)
         {:error, reason}
     end
+  end
+
+  defp hmac_signature(body) do
+    secret = Application.get_env(:core, :vision_hmac_secret, "")
+    :crypto.mac(:hmac, :sha256, secret, body) |> Base.encode16(case: :lower)
   end
 
   defp configured_client do

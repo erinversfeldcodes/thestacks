@@ -4,6 +4,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   - Global endpoints: 1000 requests / 60 seconds per IP
   - Auth endpoints (`:auth` bucket): 5 requests / 60 seconds per IP
+  - Upload endpoints (`:upload` bucket): 10 requests / 60 seconds per authenticated user
 
   The ETS table is managed by `StacksWeb.Plugs.RateLimiter.Server` which
   must be started in the supervision tree before this plug runs.
@@ -11,7 +12,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
   Usage:
     plug StacksWeb.Plugs.RateLimiter
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
+    plug StacksWeb.Plugs.RateLimiter, bucket: :upload
   """
+
+  require Logger
 
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
@@ -20,6 +24,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @window_ms 60_000
   @global_limit 1_000
   @auth_limit 5
+  @upload_limit 10
 
   def init(opts), do: opts
 
@@ -33,27 +38,47 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp do_rate_check(conn, opts) do
     bucket = Keyword.get(opts, :bucket, :global)
-    ip = get_ip(conn)
-    limit = if bucket == :auth, do: @auth_limit, else: @global_limit
+    key = get_key(conn, bucket)
+    limit = get_limit(bucket)
 
-    if ets_available?() && rate_limited?(ip, bucket, limit) do
-      conn
-      |> put_status(429)
-      |> put_resp_header("retry-after", "60")
-      |> json(%{error: "rate_limit_exceeded"})
-      |> halt()
-    else
-      conn
+    cond do
+      not ets_available?() ->
+        Logger.error("RateLimiter: ETS table unavailable — request allowed through without limiting")
+        conn
+
+      rate_limited?(key, bucket, limit) ->
+        conn
+        |> put_status(429)
+        |> put_resp_header("retry-after", "60")
+        |> json(%{error: "rate_limit_exceeded"})
+        |> halt()
+
+      true ->
+        conn
     end
   end
+
+  defp get_limit(:auth), do: @auth_limit
+  defp get_limit(:upload), do: @upload_limit
+  defp get_limit(_), do: @global_limit
+
+  # Upload bucket keys on user ID so the limit is per-user, not per-IP.
+  defp get_key(conn, :upload) do
+    case conn.assigns[:guardian_default_resource] do
+      nil -> get_ip(conn)
+      user -> "user:#{user.id}"
+    end
+  end
+
+  defp get_key(conn, _), do: get_ip(conn)
 
   defp ets_available? do
     :ets.whereis(@table) != :undefined
   end
 
-  defp rate_limited?(ip, bucket, limit) do
+  defp rate_limited?(key, bucket, limit) do
     now_ms = System.system_time(:millisecond)
-    key = {ip, bucket}
+    key = {key, bucket}
 
     case :ets.lookup(@table, key) do
       [] ->

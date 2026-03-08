@@ -1,7 +1,7 @@
-defmodule StacksWeb.ShelfPlacementControllerTest do
+defmodule StacksWeb.BookshelfPlacementControllerTest do
   @moduledoc """
   Tests for:
-  - POST /api/shelves/:shelf_name/placements
+  - POST /api/bookshelves/:bookshelf_name/placements
   - PUT  /api/placements/:id/move
   - DELETE /api/placements/:id
   """
@@ -18,33 +18,33 @@ defmodule StacksWeb.ShelfPlacementControllerTest do
   end
 
   # ---------------------------------------------------------------------------
-  # POST /api/shelves/:shelf_name/placements
+  # POST /api/bookshelves/:bookshelf_name/placements
   # ---------------------------------------------------------------------------
 
-  describe "POST /api/shelves/:shelf_name/placements — create" do
-    test "returns 201 with placement on valid shelf and book_id", %{conn: conn} do
+  describe "POST /api/bookshelves/:bookshelf_name/placements — create" do
+    test "returns 201 with placement on valid bookshelf and book_id", %{conn: conn} do
       user = insert(:user)
       book = insert(:book)
 
       conn =
         conn
         |> auth_conn(user)
-        |> post("/api/shelves/library/placements", %{book_id: book.id})
+        |> post("/api/bookshelves/library/placements", %{book_id: book.id})
 
       assert %{"placement" => placement} = json_response(conn, 201)
       assert placement["book_id"] == book.id
     end
 
-    test "returns 422 for invalid shelf name", %{conn: conn} do
+    test "returns 422 for invalid bookshelf name", %{conn: conn} do
       user = insert(:user)
       book = insert(:book)
 
       conn =
         conn
         |> auth_conn(user)
-        |> post("/api/shelves/bad_shelf/placements", %{book_id: book.id})
+        |> post("/api/bookshelves/bad_shelf/placements", %{book_id: book.id})
 
-      assert %{"error" => "invalid shelf name"} = json_response(conn, 422)
+      assert %{"error" => "invalid bookshelf name"} = json_response(conn, 422)
     end
 
     test "returns 422 when book_id is missing", %{conn: conn} do
@@ -53,14 +53,14 @@ defmodule StacksWeb.ShelfPlacementControllerTest do
       conn =
         conn
         |> auth_conn(user)
-        |> post("/api/shelves/library/placements", %{})
+        |> post("/api/bookshelves/library/placements", %{})
 
       assert %{"error" => "book_id is required"} = json_response(conn, 422)
     end
 
     test "returns 401 when not authenticated", %{conn: conn} do
       book = insert(:book)
-      conn = post(conn, "/api/shelves/library/placements", %{book_id: book.id})
+      conn = post(conn, "/api/bookshelves/library/placements", %{book_id: book.id})
       assert json_response(conn, 401)
     end
   end
@@ -72,17 +72,17 @@ defmodule StacksWeb.ShelfPlacementControllerTest do
   describe "PUT /api/placements/:id/move — move" do
     setup do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      placement = insert(:placement, bookshelf: shelf, book: book)
-      %{user: user, shelf: shelf, book: book, placement: placement}
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+      %{user: user, bookshelf: bookshelf, book: book, placement: placement}
     end
 
     test "returns 200 when user moves own placement", %{conn: conn, user: user, placement: placement} do
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/placements/#{placement.id}/move", %{shelf: "wishlist"})
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "wishlist"})
 
       assert %{"placement" => moved} = json_response(conn, 200)
       assert moved["id"] == placement.id
@@ -97,22 +97,22 @@ defmodule StacksWeb.ShelfPlacementControllerTest do
       conn =
         conn
         |> auth_conn(other_user)
-        |> put("/api/placements/#{placement.id}/move", %{shelf: "wishlist"})
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "wishlist"})
 
       assert %{"error" => "forbidden"} = json_response(conn, 403)
     end
 
-    test "returns 422 when shelf parameter is missing", %{conn: conn, user: user, placement: placement} do
+    test "returns 422 when bookshelf parameter is missing", %{conn: conn, user: user, placement: placement} do
       conn =
         conn
         |> auth_conn(user)
         |> put("/api/placements/#{placement.id}/move", %{})
 
-      assert %{"error" => "shelf parameter is required"} = json_response(conn, 422)
+      assert %{"error" => "bookshelf parameter is required"} = json_response(conn, 422)
     end
 
     test "returns 401 when not authenticated", %{conn: conn, placement: placement} do
-      conn = put(conn, "/api/placements/#{placement.id}/move", %{shelf: "wishlist"})
+      conn = put(conn, "/api/placements/#{placement.id}/move", %{bookshelf: "wishlist"})
       assert json_response(conn, 401)
     end
   end
@@ -124,10 +124,10 @@ defmodule StacksWeb.ShelfPlacementControllerTest do
   describe "DELETE /api/placements/:id — delete" do
     setup do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      placement = insert(:placement, bookshelf: shelf, book: book)
-      %{user: user, shelf: shelf, book: book, placement: placement}
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+      %{user: user, bookshelf: bookshelf, book: book, placement: placement}
     end
 
     test "returns 204 when user deletes own placement", %{

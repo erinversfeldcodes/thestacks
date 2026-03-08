@@ -6,6 +6,26 @@ defmodule StacksWeb.BookController do
   alias Stacks.Books
   alias StacksWeb.Plugs.AgeGate
 
+  @doc "POST /api/books — resolve an ISBN and create the book (manual entry, US-1.1.5)."
+  def create(conn, %{"isbn" => isbn}) do
+    case Books.create_from_isbn(isbn) do
+      {:ok, book} ->
+        conn
+        |> put_status(201)
+        |> json(%{book: format_book(book)})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "isbn_not_found"})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "validation_failed", details: format_changeset_errors(changeset)})
+    end
+  end
+
   @doc "GET /api/books/:id — retrieve a book by UUID."
   def show(conn, %{"id" => id}) do
     case Books.get_book_detail(id) do
@@ -42,6 +62,14 @@ defmodule StacksWeb.BookController do
           json(conn, %{book: format_book(book)})
         end
     end
+  end
+
+  defp format_changeset_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
   end
 
   defp format_book(book) do

@@ -1,4 +1,4 @@
-defmodule StacksWeb.ShelfPlacementController do
+defmodule StacksWeb.BookshelfPlacementController do
   @moduledoc "Handles placement creation, movement, and removal."
 
   use CoreWeb, :controller
@@ -8,14 +8,14 @@ defmodule StacksWeb.ShelfPlacementController do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement}
 
-  @valid_shelves ~w(antilibrary library wishlist reading_pile looking_for_home)
+  @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
-  @doc "POST /api/shelves/:shelf_name/placements — place a book on a shelf."
-  def create(conn, %{"shelf_name" => shelf_name, "book_id" => book_id}) do
-    if shelf_name in @valid_shelves do
+  @doc "POST /api/bookshelves/:bookshelf_name/placements — place a book on a bookshelf."
+  def create(conn, %{"bookshelf_name" => bookshelf_name, "book_id" => book_id}) do
+    if bookshelf_name in @valid_bookshelves do
       user = Guardian.Plug.current_resource(conn)
 
-      case Shelving.place_book(user.id, book_id, shelf_name) do
+      case Shelving.place_book(user.id, book_id, bookshelf_name) do
         {:ok, placement} ->
           conn
           |> put_status(201)
@@ -29,7 +29,7 @@ defmodule StacksWeb.ShelfPlacementController do
     else
       conn
       |> put_status(422)
-      |> json(%{error: "invalid shelf name"})
+      |> json(%{error: "invalid bookshelf name"})
     end
   end
 
@@ -39,11 +39,11 @@ defmodule StacksWeb.ShelfPlacementController do
     |> json(%{error: "book_id is required"})
   end
 
-  @doc "PUT /api/placements/:id/move — move a placement to a different shelf."
-  def move(conn, %{"id" => placement_id, "shelf" => to_shelf}) do
+  @doc "PUT /api/placements/:id/move — move a placement to a different bookshelf."
+  def move(conn, %{"id" => placement_id, "bookshelf" => to_bookshelf}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Shelving.move_book(placement_id, user.id, to_shelf) do
+    case Shelving.move_book(placement_id, user.id, to_bookshelf) do
       {:ok, %{placement: placement}} ->
         json(conn, %{placement: format_placement(placement)})
 
@@ -62,7 +62,34 @@ defmodule StacksWeb.ShelfPlacementController do
   def move(conn, _params) do
     conn
     |> put_status(422)
-    |> json(%{error: "shelf parameter is required"})
+    |> json(%{error: "bookshelf parameter is required"})
+  end
+
+  @doc "PUT /api/placements/:id/formats — update the formats list for a placement."
+  def update_formats(conn, %{"id" => placement_id, "formats" => formats})
+      when is_list(formats) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.update_placement_formats(placement_id, user.id, formats) do
+      {:ok, placement} ->
+        json(conn, %{placement: %{id: placement.id, formats: placement.formats}})
+
+      {:error, :unauthorized} ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "forbidden"})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def update_formats(conn, _params) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "formats parameter is required and must be an array"})
   end
 
   @doc "DELETE /api/placements/:id — soft-delete (remove) a placement."

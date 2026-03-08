@@ -50,9 +50,11 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp delete_uploaded_image(image_id) do
     import Ecto.Query
 
+    {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
+
     query =
       from(i in "uploaded_images",
-        where: i.id == ^image_id
+        where: i.id == ^image_id_bin
       )
 
     {count, _} =

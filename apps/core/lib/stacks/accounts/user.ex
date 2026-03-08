@@ -59,6 +59,12 @@ defmodule Stacks.Accounts.User do
     |> cast(attrs, [:consent_analytics, :consent_analytics_at])
   end
 
+  @doc "Changeset for user settings (age verification)."
+  def settings_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:age_verified])
+  end
+
   defp hash_password(%Ecto.Changeset{valid?: true, changes: %{password: password}} = changeset) do
     changeset
     |> put_change(:password_hash, Argon2.hash_pwd_salt(password))
