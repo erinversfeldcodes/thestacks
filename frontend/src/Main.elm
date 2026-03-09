@@ -15,6 +15,7 @@ import Page.Bookshelf.Library as Library
 import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Bookshelf.WishList as WishList
+import Page.Login as Login
 import Page.Search as Search
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
@@ -44,6 +45,7 @@ main =
 
 type Page
     = PageHome
+    | PageLogin Login.Model
     | PageLibrary Library.Model
     | PageAntiLibrary AntiLibrary.Model
     | PageWishList WishList.Model
@@ -104,6 +106,9 @@ initPage route maybeAuth maybePreviousRoute =
     case route of
         Home ->
             ( PageHome, Cmd.none )
+
+        Login ->
+            ( PageLogin Login.init, Cmd.none )
 
         Library ->
             let
@@ -170,6 +175,7 @@ initPage route maybeAuth maybePreviousRoute =
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
+    | LoginMsg Login.Msg
     | LibraryMsg Library.Msg
     | AntiLibraryMsg AntiLibrary.Msg
     | WishListMsg WishList.Msg
@@ -215,6 +221,42 @@ update msg model =
               }
             , cmd
             )
+
+        LoginMsg subMsg ->
+            case model.page of
+                PageLogin subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Login.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageLogin newSubModel }
+
+                        baseCmd =
+                            Cmd.map LoginMsg subCmd
+                    in
+                    case outMsg of
+                        Login.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Login.LoggedIn authResponse ->
+                            let
+                                auth =
+                                    { user =
+                                        { id = authResponse.userId
+                                        , email = authResponse.email
+                                        , displayName = authResponse.displayName
+                                        , role = "user"
+                                        }
+                                    , token = authResponse.token
+                                    }
+                            in
+                            ( { baseModel | auth = Just auth }
+                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key "/" ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
 
         LibraryMsg subMsg ->
             case model.page of
@@ -542,6 +584,9 @@ pageTitle route =
         Home ->
             "The Stacks"
 
+        Login ->
+            "Sign In — The Stacks"
+
         Library ->
             "Library — The Stacks"
 
@@ -590,6 +635,15 @@ viewNav model =
                 , navItem model.route LookingForHome "Looking for a Home"
                 , navItem model.route Search "Search"
                 , navItem model.route Upload "Add Book"
+                , case model.auth of
+                    Nothing ->
+                        navItem model.route Login "Sign In"
+
+                    Just auth ->
+                        Html.li [ class "app-nav__item" ]
+                            [ Html.span [ class "app-nav__user" ]
+                                [ text auth.user.displayName ]
+                            ]
                 ]
             ]
         ]
@@ -620,6 +674,9 @@ viewPage model =
         PageHome ->
             viewHome
 
+        PageLogin subModel ->
+            Html.map LoginMsg (Login.view subModel)
+
         PageLibrary subModel ->
             Html.map LibraryMsg (Library.view subModel)
 
@@ -639,7 +696,7 @@ viewPage model =
             Html.map BookDetailMsg (BookDetail.view subModel)
 
         PageUpload subModel ->
-            Html.map UploadMsg (Upload.view subModel)
+            Html.map UploadMsg (Upload.view subModel (Maybe.map .token model.auth))
 
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)

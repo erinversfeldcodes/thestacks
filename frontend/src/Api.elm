@@ -42,9 +42,9 @@ authResponseDecoder : Decoder AuthResponse
 authResponseDecoder =
     Decode.map4 AuthResponse
         (Decode.field "token" Decode.string)
-        (Decode.field "user_id" Decode.string)
-        (Decode.field "email" Decode.string)
-        (Decode.field "display_name" Decode.string)
+        (Decode.at [ "user", "id" ] Decode.string)
+        (Decode.at [ "user", "email" ] Decode.string)
+        (Decode.at [ "user", "display_name" ] Decode.string)
 
 
 {-| The identification status of an uploaded image.
@@ -84,6 +84,7 @@ type alias PollResponse =
     { imageId : String
     , status : PollStatus
     , bookId : Maybe String
+    , bookIds : List String
     , rejectionReason : Maybe String
     , isDuplicate : Maybe Bool
     }
@@ -91,10 +92,11 @@ type alias PollResponse =
 
 pollResponseDecoder : Decoder PollResponse
 pollResponseDecoder =
-    Decode.map5 PollResponse
+    Decode.map6 PollResponse
         (Decode.field "image_id" Decode.string)
         (Decode.field "status" pollStatusDecoder)
         (Decode.maybe (Decode.field "book_id" Decode.string))
+        (Decode.field "book_ids" (Decode.list Decode.string) |> Decode.maybe |> Decode.map (Maybe.withDefault []))
         (Decode.maybe (Decode.field "rejection_reason" Decode.string))
         (Decode.maybe (Decode.field "is_duplicate" Decode.bool))
 
@@ -185,7 +187,7 @@ getBook bookId token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/books/" ++ bookId
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg bookDecoder
+        , expect = Http.expectJson toMsg (Decode.field "book" bookDecoder)
         , timeout = Nothing
         , tracker = Nothing
         }
