@@ -11,7 +11,7 @@ from app.config import settings
 from app.models.classification import Classification, ClassificationRequest, ClassificationResponse
 from app.models.extraction import ExtractionRequest, ExtractionResponse
 from app.services.hmac_auth import verify_hmac
-from app.services.vision_client import VisionClient
+from app.services.vision_client import TogetherResponse, VisionClient
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="The Stacks Vision Sidecar", version="0.1.0", lifespan=lifespan)
 
 
-@app.get("/health")
+@app.get("/health", status_code=200)
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "vision", "environment": settings.environment}
 
@@ -40,6 +40,7 @@ async def health() -> dict[str, str]:
 @app.post(
     "/extract",
     response_model=ExtractionResponse,
+    status_code=200,
     dependencies=[Depends(verify_hmac)],
 )
 async def extract(request: Request, body: ExtractionRequest) -> ExtractionResponse:
@@ -60,7 +61,7 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
 
     client: VisionClient = request.app.state.vision_client
     log.info("calling vision model for extraction")
-    raw_output = await client.extract(body.images)
+    raw_output: TogetherResponse = await client.extract(body.images)
 
     content = raw_output.get("choices", [{}])[0].get("message", {}).get("content", "")
     parsed: dict[str, object] = {}
@@ -78,6 +79,8 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
         else [],
         raw_text=content or None,
         model_used=settings.model_name,
+        # The extraction model does not return a confidence score — always 0.0.
+        # Only the /classify endpoint produces a meaningful confidence value.
         confidence=0.0,
     )
 
@@ -85,6 +88,7 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
 @app.post(
     "/classify",
     response_model=ClassificationResponse,
+    status_code=200,
     dependencies=[Depends(verify_hmac)],
 )
 async def classify(request: Request, body: ClassificationRequest) -> ClassificationResponse:
@@ -102,7 +106,7 @@ async def classify(request: Request, body: ClassificationRequest) -> Classificat
 
     client: VisionClient = request.app.state.vision_client
     log.info("calling vision model for classification")
-    raw_output = await client.classify(body.image)
+    raw_output: TogetherResponse = await client.classify(body.image)
 
     content = raw_output.get("choices", [{}])[0].get("message", {}).get("content", "")
     parsed: dict[str, object] = {}
