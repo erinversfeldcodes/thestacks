@@ -14,6 +14,7 @@ erl_crash.dump
 
 # Elm
 elm-stuff/
+frontend/elm.js
 frontend/node_modules/
 
 # Rust
