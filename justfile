@@ -1,4 +1,5 @@
 # The Stacks — Task Runner
+set dotenv-load
 
 # Start all available services for local development.
 # Compiles Elm, runs migrations, then starts Phoenix (always),
@@ -15,19 +16,26 @@ dev:
     echo "==> Compiling Elm..."
     (cd frontend && npm run build)
 
+    # Kill any stale processes from a previous dev session on our ports.
+    echo "==> Cleaning up stale dev processes..."
+    lsof -ti :4000 | xargs kill -9 2>/dev/null || true
+    lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+    pkill -f "stacks-scraper" 2>/dev/null || true
+    sleep 0.5
+
     trap 'kill $(jobs -p) 2>/dev/null; exit 0' EXIT INT TERM
 
     echo "==> Starting Phoenix on http://localhost:4000"
     mix phx.server &
 
     echo "==> Serving frontend on http://localhost:4001"
-    python3 -m http.server 4001 --directory frontend &
+    npx serve -s frontend -l 4001 --no-clipboard &
 
-    if command -v uvicorn >/dev/null 2>&1 && [ -f apps/vision/app/main.py ]; then
+    if [ -f apps/vision/.venv/bin/uvicorn ] && [ -f apps/vision/app/main.py ]; then
         echo "==> Starting vision sidecar on http://localhost:8000"
-        (cd apps/vision && uvicorn app.main:app --reload --port 8000) &
+        (cd apps/vision && .venv/bin/uvicorn app.main:app --reload --port 8000) &
     else
-        echo "==> Vision sidecar not ready — skipping (Issue #003)"
+        echo "==> Vision sidecar not ready — skipping (run: cd apps/vision && python -m venv .venv && .venv/bin/pip install -r requirements.txt)"
     fi
 
     if [ -f apps/scraper/src/main.rs ]; then

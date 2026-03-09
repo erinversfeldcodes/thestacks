@@ -7,6 +7,12 @@ defmodule Stacks.Moderation do
   2. extract_isbn — vision model extracts ISBN from the spine/cover
   3. classify_subject — BISAC subject classification from book subjects
   4. store_with_tier — stores book with appropriate visibility_tier
+
+  Sidecar API contract:
+  - POST /classify  → %{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}
+  - POST /extract   → %{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "model_used" => str, "confidence" => float}
+
+  Both endpoints expect base64-encoded image data (not image URLs).
   """
 
   require Logger
@@ -17,12 +23,16 @@ defmodule Stacks.Moderation do
   @doc """
   Runs the full moderation pipeline for an uploaded image.
 
+  Expects `context` to include:
+  - `image_b64` — base64-encoded image bytes
+  - `user_id`, `image_id` — for logging/context
+
   Returns `{:ok, book}` on success, `{:error, reason}` on failure.
   """
   @spec run_pipeline(map()) :: {:ok, Stacks.Books.Book.t()} | {:error, term()}
-  def run_pipeline(%{image_url: image_url} = context) do
-    with {:ok, :is_book} <- check_is_book(image_url),
-         {:ok, isbn} <- extract_isbn(image_url),
+  def run_pipeline(%{image_b64: image_b64} = context) do
+    with {:ok, :is_book} <- check_is_book(image_b64),
+         {:ok, isbn} <- extract_isbn(image_b64),
          {:ok, subjects} <- classify_subjects(isbn, context) do
       store_with_tier(isbn, subjects, context)
     else
@@ -30,17 +40,17 @@ defmodule Stacks.Moderation do
     end
   end
 
-  defp check_is_book(image_url) do
-    case AIClient.call_vision("is_book", %{image_url: image_url}) do
-      {:ok, %{"is_book" => true}} -> {:ok, :is_book}
-      {:ok, _} -> {:error, :not_a_book}
+  defp check_is_book(image_b64) do
+    case AIClient.call_vision("is_book", %{image: image_b64}) do
+      {:ok, %{"classification" => "book"}} -> {:ok, :is_book}
+      {:ok, %{"classification" => _}} -> {:error, :not_a_book}
       error -> error
     end
   end
 
-  defp extract_isbn(image_url) do
-    case AIClient.call_vision("extract_isbn", %{image_url: image_url}) do
-      {:ok, %{"isbn" => isbn}} when is_binary(isbn) and isbn != "" ->
+  defp extract_isbn(image_b64) do
+    case AIClient.call_vision("extract_isbn", %{images: [image_b64]}) do
+      {:ok, %{"potential_isbns" => [isbn | _]}} when is_binary(isbn) and isbn != "" ->
         {:ok, isbn}
 
       {:ok, _} ->
