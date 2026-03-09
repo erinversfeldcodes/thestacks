@@ -49,9 +49,7 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  @doc false
-  @spec auth_token(String.t(), String.t()) :: String.t()
-  def auth_token(method, path) do
+  defp auth_token(method, path) do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :vision_hmac_secret)
     message = "#{ts}.#{method}.#{path}"
