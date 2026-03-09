@@ -4,9 +4,9 @@ defmodule Stacks.Moderation do
 
   Runs a 4-step pipeline:
   1. is_book? — vision model checks if image contains a book
-  2. extract_isbn — vision model extracts ISBN from the spine/cover
+  2. extract_all — vision model extracts all books from the image
   3. classify_subject — BISAC subject classification from book subjects
-  4. store_with_tier — stores book with appropriate visibility_tier
+  4. store_with_tier — stores books with appropriate visibility_tier
 
   Sidecar API contract:
   - POST /classify  → %{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}
@@ -19,6 +19,7 @@ defmodule Stacks.Moderation do
 
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.Books
+  alias Stacks.Books.ISBNResolver
 
   @doc """
   Runs the full moderation pipeline for an uploaded image.
@@ -27,14 +28,14 @@ defmodule Stacks.Moderation do
   - `image_b64` — base64-encoded image bytes
   - `user_id`, `image_id` — for logging/context
 
-  Returns `{:ok, book}` on success, `{:error, reason}` on failure.
+  Returns `{:ok, [Book.t()]}` on success (one or more books identified),
+  or `{:error, reason}` on failure.
   """
-  @spec run_pipeline(map()) :: {:ok, Stacks.Books.Book.t()} | {:error, term()}
+  @spec run_pipeline(map()) :: {:ok, [Stacks.Books.Book.t()]} | {:error, term()}
   def run_pipeline(%{image_b64: image_b64} = context) do
     with {:ok, :is_book} <- check_is_book(image_b64),
-         {:ok, isbn} <- extract_isbn(image_b64),
-         {:ok, subjects} <- classify_subjects(isbn, context) do
-      store_with_tier(isbn, subjects, context)
+         {:ok, candidates} <- extract_all_candidates(image_b64) do
+      resolve_and_store_all(candidates, context)
     else
       {:error, reason} -> {:error, reason}
     end
@@ -48,41 +49,127 @@ defmodule Stacks.Moderation do
     end
   end
 
-  defp extract_isbn(image_b64) do
+  # Calls the extraction endpoint and returns a list of candidate maps,
+  # each with :isbn (if found directly) or :title/:author/:raw_text for search.
+  defp extract_all_candidates(image_b64) do
     case AIClient.call_vision("extract_isbn", %{images: [image_b64]}) do
-      {:ok, %{"books" => [%{"potential_isbns" => [isbn | _]} | _]}}
-      when is_binary(isbn) and isbn != "" ->
-        {:ok, isbn}
-
-      {:ok, %{"books" => _}} ->
+      {:ok, %{"books" => []}} ->
         {:error, :isbn_not_found}
+
+      {:ok, %{"books" => books}} when is_list(books) ->
+        Logger.info("Moderation: extraction returned #{length(books)} candidate(s)")
+        {:ok, books}
 
       error ->
         error
     end
   end
 
-  defp classify_subjects(isbn, _context) do
-    case Books.resolve_isbn(isbn) do
-      {:ok, metadata} ->
-        subjects = metadata[:subjects] || []
-        bisac_codes = subjects_to_bisac(subjects)
-        {:ok, metadata |> Map.put(:subjects, subjects) |> Map.put(:bisac_codes, bisac_codes)}
+  # Expands compound candidates where the vision model joined multiple book titles
+  # with " OR " (e.g. "Things I Don't Want to Know OR The Cost of Living").
+  # Each part becomes its own candidate with the same author/raw_text.
+  defp expand_compound_candidates(candidates) do
+    Enum.flat_map(candidates, fn candidate ->
+      title = candidate["title"] || ""
 
-      _ ->
-        {:ok, %{subjects: [], bisac_codes: []}}
+      case String.split(title, ~r/\s+OR\s+/, parts: 2) do
+        [part1, part2] ->
+          [
+            Map.put(candidate, "title", String.trim(part1)),
+            Map.put(candidate, "title", String.trim(part2))
+          ]
+
+        _ ->
+          [candidate]
+      end
+    end)
+  end
+
+  # For each candidate, resolve to an ISBN (direct or via title search) and
+  # create/find the book. Returns {:ok, [books]} with whatever could be resolved;
+  # fails only if NONE of the candidates resolve.
+  defp resolve_and_store_all(candidates, context) do
+    expanded = expand_compound_candidates(candidates)
+
+    books =
+      expanded
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {candidate, idx} ->
+        case resolve_candidate(candidate, idx) do
+          {:ok, isbn, metadata} ->
+            case store_book(isbn, metadata, context) do
+              {:ok, book} -> [book]
+              _ -> []
+            end
+
+          {:error, reason} ->
+            Logger.warning("Moderation: candidate #{idx} failed to resolve: #{inspect(reason)}")
+            []
+        end
+      end)
+
+    case books do
+      [] -> {:error, :isbn_not_found}
+      _ -> {:ok, books}
     end
   end
 
-  defp store_with_tier(isbn, metadata, context) do
-    visibility_tier = determine_visibility_tier(metadata.bisac_codes)
+  defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = _candidate, idx)
+       when is_binary(isbn) and isbn != "" do
+    Logger.info("Moderation: candidate #{idx} has direct ISBN #{isbn}")
+    {:ok, isbn, nil}
+  end
 
-    # ISBNResolver metadata is the base; context book_attrs can override any field
+  defp resolve_candidate(candidate, idx) do
+    title = candidate["title"]
+    author = candidate["author"]
+    raw_text = candidate["raw_text"]
+
+    Logger.info(
+      "Moderation: candidate #{idx} has no ISBN, searching (title=#{inspect(title)}, author=#{inspect(author)}, raw_text=#{inspect(raw_text)})"
+    )
+
+    case title_fallback(title, author, raw_text) do
+      {:ok, isbn, metadata} -> {:ok, isbn, metadata}
+      error -> error
+    end
+  end
+
+  defp title_fallback(nil, _author, _raw_text), do: {:error, :isbn_not_found}
+  defp title_fallback("", _author, _raw_text), do: {:error, :isbn_not_found}
+
+  defp title_fallback(title, author, raw_text) do
+    case ISBNResolver.search_by_title(title, author, raw_text) do
+      {:ok, isbn, metadata} ->
+        Logger.info("Moderation: title search found ISBN #{isbn} for '#{title}'")
+        {:ok, isbn, metadata}
+
+      {:error, :not_found} ->
+        Logger.warning("Moderation: title search found no results for '#{title}'")
+        {:error, :isbn_not_found}
+    end
+  end
+
+  defp store_book(isbn, prefetched_metadata, context) do
+    metadata =
+      if prefetched_metadata do
+        prefetched_metadata
+      else
+        case Books.resolve_isbn(isbn) do
+          {:ok, data} -> data
+          _ -> %{}
+        end
+      end
+
+    subjects = metadata[:subjects] || []
+    bisac_codes = subjects_to_bisac(subjects)
+    visibility_tier = determine_visibility_tier(bisac_codes)
+
     base_attrs = %{
       "isbn" => isbn,
       "title" => metadata[:title],
-      "subjects" => metadata.subjects,
-      "bisac_codes" => metadata.bisac_codes,
+      "subjects" => subjects,
+      "bisac_codes" => bisac_codes,
       "visibility_tier" => visibility_tier,
       "description" => metadata[:description],
       "cover_image_url" => metadata[:cover_image_url],

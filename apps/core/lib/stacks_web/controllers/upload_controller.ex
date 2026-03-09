@@ -45,7 +45,12 @@ defmodule StacksWeb.UploadController do
     result =
       from(i in "uploaded_images",
         where: i.id == ^image_id_bin,
-        select: %{status: i.status, book_id: i.book_id, rejection_reason: i.rejection_reason}
+        select: %{
+          status: i.status,
+          book_id: i.book_id,
+          book_ids: i.book_ids,
+          rejection_reason: i.rejection_reason
+        }
       )
       |> Repo.one(prefix: "op")
 
@@ -53,21 +58,36 @@ defmodule StacksWeb.UploadController do
       nil ->
         conn |> put_status(404) |> json(%{error: "not found"})
 
-      %{status: status, book_id: book_id_bin, rejection_reason: rejection_reason} ->
-        book_id_str = decode_book_id(book_id_bin)
+      %{status: status, book_id: book_id_bin, book_ids: book_ids_bins, rejection_reason: rejection_reason} ->
+        book_id_str = decode_uuid(book_id_bin)
+        book_ids_strs = decode_uuid_list(book_ids_bins)
+
+        # Prefer book_ids array; fall back to book_id singleton for rows written
+        # before the migration (book_ids defaults to []).
+        effective_ids =
+          if book_ids_strs != [],
+            do: book_ids_strs,
+            else: if(book_id_str, do: [book_id_str], else: [])
+
         user = Guardian.Plug.current_resource(conn)
-        is_duplicate = book_id_str != nil and Shelving.book_on_any_shelf?(user.id, book_id_str)
+        is_duplicate = Enum.any?(effective_ids, &Shelving.book_on_any_shelf?(user.id, &1))
 
         json(conn, %{
           image_id: image_id,
           status: status,
           book_id: book_id_str,
+          book_ids: effective_ids,
           rejection_reason: rejection_reason,
           is_duplicate: is_duplicate
         })
     end
   end
 
-  defp decode_book_id(nil), do: nil
-  defp decode_book_id(bin), do: elem(Ecto.UUID.load(bin), 1)
+  defp decode_uuid(nil), do: nil
+  defp decode_uuid(<<_::128>> = bin), do: elem(Ecto.UUID.load(bin), 1)
+  defp decode_uuid(str) when is_binary(str) and byte_size(str) == 36, do: str
+  defp decode_uuid(_), do: nil
+
+  defp decode_uuid_list(nil), do: []
+  defp decode_uuid_list(bins), do: Enum.map(bins, &decode_uuid/1) |> Enum.reject(&is_nil/1)
 end
