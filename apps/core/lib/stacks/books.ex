@@ -72,9 +72,20 @@ defmodule Stacks.Books do
   @spec create_from_isbn(String.t()) ::
           {:ok, Book.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def create_from_isbn(isbn) do
-    with {:ok, metadata} <- ISBNResolver.resolve(isbn),
+    with :ok <- validate_isbn_format(isbn),
+         {:ok, metadata} <- ISBNResolver.resolve(isbn),
          {:ok, author} <- find_or_create_author(metadata[:author]) do
       isbn |> build_book_attrs(metadata, author) |> create()
+    end
+  end
+
+  defp validate_isbn_format(isbn) do
+    cs = Book.changeset(%Book{}, %{"isbn" => isbn, "title" => "placeholder"})
+
+    if Keyword.has_key?(cs.errors, :isbn) do
+      {:error, Book.changeset(%Book{}, %{"isbn" => isbn})}
+    else
+      :ok
     end
   end
 
