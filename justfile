@@ -57,6 +57,10 @@ install-hooks:
 ci *GROUPS:
     scripts/ci.sh {{GROUPS}}
 
+# Install Python dev dependencies (pytest, ruff, mypy, pip-audit, etc.)
+install-python-dev:
+    cd apps/vision && .venv/bin/pip install -r requirements-dev.txt
+
 # Run all tests
 test: test-elixir test-elm test-rust test-python test-dbt
 
@@ -75,6 +79,11 @@ test-rust:
 # Python tests
 test-python:
     scripts/test-python.sh
+
+# Run the vision sidecar Atheris fuzz target against the seed corpus (all platforms)
+# Pass -- -atheris_runs=N to run the full fuzzer (Linux + atheris installed only)
+fuzz-vision *ARGS:
+    cd apps/vision && PYTHONPATH=. VISION_ENVIRONMENT=test .venv/bin/python tests/fuzz_image_input.py {{ARGS}}
 
 # Run all linters (check only — no modifications)
 lint: lint-elixir lint-elm lint-rust lint-python lint-proto lint-sql
