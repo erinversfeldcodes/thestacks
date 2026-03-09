@@ -1,6 +1,8 @@
 # Seed fixtures for development and dbt testing.
 # Run with: mix run apps/core/priv/repo/seeds.exs
 # Or via:   just test-dbt  (which resets the DB first)
+#
+# Dev login: owner@thestacks.app / dev-password-123
 
 alias Core.Repo
 
@@ -39,7 +41,7 @@ Repo.insert_all(
       id: user1,
       email: "owner@thestacks.app",
       display_name: "Platform Owner",
-      password_hash: "$argon2id$placeholder",
+      password_hash: Argon2.hash_pwd_salt("dev-password-123"),
       role: "owner",
       profile_visibility: "owner",
       age_verified: true,

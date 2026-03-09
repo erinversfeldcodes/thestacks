@@ -31,11 +31,16 @@ dev:
     echo "==> Serving frontend on http://localhost:4001"
     npx serve -s frontend -l 4001 --no-clipboard &
 
-    if [ -f apps/vision/.venv/bin/uvicorn ] && [ -f apps/vision/app/main.py ]; then
+    if [ -f apps/vision/app/main.py ]; then
+        if [ ! -f apps/vision/.venv/bin/uvicorn ]; then
+            echo "==> Installing vision sidecar dependencies..."
+            python3 -m venv apps/vision/.venv
+            apps/vision/.venv/bin/pip install -q -r apps/vision/requirements.txt
+        fi
         echo "==> Starting vision sidecar on http://localhost:8000"
         (cd apps/vision && .venv/bin/uvicorn app.main:app --reload --port 8000) &
     else
-        echo "==> Vision sidecar not ready — skipping (run: cd apps/vision && python -m venv .venv && .venv/bin/pip install -r requirements.txt)"
+        echo "==> Vision sidecar not built yet — skipping (Phase 1D)"
     fi
 
     if [ -f apps/scraper/src/main.rs ]; then
@@ -136,9 +141,16 @@ db-migrate:
 db-rollback-check:
     mix ecto.rollback --all --quiet && mix ecto.migrate --quiet
 
-# Reset database (drop + create + migrate)
+# Reset database (drop + create + migrate + seed)
+# Seeds are run explicitly here because Mix alias chaining doesn't reliably
+# start the full application context needed by Repo.insert_all.
 db-reset:
     mix ecto.reset
+    mix run apps/core/priv/repo/seeds.exs
+
+# Run Playwright E2E tests (requires just dev to be running on :4000/:4001)
+test-e2e:
+    cd e2e && npm test
 
 # Run dbt run + test (staging layer only)
 # Resets the DB, loads Ecto seeds, then validates dbt staging models.
