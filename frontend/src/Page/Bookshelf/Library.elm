@@ -1,4 +1,4 @@
-module Page.Shelf.AntiLibrary exposing
+module Page.Bookshelf.Library exposing
     ( Model
     , Msg
     , init
@@ -7,22 +7,26 @@ module Page.Shelf.AntiLibrary exposing
     )
 
 import Api
-import Components.EmptyShelf exposing (emptyShelf)
+import Components.EmptyBookshelf exposing (emptyBookshelf)
 import Components.Spine exposing (WearLevel(..), spine)
 import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
 import Http
+import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
 
 type alias Model =
     { books : RemoteData Http.Error (List Placement)
+    , selectedBook : Maybe Book
     }
 
 
 type Msg
     = BooksLoaded (Result Http.Error (List Placement))
+    | SelectBook Book
+    | ClearSelection
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -31,12 +35,12 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    Api.getShelf "antilibrary" token BooksLoaded
+                    Api.getBookshelf "library" token BooksLoaded
 
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading }, cmd )
+    ( { books = Loading, selectedBook = Nothing }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -50,28 +54,33 @@ update msg model =
                 Err err ->
                     ( { model | books = Failure err }, Cmd.none )
 
+        SelectBook book ->
+            ( { model | selectedBook = Just book }, Cmd.none )
+
+        ClearSelection ->
+            ( { model | selectedBook = Nothing }, Cmd.none )
+
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--shelf shelf-antilibrary" ]
-        [ h1 [ class "page__title" ] [ text "Antilibrary" ]
+    div [ class "page page--shelf shelf-library" ]
+        [ h1 [ class "page__title" ] [ text "Library" ]
         , case model.books of
             NotAsked ->
                 text ""
 
             Loading ->
-                div [ class "loading" ] [ text "Loading your antilibrary..." ]
+                div [ class "loading" ] [ text "Loading your library..." ]
 
             Failure _ ->
-                p [ class "error" ]
-                    [ text "Could not load your antilibrary. Please try again." ]
+                p [ class "error" ] [ text "Could not load your library. Please try again." ]
 
             Success placements ->
                 if List.isEmpty placements then
-                    emptyShelf
-                        { shelf = "antilibrary"
+                    emptyBookshelf
+                        { bookshelf = "library"
                         , message =
-                            "Your antilibrary is empty — this is where the books you haven't read yet live. The bigger the better."
+                            "Your library is empty — start by adding some books you own."
                         }
 
                 else
@@ -86,8 +95,8 @@ viewSpine : Placement -> Html Msg
 viewSpine _ =
     div [ class "bookshelf__book" ]
         [ spine
-            { pageCount = 250
-            , wearLevel = Pristine
+            { pageCount = 300
+            , wearLevel = Softened
             , title = "Book"
             , author = "Author"
             }

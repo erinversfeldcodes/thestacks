@@ -8,13 +8,13 @@ import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text,
 import Html.Attributes exposing (class, href)
 import Navigation.Route as Route exposing (Route(..))
 import Page.BookDetail as BookDetail
+import Page.Bookshelf.AntiLibrary as AntiLibrary
+import Page.Bookshelf.Library as Library
+import Page.Bookshelf.ReadingPile as ReadingPile
+import Page.Bookshelf.WishList as WishList
 import Page.Search as Search
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
-import Page.Shelf.AntiLibrary as AntiLibrary
-import Page.Shelf.Library as Library
-import Page.Shelf.ReadingPile as ReadingPile
-import Page.Shelf.WishList as WishList
 import Page.Upload as Upload
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)

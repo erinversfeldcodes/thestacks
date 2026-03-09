@@ -17,7 +17,6 @@ import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route exposing (Route)
 import Types.Book exposing (Book)
-import Types.Bookshelf exposing (bookshelfToString)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -25,10 +24,10 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { book : RemoteData Http.Error Book
     , placement : Maybe Placement
-    , shelfMoverOpen : Bool
+    , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
-    , selectedShelf : String
+    , selectedBookshelf : String
     , selectedFormats : List Format
     , removeState : RemoteData Http.Error ()
     , previousRoute : Maybe Route
@@ -42,9 +41,9 @@ type OutMsg
 
 type Msg
     = BookLoaded (Result Http.Error Book)
-    | OpenShelfMover
-    | CloseShelfMover
-    | SelectShelf String
+    | OpenBookshelfMover
+    | CloseBookshelfMover
+    | SelectBookshelf String
     | ConfirmMove
     | MoveCompleted (Result Http.Error ())
     | OpenRemoveModal
@@ -68,10 +67,10 @@ init bookId maybeToken maybePreviousRoute =
     in
     ( { book = Loading
       , placement = Nothing
-      , shelfMoverOpen = False
+      , bookshelfMoverOpen = False
       , removeModalOpen = False
       , formatPickerOpen = False
-      , selectedShelf = "library"
+      , selectedBookshelf = "library"
       , selectedFormats = []
       , removeState = NotAsked
       , previousRoute = maybePreviousRoute
@@ -91,20 +90,20 @@ update msg model maybeToken =
                 Err err ->
                     ( { model | book = Failure err }, Cmd.none, NoOut )
 
-        OpenShelfMover ->
-            ( { model | shelfMoverOpen = True }, Cmd.none, NoOut )
+        OpenBookshelfMover ->
+            ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
 
-        CloseShelfMover ->
-            ( { model | shelfMoverOpen = False }, Cmd.none, NoOut )
+        CloseBookshelfMover ->
+            ( { model | bookshelfMoverOpen = False }, Cmd.none, NoOut )
 
-        SelectShelf shelf ->
-            ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
+        SelectBookshelf bookshelf ->
+            ( { model | selectedBookshelf = bookshelf }, Cmd.none, NoOut )
 
         ConfirmMove ->
-            case ( model.book, maybeToken ) of
-                ( Success book, Just token ) ->
-                    ( { model | shelfMoverOpen = False }
-                    , Api.moveBook book.id model.selectedShelf token MoveCompleted
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    ( { model | bookshelfMoverOpen = False }
+                    , Api.moveBook placement.id model.selectedBookshelf token MoveCompleted
                     , NoOut
                     )
 
@@ -121,10 +120,10 @@ update msg model maybeToken =
             ( { model | removeModalOpen = False }, Cmd.none, NoOut )
 
         ConfirmRemove ->
-            case ( model.book, maybeToken ) of
-                ( Success book, Just token ) ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
                     ( { model | removeModalOpen = False, removeState = Loading }
-                    , Api.removeBook book.id token RemoveCompleted
+                    , Api.removeBook placement.id token RemoveCompleted
                     , NoOut
                     )
 
@@ -251,16 +250,13 @@ viewBook model book =
                     text ""
             ]
         , section [ class "book-detail__shelf-actions" ]
-            [ button [ class "btn btn--secondary", onClick OpenShelfMover ]
-                [ text "Move to Shelf" ]
-            , if model.shelfMoverOpen then
+            [ button [ class "btn btn--secondary", onClick OpenBookshelfMover ]
+                [ text "Move to Bookshelf" ]
+            , if model.bookshelfMoverOpen then
                 shelfMover
-                    { currentShelf =
-                        model.placement
-                            |> Maybe.map (.bookshelf >> bookshelfToString)
-                            |> Maybe.withDefault "library"
-                    , selectedShelf = model.selectedShelf
-                    , onSelectShelf = SelectShelf
+                    { currentBookshelf = model.selectedBookshelf
+                    , selectedBookshelf = model.selectedBookshelf
+                    , onSelectBookshelf = SelectBookshelf
                     , onMove = ConfirmMove
                     }
 
@@ -289,6 +285,6 @@ viewBook model book =
             ]
         , section [ class "book-detail__danger-zone" ]
             [ button [ class "btn btn--danger", onClick OpenRemoveModal ]
-                [ text "Remove from Shelf" ]
+                [ text "Remove from Bookshelf" ]
             ]
         ]

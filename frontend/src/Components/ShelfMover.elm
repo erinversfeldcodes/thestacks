@@ -5,8 +5,8 @@ import Html.Attributes exposing (class, selected, value)
 import Html.Events exposing (onClick, onInput)
 
 
-allShelves : List { value : String, label : String }
-allShelves =
+allBookshelves : List { value : String, label : String }
+allBookshelves =
     [ { value = "library", label = "Library" }
     , { value = "antilibrary", label = "Antilibrary" }
     , { value = "wishlist", label = "Wish List" }
@@ -16,9 +16,9 @@ allShelves =
 
 
 shelfMover :
-    { currentShelf : String
-    , selectedShelf : String
-    , onSelectShelf : String -> msg
+    { currentBookshelf : String
+    , selectedBookshelf : String
+    , onSelectBookshelf : String -> msg
     , onMove : msg
     }
     -> Html msg
@@ -26,21 +26,21 @@ shelfMover config =
     div [ class "shelf-mover" ]
         [ select
             [ class "shelf-mover__select"
-            , onInput config.onSelectShelf
+            , onInput config.onSelectBookshelf
             ]
             (List.map
-                (\shelf ->
+                (\bookshelf ->
                     option
-                        [ value shelf.value
-                        , selected (shelf.value == config.selectedShelf)
+                        [ value bookshelf.value
+                        , selected (bookshelf.value == config.selectedBookshelf)
                         ]
-                        [ text shelf.label ]
+                        [ text bookshelf.label ]
                 )
-                (List.filter (\s -> s.value /= config.currentShelf) allShelves)
+                (List.filter (\s -> s.value /= config.currentBookshelf) allBookshelves)
             )
         , button
             [ class "shelf-mover__btn"
             , onClick config.onMove
             ]
-            [ text "Move to Shelf" ]
+            [ text "Move to Bookshelf" ]
         ]
