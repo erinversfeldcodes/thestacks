@@ -1,6 +1,6 @@
 module Page.BookDetail exposing
     ( Model
-    , Msg
+    , Msg(..)
     , OutMsg(..)
     , init
     , update
@@ -8,6 +8,7 @@ module Page.BookDetail exposing
     )
 
 import Api
+import Components.AgeGate exposing (ageGate)
 import Components.FormatPicker exposing (formatPicker)
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
@@ -31,6 +32,7 @@ type alias Model =
     , selectedFormats : List Format
     , removeState : RemoteData Http.Error ()
     , previousRoute : Maybe Route
+    , showAgeGate : Bool
     }
 
 
@@ -52,6 +54,8 @@ type Msg
     | RemoveCompleted (Result Http.Error ())
     | ToggleFormatPicker
     | ToggleFormat Format
+    | VerifyAge
+    | DismissAgeGate
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -74,6 +78,7 @@ init bookId maybeToken maybePreviousRoute =
       , selectedFormats = []
       , removeState = NotAsked
       , previousRoute = maybePreviousRoute
+      , showAgeGate = False
       }
     , cmd
     )
@@ -87,8 +92,17 @@ update msg model maybeToken =
                 Ok book ->
                     ( { model | book = Success book }, Cmd.none, NoOut )
 
+                Err (Http.BadStatus 403) ->
+                    ( { model | book = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+
                 Err err ->
                     ( { model | book = Failure err }, Cmd.none, NoOut )
+
+        VerifyAge ->
+            ( model, Cmd.none, NavigateTo Route.SettingsAgeVerification )
+
+        DismissAgeGate ->
+            ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
@@ -159,32 +173,41 @@ update msg model maybeToken =
 view : Model -> Html Msg
 view model =
     div [ class "page page--book-detail" ]
-        [ case model.book of
-            NotAsked ->
-                text ""
-
-            Loading ->
-                div [ class "loading" ] [ text "Loading book..." ]
-
-            Failure _ ->
-                p [ class "error" ] [ text "Could not load this book. Please try again." ]
-
-            Success book ->
-                viewBook model book
-        , if model.removeModalOpen then
-            case model.book of
-                Success book ->
-                    removeBookModal
-                        { bookTitle = book.title
-                        , onConfirm = ConfirmRemove
-                        , onCancel = CloseRemoveModal
-                        }
-
-                _ ->
-                    text ""
+        [ if model.showAgeGate then
+            ageGate
+                { onVerify = VerifyAge
+                , onDismiss = DismissAgeGate
+                }
 
           else
-            text ""
+            div []
+                [ case model.book of
+                    NotAsked ->
+                        text ""
+
+                    Loading ->
+                        div [ class "loading" ] [ text "Loading book..." ]
+
+                    Failure _ ->
+                        p [ class "error" ] [ text "Could not load this book. Please try again." ]
+
+                    Success book ->
+                        viewBook model book
+                , if model.removeModalOpen then
+                    case model.book of
+                        Success book ->
+                            removeBookModal
+                                { bookTitle = book.title
+                                , onConfirm = ConfirmRemove
+                                , onCancel = CloseRemoveModal
+                                }
+
+                        _ ->
+                            text ""
+
+                  else
+                    text ""
+                ]
         ]
 
 

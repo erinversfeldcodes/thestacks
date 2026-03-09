@@ -1,14 +1,18 @@
 module Api exposing
     ( AuthResponse
-    , UploadResponse
+    , PollResponse
+    , PollStatus(..)
     , authResponseDecoder
     , getBook
     , getBookshelf
     , login
     , moveBook
+    , pollUploadStatus
     , register
     , removeBook
+    , saveConsent
     , searchBooks
+    , updateAgeVerification
     , uploadImage
     )
 
@@ -43,21 +47,56 @@ authResponseDecoder =
         (Decode.field "display_name" Decode.string)
 
 
-type alias UploadResponse =
-    { bookId : Maybe String
-    , isbn : Maybe String
-    , confidence : Float
-    , status : String
+{-| The identification status of an uploaded image.
+Fails loudly on unknown values rather than silently falling through.
+-}
+type PollStatus
+    = Pending
+    | Resolved
+    | Rejected
+
+
+pollStatusDecoder : Decoder PollStatus
+pollStatusDecoder =
+    Decode.string
+        |> Decode.andThen
+            (\s ->
+                case s of
+                    "pending" ->
+                        Decode.succeed Pending
+
+                    "resolved" ->
+                        Decode.succeed Resolved
+
+                    "rejected" ->
+                        Decode.succeed Rejected
+
+                    _ ->
+                        Decode.fail ("Unknown upload status: " ++ s)
+            )
+
+
+{-| Response from GET /api/upload/:image_id/status.
+bookId is present only when status is Resolved and a book was identified.
+isDuplicate is true when the identified book is already on one of the user's shelves.
+-}
+type alias PollResponse =
+    { imageId : String
+    , status : PollStatus
+    , bookId : Maybe String
+    , rejectionReason : Maybe String
+    , isDuplicate : Maybe Bool
     }
 
 
-uploadResponseDecoder : Decoder UploadResponse
-uploadResponseDecoder =
-    Decode.map4 UploadResponse
+pollResponseDecoder : Decoder PollResponse
+pollResponseDecoder =
+    Decode.map5 PollResponse
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "status" pollStatusDecoder)
         (Decode.maybe (Decode.field "book_id" Decode.string))
-        (Decode.maybe (Decode.field "isbn" Decode.string))
-        (Decode.field "confidence" Decode.float)
-        (Decode.field "status" Decode.string)
+        (Decode.maybe (Decode.field "rejection_reason" Decode.string))
+        (Decode.maybe (Decode.field "is_duplicate" Decode.bool))
 
 
 register :
@@ -97,10 +136,12 @@ login body toMsg =
         }
 
 
+{-| POST /api/upload — returns the image_id from the 202 accepted response.
+-}
 uploadImage :
     File
     -> String
-    -> (Result Http.Error UploadResponse -> msg)
+    -> (Result Http.Error String -> msg)
     -> Cmd msg
 uploadImage file token toMsg =
     Http.request
@@ -108,7 +149,26 @@ uploadImage file token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/upload"
         , body = Http.multipartBody [ Http.filePart "image" file ]
-        , expect = Http.expectJson toMsg uploadResponseDecoder
+        , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/upload/:image_id/status — poll for the identification result.
+-}
+pollUploadStatus :
+    String
+    -> String
+    -> (Result Http.Error PollResponse -> msg)
+    -> Cmd msg
+pollUploadStatus imageId token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/status"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg pollResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -198,6 +258,44 @@ removeBook placementId token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/" ++ placementId
         , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/gdpr/consent — save the user's analytics consent preference.
+-}
+saveConsent :
+    Bool
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+saveConsent consent token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/gdpr/consent"
+        , body = Http.jsonBody (Encode.object [ ( "consent", Encode.bool consent ) ])
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/settings/age_verification — save the user's age verification status.
+-}
+updateAgeVerification :
+    Bool
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updateAgeVerification verified token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/age_verification"
+        , body = Http.jsonBody (Encode.object [ ( "age_verified", Encode.bool verified ) ])
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing

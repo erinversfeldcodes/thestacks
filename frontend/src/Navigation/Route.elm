@@ -14,6 +14,7 @@ type Route
     | AntiLibrary
     | WishList
     | ReadingPile
+    | LookingForHome
     | BookDetail String
     | Upload
     | Search
@@ -30,6 +31,7 @@ parser =
         , Parser.map AntiLibrary (s "antilibrary")
         , Parser.map WishList (s "wishlist")
         , Parser.map ReadingPile (s "reading-pile")
+        , Parser.map LookingForHome (s "looking-for-home")
         , Parser.map BookDetail (s "books" </> string)
         , Parser.map Upload (s "upload")
         , Parser.map Search (s "search")
@@ -61,6 +63,9 @@ toPath route =
 
         ReadingPile ->
             "/reading-pile"
+
+        LookingForHome ->
+            "/looking-for-home"
 
         BookDetail bookId ->
             "/books/" ++ bookId

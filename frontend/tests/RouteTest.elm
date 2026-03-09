@@ -47,6 +47,10 @@ suite =
                 \_ ->
                     fromPath "/reading-pile"
                         |> Expect.equal ReadingPile
+            , test "LookingForHome" <|
+                \_ ->
+                    fromPath "/looking-for-home"
+                        |> Expect.equal LookingForHome
             , test "BookDetail" <|
                 \_ ->
                     fromPath "/books/abc123"
@@ -93,6 +97,10 @@ suite =
                 \_ ->
                     Route.toPath ReadingPile
                         |> Expect.equal "/reading-pile"
+            , test "LookingForHome path" <|
+                \_ ->
+                    Route.toPath LookingForHome
+                        |> Expect.equal "/looking-for-home"
             , test "BookDetail path" <|
                 \_ ->
                     Route.toPath (BookDetail "xyz")

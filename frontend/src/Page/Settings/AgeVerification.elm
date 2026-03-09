@@ -1,11 +1,12 @@
 module Page.Settings.AgeVerification exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , update
     , view
     )
 
+import Api
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -21,7 +22,7 @@ type alias Model =
 
 
 type Msg
-    = RequestToggle
+    = ToggleRequested
     | ConfirmToggle
     | CancelToggle
     | SaveCompleted (Result Http.Error ())
@@ -35,20 +36,25 @@ init =
     }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update msg model maybeToken =
     case msg of
-        RequestToggle ->
+        ToggleRequested ->
             ( { model | confirmModalOpen = True }, Cmd.none )
 
         ConfirmToggle ->
-            ( { model
-                | ageVerified = not model.ageVerified
-                , confirmModalOpen = False
-                , saving = Loading
-              }
-            , Cmd.none
-            )
+            let
+                newValue =
+                    not model.ageVerified
+            in
+            case maybeToken of
+                Just token ->
+                    ( { model | confirmModalOpen = False, saving = Loading }
+                    , Api.updateAgeVerification newValue token SaveCompleted
+                    )
+
+                Nothing ->
+                    ( { model | confirmModalOpen = False }, Cmd.none )
 
         CancelToggle ->
             ( { model | confirmModalOpen = False }, Cmd.none )
@@ -56,7 +62,8 @@ update msg model =
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none )
+                    -- Flip the local state only after the server confirms it.
+                    ( { model | ageVerified = not model.ageVerified, saving = Success () }, Cmd.none )
 
                 Err err ->
                     ( { model | saving = Failure err }, Cmd.none )
@@ -90,7 +97,7 @@ view model =
                          else
                             "toggle toggle--off"
                         )
-                    , onClick RequestToggle
+                    , onClick ToggleRequested
                     ]
                     [ text
                         (if model.ageVerified then

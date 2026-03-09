@@ -1,6 +1,6 @@
-module Page.Bookshelf.Library exposing
+module Page.Bookshelf.LookingForHome exposing
     ( Model
-    , Msg(..)
+    , Msg
     , OutMsg(..)
     , init
     , update
@@ -10,19 +10,16 @@ module Page.Bookshelf.Library exposing
 import Api
 import Components.AgeGate exposing (ageGate)
 import Components.EmptyBookshelf exposing (emptyBookshelf)
-import Components.Spine exposing (WearLevel(..), spine)
 import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
 import Http
 import Navigation.Route exposing (Route(..))
-import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
 
 type alias Model =
     { books : RemoteData Http.Error (List Placement)
-    , selectedBook : Maybe Book
     , showAgeGate : Bool
     }
 
@@ -34,8 +31,6 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Placement))
-    | SelectBook Book
-    | ClearSelection
     | VerifyAge
     | DismissAgeGate
 
@@ -46,12 +41,12 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    Api.getBookshelf "library" token BooksLoaded
+                    Api.getBookshelf "looking_for_home" token BooksLoaded
 
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, selectedBook = Nothing, showAgeGate = False }, cmd )
+    ( { books = Loading, showAgeGate = False }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -68,12 +63,6 @@ update msg model =
                 Err err ->
                     ( { model | books = Failure err }, Cmd.none, NoOut )
 
-        SelectBook book ->
-            ( { model | selectedBook = Just book }, Cmd.none, NoOut )
-
-        ClearSelection ->
-            ( { model | selectedBook = Nothing }, Cmd.none, NoOut )
-
         VerifyAge ->
             ( model, Cmd.none, NavigateTo SettingsAgeVerification )
 
@@ -83,8 +72,8 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--shelf shelf-library" ]
-        [ h1 [ class "page__title" ] [ text "Library" ]
+    div [ class "page page--bookshelf shelf-looking-for-home" ]
+        [ h1 [ class "page__title" ] [ text "Looking for a Home" ]
         , if model.showAgeGate then
             ageGate
                 { onVerify = VerifyAge
@@ -97,43 +86,40 @@ view model =
                     text ""
 
                 Loading ->
-                    div [ class "loading" ] [ text "Loading your library..." ]
+                    div [ class "loading" ] [ text "Loading your books looking for a home..." ]
 
                 Failure _ ->
-                    p [ class "error" ] [ text "Could not load your library. Please try again." ]
+                    p [ class "error" ]
+                        [ text "Could not load your books looking for a home. Please try again." ]
 
                 Success placements ->
                     if List.isEmpty placements then
                         emptyBookshelf
-                            { bookshelf = "library"
+                            { bookshelf = "looking_for_home"
                             , message =
-                                "Your library is empty — start by adding some books you own."
+                                "Nothing here yet — these are books looking for a new home."
                             }
 
                     else
-                        div [ class "bookshelf" ]
-                            [ div [ class "bookshelf__row" ]
-                                (List.map viewSpine placements)
-                            ]
+                        div [ class "pile-view" ]
+                            (List.map viewCover placements)
         ]
 
 
-viewSpine : Placement -> Html Msg
-viewSpine placement =
+viewCover : Placement -> Html Msg
+viewCover placement =
     let
-        ( title, author, pageCount ) =
+        ( title, author ) =
             case placement.book of
                 Just book ->
-                    ( book.title, book.author.name, Maybe.withDefault 200 book.pageCount )
+                    ( book.title, book.author.name )
 
                 Nothing ->
-                    ( "Unknown Title", "Unknown Author", 200 )
+                    ( "Unknown Title", "Unknown Author" )
     in
-    div [ class "bookshelf__book" ]
-        [ spine
-            { pageCount = pageCount
-            , wearLevel = Softened
-            , title = title
-            , author = author
-            }
+    div [ class "pile-view__book" ]
+        [ div [ class "pile-view__cover" ]
+            [ p [ class "pile-view__title" ] [ text title ]
+            , p [ class "pile-view__author" ] [ text author ]
+            ]
         ]

@@ -1,11 +1,12 @@
 module Page.Settings.Consent exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , update
     , view
     )
 
+import Api
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -32,14 +33,21 @@ init =
     }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update msg model maybeToken =
     case msg of
         ToggleAnalytics ->
             ( { model | analyticsConsent = not model.analyticsConsent }, Cmd.none )
 
         SaveConsent ->
-            ( { model | saving = Loading }, Cmd.none )
+            case maybeToken of
+                Just token ->
+                    ( { model | saving = Loading }
+                    , Api.saveConsent model.analyticsConsent token SaveCompleted
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
 
         SaveCompleted result ->
             case result of
