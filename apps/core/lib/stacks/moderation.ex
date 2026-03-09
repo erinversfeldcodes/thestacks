@@ -25,6 +25,8 @@ defmodule Stacks.Moderation do
          {:ok, isbn} <- extract_isbn(image_url),
          {:ok, subjects} <- classify_subjects(isbn, context) do
       store_with_tier(isbn, subjects, context)
+    else
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -54,23 +56,32 @@ defmodule Stacks.Moderation do
       {:ok, metadata} ->
         subjects = metadata[:subjects] || []
         bisac_codes = subjects_to_bisac(subjects)
-        {:ok, %{subjects: subjects, bisac_codes: bisac_codes}}
+        {:ok, metadata |> Map.put(:subjects, subjects) |> Map.put(:bisac_codes, bisac_codes)}
 
       _ ->
         {:ok, %{subjects: [], bisac_codes: []}}
     end
   end
 
-  defp store_with_tier(isbn, subjects_data, context) do
-    visibility_tier = determine_visibility_tier(subjects_data.bisac_codes)
+  defp store_with_tier(isbn, metadata, context) do
+    visibility_tier = determine_visibility_tier(metadata.bisac_codes)
 
-    attrs =
-      Map.merge(context[:book_attrs] || %{}, %{
-        "isbn" => isbn,
-        "subjects" => subjects_data.subjects,
-        "bisac_codes" => subjects_data.bisac_codes,
-        "visibility_tier" => visibility_tier
-      })
+    # ISBNResolver metadata is the base; context book_attrs can override any field
+    base_attrs = %{
+      "isbn" => isbn,
+      "title" => metadata[:title],
+      "subjects" => metadata.subjects,
+      "bisac_codes" => metadata.bisac_codes,
+      "visibility_tier" => visibility_tier,
+      "description" => metadata[:description],
+      "cover_image_url" => metadata[:cover_image_url],
+      "publisher" => metadata[:publisher],
+      "publication_year" => metadata[:publication_year],
+      "page_count" => metadata[:page_count],
+      "author" => metadata[:author]
+    }
+
+    attrs = Map.merge(base_attrs, context[:book_attrs] || %{})
 
     case Books.find_existing(isbn) do
       nil -> Books.create(attrs)

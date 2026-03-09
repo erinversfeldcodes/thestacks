@@ -1,6 +1,6 @@
 defmodule Stacks.Acceptance.UploadBookTest do
   @moduledoc """
-  Acceptance test for user story US-1.1.1: Upload → Identify → Place on shelf.
+  Acceptance test for user story US-1.1.1: Upload → Identify → Place on bookshelf.
   Uses mocked vision client (Stacks.AI.MockClient) which is configured in test.exs.
   Oban is in :manual mode so jobs are enqueued but not executed inline.
   """
@@ -16,8 +16,8 @@ defmodule Stacks.Acceptance.UploadBookTest do
   alias Stacks.Shelving.Placement
   alias Stacks.Workers.IdentifyBookJob
 
-  describe "US-1.1.1 upload → identify → place on shelf" do
-    test "happy path: image upload enqueues IdentifyBookJob and book can be placed on shelf" do
+  describe "US-1.1.1 upload → identify → place on bookshelf" do
+    test "happy path: image upload enqueues IdentifyBookJob and book can be placed on bookshelf" do
       {:ok, user} =
         Accounts.register(%{"email" => "reader@example.com", "password" => "password123"})
 
@@ -33,8 +33,8 @@ defmodule Stacks.Acceptance.UploadBookTest do
         args: %{"user_id" => user.id, "image_id" => image_id}
       )
 
-      # Step 2: Place the pre-existing book on a shelf
-      shelf =
+      # Step 2: Place the pre-existing book on a bookshelf
+      bookshelf =
         %Bookshelf{}
         |> Bookshelf.changeset(%{user_id: user.id, name: "library"})
         |> Repo.insert!()
@@ -43,12 +43,12 @@ defmodule Stacks.Acceptance.UploadBookTest do
         Repo.insert(
           Placement.changeset(%Placement{}, %{
             book_id: book.id,
-            bookshelf_id: shelf.id
+            bookshelf_id: bookshelf.id
           })
         )
 
-      # Step 3: Verify book is on shelf
-      placements = Shelving.get_shelf_books(user.id, "library")
+      # Step 3: Verify book is on bookshelf
+      placements = Shelving.get_bookshelf_books(user.id, "library")
       ids = Enum.map(placements, & &1.id)
       assert placement.id in ids
     end

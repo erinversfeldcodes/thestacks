@@ -17,18 +17,18 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert export.user.id == user.id
       assert export.user.email == user.email
-      assert is_list(export.shelves)
+      assert is_list(export.bookshelves)
       assert is_list(export.placements)
     end
 
-    test "includes shelves and placements" do
+    test "includes bookshelves and placements" do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      insert(:placement, bookshelf: shelf, book: book)
+      insert(:placement, bookshelf: bookshelf, book: book)
 
       assert {:ok, export} = Export.export_user_data(user.id)
-      assert length(export.shelves) == 1
+      assert length(export.bookshelves) == 1
       assert length(export.placements) == 1
     end
 
@@ -40,25 +40,25 @@ defmodule Stacks.GDPRTest do
   describe "Deletion.delete_user_data/1" do
     test "removes all user data" do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      insert(:placement, bookshelf: shelf, book: book)
+      insert(:placement, bookshelf: bookshelf, book: book)
 
       assert {:ok, _} = Deletion.delete_user_data(user.id)
       assert nil == Repo.get(User, user.id)
     end
 
-    test "removes placement history for user's shelves" do
+    test "removes placement history for user's bookshelves" do
       user = insert(:user)
-      shelf = insert(:bookshelf, user: user, name: "library")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
-      insert(:placement, bookshelf: shelf, book: book)
-      to_shelf = insert(:bookshelf, user: insert(:user), name: "wishlist")
+      insert(:placement, bookshelf: bookshelf, book: book)
+      to_bookshelf = insert(:bookshelf, user: insert(:user), name: "wishlist")
 
       {:ok, id_bin} = Ecto.UUID.dump(Ecto.UUID.generate())
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
-      {:ok, from_bin} = Ecto.UUID.dump(shelf.id)
-      {:ok, to_bin} = Ecto.UUID.dump(to_shelf.id)
+      {:ok, from_bin} = Ecto.UUID.dump(bookshelf.id)
+      {:ok, to_bin} = Ecto.UUID.dump(to_bookshelf.id)
 
       Core.Repo.insert_all(
         "bookshelf_placement_history",

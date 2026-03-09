@@ -15,16 +15,27 @@ defmodule StacksWeb.UploadControllerTest do
   end
 
   describe "POST /api/upload" do
-    test "accepts image_id and enqueues IdentifyBookJob", %{conn: conn, user: user} do
-      image_id = Ecto.UUID.generate()
-      conn = post(conn, "/api/upload", %{image_id: image_id})
+    test "accepts image upload and enqueues IdentifyBookJob", %{conn: conn, user: user} do
+      tmp_path = Path.join(System.tmp_dir!(), "test_upload_#{System.unique_integer()}.jpg")
+      File.write!(tmp_path, "fake image content")
 
-      assert %{"status" => "accepted", "image_id" => ^image_id} = json_response(conn, 202)
+      upload = %Plug.Upload{
+        path: tmp_path,
+        filename: "test_book.jpg",
+        content_type: "image/jpeg"
+      }
+
+      conn = post(conn, "/api/upload", %{"image" => upload})
+
+      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
+      assert is_binary(image_id)
 
       assert_enqueued(
         worker: IdentifyBookJob,
         args: %{"user_id" => user.id, "image_id" => image_id}
       )
+
+      File.rm(tmp_path)
     end
 
     test "returns 422 when no image provided", %{conn: conn} do
@@ -34,7 +45,41 @@ defmodule StacksWeb.UploadControllerTest do
 
     test "returns 401 without auth token" do
       conn = build_conn()
-      conn = post(conn, "/api/upload", %{image_id: "test"})
+      conn = post(conn, "/api/upload", %{"image" => "not_a_file"})
+      assert json_response(conn, 401)
+    end
+  end
+
+  describe "GET /api/upload/:image_id/status" do
+    test "returns status for an existing image", %{conn: conn} do
+      tmp_path = Path.join(System.tmp_dir!(), "status_test_#{System.unique_integer()}.jpg")
+      File.write!(tmp_path, "fake image content")
+
+      upload = %Plug.Upload{
+        path: tmp_path,
+        filename: "test_book.jpg",
+        content_type: "image/jpeg"
+      }
+
+      %{"image_id" => image_id} =
+        conn
+        |> post("/api/upload", %{"image" => upload})
+        |> json_response(202)
+
+      conn2 = get(conn, "/api/upload/#{image_id}/status")
+      assert %{"image_id" => ^image_id, "status" => "pending"} = json_response(conn2, 200)
+
+      File.rm(tmp_path)
+    end
+
+    test "returns 404 for unknown image_id", %{conn: conn} do
+      conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
+
+    test "returns 401 without auth token" do
+      conn = build_conn()
+      conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
       assert json_response(conn, 401)
     end
   end

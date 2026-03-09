@@ -31,6 +31,8 @@ defmodule Stacks.Audit do
     resource_type = Keyword.get(opts, :resource_type, "unknown")
 
     entry_id = Ecto.UUID.generate()
+    raw_metadata = Keyword.get(opts, :metadata, %{})
+    encrypted_metadata = raw_metadata |> Jason.encode!() |> Stacks.Vault.encrypt!()
 
     params = %{
       id: Ecto.UUID.dump!(entry_id),
@@ -39,11 +41,11 @@ defmodule Stacks.Audit do
       resource_type: resource_type,
       resource_id: encode_uuid(Keyword.get(opts, :resource_id)),
       ip_address: ip_address,
-      metadata: Keyword.get(opts, :metadata, %{}),
+      metadata: encrypted_metadata,
       occurred_at: now
     }
 
-    result_params = %{params | id: entry_id, user_id: user_id}
+    result_params = %{params | id: entry_id, user_id: user_id, metadata: raw_metadata}
 
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} -> {:ok, result_params}

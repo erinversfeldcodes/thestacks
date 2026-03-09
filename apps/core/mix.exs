@@ -15,7 +15,12 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: [
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test
@@ -46,6 +51,7 @@ defmodule Core.MixProject do
       {:cloak_ecto, "~> 1.3"},
       {:jason, "~> 1.4"},
       {:plug_cowboy, "~> 2.7"},
+      {:cors_plug, "~> 3.0"},
       {:prom_ex, "~> 1.9"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.1"},

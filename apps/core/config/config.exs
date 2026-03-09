@@ -31,6 +31,19 @@ config :core, Stacks.Accounts.Guardian,
 
 config :core, :vision_client, Stacks.AI.Client
 config :core, :vision_sidecar_url, "http://localhost:8000"
+config :core, :vision_hmac_secret, "dev-only-hmac-secret-change-in-production"
+
+# Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
+# The key below is for development only. In production, set CLOAK_KEY.
+config :core, Stacks.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1",
+      key: Base.decode64!("47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="),
+      iv_length: 12
+    }
+  ]
 
 config :core, :ai_budget,
   daily_limit_cents: 500,

@@ -11,7 +11,7 @@ defmodule Stacks.Books do
 
   alias Core.Repo
   alias Ecto.Multi
-  alias Stacks.Books.{Author, Book}
+  alias Stacks.Books.{Author, Book, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
   alias Stacks.Workers.IdentifyBookJob
@@ -48,7 +48,7 @@ defmodule Stacks.Books do
     Multi.new()
     |> Multi.insert(:book, changeset)
     |> Multi.run(:emit_event, fn _repo, %{book: book} ->
-      Events.emit(%{
+      Events.emit_safe(%{
         event_type: "book.created",
         aggregate_type: "book",
         aggregate_id: book.id,
@@ -86,6 +86,41 @@ defmodule Stacks.Books do
   @spec resolve_isbn(String.t()) :: {:ok, map()} | {:error, :not_found}
   def resolve_isbn(isbn) do
     ISBNResolver.resolve(isbn)
+  end
+
+  @doc """
+  Persists an uploaded file to the configured upload directory and inserts an
+  `UploadedImage` record. Returns `{:ok, uploaded_image}` or `{:error, reason}`.
+
+  The storage path is relative (e.g. `"abc123.jpg"`). The URL the vision sidecar
+  uses to fetch the image is built by `IdentifyBookJob` from `:storage_base_url`.
+  In production, replace this with a Tigris/S3 upload.
+  """
+  @spec store_upload(binary(), Plug.Upload.t()) ::
+          {:ok, UploadedImage.t()} | {:error, term()}
+  def store_upload(_user_id, %Plug.Upload{filename: filename, path: tmp_path}) do
+    image_id = Ecto.UUID.generate()
+    ext = Path.extname(filename)
+    upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
+    File.mkdir_p!(upload_dir)
+    dest = Path.join(upload_dir, "#{image_id}#{ext}")
+
+    case File.copy(tmp_path, dest) do
+      {:ok, _} ->
+        now = DateTime.utc_now()
+
+        %UploadedImage{id: image_id}
+        |> UploadedImage.changeset(%{
+          storage_path: "#{image_id}#{ext}",
+          status: "pending",
+          uploaded_at: now,
+          expires_at: DateTime.add(now, 30, :day)
+        })
+        |> Repo.insert()
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """

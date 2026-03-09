@@ -22,33 +22,32 @@ defmodule Stacks.GDPR.Deletion do
   @spec delete_user_data(binary()) :: {:ok, map()} | {:error, atom(), term(), map()}
   def delete_user_data(user_id) do
     Multi.new()
-    |> Multi.run(:shelves, fn repo, _ ->
-      shelves = repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id)
-      {:ok, shelves}
+    |> Multi.run(:bookshelves, fn repo, _ ->
+      bookshelves = repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id)
+      {:ok, bookshelves}
     end)
-    |> Multi.run(:shelf_ids, fn _repo, %{shelves: shelves} ->
-      {:ok, Enum.map(shelves, & &1.id)}
+    |> Multi.run(:bookshelf_ids, fn _repo, %{bookshelves: bookshelves} ->
+      {:ok, Enum.map(bookshelves, & &1.id)}
     end)
-    |> Multi.run(:placement_ids, fn repo, %{shelf_ids: shelf_ids} ->
-      ids = repo.all(from p in Placement, where: p.bookshelf_id in ^shelf_ids, select: p.id)
+    |> Multi.run(:placement_ids, fn repo, %{bookshelf_ids: bookshelf_ids} ->
+      ids = repo.all(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids, select: p.id)
       {:ok, ids}
     end)
-    |> Multi.run(:delete_history, fn repo,
-                                     %{placement_ids: _placement_ids, shelf_ids: shelf_ids} ->
+    |> Multi.run(:delete_history, fn repo, %{bookshelf_ids: bookshelf_ids} ->
       # PlacementHistory has from_bookshelf/to_bookshelf UUIDs, not placement_id
       {count, _} =
         repo.delete_all(
           from h in PlacementHistory,
-            where: h.from_bookshelf in ^shelf_ids or h.to_bookshelf in ^shelf_ids
+            where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
         )
 
       {:ok, count}
     end)
-    |> Multi.run(:delete_placements, fn repo, %{shelf_ids: shelf_ids} ->
-      {count, _} = repo.delete_all(from p in Placement, where: p.bookshelf_id in ^shelf_ids)
+    |> Multi.run(:delete_placements, fn repo, %{bookshelf_ids: bookshelf_ids} ->
+      {count, _} = repo.delete_all(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids)
       {:ok, count}
     end)
-    |> Multi.run(:delete_shelves, fn repo, _ ->
+    |> Multi.run(:delete_bookshelves, fn repo, _ ->
       {count, _} = repo.delete_all(from bs in Bookshelf, where: bs.user_id == ^user_id)
       {:ok, count}
     end)
@@ -67,11 +66,9 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, count}
     end)
     |> Multi.run(:delete_user, fn repo, _ ->
-      user = repo.get!(User, user_id)
-
-      case repo.delete(user) do
-        {:ok, deleted} -> {:ok, deleted}
-        {:error, changeset} -> {:error, changeset}
+      case repo.get(User, user_id) do
+        nil -> {:error, :user_not_found}
+        user -> repo.delete(user)
       end
     end)
     |> Multi.run(:audit, fn _repo, _ ->

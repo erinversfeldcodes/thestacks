@@ -3,6 +3,7 @@ defmodule CoreWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug CORSPlug
     plug StacksWeb.Plugs.SecurityHeaders
   end
 
@@ -12,6 +13,10 @@ defmodule CoreWeb.Router do
 
   pipeline :rate_limit_auth do
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
+  end
+
+  pipeline :rate_limit_upload do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :upload
   end
 
   scope "/api", CoreWeb do
@@ -26,23 +31,31 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_upload]
+    post "/upload", UploadController, :create
+  end
+
+  scope "/api", StacksWeb do
     pipe_through [:api, :authenticated]
 
     delete "/auth/logout", AuthController, :logout
     get "/auth/me", AuthController, :me
 
-    post "/upload", UploadController, :create
+    get "/upload/:image_id/status", UploadController, :status
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn
-    resources "/books", BookController, only: [:show]
+    resources "/books", BookController, only: [:show, :create]
 
     get "/search", SearchController, :index
 
-    get "/shelves/:shelf_name", ShelfController, :show
+    get "/bookshelves/:bookshelf_name", BookshelfController, :show
 
-    post "/shelves/:shelf_name/placements", ShelfPlacementController, :create
-    put "/placements/:id/move", ShelfPlacementController, :move
-    delete "/placements/:id", ShelfPlacementController, :delete
+    post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
+    put "/placements/:id/move", BookshelfPlacementController, :move
+    put "/placements/:id/formats", BookshelfPlacementController, :update_formats
+    delete "/placements/:id", BookshelfPlacementController, :delete
+
+    put "/settings/age_verification", UserSettingsController, :update_age_verification
 
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account

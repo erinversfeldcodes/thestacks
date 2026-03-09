@@ -2,7 +2,7 @@ defmodule Stacks.Shelving.PlacementHistory do
   @moduledoc """
   Schema for op.bookshelf_placement_history table.
 
-  Records book movements between shelves. Stores the source/destination shelf
+  Records book movements between bookshelves. Stores the source/destination bookshelf
   UUIDs as plain fields (from_bookshelf, to_bookshelf) and the book_id.
   """
 
@@ -20,7 +20,7 @@ defmodule Stacks.Shelving.PlacementHistory do
     field :moved_at, :utc_datetime_usec
   end
 
-  @doc "Changeset for recording a shelf move."
+  @doc "Changeset for recording a bookshelf move."
   def changeset(history, attrs) do
     history
     |> cast(attrs, [:book_id, :from_bookshelf, :to_bookshelf, :moved_at])

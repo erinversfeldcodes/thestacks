@@ -31,6 +31,26 @@ defmodule Stacks.BooksTest do
       assert {:error, changeset} = Books.create(attrs)
       assert %{isbn: [_]} = errors_on(changeset)
     end
+
+    test "returns error on isbn-13 with invalid checksum" do
+      # 9780743273565 is valid; changing the last digit breaks the checksum
+      attrs = %{"isbn" => "9780743273560", "title" => "Bad Checksum"}
+      assert {:error, changeset} = Books.create(attrs)
+      assert %{isbn: ["has an invalid checksum"]} = errors_on(changeset)
+    end
+
+    test "returns error on isbn-10 with invalid checksum" do
+      # 0306406152 is a valid ISBN-10; changing the last digit breaks it
+      attrs = %{"isbn" => "0306406153", "title" => "Bad ISBN-10 Checksum"}
+      assert {:error, changeset} = Books.create(attrs)
+      assert %{isbn: ["has an invalid checksum"]} = errors_on(changeset)
+    end
+
+    test "accepts isbn-10 with valid checksum" do
+      attrs = %{"isbn" => "0306406152", "title" => "Valid ISBN-10"}
+      assert {:ok, book} = Books.create(attrs)
+      assert book.isbn == "0306406152"
+    end
   end
 
   describe "find_existing/1" do
