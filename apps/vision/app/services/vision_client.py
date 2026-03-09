@@ -21,14 +21,25 @@ class TogetherResponse(TypedDict):
 
 
 _EXTRACT_SYSTEM_PROMPT = (
-    "Extract the book title, author name, and any ISBN numbers visible in this image. "
-    "Return JSON with fields: title, author, potential_isbns (array), raw_text."
+    "Extract all books visible or mentioned in this image. For each book, return its title, "
+    "author name, and any ISBN numbers visible. If the image is a screenshot of text "
+    "(social media post, article, reading list), extract all books mentioned in the text. "
+    "Return JSON with field: books (array of objects, each with: title, author, "
+    "potential_isbns (array of strings), raw_text). "
+    'If no books can be identified, return {"books": []}.'
 )
 
 _CLASSIFY_SYSTEM_PROMPT = (
-    "Classify this image. Is it a book? "
-    "Return JSON with fields: classification (one of: book, not_book, ambiguous), "
-    "confidence (0.0-1.0)."
+    "Does this image contain enough information to identify a book?\n\n"
+    'Answer "book" if: the image shows a physical book (cover, spine, back, or barcode), '
+    "OR the image is a screenshot or photo of text that mentions a specific book title or "
+    "author.\n\n"
+    'Answer "not_book" if: the image has no book-related content whatsoever (a pet, food, '
+    "a landscape, a selfie with no book context).\n\n"
+    'Answer "ambiguous" if: there is some possible book-related content but not enough '
+    "to attempt identification.\n\n"
+    'Return JSON: {"classification": "book" | "not_book" | "ambiguous", '
+    '"confidence": 0.0-1.0}'
 )
 
 

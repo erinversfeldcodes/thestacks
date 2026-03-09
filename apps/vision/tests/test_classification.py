@@ -109,6 +109,38 @@ def test_classify_with_oversized_image_returns_422() -> None:
     assert response.status_code == 422
 
 
+def test_classify_screenshot_with_book_mention_returns_book() -> None:
+    """Screenshot inputs mentioning a book title or author should classify as 'book'.
+
+    The updated _CLASSIFY_SYSTEM_PROMPT explicitly instructs the model to answer
+    "book" when the image is a screenshot or photo of text that mentions a specific
+    book title or author (e.g. a social media post, article, or reading list).
+    Under the old prompt, which only described physical books, such inputs would
+    have produced "not_book" or "ambiguous". This test validates that the endpoint
+    correctly surfaces a "book" classification from the model for screenshot inputs.
+    """
+    mock_output = _mock_together_response({"classification": "book", "confidence": 0.9})
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value=mock_output,
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/classify",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["classification"] == "book"
+    assert data["confidence"] == 0.9
+    assert data["model_used"] == settings.model_name
+
+
 def test_classify_unknown_classification_falls_back_to_ambiguous() -> None:
     """Unknown classification string from model should default to ambiguous."""
     mock_output = _mock_together_response({"classification": "unknown_value", "confidence": 0.3})
