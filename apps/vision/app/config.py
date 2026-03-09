@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     log_level: str = "info"
     hmac_secret: str = "change_me_in_dev"
     together_api_key: str = ""
-    model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    model_name: str = "Qwen/Qwen3-VL-8B-Instruct"
     model_provider: str = "together"  # Reserved for future multi-provider support (e.g. Replicate)
     request_timeout_seconds: int = 30
     max_image_size_bytes: int = 10_485_760  # 10 MB

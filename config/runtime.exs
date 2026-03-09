@@ -1,5 +1,31 @@
 import Config
 
+# Load secrets from env vars for dev and prod.
+# Tests use hardcoded values from config/test.exs — no env vars required.
+if config_env() != :test do
+  cloak_key =
+    System.get_env("CLOAK_KEY") ||
+      raise "environment variable CLOAK_KEY is missing. Generate with: :crypto.strong_rand_bytes(32) |> Base.encode64()"
+
+  config :core, Stacks.Vault,
+    ciphers: [
+      default: {
+        Cloak.Ciphers.AES.GCM,
+        tag: "AES.GCM.V1", key: Base.decode64!(cloak_key), iv_length: 12
+      }
+    ]
+
+  vision_hmac_secret =
+    System.get_env("VISION_HMAC_SECRET") ||
+      raise "environment variable VISION_HMAC_SECRET is missing."
+
+  if byte_size(String.trim(vision_hmac_secret)) < 16 do
+    raise "VISION_HMAC_SECRET must be at least 16 characters. Got an empty or too-short value."
+  end
+
+  config :core, :vision_hmac_secret, vision_hmac_secret
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

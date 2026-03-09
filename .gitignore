@@ -65,3 +65,9 @@ node_modules/
 
 # Test upload artifacts
 apps/core/priv/static/uploads/
+e2e/test-results
+apps/core/cover/
+frontend/test-results
+frontend/public
+priv/
+test-results/

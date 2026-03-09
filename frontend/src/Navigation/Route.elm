@@ -10,6 +10,7 @@ import Url.Parser as Parser exposing ((</>), Parser, s, string)
 
 type Route
     = Home
+    | Login
     | Library
     | AntiLibrary
     | WishList
@@ -27,6 +28,7 @@ parser : Parser (Route -> a) a
 parser =
     Parser.oneOf
         [ Parser.map Home Parser.top
+        , Parser.map Login (s "login")
         , Parser.map Library (s "library")
         , Parser.map AntiLibrary (s "antilibrary")
         , Parser.map WishList (s "wishlist")
@@ -51,6 +53,9 @@ toPath route =
     case route of
         Home ->
             "/"
+
+        Login ->
+            "/login"
 
         Library ->
             "/library"

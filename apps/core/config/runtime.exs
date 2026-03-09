@@ -12,10 +12,15 @@ config :core, Stacks.Vault,
     }
   ]
 
-config :core,
-       :vision_hmac_secret,
-       System.get_env("VISION_HMAC_SECRET") ||
-         raise("environment variable VISION_HMAC_SECRET is missing.")
+vision_hmac_secret =
+  System.get_env("VISION_HMAC_SECRET") ||
+    raise "environment variable VISION_HMAC_SECRET is missing."
+
+if byte_size(String.trim(vision_hmac_secret)) < 16 do
+  raise "VISION_HMAC_SECRET must be at least 16 characters. Got an empty or too-short value."
+end
+
+config :core, :vision_hmac_secret, vision_hmac_secret
 
 if config_env() == :prod do
   database_url =
