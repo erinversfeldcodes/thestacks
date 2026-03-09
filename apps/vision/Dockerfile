@@ -4,10 +4,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 FROM python:3.12-slim AS runtime
+RUN useradd -m -u 1000 appuser
 WORKDIR /app
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /root/.local /home/appuser/.local
 COPY app/ ./app/
-ENV PATH=/root/.local/bin:$PATH
+RUN chown -R appuser /app /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
+USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"

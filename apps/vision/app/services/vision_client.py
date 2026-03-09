@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import httpx
 from fastapi import HTTPException
@@ -44,14 +44,14 @@ class VisionClient:
 
     async def extract(self, images: list[str]) -> TogetherResponse:
         """Call Together AI to extract text from images. Returns raw model output."""
-        image_content = [
+        image_content: list[dict[str, object]] = [
             {
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{img}"},
             }
             for img in images
         ]
-        messages = [
+        messages: list[dict[str, object]] = [
             {"role": "system", "content": _EXTRACT_SYSTEM_PROMPT},
             {"role": "user", "content": image_content},
         ]
@@ -59,7 +59,7 @@ class VisionClient:
 
     async def classify(self, image: str) -> TogetherResponse:
         """Call Together AI to classify if image is a book."""
-        messages = [
+        messages: list[dict[str, object]] = [
             {"role": "system", "content": _CLASSIFY_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -86,7 +86,7 @@ class VisionClient:
         try:
             response = await self._client.post(_TOGETHER_API_URL, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()
+            return cast(TogetherResponse, response.json())
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
         except httpx.HTTPStatusError as exc:

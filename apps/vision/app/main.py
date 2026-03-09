@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.vision_client.close()
 
 
-app = FastAPI(title="The Stacks Vision Sidecar", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="The Stacks Vision Sidecar", version="0.1.0", lifespan=lifespan, debug=False)
 
 
 @app.get("/health", status_code=200)
@@ -63,7 +63,10 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
     log.info("calling vision model for extraction")
     raw_output: TogetherResponse = await client.extract(body.images)
 
-    content = raw_output.get("choices", [{}])[0].get("message", {}).get("content", "")
+    try:
+        content = raw_output["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        content = ""
     parsed: dict[str, object] = {}
     try:
         parsed = json.loads(content)
@@ -79,8 +82,10 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
         else [],
         raw_text=content or None,
         model_used=settings.model_name,
-        # The extraction model does not return a confidence score — always 0.0.
-        # Only the /classify endpoint produces a meaningful confidence value.
+        # confidence is 0.0 for the VLM path — the model does not return an extraction confidence.
+        # Phase 1D.2 (local OCR pre-pass) will populate this field when a barcode is detected
+        # with high confidence, allowing Phoenix to skip ISBN verification for clean scans.
+        # Only /classify produces a meaningful confidence from the current model.
         confidence=0.0,
     )
 
@@ -108,7 +113,10 @@ async def classify(request: Request, body: ClassificationRequest) -> Classificat
     log.info("calling vision model for classification")
     raw_output: TogetherResponse = await client.classify(body.image)
 
-    content = raw_output.get("choices", [{}])[0].get("message", {}).get("content", "")
+    try:
+        content = raw_output["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        content = ""
     parsed: dict[str, object] = {}
     try:
         parsed = json.loads(content)
