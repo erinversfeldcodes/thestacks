@@ -68,16 +68,44 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering, comments describe "why" not "what"
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — new feature → acceptance + unit tests; new endpoint → contract + integration test; new worker → unit + chaos test
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What specific context APIs, schemas, worker behaviours, or Phoenix contracts does it require from the current implementation?
+  - Does the current implementation provide them correctly — right function signatures, right return shapes, right error tuples?
+  - Are there any naming conventions, data structures, or architectural decisions here that downstream work will need to extend, work around, or undo?
+- State a clear verdict: **READY** (downstream work builds directly on this without impediment) or **GAPS** (list exactly what needs to change before downstream work begins)
+
 ---
 
 ## Review Process
+
+0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
+   - Extract the full inventory of required items from the issue's Technical Requirements section:
+     every context, controller, Oban worker, and plug named there.
+   - List the actual file tree under `apps/core/lib/stacks/`, `apps/core/lib/stacks_web/`,
+     and `apps/core/test/`.
+   - For every required item, check: does the implementation file exist? does a test file exist?
+   - Any required item absent from the file tree is a **FAILED** finding — record it in the
+     Spec Coverage Audit section of the report, regardless of what the completion report claims.
+   - The spec is the ground truth. The completion report is not.
 
 1. Read the phase objective, DoD items, and all user stories from the invoking prompt
 2. Read every file listed in the implementation completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run the full lint + test suite** — execute from `apps/core/` and record exact output:
+   - `mix format --check-formatted` — any unformatted files
+   - `mix compile --warnings-as-errors` — any compiler warnings treated as errors
+   - `mix credo --strict` — any issues
+   - `mix sobelow --config` — any high-severity findings
+   - `mix test` — total test count, failure count, any error messages
+   A non-zero exit from any of these is a **required revision**, not a note. Do not skip this step.
+   Note: `mix format --check-formatted` is not the same as `mix credo`. The formatter catches line-length and style issues that credo does not. Both must pass.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the current implementation adequately provides the foundations each downstream issue will need.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -88,9 +116,22 @@ Load and check against:
 
 ### Verdict: APPROVED | NEEDS_REVISION | FAILED
 
+### Spec Coverage Audit
+Items required by the Technical Requirements section, cross-checked against the file tree:
+- [x] Item name (present: `path/to/file.ex` + `path/to/test.exs`)
+- [ ] Item name (MISSING — no implementation file found)
+- [ ] Item name (UNTESTED — implementation present, no test file)
+
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `mix format --check-formatted`: [clean / N files unformatted — list them]
+- `mix compile --warnings-as-errors`: [clean / warnings found]
+- `mix credo --strict`: [clean / N issues — list them]
+- `mix sobelow --config`: [no high-severity findings / N findings — list them]
+- `mix test`: [X tests, N failures — paste exact summary line]
 
 ### User Story Concordance
 For each story:
@@ -134,6 +175,11 @@ For each story:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What it requires from this work] — [Provided? Y/N] — [Any gaps or decisions that will need revisiting]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file:line]
