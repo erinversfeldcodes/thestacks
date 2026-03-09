@@ -85,7 +85,8 @@ defmodule Stacks.Accounts do
   @doc """
   Updates the age_verified flag for a user.
   """
-  @spec update_age_verification(binary(), boolean()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  @spec update_age_verification(binary(), boolean()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_age_verification(user_id, age_verified) when is_boolean(age_verified) do
     user_id
     |> get_user!()

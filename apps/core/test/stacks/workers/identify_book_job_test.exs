@@ -29,6 +29,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
+
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, job_args(user.id))
       after
@@ -44,6 +45,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
+
         assert {:error, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, job_args(user.id))
       after
@@ -59,6 +61,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.ErrorClient)
+
         assert {:error, :service_unavailable} =
                  perform_job(IdentifyBookJob, job_args(user.id))
       after

@@ -26,7 +26,14 @@ defmodule Stacks.Books.UploadedImage do
 
   def changeset(image, attrs) do
     image
-    |> cast(attrs, [:storage_path, :status, :rejection_reason, :uploaded_at, :expires_at, :book_id])
+    |> cast(attrs, [
+      :storage_path,
+      :status,
+      :rejection_reason,
+      :uploaded_at,
+      :expires_at,
+      :book_id
+    ])
     |> validate_required([:storage_path, :status, :uploaded_at, :expires_at])
     |> validate_inclusion(:status, @valid_statuses)
   end

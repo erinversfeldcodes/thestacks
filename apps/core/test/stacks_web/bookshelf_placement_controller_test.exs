@@ -78,7 +78,11 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       %{user: user, bookshelf: bookshelf, book: book, placement: placement}
     end
 
-    test "returns 200 when user moves own placement", %{conn: conn, user: user, placement: placement} do
+    test "returns 200 when user moves own placement", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
       conn =
         conn
         |> auth_conn(user)
@@ -102,7 +106,11 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert %{"error" => "forbidden"} = json_response(conn, 403)
     end
 
-    test "returns 422 when bookshelf parameter is missing", %{conn: conn, user: user, placement: placement} do
+    test "returns 422 when bookshelf parameter is missing", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
       conn =
         conn
         |> auth_conn(user)

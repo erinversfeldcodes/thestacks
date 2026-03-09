@@ -89,7 +89,10 @@ defmodule Stacks.Shelving do
       to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
 
       Multi.new()
-      |> Multi.update(:placement, Placement.changeset(placement, %{bookshelf_id: to_bookshelf.id}))
+      |> Multi.update(
+        :placement,
+        Placement.changeset(placement, %{bookshelf_id: to_bookshelf.id})
+      )
       |> Multi.insert(:history, fn _ ->
         PlacementHistory.changeset(%PlacementHistory{}, %{
           book_id: placement.book_id,
@@ -195,7 +198,10 @@ defmodule Stacks.Shelving do
       {:error, :unauthorized}
     else
       Multi.new()
-      |> Multi.update(:placement, Placement.changeset(placement, %{removed_at: DateTime.utc_now()}))
+      |> Multi.update(
+        :placement,
+        Placement.changeset(placement, %{removed_at: DateTime.utc_now()})
+      )
       |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
         Events.emit_safe(%{
           event_type: "placement.removed",
