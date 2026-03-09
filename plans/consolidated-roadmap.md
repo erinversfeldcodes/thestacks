@@ -41,7 +41,7 @@ The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indi
 | Phase 1B (Elixir contexts) | **Opus 4.6** | Architectural judgment — context boundaries, Ecto.Multi patterns, event emission design |
 | Phase 1C (Elm frontend) | **Sonnet 4.6** | TEA patterns are mechanical once types are defined |
 | Phase 1D (Python sidecar) | **Sonnet 4.6** | Small, well-specified FastAPI service |
-| Phase 1D.1 (Vision benchmark) | **Sonnet 4.6** | Benchmark harness is mechanical; corpus assembly and model decision are human |
+| Phase 1D.1 (Vision eval framework) | **Sonnet 4.6** | Framework harness is mechanical; corpus assembly and model decision are human |
 | Phase 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
 | Phase 1E (Platform + CI) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
 | Phase 2 (Enrichment) | **Opus 4.6** | External API integration, scraper architecture, LLM guardrails — judgment required |
@@ -181,15 +181,30 @@ thestacks/
 - `profiles.yml` pointing to `stacks_dbt` role
 - `dbt_project.yml` with `+materialized: view` for staging, `+schema` routing per schema
 - `macros/generate_schema_name.sql` — custom macro so seeds land in `op`/`audit` without target-schema prefix
+- `packages.yml` — pin `AxelThevenot/dbt-assertions` for row-level data quality assertions (see below); run `dbt deps` after creating
 - Staging models: `stg_books`, `stg_authors`, `stg_users`, `stg_bookshelves`, `stg_bookshelf_placements`, `stg_bookshelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`
 - Seed fixtures in `dbt/seeds/` for all 8 staging tables (small CSVs, internally-consistent UUIDs)
 - Empty intermediate and mart directories with `.gitkeep`
+
+**dbt-assertions** (`AxelThevenot/dbt-assertions`, pin to `1.8.3`): adds row-level assertions to model YAML files so failing rows are identified individually rather than the test just reporting a count. Wire into staging model schemas as follows:
+- `stg_books` — assert ISBN is exactly 13 digits; `visibility_tier` is one of `public`, `restricted`, `private`, `hidden`
+- `stg_bookshelves` — assert `shelf_type` is a known enum value
+- `stg_bookshelf_placements` — assert `placed_at <= current_date`; no placement without a matching bookshelf row
+- `stg_audit_log` — assert `action` and `actor_id` are never null
+
+```yaml
+# dbt/packages.yml
+packages:
+  - package: AxelThevenot/dbt-assertions
+    version: 1.8.3
+```
 
 **Files created:**
 - `apps/core/priv/repo/migrations/` — 19 migration files
 - `dbt/models/staging/` — 8 staging model SQL files
 - `dbt/seeds/` — 8 CSV seed files
 - `dbt/macros/generate_schema_name.sql`
+- `dbt/packages.yml`
 - `dbt/profiles.yml`, `dbt/dbt_project.yml`
 
 **Test command**: `just test-dbt`
@@ -201,6 +216,8 @@ thestacks/
 - [ ] GIN index exists on `books.title`
 - [ ] `audit_log` has INSERT-only grant for `stacks_app`
 - [ ] `event_log` index exists on `(event_type, aggregate_id, occurred_at DESC)`
+- [ ] `dbt deps` installs `dbt-assertions` without errors
+- [ ] Row-level assertions pass on all 4 staging models listed above when seeded with valid fixture data
 
 ---
 
@@ -428,58 +445,75 @@ thestacks/
 
 ---
 
-### Phase 1D.1 — Vision Model Benchmark (python-agent + human)
-**Objective**: Validate that the chosen Together AI model performs acceptably across all real-world identification paths before the first production deployment. Establish a quantitative baseline and select the production model.
+### Phase 1D.1 — Vision Model Evaluation Framework (python-agent + human)
+**Objective**: Build a reusable, repeatable evaluation framework for vision model selection. The framework must be re-runnable whenever a new model appears, a prompt changes, or an architectural decision has model-selection implications. Establish a quantitative baseline for the current model and compare candidates.
 
-**Starts after**: Phase 1D committed and Phase 1E infrastructure provisioned (Together AI key available).
-**Blocks**: Phase 1E go-live. Do not deploy to production until the benchmark passes or a model change is made.
+**Starts after**: Phase 1D committed and Together AI API key provisioned (can proceed before Phase 1E).
+**Does not block**: Phase 1D.2 (local OCR pre-pass) or Phase 1E deployment. Models are swappable via `VISION_MODEL_NAME` env var. Initial performance at the 7B level is acceptable; the framework provides evidence for upgrading when needed.
+**Should complete before**: Production launch at meaningful scale. The ISBN hard gate means silent misidentification is the primary risk. A benchmark failure may warrant a model upgrade before opening to users beyond the owner.
 **Issue**: `issues/005-vision-model-benchmark.md`
 
-**Why now**: The ISBN hard gate means identification accuracy is critical from day one. Qwen2.5-VL-7B was chosen as a starting point but has not been validated against real book photos across all identification paths — including images with no barcode, where the model must derive information from title text, spine, or cover art. A model failure here produces silent bad data (wrong ISBNs, wrong books on shelves).
+**Why a framework, not a script**: This will be re-run. New models, new prompts, new architectural changes (Phase 1D.2 local OCR pre-pass) all require re-evaluation. A one-off script becomes stale; a framework with versioned configs, versioned prompts, and committed results stays useful.
 
 **Corpus** (human task — assembled before running the harness):
 
-| Category | Count | Notes |
-|----------|-------|-------|
-| Clean barcode visible | 10 | Standard retail shot, ISBN scannable |
-| Barcode obscured/worn | 5 | Sticker over barcode, worn spine edge |
-| Title/spine only (no barcode) | 10 | Older books pre-ISBN barcodes, spines |
-| Cover art dominant | 10 | Heavy illustration, minimal text |
-| Angled / low-res | 5 | Phone shot in poor light |
-| Non-book (must reject) | 10 | Objects, documents, people |
+| Stratum | Min | Description |
+|---------|-----|-------------|
+| `clean_barcode` | 10 | Barcode clearly visible, ISBN machine-readable |
+| `spine_only` | 10 | Spine/title visible, no barcode |
+| `oblique` | 5 | Angled, poor light, or low-res phone shot |
+| `worn_or_partial` | 5 | Sticker over barcode, worn edge, partial cover |
+| `multi_book` | 5 | Multiple books in frame |
+| `not_book` | 10 | Objects, documents, people — must reject |
+| `ambiguous` | 5 | Expected model output: `ambiguous` |
 
-**Models under test**:
+Ground truth locked in `corpus/annotations.csv` before any run. Append-only — no post-hoc changes.
+
+**Models under test** (first experiment):
 1. `Qwen/Qwen2.5-VL-7B-Instruct` — current default (smallest, cheapest)
 2. `Qwen/Qwen2.5-VL-72B-Instruct` — higher OCR accuracy, ~10× cost
 3. `meta-llama/Llama-3.2-11B-Vision-Instruct` — alternative architecture
 
-**Pass thresholds** (confirm before running):
-- Classification accuracy on book images: ≥ 90%
-- False positive rate on non-book images: ≤ 5%
-- ISBN extraction success (barcode-visible): ≥ 85%
-- Title extraction success (title/spine, no barcode): ≥ 70%
+**Metrics** (per stratum, not overall):
+- Classification precision/recall/F1 per class (`book`, `not_book`, `ambiguous`)
+- ISBN recall, ISBN false positive rate
+- Title/author fuzzy similarity (SequenceMatcher ratio)
+- Latency p50/p95/p99 at `VisionClient` level
+- Cost per image and per 1,000 uploads
 
-**Outputs**:
-- `apps/vision/benchmark/results/YYYY-MM-DD.json` — raw per-image results
-- `apps/vision/benchmark/REPORT.md` — per-category accuracy, latency p50/p95, cost per 1,000 uploads, go/no-go recommendation per model
-- Model selection recorded in `apps/vision/app/config.py` comment with rationale
+**Outputs** (committed to repository):
+- `apps/vision/benchmark/results/YYYY-MM-DD-{run_id}-{model_label}.json` — raw per-image results
+- `apps/vision/benchmark/reports/YYYY-MM-DD-{run_id}-{model_label}.md` — auto-generated report with per-stratum tables, threshold pass/fail, go/no-go recommendation
+- Model selection decision recorded in `apps/vision/app/config.py` comment with rationale
+
+**Justfile recipes added**:
+- `just benchmark` — runs harness
+- `just benchmark-compare` — side-by-side delta between two result files
 
 **DoD:**
-- [ ] Corpus assembled (≥ 50 images, all categories)
-- [ ] Benchmark harness (`benchmark/run_benchmark.py`) implemented and runnable
-- [ ] All three models evaluated
-- [ ] REPORT.md written with go/no-go recommendation
-- [ ] Production `model_name` confirmed or updated in `config.py`
+- [ ] `benchmark/` directory structure created
+- [ ] `corpus/annotations.csv` schema defined, ≥ 50 images annotated
+- [ ] `benchmark/run.py` implemented (reads TOML config, runs VisionClient, writes results JSON)
+- [ ] `benchmark/metrics.py` implemented (per-stratum F1, ISBN recall, title similarity, latency, cost)
+- [ ] `benchmark/compare.py` implemented (side-by-side delta table)
+- [ ] Report generator implemented (reads results JSON, writes markdown)
+- [ ] At least one experiment config committed (`configs/experiment-001.toml`)
+- [ ] Prompts versioned in `prompts/` (not hardcoded)
+- [ ] First run executed against all three candidate models
+- [ ] Results JSON and report committed
+- [ ] Production `model_name` confirmed or updated in `config.py` with rationale comment
+- [ ] `just benchmark` and `just benchmark-compare` recipes added to justfile
 
 ---
 
 ### Phase 1D.2 — Local OCR Pre-pass (python-agent)
 **Objective**: Add an in-process Tesseract/EasyOCR pass for ISBN barcodes before calling the Together AI VLM. When a barcode is cleanly readable locally, skip the VLM entirely — reducing API cost and latency for the common case.
 
-**Starts after**: Phase 1D.1 benchmark complete. Implement only if the benchmark confirms that a meaningful fraction of images have clean, machine-readable barcodes (expected: ≥ 30% of real-world uploads).
-**Parallel with**: Phase 1E (does not block deployment).
+**Starts after**: Phase 1D committed. Does not require Phase 1D.1 to complete first — Phase 1D.2 is model-agnostic and additive. When local OCR finds nothing, the code path is identical to today. When it finds a barcode, it short-circuits the VLM call. Either way, the active VLM model does not matter.
+**Parallel with**: Phase 1D.1 and Phase 1E (does not block deployment).
+**Feeds back into Phase 1D.1**: Once Phase 1D.2 is implemented, run a benchmark experiment comparing the pre-pass+VLM pipeline against VLM-only to quantify cost/accuracy trade-off. This is a config change in the experiment TOML, not a new framework.
 
-**Why after the benchmark**: The benchmark establishes how often the VLM is actually needed. If most images are clean barcodes, the local pre-pass saves significant cost. If most images are title/cover-art cases, the savings are narrow and the added complexity isn't justified. The benchmark data makes this decision evidence-based rather than speculative.
+**Why this does not gate on the benchmark**: Phase 1D.2 is worth implementing regardless of model choice — local barcode reads are cheaper, faster, and more reliable than any VLM for clean barcode images. The benchmark informs whether to keep a 7B model or upgrade, not whether to add a local pre-pass.
 
 **Implementation** (in-process, no new service):
 - Add `pytesseract` (wraps system Tesseract) and/or `pyzbar` (pure-Python barcode decoder) to `requirements.txt`
@@ -1037,6 +1071,12 @@ Migrations:
   - `create_comment/3`, `delete_comment/1`, `hide_comment/1` (moderation)
   - `get_comment_tree/2` — recursive CTE with block-graph filter; hidden sub-trees collapse (not shown with `[hidden]`)
 - Python sidecar `POST /associate` endpoint — accept post text, return `[{isbn, confidence}]` (deferred from Phase 1D)
+- **`Stacks.Books.BookDetailCache`** — ETS-backed GenServer caching the assembled `get_book_detail/1` response per `(user_id, book_id)`. On cache miss the full join runs and populates the cache. Subscribe to the following events for invalidation:
+  - `blog.post_published` / `blog.associations_updated` → invalidate `(user_id, book_id)` for all books associated with the post
+  - `placement.updated` → invalidate `(user_id, book_id)`
+  - `price_snapshot.created` → invalidate all entries for `book_id`
+
+  See `docs/technical-architecture.md` — "Book Detail Read Path & Caching" for the full rationale (ETS over PostgreSQL materialised view).
 
 **Events emitted:**
 - `blog.post_published`, `blog.associations_suggested`
@@ -1054,6 +1094,9 @@ Migrations:
 - [ ] Comment tree with block-filtered sub-tree collapse
 - [ ] Comment moderation: hide hides full sub-tree
 - [ ] Python `/associate` endpoint returns ISBN + confidence list
+- [ ] `BookDetailCache` GenServer starts under supervision; `get_book_detail/1` routes through it
+- [ ] Cache invalidation fires correctly for all four event types above
+- [ ] Cache survives a GenServer crash (supervisor restarts with empty cache; first miss repopulates)
 
 ---
 
