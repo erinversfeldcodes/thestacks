@@ -1,0 +1,24 @@
+{
+  "name": "thestacks",
+  "version": "1.0.0",
+  "description": "A self-hosted book management and discovery platform. Dark-academic-meets-cottage-core.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erinversfeldcodes/thestacks.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/erinversfeldcodes/thestacks/issues"
+  },
+  "homepage": "https://github.com/erinversfeldcodes/thestacks#readme"
+}
