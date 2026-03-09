@@ -5,13 +5,13 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
     execute("""
     DO $$ BEGIN
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
-        CREATE ROLE stacks_app;
+        CREATE ROLE stacks_app LOGIN PASSWORD 'stacks_app';
       END IF;
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
-        CREATE ROLE stacks_dbt;
+        CREATE ROLE stacks_dbt LOGIN PASSWORD 'stacks_dbt';
       END IF;
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_readonly') THEN
-        CREATE ROLE stacks_readonly;
+        CREATE ROLE stacks_readonly NOLOGIN;
       END IF;
     END $$;
     """)
@@ -25,9 +25,11 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
     execute("GRANT USAGE ON SCHEMA audit TO stacks_app")
     execute("GRANT INSERT ON ALL TABLES IN SCHEMA audit TO stacks_app")
 
-    # stacks_dbt: SELECT on op, CRUD on wh
+    # stacks_dbt: SELECT on op + audit (read source schemas), CRUD on wh (write transform output)
     execute("GRANT USAGE ON SCHEMA op TO stacks_dbt")
     execute("GRANT SELECT ON ALL TABLES IN SCHEMA op TO stacks_dbt")
+    execute("GRANT USAGE ON SCHEMA audit TO stacks_dbt")
+    execute("GRANT SELECT ON ALL TABLES IN SCHEMA audit TO stacks_dbt")
     execute("GRANT USAGE ON SCHEMA wh TO stacks_dbt")
     execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wh TO stacks_dbt")
     execute("ALTER DEFAULT PRIVILEGES IN SCHEMA wh GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stacks_dbt")
