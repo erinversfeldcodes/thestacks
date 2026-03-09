@@ -23,6 +23,8 @@ defmodule Stacks.Accounts.User do
              :updated_at
            ]}
 
+  @type t :: %__MODULE__{}
+
   schema "users" do
     field :email, :string
     field :password_hash, :string

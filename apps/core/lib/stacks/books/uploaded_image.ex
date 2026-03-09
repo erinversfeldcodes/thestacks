@@ -12,6 +12,8 @@ defmodule Stacks.Books.UploadedImage do
 
   @valid_statuses ~w(pending resolved rejected)
 
+  @type t :: %__MODULE__{}
+
   schema "uploaded_images" do
     field :storage_path, :string
     field :status, :string, default: "pending"

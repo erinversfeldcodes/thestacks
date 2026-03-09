@@ -29,10 +29,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
   def init(opts), do: opts
 
   def call(conn, opts) do
-    if Mix.env() == :test do
-      conn
-    else
+    if Application.get_env(:core, :rate_limiting_enabled, true) do
       do_rate_check(conn, opts)
+    else
+      conn
     end
   end
 

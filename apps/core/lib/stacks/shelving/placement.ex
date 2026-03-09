@@ -13,6 +13,8 @@ defmodule Stacks.Shelving.Placement do
 
   @valid_visibilities ~w(owner group platform)
 
+  @type t :: %__MODULE__{}
+
   schema "bookshelf_placements" do
     field :position, :integer
     field :placed_at, :utc_datetime_usec
