@@ -77,7 +77,7 @@ function A9(fun, a, b, c, d, e, f, g, h, i) {
   return fun.a === 9 ? fun.f(a, b, c, d, e, f, g, h, i) : fun(a)(b)(c)(d)(e)(f)(g)(h)(i);
 }
 
-
+console.warn('Compiled in DEV mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.');
 
 
 // EQUALITY
@@ -113,7 +113,7 @@ function _Utils_eqHelp(x, y, depth, stack)
 		return true;
 	}
 
-	/**_UNUSED/
+	/**/
 	if (x.$ === 'Set_elm_builtin')
 	{
 		x = $elm$core$Set$toList(x);
@@ -126,7 +126,7 @@ function _Utils_eqHelp(x, y, depth, stack)
 	}
 	//*/
 
-	/**/
+	/**_UNUSED/
 	if (x.$ < 0)
 	{
 		x = $elm$core$Dict$toList(x);
@@ -161,7 +161,7 @@ function _Utils_cmp(x, y, ord)
 		return x === y ? /*EQ*/ 0 : x < y ? /*LT*/ -1 : /*GT*/ 1;
 	}
 
-	/**_UNUSED/
+	/**/
 	if (x instanceof String)
 	{
 		var a = x.valueOf();
@@ -170,10 +170,10 @@ function _Utils_cmp(x, y, ord)
 	}
 	//*/
 
-	/**/
+	/**_UNUSED/
 	if (typeof x.$ === 'undefined')
 	//*/
-	/**_UNUSED/
+	/**/
 	if (x.$[0] === '#')
 	//*/
 	{
@@ -203,17 +203,17 @@ var _Utils_compare = F2(function(x, y)
 
 // COMMON VALUES
 
-var _Utils_Tuple0 = 0;
-var _Utils_Tuple0_UNUSED = { $: '#0' };
+var _Utils_Tuple0_UNUSED = 0;
+var _Utils_Tuple0 = { $: '#0' };
 
-function _Utils_Tuple2(a, b) { return { a: a, b: b }; }
-function _Utils_Tuple2_UNUSED(a, b) { return { $: '#2', a: a, b: b }; }
+function _Utils_Tuple2_UNUSED(a, b) { return { a: a, b: b }; }
+function _Utils_Tuple2(a, b) { return { $: '#2', a: a, b: b }; }
 
-function _Utils_Tuple3(a, b, c) { return { a: a, b: b, c: c }; }
-function _Utils_Tuple3_UNUSED(a, b, c) { return { $: '#3', a: a, b: b, c: c }; }
+function _Utils_Tuple3_UNUSED(a, b, c) { return { a: a, b: b, c: c }; }
+function _Utils_Tuple3(a, b, c) { return { $: '#3', a: a, b: b, c: c }; }
 
-function _Utils_chr(c) { return c; }
-function _Utils_chr_UNUSED(c) { return new String(c); }
+function _Utils_chr_UNUSED(c) { return c; }
+function _Utils_chr(c) { return new String(c); }
 
 
 // RECORDS
@@ -264,11 +264,11 @@ function _Utils_ap(xs, ys)
 
 
 
-var _List_Nil = { $: 0 };
-var _List_Nil_UNUSED = { $: '[]' };
+var _List_Nil_UNUSED = { $: 0 };
+var _List_Nil = { $: '[]' };
 
-function _List_Cons(hd, tl) { return { $: 1, a: hd, b: tl }; }
-function _List_Cons_UNUSED(hd, tl) { return { $: '::', a: hd, b: tl }; }
+function _List_Cons_UNUSED(hd, tl) { return { $: 1, a: hd, b: tl }; }
+function _List_Cons(hd, tl) { return { $: '::', a: hd, b: tl }; }
 
 
 var _List_cons = F2(_List_Cons);
@@ -499,12 +499,12 @@ var _JsArray_appendN = F3(function(n, dest, source)
 
 // LOG
 
-var _Debug_log = F2(function(tag, value)
+var _Debug_log_UNUSED = F2(function(tag, value)
 {
 	return value;
 });
 
-var _Debug_log_UNUSED = F2(function(tag, value)
+var _Debug_log = F2(function(tag, value)
 {
 	console.log(tag + ': ' + _Debug_toString(value));
 	return value;
@@ -530,12 +530,12 @@ function _Debug_todoCase(moduleName, region, value)
 
 // TO STRING
 
-function _Debug_toString(value)
+function _Debug_toString_UNUSED(value)
 {
 	return '<internals>';
 }
 
-function _Debug_toString_UNUSED(value)
+function _Debug_toString(value)
 {
 	return _Debug_toAnsiString(false, value);
 }
@@ -720,13 +720,13 @@ function _Debug_toHexDigit(n)
 // CRASH
 
 
-function _Debug_crash(identifier)
+function _Debug_crash_UNUSED(identifier)
 {
 	throw new Error('https://github.com/elm/core/blob/1.0.0/hints/' + identifier + '.md');
 }
 
 
-function _Debug_crash_UNUSED(identifier, fact1, fact2, fact3, fact4)
+function _Debug_crash(identifier, fact1, fact2, fact3, fact4)
 {
 	switch(identifier)
 	{
@@ -784,11 +784,11 @@ function _Debug_crash_UNUSED(identifier, fact1, fact2, fact3, fact4)
 
 function _Debug_regionToString(region)
 {
-	if (region.a3.ax === region.bm.ax)
+	if (region.start.line === region.end.line)
 	{
-		return 'on line ' + region.a3.ax;
+		return 'on line ' + region.start.line;
 	}
-	return 'on lines ' + region.a3.ax + ' through ' + region.bm.ax;
+	return 'on lines ' + region.start.line + ' through ' + region.end.line;
 }
 
 
@@ -1212,7 +1212,7 @@ function _Char_toLocaleLower(char)
 
 
 
-/**_UNUSED/
+/**/
 function _Json_errorToString(error)
 {
 	return $elm$json$Json$Decode$errorToString(error);
@@ -1616,11 +1616,11 @@ var _Json_encode = F2(function(indentLevel, value)
 	return JSON.stringify(_Json_unwrap(value), null, indentLevel) + '';
 });
 
-function _Json_wrap_UNUSED(value) { return { $: 0, a: value }; }
-function _Json_unwrap_UNUSED(value) { return value.a; }
+function _Json_wrap(value) { return { $: 0, a: value }; }
+function _Json_unwrap(value) { return value.a; }
 
-function _Json_wrap(value) { return value; }
-function _Json_unwrap(value) { return value; }
+function _Json_wrap_UNUSED(value) { return value; }
+function _Json_unwrap_UNUSED(value) { return value; }
 
 function _Json_emptyArray() { return []; }
 function _Json_emptyObject() { return {}; }
@@ -1857,9 +1857,9 @@ var _Platform_worker = F4(function(impl, flagDecoder, debugMetadata, args)
 	return _Platform_initialize(
 		flagDecoder,
 		args,
-		impl.cF,
-		impl.dA,
-		impl.dv,
+		impl.init,
+		impl.update,
+		impl.subscriptions,
 		function() { return function() {} }
 	);
 });
@@ -1872,7 +1872,7 @@ var _Platform_worker = F4(function(impl, flagDecoder, debugMetadata, args)
 function _Platform_initialize(flagDecoder, args, init, update, subscriptions, stepperBuilder)
 {
 	var result = A2(_Json_run, flagDecoder, _Json_wrap(args ? args['flags'] : undefined));
-	$elm$core$Result$isOk(result) || _Debug_crash(2 /**_UNUSED/, _Json_errorToString(result.a) /**/);
+	$elm$core$Result$isOk(result) || _Debug_crash(2 /**/, _Json_errorToString(result.a) /**/);
 	var managers = {};
 	var initPair = init(result.a);
 	var model = initPair.a;
@@ -2316,7 +2316,7 @@ function _Platform_setupIncomingPort(name, sendToApp)
 //
 
 
-function _Platform_export(exports)
+function _Platform_export_UNUSED(exports)
 {
 	scope['Elm']
 		? _Platform_mergeExportsProd(scope['Elm'], exports)
@@ -2337,7 +2337,7 @@ function _Platform_mergeExportsProd(obj, exports)
 }
 
 
-function _Platform_export_UNUSED(exports)
+function _Platform_export(exports)
 {
 	scope['Elm']
 		? _Platform_mergeExportsDebug('Elm', scope['Elm'], exports)
@@ -2377,10 +2377,10 @@ var _VirtualDom_init = F4(function(virtualNode, flagDecoder, debugMetadata, args
 {
 	// NOTE: this function needs _Platform_export available to work
 
-	/**/
+	/**_UNUSED/
 	var node = args['node'];
 	//*/
-	/**_UNUSED/
+	/**/
 	var node = args && args['node'] ? args['node'] : _Debug_crash(0);
 	//*/
 
@@ -2655,14 +2655,14 @@ function _VirtualDom_noInnerHtmlOrFormAction(key)
 function _VirtualDom_noJavaScriptUri(value)
 {
 	return _VirtualDom_RE_js.test(value)
-		? /**/''//*//**_UNUSED/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
+		? /**_UNUSED/''//*//**/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
 		: value;
 }
 
 function _VirtualDom_noJavaScriptOrHtmlUri(value)
 {
 	return _VirtualDom_RE_js_html.test(value)
-		? /**/''//*//**_UNUSED/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
+		? /**_UNUSED/''//*//**/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
 		: value;
 }
 
@@ -2670,7 +2670,7 @@ function _VirtualDom_noJavaScriptOrHtmlJson(value)
 {
 	return (typeof _Json_unwrap(value) === 'string' && _VirtualDom_RE_js_html.test(_Json_unwrap(value)))
 		? _Json_wrap(
-			/**/''//*//**_UNUSED/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
+			/**_UNUSED/''//*//**/'javascript:alert("This is an XSS vector. Please use ports or web components instead.")'//*/
 		) : value;
 }
 
@@ -2719,9 +2719,9 @@ var _VirtualDom_mapEventTuple = F2(function(func, tuple)
 var _VirtualDom_mapEventRecord = F2(function(func, record)
 {
 	return {
-		cK: func(record.cK),
-		a4: record.a4,
-		a0: record.a0
+		message: func(record.message),
+		stopPropagation: record.stopPropagation,
+		preventDefault: record.preventDefault
 	}
 });
 
@@ -2989,11 +2989,11 @@ function _VirtualDom_makeCallback(eventNode, initialHandler)
 		// 3 = Custom
 
 		var value = result.a;
-		var message = !tag ? value : tag < 3 ? value.a : value.cK;
-		var stopPropagation = tag == 1 ? value.b : tag == 3 && value.a4;
+		var message = !tag ? value : tag < 3 ? value.a : value.message;
+		var stopPropagation = tag == 1 ? value.b : tag == 3 && value.stopPropagation;
 		var currentEventNode = (
 			stopPropagation && event.stopPropagation(),
-			(tag == 2 ? value.b : tag == 3 && value.a0) && event.preventDefault(),
+			(tag == 2 ? value.b : tag == 3 && value.preventDefault) && event.preventDefault(),
 			eventNode
 		);
 		var tagger;
@@ -3943,15 +3943,15 @@ var _Browser_element = _Debugger_element || F4(function(impl, flagDecoder, debug
 	return _Platform_initialize(
 		flagDecoder,
 		args,
-		impl.cF,
-		impl.dA,
-		impl.dv,
+		impl.init,
+		impl.update,
+		impl.subscriptions,
 		function(sendToApp, initialModel) {
-			var view = impl.dD;
-			/**/
+			var view = impl.view;
+			/**_UNUSED/
 			var domNode = args['node'];
 			//*/
-			/**_UNUSED/
+			/**/
 			var domNode = args && args['node'] ? args['node'] : _Debug_crash(0);
 			//*/
 			var currNode = _VirtualDom_virtualize(domNode);
@@ -3979,12 +3979,12 @@ var _Browser_document = _Debugger_document || F4(function(impl, flagDecoder, deb
 	return _Platform_initialize(
 		flagDecoder,
 		args,
-		impl.cF,
-		impl.dA,
-		impl.dv,
+		impl.init,
+		impl.update,
+		impl.subscriptions,
 		function(sendToApp, initialModel) {
-			var divertHrefToApp = impl.a2 && impl.a2(sendToApp)
-			var view = impl.dD;
+			var divertHrefToApp = impl.setup && impl.setup(sendToApp)
+			var view = impl.view;
 			var title = _VirtualDom_doc.title;
 			var bodyNode = _VirtualDom_doc.body;
 			var currNode = _VirtualDom_virtualize(bodyNode);
@@ -3992,12 +3992,12 @@ var _Browser_document = _Debugger_document || F4(function(impl, flagDecoder, deb
 			{
 				_VirtualDom_divertHrefToApp = divertHrefToApp;
 				var doc = view(model);
-				var nextNode = _VirtualDom_node('body')(_List_Nil)(doc.I);
+				var nextNode = _VirtualDom_node('body')(_List_Nil)(doc.body);
 				var patches = _VirtualDom_diff(currNode, nextNode);
 				bodyNode = _VirtualDom_applyPatches(bodyNode, currNode, patches, sendToApp);
 				currNode = nextNode;
 				_VirtualDom_divertHrefToApp = 0;
-				(title !== doc.b2) && (_VirtualDom_doc.title = title = doc.b2);
+				(title !== doc.title) && (_VirtualDom_doc.title = title = doc.title);
 			});
 		}
 	);
@@ -4053,12 +4053,12 @@ function _Browser_makeAnimator(model, draw)
 
 function _Browser_application(impl)
 {
-	var onUrlChange = impl.c3;
-	var onUrlRequest = impl.c4;
+	var onUrlChange = impl.onUrlChange;
+	var onUrlRequest = impl.onUrlRequest;
 	var key = function() { key.a(onUrlChange(_Browser_getUrl())); };
 
 	return _Browser_document({
-		a2: function(sendToApp)
+		setup: function(sendToApp)
 		{
 			key.a = sendToApp;
 			_Browser_window.addEventListener('popstate', key);
@@ -4074,9 +4074,9 @@ function _Browser_application(impl)
 					var next = $elm$url$Url$fromString(href).a;
 					sendToApp(onUrlRequest(
 						(next
-							&& curr.bO === next.bO
-							&& curr.bv === next.bv
-							&& curr.bL.a === next.bL.a
+							&& curr.protocol === next.protocol
+							&& curr.host === next.host
+							&& curr.port_.a === next.port_.a
 						)
 							? $elm$browser$Browser$Internal(next)
 							: $elm$browser$Browser$External(href)
@@ -4084,13 +4084,13 @@ function _Browser_application(impl)
 				}
 			});
 		},
-		cF: function(flags)
+		init: function(flags)
 		{
-			return A3(impl.cF, flags, _Browser_getUrl(), key);
+			return A3(impl.init, flags, _Browser_getUrl(), key);
 		},
-		dD: impl.dD,
-		dA: impl.dA,
-		dv: impl.dv
+		view: impl.view,
+		update: impl.update,
+		subscriptions: impl.subscriptions
 	});
 }
 
@@ -4156,17 +4156,17 @@ var _Browser_decodeEvent = F2(function(decoder, event)
 function _Browser_visibilityInfo()
 {
 	return (typeof _VirtualDom_doc.hidden !== 'undefined')
-		? { cC: 'hidden', cl: 'visibilitychange' }
+		? { hidden: 'hidden', change: 'visibilitychange' }
 		:
 	(typeof _VirtualDom_doc.mozHidden !== 'undefined')
-		? { cC: 'mozHidden', cl: 'mozvisibilitychange' }
+		? { hidden: 'mozHidden', change: 'mozvisibilitychange' }
 		:
 	(typeof _VirtualDom_doc.msHidden !== 'undefined')
-		? { cC: 'msHidden', cl: 'msvisibilitychange' }
+		? { hidden: 'msHidden', change: 'msvisibilitychange' }
 		:
 	(typeof _VirtualDom_doc.webkitHidden !== 'undefined')
-		? { cC: 'webkitHidden', cl: 'webkitvisibilitychange' }
-		: { cC: 'hidden', cl: 'visibilitychange' };
+		? { hidden: 'webkitHidden', change: 'webkitvisibilitychange' }
+		: { hidden: 'hidden', change: 'visibilitychange' };
 }
 
 
@@ -4247,12 +4247,12 @@ var _Browser_call = F2(function(functionName, id)
 function _Browser_getViewport()
 {
 	return {
-		bV: _Browser_getScene(),
-		b4: {
-			b7: _Browser_window.pageXOffset,
-			b8: _Browser_window.pageYOffset,
-			b6: _Browser_doc.documentElement.clientWidth,
-			bu: _Browser_doc.documentElement.clientHeight
+		scene: _Browser_getScene(),
+		viewport: {
+			x: _Browser_window.pageXOffset,
+			y: _Browser_window.pageYOffset,
+			width: _Browser_doc.documentElement.clientWidth,
+			height: _Browser_doc.documentElement.clientHeight
 		}
 	};
 }
@@ -4262,8 +4262,8 @@ function _Browser_getScene()
 	var body = _Browser_doc.body;
 	var elem = _Browser_doc.documentElement;
 	return {
-		b6: Math.max(body.scrollWidth, body.offsetWidth, elem.scrollWidth, elem.offsetWidth, elem.clientWidth),
-		bu: Math.max(body.scrollHeight, body.offsetHeight, elem.scrollHeight, elem.offsetHeight, elem.clientHeight)
+		width: Math.max(body.scrollWidth, body.offsetWidth, elem.scrollWidth, elem.offsetWidth, elem.clientWidth),
+		height: Math.max(body.scrollHeight, body.offsetHeight, elem.scrollHeight, elem.offsetHeight, elem.clientHeight)
 	};
 }
 
@@ -4286,15 +4286,15 @@ function _Browser_getViewportOf(id)
 	return _Browser_withNode(id, function(node)
 	{
 		return {
-			bV: {
-				b6: node.scrollWidth,
-				bu: node.scrollHeight
+			scene: {
+				width: node.scrollWidth,
+				height: node.scrollHeight
 			},
-			b4: {
-				b7: node.scrollLeft,
-				b8: node.scrollTop,
-				b6: node.clientWidth,
-				bu: node.clientHeight
+			viewport: {
+				x: node.scrollLeft,
+				y: node.scrollTop,
+				width: node.clientWidth,
+				height: node.clientHeight
 			}
 		};
 	});
@@ -4324,18 +4324,18 @@ function _Browser_getElement(id)
 		var x = _Browser_window.pageXOffset;
 		var y = _Browser_window.pageYOffset;
 		return {
-			bV: _Browser_getScene(),
-			b4: {
-				b7: x,
-				b8: y,
-				b6: _Browser_doc.documentElement.clientWidth,
-				bu: _Browser_doc.documentElement.clientHeight
+			scene: _Browser_getScene(),
+			viewport: {
+				x: x,
+				y: y,
+				width: _Browser_doc.documentElement.clientWidth,
+				height: _Browser_doc.documentElement.clientHeight
 			},
-			cv: {
-				b7: x + rect.left,
-				b8: y + rect.top,
-				b6: rect.width,
-				bu: rect.height
+			element: {
+				x: x + rect.left,
+				y: y + rect.top,
+				width: rect.width,
+				height: rect.height
 			}
 		};
 	});
@@ -4397,25 +4397,25 @@ var _Http_toTask = F3(function(router, toTask, request)
 	return _Scheduler_binding(function(callback)
 	{
 		function done(response) {
-			callback(toTask(request.J.a(response)));
+			callback(toTask(request.expect.a(response)));
 		}
 
 		var xhr = new XMLHttpRequest();
 		xhr.addEventListener('error', function() { done($elm$http$Http$NetworkError_); });
 		xhr.addEventListener('timeout', function() { done($elm$http$Http$Timeout_); });
-		xhr.addEventListener('load', function() { done(_Http_toResponse(request.J.b, xhr)); });
-		$elm$core$Maybe$isJust(request.an) && _Http_track(router, xhr, request.an.a);
+		xhr.addEventListener('load', function() { done(_Http_toResponse(request.expect.b, xhr)); });
+		$elm$core$Maybe$isJust(request.tracker) && _Http_track(router, xhr, request.tracker.a);
 
 		try {
-			xhr.open(request.ai, request.N, true);
+			xhr.open(request.method, request.url, true);
 		} catch (e) {
-			return done($elm$http$Http$BadUrl_(request.N));
+			return done($elm$http$Http$BadUrl_(request.url));
 		}
 
 		_Http_configureRequest(xhr, request);
 
-		request.I.a && xhr.setRequestHeader('Content-Type', request.I.a);
-		xhr.send(request.I.b);
+		request.body.a && xhr.setRequestHeader('Content-Type', request.body.a);
+		xhr.send(request.body.b);
 
 		return function() { xhr.c = true; xhr.abort(); };
 	});
@@ -4426,13 +4426,13 @@ var _Http_toTask = F3(function(router, toTask, request)
 
 function _Http_configureRequest(xhr, request)
 {
-	for (var headers = request.af; headers.b; headers = headers.b) // WHILE_CONS
+	for (var headers = request.headers; headers.b; headers = headers.b) // WHILE_CONS
 	{
 		xhr.setRequestHeader(headers.a.a, headers.a.b);
 	}
-	xhr.timeout = request.am.a || 0;
-	xhr.responseType = request.J.d;
-	xhr.withCredentials = request.cb;
+	xhr.timeout = request.timeout.a || 0;
+	xhr.responseType = request.expect.d;
+	xhr.withCredentials = request.allowCookiesFromOtherDomains;
 }
 
 
@@ -4453,10 +4453,10 @@ function _Http_toResponse(toBody, xhr)
 function _Http_toMetadata(xhr)
 {
 	return {
-		N: xhr.responseURL,
-		dt: xhr.status,
-		du: xhr.statusText,
-		af: _Http_parseHeaders(xhr.getAllResponseHeaders())
+		url: xhr.responseURL,
+		statusCode: xhr.status,
+		statusText: xhr.statusText,
+		headers: _Http_parseHeaders(xhr.getAllResponseHeaders())
 	};
 }
 
@@ -4551,15 +4551,15 @@ function _Http_track(router, xhr, tracker)
 	xhr.upload.addEventListener('progress', function(event) {
 		if (xhr.c) { return; }
 		_Scheduler_rawSpawn(A2($elm$core$Platform$sendToSelf, router, _Utils_Tuple2(tracker, $elm$http$Http$Sending({
-			dq: event.loaded,
-			bY: event.total
+			sent: event.loaded,
+			size: event.total
 		}))));
 	});
 	xhr.addEventListener('progress', function(event) {
 		if (xhr.c) { return; }
 		_Scheduler_rawSpawn(A2($elm$core$Platform$sendToSelf, router, _Utils_Tuple2(tracker, $elm$http$Http$Receiving({
-			dh: event.loaded,
-			bY: event.lengthComputable ? $elm$core$Maybe$Just(event.total) : $elm$core$Maybe$Nothing
+			received: event.loaded,
+			size: event.lengthComputable ? $elm$core$Maybe$Just(event.total) : $elm$core$Maybe$Nothing
 		}))));
 	});
 }
@@ -4741,20 +4741,20 @@ function _File_toUrl(blob)
 }
 
 var $author$project$Main$LinkClicked = function (a) {
-	return {$: 0, a: a};
+	return {$: 'LinkClicked', a: a};
 };
 var $author$project$Main$UrlChanged = function (a) {
-	return {$: 1, a: a};
+	return {$: 'UrlChanged', a: a};
 };
-var $elm$core$Basics$EQ = 1;
-var $elm$core$Basics$GT = 2;
-var $elm$core$Basics$LT = 0;
+var $elm$core$Basics$EQ = {$: 'EQ'};
+var $elm$core$Basics$GT = {$: 'GT'};
+var $elm$core$Basics$LT = {$: 'LT'};
 var $elm$core$List$cons = _List_cons;
 var $elm$core$Dict$foldr = F3(
 	function (func, acc, t) {
 		foldr:
 		while (true) {
-			if (t.$ === -2) {
+			if (t.$ === 'RBEmpty_elm_builtin') {
 				return acc;
 			} else {
 				var key = t.b;
@@ -4799,7 +4799,7 @@ var $elm$core$Dict$keys = function (dict) {
 		dict);
 };
 var $elm$core$Set$toList = function (_v0) {
-	var dict = _v0;
+	var dict = _v0.a;
 	return $elm$core$Dict$keys(dict);
 };
 var $elm$core$Elm$JsArray$foldr = _JsArray_foldr;
@@ -4809,7 +4809,7 @@ var $elm$core$Array$foldr = F3(
 		var tail = _v0.d;
 		var helper = F2(
 			function (node, acc) {
-				if (!node.$) {
+				if (node.$ === 'SubTree') {
 					var subTree = node.a;
 					return A3($elm$core$Elm$JsArray$foldr, helper, acc, subTree);
 				} else {
@@ -4827,32 +4827,32 @@ var $elm$core$Array$toList = function (array) {
 	return A3($elm$core$Array$foldr, $elm$core$List$cons, _List_Nil, array);
 };
 var $elm$core$Result$Err = function (a) {
-	return {$: 1, a: a};
+	return {$: 'Err', a: a};
 };
 var $elm$json$Json$Decode$Failure = F2(
 	function (a, b) {
-		return {$: 3, a: a, b: b};
+		return {$: 'Failure', a: a, b: b};
 	});
 var $elm$json$Json$Decode$Field = F2(
 	function (a, b) {
-		return {$: 0, a: a, b: b};
+		return {$: 'Field', a: a, b: b};
 	});
 var $elm$json$Json$Decode$Index = F2(
 	function (a, b) {
-		return {$: 1, a: a, b: b};
+		return {$: 'Index', a: a, b: b};
 	});
 var $elm$core$Result$Ok = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Ok', a: a};
 };
 var $elm$json$Json$Decode$OneOf = function (a) {
-	return {$: 2, a: a};
+	return {$: 'OneOf', a: a};
 };
-var $elm$core$Basics$False = 1;
+var $elm$core$Basics$False = {$: 'False'};
 var $elm$core$Basics$add = _Basics_add;
 var $elm$core$Maybe$Just = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Just', a: a};
 };
-var $elm$core$Maybe$Nothing = {$: 1};
+var $elm$core$Maybe$Nothing = {$: 'Nothing'};
 var $elm$core$String$all = _String_all;
 var $elm$core$Basics$and = _Basics_and;
 var $elm$core$Basics$append = _Utils_append;
@@ -4977,12 +4977,12 @@ var $elm$json$Json$Decode$errorToStringHelp = F2(
 		errorToStringHelp:
 		while (true) {
 			switch (error.$) {
-				case 0:
+				case 'Field':
 					var f = error.a;
 					var err = error.b;
 					var isSimple = function () {
 						var _v1 = $elm$core$String$uncons(f);
-						if (_v1.$ === 1) {
+						if (_v1.$ === 'Nothing') {
 							return false;
 						} else {
 							var _v2 = _v1.a;
@@ -4997,7 +4997,7 @@ var $elm$json$Json$Decode$errorToStringHelp = F2(
 					error = $temp$error;
 					context = $temp$context;
 					continue errorToStringHelp;
-				case 1:
+				case 'Index':
 					var i = error.a;
 					var err = error.b;
 					var indexName = '[' + ($elm$core$String$fromInt(i) + ']');
@@ -5006,7 +5006,7 @@ var $elm$json$Json$Decode$errorToStringHelp = F2(
 					error = $temp$error;
 					context = $temp$context;
 					continue errorToStringHelp;
-				case 2:
+				case 'OneOf':
 					var errors = error.a;
 					if (!errors.b) {
 						return 'Ran into a Json.Decode.oneOf with no possibilities' + function () {
@@ -5070,7 +5070,7 @@ var $elm$json$Json$Decode$errorToStringHelp = F2(
 var $elm$core$Array$branchFactor = 32;
 var $elm$core$Array$Array_elm_builtin = F4(
 	function (a, b, c, d) {
-		return {$: 0, a: a, b: b, c: c, d: d};
+		return {$: 'Array_elm_builtin', a: a, b: b, c: c, d: d};
 	});
 var $elm$core$Elm$JsArray$empty = _JsArray_empty;
 var $elm$core$Basics$ceiling = _Basics_ceiling;
@@ -5085,7 +5085,7 @@ var $elm$core$Array$shiftStep = $elm$core$Basics$ceiling(
 var $elm$core$Array$empty = A4($elm$core$Array$Array_elm_builtin, 0, $elm$core$Array$shiftStep, $elm$core$Elm$JsArray$empty, $elm$core$Elm$JsArray$empty);
 var $elm$core$Elm$JsArray$initialize = _JsArray_initialize;
 var $elm$core$Array$Leaf = function (a) {
-	return {$: 1, a: a};
+	return {$: 'Leaf', a: a};
 };
 var $elm$core$Basics$apL = F2(
 	function (f, x) {
@@ -5105,7 +5105,7 @@ var $elm$core$Basics$max = F2(
 	});
 var $elm$core$Basics$mul = _Basics_mul;
 var $elm$core$Array$SubTree = function (a) {
-	return {$: 0, a: a};
+	return {$: 'SubTree', a: a};
 };
 var $elm$core$Elm$JsArray$initializeFromList = _JsArray_initializeFromList;
 var $elm$core$Array$compressNodes = F2(
@@ -5152,25 +5152,25 @@ var $elm$core$Array$treeFromBuilder = F2(
 	});
 var $elm$core$Array$builderToArray = F2(
 	function (reverseNodeList, builder) {
-		if (!builder.g) {
+		if (!builder.nodeListSize) {
 			return A4(
 				$elm$core$Array$Array_elm_builtin,
-				$elm$core$Elm$JsArray$length(builder.j),
+				$elm$core$Elm$JsArray$length(builder.tail),
 				$elm$core$Array$shiftStep,
 				$elm$core$Elm$JsArray$empty,
-				builder.j);
+				builder.tail);
 		} else {
-			var treeLen = builder.g * $elm$core$Array$branchFactor;
+			var treeLen = builder.nodeListSize * $elm$core$Array$branchFactor;
 			var depth = $elm$core$Basics$floor(
 				A2($elm$core$Basics$logBase, $elm$core$Array$branchFactor, treeLen - 1));
-			var correctNodeList = reverseNodeList ? $elm$core$List$reverse(builder.k) : builder.k;
-			var tree = A2($elm$core$Array$treeFromBuilder, correctNodeList, builder.g);
+			var correctNodeList = reverseNodeList ? $elm$core$List$reverse(builder.nodeList) : builder.nodeList;
+			var tree = A2($elm$core$Array$treeFromBuilder, correctNodeList, builder.nodeListSize);
 			return A4(
 				$elm$core$Array$Array_elm_builtin,
-				$elm$core$Elm$JsArray$length(builder.j) + treeLen,
+				$elm$core$Elm$JsArray$length(builder.tail) + treeLen,
 				A2($elm$core$Basics$max, 5, depth * $elm$core$Array$shiftStep),
 				tree,
-				builder.j);
+				builder.tail);
 		}
 	});
 var $elm$core$Basics$idiv = _Basics_idiv;
@@ -5183,7 +5183,7 @@ var $elm$core$Array$initializeHelp = F5(
 				return A2(
 					$elm$core$Array$builderToArray,
 					false,
-					{k: nodeList, g: (len / $elm$core$Array$branchFactor) | 0, j: tail});
+					{nodeList: nodeList, nodeListSize: (len / $elm$core$Array$branchFactor) | 0, tail: tail});
 			} else {
 				var leaf = $elm$core$Array$Leaf(
 					A3($elm$core$Elm$JsArray$initialize, $elm$core$Array$branchFactor, fromIndex, fn));
@@ -5213,9 +5213,9 @@ var $elm$core$Array$initialize = F2(
 			return A5($elm$core$Array$initializeHelp, fn, initialFromIndex, len, _List_Nil, tail);
 		}
 	});
-var $elm$core$Basics$True = 0;
+var $elm$core$Basics$True = {$: 'True'};
 var $elm$core$Result$isOk = function (result) {
-	if (!result.$) {
+	if (result.$ === 'Ok') {
 		return true;
 	} else {
 		return false;
@@ -5226,31 +5226,33 @@ var $elm$json$Json$Decode$map2 = _Json_map2;
 var $elm$json$Json$Decode$succeed = _Json_succeed;
 var $elm$virtual_dom$VirtualDom$toHandlerInt = function (handler) {
 	switch (handler.$) {
-		case 0:
+		case 'Normal':
 			return 0;
-		case 1:
+		case 'MayStopPropagation':
 			return 1;
-		case 2:
+		case 'MayPreventDefault':
 			return 2;
 		default:
 			return 3;
 	}
 };
 var $elm$browser$Browser$External = function (a) {
-	return {$: 1, a: a};
+	return {$: 'External', a: a};
 };
 var $elm$browser$Browser$Internal = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Internal', a: a};
 };
 var $elm$core$Basics$identity = function (x) {
 	return x;
 };
-var $elm$browser$Browser$Dom$NotFound = $elm$core$Basics$identity;
-var $elm$url$Url$Http = 0;
-var $elm$url$Url$Https = 1;
+var $elm$browser$Browser$Dom$NotFound = function (a) {
+	return {$: 'NotFound', a: a};
+};
+var $elm$url$Url$Http = {$: 'Http'};
+var $elm$url$Url$Https = {$: 'Https'};
 var $elm$url$Url$Url = F6(
 	function (protocol, host, port_, path, query, fragment) {
-		return {bq: fragment, bv: host, bJ: path, bL: port_, bO: protocol, bP: query};
+		return {fragment: fragment, host: host, path: path, port_: port_, protocol: protocol, query: query};
 	});
 var $elm$core$String$contains = _String_contains;
 var $elm$core$String$length = _String_length;
@@ -5286,7 +5288,7 @@ var $elm$url$Url$chompBeforePath = F5(
 					var i = _v0.a;
 					var _v1 = $elm$core$String$toInt(
 						A2($elm$core$String$dropLeft, i + 1, str));
-					if (_v1.$ === 1) {
+					if (_v1.$ === 'Nothing') {
 						return $elm$core$Maybe$Nothing;
 					} else {
 						var port_ = _v1;
@@ -5369,24 +5371,26 @@ var $elm$core$String$startsWith = _String_startsWith;
 var $elm$url$Url$fromString = function (str) {
 	return A2($elm$core$String$startsWith, 'http://', str) ? A2(
 		$elm$url$Url$chompAfterProtocol,
-		0,
+		$elm$url$Url$Http,
 		A2($elm$core$String$dropLeft, 7, str)) : (A2($elm$core$String$startsWith, 'https://', str) ? A2(
 		$elm$url$Url$chompAfterProtocol,
-		1,
+		$elm$url$Url$Https,
 		A2($elm$core$String$dropLeft, 8, str)) : $elm$core$Maybe$Nothing);
 };
 var $elm$core$Basics$never = function (_v0) {
 	never:
 	while (true) {
-		var nvr = _v0;
+		var nvr = _v0.a;
 		var $temp$_v0 = nvr;
 		_v0 = $temp$_v0;
 		continue never;
 	}
 };
-var $elm$core$Task$Perform = $elm$core$Basics$identity;
+var $elm$core$Task$Perform = function (a) {
+	return {$: 'Perform', a: a};
+};
 var $elm$core$Task$succeed = _Scheduler_succeed;
-var $elm$core$Task$init = $elm$core$Task$succeed(0);
+var $elm$core$Task$init = $elm$core$Task$succeed(_Utils_Tuple0);
 var $elm$core$List$foldrHelper = F4(
 	function (fn, acc, ctr, ls) {
 		if (!ls.b) {
@@ -5492,7 +5496,7 @@ var $elm$core$Task$sequence = function (tasks) {
 var $elm$core$Platform$sendToApp = _Platform_sendToApp;
 var $elm$core$Task$spawnCmd = F2(
 	function (router, _v0) {
-		var task = _v0;
+		var task = _v0.a;
 		return _Scheduler_spawn(
 			A2(
 				$elm$core$Task$andThen,
@@ -5504,7 +5508,7 @@ var $elm$core$Task$onEffects = F3(
 		return A2(
 			$elm$core$Task$map,
 			function (_v0) {
-				return 0;
+				return _Utils_Tuple0;
 			},
 			$elm$core$Task$sequence(
 				A2(
@@ -5514,25 +5518,27 @@ var $elm$core$Task$onEffects = F3(
 	});
 var $elm$core$Task$onSelfMsg = F3(
 	function (_v0, _v1, _v2) {
-		return $elm$core$Task$succeed(0);
+		return $elm$core$Task$succeed(_Utils_Tuple0);
 	});
 var $elm$core$Task$cmdMap = F2(
 	function (tagger, _v0) {
-		var task = _v0;
-		return A2($elm$core$Task$map, tagger, task);
+		var task = _v0.a;
+		return $elm$core$Task$Perform(
+			A2($elm$core$Task$map, tagger, task));
 	});
 _Platform_effectManagers['Task'] = _Platform_createManager($elm$core$Task$init, $elm$core$Task$onEffects, $elm$core$Task$onSelfMsg, $elm$core$Task$cmdMap);
 var $elm$core$Task$command = _Platform_leaf('Task');
 var $elm$core$Task$perform = F2(
 	function (toMessage, task) {
 		return $elm$core$Task$command(
-			A2($elm$core$Task$map, toMessage, task));
+			$elm$core$Task$Perform(
+				A2($elm$core$Task$map, toMessage, task)));
 	});
 var $elm$browser$Browser$application = _Browser_application;
-var $author$project$Navigation$Route$NotFound = {$: 11};
+var $author$project$Navigation$Route$NotFound = {$: 'NotFound'};
 var $elm$url$Url$Parser$State = F5(
 	function (visited, unvisited, params, frag, value) {
-		return {Q: frag, S: params, M: unvisited, aT: value, X: visited};
+		return {frag: frag, params: params, unvisited: unvisited, value: value, visited: visited};
 	});
 var $elm$url$Url$Parser$getFirstMatch = function (states) {
 	getFirstMatch:
@@ -5542,12 +5548,12 @@ var $elm$url$Url$Parser$getFirstMatch = function (states) {
 		} else {
 			var state = states.a;
 			var rest = states.b;
-			var _v1 = state.M;
+			var _v1 = state.unvisited;
 			if (!_v1.b) {
-				return $elm$core$Maybe$Just(state.aT);
+				return $elm$core$Maybe$Just(state.value);
 			} else {
 				if ((_v1.a === '') && (!_v1.b.b)) {
-					return $elm$core$Maybe$Just(state.aT);
+					return $elm$core$Maybe$Just(state.value);
 				} else {
 					var $temp$states = rest;
 					states = $temp$states;
@@ -5585,7 +5591,7 @@ var $elm$url$Url$Parser$preparePath = function (path) {
 };
 var $elm$url$Url$Parser$addToParametersHelp = F2(
 	function (value, maybeList) {
-		if (maybeList.$ === 1) {
+		if (maybeList.$ === 'Nothing') {
 			return $elm$core$Maybe$Just(
 				_List_fromArray(
 					[value]));
@@ -5601,7 +5607,7 @@ var $elm$core$Dict$get = F2(
 	function (targetKey, dict) {
 		get:
 		while (true) {
-			if (dict.$ === -2) {
+			if (dict.$ === 'RBEmpty_elm_builtin') {
 				return $elm$core$Maybe$Nothing;
 			} else {
 				var key = dict.b;
@@ -5609,14 +5615,14 @@ var $elm$core$Dict$get = F2(
 				var left = dict.d;
 				var right = dict.e;
 				var _v1 = A2($elm$core$Basics$compare, targetKey, key);
-				switch (_v1) {
-					case 0:
+				switch (_v1.$) {
+					case 'LT':
 						var $temp$targetKey = targetKey,
 							$temp$dict = left;
 						targetKey = $temp$targetKey;
 						dict = $temp$dict;
 						continue get;
-					case 1:
+					case 'EQ':
 						return $elm$core$Maybe$Just(value);
 					default:
 						var $temp$targetKey = targetKey,
@@ -5628,22 +5634,22 @@ var $elm$core$Dict$get = F2(
 			}
 		}
 	});
-var $elm$core$Dict$Black = 1;
+var $elm$core$Dict$Black = {$: 'Black'};
 var $elm$core$Dict$RBNode_elm_builtin = F5(
 	function (a, b, c, d, e) {
-		return {$: -1, a: a, b: b, c: c, d: d, e: e};
+		return {$: 'RBNode_elm_builtin', a: a, b: b, c: c, d: d, e: e};
 	});
-var $elm$core$Dict$RBEmpty_elm_builtin = {$: -2};
-var $elm$core$Dict$Red = 0;
+var $elm$core$Dict$RBEmpty_elm_builtin = {$: 'RBEmpty_elm_builtin'};
+var $elm$core$Dict$Red = {$: 'Red'};
 var $elm$core$Dict$balance = F5(
 	function (color, key, value, left, right) {
-		if ((right.$ === -1) && (!right.a)) {
+		if ((right.$ === 'RBNode_elm_builtin') && (right.a.$ === 'Red')) {
 			var _v1 = right.a;
 			var rK = right.b;
 			var rV = right.c;
 			var rLeft = right.d;
 			var rRight = right.e;
-			if ((left.$ === -1) && (!left.a)) {
+			if ((left.$ === 'RBNode_elm_builtin') && (left.a.$ === 'Red')) {
 				var _v3 = left.a;
 				var lK = left.b;
 				var lV = left.c;
@@ -5651,22 +5657,22 @@ var $elm$core$Dict$balance = F5(
 				var lRight = left.e;
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					0,
+					$elm$core$Dict$Red,
 					key,
 					value,
-					A5($elm$core$Dict$RBNode_elm_builtin, 1, lK, lV, lLeft, lRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 1, rK, rV, rLeft, rRight));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, rK, rV, rLeft, rRight));
 			} else {
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
 					color,
 					rK,
 					rV,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, key, value, left, rLeft),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, key, value, left, rLeft),
 					rRight);
 			}
 		} else {
-			if ((((left.$ === -1) && (!left.a)) && (left.d.$ === -1)) && (!left.d.a)) {
+			if ((((left.$ === 'RBNode_elm_builtin') && (left.a.$ === 'Red')) && (left.d.$ === 'RBNode_elm_builtin')) && (left.d.a.$ === 'Red')) {
 				var _v5 = left.a;
 				var lK = left.b;
 				var lV = left.c;
@@ -5679,11 +5685,11 @@ var $elm$core$Dict$balance = F5(
 				var lRight = left.e;
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					0,
+					$elm$core$Dict$Red,
 					lK,
 					lV,
-					A5($elm$core$Dict$RBNode_elm_builtin, 1, llK, llV, llLeft, llRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 1, key, value, lRight, right));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, llK, llV, llLeft, llRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, key, value, lRight, right));
 			} else {
 				return A5($elm$core$Dict$RBNode_elm_builtin, color, key, value, left, right);
 			}
@@ -5691,8 +5697,8 @@ var $elm$core$Dict$balance = F5(
 	});
 var $elm$core$Dict$insertHelp = F3(
 	function (key, value, dict) {
-		if (dict.$ === -2) {
-			return A5($elm$core$Dict$RBNode_elm_builtin, 0, key, value, $elm$core$Dict$RBEmpty_elm_builtin, $elm$core$Dict$RBEmpty_elm_builtin);
+		if (dict.$ === 'RBEmpty_elm_builtin') {
+			return A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, key, value, $elm$core$Dict$RBEmpty_elm_builtin, $elm$core$Dict$RBEmpty_elm_builtin);
 		} else {
 			var nColor = dict.a;
 			var nKey = dict.b;
@@ -5700,8 +5706,8 @@ var $elm$core$Dict$insertHelp = F3(
 			var nLeft = dict.d;
 			var nRight = dict.e;
 			var _v1 = A2($elm$core$Basics$compare, key, nKey);
-			switch (_v1) {
-				case 0:
+			switch (_v1.$) {
+				case 'LT':
 					return A5(
 						$elm$core$Dict$balance,
 						nColor,
@@ -5709,7 +5715,7 @@ var $elm$core$Dict$insertHelp = F3(
 						nValue,
 						A3($elm$core$Dict$insertHelp, key, value, nLeft),
 						nRight);
-				case 1:
+				case 'EQ':
 					return A5($elm$core$Dict$RBNode_elm_builtin, nColor, nKey, value, nLeft, nRight);
 				default:
 					return A5(
@@ -5725,13 +5731,13 @@ var $elm$core$Dict$insertHelp = F3(
 var $elm$core$Dict$insert = F3(
 	function (key, value, dict) {
 		var _v0 = A3($elm$core$Dict$insertHelp, key, value, dict);
-		if ((_v0.$ === -1) && (!_v0.a)) {
+		if ((_v0.$ === 'RBNode_elm_builtin') && (_v0.a.$ === 'Red')) {
 			var _v1 = _v0.a;
 			var k = _v0.b;
 			var v = _v0.c;
 			var l = _v0.d;
 			var r = _v0.e;
-			return A5($elm$core$Dict$RBNode_elm_builtin, 1, k, v, l, r);
+			return A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, k, v, l, r);
 		} else {
 			var x = _v0;
 			return x;
@@ -5740,7 +5746,7 @@ var $elm$core$Dict$insert = F3(
 var $elm$core$Dict$getMin = function (dict) {
 	getMin:
 	while (true) {
-		if ((dict.$ === -1) && (dict.d.$ === -1)) {
+		if ((dict.$ === 'RBNode_elm_builtin') && (dict.d.$ === 'RBNode_elm_builtin')) {
 			var left = dict.d;
 			var $temp$dict = left;
 			dict = $temp$dict;
@@ -5751,8 +5757,8 @@ var $elm$core$Dict$getMin = function (dict) {
 	}
 };
 var $elm$core$Dict$moveRedLeft = function (dict) {
-	if (((dict.$ === -1) && (dict.d.$ === -1)) && (dict.e.$ === -1)) {
-		if ((dict.e.d.$ === -1) && (!dict.e.d.a)) {
+	if (((dict.$ === 'RBNode_elm_builtin') && (dict.d.$ === 'RBNode_elm_builtin')) && (dict.e.$ === 'RBNode_elm_builtin')) {
+		if ((dict.e.d.$ === 'RBNode_elm_builtin') && (dict.e.d.a.$ === 'Red')) {
 			var clr = dict.a;
 			var k = dict.b;
 			var v = dict.c;
@@ -5775,17 +5781,17 @@ var $elm$core$Dict$moveRedLeft = function (dict) {
 			var rRight = _v2.e;
 			return A5(
 				$elm$core$Dict$RBNode_elm_builtin,
-				0,
+				$elm$core$Dict$Red,
 				rlK,
 				rlV,
 				A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, lK, lV, lLeft, lRight),
 					rlL),
-				A5($elm$core$Dict$RBNode_elm_builtin, 1, rK, rV, rlR, rRight));
+				A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, rK, rV, rlR, rRight));
 		} else {
 			var clr = dict.a;
 			var k = dict.b;
@@ -5802,22 +5808,22 @@ var $elm$core$Dict$moveRedLeft = function (dict) {
 			var rV = _v5.c;
 			var rLeft = _v5.d;
 			var rRight = _v5.e;
-			if (clr === 1) {
+			if (clr.$ === 'Black') {
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, lK, lV, lLeft, lRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, rK, rV, rLeft, rRight));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, rK, rV, rLeft, rRight));
 			} else {
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, lK, lV, lLeft, lRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, rK, rV, rLeft, rRight));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, rK, rV, rLeft, rRight));
 			}
 		}
 	} else {
@@ -5825,8 +5831,8 @@ var $elm$core$Dict$moveRedLeft = function (dict) {
 	}
 };
 var $elm$core$Dict$moveRedRight = function (dict) {
-	if (((dict.$ === -1) && (dict.d.$ === -1)) && (dict.e.$ === -1)) {
-		if ((dict.d.d.$ === -1) && (!dict.d.d.a)) {
+	if (((dict.$ === 'RBNode_elm_builtin') && (dict.d.$ === 'RBNode_elm_builtin')) && (dict.e.$ === 'RBNode_elm_builtin')) {
+		if ((dict.d.d.$ === 'RBNode_elm_builtin') && (dict.d.d.a.$ === 'Red')) {
 			var clr = dict.a;
 			var k = dict.b;
 			var v = dict.c;
@@ -5849,17 +5855,17 @@ var $elm$core$Dict$moveRedRight = function (dict) {
 			var rRight = _v4.e;
 			return A5(
 				$elm$core$Dict$RBNode_elm_builtin,
-				0,
+				$elm$core$Dict$Red,
 				lK,
 				lV,
-				A5($elm$core$Dict$RBNode_elm_builtin, 1, llK, llV, llLeft, llRight),
+				A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, llK, llV, llLeft, llRight),
 				A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
 					lRight,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, rK, rV, rLeft, rRight)));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, rK, rV, rLeft, rRight)));
 		} else {
 			var clr = dict.a;
 			var k = dict.b;
@@ -5876,22 +5882,22 @@ var $elm$core$Dict$moveRedRight = function (dict) {
 			var rV = _v6.c;
 			var rLeft = _v6.d;
 			var rRight = _v6.e;
-			if (clr === 1) {
+			if (clr.$ === 'Black') {
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, lK, lV, lLeft, lRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, rK, rV, rLeft, rRight));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, rK, rV, rLeft, rRight));
 			} else {
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
-					1,
+					$elm$core$Dict$Black,
 					k,
 					v,
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, lK, lV, lLeft, lRight),
-					A5($elm$core$Dict$RBNode_elm_builtin, 0, rK, rV, rLeft, rRight));
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, lK, lV, lLeft, lRight),
+					A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, rK, rV, rLeft, rRight));
 			}
 		}
 	} else {
@@ -5900,7 +5906,7 @@ var $elm$core$Dict$moveRedRight = function (dict) {
 };
 var $elm$core$Dict$removeHelpPrepEQGT = F7(
 	function (targetKey, dict, color, key, value, left, right) {
-		if ((left.$ === -1) && (!left.a)) {
+		if ((left.$ === 'RBNode_elm_builtin') && (left.a.$ === 'Red')) {
 			var _v1 = left.a;
 			var lK = left.b;
 			var lV = left.c;
@@ -5912,13 +5918,13 @@ var $elm$core$Dict$removeHelpPrepEQGT = F7(
 				lK,
 				lV,
 				lLeft,
-				A5($elm$core$Dict$RBNode_elm_builtin, 0, key, value, lRight, right));
+				A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Red, key, value, lRight, right));
 		} else {
 			_v2$2:
 			while (true) {
-				if ((right.$ === -1) && (right.a === 1)) {
-					if (right.d.$ === -1) {
-						if (right.d.a === 1) {
+				if ((right.$ === 'RBNode_elm_builtin') && (right.a.$ === 'Black')) {
+					if (right.d.$ === 'RBNode_elm_builtin') {
+						if (right.d.a.$ === 'Black') {
 							var _v3 = right.a;
 							var _v4 = right.d;
 							var _v5 = _v4.a;
@@ -5939,7 +5945,7 @@ var $elm$core$Dict$removeHelpPrepEQGT = F7(
 		}
 	});
 var $elm$core$Dict$removeMin = function (dict) {
-	if ((dict.$ === -1) && (dict.d.$ === -1)) {
+	if ((dict.$ === 'RBNode_elm_builtin') && (dict.d.$ === 'RBNode_elm_builtin')) {
 		var color = dict.a;
 		var key = dict.b;
 		var value = dict.c;
@@ -5947,8 +5953,8 @@ var $elm$core$Dict$removeMin = function (dict) {
 		var lColor = left.a;
 		var lLeft = left.d;
 		var right = dict.e;
-		if (lColor === 1) {
-			if ((lLeft.$ === -1) && (!lLeft.a)) {
+		if (lColor.$ === 'Black') {
+			if ((lLeft.$ === 'RBNode_elm_builtin') && (lLeft.a.$ === 'Red')) {
 				var _v3 = lLeft.a;
 				return A5(
 					$elm$core$Dict$RBNode_elm_builtin,
@@ -5959,7 +5965,7 @@ var $elm$core$Dict$removeMin = function (dict) {
 					right);
 			} else {
 				var _v4 = $elm$core$Dict$moveRedLeft(dict);
-				if (_v4.$ === -1) {
+				if (_v4.$ === 'RBNode_elm_builtin') {
 					var nColor = _v4.a;
 					var nKey = _v4.b;
 					var nValue = _v4.c;
@@ -5991,7 +5997,7 @@ var $elm$core$Dict$removeMin = function (dict) {
 };
 var $elm$core$Dict$removeHelp = F2(
 	function (targetKey, dict) {
-		if (dict.$ === -2) {
+		if (dict.$ === 'RBEmpty_elm_builtin') {
 			return $elm$core$Dict$RBEmpty_elm_builtin;
 		} else {
 			var color = dict.a;
@@ -6000,10 +6006,10 @@ var $elm$core$Dict$removeHelp = F2(
 			var left = dict.d;
 			var right = dict.e;
 			if (_Utils_cmp(targetKey, key) < 0) {
-				if ((left.$ === -1) && (left.a === 1)) {
+				if ((left.$ === 'RBNode_elm_builtin') && (left.a.$ === 'Black')) {
 					var _v4 = left.a;
 					var lLeft = left.d;
-					if ((lLeft.$ === -1) && (!lLeft.a)) {
+					if ((lLeft.$ === 'RBNode_elm_builtin') && (lLeft.a.$ === 'Red')) {
 						var _v6 = lLeft.a;
 						return A5(
 							$elm$core$Dict$RBNode_elm_builtin,
@@ -6014,7 +6020,7 @@ var $elm$core$Dict$removeHelp = F2(
 							right);
 					} else {
 						var _v7 = $elm$core$Dict$moveRedLeft(dict);
-						if (_v7.$ === -1) {
+						if (_v7.$ === 'RBNode_elm_builtin') {
 							var nColor = _v7.a;
 							var nKey = _v7.b;
 							var nValue = _v7.c;
@@ -6050,7 +6056,7 @@ var $elm$core$Dict$removeHelp = F2(
 	});
 var $elm$core$Dict$removeHelpEQGT = F2(
 	function (targetKey, dict) {
-		if (dict.$ === -1) {
+		if (dict.$ === 'RBNode_elm_builtin') {
 			var color = dict.a;
 			var key = dict.b;
 			var value = dict.c;
@@ -6058,7 +6064,7 @@ var $elm$core$Dict$removeHelpEQGT = F2(
 			var right = dict.e;
 			if (_Utils_eq(targetKey, key)) {
 				var _v1 = $elm$core$Dict$getMin(right);
-				if (_v1.$ === -1) {
+				if (_v1.$ === 'RBNode_elm_builtin') {
 					var minKey = _v1.b;
 					var minValue = _v1.c;
 					return A5(
@@ -6087,13 +6093,13 @@ var $elm$core$Dict$removeHelpEQGT = F2(
 var $elm$core$Dict$remove = F2(
 	function (key, dict) {
 		var _v0 = A2($elm$core$Dict$removeHelp, key, dict);
-		if ((_v0.$ === -1) && (!_v0.a)) {
+		if ((_v0.$ === 'RBNode_elm_builtin') && (_v0.a.$ === 'Red')) {
 			var _v1 = _v0.a;
 			var k = _v0.b;
 			var v = _v0.c;
 			var l = _v0.d;
 			var r = _v0.e;
-			return A5($elm$core$Dict$RBNode_elm_builtin, 1, k, v, l, r);
+			return A5($elm$core$Dict$RBNode_elm_builtin, $elm$core$Dict$Black, k, v, l, r);
 		} else {
 			var x = _v0;
 			return x;
@@ -6103,7 +6109,7 @@ var $elm$core$Dict$update = F3(
 	function (targetKey, alter, dictionary) {
 		var _v0 = alter(
 			A2($elm$core$Dict$get, targetKey, dictionary));
-		if (!_v0.$) {
+		if (_v0.$ === 'Just') {
 			var value = _v0.a;
 			return A3($elm$core$Dict$insert, targetKey, value, dictionary);
 		} else {
@@ -6118,12 +6124,12 @@ var $elm$url$Url$Parser$addParam = F2(
 			var _v1 = _v0.b;
 			var rawValue = _v1.a;
 			var _v2 = $elm$url$Url$percentDecode(rawKey);
-			if (_v2.$ === 1) {
+			if (_v2.$ === 'Nothing') {
 				return dict;
 			} else {
 				var key = _v2.a;
 				var _v3 = $elm$url$Url$percentDecode(rawValue);
-				if (_v3.$ === 1) {
+				if (_v3.$ === 'Nothing') {
 					return dict;
 				} else {
 					var value = _v3.a;
@@ -6140,7 +6146,7 @@ var $elm$url$Url$Parser$addParam = F2(
 	});
 var $elm$core$Dict$empty = $elm$core$Dict$RBEmpty_elm_builtin;
 var $elm$url$Url$Parser$prepareQuery = function (maybeQuery) {
-	if (maybeQuery.$ === 1) {
+	if (maybeQuery.$ === 'Nothing') {
 		return $elm$core$Dict$empty;
 	} else {
 		var qry = maybeQuery.a;
@@ -6153,38 +6159,40 @@ var $elm$url$Url$Parser$prepareQuery = function (maybeQuery) {
 };
 var $elm$url$Url$Parser$parse = F2(
 	function (_v0, url) {
-		var parser = _v0;
+		var parser = _v0.a;
 		return $elm$url$Url$Parser$getFirstMatch(
 			parser(
 				A5(
 					$elm$url$Url$Parser$State,
 					_List_Nil,
-					$elm$url$Url$Parser$preparePath(url.bJ),
-					$elm$url$Url$Parser$prepareQuery(url.bP),
-					url.bq,
+					$elm$url$Url$Parser$preparePath(url.path),
+					$elm$url$Url$Parser$prepareQuery(url.query),
+					url.fragment,
 					$elm$core$Basics$identity)));
 	});
-var $author$project$Navigation$Route$AntiLibrary = {$: 2};
+var $author$project$Navigation$Route$AntiLibrary = {$: 'AntiLibrary'};
 var $author$project$Navigation$Route$BookDetail = function (a) {
-	return {$: 6, a: a};
+	return {$: 'BookDetail', a: a};
 };
-var $author$project$Navigation$Route$Home = {$: 0};
-var $author$project$Navigation$Route$Library = {$: 1};
-var $author$project$Navigation$Route$LookingForHome = {$: 5};
-var $author$project$Navigation$Route$ReadingPile = {$: 4};
-var $author$project$Navigation$Route$Search = {$: 8};
-var $author$project$Navigation$Route$SettingsAgeVerification = {$: 10};
-var $author$project$Navigation$Route$SettingsConsent = {$: 9};
-var $author$project$Navigation$Route$Upload = {$: 7};
-var $author$project$Navigation$Route$WishList = {$: 3};
-var $elm$url$Url$Parser$Parser = $elm$core$Basics$identity;
+var $author$project$Navigation$Route$Home = {$: 'Home'};
+var $author$project$Navigation$Route$Library = {$: 'Library'};
+var $author$project$Navigation$Route$LookingForHome = {$: 'LookingForHome'};
+var $author$project$Navigation$Route$ReadingPile = {$: 'ReadingPile'};
+var $author$project$Navigation$Route$Search = {$: 'Search'};
+var $author$project$Navigation$Route$SettingsAgeVerification = {$: 'SettingsAgeVerification'};
+var $author$project$Navigation$Route$SettingsConsent = {$: 'SettingsConsent'};
+var $author$project$Navigation$Route$Upload = {$: 'Upload'};
+var $author$project$Navigation$Route$WishList = {$: 'WishList'};
+var $elm$url$Url$Parser$Parser = function (a) {
+	return {$: 'Parser', a: a};
+};
 var $elm$url$Url$Parser$mapState = F2(
 	function (func, _v0) {
-		var visited = _v0.X;
-		var unvisited = _v0.M;
-		var params = _v0.S;
-		var frag = _v0.Q;
-		var value = _v0.aT;
+		var visited = _v0.visited;
+		var unvisited = _v0.unvisited;
+		var params = _v0.params;
+		var frag = _v0.frag;
+		var value = _v0.value;
 		return A5(
 			$elm$url$Url$Parser$State,
 			visited,
@@ -6195,19 +6203,20 @@ var $elm$url$Url$Parser$mapState = F2(
 	});
 var $elm$url$Url$Parser$map = F2(
 	function (subValue, _v0) {
-		var parseArg = _v0;
-		return function (_v1) {
-			var visited = _v1.X;
-			var unvisited = _v1.M;
-			var params = _v1.S;
-			var frag = _v1.Q;
-			var value = _v1.aT;
-			return A2(
-				$elm$core$List$map,
-				$elm$url$Url$Parser$mapState(value),
-				parseArg(
-					A5($elm$url$Url$Parser$State, visited, unvisited, params, frag, subValue)));
-		};
+		var parseArg = _v0.a;
+		return $elm$url$Url$Parser$Parser(
+			function (_v1) {
+				var visited = _v1.visited;
+				var unvisited = _v1.unvisited;
+				var params = _v1.params;
+				var frag = _v1.frag;
+				var value = _v1.value;
+				return A2(
+					$elm$core$List$map,
+					$elm$url$Url$Parser$mapState(value),
+					parseArg(
+						A5($elm$url$Url$Parser$State, visited, unvisited, params, frag, subValue)));
+			});
 	});
 var $elm$core$List$append = F2(
 	function (xs, ys) {
@@ -6226,89 +6235,94 @@ var $elm$core$List$concatMap = F2(
 			A2($elm$core$List$map, f, list));
 	});
 var $elm$url$Url$Parser$oneOf = function (parsers) {
-	return function (state) {
-		return A2(
-			$elm$core$List$concatMap,
-			function (_v0) {
-				var parser = _v0;
-				return parser(state);
-			},
-			parsers);
-	};
-};
-var $elm$url$Url$Parser$s = function (str) {
-	return function (_v0) {
-		var visited = _v0.X;
-		var unvisited = _v0.M;
-		var params = _v0.S;
-		var frag = _v0.Q;
-		var value = _v0.aT;
-		if (!unvisited.b) {
-			return _List_Nil;
-		} else {
-			var next = unvisited.a;
-			var rest = unvisited.b;
-			return _Utils_eq(next, str) ? _List_fromArray(
-				[
-					A5(
-					$elm$url$Url$Parser$State,
-					A2($elm$core$List$cons, next, visited),
-					rest,
-					params,
-					frag,
-					value)
-				]) : _List_Nil;
-		}
-	};
-};
-var $elm$url$Url$Parser$slash = F2(
-	function (_v0, _v1) {
-		var parseBefore = _v0;
-		var parseAfter = _v1;
-		return function (state) {
+	return $elm$url$Url$Parser$Parser(
+		function (state) {
 			return A2(
 				$elm$core$List$concatMap,
-				parseAfter,
-				parseBefore(state));
-		};
-	});
-var $elm$url$Url$Parser$custom = F2(
-	function (tipe, stringToSomething) {
-		return function (_v0) {
-			var visited = _v0.X;
-			var unvisited = _v0.M;
-			var params = _v0.S;
-			var frag = _v0.Q;
-			var value = _v0.aT;
+				function (_v0) {
+					var parser = _v0.a;
+					return parser(state);
+				},
+				parsers);
+		});
+};
+var $elm$url$Url$Parser$s = function (str) {
+	return $elm$url$Url$Parser$Parser(
+		function (_v0) {
+			var visited = _v0.visited;
+			var unvisited = _v0.unvisited;
+			var params = _v0.params;
+			var frag = _v0.frag;
+			var value = _v0.value;
 			if (!unvisited.b) {
 				return _List_Nil;
 			} else {
 				var next = unvisited.a;
 				var rest = unvisited.b;
-				var _v2 = stringToSomething(next);
-				if (!_v2.$) {
-					var nextValue = _v2.a;
-					return _List_fromArray(
-						[
-							A5(
-							$elm$url$Url$Parser$State,
-							A2($elm$core$List$cons, next, visited),
-							rest,
-							params,
-							frag,
-							value(nextValue))
-						]);
-				} else {
-					return _List_Nil;
-				}
+				return _Utils_eq(next, str) ? _List_fromArray(
+					[
+						A5(
+						$elm$url$Url$Parser$State,
+						A2($elm$core$List$cons, next, visited),
+						rest,
+						params,
+						frag,
+						value)
+					]) : _List_Nil;
 			}
-		};
+		});
+};
+var $elm$url$Url$Parser$slash = F2(
+	function (_v0, _v1) {
+		var parseBefore = _v0.a;
+		var parseAfter = _v1.a;
+		return $elm$url$Url$Parser$Parser(
+			function (state) {
+				return A2(
+					$elm$core$List$concatMap,
+					parseAfter,
+					parseBefore(state));
+			});
+	});
+var $elm$url$Url$Parser$custom = F2(
+	function (tipe, stringToSomething) {
+		return $elm$url$Url$Parser$Parser(
+			function (_v0) {
+				var visited = _v0.visited;
+				var unvisited = _v0.unvisited;
+				var params = _v0.params;
+				var frag = _v0.frag;
+				var value = _v0.value;
+				if (!unvisited.b) {
+					return _List_Nil;
+				} else {
+					var next = unvisited.a;
+					var rest = unvisited.b;
+					var _v2 = stringToSomething(next);
+					if (_v2.$ === 'Just') {
+						var nextValue = _v2.a;
+						return _List_fromArray(
+							[
+								A5(
+								$elm$url$Url$Parser$State,
+								A2($elm$core$List$cons, next, visited),
+								rest,
+								params,
+								frag,
+								value(nextValue))
+							]);
+					} else {
+						return _List_Nil;
+					}
+				}
+			});
 	});
 var $elm$url$Url$Parser$string = A2($elm$url$Url$Parser$custom, 'STRING', $elm$core$Maybe$Just);
-var $elm$url$Url$Parser$top = function (state) {
-	return _List_fromArray(
-		[state]);
-};
+var $elm$url$Url$Parser$top = $elm$url$Url$Parser$Parser(
+	function (state) {
+		return _List_fromArray(
+			[state]);
+	});
 var $author$project$Navigation$Route$parser = $elm$url$Url$Parser$oneOf(
 	_List_fromArray(
 		[
@@ -6365,7 +6379,7 @@ var $author$project$Navigation$Route$parser = $elm$url$Url$Parser$oneOf(
 		]));
 var $elm$core$Maybe$withDefault = F2(
 	function (_default, maybe) {
-		if (!maybe.$) {
+		if (maybe.$ === 'Just') {
 			var value = maybe.a;
 			return value;
 		} else {
@@ -6379,66 +6393,66 @@ var $author$project$Navigation$Route$fromUrl = function (url) {
 		A2($elm$url$Url$Parser$parse, $author$project$Navigation$Route$parser, url));
 };
 var $author$project$Main$AntiLibraryMsg = function (a) {
-	return {$: 3, a: a};
+	return {$: 'AntiLibraryMsg', a: a};
 };
 var $author$project$Main$BookDetailMsg = function (a) {
-	return {$: 7, a: a};
+	return {$: 'BookDetailMsg', a: a};
 };
 var $author$project$Main$LibraryMsg = function (a) {
-	return {$: 2, a: a};
+	return {$: 'LibraryMsg', a: a};
 };
 var $author$project$Main$LookingForHomeMsg = function (a) {
-	return {$: 6, a: a};
+	return {$: 'LookingForHomeMsg', a: a};
 };
 var $author$project$Main$PageAntiLibrary = function (a) {
-	return {$: 2, a: a};
+	return {$: 'PageAntiLibrary', a: a};
 };
 var $author$project$Main$PageBookDetail = function (a) {
-	return {$: 6, a: a};
+	return {$: 'PageBookDetail', a: a};
 };
-var $author$project$Main$PageHome = {$: 0};
+var $author$project$Main$PageHome = {$: 'PageHome'};
 var $author$project$Main$PageLibrary = function (a) {
-	return {$: 1, a: a};
+	return {$: 'PageLibrary', a: a};
 };
 var $author$project$Main$PageLookingForHome = function (a) {
-	return {$: 5, a: a};
+	return {$: 'PageLookingForHome', a: a};
 };
-var $author$project$Main$PageNotFound = {$: 11};
+var $author$project$Main$PageNotFound = {$: 'PageNotFound'};
 var $author$project$Main$PageReadingPile = function (a) {
-	return {$: 4, a: a};
+	return {$: 'PageReadingPile', a: a};
 };
 var $author$project$Main$PageSearch = function (a) {
-	return {$: 8, a: a};
+	return {$: 'PageSearch', a: a};
 };
 var $author$project$Main$PageSettingsAgeVerification = function (a) {
-	return {$: 10, a: a};
+	return {$: 'PageSettingsAgeVerification', a: a};
 };
 var $author$project$Main$PageSettingsConsent = function (a) {
-	return {$: 9, a: a};
+	return {$: 'PageSettingsConsent', a: a};
 };
 var $author$project$Main$PageUpload = function (a) {
-	return {$: 7, a: a};
+	return {$: 'PageUpload', a: a};
 };
 var $author$project$Main$PageWishList = function (a) {
-	return {$: 3, a: a};
+	return {$: 'PageWishList', a: a};
 };
 var $author$project$Main$ReadingPileMsg = function (a) {
-	return {$: 5, a: a};
+	return {$: 'ReadingPileMsg', a: a};
 };
 var $author$project$Main$WishListMsg = function (a) {
-	return {$: 4, a: a};
+	return {$: 'WishListMsg', a: a};
 };
 var $author$project$Page$BookDetail$BookLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BookLoaded', a: a};
 };
-var $author$project$Types$RemoteData$Loading = {$: 1};
-var $author$project$Types$RemoteData$NotAsked = {$: 0};
+var $author$project$Types$RemoteData$Loading = {$: 'Loading'};
+var $author$project$Types$RemoteData$NotAsked = {$: 'NotAsked'};
 var $author$project$Api$baseUrl = 'http://localhost:4000';
-var $author$project$Types$Book$Public = 0;
+var $author$project$Types$Book$Public = {$: 'Public'};
 var $elm$json$Json$Decode$andThen = _Json_andThen;
 var $author$project$Types$Book$Author = F3(
 	function (id, name, bio) {
-		return {cf: bio, bw: id, bC: name};
+		return {bio: bio, id: id, name: name};
 	});
 var $elm$json$Json$Decode$field = _Json_decodeField;
 var $elm$json$Json$Decode$map3 = _Json_map3;
@@ -6472,7 +6486,7 @@ var $author$project$Types$Book$optionalInt = function (fieldName) {
 				$elm$json$Json$Decode$decodeValue,
 				A2($elm$json$Json$Decode$field, fieldName, $elm$json$Json$Decode$value),
 				json);
-			if (_v0.$ === 1) {
+			if (_v0.$ === 'Err') {
 				return $elm$json$Json$Decode$succeed($elm$core$Maybe$Nothing);
 			} else {
 				return A2(
@@ -6483,19 +6497,19 @@ var $author$project$Types$Book$optionalInt = function (fieldName) {
 		},
 		$elm$json$Json$Decode$value);
 };
-var $author$project$Types$Book$Private = 2;
-var $author$project$Types$Book$Unlisted = 1;
+var $author$project$Types$Book$Private = {$: 'Private'};
+var $author$project$Types$Book$Unlisted = {$: 'Unlisted'};
 var $elm$json$Json$Decode$fail = _Json_fail;
 var $author$project$Types$Book$visibilityTierDecoder = A2(
 	$elm$json$Json$Decode$andThen,
 	function (s) {
 		switch (s) {
 			case 'public':
-				return $elm$json$Json$Decode$succeed(0);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Book$Public);
 			case 'unlisted':
-				return $elm$json$Json$Decode$succeed(1);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Book$Unlisted);
 			case 'private':
-				return $elm$json$Json$Decode$succeed(2);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Book$Private);
 			default:
 				return $elm$json$Json$Decode$fail('Unknown visibility tier: ' + s);
 		}
@@ -6510,7 +6524,7 @@ var $author$project$Types$Book$bookDecoder = A2(
 				function (publicationYear, subjects, visibilityTier) {
 					return _Utils_update(
 						partial,
-						{df: publicationYear, a5: subjects, a8: visibilityTier});
+						{publicationYear: publicationYear, subjects: subjects, visibilityTier: visibilityTier});
 				}),
 			$author$project$Types$Book$optionalInt('publication_year'),
 			$elm$json$Json$Decode$oneOf(
@@ -6528,7 +6542,7 @@ var $author$project$Types$Book$bookDecoder = A2(
 		$elm$json$Json$Decode$map8,
 		F8(
 			function (id, isbn, title, author, description, coverImageUrl, pageCount, publisher) {
-				return {be: author, co: coverImageUrl, cs: description, bw: id, cG: isbn, da: pageCount, df: $elm$core$Maybe$Nothing, dg: publisher, a5: _List_Nil, b2: title, a8: 0};
+				return {author: author, coverImageUrl: coverImageUrl, description: description, id: id, isbn: isbn, pageCount: pageCount, publicationYear: $elm$core$Maybe$Nothing, publisher: publisher, subjects: _List_Nil, title: title, visibilityTier: $author$project$Types$Book$Public};
 			}),
 		A2($elm$json$Json$Decode$field, 'id', $elm$json$Json$Decode$string),
 		A2($elm$json$Json$Decode$field, 'isbn', $elm$json$Json$Decode$string),
@@ -6543,25 +6557,25 @@ var $author$project$Types$Book$bookDecoder = A2(
 			A2($elm$json$Json$Decode$field, 'publisher', $elm$json$Json$Decode$string))));
 var $elm$http$Http$BadStatus_ = F2(
 	function (a, b) {
-		return {$: 3, a: a, b: b};
+		return {$: 'BadStatus_', a: a, b: b};
 	});
 var $elm$http$Http$BadUrl_ = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BadUrl_', a: a};
 };
 var $elm$http$Http$GoodStatus_ = F2(
 	function (a, b) {
-		return {$: 4, a: a, b: b};
+		return {$: 'GoodStatus_', a: a, b: b};
 	});
-var $elm$http$Http$NetworkError_ = {$: 2};
+var $elm$http$Http$NetworkError_ = {$: 'NetworkError_'};
 var $elm$http$Http$Receiving = function (a) {
-	return {$: 1, a: a};
+	return {$: 'Receiving', a: a};
 };
 var $elm$http$Http$Sending = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Sending', a: a};
 };
-var $elm$http$Http$Timeout_ = {$: 1};
+var $elm$http$Http$Timeout_ = {$: 'Timeout_'};
 var $elm$core$Maybe$isJust = function (maybe) {
-	if (!maybe.$) {
+	if (maybe.$ === 'Just') {
 		return true;
 	} else {
 		return false;
@@ -6585,7 +6599,7 @@ var $elm$http$Http$expectStringResponse = F2(
 	});
 var $elm$core$Result$mapError = F2(
 	function (f, result) {
-		if (!result.$) {
+		if (result.$ === 'Ok') {
 			var v = result.a;
 			return $elm$core$Result$Ok(v);
 		} else {
@@ -6595,31 +6609,31 @@ var $elm$core$Result$mapError = F2(
 		}
 	});
 var $elm$http$Http$BadBody = function (a) {
-	return {$: 4, a: a};
+	return {$: 'BadBody', a: a};
 };
 var $elm$http$Http$BadStatus = function (a) {
-	return {$: 3, a: a};
+	return {$: 'BadStatus', a: a};
 };
 var $elm$http$Http$BadUrl = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BadUrl', a: a};
 };
-var $elm$http$Http$NetworkError = {$: 2};
-var $elm$http$Http$Timeout = {$: 1};
+var $elm$http$Http$NetworkError = {$: 'NetworkError'};
+var $elm$http$Http$Timeout = {$: 'Timeout'};
 var $elm$http$Http$resolve = F2(
 	function (toResult, response) {
 		switch (response.$) {
-			case 0:
+			case 'BadUrl_':
 				var url = response.a;
 				return $elm$core$Result$Err(
 					$elm$http$Http$BadUrl(url));
-			case 1:
+			case 'Timeout_':
 				return $elm$core$Result$Err($elm$http$Http$Timeout);
-			case 2:
+			case 'NetworkError_':
 				return $elm$core$Result$Err($elm$http$Http$NetworkError);
-			case 3:
+			case 'BadStatus_':
 				var metadata = response.a;
 				return $elm$core$Result$Err(
-					$elm$http$Http$BadStatus(metadata.dt));
+					$elm$http$Http$BadStatus(metadata.statusCode));
 			default:
 				var body = response.b;
 				return A2(
@@ -6643,15 +6657,15 @@ var $elm$http$Http$expectJson = F2(
 	});
 var $elm$http$Http$Header = F2(
 	function (a, b) {
-		return {$: 0, a: a, b: b};
+		return {$: 'Header', a: a, b: b};
 	});
 var $elm$http$Http$header = $elm$http$Http$Header;
 var $elm$http$Http$Request = function (a) {
-	return {$: 1, a: a};
+	return {$: 'Request', a: a};
 };
 var $elm$http$Http$State = F2(
 	function (reqs, subs) {
-		return {bR: reqs, b0: subs};
+		return {reqs: reqs, subs: subs};
 	});
 var $elm$http$Http$init = $elm$core$Task$succeed(
 	A2($elm$http$Http$State, $elm$core$Dict$empty, _List_Nil));
@@ -6666,10 +6680,10 @@ var $elm$http$Http$updateReqs = F3(
 			} else {
 				var cmd = cmds.a;
 				var otherCmds = cmds.b;
-				if (!cmd.$) {
+				if (cmd.$ === 'Cancel') {
 					var tracker = cmd.a;
 					var _v2 = A2($elm$core$Dict$get, tracker, reqs);
-					if (_v2.$ === 1) {
+					if (_v2.$ === 'Nothing') {
 						var $temp$router = router,
 							$temp$cmds = otherCmds,
 							$temp$reqs = reqs;
@@ -6695,8 +6709,8 @@ var $elm$http$Http$updateReqs = F3(
 					return A2(
 						$elm$core$Task$andThen,
 						function (pid) {
-							var _v4 = req.an;
-							if (_v4.$ === 1) {
+							var _v4 = req.tracker;
+							if (_v4.$ === 'Nothing') {
 								return A3($elm$http$Http$updateReqs, router, otherCmds, reqs);
 							} else {
 								var tracker = _v4.a;
@@ -6725,12 +6739,12 @@ var $elm$http$Http$onEffects = F4(
 				return $elm$core$Task$succeed(
 					A2($elm$http$Http$State, reqs, subs));
 			},
-			A3($elm$http$Http$updateReqs, router, cmds, state.bR));
+			A3($elm$http$Http$updateReqs, router, cmds, state.reqs));
 	});
 var $elm$core$List$maybeCons = F3(
 	function (f, mx, xs) {
 		var _v0 = f(mx);
-		if (!_v0.$) {
+		if (_v0.$ === 'Just') {
 			var x = _v0.a;
 			return A2($elm$core$List$cons, x, xs);
 		} else {
@@ -6768,34 +6782,34 @@ var $elm$http$Http$onSelfMsg = F3(
 				A2(
 					$elm$core$List$filterMap,
 					A3($elm$http$Http$maybeSend, router, tracker, progress),
-					state.b0)));
+					state.subs)));
 	});
 var $elm$http$Http$Cancel = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Cancel', a: a};
 };
 var $elm$http$Http$cmdMap = F2(
 	function (func, cmd) {
-		if (!cmd.$) {
+		if (cmd.$ === 'Cancel') {
 			var tracker = cmd.a;
 			return $elm$http$Http$Cancel(tracker);
 		} else {
 			var r = cmd.a;
 			return $elm$http$Http$Request(
 				{
-					cb: r.cb,
-					I: r.I,
-					J: A2(_Http_mapExpect, func, r.J),
-					af: r.af,
-					ai: r.ai,
-					am: r.am,
-					an: r.an,
-					N: r.N
+					allowCookiesFromOtherDomains: r.allowCookiesFromOtherDomains,
+					body: r.body,
+					expect: A2(_Http_mapExpect, func, r.expect),
+					headers: r.headers,
+					method: r.method,
+					timeout: r.timeout,
+					tracker: r.tracker,
+					url: r.url
 				});
 		}
 	});
 var $elm$http$Http$MySub = F2(
 	function (a, b) {
-		return {$: 0, a: a, b: b};
+		return {$: 'MySub', a: a, b: b};
 	});
 var $elm$http$Http$subMap = F2(
 	function (func, _v0) {
@@ -6812,22 +6826,22 @@ var $elm$http$Http$subscription = _Platform_leaf('Http');
 var $elm$http$Http$request = function (r) {
 	return $elm$http$Http$command(
 		$elm$http$Http$Request(
-			{cb: false, I: r.I, J: r.J, af: r.af, ai: r.ai, am: r.am, an: r.an, N: r.N}));
+			{allowCookiesFromOtherDomains: false, body: r.body, expect: r.expect, headers: r.headers, method: r.method, timeout: r.timeout, tracker: r.tracker, url: r.url}));
 };
 var $author$project$Api$getBook = F3(
 	function (bookId, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$emptyBody,
-				J: A2($elm$http$Http$expectJson, toMsg, $author$project$Types$Book$bookDecoder),
-				af: _List_fromArray(
+				body: $elm$http$Http$emptyBody,
+				expect: A2($elm$http$Http$expectJson, toMsg, $author$project$Types$Book$bookDecoder),
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'GET',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: $author$project$Api$baseUrl + ('/api/books/' + bookId)
+				method: 'GET',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + ('/api/books/' + bookId)
 			});
 	});
 var $elm$core$Platform$Cmd$batch = _Platform_batch;
@@ -6835,7 +6849,7 @@ var $elm$core$Platform$Cmd$none = $elm$core$Platform$Cmd$batch(_List_Nil);
 var $author$project$Page$BookDetail$init = F3(
 	function (bookId, maybeToken, maybePreviousRoute) {
 		var cmd = function () {
-			if (!maybeToken.$) {
+			if (maybeToken.$ === 'Just') {
 				var token = maybeToken.a;
 				return A3($author$project$Api$getBook, bookId, token, $author$project$Page$BookDetail$BookLoaded);
 			} else {
@@ -6843,29 +6857,29 @@ var $author$project$Page$BookDetail$init = F3(
 			}
 		}();
 		return _Utils_Tuple2(
-			{P: $author$project$Types$RemoteData$Loading, aa: false, aw: false, aK: $elm$core$Maybe$Nothing, a1: maybePreviousRoute, aj: false, aA: $author$project$Types$RemoteData$NotAsked, dp: 'library', V: _List_Nil, aB: false},
+			{book: $author$project$Types$RemoteData$Loading, bookshelfMoverOpen: false, formatPickerOpen: false, placement: $elm$core$Maybe$Nothing, previousRoute: maybePreviousRoute, removeModalOpen: false, removeState: $author$project$Types$RemoteData$NotAsked, selectedBookshelf: 'library', selectedFormats: _List_Nil, showAgeGate: false},
 			cmd);
 	});
 var $author$project$Page$Bookshelf$AntiLibrary$BooksLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BooksLoaded', a: a};
 };
 var $author$project$Types$Placement$Placement = F7(
 	function (id, book, position, placedAt, formats, personalRating, notes) {
-		return {P: book, cB: formats, bw: id, cV: notes, db: personalRating, dc: placedAt, de: position};
+		return {book: book, formats: formats, id: id, notes: notes, personalRating: personalRating, placedAt: placedAt, position: position};
 	});
-var $author$project$Types$Placement$Audiobook = 2;
-var $author$project$Types$Placement$EBook = 1;
-var $author$project$Types$Placement$Physical = 0;
+var $author$project$Types$Placement$Audiobook = {$: 'Audiobook'};
+var $author$project$Types$Placement$EBook = {$: 'EBook'};
+var $author$project$Types$Placement$Physical = {$: 'Physical'};
 var $author$project$Types$Placement$formatDecoder = A2(
 	$elm$json$Json$Decode$andThen,
 	function (s) {
 		switch (s) {
 			case 'physical':
-				return $elm$json$Json$Decode$succeed(0);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Placement$Physical);
 			case 'ebook':
-				return $elm$json$Json$Decode$succeed(1);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Placement$EBook);
 			case 'audiobook':
-				return $elm$json$Json$Decode$succeed(2);
+				return $elm$json$Json$Decode$succeed($author$project$Types$Placement$Audiobook);
 			default:
 				return $elm$json$Json$Decode$fail('Unknown format: ' + s);
 		}
@@ -6897,27 +6911,27 @@ var $author$project$Api$getBookshelf = F3(
 	function (shelfName, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$emptyBody,
-				J: A2(
+				body: $elm$http$Http$emptyBody,
+				expect: A2(
 					$elm$http$Http$expectJson,
 					toMsg,
 					A2(
 						$elm$json$Json$Decode$field,
 						'placements',
 						$elm$json$Json$Decode$list($author$project$Types$Placement$placementDecoder))),
-				af: _List_fromArray(
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'GET',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: $author$project$Api$baseUrl + ('/api/bookshelves/' + shelfName)
+				method: 'GET',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + ('/api/bookshelves/' + shelfName)
 			});
 	});
 var $author$project$Page$Bookshelf$AntiLibrary$init = function (maybeToken) {
 	var cmd = function () {
-		if (!maybeToken.$) {
+		if (maybeToken.$ === 'Just') {
 			var token = maybeToken.a;
 			return A3($author$project$Api$getBookshelf, 'antilibrary', token, $author$project$Page$Bookshelf$AntiLibrary$BooksLoaded);
 		} else {
@@ -6925,15 +6939,15 @@ var $author$project$Page$Bookshelf$AntiLibrary$init = function (maybeToken) {
 		}
 	}();
 	return _Utils_Tuple2(
-		{_: $author$project$Types$RemoteData$Loading, aB: false},
+		{books: $author$project$Types$RemoteData$Loading, showAgeGate: false},
 		cmd);
 };
 var $author$project$Page$Bookshelf$Library$BooksLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BooksLoaded', a: a};
 };
 var $author$project$Page$Bookshelf$Library$init = function (maybeToken) {
 	var cmd = function () {
-		if (!maybeToken.$) {
+		if (maybeToken.$ === 'Just') {
 			var token = maybeToken.a;
 			return A3($author$project$Api$getBookshelf, 'library', token, $author$project$Page$Bookshelf$Library$BooksLoaded);
 		} else {
@@ -6941,15 +6955,15 @@ var $author$project$Page$Bookshelf$Library$init = function (maybeToken) {
 		}
 	}();
 	return _Utils_Tuple2(
-		{_: $author$project$Types$RemoteData$Loading, aO: $elm$core$Maybe$Nothing, aB: false},
+		{books: $author$project$Types$RemoteData$Loading, selectedBook: $elm$core$Maybe$Nothing, showAgeGate: false},
 		cmd);
 };
 var $author$project$Page$Bookshelf$LookingForHome$BooksLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BooksLoaded', a: a};
 };
 var $author$project$Page$Bookshelf$LookingForHome$init = function (maybeToken) {
 	var cmd = function () {
-		if (!maybeToken.$) {
+		if (maybeToken.$ === 'Just') {
 			var token = maybeToken.a;
 			return A3($author$project$Api$getBookshelf, 'looking_for_home', token, $author$project$Page$Bookshelf$LookingForHome$BooksLoaded);
 		} else {
@@ -6957,15 +6971,15 @@ var $author$project$Page$Bookshelf$LookingForHome$init = function (maybeToken) {
 		}
 	}();
 	return _Utils_Tuple2(
-		{_: $author$project$Types$RemoteData$Loading, aB: false},
+		{books: $author$project$Types$RemoteData$Loading, showAgeGate: false},
 		cmd);
 };
 var $author$project$Page$Bookshelf$ReadingPile$BooksLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BooksLoaded', a: a};
 };
 var $author$project$Page$Bookshelf$ReadingPile$init = function (maybeToken) {
 	var cmd = function () {
-		if (!maybeToken.$) {
+		if (maybeToken.$ === 'Just') {
 			var token = maybeToken.a;
 			return A3($author$project$Api$getBookshelf, 'reading_pile', token, $author$project$Page$Bookshelf$ReadingPile$BooksLoaded);
 		} else {
@@ -6973,15 +6987,15 @@ var $author$project$Page$Bookshelf$ReadingPile$init = function (maybeToken) {
 		}
 	}();
 	return _Utils_Tuple2(
-		{_: $author$project$Types$RemoteData$Loading, aB: false},
+		{books: $author$project$Types$RemoteData$Loading, showAgeGate: false},
 		cmd);
 };
 var $author$project$Page$Bookshelf$WishList$BooksLoaded = function (a) {
-	return {$: 0, a: a};
+	return {$: 'BooksLoaded', a: a};
 };
 var $author$project$Page$Bookshelf$WishList$init = function (maybeToken) {
 	var cmd = function () {
-		if (!maybeToken.$) {
+		if (maybeToken.$ === 'Just') {
 			var token = maybeToken.a;
 			return A3($author$project$Api$getBookshelf, 'wishlist', token, $author$project$Page$Bookshelf$WishList$BooksLoaded);
 		} else {
@@ -6989,19 +7003,19 @@ var $author$project$Page$Bookshelf$WishList$init = function (maybeToken) {
 		}
 	}();
 	return _Utils_Tuple2(
-		{_: $author$project$Types$RemoteData$Loading, aB: false},
+		{books: $author$project$Types$RemoteData$Loading, showAgeGate: false},
 		cmd);
 };
-var $author$project$Components$FilterPanel$ByTitle = 0;
-var $author$project$Components$FilterPanel$defaultFilterState = {bp: $elm$core$Maybe$Nothing, bX: $elm$core$Maybe$Nothing, a9: $elm$core$Maybe$Nothing, ba: $elm$core$Maybe$Nothing};
-var $author$project$Page$Search$init = {au: 0, av: false, bo: $author$project$Components$FilterPanel$defaultFilterState, bP: '', U: $author$project$Types$RemoteData$NotAsked, aP: 0};
-var $author$project$Page$Settings$AgeVerification$init = {G: false, ab: false, ak: $author$project$Types$RemoteData$NotAsked};
-var $author$project$Page$Settings$Consent$init = {Y: false, ak: $author$project$Types$RemoteData$NotAsked};
-var $author$project$Page$Upload$NoResult = {$: 0};
-var $author$project$Page$Upload$init = {ac: $author$project$Types$RemoteData$NotAsked, aH: 'library', aW: $elm$core$Maybe$Nothing, ag: false, ay: '', t: $author$project$Page$Upload$NoResult, aC: false, z: $author$project$Types$RemoteData$NotAsked};
+var $author$project$Components$FilterPanel$ByTitle = {$: 'ByTitle'};
+var $author$project$Components$FilterPanel$defaultFilterState = {formatFilter: $elm$core$Maybe$Nothing, shelfFilter: $elm$core$Maybe$Nothing, yearFrom: $elm$core$Maybe$Nothing, yearTo: $elm$core$Maybe$Nothing};
+var $author$project$Page$Search$init = {debounceCount: 0, filterPanelOpen: false, filters: $author$project$Components$FilterPanel$defaultFilterState, query: '', results: $author$project$Types$RemoteData$NotAsked, sort: $author$project$Components$FilterPanel$ByTitle};
+var $author$project$Page$Settings$AgeVerification$init = {ageVerified: false, confirmModalOpen: false, saving: $author$project$Types$RemoteData$NotAsked};
+var $author$project$Page$Settings$Consent$init = {analyticsConsent: false, saving: $author$project$Types$RemoteData$NotAsked};
+var $author$project$Page$Upload$NoResult = {$: 'NoResult'};
+var $author$project$Page$Upload$init = {duplicateMoveState: $author$project$Types$RemoteData$NotAsked, duplicateShelf: 'library', file: $elm$core$Maybe$Nothing, isDragging: false, manualIsbn: '', pollCount: 0, result: $author$project$Page$Upload$NoResult, showIsbnError: false, uploadState: $author$project$Types$RemoteData$NotAsked};
 var $elm$core$Maybe$map = F2(
 	function (f, maybe) {
-		if (!maybe.$) {
+		if (maybe.$ === 'Just') {
 			var value = maybe.a;
 			return $elm$core$Maybe$Just(
 				f(value));
@@ -7015,48 +7029,48 @@ var $author$project$Main$initPage = F3(
 		var maybeToken = A2(
 			$elm$core$Maybe$map,
 			function ($) {
-				return $.dy;
+				return $.token;
 			},
 			maybeAuth);
 		switch (route.$) {
-			case 0:
+			case 'Home':
 				return _Utils_Tuple2($author$project$Main$PageHome, $elm$core$Platform$Cmd$none);
-			case 1:
+			case 'Library':
 				var _v1 = $author$project$Page$Bookshelf$Library$init(maybeToken);
 				var model = _v1.a;
 				var cmd = _v1.b;
 				return _Utils_Tuple2(
 					$author$project$Main$PageLibrary(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$LibraryMsg, cmd));
-			case 2:
+			case 'AntiLibrary':
 				var _v2 = $author$project$Page$Bookshelf$AntiLibrary$init(maybeToken);
 				var model = _v2.a;
 				var cmd = _v2.b;
 				return _Utils_Tuple2(
 					$author$project$Main$PageAntiLibrary(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$AntiLibraryMsg, cmd));
-			case 3:
+			case 'WishList':
 				var _v3 = $author$project$Page$Bookshelf$WishList$init(maybeToken);
 				var model = _v3.a;
 				var cmd = _v3.b;
 				return _Utils_Tuple2(
 					$author$project$Main$PageWishList(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$WishListMsg, cmd));
-			case 4:
+			case 'ReadingPile':
 				var _v4 = $author$project$Page$Bookshelf$ReadingPile$init(maybeToken);
 				var model = _v4.a;
 				var cmd = _v4.b;
 				return _Utils_Tuple2(
 					$author$project$Main$PageReadingPile(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$ReadingPileMsg, cmd));
-			case 5:
+			case 'LookingForHome':
 				var _v5 = $author$project$Page$Bookshelf$LookingForHome$init(maybeToken);
 				var model = _v5.a;
 				var cmd = _v5.b;
 				return _Utils_Tuple2(
 					$author$project$Main$PageLookingForHome(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$LookingForHomeMsg, cmd));
-			case 6:
+			case 'BookDetail':
 				var bookId = route.a;
 				var _v6 = A3($author$project$Page$BookDetail$init, bookId, maybeToken, maybePreviousRoute);
 				var model = _v6.a;
@@ -7064,19 +7078,19 @@ var $author$project$Main$initPage = F3(
 				return _Utils_Tuple2(
 					$author$project$Main$PageBookDetail(model),
 					A2($elm$core$Platform$Cmd$map, $author$project$Main$BookDetailMsg, cmd));
-			case 7:
+			case 'Upload':
 				return _Utils_Tuple2(
 					$author$project$Main$PageUpload($author$project$Page$Upload$init),
 					$elm$core$Platform$Cmd$none);
-			case 8:
+			case 'Search':
 				return _Utils_Tuple2(
 					$author$project$Main$PageSearch($author$project$Page$Search$init),
 					$elm$core$Platform$Cmd$none);
-			case 9:
+			case 'SettingsConsent':
 				return _Utils_Tuple2(
 					$author$project$Main$PageSettingsConsent($author$project$Page$Settings$Consent$init),
 					$elm$core$Platform$Cmd$none);
-			case 10:
+			case 'SettingsAgeVerification':
 				return _Utils_Tuple2(
 					$author$project$Main$PageSettingsAgeVerification($author$project$Page$Settings$AgeVerification$init),
 					$elm$core$Platform$Cmd$none);
@@ -7091,27 +7105,37 @@ var $author$project$Main$init = F3(
 		var page = _v1.a;
 		var cmd = _v1.b;
 		return _Utils_Tuple2(
-			{Z: $elm$core$Maybe$Nothing, A: key, c: page, a1: $elm$core$Maybe$Nothing, m: route, aR: $elm$core$Maybe$Nothing, N: url},
+			{auth: $elm$core$Maybe$Nothing, key: key, page: page, previousRoute: $elm$core$Maybe$Nothing, route: route, transition: $elm$core$Maybe$Nothing, url: url},
 			cmd);
 	});
+var $author$project$Main$SwipeIgnored = {$: 'SwipeIgnored'};
 var $author$project$Main$SwipeReceived = function (a) {
-	return {$: 12, a: a};
+	return {$: 'SwipeReceived', a: a};
 };
-var $author$project$Main$onSwipe = _Platform_incomingPort('onSwipe', $elm$json$Json$Decode$string);
+var $author$project$Main$decodeSwipe = function (value) {
+	var _v0 = A2($elm$json$Json$Decode$decodeValue, $elm$json$Json$Decode$string, value);
+	if (_v0.$ === 'Ok') {
+		var direction = _v0.a;
+		return $author$project$Main$SwipeReceived(direction);
+	} else {
+		return $author$project$Main$SwipeIgnored;
+	}
+};
+var $author$project$Main$onSwipe = _Platform_incomingPort('onSwipe', $elm$json$Json$Decode$value);
 var $author$project$Main$subscriptions = function (_v0) {
-	return $author$project$Main$onSwipe($author$project$Main$SwipeReceived);
+	return $author$project$Main$onSwipe($author$project$Main$decodeSwipe);
 };
 var $author$project$Main$AgeVerificationMsg = function (a) {
-	return {$: 11, a: a};
+	return {$: 'AgeVerificationMsg', a: a};
 };
 var $author$project$Main$ConsentMsg = function (a) {
-	return {$: 10, a: a};
+	return {$: 'ConsentMsg', a: a};
 };
 var $author$project$Main$SearchMsg = function (a) {
-	return {$: 9, a: a};
+	return {$: 'SearchMsg', a: a};
 };
 var $author$project$Main$UploadMsg = function (a) {
-	return {$: 8, a: a};
+	return {$: 'UploadMsg', a: a};
 };
 var $elm$browser$Browser$Navigation$load = _Browser_load;
 var $elm$browser$Browser$Navigation$pushUrl = _Browser_pushUrl;
@@ -7166,7 +7190,7 @@ var $author$project$Navigation$SwipeNavigation$swipeRoute = F2(
 	function (direction, currentRoute) {
 		var maybeIndex = A3($author$project$Navigation$SwipeNavigation$findIndex, currentRoute, $author$project$Navigation$SwipeNavigation$bookshelfRoutes, 0);
 		var len = $elm$core$List$length($author$project$Navigation$SwipeNavigation$bookshelfRoutes);
-		if (maybeIndex.$ === 1) {
+		if (maybeIndex.$ === 'Nothing') {
 			return $elm$core$Maybe$Nothing;
 		} else {
 			var idx = maybeIndex.a;
@@ -7182,28 +7206,28 @@ var $author$project$Navigation$SwipeNavigation$swipeRight = function (currentRou
 };
 var $author$project$Navigation$Route$toPath = function (route) {
 	switch (route.$) {
-		case 0:
+		case 'Home':
 			return '/';
-		case 1:
+		case 'Library':
 			return '/library';
-		case 2:
+		case 'AntiLibrary':
 			return '/antilibrary';
-		case 3:
+		case 'WishList':
 			return '/wishlist';
-		case 4:
+		case 'ReadingPile':
 			return '/reading-pile';
-		case 5:
+		case 'LookingForHome':
 			return '/looking-for-home';
-		case 6:
+		case 'BookDetail':
 			var bookId = route.a;
 			return '/books/' + bookId;
-		case 7:
+		case 'Upload':
 			return '/upload';
-		case 8:
+		case 'Search':
 			return '/search';
-		case 9:
+		case 'SettingsConsent':
 			return '/settings/consent';
-		case 10:
+		case 'SettingsAgeVerification':
 			return '/settings/age-verification';
 		default:
 			return '/not-found';
@@ -7211,7 +7235,7 @@ var $author$project$Navigation$Route$toPath = function (route) {
 };
 var $elm$url$Url$addPort = F2(
 	function (maybePort, starter) {
-		if (maybePort.$ === 1) {
+		if (maybePort.$ === 'Nothing') {
 			return starter;
 		} else {
 			var port_ = maybePort.a;
@@ -7220,7 +7244,7 @@ var $elm$url$Url$addPort = F2(
 	});
 var $elm$url$Url$addPrefixed = F3(
 	function (prefix, maybeSegment, starter) {
-		if (maybeSegment.$ === 1) {
+		if (maybeSegment.$ === 'Nothing') {
 			return starter;
 		} else {
 			var segment = maybeSegment.a;
@@ -7231,8 +7255,8 @@ var $elm$url$Url$addPrefixed = F3(
 	});
 var $elm$url$Url$toString = function (url) {
 	var http = function () {
-		var _v0 = url.bO;
-		if (!_v0) {
+		var _v0 = url.protocol;
+		if (_v0.$ === 'Http') {
 			return 'http://';
 		} else {
 			return 'https://';
@@ -7241,17 +7265,17 @@ var $elm$url$Url$toString = function (url) {
 	return A3(
 		$elm$url$Url$addPrefixed,
 		'#',
-		url.bq,
+		url.fragment,
 		A3(
 			$elm$url$Url$addPrefixed,
 			'?',
-			url.bP,
+			url.query,
 			_Utils_ap(
 				A2(
 					$elm$url$Url$addPort,
-					url.bL,
-					_Utils_ap(http, url.bv)),
-				url.bJ)));
+					url.port_,
+					_Utils_ap(http, url.host)),
+				url.path)));
 };
 var $author$project$Animation$RoomTransition$fadeThroughDarkIn = 'fade-through-dark-in';
 var $author$project$Animation$SlideTransition$slideInRight = 'slide-in-right';
@@ -7259,10 +7283,10 @@ var $author$project$Animation$SlideTransition$slideOutRight = 'slide-out-right';
 var $author$project$Main$transitionClass = F2(
 	function (from, to) {
 		var _v0 = _Utils_Tuple2(from, to);
-		if (_v0.b.$ === 6) {
+		if (_v0.b.$ === 'BookDetail') {
 			return $author$project$Animation$SlideTransition$slideInRight;
 		} else {
-			if (_v0.a.$ === 6) {
+			if (_v0.a.$ === 'BookDetail') {
 				return $author$project$Animation$SlideTransition$slideOutRight;
 			} else {
 				return $author$project$Animation$RoomTransition$fadeThroughDarkIn;
@@ -7270,20 +7294,20 @@ var $author$project$Main$transitionClass = F2(
 		}
 	});
 var $author$project$Types$RemoteData$Failure = function (a) {
-	return {$: 2, a: a};
+	return {$: 'Failure', a: a};
 };
 var $author$project$Page$BookDetail$MoveCompleted = function (a) {
-	return {$: 5, a: a};
+	return {$: 'MoveCompleted', a: a};
 };
 var $author$project$Page$BookDetail$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$BookDetail$NoOut = {$: 0};
+var $author$project$Page$BookDetail$NoOut = {$: 'NoOut'};
 var $author$project$Page$BookDetail$RemoveCompleted = function (a) {
-	return {$: 9, a: a};
+	return {$: 'RemoveCompleted', a: a};
 };
 var $author$project$Types$RemoteData$Success = function (a) {
-	return {$: 3, a: a};
+	return {$: 'Success', a: a};
 };
 var $elm$core$List$filter = F2(
 	function (isGood, list) {
@@ -7340,7 +7364,7 @@ var $elm$http$Http$expectWhatever = function (toMsg) {
 		toMsg,
 		$elm$http$Http$resolve(
 			function (_v0) {
-				return $elm$core$Result$Ok(0);
+				return $elm$core$Result$Ok(_Utils_Tuple0);
 			}));
 };
 var $elm$http$Http$jsonBody = function (value) {
@@ -7359,7 +7383,7 @@ var $elm$json$Json$Encode$object = function (pairs) {
 					var v = _v0.b;
 					return A3(_Json_addField, k, v, obj);
 				}),
-			_Json_emptyObject(0),
+			_Json_emptyObject(_Utils_Tuple0),
 			pairs));
 };
 var $elm$json$Json$Encode$string = _Json_wrap;
@@ -7367,7 +7391,7 @@ var $author$project$Api$moveBook = F4(
 	function (placementId, targetBookshelf, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$jsonBody(
+				body: $elm$http$Http$jsonBody(
 					$elm$json$Json$Encode$object(
 						_List_fromArray(
 							[
@@ -7375,15 +7399,15 @@ var $author$project$Api$moveBook = F4(
 								'bookshelf',
 								$elm$json$Json$Encode$string(targetBookshelf))
 							]))),
-				J: $elm$http$Http$expectWhatever(toMsg),
-				af: _List_fromArray(
+				expect: $elm$http$Http$expectWhatever(toMsg),
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'PUT',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: $author$project$Api$baseUrl + ('/api/placements/' + (placementId + '/move'))
+				method: 'PUT',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + ('/api/placements/' + (placementId + '/move'))
 			});
 	});
 var $elm$core$Basics$neq = _Utils_notEqual;
@@ -7392,42 +7416,42 @@ var $author$project$Api$removeBook = F3(
 	function (placementId, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$emptyBody,
-				J: $elm$http$Http$expectWhatever(toMsg),
-				af: _List_fromArray(
+				body: $elm$http$Http$emptyBody,
+				expect: $elm$http$Http$expectWhatever(toMsg),
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'DELETE',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: $author$project$Api$baseUrl + ('/api/placements/' + placementId)
+				method: 'DELETE',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + ('/api/placements/' + placementId)
 			});
 	});
 var $author$project$Page$BookDetail$update = F3(
 	function (msg, model, maybeToken) {
 		switch (msg.$) {
-			case 0:
+			case 'BookLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var book = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								P: $author$project$Types$RemoteData$Success(book)
+								book: $author$project$Types$RemoteData$Success(book)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$BookDetail$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									P: $author$project$Types$RemoteData$Failure(
+									book: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$BookDetail$NoOut);
@@ -7437,164 +7461,164 @@ var $author$project$Page$BookDetail$update = F3(
 							_Utils_update(
 								model,
 								{
-									P: $author$project$Types$RemoteData$Failure(err)
+									book: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$BookDetail$NoOut);
 					}
 				}
-			case 12:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NavigateTo($author$project$Navigation$Route$SettingsAgeVerification));
-			case 13:
+			case 'DismissAgeGate':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 1:
+			case 'OpenBookshelfMover':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aa: true}),
+						{bookshelfMoverOpen: true}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 2:
+			case 'CloseBookshelfMover':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aa: false}),
+						{bookshelfMoverOpen: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 3:
+			case 'SelectBookshelf':
 				var bookshelf = msg.a;
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{dp: bookshelf}),
+						{selectedBookshelf: bookshelf}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 4:
-				var _v2 = _Utils_Tuple2(model.aK, maybeToken);
-				if ((!_v2.a.$) && (!_v2.b.$)) {
+			case 'ConfirmMove':
+				var _v2 = _Utils_Tuple2(model.placement, maybeToken);
+				if ((_v2.a.$ === 'Just') && (_v2.b.$ === 'Just')) {
 					var placement = _v2.a.a;
 					var token = _v2.b.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
-							{aa: false}),
-						A4($author$project$Api$moveBook, placement.bw, model.dp, token, $author$project$Page$BookDetail$MoveCompleted),
+							{bookshelfMoverOpen: false}),
+						A4($author$project$Api$moveBook, placement.id, model.selectedBookshelf, token, $author$project$Page$BookDetail$MoveCompleted),
 						$author$project$Page$BookDetail$NoOut);
 				} else {
 					return _Utils_Tuple3(model, $elm$core$Platform$Cmd$none, $author$project$Page$BookDetail$NoOut);
 				}
-			case 5:
+			case 'MoveCompleted':
 				return _Utils_Tuple3(model, $elm$core$Platform$Cmd$none, $author$project$Page$BookDetail$NoOut);
-			case 6:
+			case 'OpenRemoveModal':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aj: true}),
+						{removeModalOpen: true}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 7:
+			case 'CloseRemoveModal':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aj: false}),
+						{removeModalOpen: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
-			case 8:
-				var _v3 = _Utils_Tuple2(model.aK, maybeToken);
-				if ((!_v3.a.$) && (!_v3.b.$)) {
+			case 'ConfirmRemove':
+				var _v3 = _Utils_Tuple2(model.placement, maybeToken);
+				if ((_v3.a.$ === 'Just') && (_v3.b.$ === 'Just')) {
 					var placement = _v3.a.a;
 					var token = _v3.b.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
-							{aj: false, aA: $author$project$Types$RemoteData$Loading}),
-						A3($author$project$Api$removeBook, placement.bw, token, $author$project$Page$BookDetail$RemoveCompleted),
+							{removeModalOpen: false, removeState: $author$project$Types$RemoteData$Loading}),
+						A3($author$project$Api$removeBook, placement.id, token, $author$project$Page$BookDetail$RemoveCompleted),
 						$author$project$Page$BookDetail$NoOut);
 				} else {
 					return _Utils_Tuple3(model, $elm$core$Platform$Cmd$none, $author$project$Page$BookDetail$NoOut);
 				}
-			case 9:
+			case 'RemoveCompleted':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								aA: $author$project$Types$RemoteData$Success(0)
+								removeState: $author$project$Types$RemoteData$Success(_Utils_Tuple0)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$BookDetail$NavigateTo(
-							A2($elm$core$Maybe$withDefault, $author$project$Navigation$Route$Library, model.a1)));
+							A2($elm$core$Maybe$withDefault, $author$project$Navigation$Route$Library, model.previousRoute)));
 				} else {
 					var err = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								aA: $author$project$Types$RemoteData$Failure(err)
+								removeState: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$BookDetail$NoOut);
 				}
-			case 10:
+			case 'ToggleFormatPicker':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aw: !model.aw}),
+						{formatPickerOpen: !model.formatPickerOpen}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
 			default:
 				var format = msg.a;
-				var newFormats = A2($elm$core$List$member, format, model.V) ? A2(
+				var newFormats = A2($elm$core$List$member, format, model.selectedFormats) ? A2(
 					$elm$core$List$filter,
 					function (f) {
 						return !_Utils_eq(f, format);
 					},
-					model.V) : A2($elm$core$List$cons, format, model.V);
+					model.selectedFormats) : A2($elm$core$List$cons, format, model.selectedFormats);
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{V: newFormats}),
+						{selectedFormats: newFormats}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$BookDetail$NoOut);
 		}
 	});
 var $author$project$Page$Bookshelf$AntiLibrary$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$Bookshelf$AntiLibrary$NoOut = {$: 0};
+var $author$project$Page$Bookshelf$AntiLibrary$NoOut = {$: 'NoOut'};
 var $author$project$Page$Bookshelf$AntiLibrary$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'BooksLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var placements = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								_: $author$project$Types$RemoteData$Success(placements)
+								books: $author$project$Types$RemoteData$Success(placements)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$Bookshelf$AntiLibrary$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(
+									books: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$AntiLibrary$NoOut);
@@ -7604,13 +7628,13 @@ var $author$project$Page$Bookshelf$AntiLibrary$update = F2(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(err)
+									books: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$AntiLibrary$NoOut);
 					}
 				}
-			case 1:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
@@ -7619,39 +7643,39 @@ var $author$project$Page$Bookshelf$AntiLibrary$update = F2(
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$AntiLibrary$NoOut);
 		}
 	});
 var $author$project$Page$Bookshelf$Library$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$Bookshelf$Library$NoOut = {$: 0};
+var $author$project$Page$Bookshelf$Library$NoOut = {$: 'NoOut'};
 var $author$project$Page$Bookshelf$Library$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'BooksLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var placements = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								_: $author$project$Types$RemoteData$Success(placements)
+								books: $author$project$Types$RemoteData$Success(placements)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$Bookshelf$Library$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(
+									books: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$Library$NoOut);
@@ -7661,30 +7685,30 @@ var $author$project$Page$Bookshelf$Library$update = F2(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(err)
+									books: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$Library$NoOut);
 					}
 				}
-			case 1:
+			case 'SelectBook':
 				var book = msg.a;
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
 						{
-							aO: $elm$core$Maybe$Just(book)
+							selectedBook: $elm$core$Maybe$Just(book)
 						}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$Library$NoOut);
-			case 2:
+			case 'ClearSelection':
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aO: $elm$core$Maybe$Nothing}),
+						{selectedBook: $elm$core$Maybe$Nothing}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$Library$NoOut);
-			case 3:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
@@ -7693,39 +7717,39 @@ var $author$project$Page$Bookshelf$Library$update = F2(
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$Library$NoOut);
 		}
 	});
 var $author$project$Page$Bookshelf$LookingForHome$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$Bookshelf$LookingForHome$NoOut = {$: 0};
+var $author$project$Page$Bookshelf$LookingForHome$NoOut = {$: 'NoOut'};
 var $author$project$Page$Bookshelf$LookingForHome$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'BooksLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var placements = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								_: $author$project$Types$RemoteData$Success(placements)
+								books: $author$project$Types$RemoteData$Success(placements)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$Bookshelf$LookingForHome$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(
+									books: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$LookingForHome$NoOut);
@@ -7735,13 +7759,13 @@ var $author$project$Page$Bookshelf$LookingForHome$update = F2(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(err)
+									books: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$LookingForHome$NoOut);
 					}
 				}
-			case 1:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
@@ -7750,39 +7774,39 @@ var $author$project$Page$Bookshelf$LookingForHome$update = F2(
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$LookingForHome$NoOut);
 		}
 	});
 var $author$project$Page$Bookshelf$ReadingPile$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$Bookshelf$ReadingPile$NoOut = {$: 0};
+var $author$project$Page$Bookshelf$ReadingPile$NoOut = {$: 'NoOut'};
 var $author$project$Page$Bookshelf$ReadingPile$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'BooksLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var placements = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								_: $author$project$Types$RemoteData$Success(placements)
+								books: $author$project$Types$RemoteData$Success(placements)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$Bookshelf$ReadingPile$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(
+									books: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$ReadingPile$NoOut);
@@ -7792,13 +7816,13 @@ var $author$project$Page$Bookshelf$ReadingPile$update = F2(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(err)
+									books: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$ReadingPile$NoOut);
 					}
 				}
-			case 1:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
@@ -7807,39 +7831,39 @@ var $author$project$Page$Bookshelf$ReadingPile$update = F2(
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$ReadingPile$NoOut);
 		}
 	});
 var $author$project$Page$Bookshelf$WishList$NavigateTo = function (a) {
-	return {$: 1, a: a};
+	return {$: 'NavigateTo', a: a};
 };
-var $author$project$Page$Bookshelf$WishList$NoOut = {$: 0};
+var $author$project$Page$Bookshelf$WishList$NoOut = {$: 'NoOut'};
 var $author$project$Page$Bookshelf$WishList$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'BooksLoaded':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var placements = result.a;
 					return _Utils_Tuple3(
 						_Utils_update(
 							model,
 							{
-								_: $author$project$Types$RemoteData$Success(placements)
+								books: $author$project$Types$RemoteData$Success(placements)
 							}),
 						$elm$core$Platform$Cmd$none,
 						$author$project$Page$Bookshelf$WishList$NoOut);
 				} else {
-					if ((result.a.$ === 3) && (result.a.a === 403)) {
+					if ((result.a.$ === 'BadStatus') && (result.a.a === 403)) {
 						return _Utils_Tuple3(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(
+									books: $author$project$Types$RemoteData$Failure(
 										$elm$http$Http$BadStatus(403)),
-									aB: true
+									showAgeGate: true
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$WishList$NoOut);
@@ -7849,13 +7873,13 @@ var $author$project$Page$Bookshelf$WishList$update = F2(
 							_Utils_update(
 								model,
 								{
-									_: $author$project$Types$RemoteData$Failure(err)
+									books: $author$project$Types$RemoteData$Failure(err)
 								}),
 							$elm$core$Platform$Cmd$none,
 							$author$project$Page$Bookshelf$WishList$NoOut);
 					}
 				}
-			case 1:
+			case 'VerifyAge':
 				return _Utils_Tuple3(
 					model,
 					$elm$core$Platform$Cmd$none,
@@ -7864,19 +7888,19 @@ var $author$project$Page$Bookshelf$WishList$update = F2(
 				return _Utils_Tuple3(
 					_Utils_update(
 						model,
-						{aB: false}),
+						{showAgeGate: false}),
 					$elm$core$Platform$Cmd$none,
 					$author$project$Page$Bookshelf$WishList$NoOut);
 		}
 	});
-var $author$project$Components$FilterPanel$ByAuthor = 1;
-var $author$project$Components$FilterPanel$ByDateAdded = 3;
-var $author$project$Components$FilterPanel$ByYear = 2;
+var $author$project$Components$FilterPanel$ByAuthor = {$: 'ByAuthor'};
+var $author$project$Components$FilterPanel$ByDateAdded = {$: 'ByDateAdded'};
+var $author$project$Components$FilterPanel$ByYear = {$: 'ByYear'};
 var $author$project$Page$Search$DebounceExpired = function (a) {
-	return {$: 3, a: a};
+	return {$: 'DebounceExpired', a: a};
 };
 var $author$project$Page$Search$SearchCompleted = function (a) {
-	return {$: 2, a: a};
+	return {$: 'SearchCompleted', a: a};
 };
 var $elm$url$Url$Builder$toQueryPair = function (_v0) {
 	var key = _v0.a;
@@ -7899,7 +7923,7 @@ var $elm$url$Url$Builder$crossOrigin = F3(
 	});
 var $elm$url$Url$Builder$QueryParameter = F2(
 	function (a, b) {
-		return {$: 0, a: a, b: b};
+		return {$: 'QueryParameter', a: a, b: b};
 	});
 var $elm$url$Url$percentEncode = _Url_percentEncode;
 var $elm$url$Url$Builder$string = F2(
@@ -7913,19 +7937,19 @@ var $author$project$Api$searchBooks = F3(
 	function (query, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$emptyBody,
-				J: A2(
+				body: $elm$http$Http$emptyBody,
+				expect: A2(
 					$elm$http$Http$expectJson,
 					toMsg,
 					$elm$json$Json$Decode$list($author$project$Types$Book$bookDecoder)),
-				af: _List_fromArray(
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'GET',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: A3(
+				method: 'GET',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: A3(
 					$elm$url$Url$Builder$crossOrigin,
 					$author$project$Api$baseUrl,
 					_List_fromArray(
@@ -7940,9 +7964,9 @@ var $elm$core$Process$sleep = _Process_sleep;
 var $author$project$Page$Search$update = F3(
 	function (msg, model, maybeToken) {
 		switch (msg.$) {
-			case 0:
+			case 'QueryChanged':
 				var query = msg.a;
-				var newCount = model.au + 1;
+				var newCount = model.debounceCount + 1;
 				var debounceCmd = A2(
 					$elm$core$Task$perform,
 					function (_v1) {
@@ -7953,24 +7977,24 @@ var $author$project$Page$Search$update = F3(
 					_Utils_update(
 						model,
 						{
-							au: newCount,
-							bP: query,
-							U: $elm$core$String$isEmpty(query) ? $author$project$Types$RemoteData$NotAsked : $author$project$Types$RemoteData$Loading
+							debounceCount: newCount,
+							query: query,
+							results: $elm$core$String$isEmpty(query) ? $author$project$Types$RemoteData$NotAsked : $author$project$Types$RemoteData$Loading
 						}),
 					debounceCmd);
-			case 1:
+			case 'ClearQuery':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{bP: '', U: $author$project$Types$RemoteData$NotAsked}),
+						{query: '', results: $author$project$Types$RemoteData$NotAsked}),
 					$elm$core$Platform$Cmd$none);
-			case 3:
+			case 'DebounceExpired':
 				var count = msg.a;
-				if (_Utils_eq(count, model.au) && (!$elm$core$String$isEmpty(model.bP))) {
+				if (_Utils_eq(count, model.debounceCount) && (!$elm$core$String$isEmpty(model.query))) {
 					var cmd = function () {
-						if (!maybeToken.$) {
+						if (maybeToken.$ === 'Just') {
 							var token = maybeToken.a;
-							return A3($author$project$Api$searchBooks, model.bP, token, $author$project$Page$Search$SearchCompleted);
+							return A3($author$project$Api$searchBooks, model.query, token, $author$project$Page$Search$SearchCompleted);
 						} else {
 							return $elm$core$Platform$Cmd$none;
 						}
@@ -7979,15 +8003,15 @@ var $author$project$Page$Search$update = F3(
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 2:
+			case 'SearchCompleted':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var books = result.a;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								U: $author$project$Types$RemoteData$Success(books)
+								results: $author$project$Types$RemoteData$Success(books)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
@@ -7996,98 +8020,136 @@ var $author$project$Page$Search$update = F3(
 						_Utils_update(
 							model,
 							{
-								U: $author$project$Types$RemoteData$Failure(err)
+								results: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
-			case 4:
+			case 'SortChanged':
 				var sortStr = msg.a;
 				var newSort = function () {
 					switch (sortStr) {
 						case 'author':
-							return 1;
+							return $author$project$Components$FilterPanel$ByAuthor;
 						case 'year':
-							return 2;
+							return $author$project$Components$FilterPanel$ByYear;
 						case 'date_added':
-							return 3;
+							return $author$project$Components$FilterPanel$ByDateAdded;
 						default:
-							return 0;
+							return $author$project$Components$FilterPanel$ByTitle;
 					}
 				}();
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{aP: newSort}),
+						{sort: newSort}),
 					$elm$core$Platform$Cmd$none);
-			case 5:
+			case 'ToggleFilterPanel':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{av: !model.av}),
+						{filterPanelOpen: !model.filterPanelOpen}),
 					$elm$core$Platform$Cmd$none);
-			case 6:
+			case 'YearFromChanged':
 				var str = msg.a;
-				var oldFilters = model.bo;
+				var oldFilters = model.filters;
 				var newFilters = _Utils_update(
 					oldFilters,
 					{
-						a9: $elm$core$String$toInt(str)
+						yearFrom: $elm$core$String$toInt(str)
 					});
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{bo: newFilters}),
+						{filters: newFilters}),
 					$elm$core$Platform$Cmd$none);
-			case 7:
+			case 'YearToChanged':
 				var str = msg.a;
-				var oldFilters = model.bo;
+				var oldFilters = model.filters;
 				var newFilters = _Utils_update(
 					oldFilters,
 					{
-						ba: $elm$core$String$toInt(str)
+						yearTo: $elm$core$String$toInt(str)
 					});
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{bo: newFilters}),
+						{filters: newFilters}),
 					$elm$core$Platform$Cmd$none);
 			default:
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{bo: $author$project$Components$FilterPanel$defaultFilterState}),
+						{filters: $author$project$Components$FilterPanel$defaultFilterState}),
 					$elm$core$Platform$Cmd$none);
 		}
 	});
-var $author$project$Page$Settings$AgeVerification$update = F2(
-	function (msg, model) {
+var $author$project$Page$Settings$AgeVerification$SaveCompleted = function (a) {
+	return {$: 'SaveCompleted', a: a};
+};
+var $elm$json$Json$Encode$bool = _Json_wrap;
+var $author$project$Api$updateAgeVerification = F3(
+	function (verified, token, toMsg) {
+		return $elm$http$Http$request(
+			{
+				body: $elm$http$Http$jsonBody(
+					$elm$json$Json$Encode$object(
+						_List_fromArray(
+							[
+								_Utils_Tuple2(
+								'age_verified',
+								$elm$json$Json$Encode$bool(verified))
+							]))),
+				expect: $elm$http$Http$expectWhatever(toMsg),
+				headers: _List_fromArray(
+					[
+						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
+					]),
+				method: 'PUT',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + '/api/settings/age_verification'
+			});
+	});
+var $author$project$Page$Settings$AgeVerification$update = F3(
+	function (msg, model, maybeToken) {
 		switch (msg.$) {
-			case 0:
+			case 'ToggleRequested':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{ab: true}),
+						{confirmModalOpen: true}),
 					$elm$core$Platform$Cmd$none);
-			case 1:
+			case 'ConfirmToggle':
+				var newValue = !model.ageVerified;
+				if (maybeToken.$ === 'Just') {
+					var token = maybeToken.a;
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{confirmModalOpen: false, saving: $author$project$Types$RemoteData$Loading}),
+						A3($author$project$Api$updateAgeVerification, newValue, token, $author$project$Page$Settings$AgeVerification$SaveCompleted));
+				} else {
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{confirmModalOpen: false}),
+						$elm$core$Platform$Cmd$none);
+				}
+			case 'CancelToggle':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{G: !model.G, ab: false, ak: $author$project$Types$RemoteData$Loading}),
-					$elm$core$Platform$Cmd$none);
-			case 2:
-				return _Utils_Tuple2(
-					_Utils_update(
-						model,
-						{ab: false}),
+						{confirmModalOpen: false}),
 					$elm$core$Platform$Cmd$none);
 			default:
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								ak: $author$project$Types$RemoteData$Success(0)
+								ageVerified: !model.ageVerified,
+								saving: $author$project$Types$RemoteData$Success(_Utils_Tuple0)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
@@ -8096,35 +8158,66 @@ var $author$project$Page$Settings$AgeVerification$update = F2(
 						_Utils_update(
 							model,
 							{
-								ak: $author$project$Types$RemoteData$Failure(err)
+								saving: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
 		}
 	});
-var $author$project$Page$Settings$Consent$update = F2(
-	function (msg, model) {
+var $author$project$Page$Settings$Consent$SaveCompleted = function (a) {
+	return {$: 'SaveCompleted', a: a};
+};
+var $author$project$Api$saveConsent = F3(
+	function (consent, token, toMsg) {
+		return $elm$http$Http$request(
+			{
+				body: $elm$http$Http$jsonBody(
+					$elm$json$Json$Encode$object(
+						_List_fromArray(
+							[
+								_Utils_Tuple2(
+								'consent',
+								$elm$json$Json$Encode$bool(consent))
+							]))),
+				expect: $elm$http$Http$expectWhatever(toMsg),
+				headers: _List_fromArray(
+					[
+						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
+					]),
+				method: 'POST',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + '/api/gdpr/consent'
+			});
+	});
+var $author$project$Page$Settings$Consent$update = F3(
+	function (msg, model, maybeToken) {
 		switch (msg.$) {
-			case 0:
+			case 'ToggleAnalytics':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{Y: !model.Y}),
+						{analyticsConsent: !model.analyticsConsent}),
 					$elm$core$Platform$Cmd$none);
-			case 1:
-				return _Utils_Tuple2(
-					_Utils_update(
-						model,
-						{ak: $author$project$Types$RemoteData$Loading}),
-					$elm$core$Platform$Cmd$none);
+			case 'SaveConsent':
+				if (maybeToken.$ === 'Just') {
+					var token = maybeToken.a;
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{saving: $author$project$Types$RemoteData$Loading}),
+						A3($author$project$Api$saveConsent, model.analyticsConsent, token, $author$project$Page$Settings$Consent$SaveCompleted));
+				} else {
+					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+				}
 			default:
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								ak: $author$project$Types$RemoteData$Success(0)
+								saving: $author$project$Types$RemoteData$Success(_Utils_Tuple0)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
@@ -8133,39 +8226,44 @@ var $author$project$Page$Settings$Consent$update = F2(
 						_Utils_update(
 							model,
 							{
-								ak: $author$project$Types$RemoteData$Failure(err)
+								saving: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
 		}
 	});
 var $author$project$Page$Upload$DuplicateDetected = function (a) {
-	return {$: 5, a: a};
+	return {$: 'DuplicateDetected', a: a};
 };
 var $author$project$Page$Upload$DuplicateMoveCompleted = function (a) {
-	return {$: 12, a: a};
+	return {$: 'DuplicateMoveCompleted', a: a};
 };
 var $author$project$Page$Upload$GotDuplicateBook = function (a) {
-	return {$: 6, a: a};
+	return {$: 'GotDuplicateBook', a: a};
 };
 var $author$project$Page$Upload$GotFiles = F2(
 	function (a, b) {
-		return {$: 0, a: a, b: b};
+		return {$: 'GotFiles', a: a, b: b};
 	});
 var $author$project$Page$Upload$GotIdentifiedBook = function (a) {
-	return {$: 5, a: a};
+	return {$: 'GotIdentifiedBook', a: a};
 };
-var $author$project$Page$Upload$IdentificationFailed = {$: 2};
+var $author$project$Page$Upload$IdentificationFailed = {$: 'IdentificationFailed'};
 var $author$project$Page$Upload$Identified = function (a) {
-	return {$: 1, a: a};
+	return {$: 'Identified', a: a};
 };
-var $author$project$Page$Upload$ManualISBNEntry = {$: 4};
-var $author$project$Page$Upload$NotABook = {$: 3};
-var $author$project$Page$Upload$UploadCompleted = function (a) {
-	return {$: 4, a: a};
+var $author$project$Page$Upload$ManualISBNEntry = {$: 'ManualISBNEntry'};
+var $author$project$Page$Upload$NotABook = {$: 'NotABook'};
+var $author$project$Page$Upload$StatusReceived = function (a) {
+	return {$: 'StatusReceived', a: a};
 };
-var $elm$time$Time$Posix = $elm$core$Basics$identity;
-var $elm$time$Time$millisToPosix = $elm$core$Basics$identity;
+var $author$project$Page$Upload$UploadAccepted = function (a) {
+	return {$: 'UploadAccepted', a: a};
+};
+var $elm$time$Time$Posix = function (a) {
+	return {$: 'Posix', a: a};
+};
+var $elm$time$Time$millisToPosix = $elm$time$Time$Posix;
 var $elm$file$File$Select$files = F2(
 	function (mimes, toMsg) {
 		return A2(
@@ -8177,6 +8275,7 @@ var $elm$file$File$Select$files = F2(
 			},
 			_File_uploadOneOrMore(mimes));
 	});
+var $elm$core$Basics$ge = _Utils_ge;
 var $elm$core$String$fromList = _String_fromList;
 var $elm$core$String$foldr = _String_foldr;
 var $elm$core$String$toList = function (string) {
@@ -8205,7 +8304,11 @@ var $author$project$Components$ISBNInput$validateISBN10 = function (raw) {
 	var digits = A2(
 		$elm$core$List$filter,
 		function (c) {
-			return (c !== '-') && (c !== ' ');
+			return (!_Utils_eq(
+				c,
+				_Utils_chr('-'))) && (!_Utils_eq(
+				c,
+				_Utils_chr(' ')));
 		},
 		$elm$core$String$toList(raw));
 	if ($elm$core$List$length(digits) !== 10) {
@@ -8213,7 +8316,11 @@ var $author$project$Components$ISBNInput$validateISBN10 = function (raw) {
 	} else {
 		var charToValue = F2(
 			function (idx, c) {
-				return ((idx === 9) && ((c === 'X') || (c === 'x'))) ? $elm$core$Maybe$Just(10) : $elm$core$String$toInt(
+				return ((idx === 9) && (_Utils_eq(
+					c,
+					_Utils_chr('X')) || _Utils_eq(
+					c,
+					_Utils_chr('x')))) ? $elm$core$Maybe$Just(10) : $elm$core$String$toInt(
 					$elm$core$String$fromChar(c));
 			});
 		var values = A2($elm$core$List$indexedMap, charToValue, digits);
@@ -8222,7 +8329,7 @@ var $author$project$Components$ISBNInput$validateISBN10 = function (raw) {
 				$elm$core$List$indexedMap,
 				F2(
 					function (i, maybeV) {
-						if (!maybeV.$) {
+						if (maybeV.$ === 'Just') {
 							var v = maybeV.a;
 							return (10 - i) * v;
 						} else {
@@ -8243,7 +8350,11 @@ var $author$project$Components$ISBNInput$validateISBN13 = function (raw) {
 	var digits = A2(
 		$elm$core$List$filter,
 		function (c) {
-			return (c !== '-') && (c !== ' ');
+			return (!_Utils_eq(
+				c,
+				_Utils_chr('-'))) && (!_Utils_eq(
+				c,
+				_Utils_chr(' ')));
 		},
 		$elm$core$String$toList(raw));
 	if ($elm$core$List$length(digits) !== 13) {
@@ -8268,7 +8379,7 @@ var $author$project$Components$ISBNInput$validateISBN13 = function (raw) {
 				$elm$core$List$map2,
 				F2(
 					function (w, maybeV) {
-						if (!maybeV.$) {
+						if (maybeV.$ === 'Just') {
 							var v = maybeV.a;
 							return w * v;
 						} else {
@@ -8291,12 +8402,75 @@ var $author$project$Components$ISBNInput$isValidISBN = function (raw) {
 		A2(
 			$elm$core$List$filter,
 			function (c) {
-				return (c !== '-') && (c !== ' ');
+				return (!_Utils_eq(
+					c,
+					_Utils_chr('-'))) && (!_Utils_eq(
+					c,
+					_Utils_chr(' ')));
 			},
 			$elm$core$String$toList(raw)));
 	var len = $elm$core$String$length(stripped);
 	return (len === 10) ? $author$project$Components$ISBNInput$validateISBN10(raw) : ((len === 13) ? $author$project$Components$ISBNInput$validateISBN13(raw) : false);
 };
+var $author$project$Page$Upload$maxPollCount = 15;
+var $author$project$Api$PollResponse = F5(
+	function (imageId, status, bookId, rejectionReason, isDuplicate) {
+		return {bookId: bookId, imageId: imageId, isDuplicate: isDuplicate, rejectionReason: rejectionReason, status: status};
+	});
+var $elm$json$Json$Decode$bool = _Json_decodeBool;
+var $elm$json$Json$Decode$map5 = _Json_map5;
+var $author$project$Api$Pending = {$: 'Pending'};
+var $author$project$Api$Rejected = {$: 'Rejected'};
+var $author$project$Api$Resolved = {$: 'Resolved'};
+var $author$project$Api$pollStatusDecoder = A2(
+	$elm$json$Json$Decode$andThen,
+	function (s) {
+		switch (s) {
+			case 'pending':
+				return $elm$json$Json$Decode$succeed($author$project$Api$Pending);
+			case 'resolved':
+				return $elm$json$Json$Decode$succeed($author$project$Api$Resolved);
+			case 'rejected':
+				return $elm$json$Json$Decode$succeed($author$project$Api$Rejected);
+			default:
+				return $elm$json$Json$Decode$fail('Unknown upload status: ' + s);
+		}
+	},
+	$elm$json$Json$Decode$string);
+var $author$project$Api$pollResponseDecoder = A6(
+	$elm$json$Json$Decode$map5,
+	$author$project$Api$PollResponse,
+	A2($elm$json$Json$Decode$field, 'image_id', $elm$json$Json$Decode$string),
+	A2($elm$json$Json$Decode$field, 'status', $author$project$Api$pollStatusDecoder),
+	$elm$json$Json$Decode$maybe(
+		A2($elm$json$Json$Decode$field, 'book_id', $elm$json$Json$Decode$string)),
+	$elm$json$Json$Decode$maybe(
+		A2($elm$json$Json$Decode$field, 'rejection_reason', $elm$json$Json$Decode$string)),
+	$elm$json$Json$Decode$maybe(
+		A2($elm$json$Json$Decode$field, 'is_duplicate', $elm$json$Json$Decode$bool)));
+var $author$project$Api$pollUploadStatus = F3(
+	function (imageId, token, toMsg) {
+		return $elm$http$Http$request(
+			{
+				body: $elm$http$Http$emptyBody,
+				expect: A2($elm$http$Http$expectJson, toMsg, $author$project$Api$pollResponseDecoder),
+				headers: _List_fromArray(
+					[
+						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
+					]),
+				method: 'GET',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + ('/api/upload/' + (imageId + '/status'))
+			});
+	});
+var $author$project$Page$Upload$CheckStatus = {$: 'CheckStatus'};
+var $author$project$Page$Upload$sleepThenPoll = A2(
+	$elm$core$Task$perform,
+	function (_v0) {
+		return $author$project$Page$Upload$CheckStatus;
+	},
+	$elm$core$Process$sleep(2000));
 var $elm$http$Http$filePart = _Http_pair;
 var $elm$http$Http$multipartBody = function (parts) {
 	return A2(
@@ -8304,50 +8478,38 @@ var $elm$http$Http$multipartBody = function (parts) {
 		'',
 		_Http_toFormData(parts));
 };
-var $author$project$Api$UploadResponse = F4(
-	function (bookId, isbn, confidence, status) {
-		return {cg: bookId, cn: confidence, cG: isbn, ds: status};
-	});
-var $elm$json$Json$Decode$float = _Json_decodeFloat;
-var $elm$json$Json$Decode$map4 = _Json_map4;
-var $author$project$Api$uploadResponseDecoder = A5(
-	$elm$json$Json$Decode$map4,
-	$author$project$Api$UploadResponse,
-	$elm$json$Json$Decode$maybe(
-		A2($elm$json$Json$Decode$field, 'book_id', $elm$json$Json$Decode$string)),
-	$elm$json$Json$Decode$maybe(
-		A2($elm$json$Json$Decode$field, 'isbn', $elm$json$Json$Decode$string)),
-	A2($elm$json$Json$Decode$field, 'confidence', $elm$json$Json$Decode$float),
-	A2($elm$json$Json$Decode$field, 'status', $elm$json$Json$Decode$string));
 var $author$project$Api$uploadImage = F3(
 	function (file, token, toMsg) {
 		return $elm$http$Http$request(
 			{
-				I: $elm$http$Http$multipartBody(
+				body: $elm$http$Http$multipartBody(
 					_List_fromArray(
 						[
 							A2($elm$http$Http$filePart, 'image', file)
 						])),
-				J: A2($elm$http$Http$expectJson, toMsg, $author$project$Api$uploadResponseDecoder),
-				af: _List_fromArray(
+				expect: A2(
+					$elm$http$Http$expectJson,
+					toMsg,
+					A2($elm$json$Json$Decode$field, 'image_id', $elm$json$Json$Decode$string)),
+				headers: _List_fromArray(
 					[
 						A2($elm$http$Http$header, 'Authorization', 'Bearer ' + token)
 					]),
-				ai: 'POST',
-				am: $elm$core$Maybe$Nothing,
-				an: $elm$core$Maybe$Nothing,
-				N: $author$project$Api$baseUrl + '/api/upload'
+				method: 'POST',
+				timeout: $elm$core$Maybe$Nothing,
+				tracker: $elm$core$Maybe$Nothing,
+				url: $author$project$Api$baseUrl + '/api/upload'
 			});
 	});
 var $author$project$Page$Upload$update = F3(
 	function (msg, model, maybeToken) {
 		switch (msg.$) {
-			case 0:
+			case 'GotFiles':
 				var file = msg.a;
 				var cmd = function () {
-					if (!maybeToken.$) {
+					if (maybeToken.$ === 'Just') {
 						var token = maybeToken.a;
-						return A3($author$project$Api$uploadImage, file, token, $author$project$Page$Upload$UploadCompleted);
+						return A3($author$project$Api$uploadImage, file, token, $author$project$Page$Upload$UploadAccepted);
 					} else {
 						return $elm$core$Platform$Cmd$none;
 					}
@@ -8356,24 +8518,25 @@ var $author$project$Page$Upload$update = F3(
 					_Utils_update(
 						model,
 						{
-							aW: $elm$core$Maybe$Just(file),
-							ag: false,
-							z: $author$project$Types$RemoteData$Loading
+							file: $elm$core$Maybe$Just(file),
+							isDragging: false,
+							pollCount: 0,
+							uploadState: $author$project$Types$RemoteData$Loading
 						}),
 					cmd);
-			case 1:
+			case 'DragOver':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{ag: true}),
+						{isDragging: true}),
 					$elm$core$Platform$Cmd$none);
-			case 2:
+			case 'DragLeave':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{ag: false}),
+						{isDragging: false}),
 					$elm$core$Platform$Cmd$none);
-			case 3:
+			case 'FilepickerRequested':
 				return _Utils_Tuple2(
 					model,
 					A2(
@@ -8381,171 +8544,170 @@ var $author$project$Page$Upload$update = F3(
 						_List_fromArray(
 							['image/*']),
 						$author$project$Page$Upload$GotFiles));
-			case 4:
+			case 'UploadAccepted':
 				var result = msg.a;
-				if (!result.$) {
-					var response = result.a;
-					var _v3 = response.ds;
-					switch (_v3) {
-						case 'identified':
-							var _v4 = _Utils_Tuple2(response.cg, maybeToken);
-							if ((!_v4.a.$) && (!_v4.b.$)) {
-								var bookId = _v4.a.a;
-								var token = _v4.b.a;
-								return _Utils_Tuple2(
-									_Utils_update(
-										model,
-										{
-											z: $author$project$Types$RemoteData$Success(response)
-										}),
-									A3($author$project$Api$getBook, bookId, token, $author$project$Page$Upload$GotIdentifiedBook));
-							} else {
-								return _Utils_Tuple2(
-									_Utils_update(
-										model,
-										{
-											t: $author$project$Page$Upload$IdentificationFailed,
-											z: $author$project$Types$RemoteData$Success(response)
-										}),
-									$elm$core$Platform$Cmd$none);
-							}
-						case 'not_a_book':
-							return _Utils_Tuple2(
-								_Utils_update(
-									model,
-									{
-										t: $author$project$Page$Upload$NotABook,
-										z: $author$project$Types$RemoteData$Success(response)
-									}),
-								$elm$core$Platform$Cmd$none);
-						case 'duplicate':
-							var _v5 = _Utils_Tuple2(response.cg, maybeToken);
-							if ((!_v5.a.$) && (!_v5.b.$)) {
-								var bookId = _v5.a.a;
-								var token = _v5.b.a;
-								return _Utils_Tuple2(
-									_Utils_update(
-										model,
-										{
-											z: $author$project$Types$RemoteData$Success(response)
-										}),
-									A3($author$project$Api$getBook, bookId, token, $author$project$Page$Upload$GotDuplicateBook));
-							} else {
-								return _Utils_Tuple2(
-									_Utils_update(
-										model,
-										{
-											t: $author$project$Page$Upload$IdentificationFailed,
-											z: $author$project$Types$RemoteData$Success(response)
-										}),
-									$elm$core$Platform$Cmd$none);
-							}
-						default:
-							return _Utils_Tuple2(
-								_Utils_update(
-									model,
-									{
-										t: $author$project$Page$Upload$IdentificationFailed,
-										z: $author$project$Types$RemoteData$Success(response)
-									}),
-								$elm$core$Platform$Cmd$none);
-					}
+				if (result.$ === 'Ok') {
+					var imageId = result.a;
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{
+								uploadState: $author$project$Types$RemoteData$Success(imageId)
+							}),
+						$author$project$Page$Upload$sleepThenPoll);
 				} else {
 					var err = result.a;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								z: $author$project$Types$RemoteData$Failure(err)
+								uploadState: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
-			case 5:
+			case 'CheckStatus':
+				var _v3 = _Utils_Tuple2(model.uploadState, maybeToken);
+				if ((_v3.a.$ === 'Success') && (_v3.b.$ === 'Just')) {
+					var imageId = _v3.a.a;
+					var token = _v3.b.a;
+					return (_Utils_cmp(model.pollCount, $author$project$Page$Upload$maxPollCount) > -1) ? _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{result: $author$project$Page$Upload$IdentificationFailed}),
+						$elm$core$Platform$Cmd$none) : _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{pollCount: model.pollCount + 1}),
+						A3($author$project$Api$pollUploadStatus, imageId, token, $author$project$Page$Upload$StatusReceived));
+				} else {
+					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
+				}
+			case 'StatusReceived':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
+					var response = result.a;
+					var _v5 = response.status;
+					switch (_v5.$) {
+						case 'Resolved':
+							var _v6 = _Utils_Tuple2(response.bookId, maybeToken);
+							if ((_v6.a.$ === 'Just') && (_v6.b.$ === 'Just')) {
+								var bookId = _v6.a.a;
+								var token = _v6.b.a;
+								var callback = _Utils_eq(
+									response.isDuplicate,
+									$elm$core$Maybe$Just(true)) ? $author$project$Page$Upload$GotDuplicateBook : $author$project$Page$Upload$GotIdentifiedBook;
+								return _Utils_Tuple2(
+									model,
+									A3($author$project$Api$getBook, bookId, token, callback));
+							} else {
+								return _Utils_Tuple2(
+									_Utils_update(
+										model,
+										{result: $author$project$Page$Upload$NotABook}),
+									$elm$core$Platform$Cmd$none);
+							}
+						case 'Rejected':
+							return _Utils_Tuple2(
+								_Utils_update(
+									model,
+									{result: $author$project$Page$Upload$IdentificationFailed}),
+								$elm$core$Platform$Cmd$none);
+						default:
+							return _Utils_Tuple2(model, $author$project$Page$Upload$sleepThenPoll);
+					}
+				} else {
+					return _Utils_Tuple2(
+						_Utils_update(
+							model,
+							{result: $author$project$Page$Upload$IdentificationFailed}),
+						$elm$core$Platform$Cmd$none);
+				}
+			case 'GotIdentifiedBook':
+				var result = msg.a;
+				if (result.$ === 'Ok') {
 					var book = result.a;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								t: $author$project$Page$Upload$Identified(book)
+								result: $author$project$Page$Upload$Identified(book)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
-							{t: $author$project$Page$Upload$IdentificationFailed}),
+							{result: $author$project$Page$Upload$IdentificationFailed}),
 						$elm$core$Platform$Cmd$none);
 				}
-			case 6:
+			case 'GotDuplicateBook':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					var book = result.a;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								t: $author$project$Page$Upload$DuplicateDetected(book)
+								result: $author$project$Page$Upload$DuplicateDetected(book)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
-							{t: $author$project$Page$Upload$IdentificationFailed}),
+							{result: $author$project$Page$Upload$IdentificationFailed}),
 						$elm$core$Platform$Cmd$none);
 				}
-			case 7:
+			case 'ManualIsbnChanged':
 				var isbn = msg.a;
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{ay: isbn, aC: false}),
+						{manualIsbn: isbn, showIsbnError: false}),
 					$elm$core$Platform$Cmd$none);
-			case 8:
-				return $author$project$Components$ISBNInput$isValidISBN(model.ay) ? _Utils_Tuple2(
+			case 'SubmitManualIsbn':
+				return $author$project$Components$ISBNInput$isValidISBN(model.manualIsbn) ? _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{t: $author$project$Page$Upload$ManualISBNEntry}),
+						{result: $author$project$Page$Upload$ManualISBNEntry}),
 					$elm$core$Platform$Cmd$none) : _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{aC: true}),
+						{showIsbnError: true}),
 					$elm$core$Platform$Cmd$none);
-			case 9:
+			case 'EnterManualMode':
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{t: $author$project$Page$Upload$ManualISBNEntry}),
+						{result: $author$project$Page$Upload$ManualISBNEntry}),
 					$elm$core$Platform$Cmd$none);
-			case 10:
+			case 'DuplicateShelfSelected':
 				var shelf = msg.a;
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
-						{aH: shelf}),
+						{duplicateShelf: shelf}),
 					$elm$core$Platform$Cmd$none);
-			case 11:
+			case 'ConfirmDuplicateMove':
 				var bookId = msg.a;
-				if (!maybeToken.$) {
+				if (maybeToken.$ === 'Just') {
 					var token = maybeToken.a;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
-							{ac: $author$project$Types$RemoteData$Loading}),
-						A4($author$project$Api$moveBook, bookId, model.aH, token, $author$project$Page$Upload$DuplicateMoveCompleted));
+							{duplicateMoveState: $author$project$Types$RemoteData$Loading}),
+						A4($author$project$Api$moveBook, bookId, model.duplicateShelf, token, $author$project$Page$Upload$DuplicateMoveCompleted));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 12:
+			case 'DuplicateMoveCompleted':
 				var result = msg.a;
-				if (!result.$) {
+				if (result.$ === 'Ok') {
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								ac: $author$project$Types$RemoteData$Success(0)
+								duplicateMoveState: $author$project$Types$RemoteData$Success(_Utils_Tuple0)
 							}),
 						$elm$core$Platform$Cmd$none);
 				} else {
@@ -8554,7 +8716,7 @@ var $author$project$Page$Upload$update = F3(
 						_Utils_update(
 							model,
 							{
-								ac: $author$project$Types$RemoteData$Failure(err)
+								duplicateMoveState: $author$project$Types$RemoteData$Failure(err)
 							}),
 						$elm$core$Platform$Cmd$none);
 				}
@@ -8565,15 +8727,15 @@ var $author$project$Page$Upload$update = F3(
 var $author$project$Main$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 0:
+			case 'LinkClicked':
 				var urlRequest = msg.a;
-				if (!urlRequest.$) {
+				if (urlRequest.$ === 'Internal') {
 					var url = urlRequest.a;
 					return _Utils_Tuple2(
 						model,
 						A2(
 							$elm$browser$Browser$Navigation$pushUrl,
-							model.A,
+							model.key,
 							$elm$url$Url$toString(url)));
 				} else {
 					var url = urlRequest.a;
@@ -8581,33 +8743,33 @@ var $author$project$Main$update = F2(
 						model,
 						$elm$browser$Browser$Navigation$load(url));
 				}
-			case 1:
+			case 'UrlChanged':
 				var url = msg.a;
 				var newRoute = $author$project$Navigation$Route$fromUrl(url);
 				var transition = $elm$core$Maybe$Just(
-					A2($author$project$Main$transitionClass, model.m, newRoute));
+					A2($author$project$Main$transitionClass, model.route, newRoute));
 				var _v2 = A3(
 					$author$project$Main$initPage,
 					newRoute,
-					model.Z,
-					$elm$core$Maybe$Just(model.m));
+					model.auth,
+					$elm$core$Maybe$Just(model.route));
 				var page = _v2.a;
 				var cmd = _v2.b;
 				return _Utils_Tuple2(
 					_Utils_update(
 						model,
 						{
-							c: page,
-							a1: $elm$core$Maybe$Just(model.m),
-							m: newRoute,
-							aR: transition,
-							N: url
+							page: page,
+							previousRoute: $elm$core$Maybe$Just(model.route),
+							route: newRoute,
+							transition: transition,
+							url: url
 						}),
 					cmd);
-			case 2:
+			case 'LibraryMsg':
 				var subMsg = msg.a;
-				var _v3 = model.c;
-				if (_v3.$ === 1) {
+				var _v3 = model.page;
+				if (_v3.$ === 'PageLibrary') {
 					var subModel = _v3.a;
 					var _v4 = A2($author$project$Page$Bookshelf$Library$update, subMsg, subModel);
 					var newSubModel = _v4.a;
@@ -8616,10 +8778,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageLibrary(newSubModel)
+							page: $author$project$Main$PageLibrary(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$LibraryMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8631,17 +8793,17 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 3:
+			case 'AntiLibraryMsg':
 				var subMsg = msg.a;
-				var _v6 = model.c;
-				if (_v6.$ === 2) {
+				var _v6 = model.page;
+				if (_v6.$ === 'PageAntiLibrary') {
 					var subModel = _v6.a;
 					var _v7 = A2($author$project$Page$Bookshelf$AntiLibrary$update, subMsg, subModel);
 					var newSubModel = _v7.a;
@@ -8650,10 +8812,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageAntiLibrary(newSubModel)
+							page: $author$project$Main$PageAntiLibrary(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$AntiLibraryMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8665,17 +8827,17 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 4:
+			case 'WishListMsg':
 				var subMsg = msg.a;
-				var _v9 = model.c;
-				if (_v9.$ === 3) {
+				var _v9 = model.page;
+				if (_v9.$ === 'PageWishList') {
 					var subModel = _v9.a;
 					var _v10 = A2($author$project$Page$Bookshelf$WishList$update, subMsg, subModel);
 					var newSubModel = _v10.a;
@@ -8684,10 +8846,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageWishList(newSubModel)
+							page: $author$project$Main$PageWishList(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$WishListMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8699,17 +8861,17 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 5:
+			case 'ReadingPileMsg':
 				var subMsg = msg.a;
-				var _v12 = model.c;
-				if (_v12.$ === 4) {
+				var _v12 = model.page;
+				if (_v12.$ === 'PageReadingPile') {
 					var subModel = _v12.a;
 					var _v13 = A2($author$project$Page$Bookshelf$ReadingPile$update, subMsg, subModel);
 					var newSubModel = _v13.a;
@@ -8718,10 +8880,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageReadingPile(newSubModel)
+							page: $author$project$Main$PageReadingPile(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$ReadingPileMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8733,17 +8895,17 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 6:
+			case 'LookingForHomeMsg':
 				var subMsg = msg.a;
-				var _v15 = model.c;
-				if (_v15.$ === 5) {
+				var _v15 = model.page;
+				if (_v15.$ === 'PageLookingForHome') {
 					var subModel = _v15.a;
 					var _v16 = A2($author$project$Page$Bookshelf$LookingForHome$update, subMsg, subModel);
 					var newSubModel = _v16.a;
@@ -8752,10 +8914,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageLookingForHome(newSubModel)
+							page: $author$project$Main$PageLookingForHome(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$LookingForHomeMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8767,24 +8929,24 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 7:
+			case 'BookDetailMsg':
 				var subMsg = msg.a;
-				var _v18 = model.c;
-				if (_v18.$ === 6) {
+				var _v18 = model.page;
+				if (_v18.$ === 'PageBookDetail') {
 					var subModel = _v18.a;
 					var maybeToken = A2(
 						$elm$core$Maybe$map,
 						function ($) {
-							return $.dy;
+							return $.token;
 						},
-						model.Z);
+						model.auth);
 					var _v19 = A3($author$project$Page$BookDetail$update, subMsg, subModel, maybeToken);
 					var newSubModel = _v19.a;
 					var subCmd = _v19.b;
@@ -8792,10 +8954,10 @@ var $author$project$Main$update = F2(
 					var baseModel = _Utils_update(
 						model,
 						{
-							c: $author$project$Main$PageBookDetail(newSubModel)
+							page: $author$project$Main$PageBookDetail(newSubModel)
 						});
 					var baseCmd = A2($elm$core$Platform$Cmd$map, $author$project$Main$BookDetailMsg, subCmd);
-					if (!outMsg.$) {
+					if (outMsg.$ === 'NoOut') {
 						return _Utils_Tuple2(baseModel, baseCmd);
 					} else {
 						var route = outMsg.a;
@@ -8807,24 +8969,24 @@ var $author$project$Main$update = F2(
 										baseCmd,
 										A2(
 										$elm$browser$Browser$Navigation$pushUrl,
-										model.A,
+										model.key,
 										$author$project$Navigation$Route$toPath(route))
 									])));
 					}
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 8:
+			case 'UploadMsg':
 				var subMsg = msg.a;
-				var _v21 = model.c;
-				if (_v21.$ === 7) {
+				var _v21 = model.page;
+				if (_v21.$ === 'PageUpload') {
 					var subModel = _v21.a;
 					var maybeToken = A2(
 						$elm$core$Maybe$map,
 						function ($) {
-							return $.dy;
+							return $.token;
 						},
-						model.Z);
+						model.auth);
 					var _v22 = A3($author$project$Page$Upload$update, subMsg, subModel, maybeToken);
 					var newSubModel = _v22.a;
 					var subCmd = _v22.b;
@@ -8832,23 +8994,23 @@ var $author$project$Main$update = F2(
 						_Utils_update(
 							model,
 							{
-								c: $author$project$Main$PageUpload(newSubModel)
+								page: $author$project$Main$PageUpload(newSubModel)
 							}),
 						A2($elm$core$Platform$Cmd$map, $author$project$Main$UploadMsg, subCmd));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 9:
+			case 'SearchMsg':
 				var subMsg = msg.a;
-				var _v23 = model.c;
-				if (_v23.$ === 8) {
+				var _v23 = model.page;
+				if (_v23.$ === 'PageSearch') {
 					var subModel = _v23.a;
 					var maybeToken = A2(
 						$elm$core$Maybe$map,
 						function ($) {
-							return $.dy;
+							return $.token;
 						},
-						model.Z);
+						model.auth);
 					var _v24 = A3($author$project$Page$Search$update, subMsg, subModel, maybeToken);
 					var newSubModel = _v24.a;
 					var subCmd = _v24.b;
@@ -8856,62 +9018,76 @@ var $author$project$Main$update = F2(
 						_Utils_update(
 							model,
 							{
-								c: $author$project$Main$PageSearch(newSubModel)
+								page: $author$project$Main$PageSearch(newSubModel)
 							}),
 						A2($elm$core$Platform$Cmd$map, $author$project$Main$SearchMsg, subCmd));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 10:
+			case 'ConsentMsg':
 				var subMsg = msg.a;
-				var _v25 = model.c;
-				if (_v25.$ === 9) {
+				var _v25 = model.page;
+				if (_v25.$ === 'PageSettingsConsent') {
 					var subModel = _v25.a;
-					var _v26 = A2($author$project$Page$Settings$Consent$update, subMsg, subModel);
+					var maybeToken = A2(
+						$elm$core$Maybe$map,
+						function ($) {
+							return $.token;
+						},
+						model.auth);
+					var _v26 = A3($author$project$Page$Settings$Consent$update, subMsg, subModel, maybeToken);
 					var newSubModel = _v26.a;
 					var subCmd = _v26.b;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								c: $author$project$Main$PageSettingsConsent(newSubModel)
+								page: $author$project$Main$PageSettingsConsent(newSubModel)
 							}),
 						A2($elm$core$Platform$Cmd$map, $author$project$Main$ConsentMsg, subCmd));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			case 11:
+			case 'AgeVerificationMsg':
 				var subMsg = msg.a;
-				var _v27 = model.c;
-				if (_v27.$ === 10) {
+				var _v27 = model.page;
+				if (_v27.$ === 'PageSettingsAgeVerification') {
 					var subModel = _v27.a;
-					var _v28 = A2($author$project$Page$Settings$AgeVerification$update, subMsg, subModel);
+					var maybeToken = A2(
+						$elm$core$Maybe$map,
+						function ($) {
+							return $.token;
+						},
+						model.auth);
+					var _v28 = A3($author$project$Page$Settings$AgeVerification$update, subMsg, subModel, maybeToken);
 					var newSubModel = _v28.a;
 					var subCmd = _v28.b;
 					return _Utils_Tuple2(
 						_Utils_update(
 							model,
 							{
-								c: $author$project$Main$PageSettingsAgeVerification(newSubModel)
+								page: $author$project$Main$PageSettingsAgeVerification(newSubModel)
 							}),
 						A2($elm$core$Platform$Cmd$map, $author$project$Main$AgeVerificationMsg, subCmd));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
-			default:
+			case 'SwipeReceived':
 				var direction = msg.a;
-				var maybeNext = (direction === 'left') ? $author$project$Navigation$SwipeNavigation$swipeLeft(model.m) : $author$project$Navigation$SwipeNavigation$swipeRight(model.m);
-				if (!maybeNext.$) {
+				var maybeNext = (direction === 'left') ? $author$project$Navigation$SwipeNavigation$swipeLeft(model.route) : $author$project$Navigation$SwipeNavigation$swipeRight(model.route);
+				if (maybeNext.$ === 'Just') {
 					var nextRoute = maybeNext.a;
 					return _Utils_Tuple2(
 						model,
 						A2(
 							$elm$browser$Browser$Navigation$pushUrl,
-							model.A,
+							model.key,
 							$author$project$Navigation$Route$toPath(nextRoute)));
 				} else {
 					return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 				}
+			default:
+				return _Utils_Tuple2(model, $elm$core$Platform$Cmd$none);
 		}
 	});
 var $elm$html$Html$Attributes$stringProperty = F2(
@@ -8926,27 +9102,27 @@ var $elm$html$Html$div = _VirtualDom_node('div');
 var $elm$html$Html$main_ = _VirtualDom_node('main');
 var $author$project$Main$pageTitle = function (route) {
 	switch (route.$) {
-		case 0:
+		case 'Home':
 			return 'The Stacks';
-		case 1:
+		case 'Library':
 			return 'Library — The Stacks';
-		case 2:
+		case 'AntiLibrary':
 			return 'Antilibrary — The Stacks';
-		case 3:
+		case 'WishList':
 			return 'Wish List — The Stacks';
-		case 4:
+		case 'ReadingPile':
 			return 'Reading Pile — The Stacks';
-		case 5:
+		case 'LookingForHome':
 			return 'Looking for a Home — The Stacks';
-		case 6:
+		case 'BookDetail':
 			return 'Book — The Stacks';
-		case 7:
+		case 'Upload':
 			return 'Add a Book — The Stacks';
-		case 8:
+		case 'Search':
 			return 'Search — The Stacks';
-		case 9:
+		case 'SettingsConsent':
 			return 'Privacy Settings — The Stacks';
-		case 10:
+		case 'SettingsAgeVerification':
 			return 'Age Verification — The Stacks';
 		default:
 			return 'Not Found — The Stacks';
@@ -9057,27 +9233,27 @@ var $author$project$Main$viewNav = function (model) {
 							]),
 						_List_fromArray(
 							[
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$Library, 'Library'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$AntiLibrary, 'Antilibrary'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$WishList, 'Wish List'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$ReadingPile, 'Reading Pile'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$LookingForHome, 'Looking for a Home'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$Search, 'Search'),
-								A3($author$project$Main$navItem, model.m, $author$project$Navigation$Route$Upload, 'Add Book')
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$Library, 'Library'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$AntiLibrary, 'Antilibrary'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$WishList, 'Wish List'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$ReadingPile, 'Reading Pile'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$LookingForHome, 'Looking for a Home'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$Search, 'Search'),
+								A3($author$project$Main$navItem, model.route, $author$project$Navigation$Route$Upload, 'Add Book')
 							]))
 					]))
 			]));
 };
 var $elm$virtual_dom$VirtualDom$map = _VirtualDom_map;
 var $elm$html$Html$map = $elm$virtual_dom$VirtualDom$map;
-var $author$project$Page$BookDetail$CloseRemoveModal = {$: 7};
-var $author$project$Page$BookDetail$ConfirmRemove = {$: 8};
-var $author$project$Page$BookDetail$DismissAgeGate = {$: 13};
-var $author$project$Page$BookDetail$VerifyAge = {$: 12};
+var $author$project$Page$BookDetail$CloseRemoveModal = {$: 'CloseRemoveModal'};
+var $author$project$Page$BookDetail$ConfirmRemove = {$: 'ConfirmRemove'};
+var $author$project$Page$BookDetail$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$BookDetail$VerifyAge = {$: 'VerifyAge'};
 var $elm$html$Html$button = _VirtualDom_node('button');
 var $elm$html$Html$h2 = _VirtualDom_node('h2');
 var $elm$virtual_dom$VirtualDom$Normal = function (a) {
-	return {$: 0, a: a};
+	return {$: 'Normal', a: a};
 };
 var $elm$virtual_dom$VirtualDom$on = _VirtualDom_on;
 var $elm$html$Html$Events$on = F2(
@@ -9143,7 +9319,7 @@ var $author$project$Components$AgeGate$ageGate = function (config) {
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class('btn btn--primary'),
-										$elm$html$Html$Events$onClick(config.c5)
+										$elm$html$Html$Events$onClick(config.onVerify)
 									]),
 								_List_fromArray(
 									[
@@ -9154,7 +9330,7 @@ var $author$project$Components$AgeGate$ageGate = function (config) {
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class('btn btn--secondary'),
-										$elm$html$Html$Events$onClick(config.c_)
+										$elm$html$Html$Events$onClick(config.onDismiss)
 									]),
 								_List_fromArray(
 									[
@@ -9199,7 +9375,7 @@ var $author$project$Components$RemoveBookModal$removeBookModal = function (confi
 							]),
 						_List_fromArray(
 							[
-								$elm$html$Html$text('Are you sure you want to remove \"' + (config.ch + '\" from your shelf? This cannot be undone.'))
+								$elm$html$Html$text('Are you sure you want to remove \"' + (config.bookTitle + '\" from your shelf? This cannot be undone.'))
 							])),
 						A2(
 						$elm$html$Html$div,
@@ -9214,7 +9390,7 @@ var $author$project$Components$RemoveBookModal$removeBookModal = function (confi
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class('btn btn--secondary'),
-										$elm$html$Html$Events$onClick(config.cW)
+										$elm$html$Html$Events$onClick(config.onCancel)
 									]),
 								_List_fromArray(
 									[
@@ -9225,7 +9401,7 @@ var $author$project$Components$RemoveBookModal$removeBookModal = function (confi
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class('btn btn--danger'),
-										$elm$html$Html$Events$onClick(config.cZ)
+										$elm$html$Html$Events$onClick(config.onConfirm)
 									]),
 								_List_fromArray(
 									[
@@ -9235,22 +9411,22 @@ var $author$project$Components$RemoveBookModal$removeBookModal = function (confi
 					]))
 			]));
 };
-var $author$project$Page$BookDetail$ConfirmMove = {$: 4};
-var $author$project$Page$BookDetail$OpenBookshelfMover = {$: 1};
-var $author$project$Page$BookDetail$OpenRemoveModal = {$: 6};
+var $author$project$Page$BookDetail$ConfirmMove = {$: 'ConfirmMove'};
+var $author$project$Page$BookDetail$OpenBookshelfMover = {$: 'OpenBookshelfMover'};
+var $author$project$Page$BookDetail$OpenRemoveModal = {$: 'OpenRemoveModal'};
 var $author$project$Page$BookDetail$SelectBookshelf = function (a) {
-	return {$: 3, a: a};
+	return {$: 'SelectBookshelf', a: a};
 };
 var $author$project$Page$BookDetail$ToggleFormat = function (a) {
-	return {$: 11, a: a};
+	return {$: 'ToggleFormat', a: a};
 };
-var $author$project$Page$BookDetail$ToggleFormatPicker = {$: 10};
+var $author$project$Page$BookDetail$ToggleFormatPicker = {$: 'ToggleFormatPicker'};
 var $elm$html$Html$Attributes$alt = $elm$html$Html$Attributes$stringProperty('alt');
 var $author$project$Components$FormatPicker$formatLabel = function (format) {
-	switch (format) {
-		case 0:
+	switch (format.$) {
+		case 'Physical':
 			return 'Physical';
-		case 1:
+		case 'EBook':
 			return 'eBook';
 		default:
 			return 'Audiobook';
@@ -9266,7 +9442,7 @@ var $author$project$Components$FormatPicker$formatPicker = function (config) {
 		A2(
 			$elm$core$List$map,
 			function (format) {
-				var isSelected = A2($elm$core$List$member, format, config.$7);
+				var isSelected = A2($elm$core$List$member, format, config.selected);
 				var selectedClass = isSelected ? 'format-picker__btn--selected' : '';
 				return A2(
 					$elm$html$Html$button,
@@ -9274,7 +9450,7 @@ var $author$project$Components$FormatPicker$formatPicker = function (config) {
 						[
 							$elm$html$Html$Attributes$class('format-picker__btn ' + selectedClass),
 							$elm$html$Html$Events$onClick(
-							config.c2(format))
+							config.onToggle(format))
 						]),
 					_List_fromArray(
 						[
@@ -9283,7 +9459,7 @@ var $author$project$Components$FormatPicker$formatPicker = function (config) {
 						]));
 			},
 			_List_fromArray(
-				[0, 1, 2])));
+				[$author$project$Types$Placement$Physical, $author$project$Types$Placement$EBook, $author$project$Types$Placement$Audiobook])));
 };
 var $elm$html$Html$h1 = _VirtualDom_node('h1');
 var $elm$html$Html$h3 = _VirtualDom_node('h3');
@@ -9291,17 +9467,17 @@ var $elm$html$Html$img = _VirtualDom_node('img');
 var $elm$html$Html$section = _VirtualDom_node('section');
 var $author$project$Components$ShelfMover$allBookshelves = _List_fromArray(
 	[
-		{ah: 'Library', aT: 'library'},
-		{ah: 'Antilibrary', aT: 'antilibrary'},
-		{ah: 'Wish List', aT: 'wishlist'},
-		{ah: 'Reading Pile', aT: 'reading_pile'},
-		{ah: 'Looking for a Home', aT: 'looking_for_home'}
+		{label: 'Library', value: 'library'},
+		{label: 'Antilibrary', value: 'antilibrary'},
+		{label: 'Wish List', value: 'wishlist'},
+		{label: 'Reading Pile', value: 'reading_pile'},
+		{label: 'Looking for a Home', value: 'looking_for_home'}
 	]);
 var $elm$html$Html$Events$alwaysStop = function (x) {
 	return _Utils_Tuple2(x, true);
 };
 var $elm$virtual_dom$VirtualDom$MayStopPropagation = function (a) {
-	return {$: 1, a: a};
+	return {$: 'MayStopPropagation', a: a};
 };
 var $elm$html$Html$Events$stopPropagationOn = F2(
 	function (event, decoder) {
@@ -9330,7 +9506,6 @@ var $elm$html$Html$Events$onInput = function (tagger) {
 };
 var $elm$html$Html$option = _VirtualDom_node('option');
 var $elm$html$Html$select = _VirtualDom_node('select');
-var $elm$json$Json$Encode$bool = _Json_wrap;
 var $elm$html$Html$Attributes$boolProperty = F2(
 	function (key, bool) {
 		return A2(
@@ -9354,7 +9529,7 @@ var $author$project$Components$ShelfMover$shelfMover = function (config) {
 				_List_fromArray(
 					[
 						$elm$html$Html$Attributes$class('shelf-mover__select'),
-						$elm$html$Html$Events$onInput(config.c1)
+						$elm$html$Html$Events$onInput(config.onSelectBookshelf)
 					]),
 				A2(
 					$elm$core$List$map,
@@ -9363,19 +9538,19 @@ var $author$project$Components$ShelfMover$shelfMover = function (config) {
 							$elm$html$Html$option,
 							_List_fromArray(
 								[
-									$elm$html$Html$Attributes$value(bookshelf.aT),
+									$elm$html$Html$Attributes$value(bookshelf.value),
 									$elm$html$Html$Attributes$selected(
-									_Utils_eq(bookshelf.aT, config.dp))
+									_Utils_eq(bookshelf.value, config.selectedBookshelf))
 								]),
 							_List_fromArray(
 								[
-									$elm$html$Html$text(bookshelf.ah)
+									$elm$html$Html$text(bookshelf.label)
 								]));
 					},
 					A2(
 						$elm$core$List$filter,
 						function (s) {
-							return !_Utils_eq(s.aT, config.cq);
+							return !_Utils_eq(s.value, config.currentBookshelf);
 						},
 						$author$project$Components$ShelfMover$allBookshelves))),
 				A2(
@@ -9383,7 +9558,7 @@ var $author$project$Components$ShelfMover$shelfMover = function (config) {
 				_List_fromArray(
 					[
 						$elm$html$Html$Attributes$class('shelf-mover__btn'),
-						$elm$html$Html$Events$onClick(config.c0)
+						$elm$html$Html$Events$onClick(config.onMove)
 					]),
 				_List_fromArray(
 					[
@@ -9424,15 +9599,15 @@ var $author$project$Page$BookDetail$viewBook = F2(
 							_List_fromArray(
 								[
 									function () {
-									var _v0 = book.co;
-									if (!_v0.$) {
+									var _v0 = book.coverImageUrl;
+									if (_v0.$ === 'Just') {
 										var url = _v0.a;
 										return A2(
 											$elm$html$Html$img,
 											_List_fromArray(
 												[
 													$elm$html$Html$Attributes$src(url),
-													$elm$html$Html$Attributes$alt('Cover of ' + book.b2),
+													$elm$html$Html$Attributes$alt('Cover of ' + book.title),
 													$elm$html$Html$Attributes$class('book-detail__cover-img')
 												]),
 											_List_Nil);
@@ -9466,7 +9641,7 @@ var $author$project$Page$BookDetail$viewBook = F2(
 										]),
 									_List_fromArray(
 										[
-											$elm$html$Html$text(book.b2)
+											$elm$html$Html$text(book.title)
 										])),
 									A2(
 									$elm$html$Html$h2,
@@ -9476,11 +9651,11 @@ var $author$project$Page$BookDetail$viewBook = F2(
 										]),
 									_List_fromArray(
 										[
-											$elm$html$Html$text(book.be.bC)
+											$elm$html$Html$text(book.author.name)
 										])),
 									function () {
-									var _v1 = book.df;
-									if (!_v1.$) {
+									var _v1 = book.publicationYear;
+									if (_v1.$ === 'Just') {
 										var year = _v1.a;
 										return A2(
 											$elm$html$Html$p,
@@ -9498,8 +9673,8 @@ var $author$project$Page$BookDetail$viewBook = F2(
 									}
 								}(),
 									function () {
-									var _v2 = book.dg;
-									if (!_v2.$) {
+									var _v2 = book.publisher;
+									if (_v2.$ === 'Just') {
 										var publisher = _v2.a;
 										return A2(
 											$elm$html$Html$p,
@@ -9516,8 +9691,8 @@ var $author$project$Page$BookDetail$viewBook = F2(
 									}
 								}(),
 									function () {
-									var _v3 = book.da;
-									if (!_v3.$) {
+									var _v3 = book.pageCount;
+									if (_v3.$ === 'Just') {
 										var pages = _v3.a;
 										return A2(
 											$elm$html$Html$p,
@@ -9542,7 +9717,7 @@ var $author$project$Page$BookDetail$viewBook = F2(
 										]),
 									_List_fromArray(
 										[
-											$elm$html$Html$text('ISBN: ' + book.cG)
+											$elm$html$Html$text('ISBN: ' + book.isbn)
 										]))
 								]))
 						])),
@@ -9555,8 +9730,8 @@ var $author$project$Page$BookDetail$viewBook = F2(
 					_List_fromArray(
 						[
 							function () {
-							var _v4 = book.cs;
-							if (!_v4.$) {
+							var _v4 = book.description;
+							if (_v4.$ === 'Just') {
 								var desc = _v4.a;
 								return A2(
 									$elm$html$Html$p,
@@ -9590,11 +9765,11 @@ var $author$project$Page$BookDetail$viewBook = F2(
 							_List_Nil,
 							_List_fromArray(
 								[
-									$elm$html$Html$text(book.be.bC)
+									$elm$html$Html$text(book.author.name)
 								])),
 							function () {
-							var _v5 = book.be.cf;
-							if (!_v5.$) {
+							var _v5 = book.author.bio;
+							if (_v5.$ === 'Just') {
 								var bio = _v5.a;
 								return A2(
 									$elm$html$Html$p,
@@ -9627,8 +9802,8 @@ var $author$project$Page$BookDetail$viewBook = F2(
 								[
 									$elm$html$Html$text('Move to Bookshelf')
 								])),
-							model.aa ? $author$project$Components$ShelfMover$shelfMover(
-							{cq: model.dp, c0: $author$project$Page$BookDetail$ConfirmMove, c1: $author$project$Page$BookDetail$SelectBookshelf, dp: model.dp}) : $elm$html$Html$text('')
+							model.bookshelfMoverOpen ? $author$project$Components$ShelfMover$shelfMover(
+							{currentBookshelf: model.selectedBookshelf, onMove: $author$project$Page$BookDetail$ConfirmMove, onSelectBookshelf: $author$project$Page$BookDetail$SelectBookshelf, selectedBookshelf: model.selectedBookshelf}) : $elm$html$Html$text('')
 						])),
 					A2(
 					$elm$html$Html$section,
@@ -9649,8 +9824,8 @@ var $author$project$Page$BookDetail$viewBook = F2(
 								[
 									$elm$html$Html$text('Formats')
 								])),
-							model.aw ? $author$project$Components$FormatPicker$formatPicker(
-							{c2: $author$project$Page$BookDetail$ToggleFormat, $7: model.V}) : $elm$html$Html$text('')
+							model.formatPickerOpen ? $author$project$Components$FormatPicker$formatPicker(
+							{onToggle: $author$project$Page$BookDetail$ToggleFormat, selected: model.selectedFormats}) : $elm$html$Html$text('')
 						])),
 					A2(
 					$elm$html$Html$section,
@@ -9735,18 +9910,18 @@ var $author$project$Page$BookDetail$view = function (model) {
 			]),
 		_List_fromArray(
 			[
-				model.aB ? $author$project$Components$AgeGate$ageGate(
-				{c_: $author$project$Page$BookDetail$DismissAgeGate, c5: $author$project$Page$BookDetail$VerifyAge}) : A2(
+				model.showAgeGate ? $author$project$Components$AgeGate$ageGate(
+				{onDismiss: $author$project$Page$BookDetail$DismissAgeGate, onVerify: $author$project$Page$BookDetail$VerifyAge}) : A2(
 				$elm$html$Html$div,
 				_List_Nil,
 				_List_fromArray(
 					[
 						function () {
-						var _v0 = model.P;
+						var _v0 = model.book;
 						switch (_v0.$) {
-							case 0:
+							case 'NotAsked':
 								return $elm$html$Html$text('');
-							case 1:
+							case 'Loading':
 								return A2(
 									$elm$html$Html$div,
 									_List_fromArray(
@@ -9757,7 +9932,7 @@ var $author$project$Page$BookDetail$view = function (model) {
 										[
 											$elm$html$Html$text('Loading book...')
 										]));
-							case 2:
+							case 'Failure':
 								return A2(
 									$elm$html$Html$p,
 									_List_fromArray(
@@ -9774,12 +9949,12 @@ var $author$project$Page$BookDetail$view = function (model) {
 						}
 					}(),
 						function () {
-						if (model.aj) {
-							var _v1 = model.P;
-							if (_v1.$ === 3) {
+						if (model.removeModalOpen) {
+							var _v1 = model.book;
+							if (_v1.$ === 'Success') {
 								var book = _v1.a;
 								return $author$project$Components$RemoveBookModal$removeBookModal(
-									{ch: book.b2, cW: $author$project$Page$BookDetail$CloseRemoveModal, cZ: $author$project$Page$BookDetail$ConfirmRemove});
+									{bookTitle: book.title, onCancel: $author$project$Page$BookDetail$CloseRemoveModal, onConfirm: $author$project$Page$BookDetail$ConfirmRemove});
 							} else {
 								return $elm$html$Html$text('');
 							}
@@ -9790,8 +9965,8 @@ var $author$project$Page$BookDetail$view = function (model) {
 					]))
 			]));
 };
-var $author$project$Page$Bookshelf$AntiLibrary$DismissAgeGate = {$: 2};
-var $author$project$Page$Bookshelf$AntiLibrary$VerifyAge = {$: 1};
+var $author$project$Page$Bookshelf$AntiLibrary$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$Bookshelf$AntiLibrary$VerifyAge = {$: 'VerifyAge'};
 var $author$project$Components$EmptyBookshelf$emptyBookshelf = function (config) {
 	return A2(
 		$elm$html$Html$div,
@@ -9819,7 +9994,7 @@ var $author$project$Components$EmptyBookshelf$emptyBookshelf = function (config)
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text(config.cK)
+						$elm$html$Html$text(config.message)
 					]))
 			]));
 };
@@ -9830,7 +10005,7 @@ var $elm$core$List$isEmpty = function (xs) {
 		return false;
 	}
 };
-var $author$project$Components$Spine$Pristine = 0;
+var $author$project$Components$Spine$Pristine = {$: 'Pristine'};
 var $elm$virtual_dom$VirtualDom$attribute = F2(
 	function (key, value) {
 		return A2(
@@ -9882,21 +10057,21 @@ var $elm$virtual_dom$VirtualDom$style = _VirtualDom_style;
 var $elm$html$Html$Attributes$style = $elm$virtual_dom$VirtualDom$style;
 var $elm$html$Html$Attributes$title = $elm$html$Html$Attributes$stringProperty('title');
 var $author$project$Components$Spine$wearLevelClass = function (wearLevel) {
-	switch (wearLevel) {
-		case 0:
+	switch (wearLevel.$) {
+		case 'Pristine':
 			return 'spine--pristine';
-		case 1:
+		case 'Softened':
 			return 'spine--softened';
-		case 2:
+		case 'Cracking':
 			return 'spine--cracking';
-		case 3:
+		case 'WellRead':
 			return 'spine--wellread';
 		default:
 			return 'spine--wellloved';
 	}
 };
 var $author$project$Components$Spine$spine = function (config) {
-	var widthPx = $author$project$Components$Spine$spineWidth(config.da);
+	var widthPx = $author$project$Components$Spine$spineWidth(config.pageCount);
 	var widthStr = $elm$core$String$fromInt(widthPx) + 'px';
 	return A2(
 		$elm$html$Html$div,
@@ -9904,9 +10079,9 @@ var $author$project$Components$Spine$spine = function (config) {
 			[
 				$elm$html$Html$Attributes$class('spine'),
 				$elm$html$Html$Attributes$class(
-				$author$project$Components$Spine$wearLevelClass(config.dE)),
+				$author$project$Components$Spine$wearLevelClass(config.wearLevel)),
 				A2($elm$html$Html$Attributes$style, 'width', widthStr),
-				$elm$html$Html$Attributes$title(config.b2 + (' — ' + config.be))
+				$elm$html$Html$Attributes$title(config.title + (' — ' + config.author))
 			]),
 		_List_fromArray(
 			[
@@ -9919,11 +10094,26 @@ var $author$project$Components$Spine$spine = function (config) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text(config.b2 + (' · ' + config.be))
+						$elm$html$Html$text(config.title + (' · ' + config.author))
 					]))
 			]));
 };
-var $author$project$Page$Bookshelf$AntiLibrary$viewSpine = function (_v0) {
+var $author$project$Page$Bookshelf$AntiLibrary$viewSpine = function (placement) {
+	var _v0 = function () {
+		var _v1 = placement.book;
+		if (_v1.$ === 'Just') {
+			var book = _v1.a;
+			return _Utils_Tuple3(
+				book.title,
+				book.author.name,
+				A2($elm$core$Maybe$withDefault, 200, book.pageCount));
+		} else {
+			return _Utils_Tuple3('Unknown Title', 'Unknown Author', 200);
+		}
+	}();
+	var title = _v0.a;
+	var author = _v0.b;
+	var pageCount = _v0.c;
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -9933,7 +10123,7 @@ var $author$project$Page$Bookshelf$AntiLibrary$viewSpine = function (_v0) {
 		_List_fromArray(
 			[
 				$author$project$Components$Spine$spine(
-				{be: 'Author', da: 250, b2: 'Book', dE: 0})
+				{author: author, pageCount: pageCount, title: title, wearLevel: $author$project$Components$Spine$Pristine})
 			]));
 };
 var $author$project$Page$Bookshelf$AntiLibrary$view = function (model) {
@@ -9956,15 +10146,15 @@ var $author$project$Page$Bookshelf$AntiLibrary$view = function (model) {
 						$elm$html$Html$text('Antilibrary')
 					])),
 				function () {
-				if (model.aB) {
+				if (model.showAgeGate) {
 					return $author$project$Components$AgeGate$ageGate(
-						{c_: $author$project$Page$Bookshelf$AntiLibrary$DismissAgeGate, c5: $author$project$Page$Bookshelf$AntiLibrary$VerifyAge});
+						{onDismiss: $author$project$Page$Bookshelf$AntiLibrary$DismissAgeGate, onVerify: $author$project$Page$Bookshelf$AntiLibrary$VerifyAge});
 				} else {
-					var _v0 = model._;
+					var _v0 = model.books;
 					switch (_v0.$) {
-						case 0:
+						case 'NotAsked':
 							return $elm$html$Html$text('');
-						case 1:
+						case 'Loading':
 							return A2(
 								$elm$html$Html$div,
 								_List_fromArray(
@@ -9975,7 +10165,7 @@ var $author$project$Page$Bookshelf$AntiLibrary$view = function (model) {
 									[
 										$elm$html$Html$text('Loading your antilibrary...')
 									]));
-						case 2:
+						case 'Failure':
 							return A2(
 								$elm$html$Html$p,
 								_List_fromArray(
@@ -9989,7 +10179,7 @@ var $author$project$Page$Bookshelf$AntiLibrary$view = function (model) {
 						default:
 							var placements = _v0.a;
 							return $elm$core$List$isEmpty(placements) ? $author$project$Components$EmptyBookshelf$emptyBookshelf(
-								{ci: 'antilibrary', cK: 'Your antilibrary is empty — this is where the books you haven\'t read yet live. The bigger the better.'}) : A2(
+								{bookshelf: 'antilibrary', message: 'Your antilibrary is empty — this is where the books you haven\'t read yet live. The bigger the better.'}) : A2(
 								$elm$html$Html$div,
 								_List_fromArray(
 									[
@@ -10010,10 +10200,25 @@ var $author$project$Page$Bookshelf$AntiLibrary$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Bookshelf$Library$DismissAgeGate = {$: 4};
-var $author$project$Page$Bookshelf$Library$VerifyAge = {$: 3};
-var $author$project$Components$Spine$Softened = 1;
-var $author$project$Page$Bookshelf$Library$viewSpine = function (_v0) {
+var $author$project$Page$Bookshelf$Library$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$Bookshelf$Library$VerifyAge = {$: 'VerifyAge'};
+var $author$project$Components$Spine$Softened = {$: 'Softened'};
+var $author$project$Page$Bookshelf$Library$viewSpine = function (placement) {
+	var _v0 = function () {
+		var _v1 = placement.book;
+		if (_v1.$ === 'Just') {
+			var book = _v1.a;
+			return _Utils_Tuple3(
+				book.title,
+				book.author.name,
+				A2($elm$core$Maybe$withDefault, 200, book.pageCount));
+		} else {
+			return _Utils_Tuple3('Unknown Title', 'Unknown Author', 200);
+		}
+	}();
+	var title = _v0.a;
+	var author = _v0.b;
+	var pageCount = _v0.c;
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -10023,7 +10228,7 @@ var $author$project$Page$Bookshelf$Library$viewSpine = function (_v0) {
 		_List_fromArray(
 			[
 				$author$project$Components$Spine$spine(
-				{be: 'Author', da: 300, b2: 'Book', dE: 1})
+				{author: author, pageCount: pageCount, title: title, wearLevel: $author$project$Components$Spine$Softened})
 			]));
 };
 var $author$project$Page$Bookshelf$Library$view = function (model) {
@@ -10046,15 +10251,15 @@ var $author$project$Page$Bookshelf$Library$view = function (model) {
 						$elm$html$Html$text('Library')
 					])),
 				function () {
-				if (model.aB) {
+				if (model.showAgeGate) {
 					return $author$project$Components$AgeGate$ageGate(
-						{c_: $author$project$Page$Bookshelf$Library$DismissAgeGate, c5: $author$project$Page$Bookshelf$Library$VerifyAge});
+						{onDismiss: $author$project$Page$Bookshelf$Library$DismissAgeGate, onVerify: $author$project$Page$Bookshelf$Library$VerifyAge});
 				} else {
-					var _v0 = model._;
+					var _v0 = model.books;
 					switch (_v0.$) {
-						case 0:
+						case 'NotAsked':
 							return $elm$html$Html$text('');
-						case 1:
+						case 'Loading':
 							return A2(
 								$elm$html$Html$div,
 								_List_fromArray(
@@ -10065,7 +10270,7 @@ var $author$project$Page$Bookshelf$Library$view = function (model) {
 									[
 										$elm$html$Html$text('Loading your library...')
 									]));
-						case 2:
+						case 'Failure':
 							return A2(
 								$elm$html$Html$p,
 								_List_fromArray(
@@ -10079,7 +10284,7 @@ var $author$project$Page$Bookshelf$Library$view = function (model) {
 						default:
 							var placements = _v0.a;
 							return $elm$core$List$isEmpty(placements) ? $author$project$Components$EmptyBookshelf$emptyBookshelf(
-								{ci: 'library', cK: 'Your library is empty — start by adding some books you own.'}) : A2(
+								{bookshelf: 'library', message: 'Your library is empty — start by adding some books you own.'}) : A2(
 								$elm$html$Html$div,
 								_List_fromArray(
 									[
@@ -10100,9 +10305,20 @@ var $author$project$Page$Bookshelf$Library$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Bookshelf$LookingForHome$DismissAgeGate = {$: 2};
-var $author$project$Page$Bookshelf$LookingForHome$VerifyAge = {$: 1};
-var $author$project$Page$Bookshelf$LookingForHome$viewCover = function (_v0) {
+var $author$project$Page$Bookshelf$LookingForHome$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$Bookshelf$LookingForHome$VerifyAge = {$: 'VerifyAge'};
+var $author$project$Page$Bookshelf$LookingForHome$viewCover = function (placement) {
+	var _v0 = function () {
+		var _v1 = placement.book;
+		if (_v1.$ === 'Just') {
+			var book = _v1.a;
+			return _Utils_Tuple2(book.title, book.author.name);
+		} else {
+			return _Utils_Tuple2('Unknown Title', 'Unknown Author');
+		}
+	}();
+	var title = _v0.a;
+	var author = _v0.b;
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -10119,7 +10335,26 @@ var $author$project$Page$Bookshelf$LookingForHome$viewCover = function (_v0) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text('📖')
+						A2(
+						$elm$html$Html$p,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('pile-view__title')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(title)
+							])),
+						A2(
+						$elm$html$Html$p,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('pile-view__author')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(author)
+							]))
 					]))
 			]));
 };
@@ -10143,15 +10378,15 @@ var $author$project$Page$Bookshelf$LookingForHome$view = function (model) {
 						$elm$html$Html$text('Looking for a Home')
 					])),
 				function () {
-				if (model.aB) {
+				if (model.showAgeGate) {
 					return $author$project$Components$AgeGate$ageGate(
-						{c_: $author$project$Page$Bookshelf$LookingForHome$DismissAgeGate, c5: $author$project$Page$Bookshelf$LookingForHome$VerifyAge});
+						{onDismiss: $author$project$Page$Bookshelf$LookingForHome$DismissAgeGate, onVerify: $author$project$Page$Bookshelf$LookingForHome$VerifyAge});
 				} else {
-					var _v0 = model._;
+					var _v0 = model.books;
 					switch (_v0.$) {
-						case 0:
+						case 'NotAsked':
 							return $elm$html$Html$text('');
-						case 1:
+						case 'Loading':
 							return A2(
 								$elm$html$Html$div,
 								_List_fromArray(
@@ -10162,7 +10397,7 @@ var $author$project$Page$Bookshelf$LookingForHome$view = function (model) {
 									[
 										$elm$html$Html$text('Loading your books looking for a home...')
 									]));
-						case 2:
+						case 'Failure':
 							return A2(
 								$elm$html$Html$p,
 								_List_fromArray(
@@ -10176,7 +10411,7 @@ var $author$project$Page$Bookshelf$LookingForHome$view = function (model) {
 						default:
 							var placements = _v0.a;
 							return $elm$core$List$isEmpty(placements) ? $author$project$Components$EmptyBookshelf$emptyBookshelf(
-								{ci: 'looking_for_home', cK: 'Nothing here yet — these are books looking for a new home.'}) : A2(
+								{bookshelf: 'looking_for_home', message: 'Nothing here yet — these are books looking for a new home.'}) : A2(
 								$elm$html$Html$div,
 								_List_fromArray(
 									[
@@ -10188,9 +10423,20 @@ var $author$project$Page$Bookshelf$LookingForHome$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Bookshelf$ReadingPile$DismissAgeGate = {$: 2};
-var $author$project$Page$Bookshelf$ReadingPile$VerifyAge = {$: 1};
-var $author$project$Page$Bookshelf$ReadingPile$viewCover = function (_v0) {
+var $author$project$Page$Bookshelf$ReadingPile$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$Bookshelf$ReadingPile$VerifyAge = {$: 'VerifyAge'};
+var $author$project$Page$Bookshelf$ReadingPile$viewCover = function (placement) {
+	var _v0 = function () {
+		var _v1 = placement.book;
+		if (_v1.$ === 'Just') {
+			var book = _v1.a;
+			return _Utils_Tuple2(book.title, book.author.name);
+		} else {
+			return _Utils_Tuple2('Unknown Title', 'Unknown Author');
+		}
+	}();
+	var title = _v0.a;
+	var author = _v0.b;
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -10207,7 +10453,26 @@ var $author$project$Page$Bookshelf$ReadingPile$viewCover = function (_v0) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text('📖')
+						A2(
+						$elm$html$Html$p,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('pile-view__title')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(title)
+							])),
+						A2(
+						$elm$html$Html$p,
+						_List_fromArray(
+							[
+								$elm$html$Html$Attributes$class('pile-view__author')
+							]),
+						_List_fromArray(
+							[
+								$elm$html$Html$text(author)
+							]))
 					]))
 			]));
 };
@@ -10231,15 +10496,15 @@ var $author$project$Page$Bookshelf$ReadingPile$view = function (model) {
 						$elm$html$Html$text('Reading Pile')
 					])),
 				function () {
-				if (model.aB) {
+				if (model.showAgeGate) {
 					return $author$project$Components$AgeGate$ageGate(
-						{c_: $author$project$Page$Bookshelf$ReadingPile$DismissAgeGate, c5: $author$project$Page$Bookshelf$ReadingPile$VerifyAge});
+						{onDismiss: $author$project$Page$Bookshelf$ReadingPile$DismissAgeGate, onVerify: $author$project$Page$Bookshelf$ReadingPile$VerifyAge});
 				} else {
-					var _v0 = model._;
+					var _v0 = model.books;
 					switch (_v0.$) {
-						case 0:
+						case 'NotAsked':
 							return $elm$html$Html$text('');
-						case 1:
+						case 'Loading':
 							return A2(
 								$elm$html$Html$div,
 								_List_fromArray(
@@ -10250,7 +10515,7 @@ var $author$project$Page$Bookshelf$ReadingPile$view = function (model) {
 									[
 										$elm$html$Html$text('Loading your reading pile...')
 									]));
-						case 2:
+						case 'Failure':
 							return A2(
 								$elm$html$Html$p,
 								_List_fromArray(
@@ -10264,7 +10529,7 @@ var $author$project$Page$Bookshelf$ReadingPile$view = function (model) {
 						default:
 							var placements = _v0.a;
 							return $elm$core$List$isEmpty(placements) ? $author$project$Components$EmptyBookshelf$emptyBookshelf(
-								{ci: 'reading_pile', cK: 'Your reading pile is empty — time to pick something up.'}) : A2(
+								{bookshelf: 'reading_pile', message: 'Your reading pile is empty — time to pick something up.'}) : A2(
 								$elm$html$Html$div,
 								_List_fromArray(
 									[
@@ -10276,9 +10541,24 @@ var $author$project$Page$Bookshelf$ReadingPile$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Bookshelf$WishList$DismissAgeGate = {$: 2};
-var $author$project$Page$Bookshelf$WishList$VerifyAge = {$: 1};
-var $author$project$Page$Bookshelf$WishList$viewSpine = function (_v0) {
+var $author$project$Page$Bookshelf$WishList$DismissAgeGate = {$: 'DismissAgeGate'};
+var $author$project$Page$Bookshelf$WishList$VerifyAge = {$: 'VerifyAge'};
+var $author$project$Page$Bookshelf$WishList$viewSpine = function (placement) {
+	var _v0 = function () {
+		var _v1 = placement.book;
+		if (_v1.$ === 'Just') {
+			var book = _v1.a;
+			return _Utils_Tuple3(
+				book.title,
+				book.author.name,
+				A2($elm$core$Maybe$withDefault, 200, book.pageCount));
+		} else {
+			return _Utils_Tuple3('Unknown Title', 'Unknown Author', 200);
+		}
+	}();
+	var title = _v0.a;
+	var author = _v0.b;
+	var pageCount = _v0.c;
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -10288,7 +10568,7 @@ var $author$project$Page$Bookshelf$WishList$viewSpine = function (_v0) {
 		_List_fromArray(
 			[
 				$author$project$Components$Spine$spine(
-				{be: 'Author', da: 200, b2: 'Book', dE: 0})
+				{author: author, pageCount: pageCount, title: title, wearLevel: $author$project$Components$Spine$Pristine})
 			]));
 };
 var $author$project$Page$Bookshelf$WishList$view = function (model) {
@@ -10311,15 +10591,15 @@ var $author$project$Page$Bookshelf$WishList$view = function (model) {
 						$elm$html$Html$text('Wish List')
 					])),
 				function () {
-				if (model.aB) {
+				if (model.showAgeGate) {
 					return $author$project$Components$AgeGate$ageGate(
-						{c_: $author$project$Page$Bookshelf$WishList$DismissAgeGate, c5: $author$project$Page$Bookshelf$WishList$VerifyAge});
+						{onDismiss: $author$project$Page$Bookshelf$WishList$DismissAgeGate, onVerify: $author$project$Page$Bookshelf$WishList$VerifyAge});
 				} else {
-					var _v0 = model._;
+					var _v0 = model.books;
 					switch (_v0.$) {
-						case 0:
+						case 'NotAsked':
 							return $elm$html$Html$text('');
-						case 1:
+						case 'Loading':
 							return A2(
 								$elm$html$Html$div,
 								_List_fromArray(
@@ -10330,7 +10610,7 @@ var $author$project$Page$Bookshelf$WishList$view = function (model) {
 									[
 										$elm$html$Html$text('Loading your wish list...')
 									]));
-						case 2:
+						case 'Failure':
 							return A2(
 								$elm$html$Html$p,
 								_List_fromArray(
@@ -10344,7 +10624,7 @@ var $author$project$Page$Bookshelf$WishList$view = function (model) {
 						default:
 							var placements = _v0.a;
 							return $elm$core$List$isEmpty(placements) ? $author$project$Components$EmptyBookshelf$emptyBookshelf(
-								{ci: 'wishlist', cK: 'Nothing on your wishlist yet — snap photos of books you want to remember.'}) : A2(
+								{bookshelf: 'wishlist', message: 'Nothing on your wishlist yet — snap photos of books you want to remember.'}) : A2(
 								$elm$html$Html$div,
 								_List_fromArray(
 									[
@@ -10365,20 +10645,20 @@ var $author$project$Page$Bookshelf$WishList$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Search$ClearFilters = {$: 8};
-var $author$project$Page$Search$ClearQuery = {$: 1};
+var $author$project$Page$Search$ClearFilters = {$: 'ClearFilters'};
+var $author$project$Page$Search$ClearQuery = {$: 'ClearQuery'};
 var $author$project$Page$Search$QueryChanged = function (a) {
-	return {$: 0, a: a};
+	return {$: 'QueryChanged', a: a};
 };
 var $author$project$Page$Search$SortChanged = function (a) {
-	return {$: 4, a: a};
+	return {$: 'SortChanged', a: a};
 };
-var $author$project$Page$Search$ToggleFilterPanel = {$: 5};
+var $author$project$Page$Search$ToggleFilterPanel = {$: 'ToggleFilterPanel'};
 var $author$project$Page$Search$YearFromChanged = function (a) {
-	return {$: 6, a: a};
+	return {$: 'YearFromChanged', a: a};
 };
 var $author$project$Page$Search$YearToChanged = function (a) {
-	return {$: 7, a: a};
+	return {$: 'YearToChanged', a: a};
 };
 var $elm$html$Html$input = _VirtualDom_node('input');
 var $elm$html$Html$label = _VirtualDom_node('label');
@@ -10397,14 +10677,14 @@ var $author$project$Components$FilterPanel$filterPanel = function (config) {
 				_List_fromArray(
 					[
 						$elm$html$Html$Attributes$class('filter-panel__toggle'),
-						$elm$html$Html$Events$onClick(config.c2)
+						$elm$html$Html$Events$onClick(config.onToggle)
 					]),
 				_List_fromArray(
 					[
 						$elm$html$Html$text(
-						config.by ? 'Hide Filters' : 'Show Filters')
+						config.isOpen ? 'Hide Filters' : 'Show Filters')
 					])),
-				config.by ? A2(
+				config.isOpen ? A2(
 				$elm$html$Html$div,
 				_List_fromArray(
 					[
@@ -10440,8 +10720,8 @@ var $author$project$Components$FilterPanel$filterPanel = function (config) {
 										A2(
 											$elm$core$Maybe$withDefault,
 											'',
-											A2($elm$core$Maybe$map, $elm$core$String$fromInt, config.bo.a9))),
-										$elm$html$Html$Events$onInput(config.c6)
+											A2($elm$core$Maybe$map, $elm$core$String$fromInt, config.filters.yearFrom))),
+										$elm$html$Html$Events$onInput(config.onYearFrom)
 									]),
 								_List_Nil)
 							])),
@@ -10473,8 +10753,8 @@ var $author$project$Components$FilterPanel$filterPanel = function (config) {
 										A2(
 											$elm$core$Maybe$withDefault,
 											'',
-											A2($elm$core$Maybe$map, $elm$core$String$fromInt, config.bo.ba))),
-										$elm$html$Html$Events$onInput(config.c7)
+											A2($elm$core$Maybe$map, $elm$core$String$fromInt, config.filters.yearTo))),
+										$elm$html$Html$Events$onInput(config.onYearTo)
 									]),
 								_List_Nil)
 							])),
@@ -10483,7 +10763,7 @@ var $author$project$Components$FilterPanel$filterPanel = function (config) {
 						_List_fromArray(
 							[
 								$elm$html$Html$Attributes$class('filter-panel__clear'),
-								$elm$html$Html$Events$onClick(config.cY)
+								$elm$html$Html$Events$onClick(config.onClear)
 							]),
 						_List_fromArray(
 							[
@@ -10518,17 +10798,17 @@ var $author$project$Components$SearchBar$searchBar = function (config) {
 					[
 						$elm$html$Html$Attributes$type_('text'),
 						$elm$html$Html$Attributes$class('search-bar__input'),
-						$elm$html$Html$Attributes$placeholder(config.dd),
-						$elm$html$Html$Attributes$value(config.bP),
-						$elm$html$Html$Events$onInput(config.c$)
+						$elm$html$Html$Attributes$placeholder(config.placeholder_),
+						$elm$html$Html$Attributes$value(config.query),
+						$elm$html$Html$Events$onInput(config.onInput)
 					]),
 				_List_Nil),
-				$elm$core$String$isEmpty(config.bP) ? $elm$html$Html$text('') : A2(
+				$elm$core$String$isEmpty(config.query) ? $elm$html$Html$text('') : A2(
 				$elm$html$Html$button,
 				_List_fromArray(
 					[
 						$elm$html$Html$Attributes$class('search-bar__clear'),
-						$elm$html$Html$Events$onClick(config.cY)
+						$elm$html$Html$Events$onClick(config.onClear)
 					]),
 				_List_fromArray(
 					[
@@ -10560,7 +10840,7 @@ var $author$project$Components$SortSelector$sortSelector = function (config) {
 				_List_fromArray(
 					[
 						$elm$html$Html$Attributes$class('sort-selector__select'),
-						$elm$html$Html$Events$onInput(config.cX)
+						$elm$html$Html$Events$onInput(config.onChange)
 					]),
 				_List_fromArray(
 					[
@@ -10624,7 +10904,7 @@ var $author$project$Page$Search$viewBookResult = function (book) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text(book.b2)
+						$elm$html$Html$text(book.title)
 					])),
 				A2(
 				$elm$html$Html$p,
@@ -10634,11 +10914,11 @@ var $author$project$Page$Search$viewBookResult = function (book) {
 					]),
 				_List_fromArray(
 					[
-						$elm$html$Html$text(book.be.bC)
+						$elm$html$Html$text(book.author.name)
 					])),
 				function () {
-				var _v0 = book.df;
-				if (!_v0.$) {
+				var _v0 = book.publicationYear;
+				if (_v0.$ === 'Just') {
 					var year = _v0.a;
 					return A2(
 						$elm$html$Html$p,
@@ -10677,15 +10957,15 @@ var $author$project$Page$Search$view = function (model) {
 						$elm$html$Html$text('Search Books')
 					])),
 				$author$project$Components$SearchBar$searchBar(
-				{cY: $author$project$Page$Search$ClearQuery, c$: $author$project$Page$Search$QueryChanged, dd: 'Search by title, author, or ISBN...', bP: model.bP}),
+				{onClear: $author$project$Page$Search$ClearQuery, onInput: $author$project$Page$Search$QueryChanged, placeholder_: 'Search by title, author, or ISBN...', query: model.query}),
 				$author$project$Components$SortSelector$sortSelector(
-				{cp: model.aP, cX: $author$project$Page$Search$SortChanged}),
+				{current: model.sort, onChange: $author$project$Page$Search$SortChanged}),
 				$author$project$Components$FilterPanel$filterPanel(
-				{bo: model.bo, by: model.av, cY: $author$project$Page$Search$ClearFilters, c2: $author$project$Page$Search$ToggleFilterPanel, c6: $author$project$Page$Search$YearFromChanged, c7: $author$project$Page$Search$YearToChanged}),
+				{filters: model.filters, isOpen: model.filterPanelOpen, onClear: $author$project$Page$Search$ClearFilters, onToggle: $author$project$Page$Search$ToggleFilterPanel, onYearFrom: $author$project$Page$Search$YearFromChanged, onYearTo: $author$project$Page$Search$YearToChanged}),
 				function () {
-				var _v0 = model.U;
+				var _v0 = model.results;
 				switch (_v0.$) {
-					case 0:
+					case 'NotAsked':
 						return A2(
 							$elm$html$Html$p,
 							_List_fromArray(
@@ -10696,7 +10976,7 @@ var $author$project$Page$Search$view = function (model) {
 								[
 									$elm$html$Html$text('Enter a search term above to find books.')
 								]));
-					case 1:
+					case 'Loading':
 						return A2(
 							$elm$html$Html$div,
 							_List_fromArray(
@@ -10707,7 +10987,7 @@ var $author$project$Page$Search$view = function (model) {
 								[
 									$elm$html$Html$text('Searching...')
 								]));
-					case 2:
+					case 'Failure':
 						return A2(
 							$elm$html$Html$p,
 							_List_fromArray(
@@ -10740,9 +11020,9 @@ var $author$project$Page$Search$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Settings$AgeVerification$RequestToggle = {$: 0};
-var $author$project$Page$Settings$AgeVerification$CancelToggle = {$: 2};
-var $author$project$Page$Settings$AgeVerification$ConfirmToggle = {$: 1};
+var $author$project$Page$Settings$AgeVerification$ToggleRequested = {$: 'ToggleRequested'};
+var $author$project$Page$Settings$AgeVerification$CancelToggle = {$: 'CancelToggle'};
+var $author$project$Page$Settings$AgeVerification$ConfirmToggle = {$: 'ConfirmToggle'};
 var $author$project$Page$Settings$AgeVerification$viewConfirmModal = function (model) {
 	return A2(
 		$elm$html$Html$div,
@@ -10779,7 +11059,7 @@ var $author$project$Page$Settings$AgeVerification$viewConfirmModal = function (m
 						_List_fromArray(
 							[
 								$elm$html$Html$text(
-								model.G ? 'Are you sure you want to remove your age verification?' : 'By confirming, you declare that you are 18 years of age or older.')
+								model.ageVerified ? 'Are you sure you want to remove your age verification?' : 'By confirming, you declare that you are 18 years of age or older.')
 							])),
 						A2(
 						$elm$html$Html$div,
@@ -10879,27 +11159,27 @@ var $author$project$Page$Settings$AgeVerification$view = function (model) {
 								_List_fromArray(
 									[
 										$elm$html$Html$text(
-										model.G ? 'Verified (18+)' : 'Not verified')
+										model.ageVerified ? 'Verified (18+)' : 'Not verified')
 									])),
 								A2(
 								$elm$html$Html$button,
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class(
-										model.G ? 'toggle toggle--on' : 'toggle toggle--off'),
-										$elm$html$Html$Events$onClick($author$project$Page$Settings$AgeVerification$RequestToggle)
+										model.ageVerified ? 'toggle toggle--on' : 'toggle toggle--off'),
+										$elm$html$Html$Events$onClick($author$project$Page$Settings$AgeVerification$ToggleRequested)
 									]),
 								_List_fromArray(
 									[
 										$elm$html$Html$text(
-										model.G ? 'Verified' : 'Verify')
+										model.ageVerified ? 'Verified' : 'Verify')
 									]))
 							]))
 					])),
-				model.ab ? $author$project$Page$Settings$AgeVerification$viewConfirmModal(model) : $elm$html$Html$text(''),
+				model.confirmModalOpen ? $author$project$Page$Settings$AgeVerification$viewConfirmModal(model) : $elm$html$Html$text(''),
 				function () {
-				var _v0 = model.ak;
-				if (_v0.$ === 2) {
+				var _v0 = model.saving;
+				if (_v0.$ === 'Failure') {
 					return A2(
 						$elm$html$Html$p,
 						_List_fromArray(
@@ -10916,8 +11196,8 @@ var $author$project$Page$Settings$AgeVerification$view = function (model) {
 			}()
 			]));
 };
-var $author$project$Page$Settings$Consent$SaveConsent = {$: 1};
-var $author$project$Page$Settings$Consent$ToggleAnalytics = {$: 0};
+var $author$project$Page$Settings$Consent$SaveConsent = {$: 'SaveConsent'};
+var $author$project$Page$Settings$Consent$ToggleAnalytics = {$: 'ToggleAnalytics'};
 var $author$project$Page$Settings$Consent$view = function (model) {
 	return A2(
 		$elm$html$Html$div,
@@ -10988,13 +11268,13 @@ var $author$project$Page$Settings$Consent$view = function (model) {
 								_List_fromArray(
 									[
 										$elm$html$Html$Attributes$class(
-										model.Y ? 'toggle toggle--on' : 'toggle toggle--off'),
+										model.analyticsConsent ? 'toggle toggle--on' : 'toggle toggle--off'),
 										$elm$html$Html$Events$onClick($author$project$Page$Settings$Consent$ToggleAnalytics)
 									]),
 								_List_fromArray(
 									[
 										$elm$html$Html$text(
-										model.Y ? 'On' : 'Off')
+										model.analyticsConsent ? 'On' : 'Off')
 									]))
 							]))
 					])),
@@ -11007,9 +11287,9 @@ var $author$project$Page$Settings$Consent$view = function (model) {
 				_List_fromArray(
 					[
 						function () {
-						var _v0 = model.ak;
+						var _v0 = model.saving;
 						switch (_v0.$) {
-							case 1:
+							case 'Loading':
 								return A2(
 									$elm$html$Html$button,
 									_List_fromArray(
@@ -11020,7 +11300,7 @@ var $author$project$Page$Settings$Consent$view = function (model) {
 										[
 											$elm$html$Html$text('Saving...')
 										]));
-							case 3:
+							case 'Success':
 								return A2(
 									$elm$html$Html$button,
 									_List_fromArray(
@@ -11047,8 +11327,8 @@ var $author$project$Page$Settings$Consent$view = function (model) {
 					}()
 					])),
 				function () {
-				var _v1 = model.ak;
-				if (_v1.$ === 2) {
+				var _v1 = model.saving;
+				if (_v1.$ === 'Failure') {
 					return A2(
 						$elm$html$Html$p,
 						_List_fromArray(
@@ -11066,19 +11346,19 @@ var $author$project$Page$Settings$Consent$view = function (model) {
 			]));
 };
 var $author$project$Page$Upload$ConfirmDuplicateMove = function (a) {
-	return {$: 11, a: a};
+	return {$: 'ConfirmDuplicateMove', a: a};
 };
 var $author$project$Page$Upload$DuplicateShelfSelected = function (a) {
-	return {$: 10, a: a};
+	return {$: 'DuplicateShelfSelected', a: a};
 };
-var $author$project$Page$Upload$Reset = {$: 13};
+var $author$project$Page$Upload$Reset = {$: 'Reset'};
 var $author$project$Page$Upload$allShelves = _List_fromArray(
 	[
-		{ah: 'Library', aT: 'library'},
-		{ah: 'Antilibrary', aT: 'antilibrary'},
-		{ah: 'Wish List', aT: 'wishlist'},
-		{ah: 'Reading Pile', aT: 'reading_pile'},
-		{ah: 'Looking for a Home', aT: 'looking_for_home'}
+		{label: 'Library', value: 'library'},
+		{label: 'Antilibrary', value: 'antilibrary'},
+		{label: 'Wish List', value: 'wishlist'},
+		{label: 'Reading Pile', value: 'reading_pile'},
+		{label: 'Looking for a Home', value: 'looking_for_home'}
 	]);
 var $author$project$Page$Upload$viewDuplicate = F2(
 	function (model, book) {
@@ -11102,7 +11382,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 					_List_Nil,
 					_List_fromArray(
 						[
-							$elm$html$Html$text('\"' + (book.b2 + '\" is already on one of your shelves.'))
+							$elm$html$Html$text('\"' + (book.title + '\" is already on one of your shelves.'))
 						])),
 					A2(
 					$elm$html$Html$a,
@@ -11110,7 +11390,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 						[
 							$elm$html$Html$Attributes$href(
 							$author$project$Navigation$Route$toPath(
-								$author$project$Navigation$Route$BookDetail(book.bw))),
+								$author$project$Navigation$Route$BookDetail(book.id))),
 							$elm$html$Html$Attributes$class('btn btn--primary')
 						]),
 					_List_fromArray(
@@ -11146,18 +11426,18 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 										$elm$html$Html$option,
 										_List_fromArray(
 											[
-												$elm$html$Html$Attributes$value(shelf.aT)
+												$elm$html$Html$Attributes$value(shelf.value)
 											]),
 										_List_fromArray(
 											[
-												$elm$html$Html$text(shelf.ah)
+												$elm$html$Html$text(shelf.label)
 											]));
 								},
 								$author$project$Page$Upload$allShelves)),
 							function () {
-							var _v0 = model.ac;
+							var _v0 = model.duplicateMoveState;
 							switch (_v0.$) {
-								case 1:
+								case 'Loading':
 									return A2(
 										$elm$html$Html$p,
 										_List_Nil,
@@ -11165,7 +11445,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 											[
 												$elm$html$Html$text('Moving...')
 											]));
-								case 3:
+								case 'Success':
 									return A2(
 										$elm$html$Html$p,
 										_List_fromArray(
@@ -11176,7 +11456,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 											[
 												$elm$html$Html$text('Moved!')
 											]));
-								case 2:
+								case 'Failure':
 									return A2(
 										$elm$html$Html$div,
 										_List_Nil,
@@ -11198,7 +11478,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 													[
 														$elm$html$Html$Attributes$class('btn btn--secondary'),
 														$elm$html$Html$Events$onClick(
-														$author$project$Page$Upload$ConfirmDuplicateMove(book.bw))
+														$author$project$Page$Upload$ConfirmDuplicateMove(book.id))
 													]),
 												_List_fromArray(
 													[
@@ -11212,7 +11492,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 											[
 												$elm$html$Html$Attributes$class('btn btn--secondary'),
 												$elm$html$Html$Events$onClick(
-												$author$project$Page$Upload$ConfirmDuplicateMove(book.bw))
+												$author$project$Page$Upload$ConfirmDuplicateMove(book.id))
 											]),
 										_List_fromArray(
 											[
@@ -11234,7 +11514,7 @@ var $author$project$Page$Upload$viewDuplicate = F2(
 						]))
 				]));
 	});
-var $author$project$Page$Upload$EnterManualMode = {$: 9};
+var $author$project$Page$Upload$EnterManualMode = {$: 'EnterManualMode'};
 var $author$project$Page$Upload$viewIdentificationFailed = A2(
 	$elm$html$Html$div,
 	_List_fromArray(
@@ -11301,14 +11581,14 @@ var $author$project$Page$Upload$viewIdentified = function (book) {
 				_List_Nil,
 				_List_fromArray(
 					[
-						$elm$html$Html$text(book.b2)
+						$elm$html$Html$text(book.title)
 					])),
 				A2(
 				$elm$html$Html$p,
 				_List_Nil,
 				_List_fromArray(
 					[
-						$elm$html$Html$text(book.be.bC)
+						$elm$html$Html$text(book.author.name)
 					])),
 				A2(
 				$elm$html$Html$a,
@@ -11316,7 +11596,7 @@ var $author$project$Page$Upload$viewIdentified = function (book) {
 					[
 						$elm$html$Html$Attributes$href(
 						$author$project$Navigation$Route$toPath(
-							$author$project$Navigation$Route$BookDetail(book.bw))),
+							$author$project$Navigation$Route$BookDetail(book.id))),
 						$elm$html$Html$Attributes$class('btn btn--primary')
 					]),
 				_List_fromArray(
@@ -11337,12 +11617,12 @@ var $author$project$Page$Upload$viewIdentified = function (book) {
 			]));
 };
 var $author$project$Page$Upload$ManualIsbnChanged = function (a) {
-	return {$: 7, a: a};
+	return {$: 'ManualIsbnChanged', a: a};
 };
-var $author$project$Page$Upload$SubmitManualIsbn = {$: 8};
+var $author$project$Page$Upload$SubmitManualIsbn = {$: 'SubmitManualIsbn'};
 var $author$project$Components$ISBNInput$isbnInput = function (config) {
-	var isValid = $elm$core$String$isEmpty(config.aT) || $author$project$Components$ISBNInput$isValidISBN(config.aT);
-	var hasError = config.dr && ((!isValid) && (!$elm$core$String$isEmpty(config.aT)));
+	var isValid = $elm$core$String$isEmpty(config.value) || $author$project$Components$ISBNInput$isValidISBN(config.value);
+	var hasError = config.showError && ((!isValid) && (!$elm$core$String$isEmpty(config.value)));
 	var inputClass = hasError ? 'isbn-input isbn-input--error' : 'isbn-input';
 	return A2(
 		$elm$html$Html$div,
@@ -11359,8 +11639,8 @@ var $author$project$Components$ISBNInput$isbnInput = function (config) {
 						$elm$html$Html$Attributes$type_('text'),
 						$elm$html$Html$Attributes$class(inputClass),
 						$elm$html$Html$Attributes$placeholder('Enter ISBN-10 or ISBN-13'),
-						$elm$html$Html$Attributes$value(config.aT),
-						$elm$html$Html$Events$onInput(config.c$)
+						$elm$html$Html$Attributes$value(config.value),
+						$elm$html$Html$Events$onInput(config.onInput)
 					]),
 				_List_Nil),
 				hasError ? A2(
@@ -11392,7 +11672,7 @@ var $author$project$Page$Upload$viewManualEntry = function (model) {
 						$elm$html$Html$text('Enter ISBN Manually')
 					])),
 				$author$project$Components$ISBNInput$isbnInput(
-				{c$: $author$project$Page$Upload$ManualIsbnChanged, dr: model.aC, aT: model.ay}),
+				{onInput: $author$project$Page$Upload$ManualIsbnChanged, showError: model.showIsbnError, value: model.manualIsbn}),
 				A2(
 				$elm$html$Html$button,
 				_List_fromArray(
@@ -11451,12 +11731,12 @@ var $author$project$Page$Upload$viewNotABook = A2(
 					$elm$html$Html$text('Try Again')
 				]))
 		]));
-var $author$project$Page$Upload$DragLeave = {$: 2};
-var $author$project$Page$Upload$DragOver = {$: 1};
+var $author$project$Page$Upload$DragLeave = {$: 'DragLeave'};
+var $author$project$Page$Upload$DragOver = {$: 'DragOver'};
 var $elm$file$File$decoder = _File_decoder;
 var $elm$json$Json$Decode$index = _Json_decodeIndex;
 var $elm$virtual_dom$VirtualDom$MayPreventDefault = function (a) {
-	return {$: 2, a: a};
+	return {$: 'MayPreventDefault', a: a};
 };
 var $elm$html$Html$Events$preventDefaultOn = F2(
 	function (event, decoder) {
@@ -11465,7 +11745,7 @@ var $elm$html$Html$Events$preventDefaultOn = F2(
 			event,
 			$elm$virtual_dom$VirtualDom$MayPreventDefault(decoder));
 	});
-var $author$project$Page$Upload$RequestFilePicker = {$: 3};
+var $author$project$Page$Upload$FilepickerRequested = {$: 'FilepickerRequested'};
 var $author$project$Page$Upload$viewDropPrompt = A2(
 	$elm$html$Html$div,
 	_List_fromArray(
@@ -11506,7 +11786,7 @@ var $author$project$Page$Upload$viewDropPrompt = A2(
 			_List_fromArray(
 				[
 					$elm$html$Html$Attributes$class('btn btn--primary'),
-					$elm$html$Html$Events$onClick($author$project$Page$Upload$RequestFilePicker)
+					$elm$html$Html$Events$onClick($author$project$Page$Upload$FilepickerRequested)
 				]),
 			_List_fromArray(
 				[
@@ -11542,7 +11822,7 @@ var $author$project$Page$Upload$viewUploadArea = function (model) {
 		'dragleave',
 		$elm$json$Json$Decode$succeed(
 			_Utils_Tuple2($author$project$Page$Upload$DragLeave, true)));
-	var draggingClass = model.ag ? 'upload-area upload-area--dragging' : 'upload-area';
+	var draggingClass = model.isDragging ? 'upload-area upload-area--dragging' : 'upload-area';
 	return A2(
 		$elm$html$Html$div,
 		_List_Nil,
@@ -11560,9 +11840,33 @@ var $author$project$Page$Upload$viewUploadArea = function (model) {
 				_List_fromArray(
 					[
 						function () {
-						var _v0 = model.z;
+						var _v0 = model.uploadState;
 						switch (_v0.$) {
-							case 1:
+							case 'Loading':
+								return A2(
+									$elm$html$Html$div,
+									_List_fromArray(
+										[
+											$elm$html$Html$Attributes$class('upload-area__loading')
+										]),
+									_List_fromArray(
+										[
+											A2(
+											$elm$html$Html$span,
+											_List_fromArray(
+												[
+													$elm$html$Html$Attributes$class('spinner')
+												]),
+											_List_Nil),
+											A2(
+											$elm$html$Html$p,
+											_List_Nil,
+											_List_fromArray(
+												[
+													$elm$html$Html$text('Uploading...')
+												]))
+										]));
+							case 'Success':
 								return A2(
 									$elm$html$Html$div,
 									_List_fromArray(
@@ -11586,7 +11890,7 @@ var $author$project$Page$Upload$viewUploadArea = function (model) {
 													$elm$html$Html$text('Identifying your book...')
 												]))
 										]));
-							case 2:
+							case 'Failure':
 								return A2(
 									$elm$html$Html$div,
 									_List_fromArray(
@@ -11614,8 +11918,6 @@ var $author$project$Page$Upload$viewUploadArea = function (model) {
 													$elm$html$Html$text('Try Again')
 												]))
 										]));
-							case 0:
-								return $author$project$Page$Upload$viewDropPrompt;
 							default:
 								return $author$project$Page$Upload$viewDropPrompt;
 						}
@@ -11663,18 +11965,18 @@ var $author$project$Page$Upload$view = function (model) {
 						$elm$html$Html$text('Add a Book')
 					])),
 				function () {
-				var _v0 = model.t;
+				var _v0 = model.result;
 				switch (_v0.$) {
-					case 0:
+					case 'NoResult':
 						return $author$project$Page$Upload$viewUploadArea(model);
-					case 1:
+					case 'Identified':
 						var book = _v0.a;
 						return $author$project$Page$Upload$viewIdentified(book);
-					case 2:
+					case 'IdentificationFailed':
 						return $author$project$Page$Upload$viewIdentificationFailed;
-					case 3:
+					case 'NotABook':
 						return $author$project$Page$Upload$viewNotABook;
-					case 4:
+					case 'ManualISBNEntry':
 						return $author$project$Page$Upload$viewManualEntry(model);
 					default:
 						var book = _v0.a;
@@ -11780,65 +12082,65 @@ var $author$project$Main$viewNotFound = A2(
 				]))
 		]));
 var $author$project$Main$viewPage = function (model) {
-	var _v0 = model.c;
+	var _v0 = model.page;
 	switch (_v0.$) {
-		case 0:
+		case 'PageHome':
 			return $author$project$Main$viewHome;
-		case 1:
+		case 'PageLibrary':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$LibraryMsg,
 				$author$project$Page$Bookshelf$Library$view(subModel));
-		case 2:
+		case 'PageAntiLibrary':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$AntiLibraryMsg,
 				$author$project$Page$Bookshelf$AntiLibrary$view(subModel));
-		case 3:
+		case 'PageWishList':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$WishListMsg,
 				$author$project$Page$Bookshelf$WishList$view(subModel));
-		case 4:
+		case 'PageReadingPile':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$ReadingPileMsg,
 				$author$project$Page$Bookshelf$ReadingPile$view(subModel));
-		case 5:
+		case 'PageLookingForHome':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$LookingForHomeMsg,
 				$author$project$Page$Bookshelf$LookingForHome$view(subModel));
-		case 6:
+		case 'PageBookDetail':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$BookDetailMsg,
 				$author$project$Page$BookDetail$view(subModel));
-		case 7:
+		case 'PageUpload':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$UploadMsg,
 				$author$project$Page$Upload$view(subModel));
-		case 8:
+		case 'PageSearch':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$SearchMsg,
 				$author$project$Page$Search$view(subModel));
-		case 9:
+		case 'PageSettingsConsent':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
 				$author$project$Main$ConsentMsg,
 				$author$project$Page$Settings$Consent$view(subModel));
-		case 10:
+		case 'PageSettingsAgeVerification':
 			var subModel = _v0.a;
 			return A2(
 				$elm$html$Html$map,
@@ -11850,7 +12152,7 @@ var $author$project$Main$viewPage = function (model) {
 };
 var $author$project$Main$view = function (model) {
 	return {
-		I: _List_fromArray(
+		body: _List_fromArray(
 			[
 				A2(
 				$elm$html$Html$div,
@@ -11867,8 +12169,8 @@ var $author$project$Main$view = function (model) {
 							[
 								$elm$html$Html$Attributes$class(
 								'app__main' + function () {
-									var _v0 = model.aR;
-									if (!_v0.$) {
+									var _v0 = model.transition;
+									if (_v0.$ === 'Just') {
 										var t = _v0.a;
 										return ' ' + t;
 									} else {
@@ -11883,10 +12185,10 @@ var $author$project$Main$view = function (model) {
 						$author$project$Main$viewFooter
 					]))
 			]),
-		b2: $author$project$Main$pageTitle(model.m)
+		title: $author$project$Main$pageTitle(model.route)
 	};
 };
 var $author$project$Main$main = $elm$browser$Browser$application(
-	{cF: $author$project$Main$init, c3: $author$project$Main$UrlChanged, c4: $author$project$Main$LinkClicked, dv: $author$project$Main$subscriptions, dA: $author$project$Main$update, dD: $author$project$Main$view});
+	{init: $author$project$Main$init, onUrlChange: $author$project$Main$UrlChanged, onUrlRequest: $author$project$Main$LinkClicked, subscriptions: $author$project$Main$subscriptions, update: $author$project$Main$update, view: $author$project$Main$view});
 _Platform_export({'Main':{'init':$author$project$Main$main(
-	$elm$json$Json$Decode$succeed(0))(0)}});}(this));
+	$elm$json$Json$Decode$succeed(_Utils_Tuple0))(0)}});}(this));
