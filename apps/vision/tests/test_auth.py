@@ -99,3 +99,36 @@ def test_settings_rejects_empty_together_api_key() -> None:
             hmac_secret="a-strong-secret-value",
             together_api_key="",
         )
+
+
+def test_extract_with_token_for_wrong_path_returns_401() -> None:
+    """A valid token signed for /classify must be rejected by /extract.
+
+    The path is included in the HMAC message ("<ts>.POST.<path>"), so a token
+    signed for /classify cannot be replayed against /extract.
+    """
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header("POST", "/classify"),  # token signed for wrong endpoint
+        )
+    assert response.status_code == 401
+
+
+def test_extract_with_future_token_returns_401() -> None:
+    """A token with a timestamp far in the future must be rejected.
+
+    The replay window uses abs(now - timestamp) > 60s, which catches both
+    stale tokens (past) and pre-generated tokens (future).
+    """
+    ts = str(int(time.time()) + 120)  # 2 minutes in the future
+    message = f"{ts}.POST./extract".encode()
+    token_hex = hmac.new(settings.hmac_secret.encode(), message, hashlib.sha256).hexdigest()
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers={"X-Internal-Token": f"{ts}.{token_hex}"},
+        )
+    assert response.status_code == 401

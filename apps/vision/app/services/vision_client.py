@@ -1,9 +1,25 @@
+import base64
 from typing import TypedDict, cast
 
 import httpx
 from fastapi import HTTPException
 
 from app.config import settings
+
+
+def _image_mime_type(b64_data: str) -> str:
+    """Detect image MIME type from the first bytes of the base64-encoded data."""
+    try:
+        header = base64.b64decode(b64_data[:16], validate=False)
+        if header[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if header[:3] == b"GIF":
+            return "image/gif"
+        if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+            return "image/webp"
+    except Exception:
+        pass
+    return "image/jpeg"
 
 _TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
 
@@ -63,7 +79,7 @@ class VisionClient:
         image_content: list[dict[str, object]] = [
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{img}"},
+                "image_url": {"url": f"data:{_image_mime_type(img)};base64,{img}"},
             }
             for img in images
         ]
@@ -82,7 +98,7 @@ class VisionClient:
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+                        "image_url": {"url": f"data:{_image_mime_type(image)};base64,{image}"},
                     }
                 ],
             },
@@ -106,9 +122,10 @@ class VisionClient:
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
         except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:500]
             raise HTTPException(
                 status_code=502,
-                detail=f"Vision model returned error: {exc.response.status_code}",
+                detail=f"Vision model returned error: {exc.response.status_code} — {body}",
             ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail="Vision model request failed") from exc
