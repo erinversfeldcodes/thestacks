@@ -66,16 +66,40 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `pytest` with fixtures, Atheris for fuzzing image input parsing, no live external calls in tests
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What endpoint shapes, Pydantic model fields, or response contracts does it depend on from the sidecar?
+  - Does the current implementation expose those contracts correctly?
+  - Are there any model choices, endpoint paths, or response shapes that downstream work will need changed?
+- State a clear verdict: **READY** or **GAPS**
+
 ---
 
 ## Review Process
+
+0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
+   - Extract the full inventory of required items from the issue's Technical Requirements section:
+     every endpoint, module, Pydantic model, and provider named there.
+   - List the actual file tree under `apps/vision/app/` and `apps/vision/tests/`.
+   - For every required item, check: does the implementation file exist? does a test exist?
+   - Any required item absent from the file tree is a **FAILED** finding — record it in the
+     Spec Coverage Audit section of the report, regardless of what the completion report claims.
+   - The spec is the ground truth. The completion report is not.
 
 1. Read the phase objective, DoD items, and all user stories from the invoking prompt
 2. Read every file listed in the implementation completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run the test suite** — execute from `apps/vision/` and record exact output:
+   - `pytest` — total test count, failure count, any error messages
+   - `ruff check .` — any lint issues
+   - `ruff format --check .` — any format issues
+   Any non-zero exit is a **required revision**. Do not skip this step.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the sidecar API contract adequately supports downstream Elixir callers.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -86,9 +110,20 @@ Load and check against:
 
 ### Verdict: APPROVED | NEEDS_REVISION | FAILED
 
+### Spec Coverage Audit
+Items required by the Technical Requirements section, cross-checked against the file tree:
+- [x] Item name (present: `path/to/module.py` + `path/to/test_module.py`)
+- [ ] Item name (MISSING — no implementation file found)
+- [ ] Item name (UNTESTED — implementation present, no test)
+
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `pytest`: [X tests, N failures — paste exact summary line]
+- `ruff check`: [clean / N issues — list them]
+- `ruff format --check`: [clean / files would be reformatted]
 
 ### User Story Concordance
 For each story:
@@ -132,6 +167,11 @@ For each story:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What it requires from the sidecar] — [Provided? Y/N] — [Any gaps]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file:line]

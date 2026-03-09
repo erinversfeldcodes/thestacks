@@ -7,7 +7,11 @@ defmodule Core.Application do
   def start(_type, _args) do
     children = [
       Core.Repo,
+      Stacks.Vault,
       {Phoenix.PubSub, name: Core.PubSub},
+      {Finch, name: Stacks.Finch},
+      StacksWeb.Plugs.RateLimiter.Server,
+      Stacks.AI.BudgetTracker,
       {Oban, Application.fetch_env!(:core, Oban)},
       CoreWeb.Telemetry,
       CoreWeb.Endpoint
