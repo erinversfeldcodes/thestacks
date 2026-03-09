@@ -39,14 +39,14 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   end
 
   describe "perform/1 — isbn_not_found path" do
-    test "returns {:error, reason} when vision model cannot extract an ISBN" do
+    test "returns {:cancel, reason} when vision model cannot extract an ISBN" do
       user = insert(:user)
       original = Application.get_env(:core, :vision_client)
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
 
-        assert {:error, "isbn_not_found"} =
+        assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, job_args(user.id))
       after
         Application.put_env(:core, :vision_client, original)
