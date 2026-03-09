@@ -91,16 +91,30 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What infrastructure resources, CI jobs, or deployment primitives does it depend on from the current platform work?
+  - Are those present and correctly configured?
+  - Are there any service names, environment variable names, or Fly.io app configurations that downstream issues will need changed?
+- State a clear verdict: **READY** or **GAPS**
+
 ---
 
 ## Review Process
 
-1. Read the phase objective, DoD items, and the functional requirements of issues 001–003 from the invoking prompt
+1. Read the phase objective, DoD items, and the functional requirements from the invoking prompt
 2. Read every file listed in the implementation completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run available checks** — execute and record exact output:
+   - `hadolint <each-Dockerfile>` — record any DL-level warnings
+   - `buf lint` from `proto/` — if any proto files were changed
+   Any high-severity Hadolint finding is a **required revision**. Do not skip this step.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the current CI, Dockerfile, and Fly configuration adequately supports downstream services and workflows.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -114,6 +128,10 @@ Load and check against:
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `hadolint` (each Dockerfile): [clean / N warnings — list DL-level findings]
+- `buf lint`: [clean / N violations — list them — or: N/A, no proto changes]
 
 ### Functional Requirements Concordance
 - **core service**: [env vars wired? health check configured? secrets handled? networking correct?]
@@ -156,6 +174,11 @@ Load and check against:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What infrastructure it requires] — [Provided? Y/N] — [Any gaps]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file path]

@@ -67,16 +67,39 @@ Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `elm-program-test` for pages, unit tests for decoders and components, Playwright only where a real browser is required
 - `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — Elm decoders checked in at `proto/gen/elm/`, consistent with proto definitions
 
+### 8. Forward Compatibility
+- Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
+- Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
+- For each identified downstream issue:
+  - What pages, components, `Msg` types, or shared `Types/` modules does it build on from the current work?
+  - Does the current implementation expose those in a shape downstream pages can extend without a rewrite?
+  - Are there any routing decisions, model structures, or decoder shapes that downstream pages will need changed?
+- State a clear verdict: **READY** or **GAPS**
+
 ---
 
 ## Review Process
+
+0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
+   - Extract the full inventory of required items from the issue's Technical Requirements section:
+     every Page, Component, type module, and animation module named there.
+   - List the actual file tree under `frontend/src/` and `frontend/tests/`.
+   - For every required item, check: does the implementation file exist? does a test file exist?
+   - Any required item absent from the file tree is a **FAILED** finding — record it in the
+     Spec Coverage Audit section of the report, regardless of what the completion report claims.
+   - The spec is the ground truth. The completion report is not.
 
 1. Read the phase objective, DoD items, and all user stories from the invoking prompt
 2. Read every file listed in the implementation completion report
 3. Load all standards files referenced above
 4. Research alternative approaches (Axis 6) — use your knowledge and available tools
-5. Assess each file against all axes
-6. Produce the review report
+5. **Run the test suite** — execute from `frontend/` and record exact output:
+   - `elm-test` — total test count, failure count, any error messages
+   - `elm make src/Main.elm --optimize --output /dev/null` — verify compilation with zero warnings
+   Any non-zero exit is a **required revision**. Do not skip this step.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the current page structure, shared types, and API decoder shapes adequately support downstream frontend work.
+7. Assess each file against all axes
+8. Produce the review report
 
 ---
 
@@ -87,9 +110,19 @@ Load and check against:
 
 ### Verdict: APPROVED | NEEDS_REVISION | FAILED
 
+### Spec Coverage Audit
+Items required by the Technical Requirements section, cross-checked against the file tree:
+- [x] Item name (present: `path/to/Page.elm` + `path/to/test`)
+- [ ] Item name (MISSING — no implementation file found)
+- [ ] Item name (UNTESTED — implementation present, no test)
+
 ### DoD Checklist
 - [x] Item (satisfied — file:line evidence)
 - [ ] Item (NOT satisfied — what's missing)
+
+### Test Suite Results
+- `elm-test`: [X tests, N failures — paste exact summary line]
+- `elm make --optimize`: [clean / N warnings — list them]
 
 ### User Story Concordance
 For each story:
@@ -133,6 +166,11 @@ For each story:
 ### Alternative Approaches
 1. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
 2. **[Topic]**: [What] — [Tradeoff] — [Raise now / defer]
+
+### Forward Compatibility
+Downstream issues identified: [list issue numbers and titles]
+- **Issue #NNN — [Title]**: [What it requires from the current frontend work] — [Provided? Y/N] — [Any gaps]
+Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)
 1. [Specific, actionable revision with file:line]

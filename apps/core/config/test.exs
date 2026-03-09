@@ -18,6 +18,20 @@ config :core, CoreWeb.Endpoint,
     "test-only-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-to-accept-it",
   server: false
 
-config :core, Oban, testing: :inline
+config :core, Oban, testing: :manual
+
+config :core, :rate_limiting_enabled, false
+config :core, :vision_client, Stacks.AI.MockClient
+config :core, :vision_hmac_secret, "test-hmac-secret"
+
+config :core, Stacks.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1",
+      key: Base.decode64!("47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="),
+      iv_length: 12
+    }
+  ]
 
 config :logger, level: :warning

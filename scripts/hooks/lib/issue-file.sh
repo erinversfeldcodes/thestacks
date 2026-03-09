@@ -99,6 +99,7 @@ build_pr_description() {
         -v goal_file="$goal_file" \
         -v approach_file="$approach_file" \
         -v verification_file="$verification_file" \
+        -v ci_file="$ci_file" \
         '
         /<!-- pr:issue_num -->/ {
             gsub(/<!-- pr:issue_num -->/, issue_num)
@@ -116,6 +117,19 @@ build_pr_description() {
             while ((getline line < verification_file) > 0) print line
             close(verification_file); next
         }
+        /<!-- ci-summary-start -->/ {
+            if (ci_file != "") {
+                while ((getline line < ci_file) > 0) print line
+                close(ci_file)
+                skip=1; next
+            }
+            print; next
+        }
+        /<!-- ci-summary-end -->/ {
+            if (skip) { skip=0; next }
+            print; next
+        }
+        skip { next }
         { print }
         ' "$template"
 
