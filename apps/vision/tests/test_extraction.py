@@ -24,13 +24,18 @@ def _mock_together_response(content: dict[str, object]) -> dict[str, object]:
     return {"choices": [{"message": {"content": json.dumps(content)}}]}
 
 
-def test_extract_returns_structured_response() -> None:
+def test_extract_returns_books_list() -> None:
+    """Happy path: single book returned inside books list."""
     mock_output = _mock_together_response(
         {
-            "title": "The Name of the Rose",
-            "author": "Umberto Eco",
-            "potential_isbns": ["9780156001311"],
-            "raw_text": "The Name of the Rose Umberto Eco ISBN 9780156001311",
+            "books": [
+                {
+                    "title": "The Name of the Rose",
+                    "author": "Umberto Eco",
+                    "potential_isbns": ["9780156001311"],
+                    "raw_text": "The Name of the Rose Umberto Eco ISBN 9780156001311",
+                }
+            ]
         }
     )
     with (
@@ -49,11 +54,77 @@ def test_extract_returns_structured_response() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["title"] == "The Name of the Rose"
-    assert data["author"] == "Umberto Eco"
-    assert "9780156001311" in data["potential_isbns"]
+    assert "books" in data
+    assert len(data["books"]) == 1
+    book = data["books"][0]
+    assert book["title"] == "The Name of the Rose"
+    assert book["author"] == "Umberto Eco"
+    assert "9780156001311" in book["potential_isbns"]
     assert data["model_used"] == settings.model_name
-    assert 0.0 <= data["confidence"] <= 1.0
+
+
+def test_extract_returns_multiple_books() -> None:
+    """Multi-book response: model identifies 2+ books, all appear in books list."""
+    mock_output = _mock_together_response(
+        {
+            "books": [
+                {
+                    "title": "The Name of the Rose",
+                    "author": "Umberto Eco",
+                    "potential_isbns": ["9780156001311"],
+                    "raw_text": "The Name of the Rose",
+                },
+                {
+                    "title": "Foucault's Pendulum",
+                    "author": "Umberto Eco",
+                    "potential_isbns": ["9780156032971"],
+                    "raw_text": "Foucault's Pendulum",
+                },
+            ]
+        }
+    )
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=mock_output,
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["books"]) == 2
+    titles = [b["title"] for b in data["books"]]
+    assert "The Name of the Rose" in titles
+    assert "Foucault's Pendulum" in titles
+
+
+def test_extract_returns_empty_books_list_when_nothing_extractable() -> None:
+    """Empty books list (not an error) when model finds nothing."""
+    mock_output = _mock_together_response({"books": []})
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=mock_output,
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["books"] == []
 
 
 def test_extract_with_invalid_base64_returns_422() -> None:
@@ -100,8 +171,8 @@ def test_extract_with_oversized_image_returns_422() -> None:
     assert response.status_code == 422
 
 
-def test_extract_with_non_json_model_output_returns_empty_fields() -> None:
-    """Non-JSON model output should not raise — all fields fall back to None/empty."""
+def test_extract_with_non_json_model_output_returns_empty_books() -> None:
+    """Non-JSON model output should not raise — books falls back to empty list."""
     mock_output = {"choices": [{"message": {"content": "not valid json at all"}}]}
     with (
         patch(
@@ -119,14 +190,14 @@ def test_extract_with_non_json_model_output_returns_empty_fields() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["title"] is None
-    assert data["author"] is None
-    assert data["potential_isbns"] == []
+    assert data["books"] == []
 
 
-def test_extract_partial_model_output_is_returned() -> None:
-    """Model output missing fields should result in None values, not an error."""
-    mock_output = _mock_together_response({"raw_text": "Some text only"})
+def test_extract_partial_book_fields_are_returned() -> None:
+    """Book entries missing optional fields should use None/[] defaults, not error."""
+    mock_output = _mock_together_response(
+        {"books": [{"title": "Only a Title", "raw_text": "Some text only"}]}
+    )
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -143,6 +214,30 @@ def test_extract_partial_model_output_is_returned() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["title"] is None
-    assert data["author"] is None
-    assert data["potential_isbns"] == []
+    assert len(data["books"]) == 1
+    book = data["books"][0]
+    assert book["title"] == "Only a Title"
+    assert book["author"] is None
+    assert book["potential_isbns"] == []
+
+
+def test_extract_model_returns_non_list_books_field_gives_empty() -> None:
+    """If the model returns books as a non-list (malformed), fall back to empty list."""
+    mock_output = _mock_together_response({"books": "not a list"})
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=mock_output,
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE]},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["books"] == []
