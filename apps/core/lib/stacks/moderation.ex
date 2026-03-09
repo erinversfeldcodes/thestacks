@@ -94,23 +94,25 @@ defmodule Stacks.Moderation do
     books =
       expanded
       |> Enum.with_index(1)
-      |> Enum.flat_map(fn {candidate, idx} ->
-        case resolve_candidate(candidate, idx) do
-          {:ok, isbn, metadata} ->
-            case store_book(isbn, metadata, context) do
-              {:ok, book} -> [book]
-              _ -> []
-            end
-
-          {:error, reason} ->
-            Logger.warning("Moderation: candidate #{idx} failed to resolve: #{inspect(reason)}")
-            []
-        end
-      end)
+      |> Enum.flat_map(fn {candidate, idx} -> resolve_and_store(candidate, idx, context) end)
 
     case books do
       [] -> {:error, :isbn_not_found}
       _ -> {:ok, books}
+    end
+  end
+
+  defp resolve_and_store(candidate, idx, context) do
+    case resolve_candidate(candidate, idx) do
+      {:ok, isbn, metadata} ->
+        case store_book(isbn, metadata, context) do
+          {:ok, book} -> [book]
+          _ -> []
+        end
+
+      {:error, reason} ->
+        Logger.warning("Moderation: candidate #{idx} failed to resolve: #{inspect(reason)}")
+        []
     end
   end
 

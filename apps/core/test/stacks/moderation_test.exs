@@ -24,13 +24,13 @@ defmodule Stacks.ModerationTest do
   @test_image_b64 Base.encode64("fake image bytes")
 
   describe "run_pipeline/1 — happy path" do
-    test "returns {:ok, book} when vision model confirms it is a book with valid ISBN" do
+    test "returns {:ok, [book]} when vision model confirms it is a book with valid ISBN" do
       context = %{
         image_b64: @test_image_b64,
         book_attrs: %{"title" => "The Great Gatsby"}
       }
 
-      assert {:ok, book} = Moderation.run_pipeline(context)
+      assert {:ok, [book]} = Moderation.run_pipeline(context)
       assert book.isbn == "9780743273565"
       assert book.visibility_tier in ["public", "age_gated"]
     end
@@ -41,7 +41,7 @@ defmodule Stacks.ModerationTest do
         book_attrs: %{"title" => "A Peaceful Novel"}
       }
 
-      assert {:ok, book} = Moderation.run_pipeline(context)
+      assert {:ok, [book]} = Moderation.run_pipeline(context)
       assert book.visibility_tier == "public"
     end
 
@@ -53,7 +53,7 @@ defmodule Stacks.ModerationTest do
         book_attrs: %{"title" => "Should Not Matter"}
       }
 
-      assert {:ok, book} = Moderation.run_pipeline(context)
+      assert {:ok, [book]} = Moderation.run_pipeline(context)
       assert book.id == existing.id
     end
   end
