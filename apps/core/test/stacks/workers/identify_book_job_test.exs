@@ -133,6 +133,32 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
+  describe "valid_upload_filename?/1" do
+    test "accepts a normal UUID-style filename" do
+      assert IdentifyBookJob.valid_upload_filename?("abc123-def456.jpg")
+    end
+
+    test "rejects empty string" do
+      refute IdentifyBookJob.valid_upload_filename?("")
+    end
+
+    test "rejects dot (current directory)" do
+      refute IdentifyBookJob.valid_upload_filename?(".")
+    end
+
+    test "rejects double-dot (parent directory)" do
+      refute IdentifyBookJob.valid_upload_filename?("..")
+    end
+
+    test "rejects names containing forward slash" do
+      refute IdentifyBookJob.valid_upload_filename?("some/path")
+    end
+
+    test "rejects names containing backslash" do
+      refute IdentifyBookJob.valid_upload_filename?("some\\path")
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Inline mock modules
   # ---------------------------------------------------------------------------
