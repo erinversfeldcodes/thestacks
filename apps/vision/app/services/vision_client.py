@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from typing import TypedDict, cast
 
@@ -5,6 +6,11 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import settings
+
+# Status codes that represent transient conditions worth retrying once.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 2
+_RETRY_BASE_DELAY = 1.0  # seconds; doubles each attempt (1 s, 2 s)
 
 
 def _image_mime_type(b64_data: str) -> str:
@@ -107,29 +113,62 @@ class VisionClient:
         return await self._call_api(messages)
 
     async def _call_api(self, messages: list[dict[str, object]]) -> TogetherResponse:
-        """Send a request to Together AI chat completions endpoint."""
-        payload = {
+        """Send a request to Together AI chat completions endpoint.
+
+        Retries up to _MAX_RETRIES times on transient errors (rate limits,
+        upstream 5xx) with exponential backoff. Uses response_format=json_object
+        to guarantee the model returns valid JSON rather than markdown-wrapped output.
+        """
+        payload: dict[str, object] = {
             "model": settings.model_name,
             "messages": messages,
+            # Enforce JSON output — eliminates code-fence wrapping and parse failures.
+            "response_format": {"type": "json_object"},
+            # temperature=0 makes sampling deterministic, eliminating result variance
+            # between retries and test runs. Either the model can identify the book or
+            # it can't — we don't want random variation obscuring that signal.
+            "temperature": 0,
         }
         headers = {
             "Authorization": f"Bearer {settings.together_api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            response = await self._client.post(_TOGETHER_API_URL, json=payload, headers=headers)
-            response.raise_for_status()
-            return cast(TogetherResponse, response.json())
-        except httpx.TimeoutException as exc:
-            raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
-        except httpx.HTTPStatusError as exc:
-            body = exc.response.text[:500]
-            raise HTTPException(
-                status_code=502,
-                detail=f"Vision model returned error: {exc.response.status_code} — {body}",
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Vision model request failed") from exc
+
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = await self._client.post(_TOGETHER_API_URL, json=payload, headers=headers)
+                if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                    delay = _RETRY_BASE_DELAY * (2**attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                response.raise_for_status()
+                return cast(TogetherResponse, response.json())
+            except httpx.TimeoutException as exc:
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_RETRY_BASE_DELAY * (2**attempt))
+                    last_exc = exc
+                    continue
+                raise HTTPException(
+                    status_code=504, detail="Vision model request timed out"
+                ) from exc
+            except httpx.HTTPStatusError as exc:
+                body = exc.response.text[:500]
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Vision model returned error: {exc.response.status_code} — {body}",
+                ) from exc
+            except httpx.HTTPError as exc:
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_RETRY_BASE_DELAY * (2**attempt))
+                    last_exc = exc
+                    continue
+                raise HTTPException(status_code=502, detail="Vision model request failed") from exc
+
+        # Exhausted retries on a non-HTTPStatusError (timeout or network error).
+        raise HTTPException(
+            status_code=502, detail="Vision model request failed after retries"
+        ) from last_exc
 
     async def close(self) -> None:
         await self._client.aclose()
