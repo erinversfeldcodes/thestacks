@@ -25,6 +25,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Prefer ~/.local/bin/flyctl (installed via scripts/install-flyctl.sh) over any
+# stale system flyctl (e.g. the superfly/homebrew-tap, last updated 2023).
+export PATH="${HOME}/.local/bin:${PATH}"
+
 # ── Preflight ─────────────────────────────────────────────────────────────────
 if [[ -z "${FLY_API_TOKEN:-}" ]]; then
     echo "SKIP: FLY_API_TOKEN not set — skipping deploy preview."
@@ -212,6 +216,107 @@ if command -v docker &>/dev/null; then
     fi
 else
     echo "SKIP: docker not available — skipping OWASP ZAP scan"
+fi
+
+# ── Nuclei (JWT + misconfig templates) ───────────────────────────────────────
+echo ""
+if command -v nuclei &>/dev/null; then
+    echo "==> Running Nuclei (jwt + misconfig) against ${CORE_URL}..."
+    # || true: nuclei exits non-zero when findings are present; we parse output ourselves.
+    nuclei_output="$(nuclei -u "${CORE_URL}" \
+        -tags jwt,misconfiguration \
+        -severity medium,high,critical \
+        -no-color -silent 2>&1)" || true
+    echo "${nuclei_output}"
+    if echo "${nuclei_output}" | grep -qiE "\[critical\]|\[high\]"; then
+        echo "FAIL deploy: Nuclei found high/critical vulnerabilities"
+    else
+        echo "PASS deploy: Nuclei scan clean"
+    fi
+else
+    echo "SKIP: nuclei not installed (brew install nuclei)"
+fi
+
+# ── jwt_tool (JWT attack surface) ─────────────────────────────────────────────
+echo ""
+if command -v jwt_tool &>/dev/null; then
+    echo "==> Running jwt_tool against ${CORE_URL}/api/auth/login..."
+    # Obtain a JWT from the preview environment
+    login_resp="$(curl -sf "${CORE_URL}/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null)" || true
+    jwt_token="$(echo "${login_resp}" | python3 -c \
+        "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+    if [[ -n "${jwt_token}" ]]; then
+        # -X a: try all exploits (alg:none, HMAC confusion, kid injection, etc.)
+        # -t: target endpoint to probe with forged tokens
+        # -rh: request header template (*JWT* is replaced by jwt_tool with forged token)
+        jwt_output="$(jwt_tool "${jwt_token}" \
+            -t "${CORE_URL}/api/auth/me" \
+            -rh "Authorization: Bearer *JWT*" \
+            -X a 2>&1)" || true
+        echo "${jwt_output}"
+        if echo "${jwt_output}" | grep -qi "EXPLOIT"; then
+            echo "FAIL deploy: jwt_tool found exploitable JWT vulnerability"
+        else
+            echo "PASS deploy: jwt_tool — no exploitable JWT vulnerabilities"
+        fi
+    else
+        echo "SKIP jwt_tool: could not obtain JWT (login endpoint unreachable or credentials wrong)"
+    fi
+else
+    echo "SKIP: jwt_tool not installed (pip install jwt_tool)"
+fi
+
+# ── IDOR test (cross-user resource access) ────────────────────────────────────
+# Verifies that user2 cannot read or mutate user1's private placements.
+# Requires both seed users: owner@thestacks.app and user@thestacks.app.
+echo ""
+echo "==> Running IDOR test (cross-user resource access)..."
+idor_failed=0
+
+u1_resp="$(curl -sf "${CORE_URL}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null)" || true
+u1_token="$(echo "${u1_resp}" | python3 -c \
+    "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+
+u2_resp="$(curl -sf "${CORE_URL}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null)" || true
+u2_token="$(echo "${u2_resp}" | python3 -c \
+    "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+
+if [[ -z "${u1_token}" ]] || [[ -z "${u2_token}" ]]; then
+    echo "SKIP: IDOR test — could not authenticate both seed users"
+else
+    # Get user1's library; extract a placement ID
+    u1_library="$(curl -sf "${CORE_URL}/api/bookshelves/library" \
+        -H "Authorization: Bearer ${u1_token}" 2>/dev/null)" || true
+    placement_id="$(echo "${u1_library}" | python3 -c \
+        "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+        2>/dev/null || true)"
+
+    if [[ -n "${placement_id}" ]]; then
+        # Attempt to delete user1's placement as user2 — must be 403 or 404, not 200
+        idor_status="$(curl -o /dev/null -s -w "%{http_code}" \
+            -X DELETE "${CORE_URL}/api/placements/${placement_id}" \
+            -H "Authorization: Bearer ${u2_token}")"
+        if [[ "${idor_status}" == "200" ]]; then
+            echo "FAIL deploy: IDOR — user2 deleted user1's placement ${placement_id} (HTTP 200)"
+            idor_failed=1
+        else
+            echo "PASS deploy: IDOR — cross-user DELETE blocked (HTTP ${idor_status})"
+        fi
+    else
+        echo "SKIP: IDOR placement test — user1 has no placements in library"
+    fi
+
+    if [[ $idor_failed -eq 0 ]]; then
+        echo "PASS deploy: IDOR tests passed"
+    else
+        echo "FAIL deploy: IDOR tests found vulnerabilities"
+    fi
 fi
 
 # ── Final result ──────────────────────────────────────────────────────────────

@@ -49,14 +49,42 @@
             # Tools
             just
             ruff
-            flyctl
+            # flyctl is NOT installed via nixpkgs — the superfly/homebrew-tap has not
+            # been updated in ~2 years. Use scripts/install-flyctl.sh instead.
+
+            # Security toolchain
+            gitleaks
+            semgrep
+            hadolint
+            trivy
+            trufflehog
+            syft
+            grype
+            nuclei
           ];
 
           shellHook = ''
-            # Install dbt-postgres via pip if not already available
+            # Install flyctl from GitHub releases (superfly/homebrew-tap is abandoned)
+            if ! command -v flyctl &> /dev/null && ! test -x "$HOME/.local/bin/flyctl"; then
+              bash scripts/install-flyctl.sh
+            fi
+            # Install Python-based tools via pip if not already available
             if ! command -v dbt &> /dev/null; then
               echo "Installing dbt-postgres..."
               pip install --quiet dbt-postgres
+            fi
+            if ! command -v dbt-checkpoint &> /dev/null; then
+              echo "Installing dbt-checkpoint..."
+              pip install --quiet dbt-checkpoint
+            fi
+            if ! command -v jwt_tool &> /dev/null; then
+              echo "Installing jwt_tool..."
+              pip install --quiet jwt_tool
+            fi
+            # checkov is Python-based; install via pip for reliable version management
+            if ! command -v checkov &> /dev/null; then
+              echo "Installing checkov..."
+              pip install --quiet checkov
             fi
             echo "The Stacks dev environment loaded."
             echo "Run 'just dev' to start all services."

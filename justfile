@@ -65,6 +65,14 @@ setup:
 install-hooks:
     bash scripts/install-hooks.sh
 
+# Install or update flyctl from GitHub releases (superfly/homebrew-tap is abandoned)
+install-flyctl:
+    bash scripts/install-flyctl.sh
+
+# Check if flyctl update is available
+check-flyctl:
+    bash scripts/install-flyctl.sh --check
+
 # Run every CI check locally in CI order (sequential, all groups)
 # Optionally pass group names to run a subset: just ci elixir dbt
 ci *GROUPS:

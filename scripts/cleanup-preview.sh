@@ -19,6 +19,8 @@
 
 set -euo pipefail
 
+export PATH="${HOME}/.local/bin:${PATH}"
+
 # ── Parse args ────────────────────────────────────────────────────────────────
 BRANCH=""
 NEON_BRANCH_ID=""
