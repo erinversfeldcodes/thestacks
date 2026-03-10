@@ -88,6 +88,66 @@ defmodule Stacks.ModerationTest do
     end
   end
 
+  describe "run_pipeline/1 — extraction error path" do
+    test "returns error when vision extraction endpoint itself fails" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.ExtractionErrorClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, _reason} = Moderation.run_pipeline(context)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
+  describe "run_pipeline/1 — compound title expansion" do
+    test "splits 'Title A OR Title B' into two candidates and resolves both" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CompoundTitleClient)
+
+        context = %{image_b64: @test_image_b64}
+        # Both parts carry the same direct ISBN, so at most one unique book is stored.
+        assert {:ok, books} = Moderation.run_pipeline(context)
+        refute books == []
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
+  describe "run_pipeline/1 — unresolvable candidates" do
+    test "returns {:error, :isbn_not_found} when candidates have no ISBN and nil title" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NoResolvableClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "returns {:error, :isbn_not_found} when candidate title is empty string" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.EmptyTitleClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Inline mock modules for specific failure scenarios
   # ---------------------------------------------------------------------------
@@ -114,6 +174,99 @@ defmodule Stacks.ModerationTest do
     # Returns empty books list — triggers :isbn_not_found
     def call_vision("extract_isbn", _payload),
       do: {:ok, %{"books" => [], "model_used" => "mock"}}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule ExtractionErrorClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+
+    def call_vision("extract_isbn", _payload), do: {:error, :service_unavailable}
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule CompoundTitleClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+
+    # Returns a compound title with a direct ISBN so both expanded parts resolve immediately.
+    def call_vision("extract_isbn", _payload) do
+      {:ok,
+       %{
+         "books" => [
+           %{
+             "title" => "First Book OR Second Book",
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule NoResolvableClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+
+    # Returns a candidate with no ISBN and nil title — title_fallback returns immediately.
+    def call_vision("extract_isbn", _payload) do
+      {:ok,
+       %{
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => [],
+             "raw_text" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule EmptyTitleClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+
+    # Returns a candidate with an empty string title.
+    def call_vision("extract_isbn", _payload) do
+      {:ok,
+       %{
+         "books" => [
+           %{
+             "title" => "",
+             "author" => nil,
+             "potential_isbns" => [],
+             "raw_text" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
