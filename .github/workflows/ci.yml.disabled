@@ -16,6 +16,9 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       proto: ${{ steps.filter.outputs.proto }}
       dbt: ${{ steps.filter.outputs.dbt }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+      licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -36,11 +39,23 @@ jobs:
               - 'proto/**'
             dbt:
               - 'dbt/**'
+            e2e:
+              - 'frontend/**'
+              - 'apps/core/**'
+              - 'apps/vision/**'
+              - 'e2e/**'
+            migrations:
+              - 'apps/core/priv/repo/migrations/**'
+            licenses:
+              - 'mix.lock'
+              - 'frontend/package-lock.json'
+              - 'e2e/package-lock.json'
 
   test-elixir:
     needs: changes
     if: needs.changes.outputs.elixir == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -83,6 +98,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.elm == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -102,6 +118,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -123,6 +140,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -138,6 +156,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1.47.2
@@ -147,6 +166,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.dbt == 'true' || needs.changes.outputs.elixir == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -201,6 +221,7 @@ jobs:
 
   gitleaks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,6 +232,7 @@ jobs:
 
   hadolint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: hadolint/hadolint-action@v3.1.0
@@ -234,6 +256,7 @@ jobs:
 
   checkov:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: bridgecrewio/checkov-action@v12
@@ -242,6 +265,7 @@ jobs:
 
   trivy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: aquasecurity/trivy-action@0.28.0
@@ -249,3 +273,159 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
+
+  test-e2e:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - name: Install Elixir deps
+        run: mix deps.get
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+      - name: Install vision sidecar deps
+        working-directory: apps/vision
+        run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run migrations and seed
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
+          MIX_ENV: dev
+        run: mix ecto.create && mix ecto.migrate && mix run apps/core/priv/repo/seeds.exs
+      - name: Run E2E
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
+          MIX_ENV: dev
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+        run: scripts/test-e2e.sh
+
+  security-squawk:
+    needs: changes
+    if: needs.changes.outputs.migrations == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install squawk
+        run: npm install -g squawk-cli
+      - name: Lint changed migrations
+        run: scripts/security-squawk.sh origin/main
+
+  check-licenses:
+    needs: changes
+    if: needs.changes.outputs.licenses == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Elixir deps
+        run: mix deps.get
+      - name: Check licences
+        run: scripts/check-licenses.sh
+
+  trufflehog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          path: '.'
+          base: main
+          head: HEAD
+          extra_args: '--only-verified'
+
+  syft-grype:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anchore/sbom-action@v0
+        with:
+          path: '.'
+          format: cyclonedx-json
+          artifact-name: sbom.json
+      - uses: anchore/scan-action@v3
+        with:
+          sbom: sbom.json
+          fail-build: 'true'
+          severity-cutoff: high
+
+  deploy-preview:
+    needs: [test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype]
+    if: github.event_name == 'pull_request' && !failure() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy preview and run E2E
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+        run: scripts/deploy-preview.sh
+      - name: Post deployed E2E results to PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/hooks/lib/post-deployed-e2e-to-pr.sh
