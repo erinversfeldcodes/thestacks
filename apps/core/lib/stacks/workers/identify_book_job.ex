@@ -20,39 +20,41 @@ defmodule Stacks.Workers.IdentifyBookJob do
   def perform(%Oban.Job{args: %{"user_id" => user_id, "image_id" => image_id}}) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
-    with {:ok, image_b64} <- load_image_b64(image_id) do
-      Logger.debug("IdentifyBookJob: image loaded (#{byte_size(image_b64)} b64 bytes), calling pipeline")
+    case load_image_b64(image_id) do
+      {:ok, image_b64} ->
+        Logger.debug("IdentifyBookJob: image loaded (#{byte_size(image_b64)} b64 bytes), calling pipeline")
 
-      context = %{
-        image_b64: image_b64,
-        user_id: user_id,
-        image_id: image_id
-      }
+        context = %{
+          image_b64: image_b64,
+          user_id: user_id,
+          image_id: image_id
+        }
 
-      case Moderation.run_pipeline(context) do
-        {:ok, books} when is_list(books) ->
-          book_ids = Enum.map(books, & &1.id)
-          Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{Enum.map(books, & &1.isbn) |> Enum.join(", ")}")
-          mark_resolved(image_id, book_ids)
-          :ok
+        case Moderation.run_pipeline(context) do
+          {:ok, books} when is_list(books) ->
+            book_ids = Enum.map(books, & &1.id)
+            isbns = Enum.map_join(books, ", ", & &1.isbn)
+            Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{isbns}")
+            mark_resolved(image_id, book_ids)
+            :ok
 
-        {:error, :not_a_book} ->
-          Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
-          mark_rejected(image_id, "not_a_book")
-          {:cancel, "image does not contain a book"}
+          {:error, :not_a_book} ->
+            Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
+            mark_rejected(image_id, "not_a_book")
+            {:cancel, "image does not contain a book"}
 
-        {:error, :isbn_not_found} ->
-          Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
-          # Cancel rather than retry — the image content won't change on retry.
-          mark_rejected(image_id, "isbn_not_found")
-          {:cancel, "isbn_not_found"}
+          {:error, :isbn_not_found} ->
+            Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
+            # Cancel rather than retry — the image content won't change on retry.
+            mark_rejected(image_id, "isbn_not_found")
+            {:cancel, "isbn_not_found"}
 
-        {:error, reason} ->
-          Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
-          # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
-          {:error, reason}
-      end
-    else
+          {:error, reason} ->
+            Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
+            # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
+            {:error, reason}
+        end
+
       {:error, reason} ->
         Logger.error("IdentifyBookJob: failed to load image #{image_id}: #{inspect(reason)}")
         {:error, reason}

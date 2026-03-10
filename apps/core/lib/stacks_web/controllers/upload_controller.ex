@@ -64,10 +64,7 @@ defmodule StacksWeb.UploadController do
 
         # Prefer book_ids array; fall back to book_id singleton for rows written
         # before the migration (book_ids defaults to []).
-        effective_ids =
-          if book_ids_strs != [],
-            do: book_ids_strs,
-            else: if(book_id_str, do: [book_id_str], else: [])
+        effective_ids = effective_book_ids(book_ids_strs, book_id_str)
 
         user = Guardian.Plug.current_resource(conn)
         is_duplicate = Enum.any?(effective_ids, &Shelving.book_on_any_shelf?(user.id, &1))
@@ -82,6 +79,10 @@ defmodule StacksWeb.UploadController do
         })
     end
   end
+
+  defp effective_book_ids([_ | _] = ids, _), do: ids
+  defp effective_book_ids([], nil), do: []
+  defp effective_book_ids([], book_id), do: [book_id]
 
   defp decode_uuid(nil), do: nil
   defp decode_uuid(<<_::128>> = bin), do: elem(Ecto.UUID.load(bin), 1)
