@@ -19,16 +19,14 @@ defmodule Stacks.ModerationTest do
 
   alias Stacks.Moderation
 
-  # The MockClient default for "extract_isbn" returns "9780743273565" when no
-  # :isbn key is present in the payload. The "is_book" call always returns true.
+  # The pipeline now receives base64-encoded image data. Any non-empty string
+  # works for unit tests since MockClient ignores the payload content.
+  @test_image_b64 Base.encode64("fake image bytes")
 
   describe "run_pipeline/1 — happy path" do
     test "returns {:ok, book} when vision model confirms it is a book with valid ISBN" do
-      # The mock client returns is_book: true and isbn: "9780743273565".
-      # classify_subjects falls back to empty subjects when Open Library is unreachable.
-      # store_with_tier finds no existing book and creates one.
       context = %{
-        image_url: "https://example.com/book.jpg",
+        image_b64: @test_image_b64,
         book_attrs: %{"title" => "The Great Gatsby"}
       }
 
@@ -38,9 +36,8 @@ defmodule Stacks.ModerationTest do
     end
 
     test "stores book with public tier when no adult BISAC codes are present" do
-      # With empty bisac_codes (Open Library unreachable fallback), tier is "public"
       context = %{
-        image_url: "https://example.com/book.jpg",
+        image_b64: @test_image_b64,
         book_attrs: %{"title" => "A Peaceful Novel"}
       }
 
@@ -52,7 +49,7 @@ defmodule Stacks.ModerationTest do
       existing = insert(:book, isbn: "9780743273565")
 
       context = %{
-        image_url: "https://example.com/book.jpg",
+        image_b64: @test_image_b64,
         book_attrs: %{"title" => "Should Not Matter"}
       }
 
@@ -63,19 +60,12 @@ defmodule Stacks.ModerationTest do
 
   describe "run_pipeline/1 — not_a_book path" do
     test "returns {:error, :not_a_book} when vision model says it is not a book" do
-      # Override the vision client for this test by temporarily swapping
-      # to a custom mock. We use Application.put_env within the test process.
-      # Since the default MockClient always returns is_book: true, we define
-      # a test-local module that returns is_book: false.
-      #
-      # The cleanest approach without Mox: wrap in a process that overrides
-      # Application env temporarily.
       original = Application.get_env(:core, :vision_client)
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
 
-        context = %{image_url: "https://example.com/not_a_book.jpg"}
+        context = %{image_b64: @test_image_b64}
         assert {:error, :not_a_book} = Moderation.run_pipeline(context)
       after
         Application.put_env(:core, :vision_client, original)
@@ -90,7 +80,7 @@ defmodule Stacks.ModerationTest do
       try do
         Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
 
-        context = %{image_url: "https://example.com/book.jpg"}
+        context = %{image_b64: @test_image_b64}
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
       after
         Application.put_env(:core, :vision_client, original)
@@ -107,7 +97,9 @@ defmodule Stacks.ModerationTest do
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("is_book", _payload), do: {:ok, %{"is_book" => false}}
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "not_book", "confidence" => 0.95, "model_used" => "mock"}}
+
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
@@ -116,9 +108,22 @@ defmodule Stacks.ModerationTest do
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("is_book", _payload), do: {:ok, %{"is_book" => true}}
-    # Returns response without an "isbn" key — triggers :isbn_not_found
-    def call_vision("extract_isbn", _payload), do: {:ok, %{"isbn" => ""}}
+    def call_vision("is_book", _payload),
+      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+
+    # Returns empty potential_isbns — triggers :isbn_not_found
+    def call_vision("extract_isbn", _payload),
+      do:
+        {:ok,
+         %{
+           "potential_isbns" => [],
+           "title" => nil,
+           "author" => nil,
+           "raw_text" => nil,
+           "model_used" => "mock",
+           "confidence" => 0.0
+         }}
+
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end

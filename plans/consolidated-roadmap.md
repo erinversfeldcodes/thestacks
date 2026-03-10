@@ -330,12 +330,17 @@ packages:
 
 #### Pages
 
-**`Page.Upload`** — drag-and-drop / camera capture, upload progress, result confirmation
+**`Page.Upload`** — drop zone (single and bulk), processing progress, review/confirmation screen, result states
 - `UploadMsg`, `UploadModel`, `PhotoFile` types
+- Single-image flow: drop → process → confirm identity + select shelf → add (US-1.1.1)
+- Bulk flow: drop N images → processing progress → Review screen with card grid (US-1.1.7)
+  - `Components.BookReviewCard` — confirmed / ambiguous / rejected states, per-card shelf selector
+  - `Components.BulkProgress` — N images processing indicator
 - `IdentificationFailed` variant (US-1.1.2 ISBN Hard Gate)
-- `NotABook` variant (US-1.1.3 Non-Book Rejection)
+- `NotABook` variant (US-1.1.3) — in bulk, appears as rejected card; in single, full-screen rejection
 - `ManualISBNEntry` variant (US-1.1.5) with client-side ISBN checksum validation
 - `DuplicateDetected` variant (US-1.1.6) with view/move/close actions
+- Shelf selection happens at the review/confirmation step, not at upload time
 
 **`Page.Shelf.Library`** — dark walnut, green damask (`ShelfTheme { wood: DarkWalnut, backdrop: GreenDamask }`)
 **`Page.Shelf.AntiLibrary`** — light oak, botanical prints
@@ -432,6 +437,9 @@ packages:
 - Model version pinned in config (`Qwen/Qwen2.5-VL-7B-Instruct`)
 - Budget tracking delegated to Phoenix (sidecar just makes calls)
 - HMAC auth on all endpoints — reject requests without valid `X-Internal-Token`
+- `/extract` returns `books: list[ExtractedBook]` — always a list, even for single-book images. Empty list = nothing extractable. See Issue #008.
+- `/classify` prompt: "Does this image contain enough information to identify a book?" — accepts screenshots and non-physical-book images. See Issue #008.
+- Image pre-processing (orientation, horizontal flip correction, EXIF strip) happens in Phoenix **before** the image reaches the sidecar. The sidecar receives a canonical JPEG.
 
 **Test command**: `cd apps/vision && python -m pytest`
 **DoD:**
@@ -463,7 +471,9 @@ packages:
 | `spine_only` | 10 | Spine/title visible, no barcode |
 | `oblique` | 5 | Angled, poor light, or low-res phone shot |
 | `worn_or_partial` | 5 | Sticker over barcode, worn edge, partial cover |
-| `multi_book` | 5 | Multiple books in frame |
+| `mirrored_cover` | 5 | Front cover photographed in selfie/mirror mode — text horizontally flipped. Isolates whether pre-flip pre-processing is needed or whether the model handles it natively. |
+| `multi_book_image` | 5 | Single image with multiple visible books (shelfie, stack). ISBN recall computed across all ground-truth books, not just first returned. |
+| `screenshot_text` | 10 | Screenshot of text referencing books (social media, articles, reading lists). No physical book visible. Primary metric: title/author extraction and correct classification as book-related. |
 | `not_book` | 10 | Objects, documents, people — must reject |
 | `ambiguous` | 5 | Expected model output: `ambiguous` |
 

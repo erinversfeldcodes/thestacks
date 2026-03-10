@@ -28,7 +28,7 @@
 
 | Phase | Name | Stories | Rationale |
 |-------|------|---------|-----------|
-| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.4, US-1.6.5 | The core loop: upload photo, identify book, place on shelf, browse and manage. Everything a single user needs to start using The Stacks. |
+| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.4, US-1.6.5 | The core loop: upload photo(s), identify book(s), review and confirm, place on shelf, browse and manage. Everything a single user needs to start using The Stacks. |
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, and source discovery. |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, US-5.1.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (Metrics), and sharing (RSS/OPDS). |
@@ -45,9 +45,10 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 
 | Story | Elm | Phoenix | Python Sidecar | Rust Scraper | PostgreSQL | dbt | External APIs |
 |-------|-----|---------|----------------|--------------|------------|-----|---------------|
-| US-1.1.1 | W (upload form) | RW (intake, create) | RW (vision) | -- | W (books, images) | -- | Together AI / Replicate, Open Library, Google Books |
+| US-1.1.1 | W (upload form, confirm) | RW (intake, pre-process, create) | RW (vision) | -- | W (books, images) | -- | Together AI / Replicate, Open Library, Google Books |
 | US-1.1.2 | R (error display) | R (validation) | -- | -- | R (books) | -- | Open Library, Google Books |
 | US-1.1.3 | R (error display) | R (validation) | R (classification) | -- | W (audit_log) | -- | Together AI / Replicate |
+| US-1.1.7 | RW (bulk drop zone, review screen, shelf selector) | RW (batch intake, pre-process, grouping, batch jobs) | RW (classify + extract per image) | -- | W (books, images, batch_id, group_id) | -- | Together AI / Replicate, Open Library, Google Books |
 | US-1.1.4 | R (gate UI) | RW (flag + gate) | -- | -- | RW (books, audit_log) | R (BISAC view) | -- |
 | US-1.1.5 | RW (ISBN form) | RW (validate + create) | -- | -- | W (books, shelf_placements) | -- | Open Library, Google Books |
 | US-1.1.6 | RW (duplicate UI) | R (dedup check) | -- | -- | R (books) | -- | -- |
@@ -401,6 +402,26 @@ US-1.1.1 (Upload + Identify)
 | **dbt Models** | `int_duplicate_detection_rate`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1 (part of upload flow). |
+
+---
+
+#### US-1.1.7 -- Bulk Image Upload with Grouping and Review
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | User drops N images; system classifies, extracts, and groups related images (same book → same group); user reviews a confirmation screen with one card per detected book; shelf is chosen per card; confirmed books go through standard ISBN pipeline. Multi-book images (shelfie, screenshot of reading list) produce multiple cards from a single image. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Upload` extended — bulk drop zone accepting N files. `Page.Upload.Review` — card grid with confirmed/ambiguous/rejected buckets. `Components.BookReviewCard` — thumbnail, title, author, shelf selector, confirm/dismiss actions. `Components.BulkProgress` — processing indicator. |
+| **Backend (Phoenix)** | `StacksWeb.UploadController.create_batch/2` — accepts N images, stores each, enqueues `BatchIdentifyJob`. `StacksWeb.UploadController.batch_status/2` — polls overall batch progress. `Stacks.Books.group_by_isbn/1` — merges images that resolved to the same ISBN into a single group. |
+| **Database** | **Write:** `op.uploaded_images` with `batch_id UUID` and `group_id UUID` columns (new — migration required). **Write:** `op.books`, `op.bookshelf_placements`, `op.audit_log` per confirmed book. |
+| **Jobs (Oban)** | `Stacks.Workers.BatchIdentifyJob` — orchestrator: fans out one `IdentifyBookJob` per image, collects results, performs grouping, writes batch status. |
+| **External Services** | Together AI / Replicate (classify + extract per image). Open Library, Google Books (ISBN resolution per confirmed book). |
+| **dbt Models** | `int_bulk_upload_batch_size`, `int_bulk_upload_confirmation_rate` (how many detected books users confirm vs. dismiss). |
+| **Infrastructure** | No new services. Requires `batch_id` and `group_id` migration on `op.uploaded_images`. |
+| **Dependencies** | US-1.1.1 (single-image pipeline); Issue #008 (multi-book extraction API — `/extract` must return `books: list` before this can be implemented); Issue #009 (bulk upload issue). |
 
 ---
 

@@ -11,6 +11,8 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   require Logger
 
+  import Ecto.Query
+
   alias Core.Repo
   alias Stacks.Moderation
 
@@ -18,42 +20,65 @@ defmodule Stacks.Workers.IdentifyBookJob do
   def perform(%Oban.Job{args: %{"user_id" => user_id, "image_id" => image_id}}) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
-    image_url = build_image_url(image_id)
+    with {:ok, image_b64} <- load_image_b64(image_id) do
+      context = %{
+        image_b64: image_b64,
+        user_id: user_id,
+        image_id: image_id
+      }
 
-    context = %{
-      image_url: image_url,
-      user_id: user_id,
-      image_id: image_id
-    }
+      case Moderation.run_pipeline(context) do
+        {:ok, book} ->
+          Logger.info("IdentifyBookJob: identified book #{book.id} (ISBN: #{book.isbn})")
+          mark_resolved(image_id, book.id)
+          :ok
 
-    case Moderation.run_pipeline(context) do
-      {:ok, book} ->
-        Logger.info("IdentifyBookJob: identified book #{book.id} (ISBN: #{book.isbn})")
-        mark_resolved(image_id, book.id)
-        :ok
+        {:error, :not_a_book} ->
+          Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
+          mark_rejected(image_id, "not_a_book")
+          {:cancel, "image does not contain a book"}
 
-      {:error, :not_a_book} ->
-        Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
-        mark_rejected(image_id, "not_a_book")
-        {:cancel, "image does not contain a book"}
+        {:error, :isbn_not_found} ->
+          Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
+          # Cancel rather than retry — the image content won't change on retry.
+          mark_rejected(image_id, "isbn_not_found")
+          {:cancel, "isbn_not_found"}
 
-      {:error, :isbn_not_found} ->
-        Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
-        # Cancel rather than retry — the image content won't change on retry.
-        mark_rejected(image_id, "isbn_not_found")
-        {:cancel, "isbn_not_found"}
+        {:error, reason} ->
+          Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
+          # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
+          {:error, reason}
+      end
+    end
+  end
 
-      {:error, reason} ->
-        Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
-        # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
-        {:error, reason}
+  # Reads the uploaded image from disk and returns it base64-encoded.
+  defp load_image_b64(image_id) do
+    upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
+
+    # Look up storage_path (includes extension) from DB.
+    {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
+
+    storage_path =
+      from(i in "uploaded_images", where: i.id == ^image_id_bin, select: i.storage_path)
+      |> Repo.one(prefix: "op")
+
+    case storage_path do
+      nil ->
+        {:error, :image_not_found}
+
+      path ->
+        full_path = Path.join(upload_dir, path)
+
+        case File.read(full_path) do
+          {:ok, bytes} -> {:ok, Base.encode64(bytes)}
+          {:error, reason} -> {:error, {:file_read, reason}}
+        end
     end
   end
 
   # Marks an image as resolved and records which book was identified.
   defp mark_resolved(image_id, book_id) do
-    import Ecto.Query
-
     {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
     {:ok, book_id_bin} = Ecto.UUID.dump(book_id)
 
@@ -78,8 +103,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   # Marks an image as rejected with a reason so the poll endpoint can surface it.
   defp mark_rejected(image_id, reason) do
-    import Ecto.Query
-
     {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
 
     query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
@@ -105,10 +128,5 @@ defmodule Stacks.Workers.IdentifyBookJob do
   rescue
     error ->
       Logger.error("IdentifyBookJob: failed to reject image #{image_id}: #{inspect(error)}")
-  end
-
-  defp build_image_url(image_id) do
-    base = Application.get_env(:core, :storage_base_url, "http://localhost:4000/uploads")
-    "#{base}/#{image_id}"
   end
 end

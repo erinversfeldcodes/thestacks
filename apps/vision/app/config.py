@@ -1,7 +1,8 @@
+from pathlib import Path
 from typing import Self
 
 from pydantic import model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULTS = {"change_me_in_dev", "change_me", "secret", ""}
 
@@ -17,7 +18,15 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 30
     max_image_size_bytes: int = 10_485_760  # 10 MB
 
-    model_config = {"env_prefix": "VISION_"}
+    model_config = SettingsConfigDict(
+        env_prefix="VISION_",
+        env_file=[
+            Path(__file__).resolve().parents[3] / ".env",  # repo root
+            Path(__file__).resolve().parents[3] / ".env.local",  # local overrides
+        ],
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @model_validator(mode="after")
     def validate_secrets(self) -> Self:
