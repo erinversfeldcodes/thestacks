@@ -21,6 +21,7 @@ def _image_mime_type(b64_data: str) -> str:
         pass
     return "image/jpeg"
 
+
 _TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
 
 
