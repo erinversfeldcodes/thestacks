@@ -11,7 +11,7 @@ import Api exposing (PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, a, button, div, h1, h2, option, p, select, span, text)
+import Html exposing (Html, a, button, div, h1, h2, li, option, p, select, span, text, ul)
 import Html.Attributes exposing (class, href, value)
 import Html.Events exposing (onClick, onInput, preventDefaultOn)
 import Http
@@ -23,16 +23,16 @@ import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
 
 
-{-| Maximum number of poll attempts before giving up (~30 seconds at 2s intervals).
+{-| Maximum number of poll attempts before giving up (~90 seconds at 2s intervals).
 -}
 maxPollCount : Int
 maxPollCount =
-    15
+    45
 
 
 type UploadResult
     = NoResult
-    | Identified Book
+    | Identified (List Book)
     | IdentificationFailed
     | NotABook
     | ManualISBNEntry
@@ -51,6 +51,10 @@ type alias Model =
     , isDragging : Bool
     , duplicateShelf : String
     , duplicateMoveState : RemoteData Http.Error ()
+
+    -- Accumulate multiple book fetches before showing the result.
+    , pendingBookIds : List String
+    , collectedBooks : List Book
     }
 
 
@@ -62,7 +66,7 @@ type Msg
     | UploadAccepted (Result Http.Error String)
     | CheckStatus
     | StatusReceived (Result Http.Error PollResponse)
-    | GotIdentifiedBook (Result Http.Error Book)
+    | GotIdentifiedBook String (Result Http.Error Book)
     | GotDuplicateBook (Result Http.Error Book)
     | ManualIsbnChanged String
     | SubmitManualIsbn
@@ -84,6 +88,8 @@ init =
     , isDragging = False
     , duplicateShelf = "library"
     , duplicateMoveState = NotAsked
+    , pendingBookIds = []
+    , collectedBooks = []
     }
 
 
@@ -96,23 +102,22 @@ update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
 update msg model maybeToken =
     case msg of
         GotFiles file _ ->
-            let
-                cmd =
-                    case maybeToken of
-                        Just token ->
-                            Api.uploadImage file token UploadAccepted
+            case maybeToken of
+                Nothing ->
+                    -- Not authenticated — send to login rather than silently hanging.
+                    ( { model | file = Just file, isDragging = False }
+                    , Cmd.none
+                    )
 
-                        Nothing ->
-                            Cmd.none
-            in
-            ( { model
-                | file = Just file
-                , uploadState = Loading
-                , pollCount = 0
-                , isDragging = False
-              }
-            , cmd
-            )
+                Just token ->
+                    ( { model
+                        | file = Just file
+                        , uploadState = Loading
+                        , pollCount = 0
+                        , isDragging = False
+                      }
+                    , Api.uploadImage file token UploadAccepted
+                    )
 
         DragOver ->
             ( { model | isDragging = True }, Cmd.none )
@@ -152,22 +157,53 @@ update msg model maybeToken =
                 Ok response ->
                     case response.status of
                         Resolved ->
-                            case ( response.bookId, maybeToken ) of
-                                ( Just bookId, Just token ) ->
+                            let
+                                -- Prefer the book_ids array; fall back to singleton book_id.
+                                ids =
+                                    if List.isEmpty response.bookIds then
+                                        case response.bookId of
+                                            Just bid ->
+                                                [ bid ]
+
+                                            Nothing ->
+                                                []
+
+                                    else
+                                        response.bookIds
+                            in
+                            case ( ids, maybeToken ) of
+                                ( [], _ ) ->
+                                    -- Resolved without any book IDs means not_a_book.
+                                    ( { model | result = NotABook }, Cmd.none )
+
+                                ( [ singleId ], Just token ) ->
+                                    -- Single book: check for duplicate, then fetch.
                                     let
-                                        -- Route to GotDuplicateBook when the server reports
-                                        -- the book is already on one of the user's shelves.
                                         callback =
                                             if response.isDuplicate == Just True then
                                                 GotDuplicateBook
 
                                             else
-                                                GotIdentifiedBook
+                                                GotIdentifiedBook singleId
                                     in
-                                    ( model, Api.getBook bookId token callback )
+                                    ( { model | pendingBookIds = [], collectedBooks = [] }
+                                    , Api.getBook singleId token callback
+                                    )
+
+                                ( multiIds, Just token ) ->
+                                    -- Multiple books: fetch all in parallel.
+                                    ( { model
+                                        | pendingBookIds = multiIds
+                                        , collectedBooks = []
+                                      }
+                                    , Cmd.batch
+                                        (List.map
+                                            (\bid -> Api.getBook bid token (GotIdentifiedBook bid))
+                                            multiIds
+                                        )
+                                    )
 
                                 _ ->
-                                    -- Resolved without book_id means not_a_book.
                                     ( { model | result = NotABook }, Cmd.none )
 
                         Rejected ->
@@ -179,13 +215,57 @@ update msg model maybeToken =
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none )
 
-        GotIdentifiedBook result ->
+        GotIdentifiedBook bookId result ->
             case result of
                 Ok book ->
-                    ( { model | result = Identified book }, Cmd.none )
+                    let
+                        newCollected =
+                            model.collectedBooks ++ [ book ]
+
+                        remaining =
+                            List.filter (\bid -> bid /= bookId) model.pendingBookIds
+                    in
+                    if List.isEmpty remaining then
+                        -- All books fetched — show the result.
+                        ( { model
+                            | result = Identified newCollected
+                            , collectedBooks = []
+                            , pendingBookIds = []
+                          }
+                        , Cmd.none
+                        )
+
+                    else
+                        ( { model
+                            | collectedBooks = newCollected
+                            , pendingBookIds = remaining
+                          }
+                        , Cmd.none
+                        )
 
                 Err _ ->
-                    ( { model | result = IdentificationFailed }, Cmd.none )
+                    -- One book fetch failed — remove from pending; show what we have
+                    -- if everything else is done, otherwise keep waiting.
+                    let
+                        remaining =
+                            List.filter (\bid -> bid /= bookId) model.pendingBookIds
+                    in
+                    if List.isEmpty remaining then
+                        case model.collectedBooks of
+                            [] ->
+                                ( { model | result = IdentificationFailed }, Cmd.none )
+
+                            books ->
+                                ( { model
+                                    | result = Identified books
+                                    , collectedBooks = []
+                                    , pendingBookIds = []
+                                  }
+                                , Cmd.none
+                                )
+
+                    else
+                        ( { model | pendingBookIds = remaining }, Cmd.none )
 
         GotDuplicateBook result ->
             case result of
@@ -233,28 +313,41 @@ update msg model maybeToken =
             ( init, Cmd.none )
 
 
-view : Model -> Html Msg
-view model =
+view : Model -> Maybe String -> Html Msg
+view model maybeToken =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]
-        , case model.result of
-            NoResult ->
-                viewUploadArea model
+        , case maybeToken of
+            Nothing ->
+                viewSignInRequired
 
-            Identified book ->
-                viewIdentified book
+            Just _ ->
+                case model.result of
+                    NoResult ->
+                        viewUploadArea model
 
-            IdentificationFailed ->
-                viewIdentificationFailed
+                    Identified books ->
+                        viewIdentified books
 
-            NotABook ->
-                viewNotABook
+                    IdentificationFailed ->
+                        viewIdentificationFailed
 
-            ManualISBNEntry ->
-                viewManualEntry model
+                    NotABook ->
+                        viewNotABook
 
-            DuplicateDetected book ->
-                viewDuplicate model book
+                    ManualISBNEntry ->
+                        viewManualEntry model
+
+                    DuplicateDetected book ->
+                        viewDuplicate model book
+        ]
+
+
+viewSignInRequired : Html Msg
+viewSignInRequired =
+    div [ class "upload-auth-required" ]
+        [ p [] [ text "You need to sign in to add books." ]
+        , a [ href "/login", class "btn btn--primary" ] [ text "Sign In" ]
         ]
 
 
@@ -339,18 +432,35 @@ viewDropPrompt =
         ]
 
 
-viewIdentified : Book -> Html Msg
-viewIdentified book =
+viewIdentified : List Book -> Html Msg
+viewIdentified books =
     div [ class "upload-result upload-result--identified" ]
-        [ h2 [] [ text "Book Identified!" ]
-        , p [] [ text book.title ]
-        , p [] [ text book.author.name ]
+        ([ h2 []
+            [ text
+                (if List.length books == 1 then
+                    "Book Identified!"
+
+                 else
+                    "Books Identified!"
+                )
+            ]
+         , ul [ class "upload-result__book-list" ]
+            (List.map viewIdentifiedBook books)
+         ]
+            ++ [ button [ class "btn btn--ghost", onClick Reset ] [ text "Try Another" ] ]
+        )
+
+
+viewIdentifiedBook : Book -> Html Msg
+viewIdentifiedBook book =
+    li [ class "upload-result__book-item" ]
+        [ p [ class "upload-result__book-title" ] [ text book.title ]
+        , p [ class "upload-result__book-author" ] [ text book.author.name ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
             , class "btn btn--primary"
             ]
             [ text "View Book" ]
-        , button [ class "btn btn--ghost", onClick Reset ] [ text "Try Another" ]
         ]
 
 

@@ -326,7 +326,7 @@ The Phoenix core, Python sidecar, and Rust scraper communicate over HTTP. These 
 | Approach | Implementation |
 |----------|---------------|
 | **Network isolation** | Fly.io private networking — services communicate via `*.internal` DNS. Not exposed to public internet. |
-| **Shared HMAC token** | Each request includes `X-Internal-Token: HMAC-SHA256(timestamp + body, shared_secret)`. Sidecar validates token + timestamp freshness (reject if >60s old). |
+| **Shared HMAC token** | Each request includes `X-Internal-Token: <unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded). The sidecar validates the signature and rejects tokens whose timestamp is more than ±60 seconds from the server clock (replay protection). The secret is the `VISION_HMAC_SECRET` environment variable, shared between the Elixir core and the Python vision sidecar. The Elixir side generates this token via `Stacks.AI.Client.auth_token/2`; the Python side verifies it in `apps/vision/app/services/hmac_auth.py`. |
 | **No public endpoints** | Python sidecar and Rust scraper have no public-facing routes. Only the Phoenix app is internet-accessible. |
 
 ### Secrets Management

@@ -30,6 +30,7 @@ pendingPoll =
     { imageId = "img-1"
     , status = Pending
     , bookId = Nothing
+    , bookIds = []
     , rejectionReason = Nothing
     , isDuplicate = Nothing
     }
@@ -40,6 +41,7 @@ rejectedPoll =
     { imageId = "img-1"
     , status = Rejected
     , bookId = Nothing
+    , bookIds = []
     , rejectionReason = Just "isbn_not_found"
     , isDuplicate = Nothing
     }
@@ -50,6 +52,7 @@ resolvedNewBook =
     { imageId = "img-1"
     , status = Resolved
     , bookId = Just "book-1"
+    , bookIds = [ "book-1" ]
     , rejectionReason = Nothing
     , isDuplicate = Just False
     }
@@ -60,6 +63,7 @@ resolvedDuplicate =
     { imageId = "img-1"
     , status = Resolved
     , bookId = Just "book-1"
+    , bookIds = [ "book-1" ]
     , rejectionReason = Nothing
     , isDuplicate = Just True
     }
@@ -70,6 +74,7 @@ resolvedNotABook =
     { imageId = "img-1"
     , status = Resolved
     , bookId = Nothing
+    , bookIds = []
     , rejectionReason = Just "not_a_book"
     , isDuplicate = Nothing
     }
@@ -122,7 +127,7 @@ suite =
                             Upload.init
 
                         timedOut =
-                            { base | uploadState = Success "img-1", pollCount = 15 }
+                            { base | uploadState = Success "img-1", pollCount = 45 }
 
                         ( model, _ ) =
                             Upload.update CheckStatus timedOut (Just "tok")
@@ -189,18 +194,30 @@ suite =
                     model.result |> Expect.equal IdentificationFailed
             ]
         , describe "GotIdentifiedBook"
-            [ test "Ok sets result to Identified" <|
+            [ test "Ok collects book and shows Identified when no more pending" <|
                 \_ ->
                     let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
+
                         ( model, _ ) =
-                            Upload.update (GotIdentifiedBook (Ok dummyBook)) Upload.init Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok dummyBook)) modelPending Nothing
                     in
-                    model.result |> Expect.equal (Identified dummyBook)
-            , test "Err sets result to IdentificationFailed" <|
+                    model.result |> Expect.equal (Identified [ dummyBook ])
+            , test "Err sets result to IdentificationFailed when no books collected" <|
                 \_ ->
                     let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
+
                         ( model, _ ) =
-                            Upload.update (GotIdentifiedBook (Err Http.NetworkError)) Upload.init Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Err Http.NetworkError)) modelPending Nothing
                     in
                     model.result |> Expect.equal IdentificationFailed
             ]
