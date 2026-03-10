@@ -5189,6 +5189,31 @@ Blog posts are native first-class content stored in `blog_posts`. Body is stored
 
 Posts are standalone — they are not required to reference a book. The connection to books is surfaced post-hoc by the LLM association worker.
 
+### Book Detail Read Path & Caching
+
+`Books.get_book_detail/1` assembles a per-user book view by joining:
+- The canonical `books` row (title, ISBN, author, cover, metadata)
+- Enrichment data: `price_snapshots`, `review_snapshots`, `discovered_sources`
+- The user's `bookshelf_placements` row (shelf, formats, wear level)
+- The user's `post_book_associations` (links to their blog posts about this book)
+
+**In Phases 1–6**, the join set is small enough that query-time assembly is the correct approach. The enrichment data is canonical (scraped once per ISBN, not per user), and the user-specific joins are a single `placements` row.
+
+**In Phase 7**, when a prolific author can have many `post_book_associations` across many books, this read path should be cached. The right mechanism is an **ETS-backed `BookDetailCache` GenServer**, invalidated by the existing event infrastructure:
+
+```
+blog.post_published        → invalidate BookDetailCache for (user_id, book_id) for all associated books
+blog.associations_updated  → invalidate BookDetailCache for (user_id, book_id)
+placement.updated          → invalidate BookDetailCache for (user_id, book_id)
+price_snapshot.created     → invalidate all BookDetailCache entries for book_id
+```
+
+On cache miss, `get_book_detail/1` performs the full join and populates the cache. On hit, it is a microsecond ETS lookup.
+
+**Why ETS over a PostgreSQL materialised view**: `REFRESH MATERIALIZED VIEW CONCURRENTLY` refreshes the entire view — it does not support per-`(user_id, book_id)` row invalidation. A PostgreSQL materialised view would require a very wide table (one row per user × book combination across the whole platform) and coarse refresh semantics. The event bus already exists; ETS invalidation driven by events is more granular and stays in the application layer where the business logic belongs.
+
+**The `wh` schema (dbt)** remains the right home for analytics — "most placed books platform-wide", "User A's reading velocity" — where staleness of minutes is acceptable. It is not the operational read path.
+
 ### `PostBookAssociationWorker` (Oban)
 
 Fires when a post is published or its body is updated:
