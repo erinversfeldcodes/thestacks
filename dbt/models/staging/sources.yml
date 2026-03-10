@@ -3,6 +3,11 @@ version: 2
 sources:
   - name: op
     schema: op
+    # Freshness is checked against updated_at; warn if data is >24 h old, error if >48 h.
+    loaded_at_field: updated_at
+    freshness:
+      warn_after: {count: 24, period: hour}
+      error_after: {count: 48, period: hour}
     tables:
       - name: books
       - name: authors
@@ -12,16 +17,29 @@ sources:
       - name: uploaded_images
       - name: users
       - name: bookstores
+        # No freshness check — populated by scraper (Phase 2A), may be empty in dev
+        freshness: null
       - name: price_snapshots
+        freshness: null
       - name: review_snapshots
+        freshness: null
       - name: discovered_sources
+        freshness: null
       - name: bookstore_events
+        freshness: null
       - name: third_spaces
+        freshness: null
       - name: third_space_events
+        freshness: null
       - name: event_log
       - name: my_writing_links
+        freshness: null
 
   - name: audit
     schema: audit
+    loaded_at_field: occurred_at
+    freshness:
+      warn_after: {count: 24, period: hour}
+      error_after: {count: 48, period: hour}
     tables:
       - name: audit_log

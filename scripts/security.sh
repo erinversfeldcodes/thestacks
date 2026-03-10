@@ -54,6 +54,16 @@ else
     echo "SKIP: syft/grype not installed (brew install syft grype)"
 fi
 
+# dbt-checkpoint — static model quality gates (no DB required)
+# Verifies staging schema.yml has descriptions and sources.yml has freshness config.
+if command -v dbt-checkpoint &>/dev/null; then
+    echo "Running dbt-checkpoint quality gates..."
+    dbt-checkpoint check-model-has-description dbt/models/staging/schema.yml
+    dbt-checkpoint check-source-has-freshness dbt/models/staging/sources.yml
+else
+    echo "SKIP: dbt-checkpoint not installed (pip install dbt-checkpoint)"
+fi
+
 # Dockle — CIS Docker Benchmark for each Dockerfile
 if command -v dockle &>/dev/null; then
     if command -v docker &>/dev/null; then
