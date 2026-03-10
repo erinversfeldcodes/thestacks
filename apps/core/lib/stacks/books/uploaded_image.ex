@@ -20,6 +20,7 @@ defmodule Stacks.Books.UploadedImage do
     field :rejection_reason, :string
     field :uploaded_at, :utc_datetime_usec
     field :expires_at, :utc_datetime_usec
+    field :book_ids, {:array, :binary_id}, default: []
 
     belongs_to :book, Book
 
@@ -34,7 +35,8 @@ defmodule Stacks.Books.UploadedImage do
       :rejection_reason,
       :uploaded_at,
       :expires_at,
-      :book_id
+      :book_id,
+      :book_ids
     ])
     |> validate_required([:storage_path, :status, :uploaded_at, :expires_at])
     |> validate_inclusion(:status, @valid_statuses)

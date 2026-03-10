@@ -21,6 +21,8 @@ defmodule Stacks.Workers.IdentifyBookJob do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
     with {:ok, image_b64} <- load_image_b64(image_id) do
+      Logger.debug("IdentifyBookJob: image loaded (#{byte_size(image_b64)} b64 bytes), calling pipeline")
+
       context = %{
         image_b64: image_b64,
         user_id: user_id,
@@ -28,9 +30,10 @@ defmodule Stacks.Workers.IdentifyBookJob do
       }
 
       case Moderation.run_pipeline(context) do
-        {:ok, book} ->
-          Logger.info("IdentifyBookJob: identified book #{book.id} (ISBN: #{book.isbn})")
-          mark_resolved(image_id, book.id)
+        {:ok, books} when is_list(books) ->
+          book_ids = Enum.map(books, & &1.id)
+          Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{Enum.map(books, & &1.isbn) |> Enum.join(", ")}")
+          mark_resolved(image_id, book_ids)
           :ok
 
         {:error, :not_a_book} ->
@@ -49,7 +52,17 @@ defmodule Stacks.Workers.IdentifyBookJob do
           # Unknown errors may be transient (network, sidecar down) — allow Oban retries.
           {:error, reason}
       end
+    else
+      {:error, reason} ->
+        Logger.error("IdentifyBookJob: failed to load image #{image_id}: #{inspect(reason)}")
+        {:error, reason}
     end
+  rescue
+    exception ->
+      Logger.error(
+        "IdentifyBookJob: unhandled exception for image #{image_id}: #{Exception.format(:error, exception, __STACKTRACE__)}"
+      )
+      {:error, exception}
   end
 
   # Reads the uploaded image from disk and returns it base64-encoded.
@@ -86,27 +99,38 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  defp valid_upload_filename?(name) do
+  @doc false
+  def valid_upload_filename?(name) do
     name != "" and name != "." and name != ".." and
       not String.contains?(name, "/") and not String.contains?(name, "\\")
   end
 
-  # Marks an image as resolved and records which book was identified.
-  defp mark_resolved(image_id, book_id) do
+  # Marks an image as resolved with one or more identified book IDs.
+  # Sets book_id (singular) to the first book for backward compatibility,
+  # and book_ids (array) to all identified books.
+  defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
     {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
-    {:ok, book_id_bin} = Ecto.UUID.dump(book_id)
+    book_id_bins = Enum.map(book_ids, fn id -> elem(Ecto.UUID.dump(id), 1) end)
+    first_book_id_bin = List.first(book_id_bins)
 
     query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
 
     {count, _} =
       Repo.update_all(
         query,
-        [set: [status: "resolved", book_id: book_id_bin, updated_at: DateTime.utc_now()]],
+        [
+          set: [
+            status: "resolved",
+            book_id: first_book_id_bin,
+            book_ids: book_id_bins,
+            updated_at: DateTime.utc_now()
+          ]
+        ],
         prefix: "op"
       )
 
     if count > 0 do
-      Logger.info("IdentifyBookJob: resolved image #{image_id} → book #{book_id}")
+      Logger.info("IdentifyBookJob: resolved image #{image_id} → #{length(book_ids)} book(s)")
     else
       Logger.warning("IdentifyBookJob: image #{image_id} not found for resolve")
     end
