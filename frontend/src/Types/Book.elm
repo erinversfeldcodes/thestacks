@@ -2,9 +2,7 @@ module Types.Book exposing
     ( Author
     , Book
     , VisibilityTier(..)
-    , authorDecoder
     , bookDecoder
-    , visibilityTierDecoder
     )
 
 import Json.Decode as Decode exposing (Decoder)

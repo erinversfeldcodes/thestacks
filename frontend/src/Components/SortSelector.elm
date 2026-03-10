@@ -1,6 +1,6 @@
 module Components.SortSelector exposing (sortSelector)
 
-import Components.FilterPanel exposing (SortOrder(..))
+import Components.FilterPanel exposing (SortOrder)
 import Html exposing (Html, div, label, option, select, text)
 import Html.Attributes exposing (class, value)
 import Html.Events exposing (onInput)
