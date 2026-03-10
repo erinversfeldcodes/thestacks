@@ -9,28 +9,27 @@
 
 ### 1.1 Adding a Book
 
-#### US-1.1.1 Upload Photos to Add a Book
+#### US-1.1.1 Upload a Photo to Add a Book
 
-**As a** user, **I want to** upload one to three photos of a physical book **so that** the system can identify it and add it to my collection without manual data entry.
+**As a** user, **I want to** upload a photo or screenshot **so that** the system can identify the book and add it to my collection without manual data entry.
 
-**What the user wants to accomplish:** Get a book into their collection by photographing it — cover, spine, back cover, or even a screenshot from TikTok, Instagram, or YouTube where the book appeared.
+**What the user wants to accomplish:** Get a book into their collection by photographing it or sharing a screenshot — cover, spine, back cover, mirrored selfie-mode shot, or a screenshot from TikTok, Instagram, a reading list, or anywhere a book title or author appears as text.
 
 **How they accomplish it:**
 1. The user navigates to any bookshelf page and clicks the "Add a Book" button.
-2. A modal appears inviting the user to upload 1–3 images. Drag-and-drop and file picker are both supported. Accepted formats include photos of covers, spines, back covers, and social media screenshots.
-3. The user selects which shelf the book should land on (defaulting to AntiLibrary).
-4. The user confirms the upload.
-5. The system sends the images to an open-source vision model (hosted on Together AI or Replicate) to extract visible text — title, author, ISBN barcode, publisher information.
+2. A drop zone appears. Drag-and-drop and file picker are both supported. Accepted inputs include photos of covers, spines, back covers, mirrored or rotated photos, and screenshots containing book titles or recommendations.
+3. The user drops or selects one image. (For bulk upload of multiple images, see US-1.1.7.)
+4. The system pre-processes the image before sending it to the vision model: orientation is corrected using EXIF data, horizontal mirroring is detected and corrected, and the image is re-encoded to a canonical format with EXIF stripped.
+5. The system sends the pre-processed image to an open-source vision model (hosted on Together AI or Replicate) to extract visible text — title, author, ISBN barcode, publisher information. If the image contains multiple identifiable books, all are extracted.
 6. The extracted text is used to query the Open Library API and Google Books API to resolve an ISBN.
-7. If an ISBN is found, the book is created with full metadata: title, author, cover image, description, subjects, and page count.
-8. The book's spine appears on the chosen shelf with a brief slide-in animation.
+7. If an ISBN is found, the system presents the identified book for confirmation (title, author, cover image). The user selects which shelf to place it on (defaulting to AntiLibrary) and confirms.
+8. The book is created with full metadata and its spine slides into place on the chosen shelf with a soft thud animation.
 
 **What they see on the page:**
-- The upload modal has a warm parchment background with a subtle vignette. A dotted border area reads "Drop your photos here" in a serif typeface.
-- Thumbnail previews of uploaded images appear in a row below the drop zone.
-- A shelf selector dropdown styled as a wooden plaque lets the user choose which shelf to place the book on.
-- While processing, a gentle animation of a turning page indicates progress, with status text: "Reading the cover...", "Looking up the ISBN...", "Fetching details..."
-- On success, the modal closes and the new book spine slides into place on the shelf with a soft thud animation.
+- The upload area has a warm parchment background with a dotted border reading "Drop a photo here" in a serif typeface.
+- While processing, a gentle turning-page animation shows progress with status text: "Reading the cover...", "Looking up the ISBN...", "Fetching details..."
+- On identification, the user sees a confirmation card with the book cover, title, author, and a shelf selector before committing.
+- On success, the modal closes and the new book spine slides into place.
 
 ---
 
@@ -55,19 +54,24 @@
 
 #### US-1.1.3 Non-Book Image Rejection
 
-**As a** user, **I want** non-book images to be rejected immediately **so that** the platform remains focused on books and inappropriate content never appears.
+**As a** user, **I want** images with no book-related content to be rejected immediately **so that** the platform remains focused on books and inappropriate content never appears.
 
-**What the user wants to accomplish:** Upload only book-related content; any accidental or intentional non-book uploads are caught early.
+**What the user wants to accomplish:** Upload only book-related content; accidental or intentional non-book uploads are caught before wasting processing time on them.
+
+**What counts as book-related:** Any image from which a book title, author, or ISBN can plausibly be extracted. This includes physical book photos (cover, spine, back, barcode), mirrored or rotated photos of books, and screenshots of text that mention specific books — social media posts, reading lists, articles, captions. The classification criterion is "can we identify a book from this?" not "is this a photo of a physical book?"
+
+**What gets rejected:** Images with no book-related content whatsoever — a pet, a landscape, food, a selfie with no book in frame, a meme with no book reference. Ambiguous images are passed through to extraction rather than rejected conservatively.
 
 **How they accomplish it:**
-1. The user uploads an image that is not of a book (a pet, a selfie, food, etc.).
-2. The vision model's first pass determines the image is not a photo of or about a book.
-3. The system rejects the upload before any ISBN lookup occurs.
+1. The user uploads an image.
+2. The vision model's first pass answers: "Does this image contain enough information to identify a book?"
+3. If no — the image is rejected before any ISBN lookup occurs.
+4. If yes or ambiguous — the image proceeds to extraction.
 
 **What they see on the page:**
-- The upload modal displays a polite rejection: "This doesn't appear to be a photo of a book. The Stacks only accepts images of book covers, spines, back covers, or screenshots featuring books."
-- The thumbnail of the rejected image is greyed out with a subtle cross mark.
-- The user can remove the image and try again.
+- In single-image upload: a polite rejection message: "This image doesn't seem to mention or show a book. Try a photo of the cover, spine, or back, or a screenshot where the book title appears."
+- In bulk upload (US-1.1.7): the rejected image appears in the "Couldn't process" bucket on the review screen. The rest of the batch continues unaffected.
+- The user can remove the image and try again with a different photo.
 
 ---
 
@@ -131,6 +135,36 @@
 - The message reads: "You already have this book! It's currently on your [Shelf Name]."
 - Three buttons: "Move to a different shelf" (opens shelf picker), "View book" (navigates to detail page), "Close" (dismisses modal).
 - No new book or shelf placement is created.
+
+---
+
+#### US-1.1.7 Bulk Image Upload with Grouping and Review
+
+**As a** user, **I want to** drop a pile of book photos at once and review what the system found before anything lands on my shelves **so that** I can add a batch of books efficiently without losing control over what gets added.
+
+**What the user wants to accomplish:** Upload many images in one go — including multiple photos of the same book (front, back, spine), photos of different books, screenshots of reading lists, and shelfie photos containing several titles — and have the system do the grouping work, then confirm the results before committing.
+
+**How they accomplish it:**
+1. The user clicks "Add Books" and selects multiple images, or drags a batch onto the drop zone.
+2. The system accepts all images immediately and begins processing in parallel. A progress indicator shows how many images are being processed.
+3. In the background, each image is classified and partially extracted. Images that resolve to the same ISBN, or have strongly overlapping title/author signals, are grouped together automatically. A shelfie or screenshot yielding multiple distinct books produces one candidate per identified book.
+4. When processing is complete, the user is taken to a **Review screen**.
+5. The Review screen shows one card per detected book:
+   - **Confirmed** (green border): ISBN resolved cleanly. Shows thumbnail(s), title, author, ISBN badge.
+   - **Ambiguous** (amber border): System found something but isn't confident. Shows best guess; user can confirm, enter ISBN manually, or dismiss.
+   - **Multiple books from one image**: an expandable card showing one sub-card per detected book — the user confirms or dismisses each independently.
+   - **Rejected** (grey, separate bucket): images with no detectable book content. User can dismiss or retry with a different photo.
+6. The user reviews, dismisses any misidentifications, and selects which shelf each confirmed book should land on (defaulting to AntiLibrary, settable per card).
+7. The user taps "Add N Books to Shelves". Each confirmed book goes through the standard ISBN resolution and duplicate detection pipeline (US-1.1.2, US-1.1.6). Any that fail at this stage surface inline on the review screen without blocking the others.
+8. Successfully added books appear on their chosen shelves.
+
+**What they see on the page:**
+- The drop zone accepts any number of files. A progress bar shows "Processing N images..." as the backend works.
+- The review screen uses a parchment-card grid. Cards have coloured borders by confidence state: green (confirmed), amber (ambiguous), grey (rejected).
+- Each confirmed card shows the best thumbnail from the group, title in a serif typeface, author, and a shelf selector.
+- A "Confirm all" button at the bottom adds all confirmed-state cards at once. Ambiguous cards must be individually confirmed or dismissed before they can be added.
+- An X on each card removes it from the batch without affecting others.
+- Nothing is committed to shelves until the user taps "Add to Shelves".
 
 ---
 

@@ -7,7 +7,7 @@ defmodule Stacks.Factory do
   use ExMachina.Ecto, repo: Core.Repo
 
   alias Stacks.Accounts.User
-  alias Stacks.Books.{Author, Book}
+  alias Stacks.Books.{Author, Book, UploadedImage}
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   def user_factory do
@@ -68,6 +68,15 @@ defmodule Stacks.Factory do
       visibility: "owner",
       book: build(:book),
       bookshelf: build(:bookshelf)
+    }
+  end
+
+  def uploaded_image_factory do
+    %UploadedImage{
+      storage_path: "#{Ecto.UUID.generate()}.jpg",
+      status: "pending",
+      uploaded_at: DateTime.utc_now(),
+      expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
     }
   end
 

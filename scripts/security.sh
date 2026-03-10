@@ -19,8 +19,10 @@ require_tool hadolint
 require_tool checkov
 require_tool trivy
 
-# Secret scanning
-gitleaks detect --source . --no-git
+# Secret scanning — scans git history; .gitignore and .gitleaks.toml apply.
+# --no-git is intentionally NOT used: it would scan the entire filesystem
+# including gitignored .env files that contain valid local dev secrets.
+gitleaks detect --source . --config .gitleaks.toml
 
 # SAST
 semgrep scan --config auto --error

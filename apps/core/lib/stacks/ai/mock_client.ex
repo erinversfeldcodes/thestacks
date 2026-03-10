@@ -8,12 +8,24 @@ defmodule Stacks.AI.MockClient do
 
   @impl true
   def call_vision("is_book", _payload) do
-    {:ok, %{"is_book" => true}}
+    {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
   end
 
   def call_vision("extract_isbn", payload) do
-    isbn = Map.get(payload, :isbn) || Map.get(payload, "isbn") || "9780743273565"
-    {:ok, %{"isbn" => isbn}}
+    isbn =
+      Map.get(payload, :isbn) ||
+        Map.get(payload, "isbn") ||
+        "9780743273565"
+
+    {:ok,
+     %{
+       "potential_isbns" => [isbn],
+       "title" => nil,
+       "author" => nil,
+       "raw_text" => nil,
+       "model_used" => "mock",
+       "confidence" => 0.9
+     }}
   end
 
   def call_vision("classify_subjects", _payload) do

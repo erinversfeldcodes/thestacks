@@ -312,9 +312,11 @@ Uploaded book photos are an attack surface. Defence in depth:
 |-------|-----------|
 | **File size** | 10MB max per image, 30MB total per upload (enforced in plug) |
 | **File type** | Magic byte validation — only JPEG, PNG, WebP, HEIC. Do not trust `Content-Type` header or file extension. |
-| **EXIF stripping** | Strip all EXIF metadata on upload using `Mogrify` or `image_rs`. User photos may contain GPS coordinates, device info, timestamps. This is PII. |
+| **Orientation normalisation** | Read the EXIF `Orientation` tag and apply the corresponding pixel rotation/flip to the image data **before** stripping EXIF. Without this step, stripping EXIF loses the orientation metadata and the image arrives at the vision model sideways or upside-down, degrading text extraction. |
+| **Horizontal flip correction** | Detect horizontally mirrored images (common with front-facing camera and selfie-mode photos) and apply a horizontal flip correction before sending to the vision model. Mirrored text — particularly ISBNs and stylised cover typography — significantly degrades extraction accuracy. Detection uses pixel-level heuristics or a lightweight classifier; correction is a single Pillow/Mogrify operation. |
+| **EXIF stripping** | Strip all EXIF metadata **after** orientation and flip correction. User photos may contain GPS coordinates, device info, and timestamps — all PII. Order matters: strip last, not first. |
 | **Filename sanitization** | `Path.basename(filename)` — prevent path traversal. Generate UUID-based names for storage. |
-| **Image reprocessing** | Re-encode uploaded images to a canonical format (JPEG, max 2048px longest edge). This neutralises image-based exploits (ImageTragick-style). |
+| **Image reprocessing** | Re-encode uploaded images to a canonical format (JPEG, max 2048px longest edge) after orientation/flip correction and EXIF stripping. This neutralises image-based exploits (ImageTragick-style). |
 | **Virus scanning** | Optional: ClamAV sidecar for uploaded files. Low priority for single-user but important for marketplace. |
 
 ### Service-to-Service Authentication
@@ -1396,14 +1398,27 @@ Every image upload goes through a four-step pipeline before a book is added to t
 ```
 Image Upload
 │
+├── Pre-processing (before any AI call)
+│   ├── Apply EXIF orientation to pixel data
+│   ├── Detect and correct horizontal mirror (selfie/front-camera photos)
+│   ├── Strip EXIF
+│   └── Re-encode to canonical JPEG (max 2048px)
+│
 ├── Step 1: Vision Model Classification
-│   └── "Is this a photo of / about a book?"
-│       ├── No  → REJECT (not a book image)
-│       └── Yes → continue
+│   └── "Does this image contain enough information to identify a book?"
+│       Accepts: physical book photos (any orientation), mirrored covers,
+│                screenshots of text mentioning specific books.
+│       Rejects: pets, food, selfies with no book context, unrelated objects.
+│       ├── No  → REJECT (not book-identifiable)
+│       └── Yes / Ambiguous → continue
 │
 ├── Step 2: Text Extraction + ISBN Resolution
-│   └── Extract text via vision model → resolve ISBN via Open Library
-│       ├── No ISBN found → REJECT (unresolvable)
+│   └── Extract all identifiable books via vision model
+│       Returns: list of {title, author, potential_isbns} — one entry per book found.
+│       For each extracted book:
+│       ├── Attempt ISBN resolution via Open Library → Google Books fallback
+│       ├── No ISBN found → surface as "ambiguous" for user review (US-1.1.7)
+│       │   or reject if single-image flow (US-1.1.2)
 │       └── ISBN found → continue
 │
 ├── Step 3: Metadata Lookup + Content Classification
@@ -1417,6 +1432,10 @@ Image Upload
 ```
 
 **Design decision:** Uses Open Library subject classifications and BISAC codes for age-gating rather than an AI classifier. A curated keyword list is more auditable, more predictable, and easier to defend in a compliance review.
+
+**Design decision:** Classification accepts screenshots and non-physical-book images as valid inputs provided a book can be identified from them. The rejection criterion is "no book-identifiable content" not "not a physical book photo." This is enforced via the classification prompt, not post-hoc filtering.
+
+**Design decision:** Image pre-processing (orientation normalisation, horizontal flip correction) happens in Phoenix before the image reaches the Python sidecar. The sidecar receives a correctly-oriented, non-mirrored canonical JPEG. The sidecar never corrects orientation itself — this is the core's responsibility.
 
 ---
 
