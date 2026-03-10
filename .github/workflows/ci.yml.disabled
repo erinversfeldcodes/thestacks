@@ -406,8 +406,34 @@ jobs:
           fail-build: 'true'
           severity-cutoff: high
 
+  dockle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images for CIS benchmark
+        run: |
+          docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
+          docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
+          docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
+      - uses: goodwithtech/dockle-action@v1
+        with:
+          image: stacks-dockle-core
+          exit-code: '1'
+          exit-level: WARN
+      - uses: goodwithtech/dockle-action@v1
+        with:
+          image: stacks-dockle-vision
+          exit-code: '1'
+          exit-level: WARN
+      - uses: goodwithtech/dockle-action@v1
+        with:
+          image: stacks-dockle-scraper
+          exit-code: '1'
+          exit-level: WARN
+
   deploy-preview:
-    needs: [test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype]
+    needs: [test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
     if: github.event_name == 'pull_request' && !failure() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -418,11 +444,13 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           GITHUB_HEAD_REF: ${{ github.head_ref }}
-        run: scripts/deploy-preview.sh
+        # Tee to /tmp so post-deployed-e2e-to-pr.sh can parse the structured output
+        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
       - name: Post deployed E2E results to PR
         if: always()
         env:
