@@ -1,7 +1,4 @@
-import os
-
-os.environ.setdefault("VISION_ENVIRONMENT", "test")
-
+from collections.abc import AsyncGenerator
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -14,7 +11,7 @@ _VALID_IMAGE = "dGVzdA=="  # base64("test")
 
 
 @pytest.fixture
-async def client() -> VisionClient:
+async def client() -> AsyncGenerator[VisionClient, None]:
     c = VisionClient()
     yield c
     await c.close()

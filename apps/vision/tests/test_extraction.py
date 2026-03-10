@@ -20,7 +20,7 @@ def _make_header(path: str = "/extract") -> dict[str, str]:
     return {"X-Internal-Token": f"{ts}.{token_hex}"}
 
 
-def _mock_together_response(content: dict) -> dict:  # type: ignore[type-arg]
+def _mock_together_response(content: dict[str, object]) -> dict[str, object]:
     return {"choices": [{"message": {"content": json.dumps(content)}}]}
 
 
