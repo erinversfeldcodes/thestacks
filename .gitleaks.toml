@@ -10,3 +10,11 @@ paths = [
     '''deps/''',
     '''_build/''',
 ]
+
+[[allowlists]]
+description = "Ignore local dev env files (gitignored, never committed)"
+paths = [
+    '''^\.env$''',
+    '''^\.env\.local$''',
+    '''^\.env\..+\.local$''',
+]
