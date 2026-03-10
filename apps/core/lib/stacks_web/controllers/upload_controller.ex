@@ -58,7 +58,12 @@ defmodule StacksWeb.UploadController do
       nil ->
         conn |> put_status(404) |> json(%{error: "not found"})
 
-      %{status: status, book_id: book_id_bin, book_ids: book_ids_bins, rejection_reason: rejection_reason} ->
+      %{
+        status: status,
+        book_id: book_id_bin,
+        book_ids: book_ids_bins,
+        rejection_reason: rejection_reason
+      } ->
         book_id_str = decode_uuid(book_id_bin)
         book_ids_strs = decode_uuid_list(book_ids_bins)
 
