@@ -38,6 +38,7 @@ if config_env() == :prod do
 
   config :core, Core.Repo,
     url: database_url,
+    ssl: true,
     parameters: [search_path: "op,public"],
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6

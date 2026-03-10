@@ -69,5 +69,6 @@ e2e/test-results
 apps/core/cover/
 frontend/test-results
 frontend/public
-priv/
+/priv/
+!apps/core/priv/repo/
 test-results/
