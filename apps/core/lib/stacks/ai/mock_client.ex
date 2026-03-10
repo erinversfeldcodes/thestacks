@@ -19,12 +19,16 @@ defmodule Stacks.AI.MockClient do
 
     {:ok,
      %{
-       "potential_isbns" => [isbn],
-       "title" => nil,
-       "author" => nil,
-       "raw_text" => nil,
-       "model_used" => "mock",
-       "confidence" => 0.9
+       "books" => [
+         %{
+           "title" => nil,
+           "author" => nil,
+           "potential_isbns" => [isbn],
+           "raw_text" => nil,
+           "confidence" => 0.9
+         }
+       ],
+       "model_used" => "mock"
      }}
   end
 

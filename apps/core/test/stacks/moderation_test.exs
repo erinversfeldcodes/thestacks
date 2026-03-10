@@ -111,18 +111,9 @@ defmodule Stacks.ModerationTest do
     def call_vision("is_book", _payload),
       do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
 
-    # Returns empty potential_isbns — triggers :isbn_not_found
+    # Returns empty books list — triggers :isbn_not_found
     def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
-           "potential_isbns" => [],
-           "title" => nil,
-           "author" => nil,
-           "raw_text" => nil,
-           "model_used" => "mock",
-           "confidence" => 0.0
-         }}
+      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end

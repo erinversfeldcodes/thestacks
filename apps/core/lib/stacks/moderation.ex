@@ -10,7 +10,7 @@ defmodule Stacks.Moderation do
 
   Sidecar API contract:
   - POST /classify  → %{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}
-  - POST /extract   → %{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "model_used" => str, "confidence" => float}
+  - POST /extract   → %{"books" => [%{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "confidence" => float}], "model_used" => str}
 
   Both endpoints expect base64-encoded image data (not image URLs).
   """
@@ -50,10 +50,11 @@ defmodule Stacks.Moderation do
 
   defp extract_isbn(image_b64) do
     case AIClient.call_vision("extract_isbn", %{images: [image_b64]}) do
-      {:ok, %{"potential_isbns" => [isbn | _]}} when is_binary(isbn) and isbn != "" ->
+      {:ok, %{"books" => [%{"potential_isbns" => [isbn | _]} | _]}}
+      when is_binary(isbn) and isbn != "" ->
         {:ok, isbn}
 
-      {:ok, _} ->
+      {:ok, %{"books" => _}} ->
         {:error, :isbn_not_found}
 
       error ->

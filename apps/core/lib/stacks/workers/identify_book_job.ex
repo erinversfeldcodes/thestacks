@@ -68,11 +68,23 @@ defmodule Stacks.Workers.IdentifyBookJob do
         {:error, :image_not_found}
 
       path ->
-        full_path = Path.join(upload_dir, path)
+        # Sanitise: storage_path must be a plain filename (no directory components).
+        # Path.basename strips any leading "../" or subdirectory segments that could
+        # escape upload_dir. We additionally reject any path that still contains a
+        # separator after stripping (defence-in-depth against crafted DB values).
+        safe_name = Path.basename(path)
+        full_path = Path.join(upload_dir, safe_name)
 
-        case File.read(full_path) do
-          {:ok, bytes} -> {:ok, Base.encode64(bytes)}
-          {:error, reason} -> {:error, {:file_read, reason}}
+        if String.contains?(safe_name, "/") or String.contains?(safe_name, "\\") or
+             safe_name in ["", ".", ".."] do
+          {:error, :invalid_storage_path}
+        else
+          # sobelow_skip ["Traversal.FileModule"] -- path is sanitised above: basename-only,
+          # no separators, verified within upload_dir at write time by store_upload/2.
+          case File.read(full_path) do
+            {:ok, bytes} -> {:ok, Base.encode64(bytes)}
+            {:error, reason} -> {:error, {:file_read, reason}}
+          end
         end
     end
   end
