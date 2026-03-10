@@ -24,6 +24,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Load local .env for dev secrets (CLOAK_KEY, SECRET_KEY_BASE, etc.) if running outside CI.
+if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
+    set -a; source "$REPO_ROOT/.env"; set +a
+fi
+
 # shellcheck source=scripts/lib/postgres.sh
 source "$REPO_ROOT/scripts/lib/postgres.sh"
 
