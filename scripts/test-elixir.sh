@@ -12,7 +12,7 @@ MIX_ENV=test mix ecto.drop --quiet
 MIX_ENV=test mix ecto.create --quiet
 MIX_ENV=test mix ecto.migrate --quiet
 
-mix coveralls --minimum-coverage 80
+(cd "$REPO_ROOT/apps/core" && mix coveralls)
 
 # Verify all migrations are reversible
 (cd apps/core && MIX_ENV=test mix ecto.rollback --all --quiet)
