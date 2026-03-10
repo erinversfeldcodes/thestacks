@@ -87,6 +87,52 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
+  describe "perform/1 — image_not_found" do
+    test "returns {:error, :image_not_found} when image_id has no DB record", %{user: user} do
+      missing_id = Ecto.UUID.generate()
+
+      assert {:error, :image_not_found} =
+               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => missing_id})
+    end
+  end
+
+  describe "perform/1 — invalid_storage_path" do
+    test "returns {:error, :invalid_storage_path} when storage_path is a degenerate name", %{
+      user: user,
+      image: image
+    } do
+      # Security model: Path.basename/1 neutralises directory traversal attempts
+      # (e.g. "../../../etc/passwd" → "passwd"), so deep traversal paths are safe.
+      # The valid_upload_filename? guard catches degenerate names that basename
+      # cannot reduce to a safe filename: "..", ".", and the empty string.
+      {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
+
+      import Ecto.Query
+
+      Core.Repo.update_all(
+        from(i in "uploaded_images", where: i.id == ^image_id_bin),
+        [set: [storage_path: ".."]],
+        prefix: "op"
+      )
+
+      assert {:error, :invalid_storage_path} =
+               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+    end
+  end
+
+  describe "perform/1 — file_read error" do
+    test "returns {:error, {:file_read, _}} when file is missing from disk", %{
+      user: user,
+      image: image
+    } do
+      upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
+      File.rm!(Path.join(upload_dir, image.storage_path))
+
+      assert {:error, {:file_read, _reason}} =
+               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Inline mock modules
   # ---------------------------------------------------------------------------
@@ -109,16 +155,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
 
     def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
-           "potential_isbns" => [],
-           "title" => nil,
-           "author" => nil,
-           "raw_text" => nil,
-           "model_used" => "mock",
-           "confidence" => 0.0
-         }}
+      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end

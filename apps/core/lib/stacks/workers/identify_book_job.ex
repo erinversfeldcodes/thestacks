@@ -64,17 +64,31 @@ defmodule Stacks.Workers.IdentifyBookJob do
       |> Repo.one(prefix: "op")
 
     case storage_path do
-      nil ->
-        {:error, :image_not_found}
-
-      path ->
-        full_path = Path.join(upload_dir, path)
-
-        case File.read(full_path) do
-          {:ok, bytes} -> {:ok, Base.encode64(bytes)}
-          {:error, reason} -> {:error, {:file_read, reason}}
-        end
+      nil -> {:error, :image_not_found}
+      path -> read_upload_file(upload_dir, path)
     end
+  end
+
+  # Sanitise and read an upload file. `Path.basename` strips any leading "../" or
+  # subdirectory segments; the guard rejects anything that still looks traversal-like.
+  # sobelow_skip ["Traversal.FileModule"] -- path is basename-only, no separators;
+  # store_upload/2 controls all writes into upload_dir.
+  defp read_upload_file(upload_dir, path) do
+    safe_name = Path.basename(path)
+
+    if valid_upload_filename?(safe_name) do
+      case File.read(Path.join(upload_dir, safe_name)) do
+        {:ok, bytes} -> {:ok, Base.encode64(bytes)}
+        {:error, reason} -> {:error, {:file_read, reason}}
+      end
+    else
+      {:error, :invalid_storage_path}
+    end
+  end
+
+  defp valid_upload_filename?(name) do
+    name != "" and name != "." and name != ".." and
+      not String.contains?(name, "/") and not String.contains?(name, "\\")
   end
 
   # Marks an image as resolved and records which book was identified.

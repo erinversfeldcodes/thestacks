@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 
 from app.config import settings
 from app.models.classification import Classification, ClassificationRequest, ClassificationResponse
-from app.models.extraction import ExtractionRequest, ExtractionResponse
+from app.models.extraction import ExtractedBook, ExtractionRequest, ExtractionResponse
 from app.services.hmac_auth import verify_hmac
 from app.services.vision_client import TogetherResponse, VisionClient
 
@@ -73,20 +73,34 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
     except (json.JSONDecodeError, TypeError):
         parsed = {}
 
-    log.info("extraction complete")
+    books: list[ExtractedBook] = []
+    raw_books = parsed.get("books")
+    if isinstance(raw_books, list):
+        for item in raw_books:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title")
+            author = item.get("author")
+            isbns = item.get("potential_isbns")
+            raw_text = item.get("raw_text")
+            books.append(
+                ExtractedBook(
+                    title=title if isinstance(title, str) else None,
+                    author=author if isinstance(author, str) else None,
+                    potential_isbns=isbns if isinstance(isbns, list) else [],
+                    raw_text=raw_text if isinstance(raw_text, str) else None,
+                    # confidence is 0.0 for the VLM path — the model does not return an
+                    # extraction confidence. Phase 1D.2 (local OCR pre-pass) will populate
+                    # this field when a barcode is detected with high confidence, allowing
+                    # Phoenix to skip ISBN verification for clean scans.
+                    confidence=0.0,
+                )
+            )
+
+    log.info("extraction complete", book_count=len(books))
     return ExtractionResponse(
-        title=parsed.get("title") if isinstance(parsed.get("title"), str) else None,  # type: ignore[arg-type]
-        author=parsed.get("author") if isinstance(parsed.get("author"), str) else None,  # type: ignore[arg-type]
-        potential_isbns=parsed.get("potential_isbns")  # type: ignore[arg-type]
-        if isinstance(parsed.get("potential_isbns"), list)
-        else [],
-        raw_text=content or None,
+        books=books,
         model_used=settings.model_name,
-        # confidence is 0.0 for the VLM path — the model does not return an extraction confidence.
-        # Phase 1D.2 (local OCR pre-pass) will populate this field when a barcode is detected
-        # with high confidence, allowing Phoenix to skip ISBN verification for clean scans.
-        # Only /classify produces a meaningful confidence from the current model.
-        confidence=0.0,
     )
 
 

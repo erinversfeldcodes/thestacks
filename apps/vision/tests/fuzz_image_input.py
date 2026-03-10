@@ -52,9 +52,7 @@ from app.main import app
 _CORPUS_DIR = Path(__file__).parent.parent.parent.parent / "images"
 
 # Fixed mock responses — HTTP fuzzing exercises request handling, not model calls.
-_MOCK_EXTRACT = {
-    "choices": [{"message": {"content": '{"title":null,"author":null,"potential_isbns":[]}'}}]
-}
+_MOCK_EXTRACT = {"choices": [{"message": {"content": '{"books":[]}'}}]}
 _MOCK_CLASSIFY = {
     "choices": [{"message": {"content": '{"classification":"ambiguous","confidence":0.5}'}}]
 }
@@ -113,9 +111,13 @@ def _fuzz_model_output_parsing(raw: bytes) -> None:
         if isinstance(parsed, dict):
             _ = parsed.get("classification", "ambiguous")
             _ = parsed.get("confidence", 0.0)
-            _ = parsed.get("title")
-            _ = parsed.get("author")
-            _ = parsed.get("potential_isbns")
+            raw_books = parsed.get("books")
+            if isinstance(raw_books, list):
+                for item in raw_books:
+                    if isinstance(item, dict):
+                        _ = item.get("title")
+                        _ = item.get("author")
+                        _ = item.get("potential_isbns")
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
 
