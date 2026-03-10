@@ -22,7 +22,9 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     case load_image_b64(image_id) do
       {:ok, image_b64} ->
-        Logger.debug("IdentifyBookJob: image loaded (#{byte_size(image_b64)} b64 bytes), calling pipeline")
+        Logger.debug(
+          "IdentifyBookJob: image loaded (#{byte_size(image_b64)} b64 bytes), calling pipeline"
+        )
 
         context = %{
           image_b64: image_b64,
@@ -64,6 +66,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Logger.error(
         "IdentifyBookJob: unhandled exception for image #{image_id}: #{Exception.format(:error, exception, __STACKTRACE__)}"
       )
+
       {:error, exception}
   end
 

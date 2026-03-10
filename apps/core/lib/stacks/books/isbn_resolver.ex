@@ -123,7 +123,9 @@ defmodule Stacks.Books.ISBNResolver do
     |> String.upcase()
     # Join space-separated single-letter sequences like "F D R" → "FDR".
     # The greedy pattern matches the full run in one pass.
-    |> then(fn t -> Regex.replace(~r/\b[A-Z]( [A-Z])+/, t, fn match -> String.replace(match, " ", "") end) end)
+    |> then(fn t ->
+      Regex.replace(~r/\b[A-Z]( [A-Z])+/, t, fn match -> String.replace(match, " ", "") end)
+    end)
     |> String.downcase()
     # Strip punctuation
     |> String.replace(~r/[^\w\s]/, " ")
