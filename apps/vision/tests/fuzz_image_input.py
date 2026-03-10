@@ -9,6 +9,10 @@ Running with Atheris (Linux only — requires: pip install atheris):
 Running as a seed-corpus regression test (all platforms):
     just fuzz-vision
 
+Always invoke via `just fuzz-vision` — the target sets PYTHONPATH=. so that
+`app` is importable. Running `python tests/fuzz_image_input.py` directly from
+inside `apps/vision/` will fail with ModuleNotFoundError without it.
+
 The seed corpus lives at <repo-root>/images/ and contains representative
 book cover photos used to prime coverage before Atheris mutates inputs.
 """

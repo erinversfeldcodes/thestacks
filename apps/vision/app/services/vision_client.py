@@ -33,7 +33,12 @@ _CLASSIFY_SYSTEM_PROMPT = (
 
 
 class VisionClient:
-    """HTTP client for Together AI vision model."""
+    """HTTP client for Together AI vision model.
+
+    Security note: the Authorization header constructed in _call_api contains
+    the together_api_key. Never pass the headers dict to any logger — log only
+    the request method, path, and status code if needed.
+    """
 
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
