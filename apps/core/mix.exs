@@ -14,7 +14,7 @@ defmodule Core.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      test_coverage: [tool: ExCoveralls],
+      test_coverage: [tool: ExCoveralls, minimum_coverage: 80],
       dialyzer: [ignore_warnings: ".dialyzer_ignore.exs"]
     ]
   end
