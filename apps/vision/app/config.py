@@ -4,6 +4,15 @@ from typing import Self
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+def _env_files() -> list[Path]:
+    here = Path(__file__).resolve()
+    try:
+        root = here.parents[3]
+        return [root / ".env", root / ".env.local"]
+    except IndexError:
+        return []
+
 _INSECURE_DEFAULTS = {"change_me_in_dev", "change_me", "secret", ""}
 
 
@@ -20,10 +29,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="VISION_",
-        env_file=[
-            Path(__file__).resolve().parents[3] / ".env",  # repo root
-            Path(__file__).resolve().parents[3] / ".env.local",  # local overrides
-        ],
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

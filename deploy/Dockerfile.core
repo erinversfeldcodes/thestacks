@@ -1,7 +1,7 @@
 # Build stage
-FROM hexpm/elixir:1.18.1-erlang-27.2.1-alpine-3.21.2 AS builder
+FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0
+RUN apk add --no-cache build-base git
 
 WORKDIR /app
 
@@ -14,18 +14,18 @@ COPY config/config.exs config/config.exs
 COPY config/prod.exs config/prod.exs
 COPY config/runtime.exs config/runtime.exs
 COPY apps/core/mix.exs apps/core/mix.exs
+COPY apps/core/config/ apps/core/config/
 RUN mix deps.get --only prod && mix deps.compile
 
-COPY apps/core/config/ apps/core/config/
 COPY apps/core/lib apps/core/lib
 COPY apps/core/priv apps/core/priv
 
 RUN mix compile && mix release core
 
 # Runtime stage
-FROM alpine:3.21.2 AS runtime
+FROM alpine:3.21.6 AS runtime
 
-RUN apk add --no-cache libstdc++=14.2.0-r4 openssl=3.3.6-r0 ncurses-libs=6.5_p20241006-r3
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
 
 RUN addgroup -S stacks && adduser -S stacks -G stacks
 WORKDIR /app
