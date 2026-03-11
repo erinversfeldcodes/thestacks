@@ -168,3 +168,19 @@ buf-lint:
 # Generate code from protobuf schemas
 buf-generate:
     buf generate proto/
+
+# Run E2E tests with service lifecycle management
+test-e2e-ci:
+    scripts/test-e2e.sh
+
+# Check licence compliance
+check-licenses:
+    scripts/check-licenses.sh
+
+# Lint changed migrations with squawk
+squawk:
+    scripts/security-squawk.sh
+
+# Deploy ephemeral preview + run E2E against it + destroy
+deploy-preview:
+    scripts/deploy-preview.sh

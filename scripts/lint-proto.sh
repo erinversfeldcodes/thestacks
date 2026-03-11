@@ -14,3 +14,8 @@ if ! find proto/ -name "*.proto" -print -quit 2>/dev/null | grep -q .; then
 fi
 
 buf lint proto/
+
+# Backward-compatibility check (only meaningful when there's a prior committed state)
+if git rev-parse --verify origin/main &>/dev/null 2>&1; then
+    buf breaking proto/ --against '.git#branch=origin/main'
+fi
