@@ -13,6 +13,7 @@ def _env_files() -> list[Path]:
     except IndexError:
         return []
 
+
 _INSECURE_DEFAULTS = {"change_me_in_dev", "change_me", "secret", ""}
 
 
