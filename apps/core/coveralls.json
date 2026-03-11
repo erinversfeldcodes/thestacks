@@ -3,6 +3,7 @@
   "skip_files": [
     "test/",
     "priv/",
-    "lib/stacks_web/telemetry.ex"
+    "lib/stacks_web/telemetry.ex",
+    "lib/stacks/release.ex"
   ]
 }

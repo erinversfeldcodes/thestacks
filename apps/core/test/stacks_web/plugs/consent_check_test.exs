@@ -1,0 +1,59 @@
+defmodule StacksWeb.Plugs.ConsentCheckTest do
+  use CoreWeb.ConnCase, async: true
+
+  import Stacks.Factory
+
+  alias Stacks.Accounts.Guardian
+  alias Stacks.GDPR.Consent
+  alias StacksWeb.Plugs.ConsentCheck
+
+  # Puts the user into the Guardian private storage so that
+  # Guardian.Plug.current_resource/1 returns it from within the plug under test.
+  defp with_current_user(conn, user) do
+    Guardian.Plug.put_current_resource(conn, user)
+  end
+
+  describe "call/2" do
+    test "passes conn through when user has granted consent", %{conn: conn} do
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id)
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, feature: "analytics")
+      refute result.halted
+    end
+
+    test "halts with 403 when user has not granted consent", %{conn: conn} do
+      user = insert(:user)
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, feature: "analytics")
+      assert result.halted
+      assert result.status == 403
+    end
+
+    test "halts with 403 when no user is authenticated", %{conn: conn} do
+      result = ConsentCheck.call(conn, feature: "analytics")
+      assert result.halted
+      assert result.status == 403
+    end
+
+    test "response body includes the feature name", %{conn: conn} do
+      user = insert(:user)
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, feature: "analytics")
+      body = Jason.decode!(result.resp_body)
+      assert body["feature"] == "analytics"
+      assert body["error"] == "consent_required"
+    end
+
+    test "defaults to analytics feature when none specified", %{conn: conn} do
+      user = insert(:user)
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, [])
+      assert result.halted
+    end
+  end
+end

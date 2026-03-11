@@ -77,6 +77,11 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"error" => "not found"} = json_response(conn, 404)
     end
 
+    test "returns 422 for an invalid (non-UUID) image_id", %{conn: conn} do
+      conn = get(conn, "/api/upload/not-a-uuid/status")
+      assert %{"error" => "invalid image_id"} = json_response(conn, 422)
+    end
+
     test "returns 401 without auth token" do
       conn = build_conn()
       conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
