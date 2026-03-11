@@ -71,18 +71,9 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
     try:
         parsed = json.loads(content)
     except (json.JSONDecodeError, TypeError):
-        raw_preview = content[:500] if content else ""
-        log.warning("extraction: failed to parse JSON", raw_content=raw_preview)
-        # Model may have returned markdown-wrapped JSON — try stripping code fences
-        stripped = (
-            content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-            if content
-            else ""
+        log.warning(
+            "extraction: failed to parse JSON", raw_content=content[:500] if content else ""
         )
-        try:
-            parsed = json.loads(stripped)
-        except (json.JSONDecodeError, TypeError):
-            parsed = {}
 
     if not parsed:
         log.warning("extraction: empty parse result", raw_content=content[:500] if content else "")
