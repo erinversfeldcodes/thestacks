@@ -44,7 +44,6 @@ type OutMsg
 type Msg
     = BookLoaded (Result Http.Error Book)
     | OpenBookshelfMover
-    | CloseBookshelfMover
     | SelectBookshelf String
     | ConfirmMove
     | MoveCompleted (Result Http.Error ())
@@ -106,9 +105,6 @@ update msg model maybeToken =
 
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
-
-        CloseBookshelfMover ->
-            ( { model | bookshelfMoverOpen = False }, Cmd.none, NoOut )
 
         SelectBookshelf bookshelf ->
             ( { model | selectedBookshelf = bookshelf }, Cmd.none, NoOut )

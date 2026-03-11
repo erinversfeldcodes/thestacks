@@ -1,6 +1,6 @@
 module Page.Login exposing
     ( Model
-    , Msg(..)
+    , Msg
     , OutMsg(..)
     , init
     , update

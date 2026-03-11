@@ -2,7 +2,6 @@ module Api exposing
     ( AuthResponse
     , PollResponse
     , PollStatus(..)
-    , authResponseDecoder
     , getBook
     , getBookshelf
     , login

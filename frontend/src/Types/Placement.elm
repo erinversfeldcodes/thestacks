@@ -1,11 +1,7 @@
 module Types.Placement exposing
     ( Format(..)
     , Placement
-    , PlacementHistory
-    , formatDecoder
-    , formatToString
     , placementDecoder
-    , placementHistoryDecoder
     )
 
 import Json.Decode as Decode exposing (Decoder)
@@ -16,19 +12,6 @@ type Format
     = Physical
     | EBook
     | Audiobook
-
-
-formatToString : Format -> String
-formatToString format =
-    case format of
-        Physical ->
-            "physical"
-
-        EBook ->
-            "ebook"
-
-        Audiobook ->
-            "audiobook"
 
 
 formatDecoder : Decoder Format
@@ -62,10 +45,6 @@ type alias Placement =
     }
 
 
-type alias PlacementHistory =
-    List Placement
-
-
 placementDecoder : Decoder Placement
 placementDecoder =
     Decode.map7 Placement
@@ -80,8 +59,3 @@ placementDecoder =
         )
         (Decode.maybe (Decode.field "personal_rating" Decode.int))
         (Decode.maybe (Decode.field "notes" Decode.string))
-
-
-placementHistoryDecoder : Decoder PlacementHistory
-placementHistoryDecoder =
-    Decode.list placementDecoder

@@ -3,7 +3,7 @@ module Components.FormatPicker exposing (formatPicker)
 import Html exposing (Html, button, div, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
-import Types.Placement exposing (Format(..), formatToString)
+import Types.Placement exposing (Format(..))
 
 
 formatPicker :

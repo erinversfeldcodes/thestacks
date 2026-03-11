@@ -34,8 +34,6 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Placement))
-    | SelectBook Book
-    | ClearSelection
     | VerifyAge
     | DismissAgeGate
 
@@ -67,12 +65,6 @@ update msg model =
 
                 Err err ->
                     ( { model | books = Failure err }, Cmd.none, NoOut )
-
-        SelectBook book ->
-            ( { model | selectedBook = Just book }, Cmd.none, NoOut )
-
-        ClearSelection ->
-            ( { model | selectedBook = Nothing }, Cmd.none, NoOut )
 
         VerifyAge ->
             ( model, Cmd.none, NavigateTo SettingsAgeVerification )
