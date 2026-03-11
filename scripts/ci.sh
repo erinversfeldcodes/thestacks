@@ -50,7 +50,10 @@ run_group() {
 # Determine which groups to run (default: all).
 # NOTE: Do NOT use GROUPS — it is a bash built-in read-only variable (user GIDs).
 if [[ $# -eq 0 ]]; then
-    CI_GROUPS=(elixir elm rust python proto dbt security squawk e2e licenses)
+    # e2e is excluded from the default run — it requires all services to be live,
+    # depends on vision model timing, and is covered by deploy-preview.sh smoke tests.
+    # Run explicitly with: scripts/ci.sh e2e
+    CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
 else
     CI_GROUPS=("$@")
 fi

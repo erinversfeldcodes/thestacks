@@ -35,23 +35,37 @@ source "$REPO_ROOT/scripts/lib/postgres.sh"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-port_open() {
-    nc -z localhost "$1" 2>/dev/null
-}
-
-wait_for_port() {
-    local port="$1"
+# wait_for_health <url> <name> [timeout_seconds]
+# Polls the given HTTP health endpoint until it returns HTTP 200.
+# Uses curl --fail so any non-2xx response is treated as not-ready.
+# This is deterministic: we verify the service is actually serving valid responses,
+# not just that a TCP port has been opened (which happens before the app is ready).
+wait_for_health() {
+    local url="$1"
     local name="$2"
-    local attempts=30
-    until port_open "$port"; do
-        if [[ $attempts -le 0 ]]; then
-            echo "ERROR: $name did not become ready on :$port in time." >&2
+    local timeout="${3:-60}"
+    local deadline=$(( $(date +%s) + timeout ))
+
+    until curl -sf --max-time 2 "$url" > /dev/null 2>&1; do
+        if [[ $(date +%s) -ge $deadline ]]; then
+            echo "ERROR: $name did not become healthy at $url within ${timeout}s." >&2
+            echo "       Last log output:" >&2
+            case "$name" in
+                Phoenix) tail -20 /tmp/stacks-phoenix.log >&2 ;;
+                Frontend) tail -5 /tmp/stacks-frontend.log >&2 ;;
+                Vision) tail -20 /tmp/stacks-vision.log >&2 ;;
+            esac
             exit 1
         fi
-        sleep 1
-        ((attempts--))
+        # No sleep — curl itself has a 2s timeout, so we're polling at most every 2s
+        # without any artificial delay between attempts.
     done
-    echo "  $name ready on :$port"
+    echo "  $name healthy at $url"
+}
+
+# port_open is kept for the "already running" pre-checks only.
+port_open() {
+    nc -z localhost "$1" 2>/dev/null
 }
 
 # ── Install E2E deps if needed ─────────────────────────────────────────────────
@@ -133,8 +147,15 @@ trap cleanup EXIT
 
 # ── Wait for services ─────────────────────────────────────────────────────────
 if [[ "${E2E_SERVICES:-}" != "none" ]]; then
-    wait_for_port 4000 "Phoenix"
-    wait_for_port 4001 "Frontend"
+    # Check the actual HTTP health endpoints, not just TCP port availability.
+    # Phoenix opens its socket early but isn't ready to handle requests until
+    # the DB pool is connected and routes are compiled — the health endpoint
+    # returns 200 only when the app is fully initialised.
+    wait_for_health "http://localhost:4000/api/health" "Phoenix" 120
+    wait_for_health "http://localhost:4001" "Frontend" 30
+    if [[ -f "$REPO_ROOT/apps/vision/app/main.py" ]]; then
+        wait_for_health "http://localhost:8000/health" "Vision" 30
+    fi
 fi
 
 # ── Run Playwright ────────────────────────────────────────────────────────────
