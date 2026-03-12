@@ -128,7 +128,6 @@ defmodule Stacks.GDPRTest do
           %{
             id: past_bin,
             book_id: book_id_bin,
-            storage_path: "/uploads/expired",
             status: "pending",
             uploaded_at: past,
             expires_at: past,
@@ -138,7 +137,6 @@ defmodule Stacks.GDPRTest do
           %{
             id: future_bin,
             book_id: book_id_bin,
-            storage_path: "/uploads/valid",
             status: "pending",
             uploaded_at: now,
             expires_at: future,
@@ -169,7 +167,6 @@ defmodule Stacks.GDPRTest do
           %{
             id: stuck_bin,
             book_id: book_id_bin,
-            storage_path: "/uploads/stuck",
             status: "pending",
             uploaded_at: stuck_at,
             expires_at: DateTime.add(stuck_at, 86_400, :second),
@@ -179,7 +176,6 @@ defmodule Stacks.GDPRTest do
           %{
             id: recent_bin,
             book_id: book_id_bin,
-            storage_path: "/uploads/recent",
             status: "pending",
             uploaded_at: now,
             expires_at: DateTime.add(now, 86_400, :second),

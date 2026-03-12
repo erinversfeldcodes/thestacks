@@ -23,6 +23,12 @@ end
 config :core, :vision_hmac_secret, vision_hmac_secret
 
 if config_env() == :prod do
+  vision_sidecar_url =
+    System.get_env("VISION_SIDECAR_URL") ||
+      raise "environment variable VISION_SIDECAR_URL is missing."
+
+  config :core, :vision_sidecar_url, vision_sidecar_url
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -54,4 +60,8 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+
+  # Use an absolute writable path for uploads in production.
+  # The relative default ("priv/static/uploads") is not writable in a Fly.io release.
+  config :core, upload_dir: "/tmp/uploads"
 end

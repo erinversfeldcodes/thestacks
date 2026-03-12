@@ -73,7 +73,6 @@ defmodule Stacks.Factory do
 
   def uploaded_image_factory do
     %UploadedImage{
-      storage_path: "#{Ecto.UUID.generate()}.jpg",
       status: "pending",
       uploaded_at: DateTime.utc_now(),
       expires_at: DateTime.add(DateTime.utc_now(), 30, :day)

@@ -105,34 +105,34 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Persists an uploaded file to the configured upload directory and inserts an
-  `UploadedImage` record. Returns `{:ok, uploaded_image}` or `{:error, reason}`.
+  Reads an uploaded file, inserts an `UploadedImage` record, and returns the record
+  together with the image bytes base64-encoded.
 
-  The storage path is relative (e.g. `"abc123.jpg"`). The URL the vision sidecar
-  uses to fetch the image is built by `IdentifyBookJob` from `:storage_base_url`.
-  In production, replace this with a Tigris/S3 upload.
+  Returns `{:ok, {uploaded_image, image_b64}}` or `{:error, reason}`.
+
+  The bytes are passed directly to `upload_and_identify/3` and included in the Oban
+  job args so any machine can execute the job without shared filesystem access.
   """
   @spec store_upload(binary(), Plug.Upload.t()) ::
-          {:ok, UploadedImage.t()} | {:error, term()}
-  def store_upload(_user_id, %Plug.Upload{filename: filename, path: tmp_path}) do
-    image_id = Ecto.UUID.generate()
-    ext = Path.extname(filename)
-    upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
-    File.mkdir_p!(upload_dir)
-    dest = Path.join(upload_dir, "#{image_id}#{ext}")
-
-    case File.copy(tmp_path, dest) do
-      {:ok, _} ->
+          {:ok, {UploadedImage.t(), String.t()}} | {:error, term()}
+  def store_upload(_user_id, %Plug.Upload{path: tmp_path}) do
+    case File.read(tmp_path) do
+      {:ok, bytes} ->
         now = DateTime.utc_now()
 
-        %UploadedImage{id: image_id}
-        |> UploadedImage.changeset(%{
-          storage_path: "#{image_id}#{ext}",
-          status: "pending",
-          uploaded_at: now,
-          expires_at: DateTime.add(now, 30, :day)
-        })
-        |> Repo.insert()
+        result =
+          %UploadedImage{}
+          |> UploadedImage.changeset(%{
+            status: "pending",
+            uploaded_at: now,
+            expires_at: DateTime.add(now, 30, :day)
+          })
+          |> Repo.insert()
+
+        case result do
+          {:ok, image} -> {:ok, {image, Base.encode64(bytes)}}
+          {:error, reason} -> {:error, reason}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -141,11 +141,13 @@ defmodule Stacks.Books do
 
   @doc """
   Enqueues a vision-model identification job for an uploaded image.
+  `image_b64` is included in the job args so the worker needs no filesystem access.
   Returns `{:ok, job}` immediately; the job resolves ISBN and creates the book asynchronously.
   """
-  @spec upload_and_identify(binary(), binary()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def upload_and_identify(user_id, image_id) do
-    %{user_id: user_id, image_id: image_id}
+  @spec upload_and_identify(binary(), binary(), String.t()) ::
+          {:ok, Oban.Job.t()} | {:error, term()}
+  def upload_and_identify(user_id, image_id, image_b64) do
+    %{user_id: user_id, image_id: image_id, image_b64: image_b64}
     |> IdentifyBookJob.new()
     |> Oban.insert()
   end
