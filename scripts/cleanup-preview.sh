@@ -41,16 +41,14 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
-VISION_APP="stacks-vision-pr-${SANITISED}"
+# Vision sidecar is a Modal-hosted ASGI app (shared, not per-PR) — no cleanup needed.
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
 echo "    Core app:   ${CORE_APP}"
-echo "    Vision app: ${VISION_APP}"
 
 # ── Fly apps ─────────────────────────────────────────────────────────────────
 if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
-    fly apps destroy "${CORE_APP}"   --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}."   || echo "    ${CORE_APP} not found (already gone)."
-    fly apps destroy "${VISION_APP}" --yes 2>/dev/null && echo "    Destroyed ${VISION_APP}." || echo "    ${VISION_APP} not found (already gone)."
+    fly apps destroy "${CORE_APP}" --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}." || echo "    ${CORE_APP} not found (already gone)."
 else
     echo "    SKIP: flyctl not available or FLY_API_TOKEN not set — skipping Fly cleanup."
 fi
