@@ -148,6 +148,24 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `npx elm-test`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/elm-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `elm-format` | Run `elm-format --validate` — must pass |
+| `elm make --optimize` | Run and confirm zero warnings |
+| TEA compliance | Model-Update-View structure; no logic in view functions |
+| Custom types for impossible states | Union types used instead of booleans/strings where applicable |
+| RemoteData for all API calls | No bare `Maybe` or custom loading states for HTTP responses |
+| Message naming | Messages use past tense (e.g., `BookPlaced`, not `PlaceBook`) |
+| Tests passing | `npx elm-test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -173,3 +191,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    ```
    Include any happy-path trace result if a view or interaction was exercised.
 6. DoD items satisfied — cite file:line evidence for each checked item.
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

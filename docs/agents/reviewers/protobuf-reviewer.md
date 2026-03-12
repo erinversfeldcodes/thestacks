@@ -15,12 +15,12 @@ You review `.proto` files, `buf` configuration, and generated code produced by t
 
 This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
 
-### 1. Task Completion & Schema Concordance
+### 1. Task Completion & Schema Concordance (judgment — reviewer only)
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file:line) for each
 - For **every** integration point listed in the issue (partner payloads, internal events, generated decoders), trace the full contract end-to-end: `.proto` definition → generated code (Elixir/Rust/Python/Elm) → usage in application code → wire format. Verify the schema correctly represents what the application needs to send and receive. Do not stop at one integration point.
 
-### 2. Protobuf Community Standards
+### 2. Protobuf Community Standards (mechanical — specialist self-checks)
 - **Naming**:
   - Package: `stacks.<domain>` (e.g. `stacks.partner`, `stacks.internal`)
   - Messages: PascalCase (`BookRecord`, `PartnerInventoryUpdate`)
@@ -49,7 +49,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
   - Every field has a comment explaining its meaning, units, and constraints
   - Partner-facing schemas must be especially well-documented — partners read these as API docs
 
-### 3. Test Correctness & Completeness
+### 3. Test Correctness & Completeness (mechanical — specialist self-checks)
 - **`buf lint` passes**: All lint rules pass. This is a hard requirement.
 - **`buf breaking` passes**: No breaking changes without an explicit migration path approved by the human.
 - **Generated code quality**: Does the generated Elixir, Rust, Python, or Elm code compile without warnings? Generated code that requires manual patching after generation is a smell — fix the `.proto` or the generator config.
@@ -57,14 +57,14 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Elm decoder correctness**: For partner-facing schemas, are the checked-in Elm decoders consistent with the `.proto` definitions? Are all fields decoded? Are enum values handled, including `UNSPECIFIED`?
 - **Edge case coverage**: Are there tests for messages with optional fields unset, repeated fields empty, `oneof` with each variant, and the zero enum value?
 
-### 4. Performance
+### 4. Performance (judgment — reviewer only)
 - **Message size**: Are there fields that will consistently carry large payloads (long text, base64-encoded blobs)? These should be stored by reference (URL, ID) rather than inline in the proto message.
 - **Repeated field patterns**: Very large repeated fields in a single message (hundreds of items) may indicate the wrong abstraction — consider pagination or streaming RPCs.
 - **Encoding efficiency**: Are fixed-width types (`int32`, `int64`) used where appropriate instead of variable-width (`string`) for numeric identifiers? UUIDs as strings are 36 bytes; as bytes are 16.
 - **Generated code overhead**: Does the generated Elixir or Rust code add significant runtime overhead for serialisation/deserialisation on hot paths?
 - **`oneof` vs nullable**: `oneof` is more efficient than multiple optional fields where only one is ever set — verify it's used where applicable.
 
-### 5. Security
+### 5. Security (mechanical — specialist self-checks)
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` and `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md`.
 - **Partner data isolation**: Partner-facing schemas in `proto/stacks/partner/` must never include fields for user data. Partners push inventory/events in; they never see user shelves, reading history, or personal data.
 - **Input validation at the boundary**: Protobuf deserialization does not validate business rules — verify that all Protobuf-validated payloads are also validated in application code (ISBN format, price ranges, enum membership).
@@ -72,7 +72,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **Upcasting strategy**: If schema versions are used, is there a documented upcasting strategy for handling messages with an older schema version? Missing upcasters are a data integrity risk.
 - **Auth not in proto**: Authentication is handled at the transport layer (HMAC headers, Guardian JWT) — proto schemas should not contain auth tokens or secrets as fields.
 
-### 6. Alternative Approaches Research
+### 6. Alternative Approaches Research (judgment — reviewer only)
 Before returning your verdict, actively research the following and include findings in your report:
 - Are there alternative schema definition formats (JSON Schema, OpenAPI, Avro, MessagePack, Cap'n Proto) that would be better suited for this project's use cases — particularly the partner JSON-on-wire pattern?
 - Are there alternative `buf` plugins or code generation targets worth enabling for better developer experience in any of the language stacks?
@@ -84,12 +84,12 @@ For each significant finding, state: **what** the alternative is, the **tradeoff
 
 This section is mandatory. The human will decide what to act on.
 
-### 7. Project Coding Standards
+### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — file organisation, schema evolution rules, code generation, event upcasting, Elm decoder exception
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, clarity, comments as documentation
 
-### 8. Forward Compatibility
+### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
@@ -103,6 +103,8 @@ Load and check against:
 ## Review Process
 
 0. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
+
+0b. **Self-Review Acknowledgement** — Check the specialist's Self-Review table in their completion report. Axes marked PASS may be spot-checked rather than re-run in full. Focus your review time on judgment axes (1, 6, 8) and any mixed axes where you assess quality beyond the mechanical check. A missing or empty Self-Review section is a blocker — return NEEDS_REVISION.
 
 1. Read the phase objective, DoD items, and all integration points from the invoking prompt
 2. Read every `.proto` file, `buf.yaml`, `buf.gen.yaml`, and generated code listed in the completion report

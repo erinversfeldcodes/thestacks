@@ -15,12 +15,12 @@ You review Elm frontend code changes produced by the elm-agent. You never write 
 
 This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
 
-### 1. Task Completion & User Story Concordance
+### 1. Task Completion & User Story Concordance (judgment — reviewer only)
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file:line) for each
 - For **every** user story listed in the issue file, trace the full user interaction end-to-end: user action → `Msg` → `update` → model state → `view` → rendered output → any API call and its `RemoteData` handling. Verify the story's acceptance criteria are met. Do not stop at one story.
 
-### 2. Elm Community Standards
+### 2. Elm Community Standards (mechanical — specialist self-checks)
 - **The Elm Architecture (TEA)**: Every page follows Model-Update-View. `init`, `update`, `view`, `subscriptions` clearly separated. No exceptions.
 - **Types as documentation**: Custom types over primitives. `type ShelfName = Library | AntiLibrary | WishList | ReadingPile` not `String`. Make invalid states unrepresentable.
 - **Impossible states**: Union type variants should make impossible combinations unrepresentable. A `DuplicateDetected` variant on upload result is better than a `Maybe Book` flag alongside a `Bool`.
@@ -33,14 +33,14 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Module structure**: One module per page or component. No god modules. Expose only what's needed. `Types/` modules for shared domain types.
 - **`elm make --optimize`**: Must compile with zero warnings.
 
-### 3. Test Correctness & Completeness
+### 3. Test Correctness & Completeness (mixed — specialist checks test presence; reviewer assesses test quality)
 - **Correctness**: Do tests assert the rendered output and model state, not internal implementation details? `elm-program-test` should simulate user interactions, not call `update` directly.
 - **Completeness**: Is there coverage for: happy path, all `RemoteData` states (`Loading`, `Failure`, `Success`), all union type variants in `update`, empty states, error messages rendered correctly?
 - **Decoder tests**: Every decoder must have a unit test that covers valid input, missing fields, and unexpected field types.
 - **Component tests**: Components with non-trivial view logic (e.g. `Spine` wear level calculation, `ISBNInput` checksum validation) must have unit tests.
 - **Test performance**: Flag any tests that are slow due to complex model setup. These slow down `elm-test` feedback loops.
 
-### 4. Performance
+### 4. Performance (mixed — specialist checks obvious patterns; reviewer assesses performance trade-offs)
 - **Unnecessary re-renders**: Large `update` branches that replace the entire model on minor changes cause full view recomputation. Sub-models for page state are better than a flat mega-model.
 - **Decoder efficiency**: Deeply nested or repeatedly applied decoders on large JSON payloads. Are there opportunities to decode lazily or partially?
 - **Subscription frequency**: Any `Time.every` or `Browser.onAnimationFrame` subscriptions — are they running when not needed? Should they be conditional on model state?
@@ -48,7 +48,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Animation**: Are CSS transitions used where possible over JS-driven animation? Elm's `Browser.Events.onAnimationFrame` is expensive if overused.
 - **Bundle size**: No unnecessary dependencies. Each `elm.json` dependency should be justified.
 
-### 5. Security
+### 5. Security (mixed — specialist checks XSS patterns; reviewer assesses threat model)
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
 - **XSS**: Elm's virtual DOM prevents most XSS, but check any `Html.Attributes.attribute` or port usage that passes raw strings to JS — these are the attack surface.
 - **Auth token handling**: JWT or session tokens must not be stored in `localStorage` without understanding the XSS tradeoff. Prefer `HttpOnly` cookies managed by Phoenix if possible. Flag how tokens are stored.
@@ -57,7 +57,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **API boundary**: All requests to Phoenix go through `Api.elm`. No hardcoded URLs or tokens scattered across page modules.
 - **GDPR**: Consent state must gate analytics calls. `Page.Settings.Consent` changes must propagate to prevent subsequent calls.
 
-### 6. Alternative Approaches Research
+### 6. Alternative Approaches Research (judgment — reviewer only)
 Before returning your verdict, actively research the following and include findings in your report:
 - Are there alternative Elm packages for any core concerns (routing, HTTP, animation, date handling) that are better maintained or more idiomatic?
 - Are there alternative patterns for managing shared state across pages (e.g. `OutMsg` pattern, shared `Session` type, parent-child message routing)?
@@ -69,13 +69,13 @@ For each significant finding, state: **what** the alternative is, the **tradeoff
 
 This section is mandatory. The human will decide what to act on.
 
-### 7. Project Coding Standards
+### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `elm-program-test` for pages, unit tests for decoders and components, Playwright only where a real browser is required
 - `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — Elm decoders checked in at `proto/gen/elm/`, consistent with proto definitions
 
-### 8. Forward Compatibility
+### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
@@ -89,6 +89,8 @@ Load and check against:
 ## Review Process
 
 0a. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
+
+0b. **Self-Review Acknowledgement** — Check the specialist's Self-Review table in their completion report. Axes marked PASS may be spot-checked rather than re-run in full. Focus your review time on judgment axes (1, 6, 8) and any mixed axes where you assess quality beyond the mechanical check. A missing or empty Self-Review section is a blocker — return NEEDS_REVISION.
 
 0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
    - Extract the full inventory of required items from the issue's Technical Requirements section:

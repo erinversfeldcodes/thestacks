@@ -108,6 +108,25 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `pytest`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/python-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `ruff format --check` | Run and confirm no formatting issues |
+| `ruff check` | Run and confirm no lint errors |
+| Type hints | All public functions have type annotations; no bare `Any` |
+| Pydantic v2 models | Request/response models use Pydantic v2 with `model_validator` |
+| FastAPI patterns | `Depends` for injection, explicit status codes, `HTTPException` for errors |
+| Async correctness | External service calls use `async def`; no `requests.get` in async code |
+| HMAC auth | Every non-health endpoint validates HMAC signature |
+| Tests passing | `pytest` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -133,3 +152,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    ```
    Include happy-path exercise result if an endpoint was exercised with a realistic request.
 6. DoD items satisfied — cite file:line evidence for each checked item.
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

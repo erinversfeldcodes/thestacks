@@ -146,6 +146,24 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `cargo test`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/rust-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `cargo fmt --check` | Run and confirm no formatting issues |
+| `cargo clippy -- -D warnings` | Run and confirm zero warnings |
+| Error handling | `thiserror` for library errors, `anyhow` for application errors; no `unwrap()` in library code |
+| Type system | Newtypes for domain concepts (ISBN, Price); enums for variants |
+| TOML config validation | Config structs validate on load; invalid configs fail fast |
+| HMAC auth | All requests to/from core validate HMAC signatures |
+| Tests passing | `cargo test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -171,3 +189,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    ```
    Include happy-path exercise result if a scraper or endpoint was exercised with real input.
 6. DoD items satisfied — cite file:line evidence for each checked item.
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

@@ -127,8 +127,30 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `mix test`
 
+### Self-Review
+
+Before submitting your completion report, load the relevant reviewer doc(s) for the stack you modified and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `mix sobelow` | Run and confirm no high-severity findings |
+| Auth enforcement | Guardian plugs applied to all protected routes; routes reject with 401 |
+| Argon2 for secrets | Partner API keys and passwords hashed with Argon2, never plaintext |
+| HMAC verification | Service-to-service calls validate HMAC signatures with constant-time comparison |
+| GDPR data classification | Personal data columns documented; consent timestamps present |
+| Input validation | All external inputs validated at boundaries |
+| Tests passing | `mix test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
 3. Security scan results
 4. DoD items satisfied for this phase
+5. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.
