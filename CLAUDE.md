@@ -22,7 +22,7 @@
 | Bookshop price scraper | Rust microservice | `apps/scraper/` |
 | Data transforms | dbt | `dbt/` |
 | Schema contracts | Protobuf + buf | `proto/` |
-| Infrastructure | Fly.io (JHB), Nix/Flox | `deploy/`, `nix/` |
+| Infrastructure | Fly.io (IAD), Nix/Flox | `deploy/`, `nix/` |
 | Database | PostgreSQL (op, wh, audit schemas) | `apps/core/priv/repo/migrations/` |
 
 ## Core Conventions

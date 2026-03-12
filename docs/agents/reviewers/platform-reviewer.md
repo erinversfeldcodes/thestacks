@@ -25,7 +25,7 @@ You review infrastructure, CI/CD, Docker, Nix, and deployment configuration chan
   - Health checks configured with appropriate `interval`, `timeout`, and `grace_period`
   - Private networking (`internal_port`, `auto_rollback`) for scraper (vision service is on Modal, not Fly)
   - Secrets via `fly secrets set`, never in TOML files
-  - Region set to JHB (`yyz` is wrong, `jnb` is correct)
+  - Region set to IAD (`iad` is correct; `yyz`, `jnb` are wrong)
   - Resource sizing appropriate: core 256MB, vision 512MB, scraper 256MB
   - `force_https = true` for public-facing core service
 - **GitHub Actions CI**:
@@ -76,7 +76,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 
 ### 6. Alternative Approaches Research
 Before returning your verdict, actively research the following and include findings in your report:
-- Are there alternative deployment targets or configurations for this stack that would offer better cost, latency, or reliability from the JHB region (e.g. Railway, Render, Hetzner, AWS Cape Town)?
+- Are there alternative deployment targets or configurations for this stack that would offer better cost, latency, or reliability from the IAD region (e.g. Railway, Render, Hetzner, AWS)?
 - Are there alternative CI approaches for Elixir + multi-language monorepos (e.g. Earthly, Dagger, Nx) that would give better caching or developer experience?
 - Are there alternative base images or build strategies for the Elixir release that would produce smaller or faster-starting images?
 - Are there alternative secret management approaches worth considering (e.g. Fly secrets vs Vault vs environment injection)?
@@ -141,7 +141,7 @@ Load and check against:
 ### Platform Community Standards
 [Assessment with specific file path references]
 - Dockerfiles: [multi-stage? minimal runtime? non-root? no secrets in layers? COPY specific?]
-- Fly.io: [health checks? private networking for internal services? JHB region? force_https?]
+- Fly.io: [health checks? private networking for internal services? IAD region? force_https?]
 - CI/CD: [path filtering correct? caching correct? deploy gated on tests? no secrets in YAML?]
 - Nix: [all tools pinned? devShell complete?]
 - justfile: [all recipes present? composable?]
