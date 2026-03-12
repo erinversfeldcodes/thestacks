@@ -55,6 +55,7 @@ node_modules/
 .claude/settings.local.json
 .claude/worktrees/
 plans/*-state.json
+plans/*-state-complete.json
 
 # IDE
 .idea/
