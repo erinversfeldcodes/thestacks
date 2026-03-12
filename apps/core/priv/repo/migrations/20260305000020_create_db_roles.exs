@@ -2,46 +2,61 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
   use Ecto.Migration
 
   def up do
+    # Role passwords come from env vars so weak hardcoded passwords are never sent
+    # to hosted databases (e.g. Neon enforces a minimum password strength policy).
+    # If the env vars are not set, role creation is skipped — the application still
+    # works because it connects as the database owner role (neondb_owner on Neon,
+    # postgres locally). The fine-grained roles are set up out-of-band when needed.
+    app_password = System.get_env("STACKS_APP_DB_PASSWORD")
+    dbt_password = System.get_env("STACKS_DBT_DB_PASSWORD")
+
+    if app_password || dbt_password do
+      execute("""
+      DO $$ BEGIN
+        #{if app_password, do: "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN CREATE ROLE stacks_app LOGIN PASSWORD '#{app_password}'; END IF;", else: ""}
+        #{if dbt_password, do: "IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN CREATE ROLE stacks_dbt LOGIN PASSWORD '#{dbt_password}'; END IF;", else: ""}
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_readonly') THEN
+          CREATE ROLE stacks_readonly NOLOGIN;
+        END IF;
+      END $$;
+      """)
+    end
+
+    # Only grant privileges if the roles were actually created above.
     execute("""
     DO $$ BEGIN
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
-        CREATE ROLE stacks_app LOGIN PASSWORD 'stacks_app';
+      -- stacks_app: CRUD on op, SELECT on wh, INSERT-only on audit
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
+        GRANT USAGE ON SCHEMA op TO stacks_app;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA op TO stacks_app;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA op GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stacks_app;
+        GRANT USAGE ON SCHEMA wh TO stacks_app;
+        GRANT SELECT ON ALL TABLES IN SCHEMA wh TO stacks_app;
+        GRANT USAGE ON SCHEMA audit TO stacks_app;
+        GRANT INSERT ON ALL TABLES IN SCHEMA audit TO stacks_app;
+        REVOKE UPDATE, DELETE ON audit.audit_log FROM stacks_app;
       END IF;
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
-        CREATE ROLE stacks_dbt LOGIN PASSWORD 'stacks_dbt';
+
+      -- stacks_dbt: SELECT on op + audit, CRUD on wh
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
+        GRANT USAGE ON SCHEMA op TO stacks_dbt;
+        GRANT SELECT ON ALL TABLES IN SCHEMA op TO stacks_dbt;
+        GRANT USAGE ON SCHEMA audit TO stacks_dbt;
+        GRANT SELECT ON ALL TABLES IN SCHEMA audit TO stacks_dbt;
+        GRANT USAGE ON SCHEMA wh TO stacks_dbt;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wh TO stacks_dbt;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA wh GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stacks_dbt;
       END IF;
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_readonly') THEN
-        CREATE ROLE stacks_readonly NOLOGIN;
+
+      -- stacks_readonly: SELECT on op and wh
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_readonly') THEN
+        GRANT USAGE ON SCHEMA op TO stacks_readonly;
+        GRANT SELECT ON ALL TABLES IN SCHEMA op TO stacks_readonly;
+        GRANT USAGE ON SCHEMA wh TO stacks_readonly;
+        GRANT SELECT ON ALL TABLES IN SCHEMA wh TO stacks_readonly;
       END IF;
     END $$;
     """)
-
-    # stacks_app: CRUD on op, SELECT on wh, INSERT-only on audit
-    execute("GRANT USAGE ON SCHEMA op TO stacks_app")
-    execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA op TO stacks_app")
-    execute("ALTER DEFAULT PRIVILEGES IN SCHEMA op GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stacks_app")
-    execute("GRANT USAGE ON SCHEMA wh TO stacks_app")
-    execute("GRANT SELECT ON ALL TABLES IN SCHEMA wh TO stacks_app")
-    execute("GRANT USAGE ON SCHEMA audit TO stacks_app")
-    execute("GRANT INSERT ON ALL TABLES IN SCHEMA audit TO stacks_app")
-
-    # stacks_dbt: SELECT on op + audit (read source schemas), CRUD on wh (write transform output)
-    execute("GRANT USAGE ON SCHEMA op TO stacks_dbt")
-    execute("GRANT SELECT ON ALL TABLES IN SCHEMA op TO stacks_dbt")
-    execute("GRANT USAGE ON SCHEMA audit TO stacks_dbt")
-    execute("GRANT SELECT ON ALL TABLES IN SCHEMA audit TO stacks_dbt")
-    execute("GRANT USAGE ON SCHEMA wh TO stacks_dbt")
-    execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wh TO stacks_dbt")
-    execute("ALTER DEFAULT PRIVILEGES IN SCHEMA wh GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stacks_dbt")
-
-    # stacks_readonly: SELECT on op and wh
-    execute("GRANT USAGE ON SCHEMA op TO stacks_readonly")
-    execute("GRANT SELECT ON ALL TABLES IN SCHEMA op TO stacks_readonly")
-    execute("GRANT USAGE ON SCHEMA wh TO stacks_readonly")
-    execute("GRANT SELECT ON ALL TABLES IN SCHEMA wh TO stacks_readonly")
-
-    # audit_log: INSERT-only for stacks_app (revoke UPDATE/DELETE explicitly)
-    execute("REVOKE UPDATE, DELETE ON audit.audit_log FROM stacks_app")
   end
 
   def down do

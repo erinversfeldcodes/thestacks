@@ -11,9 +11,6 @@ import Html.Attributes exposing (class, style, title)
 type WearLevel
     = Pristine
     | Softened
-    | Cracking
-    | WellRead
-    | WellLoved
 
 
 spineWidth : Int -> Int
@@ -29,15 +26,6 @@ wearLevelClass wearLevel =
 
         Softened ->
             "spine--softened"
-
-        Cracking ->
-            "spine--cracking"
-
-        WellRead ->
-            "spine--wellread"
-
-        WellLoved ->
-            "spine--wellloved"
 
 
 bookmarkSvg : Html msg

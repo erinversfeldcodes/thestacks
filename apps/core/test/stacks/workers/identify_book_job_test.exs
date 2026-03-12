@@ -8,20 +8,15 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
   alias Stacks.Workers.IdentifyBookJob
 
-  # Each test needs an uploaded_images DB record + corresponding file on disk
-  # so that load_image_b64/1 succeeds and the pipeline can run.
+  @image_b64 Base.encode64("fake image bytes for testing")
+
   setup do
     user = insert(:user)
     image = insert(:uploaded_image)
-
-    upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
-    File.mkdir_p!(upload_dir)
-    image_path = Path.join(upload_dir, image.storage_path)
-    File.write!(image_path, "fake image bytes for testing")
-
-    on_exit(fn -> File.rm(image_path) end)
-
-    {:ok, user: user, image: image}
+    # Pre-insert the book the MockVisionClient returns so store_book finds it via
+    # Books.find_existing/1 without needing to resolve metadata over HTTP.
+    book = insert(:book, isbn: "9780743273565")
+    {:ok, user: user, image: image, book: book}
   end
 
   describe "perform/1 — happy path" do
@@ -29,7 +24,12 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      assert :ok = perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+      assert :ok =
+               perform_job(IdentifyBookJob, %{
+                 "user_id" => user.id,
+                 "image_id" => image.id,
+                 "image_b64" => @image_b64
+               })
     end
   end
 
@@ -44,7 +44,11 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
 
         assert {:cancel, "image does not contain a book"} =
-                 perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
       after
         Application.put_env(:core, :vision_client, original)
       end
@@ -62,7 +66,11 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
 
         assert {:cancel, "isbn_not_found"} =
-                 perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
       after
         Application.put_env(:core, :vision_client, original)
       end
@@ -80,82 +88,45 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         Application.put_env(:core, :vision_client, __MODULE__.ErrorClient)
 
         assert {:error, :service_unavailable} =
-                 perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
       after
         Application.put_env(:core, :vision_client, original)
       end
     end
   end
 
-  describe "perform/1 — image_not_found" do
-    test "returns {:error, :image_not_found} when image_id has no DB record", %{user: user} do
-      missing_id = Ecto.UUID.generate()
-
-      assert {:error, :image_not_found} =
-               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => missing_id})
+  describe "perform/1 — image not in DB" do
+    test "returns :ok and logs warning when resolved image_id does not exist in DB", %{user: user} do
+      # mark_resolved finds no rows → logs "not found" but still returns :ok
+      assert :ok =
+               perform_job(IdentifyBookJob, %{
+                 "user_id" => user.id,
+                 "image_id" => Ecto.UUID.generate(),
+                 "image_b64" => @image_b64
+               })
     end
-  end
 
-  describe "perform/1 — invalid_storage_path" do
-    test "returns {:error, :invalid_storage_path} when storage_path is a degenerate name", %{
-      user: user,
-      image: image
+    test "returns {:cancel, reason} and logs warning when rejected image_id does not exist", %{
+      user: user
     } do
-      # Security model: Path.basename/1 neutralises directory traversal attempts
-      # (e.g. "../../../etc/passwd" → "passwd"), so deep traversal paths are safe.
-      # The valid_upload_filename? guard catches degenerate names that basename
-      # cannot reduce to a safe filename: "..", ".", and the empty string.
-      {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
+      original = Application.get_env(:core, :vision_client)
 
-      import Ecto.Query
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
 
-      Core.Repo.update_all(
-        from(i in "uploaded_images", where: i.id == ^image_id_bin),
-        [set: [storage_path: ".."]],
-        prefix: "op"
-      )
-
-      assert {:error, :invalid_storage_path} =
-               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
-    end
-  end
-
-  describe "perform/1 — file_read error" do
-    test "returns {:error, {:file_read, _}} when file is missing from disk", %{
-      user: user,
-      image: image
-    } do
-      upload_dir = Application.get_env(:core, :upload_dir, "priv/static/uploads")
-      File.rm!(Path.join(upload_dir, image.storage_path))
-
-      assert {:error, {:file_read, _reason}} =
-               perform_job(IdentifyBookJob, %{"user_id" => user.id, "image_id" => image.id})
-    end
-  end
-
-  describe "valid_upload_filename?/1" do
-    test "accepts a normal UUID-style filename" do
-      assert IdentifyBookJob.valid_upload_filename?("abc123-def456.jpg")
-    end
-
-    test "rejects empty string" do
-      refute IdentifyBookJob.valid_upload_filename?("")
-    end
-
-    test "rejects dot (current directory)" do
-      refute IdentifyBookJob.valid_upload_filename?(".")
-    end
-
-    test "rejects double-dot (parent directory)" do
-      refute IdentifyBookJob.valid_upload_filename?("..")
-    end
-
-    test "rejects names containing forward slash" do
-      refute IdentifyBookJob.valid_upload_filename?("some/path")
-    end
-
-    test "rejects names containing backslash" do
-      refute IdentifyBookJob.valid_upload_filename?("some\\path")
+        assert {:cancel, "image does not contain a book"} =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => Ecto.UUID.generate(),
+                   "image_b64" => @image_b64
+                 })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
     end
   end
 

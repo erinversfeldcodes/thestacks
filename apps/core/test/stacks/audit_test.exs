@@ -41,5 +41,12 @@ defmodule Stacks.AuditTest do
       user = insert(:user)
       assert {:ok, _entry} = Audit.log(user.id, "minimal.action")
     end
+
+    test "handles non-UUID resource_id gracefully (encode_uuid returns nil)" do
+      user = insert(:user)
+      # Passing a non-UUID string as resource_id hits encode_uuid's :error branch
+      assert {:ok, _entry} =
+               Audit.log(user.id, "test.action", resource_id: "not-a-uuid-string")
+    end
   end
 end

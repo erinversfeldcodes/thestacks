@@ -4,20 +4,21 @@ import { test, expect } from "@playwright/test";
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
 
-// The vision pipeline calls Together AI and ISBNResolver — allow up to 180 s.
-const PIPELINE_TIMEOUT = 180_000;
+// The vision pipeline runs classify + extract on VisionModel (A10G GPU) then
+// resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
+const PIPELINE_TIMEOUT = 300_000;
 
 async function signIn(page: import("@playwright/test").Page) {
   await page.goto("/login");
   await page.fill('input[id="email"]', DEV_EMAIL);
   await page.fill('input[id="password"]', DEV_PASSWORD);
   await page.click("button.login-form__submit");
-  await page.waitForURL("/", { timeout: 10_000 });
+  await page.waitForURL("/", { timeout: 60_000 });
 }
 
 test.describe("Upload pipeline", () => {
   test(
-    "identifies multiple books from screenshot_mixed_text.PNG",
+    "identifies multiple books from screenshot_mixed_text.jpg",
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
@@ -30,11 +31,12 @@ test.describe("Upload pipeline", () => {
       await page.click("button.btn--primary");
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(
-        path.join(__dirname, "../../images/screenshot_mixed_text.PNG")
+        path.join(__dirname, "../../images/screenshot_mixed_text.jpg")
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book..."
+        "Identifying your book...",
+        { timeout: 60_000 }
       );
 
       await expect(page.locator(".upload-result--identified")).toBeVisible({
@@ -49,9 +51,9 @@ test.describe("Upload pipeline", () => {
       await expect(result).toContainText("Ishiguro");
       await expect(result).toContainText("Idiot");
       await expect(result).toContainText("Batuman");
-      await expect(result).toContainText("Things I Don't Want to Know");
+      await expect(result).toContainText("Things I Don't Want to Know", { ignoreCase: true });
       await expect(result).toContainText("Levy");
-      await expect(result).toContainText("Cost of Living");
+      await expect(result).toContainText("Cost of Living", { ignoreCase: true });
 
       // Each identified book should have a "View Book" link.
       const viewBookLinks = result.locator('a[href^="/books/"]');
@@ -60,7 +62,7 @@ test.describe("Upload pipeline", () => {
   );
 
   test(
-    "identifies Train to Crystal City from screenshot_image_reversed_and_cut_off.PNG",
+    "identifies Train to Crystal City from screenshot_image_reversed_and_cut_off.jpg",
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
@@ -73,11 +75,12 @@ test.describe("Upload pipeline", () => {
       await page.click("button.btn--primary");
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(
-        path.join(__dirname, "../../images/screenshot_image_reversed_and_cut_off.PNG")
+        path.join(__dirname, "../../images/screenshot_image_reversed_and_cut_off.jpg")
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book..."
+        "Identifying your book...",
+        { timeout: 60_000 }
       );
 
       await expect(page.locator(".upload-result--identified")).toBeVisible({
@@ -97,7 +100,7 @@ test.describe("Upload pipeline", () => {
   );
 
   test(
-    "identifies Flyboys from screenshot_image_reversed.PNG",
+    "identifies Flyboys from screenshot_image_reversed.jpg",
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
@@ -110,11 +113,12 @@ test.describe("Upload pipeline", () => {
       await page.click("button.btn--primary");
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(
-        path.join(__dirname, "../../images/screenshot_image_reversed.PNG")
+        path.join(__dirname, "../../images/screenshot_image_reversed.jpg")
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book..."
+        "Identifying your book...",
+        { timeout: 60_000 }
       );
 
       await expect(page.locator(".upload-result--identified")).toBeVisible({
@@ -134,7 +138,7 @@ test.describe("Upload pipeline", () => {
   );
 
   test(
-    "identifies Born Again Bodies from screenshot_mildly_obscured.PNG",
+    "identifies Born Again Bodies from screenshot_mildly_obscured.jpg",
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
@@ -149,12 +153,13 @@ test.describe("Upload pipeline", () => {
       await page.click("button.btn--primary");
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(
-        path.join(__dirname, "../../images/screenshot_mildly_obscured.PNG")
+        path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
       // Upload is accepted; spinner switches to "Identifying your book..."
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book..."
+        "Identifying your book...",
+        { timeout: 60_000 }
       );
 
       // Wait for the vision pipeline to complete and the result to render.

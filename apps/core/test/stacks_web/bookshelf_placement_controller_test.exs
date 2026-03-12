@@ -179,4 +179,71 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/placements/:id/formats
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/placements/:id/formats — update_formats" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user)
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+      other_user = insert(:user)
+
+      %{
+        conn: auth_conn(conn, user),
+        user: user,
+        placement: placement,
+        other_user: other_user
+      }
+    end
+
+    test "returns 200 with updated formats", %{conn: conn, placement: placement} do
+      conn = put(conn, "/api/placements/#{placement.id}/formats", %{formats: ["hardcover"]})
+      assert %{"placement" => %{"formats" => ["hardcover"]}} = json_response(conn, 200)
+    end
+
+    test "returns 200 with multiple formats", %{conn: conn, placement: placement} do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/formats", %{
+          formats: ["hardcover", "ebook"]
+        })
+
+      response = json_response(conn, 200)
+      assert "hardcover" in response["placement"]["formats"]
+      assert "ebook" in response["placement"]["formats"]
+    end
+
+    test "returns 403 when user tries to update another user's placement formats", %{
+      conn: conn,
+      other_user: other_user
+    } do
+      other_bookshelf = insert(:bookshelf, user: other_user)
+      other_placement = insert(:placement, bookshelf: other_bookshelf, book: insert(:book))
+
+      conn =
+        put(conn, "/api/placements/#{other_placement.id}/formats", %{formats: ["hardcover"]})
+
+      assert json_response(conn, 403)
+    end
+
+    test "returns 422 when formats parameter is missing", %{conn: conn, placement: placement} do
+      conn = put(conn, "/api/placements/#{placement.id}/formats", %{})
+      assert json_response(conn, 422)
+    end
+
+    test "returns 422 when formats is not an array", %{conn: conn, placement: placement} do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/formats", %{formats: "not_an_array"})
+
+      assert json_response(conn, 422)
+    end
+
+    test "returns 401 when not authenticated", %{conn: _conn, placement: placement} do
+      conn = build_conn() |> put("/api/placements/#{placement.id}/formats", %{formats: []})
+      assert json_response(conn, 401)
+    end
+  end
 end

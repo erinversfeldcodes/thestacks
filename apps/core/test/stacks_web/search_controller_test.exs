@@ -39,6 +39,31 @@ defmodule StacksWeb.SearchControllerTest do
       assert %{"error" => _} = json_response(conn, 422)
     end
 
+    test "respects a valid limit parameter", %{conn: conn} do
+      for i <- 1..5, do: insert(:book, title: "Rustica#{i}", isbn: "978000000000#{i}")
+
+      conn = get(conn, "/api/search", q: "Rustica", limit: "2")
+      response = json_response(conn, 200)
+
+      assert length(response["results"]) <= 2
+    end
+
+    test "ignores invalid limit and defaults to 20", %{conn: conn} do
+      conn = get(conn, "/api/search", q: "anything", limit: "not_a_number")
+      assert json_response(conn, 200)
+    end
+
+    test "returns author info when book has an associated author", %{conn: conn} do
+      author = insert(:author, name: "Ursula K. Le Guin")
+      insert(:book, title: "Lefthandedness", isbn: "9780441478125", author: author)
+
+      conn = get(conn, "/api/search", q: "Lefthandedness")
+      response = json_response(conn, 200)
+
+      [result | _] = response["results"]
+      assert result["author"]["name"] == "Ursula K. Le Guin"
+    end
+
     test "returns 401 without authentication" do
       conn = build_conn() |> get("/api/search", q: "test")
       assert json_response(conn, 401)

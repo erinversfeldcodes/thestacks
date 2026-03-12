@@ -27,6 +27,14 @@ if config_env() != :test do
 end
 
 if config_env() == :prod do
+  vision_service_url =
+    System.get_env("VISION_SERVICE_URL") ||
+      raise "environment variable VISION_SERVICE_URL is missing."
+
+  config :core, :vision_service_url, vision_service_url
+end
+
+if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -38,6 +46,7 @@ if config_env() == :prod do
 
   config :core, Core.Repo,
     url: database_url,
+    ssl: true,
     parameters: [search_path: "op,public"],
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6
@@ -59,4 +68,8 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+
+  # Use an absolute writable path for uploads in production.
+  # The relative default ("priv/static/uploads") is not writable in a Fly.io release.
+  config :core, upload_dir: "/tmp/uploads"
 end

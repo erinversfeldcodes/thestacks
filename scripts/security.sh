@@ -29,7 +29,6 @@ semgrep scan --config auto --error
 
 # Dockerfile linting
 hadolint deploy/Dockerfile.core
-hadolint deploy/Dockerfile.vision
 hadolint deploy/Dockerfile.scraper
 
 # Infrastructure-as-code scanning
@@ -37,3 +36,45 @@ checkov --directory deploy/
 
 # Vulnerability scanning (filesystem)
 trivy fs . --severity CRITICAL,HIGH --exit-code 1
+
+# TruffleHog — deep entropy-based secret scanning
+if command -v trufflehog &>/dev/null; then
+    trufflehog filesystem . --only-verified --fail
+else
+    echo "SKIP: trufflehog not installed (brew install trufflehog)"
+fi
+
+# Syft + Grype — SBOM generation and CVE scanning
+if command -v syft &>/dev/null && command -v grype &>/dev/null; then
+    syft . -o cyclonedx-json > /tmp/stacks-sbom.json
+    grype sbom:/tmp/stacks-sbom.json --fail-on high
+    rm -f /tmp/stacks-sbom.json
+else
+    echo "SKIP: syft/grype not installed (brew install syft grype)"
+fi
+
+# dbt-checkpoint — static model quality gates (no DB required)
+# Verifies staging schema.yml has descriptions and sources.yml has freshness config.
+if command -v dbt-checkpoint &>/dev/null; then
+    echo "Running dbt-checkpoint quality gates..."
+    dbt-checkpoint check-model-has-description dbt/models/staging/schema.yml
+    dbt-checkpoint check-source-has-freshness dbt/models/staging/sources.yml
+else
+    echo "SKIP: dbt-checkpoint not installed (pip install dbt-checkpoint)"
+fi
+
+# Dockle — CIS Docker Benchmark for each Dockerfile
+if command -v dockle &>/dev/null; then
+    if command -v docker &>/dev/null; then
+        echo "Running dockle CIS benchmark..."
+        docker build -q -t stacks-dockle-core -f deploy/Dockerfile.core . && \
+            dockle --exit-code 1 --exit-level WARN stacks-dockle-core
+        docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper . && \
+            dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
+        docker rmi stacks-dockle-core stacks-dockle-scraper 2>/dev/null || true
+    else
+        echo "SKIP: docker not available — cannot run dockle (dockle requires a built image)"
+    fi
+else
+    echo "SKIP: dockle not installed (brew install goodwithtech/r/dockle)"
+fi

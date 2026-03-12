@@ -87,7 +87,7 @@ Elm's type safety is the main value proposition. Ports break it. File uploads us
 ## Integration Handoffs
 - **elixir-agent:** API contracts — request/response JSON shapes must match
 - **protobuf-agent:** When `.proto` files change, regenerate and check in Elm decoders
-- **python-agent:** None direct (vision sidecar is backend-only)
+- **python-agent:** None direct (vision service is backend-only)
 - **rust-agent:** None direct (scraper is backend-only)
 
 ## Testing Strategy

@@ -33,9 +33,10 @@ brew "superfly/tap/flyctl"
 # ── Security scanning (for scripts/security.sh / CI) ─────────────────────────
 brew "gitleaks"
 brew "hadolint"
+brew "nuclei"
 brew "semgrep"
 brew "trivy"
-# checkov is installed via pip (see setup.sh) — no Homebrew formula
+# checkov installed via pip (see setup.sh); jwt_tool cloned from GitHub (not on PyPI)
 
 # ── Misc dev tools ────────────────────────────────────────────────────────────
 brew "gh"

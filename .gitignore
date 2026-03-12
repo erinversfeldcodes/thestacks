@@ -32,6 +32,8 @@ venv/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Nix
 result
@@ -69,5 +71,8 @@ e2e/test-results
 apps/core/cover/
 frontend/test-results
 frontend/public
-priv/
+/priv/
+!apps/core/priv/repo/
 test-results/
+apps/core/priv/static/elm.js
+apps/core/priv/static/index.html

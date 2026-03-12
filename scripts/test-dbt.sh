@@ -3,6 +3,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Load local .env for dev secrets (CLOAK_KEY, etc.) if running outside CI.
+if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
+    set -a; source "$REPO_ROOT/.env"; set +a
+fi
+
 # Ensure pip-installed tools (dbt, sqlfluff) are on PATH.
 # Python --user installs land in ~/Library/Python/*/bin on macOS.
 for pybin in "$HOME"/Library/Python/*/bin; do

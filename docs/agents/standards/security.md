@@ -22,7 +22,8 @@ Security is not a feature — it's a property of the system. Every agent must co
 - Rotation invalidates old key immediately
 
 ### Service-to-Service
-- Fly.io private networking (`.internal` DNS) — no public endpoints for sidecar/scraper
+- Core ↔ scraper: Fly.io private networking (`.internal` DNS) — no public endpoint for scraper
+- Core ↔ vision service: HMAC-signed requests over public Modal HTTPS (`VISION_HMAC_SECRET` shared secret)
 - HMAC-signed requests as defence in depth
 
 ---
@@ -116,7 +117,7 @@ GenServer tracks daily and monthly spend:
 | Auth endpoints | 5/min | Per IP | Token bucket |
 | Upload | 10/min | Per user | Token bucket |
 | Partner API | 100/min, 10k/day | Per API key | Sliding window + daily counter |
-| Vision sidecar | Budget-controlled | Global | GenServer with cost tracking |
+| Vision service (Modal) | Budget-controlled | Global | GenServer with cost tracking |
 
 ---
 

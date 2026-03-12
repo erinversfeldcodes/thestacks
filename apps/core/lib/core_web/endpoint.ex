@@ -9,6 +9,13 @@ defmodule CoreWeb.Endpoint do
   ]
 
   plug Plug.RequestId
+
+  plug Plug.Static,
+    at: "/",
+    from: {:core, "priv/static"},
+    gzip: false,
+    only: ~w(css elm.js public favicon.ico robots.txt uploads)
+
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug CORSPlug,

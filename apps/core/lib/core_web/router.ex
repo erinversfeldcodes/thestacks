@@ -60,4 +60,9 @@ defmodule CoreWeb.Router do
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
   end
+
+  # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
+  scope "/", CoreWeb do
+    get "/*path", PageController, :index
+  end
 end

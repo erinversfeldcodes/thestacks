@@ -23,7 +23,7 @@ You review infrastructure, CI/CD, Docker, Nix, and deployment configuration chan
   - `.dockerignore` excludes `_build`, `deps`, `.git`, `node_modules`, `.env`, test fixtures
 - **Fly.io config**:
   - Health checks configured with appropriate `interval`, `timeout`, and `grace_period`
-  - Private networking (`internal_port`, `auto_rollback`) for vision sidecar and scraper
+  - Private networking (`internal_port`, `auto_rollback`) for scraper (vision service is on Modal, not Fly)
   - Secrets via `fly secrets set`, never in TOML files
   - Region set to JHB (`yyz` is wrong, `jnb` is correct)
   - Resource sizing appropriate: core 256MB, vision 512MB, scraper 256MB
@@ -65,7 +65,7 @@ You review infrastructure, CI/CD, Docker, Nix, and deployment configuration chan
 
 ### 5. Security
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
-- **Private networking**: Vision sidecar and scraper must not be publicly reachable. Verify `internal_port` only, no public `services` block in their Fly TOML files.
+- **Private networking**: Rust scraper must not be publicly reachable on Fly — verify `internal_port` only, no public `services` block. Vision service is on Modal with HMAC auth on a public HTTPS endpoint — verify `VISION_HMAC_SECRET` is set as both a Fly secret (core) and a Modal secret (vision).
 - **Secrets management**: All secrets in Fly via `fly secrets set`. No secrets in TOML, Dockerfiles, workflow files, or `.env.example`.
 - **Container scanning**: Trivy or equivalent configured in CI to scan final images for CVEs.
 - **IaC scanning**: Checkov or Hadolint scanning Dockerfiles and Fly TOML for misconfigurations.
@@ -135,7 +135,7 @@ Load and check against:
 
 ### Functional Requirements Concordance
 - **core service**: [env vars wired? health check configured? secrets handled? networking correct?]
-- **vision sidecar**: [private networking only? resource sizing? HMAC secret injected?]
+- **vision service (Modal)**: [VISION_SERVICE_URL set as Fly secret on core? VISION_HMAC_SECRET set as Modal secret? modal deploy runs in CI?]
 - **scraper**: [private networking only? resource sizing? config mounted?]
 
 ### Platform Community Standards

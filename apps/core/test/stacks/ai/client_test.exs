@@ -55,6 +55,43 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
+  describe "call_vision/2 — real HTTP client path" do
+    # These tests temporarily configure the real HTTP client (instead of MockClient).
+    # The Modal vision service is not running in unit tests, so Finch returns a
+    # connection-refused error. This exercises the error-handling paths in
+    # do_call_vision/make_vision_request without making real external requests.
+
+    test "returns {:error, _} when vision service is unavailable" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, Client)
+        # The fuse for :vision_service may not be installed in test env; either
+        # path (fuse ok → Finch error, or fuse not found → Finch error) returns
+        # {:error, reason}.
+        result = Client.call_vision("is_book", %{image: "test"})
+        assert {:error, _} = result
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "do_call_vision covers all endpoint_path variants" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, Client)
+
+        for endpoint <- ["is_book", "extract_isbn", "some_other"] do
+          result = Client.call_vision(endpoint, %{})
+          assert {:error, _} = result
+        end
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   describe "build_vision_request/2 — cross-language HMAC compatibility" do
     # Verifies that the token produced satisfies the same algorithm as the
     # Python verify_hmac function:
@@ -63,7 +100,7 @@ defmodule Stacks.AI.ClientTest do
     #   token == f"{timestamp_str}.{expected_hex}"
     #
     # We replicate the Python verification here in Elixir so this test runs
-    # offline without the Python sidecar.
+    # offline without the Modal vision service.
 
     test "token satisfies the Python verify_hmac algorithm" do
       secret = Application.fetch_env!(:core, :vision_hmac_secret)
@@ -80,7 +117,7 @@ defmodule Stacks.AI.ClientTest do
     end
 
     test "a token with a timestamp >60s in the past would be outside the replay window" do
-      # The client generates tokens; the Python sidecar enforces the ±60s window.
+      # The client generates tokens; the Modal vision service enforces the ±60s window.
       # This confirms that a stale token's timestamp arithmetic is detectable.
       secret = Application.fetch_env!(:core, :vision_hmac_secret)
       stale_ts = Integer.to_string(System.os_time(:second) - 61)
