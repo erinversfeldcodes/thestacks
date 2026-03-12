@@ -163,7 +163,10 @@ def test_extract_with_oversized_image_returns_422() -> None:
 
 
 def test_extract_with_non_json_model_output_returns_empty_books() -> None:
-    """Model returning a dict with no 'books' key should not raise — books falls back to empty list."""
+    """Model returning a dict with no 'books' key should not raise.
+
+    Books falls back to empty list.
+    """
     mock_output: dict[str, object] = {}
     with (
         patch(
