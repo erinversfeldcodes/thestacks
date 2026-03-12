@@ -53,6 +53,21 @@ defmodule Stacks.BooksTest do
     end
   end
 
+  describe "create/1 — with author" do
+    test "creates book and author when author attribute is provided" do
+      attrs = %{"isbn" => "9780451524935", "title" => "Nineteen Eighty-Four", "author" => "George Orwell"}
+      assert {:ok, book} = Books.create(attrs)
+      assert book.isbn == "9780451524935"
+      assert book.author_id != nil
+    end
+
+    test "reuses existing author record when author already exists" do
+      {:ok, _} = Books.create(%{"isbn" => "9780141036144", "title" => "1984 First Ed", "author" => "George Orwell"})
+      assert {:ok, book2} = Books.create(%{"isbn" => "9780451526342", "title" => "Animal Farm", "author" => "George Orwell"})
+      assert book2.author_id != nil
+    end
+  end
+
   describe "find_existing/1" do
     test "returns book when isbn exists" do
       book = insert(:book, isbn: "9780743273565")

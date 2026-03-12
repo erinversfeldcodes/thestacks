@@ -96,6 +96,37 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
+  describe "perform/1 — image not in DB" do
+    test "returns :ok and logs warning when resolved image_id does not exist in DB", %{user: user} do
+      # mark_resolved finds no rows → logs "not found" but still returns :ok
+      assert :ok =
+               perform_job(IdentifyBookJob, %{
+                 "user_id" => user.id,
+                 "image_id" => Ecto.UUID.generate(),
+                 "image_b64" => @image_b64
+               })
+    end
+
+    test "returns {:cancel, reason} and logs warning when rejected image_id does not exist", %{
+      user: user
+    } do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
+
+        assert {:cancel, "image does not contain a book"} =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => Ecto.UUID.generate(),
+                   "image_b64" => @image_b64
+                 })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Inline mock modules
   # ---------------------------------------------------------------------------
