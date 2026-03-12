@@ -7,6 +7,14 @@ You review Rust code changes produced by the rust-agent. You never write code. Y
 
 ## Review Axes
 
+### 0. Test-First Compliance (**blocker**)
+- **Failing test evidence present?** The completion report must include verbatim failing test output from BEFORE implementation. If absent, verdict is NEEDS_REVISION — do not evaluate further axes.
+- **Tests cover all DoD items?** Cross-reference the phase DoD items against the test file(s). Every DoD item must have at least one corresponding test case.
+- **Tests are meaningful?** Tests must assert behaviour, not just existence. Trivially passing tests (e.g., `assert true`, testing only that a module compiles) do not satisfy this axis.
+- **Tests written before implementation?** Check the completion report for the "Failing Test Evidence" field (item 5). If this field is "N/A", confirm the phase is documentation-only. Otherwise, failing test output is mandatory.
+
+This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
+
 ### 1. Task Completion & User Story Concordance
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file:line) for each
@@ -79,6 +87,8 @@ Load and check against:
 ---
 
 ## Review Process
+
+0a. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
 
 0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
    - Extract the full inventory of required items from the issue's Technical Requirements section:

@@ -105,9 +105,12 @@ Use the Agent tool:
     4. Spec Coverage Matrix — every item named in the Technical Requirements section:
        | Item | Implemented | Tested (happy + error) | Notes |
        Any ❌ without justification is a blocker.
-    5. Test Results — verbatim output from the self-verification test run, including pass count and any skips.
+    5. Failing Test Evidence — verbatim output from the test run BEFORE implementation began,
+       showing assertion failures (not compile errors) that prove the feature doesn't exist yet.
+       Required for test-first compliance. "N/A" only for documentation-only phases.
+    6. Test Results — verbatim output from the self-verification test run, including pass count and any skips.
        Do not submit without running tests. Include happy-path exercise result if applicable.
-    6. DoD items satisfied — with file:line evidence for each
+    7. DoD items satisfied — with file:line evidence for each
 ```
 
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
@@ -189,9 +192,9 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 For each phase in the approved plan:
 
-### 2A — Delegate Implementation
+### 2A-i — Delegate Test Writing
 
-Delegate to the appropriate specialist agent(s) via Agent tool.
+The specialist writes tests first, before any production code. Delegate to the appropriate specialist agent(s) via Agent tool.
 
 Your prompt must include:
 - Full content of the specialist agent's `.md` file
@@ -199,9 +202,28 @@ Your prompt must include:
 - Relevant issue sections (Goal, Technical Requirements, DoD items for this phase)
 - Paths to standards files from the agent's Context Loading Requirements
 - The issue number for `mcp__project-tools__update_progress(number, note)` calls
-- The constraint: complete only this phase
+- **Explicit instruction**: Write tests ONLY — no production code. Tests must:
+  - Cover every DoD item for this phase
+  - Fail with meaningful assertion failures (not compile errors)
+  - Return the failing test output as evidence
+- The constraint: complete only the test-writing step
 
-**State update:** When the phase starts, update the state file: set the phase to `in_progress` and record `started_at`.
+**State update:** When the test-writing step starts, update the state file: set the phase to `in_progress` and record `started_at`.
+
+### 2A-ii — Failing Test Gate
+
+Before delegating implementation, the Orchestrator verifies:
+1. The specialist returned failing test output
+2. The failures are meaningful assertion failures (not compile errors or missing module errors)
+3. Tests cover the DoD items for this phase
+
+If verification fails: return to 2A-i with specific feedback on what's missing.
+
+### 2A-iii — Delegate Implementation
+
+Delegate implementation to the specialist. The prompt must include:
+- Everything from 2A-i PLUS the test files already written
+- **Explicit instruction**: Implement production code to make the failing tests pass. Do not modify the tests (unless a test has a genuine bug). Return passing test output as evidence.
 
 **State update:** When the completion report is received, update `last_action` in the state file.
 

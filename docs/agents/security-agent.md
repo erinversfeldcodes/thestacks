@@ -112,6 +112,21 @@ gitleaks detect
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write security config, auth modules, validation rules, scanning configs, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
+### Test-First Protocol
+
+When the Orchestrator delegates a test-writing step (2A-i), follow this protocol:
+
+1. **Read the phase DoD items** and translate each into one or more test cases
+2. **Write tests only** — no production code, no stubs, no mock implementations
+3. **Run the test suite** and confirm tests fail with meaningful assertion failures:
+   - Assertion failures (e.g., "expected X, got Y" or "function not found")
+   - Compile errors or missing module errors do not count
+4. **Return failing test output** verbatim in your completion report under "Failing Test Evidence"
+
+Do not write any production code until the Orchestrator confirms the failing tests and delegates the implementation step (2A-iii).
+
+**Test command:** `mix test`
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
