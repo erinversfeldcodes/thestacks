@@ -1074,17 +1074,19 @@ Individual messages within an offer thread. Includes both conversational message
 
 ### `uploaded_images`
 
-User-uploaded book photos, with GDPR retention policy.
+Tracks the lifecycle of user-uploaded book photos. The image bytes themselves are stored in Cloudflare R2 and purged after 30 days. This table holds only the metadata needed to manage that lifecycle — it never contains image bytes.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `book_id` | `UUID` | Foreign key to `books`, `NULL` until resolved |
-| `storage_path` | `TEXT` | |
-| `status` | `ENUM('pending', 'resolved', 'rejected')` | |
+| `book_ids` | `UUID[]` | All books identified (resolved images may match >1 spine) |
+| `storage_key` | `TEXT` | R2 object key — `uploads/{id}` |
+| `status` | `ENUM('pending', 'resolved', 'rejected', 'purged')` | |
 | `rejection_reason` | `TEXT` | `NULL` |
 | `uploaded_at` | `TIMESTAMPTZ` | |
-| `expires_at` | `TIMESTAMPTZ` | GDPR retention — 30 days |
+| `purge_at` | `TIMESTAMPTZ` | R2 object will be deleted at this time (30 days from upload) |
+| `purged_at` | `TIMESTAMPTZ` | Set when the R2 object is actually deleted — `NULL` until then |
 
 ### `audit_log`
 
@@ -1300,57 +1302,116 @@ Completed purchases (fixed price or accepted offer).
 
 ## Image Storage
 
-### Upload pipeline — no persistent image storage
+### Upload image lifecycle
 
-User-uploaded photos for ISBN extraction are **not** stored in object storage. The upload pipeline works as follows:
+User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds or the 30-day TTL expires, the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
+
+The upload pipeline:
 
 ```
 User uploads photo (multipart/form-data)
   → Phoenix writes to Plug temp file (OS temp dir, process-scoped)
-  → Books.store_upload/2: File.read → Base.encode64 → insert op.uploaded_images record
-  → IdentifyBookJob enqueued with base64 image in Oban job args (Postgres)
-  → Plug temp file discarded — image never written to permanent storage
-  → Oban worker sends base64 to Modal vision service over HMAC-authenticated HTTPS
+  → Books.store_upload/2:
+      ├── PUT image bytes to Cloudflare R2 (key: uploads/{image_id})
+      ├── Insert op.uploaded_images (storage_key, status=pending, purge_at=+30d)
+      └── Emit image.submitted event {storage_key, purge_at}
+  → IdentifyBookJob enqueued with {user_id, image_id, storage_key}
+  → Plug temp file discarded
+  → At job execution: worker generates short-lived presigned GET URL from storage_key
+  → POST to Modal vision service: {image_url: presigned_url}
+      — image bytes never transit Fly.io machines
+  → Modal fetches image directly from R2 via presigned URL
   → Modal: classify → extract books → return titles/authors/ISBNs
   → ISBN resolved via Open Library / Google Books
-  → uploaded_images record updated: status = resolved, book_id set
-  → Oban cron job deletes uploaded_images records older than 30 days (GDPR retention)
+  → uploaded_images updated: status = resolved, book_id(s) set
+  → Emit image.resolved event {storage_key, purge_at, book_count}
+  → Retention job (daily):
+      ├── DELETE from R2
+      ├── Set uploaded_images.purged_at
+      └── Emit image.purged event {storage_key, reason}
 ```
 
-**Why this design:**
-- Fly.io runs multiple machines with no shared filesystem — writing to local disk would mean only the machine that received the upload could process the job. Putting the image bytes directly in Oban job args (Postgres) means any machine can dequeue and process any job.
-- The image is ephemeral — it exists only to extract an ISBN. There is no user value in storing it after identification.
-- `op.uploaded_images.storage_path` is nullable; it is not populated in the current implementation. Object storage (`uploads/` path) is reserved for a future pre-processing step (EXIF stripping, orientation correction, re-encoding) but is not in use.
+**Why the presigned URL approach, not embedding bytes:**
+
+The image must ultimately reach Modal, which runs outside the Fly.io network. If the Oban worker fetched from R2 and forwarded the bytes to Modal, the image would transit Fly.io machines (adding Fly outbound egress cost ~$0.02/GB) and be held in memory during the round trip. Instead, the worker hands Modal a short-lived presigned URL and Modal fetches directly from R2. Fly.io never holds the image bytes after the initial upload write.
+
+**Why Cloudflare R2, not Fly.io Tigris:**
+
+Tigris's zero-egress benefit applies only within the Fly.io network. Since the image's destination is Modal (external), the intra-Fly advantage is irrelevant for uploads. R2 has zero egress fees to external services, making it the cheapest store for this use case.
+
+| | Tigris | Cloudflare R2 |
+|--|--------|---------------|
+| Storage | $0.02/GB/month | $0.015/GB/month |
+| Egress to Modal (external) | $0.01/GB | **$0** |
+| Egress within Fly.io | $0 | $0.01/GB |
+| S3-compatible | Yes | Yes |
+
+For upload images, R2 wins. For cover images (served to Fly machines), Tigris is equivalent or better.
+
+### Image event log and missing-purge alarm
+
+Every stage of the image lifecycle emits an event to the immutable `op.event_log`. Because the event log is permanent and the image is not, each event that precedes purge carries a `storage_key` and `purge_at` so that anyone reading the log knows when the image became unavailable.
+
+| Event | Payload | Meaning |
+|-------|---------|---------|
+| `image.submitted` | `{storage_key, purge_at}` | Image accepted and stored in R2 |
+| `image.resolved` | `{storage_key, purge_at, book_count}` | Vision pipeline identified book(s) |
+| `image.rejected` | `{storage_key, purge_at, reason}` | Vision pipeline could not identify a book |
+| `image.purged` | `{storage_key, reason}` | R2 object deleted, `purged_at` set |
+
+A scheduled daily check queries for images whose `purge_at` has passed without a corresponding `image.purged` event — this indicates the retention job failed silently for that image, which means the object still exists in R2 (costing money and retaining data past its TTL):
+
+```sql
+SELECT e.aggregate_id
+FROM op.event_log e
+WHERE e.event_type IN ('image.submitted', 'image.resolved', 'image.rejected')
+  AND (e.payload->>'purge_at')::timestamptz < NOW() - INTERVAL '1 hour'
+  AND NOT EXISTS (
+    SELECT 1 FROM op.event_log p
+    WHERE p.aggregate_type = 'image'
+      AND p.aggregate_id = e.aggregate_id
+      AND p.event_type = 'image.purged'
+  )
+```
+
+Any row returned by this query is alerted on. The 1-hour grace covers the retention job running slightly after the exact `purge_at` timestamp.
+
+**Replaying events after purge:** The `image.resolved` event payload contains `book_count` and the resolved book IDs are on the `uploaded_images` row and downstream `book.*` events. Replaying the event log for a purged image means re-applying its downstream effects (placement, enrichment) — there is no need to re-run the vision model. Replaying processors should check `purge_at` against the current time before attempting to fetch an image; if `purge_at` is in the past, assume the object is gone.
+
+### Risks and mitigations
+
+**Third-party persons in background.** A user photographing a bookshelf may capture other people who never consented to being processed by a vision model. This is why images are transient — they are purged within 30 days regardless of outcome, and the event log records only book identifiers (ISBNs, titles), never image content or descriptions of people.
+
+**Embedded malicious content.** An image may contain rendered text including URLs — on a t-shirt, a poster, or a laptop screen in the background. A sufficiently capable vision model that attempts to interpret all text in an image could extract and act on a URL that leads to malware, a phishing page, or a prompt-injection payload. Current mitigation: Modal's `/classify` and `/extract` endpoints return only ISBN-shaped strings and book titles; they do not follow URLs or return raw OCR output. However, passing the full unprocessed image to an external model remains a risk vector.
+
+**Future: feature extraction before transmission.** Before passing an image to Modal, a pre-processing step will extract only the visual regions most likely to contain book-identifying information — spine text, cover art bounding boxes — using classical CV techniques (edge detection, text region detection). This accomplishes three things:
+
+1. **Reduces attack surface.** Background content — faces, URLs on clothing, arbitrary text — is stripped before the image leaves the system.
+2. **Reduces size.** A cropped and re-encoded spine region is tens of KB, not hundreds. Lower bandwidth and faster Modal cold starts.
+3. **Defends against prompt injection via imagery.** Content like printed text saying "ignore previous instructions" or a background URL containing adversarial content is removed before the model ever sees it.
+
+This pre-processing step is tracked as a future enhancement. Until it is implemented, the risk is accepted and mitigated by Modal's output contract (ISBN-only returns) and the 30-day image TTL.
 
 ### Persistent cover images
 
-Book cover thumbnails are the persistent artefacts that require object storage. These are sourced from Open Library or Google Books — not extracted from uploads.
+Book cover thumbnails are the only permanently stored images. These are sourced from Open Library or Google Books API responses — not derived from uploads.
 
-### Provider: Fly.io Tigris (or Cloudflare R2)
-
-| Feature | Tigris | R2 |
-|---------|--------|-----|
-| S3-compatible | Yes | Yes |
-| Included with Fly.io | Yes (first 5GB free) | No (separate account) |
-| Egress fees | None | None |
-| Global distribution | Automatic (Tigris is geo-distributed) | Requires R2 + CDN |
-| Cost | $0.02/GB/month after 5GB | $0.015/GB/month |
-
-**Recommendation:** Tigris for simplicity (same platform as compute), R2 as fallback.
-
-### Storage Layout (covers only — uploads are not persisted)
+### Storage layout
 
 ```
-stacks-images/
-  ├── covers/                     # Book cover thumbnails (permanent)
+stacks-images/ (Cloudflare R2)
+  ├── uploads/                    # Upload images — 30-day TTL, then purged
+  │   └── {image_id}             # Raw upload bytes, no extension (MIME type stored separately)
+  ├── covers/                     # Book cover thumbnails — permanent
   │   └── {isbn}-cover.jpg       # Sourced from Open Library or Google Books
-  └── marketplace/                # Marketplace listing photos (future)
-      └── {listing_id}/{n}.jpg   # Multiple photos per listing
+  └── marketplace/                # Marketplace listing photos — future
+      └── {listing_id}/{n}.jpg
 ```
 
-### Access Control
+### Access control
 
-- `covers/` — Public-readable. Served via CDN for book display. No authentication needed (these are published book covers).
+- `uploads/` — Private. Accessed only via short-lived presigned URLs generated by the Oban worker at job execution time. Never served directly to clients.
+- `covers/` — Public-readable. Served via CDN. No authentication needed (published book covers).
 - `marketplace/` — Public-readable (listing photos are visible to all users).
 
 ---
@@ -1390,8 +1451,9 @@ Application-level encryption for Tier 3 uses key management via **age** (the enc
 
 | Data | Retention | Rationale |
 |------|-----------|-----------|
-| `uploaded_images` (raw) | 30 days | Delete after ISBN resolved + moderation complete |
-| `uploaded_images` (thumbnails) | Indefinite | Just the book cover |
+| `uploaded_images` (R2 object) | 30 days | Purged from R2 after identification complete; `image.purged` event emitted |
+| `uploaded_images` (row + event log) | Indefinite | Metadata row and `image.*` events are permanent — only the bytes are purged |
+| Book covers (R2 object) | Indefinite | Published cover art; sourced from Open Library / Google Books |
 | Scraped reviews (raw HTML) | 7 days | Debugging only |
 | Scraped reviews (extracted text) | 1 year | Then re-scrape |
 | `price_snapshots` | 2 years | Price trend analysis |
@@ -4694,6 +4756,10 @@ Every event follows a standard envelope, defined in `proto/stacks/internal/event
 
 | Domain | Event | Triggered By | Subscribers |
 |--------|-------|-------------|------------|
+| Images | `image.submitted` | User uploads photo | Oban job enqueued |
+| Images | `image.resolved` | Vision pipeline identifies book(s) | `book.created` downstream |
+| Images | `image.rejected` | Vision pipeline rejects image | User notification |
+| Images | `image.purged` | Retention job deletes R2 object | Closes lifecycle; absence triggers alert |
 | Books | `book.created` | Photo upload ISBN resolution | Enrichment fan-out, shelf placement |
 | Books | `book.enrichment_complete` | All enrichment jobs done | Notification, dbt trigger |
 | Shelves | `shelf.book_placed` | User places book on shelf | History tracking, engagement calc |
