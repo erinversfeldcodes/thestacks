@@ -130,8 +130,18 @@ defmodule Stacks.Books do
           |> Repo.insert()
 
         case result do
-          {:ok, image} -> {:ok, {image, Base.encode64(bytes)}}
-          {:error, reason} -> {:error, reason}
+          {:ok, image} ->
+            Events.emit_safe(%{
+              event_type: "image.submitted",
+              aggregate_type: "image",
+              aggregate_id: image.id,
+              payload: %{}
+            })
+
+            {:ok, {image, Base.encode64(bytes)}}
+
+          {:error, reason} ->
+            {:error, reason}
         end
 
       {:error, reason} ->
