@@ -126,20 +126,31 @@ fi
 
 # --- Python ---
 if [[ $HAS_PYTHON -eq 1 ]]; then
-  PYTHON_FILES=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    ABS="${REPO_ROOT}/${f}"
-    [[ -f "$ABS" ]] || continue
-    run_check \
-      "ruff format --check ${ABS}" \
-      "cd ${REPO_ROOT}/apps/vision && ruff format ${ABS}" \
-      bash -c "cd '${REPO_ROOT}/apps/vision' && ruff format --check '${ABS}'"
-    run_check \
-      "ruff check ${ABS}" \
-      "cd ${REPO_ROOT}/apps/vision && ruff check --fix ${ABS}" \
-      bash -c "cd '${REPO_ROOT}/apps/vision' && ruff check '${ABS}'"
-  done <<< "$PYTHON_FILES"
+  # Prefer the vision venv ruff; fall back to system ruff; skip if absent.
+  if [[ -f "${REPO_ROOT}/apps/vision/.venv/bin/ruff" ]]; then
+    RUFF="${REPO_ROOT}/apps/vision/.venv/bin/ruff"
+  elif command -v ruff > /dev/null 2>&1; then
+    RUFF="ruff"
+  else
+    RUFF=""
+  fi
+
+  if [[ -n "$RUFF" ]]; then
+    PYTHON_FILES=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      ABS="${REPO_ROOT}/${f}"
+      [[ -f "$ABS" ]] || continue
+      run_check \
+        "ruff format --check ${ABS}" \
+        "cd ${REPO_ROOT}/apps/vision && ruff format ${ABS}" \
+        bash -c "'${RUFF}' format --check '${ABS}'"
+      run_check \
+        "ruff check ${ABS}" \
+        "cd ${REPO_ROOT}/apps/vision && ruff check --fix ${ABS}" \
+        bash -c "'${RUFF}' check '${ABS}'"
+    done <<< "$PYTHON_FILES"
+  fi
 fi
 
 # --- Protobuf ---
