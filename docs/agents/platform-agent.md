@@ -103,8 +103,38 @@ buf breaking proto/ --against '.git#branch=main'
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write Dockerfiles, CI configs, Fly configs, Nix flakes, and return a completion report.
 
+### Challenge the Brief
+
+Before making any infrastructure or CI changes, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** environment variable names, Fly machine sizes, GitHub Actions trigger conditions, or Docker base image versions that are ambiguous or missing
+- **Risky:** changes to production deployment config, secrets handling, or CI gate logic that are hard to undo or could expose credentials
+- **Suboptimal:** a better Dockerfile layer ordering, CI caching strategy, or Fly.io feature (e.g., autoscaling policy) would serve this use case better
+- **Inconsistent:** the plan conflicts with existing `.toml` configs, the change-detection pattern in `ci.yml`, or the service-to-service auth approach
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". Infrastructure mistakes can be costly — flag anything uncertain before touching production configs. If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run the relevant build command (e.g., `docker build`, `buf lint`, `just test`) and confirm it succeeds. Record the exact output.
+2. If a CI workflow was changed, trace through the trigger conditions and job dependencies to confirm they behave correctly for the expected change patterns.
+3. If a Fly.io config was changed, run `flyctl config validate` and confirm no errors.
+4. If a Dockerfile was changed, build the image locally and confirm the resulting container starts and passes its health check.
+5. If any step fails, fix it before submitting.
+
+Do not submit a completion report with build failures, invalid configs, or untested infrastructure changes.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. Build/deploy commands run and results
-4. DoD items satisfied for this phase
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Test Results** — verbatim output from self-verification build/validation commands:
+   ```
+   $ docker build ...
+   ...
+   $ flyctl config validate
+   ...
+   ```
+   Include health check result or CI trace summary if applicable.
+5. Build/deploy commands run and results
+6. DoD items satisfied for this phase

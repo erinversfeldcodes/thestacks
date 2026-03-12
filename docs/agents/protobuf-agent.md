@@ -121,10 +121,42 @@ buf generate proto/
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write .proto files, buf config, regenerate code, update upcasters, and return a completion report.
 
+### Challenge the Brief
+
+Before making any schema changes, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** field types, enum values, or message nesting that are ambiguous or would require a breaking change to correct later
+- **Risky:** field additions that may conflict with existing reserved numbers, or changes that would silently break JSON serialisation for the Elm frontend
+- **Suboptimal:** a better message structure, naming convention, or enum design would serve this contract better long-term
+- **Inconsistent:** the plan conflicts with existing field number sequences, the `_UNSPECIFIED = 0` enum rule, or the additive-only evolution constraint
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". Field numbers are forever — flag any ambiguity before committing. If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `buf lint proto/` and confirm no lint errors.
+2. Run `buf breaking proto/ --against '.git#branch=main'` and confirm no unintended breaking changes.
+3. Run `buf generate proto/` and confirm code generation succeeds for all targets.
+4. Confirm the checked-in Elm decoders in `proto/gen/elm/` are updated to match any schema changes.
+5. If upcaster functions were added, trace through the upcast chain with a representative old event payload and confirm the output matches the current schema.
+6. If any step fails, fix it before submitting.
+
+Do not submit a completion report with buf lint failures, breaking changes without justification, or stale Elm decoders.
+
 ### Completion Report Format
 1. Summary of what was implemented
-2. Proto files created/modified
-3. Generated code updated (which languages)
-4. buf lint and buf breaking results
-5. Upcaster functions added (if event schemas changed)
-6. DoD items satisfied for this phase
+2. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+3. Proto files created/modified
+4. Generated code updated (which languages)
+5. **Test Results** — verbatim output from self-verification:
+   ```
+   $ buf lint proto/
+   ...
+   $ buf breaking proto/ --against '.git#branch=main'
+   ...
+   $ buf generate proto/
+   ...
+   ```
+   Include upcaster trace result if event schemas were changed.
+6. Upcaster functions added (if event schemas changed)
+7. DoD items satisfied for this phase
