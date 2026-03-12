@@ -105,6 +105,8 @@ defmodule Stacks.ModerationTest do
 
   describe "run_pipeline/1 — compound title expansion" do
     test "splits 'Title A OR Title B' into two candidates and resolves both" do
+      # Pre-insert so store_book finds the book without needing HTTP metadata.
+      insert(:book, isbn: "9780743273565")
       original = Application.get_env(:core, :vision_client)
 
       try do
