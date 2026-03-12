@@ -1,5 +1,9 @@
+# RETIRED: The vision sidecar is now hosted on Modal as an ASGI app.
+# See apps/vision/modal_app.py — the vision_api function decorated with @modal.asgi_app().
+# Deploy: modal deploy apps/vision/modal_app.py
+# Endpoint: https://erinversfeldcodes--thestacks-vision-vision-api.modal.run
 app = "thestacks-vision"
-primary_region = "jnb"
+primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "5s"
 
