@@ -15,12 +15,12 @@ You review infrastructure, CI/CD, Docker, Nix, and deployment configuration chan
 
 This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
 
-### 1. Task Completion & Functional Requirements Concordance
+### 1. Task Completion & Functional Requirements Concordance (judgment — reviewer only)
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file path and line) for each
 - Platform work doesn't have user stories in the traditional sense, but it must support the functional requirements of issues 001–003. For each service (core, vision, scraper), verify: does the deployment config correctly wire the service together — environment variables, internal networking, health checks, resource sizing, secrets? Trace through what happens at `fly deploy` for each service.
 
-### 2. Platform / DevOps Community Standards
+### 2. Platform / DevOps Community Standards (mechanical — specialist self-checks)
 - **Dockerfiles**:
   - Multi-stage builds: builder stage separate from runtime stage
   - Minimal runtime images: Alpine or distroless — no full Ubuntu/Debian in production
@@ -56,14 +56,14 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
   - Comments explain what each var is for and where to get it
   - No real values — only placeholders like `your_key_here` or `change_me`
 
-### 3. Test Correctness & Completeness
+### 3. Test Correctness & Completeness (mechanical — specialist self-checks)
 - **CI correctness**: Does the CI pipeline actually test what it claims to? A `test-elixir` job that only runs `mix compile` is not a test job.
 - **Path filter correctness**: Are the path filters accurate? A change to `apps/core/mix.exs` should trigger `test-elixir`. A change to `dbt/` should trigger the dbt test job. Verify each filter against its intended trigger paths.
 - **Cache correctness**: Are cache keys specific enough that a dependency change invalidates the cache? Caching on `hashFiles('**/mix.lock')` is correct; caching on a static key is not.
 - **Deploy job gates**: Does the deploy job actually depend on (`needs:`) all test jobs? A misconfigured `needs:` can allow a deploy on failing tests.
 - **Completeness**: Is there a CI job for every language in the stack? Is there a lint-proto job? Is there a security scan job?
 
-### 4. Performance
+### 4. Performance (mechanical — specialist self-checks)
 - **Docker layer caching**: Are expensive layers (dependency installation) ordered before frequently changing layers (application code)? `COPY mix.exs mix.lock ./` + `mix deps.get` should come before `COPY lib ./`.
 - **Image size**: Are final images as small as possible? Multi-stage builds should discard the build toolchain. Check final image sizes — Elixir release images should be under 100MB, Python under 200MB.
 - **CI job parallelism**: Can test jobs run in parallel? Are they configured with `needs:` only where there is a genuine dependency?
@@ -71,7 +71,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Fly.io cold starts**: Is the Elixir release pre-warmed? Does the Phoenix health check respond quickly enough to avoid Fly considering the machine unhealthy on start?
 - **Build time**: Are Elixir releases built with `MIX_ENV=prod`? Are Rust builds in `--release` mode? Debug builds in production are significantly slower.
 
-### 5. Security
+### 5. Security (mechanical — specialist self-checks)
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
 - **Private networking**: Rust scraper must not be publicly reachable on Fly — verify `internal_port` only, no public `services` block. Vision service is on Modal with HMAC auth on a public HTTPS endpoint — verify `VISION_HMAC_SECRET` is set as both a Fly secret (core) and a Modal secret (vision).
 - **Secrets management**: All secrets in Fly via `fly secrets set`. No secrets in TOML, Dockerfiles, workflow files, or `.env.example`.
@@ -82,7 +82,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **TLS**: `force_https = true` on the core public service. Internal Fly networking uses Fly's private WireGuard — verify services communicate over `.internal` addresses.
 - **`.env.example`**: Must not contain real credentials even as examples. Reviewers have been burned by this before.
 
-### 6. Alternative Approaches Research
+### 6. Alternative Approaches Research (judgment — reviewer only)
 Before returning your verdict, actively research the following and include findings in your report:
 - Are there alternative deployment targets or configurations for this stack that would offer better cost, latency, or reliability from the IAD region (e.g. Railway, Render, Hetzner, AWS)?
 - Are there alternative CI approaches for Elixir + multi-language monorepos (e.g. Earthly, Dagger, Nx) that would give better caching or developer experience?
@@ -94,12 +94,12 @@ For each significant finding, state: **what** the alternative is, the **tradeoff
 
 This section is mandatory. The human will decide what to act on.
 
-### 7. Project Coding Standards
+### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
 
-### 8. Forward Compatibility
+### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
@@ -113,6 +113,8 @@ Load and check against:
 ## Review Process
 
 0. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
+
+0b. **Self-Review Acknowledgement** — Check the specialist's Self-Review table in their completion report. Axes marked PASS may be spot-checked rather than re-run in full. Focus your review time on judgment axes (1, 6, 8) and any mixed axes where you assess quality beyond the mechanical check. A missing or empty Self-Review section is a blocker — return NEEDS_REVISION.
 
 1. Read the phase objective, DoD items, and the functional requirements from the invoking prompt
 2. Read every file listed in the implementation completion report

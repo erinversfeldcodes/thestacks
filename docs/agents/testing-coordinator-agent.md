@@ -137,9 +137,30 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `mix test`
 
+### Self-Review
+
+Before submitting your completion report, load the relevant reviewer doc(s) for the stack(s) under test and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| Test framework conventions | Tests follow stack conventions (ExUnit, elm-test, cargo test, pytest) |
+| No flaky patterns | No `Process.sleep`, no time-dependent assertions, no network calls in unit tests |
+| Coverage meaningful | Tests assert behaviour, not implementation details; no `assert true` |
+| Environment isolation | `TEST_TARGET` env var controls mock/real wiring; tests don't leak state |
+| All test layers present | Happy path, error paths, boundary conditions covered |
+| Tests passing | All relevant test suites pass with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was tested
 2. Test files created/modified (absolute paths)
 3. Test results (pass/fail counts, coverage percentages)
 4. Gaps identified (stories without acceptance tests, untested chaos scenarios)
 5. DoD items satisfied for this phase
+6. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

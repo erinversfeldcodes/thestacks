@@ -15,12 +15,12 @@ You review Python/FastAPI code changes produced by the python-agent. You never w
 
 This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
 
-### 1. Task Completion & User Story Concordance
+### 1. Task Completion & User Story Concordance (judgment — reviewer only)
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file:line) for each
 - For **every** user story listed in the issue file, trace the full flow end-to-end: Phoenix HTTP call → HMAC validation → endpoint → service → model client → response → Pydantic validation. Verify the story's acceptance criteria are met. Do not stop at one story.
 
-### 2. Python Community Standards
+### 2. Python Community Standards (mechanical — specialist self-checks)
 - **Type hints everywhere**: Every function signature has type annotations, including return types. No `Any` unless genuinely unavoidable and documented.
 - **Pydantic v2 models**: All API request/response schemas use Pydantic `BaseModel`. Field validators where appropriate. `model_config` over class-level `Config`. No raw `dict` in/out of endpoints.
 - **FastAPI conventions**: Path operations use dependency injection (`Depends`). Response models declared on the decorator. Status codes explicit (`status_code=200`). `HTTPException` for errors with appropriate codes and detail strings.
@@ -32,14 +32,14 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Logging**: `structlog` or stdlib `logging` with structured output — never `print()`.
 - **Lifespan management**: Startup/shutdown logic (client initialisation, model loading) in FastAPI `lifespan` context manager, not deprecated `@app.on_event`.
 
-### 3. Test Correctness & Completeness
+### 3. Test Correctness & Completeness (mixed — specialist checks test presence; reviewer assesses test quality)
 - **Correctness**: Do tests assert the actual response body and status codes, not just that a call was made? Are mocks realistic — do they return the same shape as the real service would?
 - **Completeness**: Is there coverage for: happy path, HMAC rejection (missing header, wrong token, replayed token), malformed input (wrong content type, missing required fields, oversized payload), external service failure (timeout, 5xx from Modal), and model output that cannot be parsed?
 - **Fixture quality**: Are `pytest` fixtures well-scoped (`function` vs `session`)? Do they clean up correctly?
 - **No live external calls in tests**: Vision client must be mocked. Tests must not call Modal.
 - **Test performance**: All tests should complete quickly. Flag any test that does real I/O, sleeps, or initialises a full model.
 
-### 4. Performance
+### 4. Performance (mixed — specialist checks blocking I/O patterns; reviewer assesses performance trade-offs)
 - **Blocking in async context**: Scan every `async def` for synchronous calls — `requests.get`, `open()`, `time.sleep`, CPU-intensive loops. Any of these stall the event loop.
 - **HTTP client lifecycle**: Is `httpx.AsyncClient` instantiated once (at app startup) and reused, or created per request? Per-request instantiation kills connection pooling and adds latency.
 - **Pydantic validation overhead**: Large or deeply nested models validated on every request. If the payload is a raw image binary plus metadata, ensure only the metadata is parsed through Pydantic.
@@ -47,7 +47,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Startup time**: Does the app defer expensive initialisation (model loading, client setup) to lifespan, or does it block the import phase? Slow startups cause Fly.io health check failures.
 - **Connection pool sizing**: Is the `httpx.AsyncClient` configured with appropriate `max_connections` and `max_keepalive_connections` for the expected request volume?
 
-### 5. Security
+### 5. Security (mechanical — specialist self-checks)
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
 - **HMAC auth**: Every non-health endpoint validates the `X-Internal-Token` header using constant-time comparison (`hmac.compare_digest`). Missing or invalid tokens return 401.
 - **Never trust model output**: The vision service returns raw extractions only. It must not attempt ISBN validation, book lookup, or any decision-making based on model output. That is Phoenix's responsibility.
@@ -57,7 +57,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **Secrets handling**: API keys loaded from environment via `pydantic-settings`. Never hardcoded. Never logged.
 - **Error responses**: Stack traces must not be returned to callers. FastAPI's default exception handler should be overridden or `debug=False` confirmed in production config.
 
-### 6. Alternative Approaches Research
+### 6. Alternative Approaches Research (judgment — reviewer only)
 Before returning your verdict, actively research the following and include findings in your report:
 - Are there alternative Python vision/OCR libraries or approaches (e.g. local open-source models, different alternative vision models, Google Vision API, AWS Textract) that might offer better accuracy, lower latency, or lower cost for book cover extraction?
 - Are there alternative FastAPI patterns for HMAC auth (e.g. middleware vs `Depends`, shared secret rotation strategies)?
@@ -69,12 +69,12 @@ For each significant finding, state: **what** the alternative is, the **tradeoff
 
 This section is mandatory. The human will decide what to act on.
 
-### 7. Project Coding Standards
+### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `pytest` with fixtures, Atheris for fuzzing image input parsing, no live external calls in tests
 
-### 8. Forward Compatibility
+### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
@@ -88,6 +88,8 @@ Load and check against:
 ## Review Process
 
 0a. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
+
+0b. **Self-Review Acknowledgement** — Check the specialist's Self-Review table in their completion report. Axes marked PASS may be spot-checked rather than re-run in full. Focus your review time on judgment axes (1, 6, 8) and any mixed axes where you assess quality beyond the mechanical check. A missing or empty Self-Review section is a blocker — return NEEDS_REVISION.
 
 0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
    - Extract the full inventory of required items from the issue's Technical Requirements section:

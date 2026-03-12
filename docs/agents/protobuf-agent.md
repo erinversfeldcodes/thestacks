@@ -158,6 +158,24 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `buf lint proto/ && buf breaking proto/ --against '.git#branch=main'`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/protobuf-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `buf lint` | Run and confirm zero errors |
+| `buf breaking` | Run against main branch and confirm no breaking changes |
+| Naming conventions | Package `stacks.*`, messages PascalCase, fields snake_case, enums UPPER_SNAKE |
+| Field number safety | No reused field numbers; removed fields listed in `reserved` |
+| Well-known types | `google.protobuf.Timestamp` for times, not strings; money as cents + currency_code |
+| File organisation | One message family per file, correct directory (`proto/stacks/common/partner/internal`) |
+| Generated code compiles | Elm decoders and any generated code compile without warnings |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
@@ -175,3 +193,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    Include upcaster trace result if event schemas were changed.
 6. Upcaster functions added (if event schemas changed)
 7. DoD items satisfied for this phase
+8. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

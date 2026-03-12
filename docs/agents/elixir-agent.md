@@ -168,6 +168,24 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `mix test`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/elixir-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `mix format` | Run `mix format --check-formatted` — must pass |
+| `mix credo --strict` | Run and confirm zero warnings |
+| `mix sobelow` | Run and confirm no high-severity findings |
+| Typespecs on public functions | Every public context function has `@spec` and `@doc` |
+| Event emission | All significant state changes emit via `Stacks.Events.emit/1` |
+| Ecto.Multi for multi-step writes | Multi-table operations wrapped in transactions |
+| Tests passing | `mix test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -192,3 +210,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    Include happy-path exercise result if an endpoint or feature was exercised with real input.
 6. DoD items satisfied — cite file:line evidence for each checked item. Do not tick an item
    without evidence.
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.
