@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import json
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -20,24 +19,18 @@ def _make_header(path: str = "/extract") -> dict[str, str]:
     return {"X-Internal-Token": f"{ts}.{token_hex}"}
 
 
-def _mock_together_response(content: dict[str, object]) -> dict[str, object]:
-    return {"choices": [{"message": {"content": json.dumps(content)}}]}
-
-
 def test_extract_returns_books_list() -> None:
     """Happy path: single book returned inside books list."""
-    mock_output = _mock_together_response(
-        {
-            "books": [
-                {
-                    "title": "The Name of the Rose",
-                    "author": "Umberto Eco",
-                    "potential_isbns": ["9780156001311"],
-                    "raw_text": "The Name of the Rose Umberto Eco ISBN 9780156001311",
-                }
-            ]
-        }
-    )
+    mock_output = {
+        "books": [
+            {
+                "title": "The Name of the Rose",
+                "author": "Umberto Eco",
+                "potential_isbns": ["9780156001311"],
+                "raw_text": "The Name of the Rose Umberto Eco ISBN 9780156001311",
+            }
+        ]
+    }
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -65,24 +58,22 @@ def test_extract_returns_books_list() -> None:
 
 def test_extract_returns_multiple_books() -> None:
     """Multi-book response: model identifies 2+ books, all appear in books list."""
-    mock_output = _mock_together_response(
-        {
-            "books": [
-                {
-                    "title": "The Name of the Rose",
-                    "author": "Umberto Eco",
-                    "potential_isbns": ["9780156001311"],
-                    "raw_text": "The Name of the Rose",
-                },
-                {
-                    "title": "Foucault's Pendulum",
-                    "author": "Umberto Eco",
-                    "potential_isbns": ["9780156032971"],
-                    "raw_text": "Foucault's Pendulum",
-                },
-            ]
-        }
-    )
+    mock_output = {
+        "books": [
+            {
+                "title": "The Name of the Rose",
+                "author": "Umberto Eco",
+                "potential_isbns": ["9780156001311"],
+                "raw_text": "The Name of the Rose",
+            },
+            {
+                "title": "Foucault's Pendulum",
+                "author": "Umberto Eco",
+                "potential_isbns": ["9780156032971"],
+                "raw_text": "Foucault's Pendulum",
+            },
+        ]
+    }
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -107,7 +98,7 @@ def test_extract_returns_multiple_books() -> None:
 
 def test_extract_returns_empty_books_list_when_nothing_extractable() -> None:
     """Empty books list (not an error) when model finds nothing."""
-    mock_output = _mock_together_response({"books": []})
+    mock_output = {"books": []}
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -172,8 +163,8 @@ def test_extract_with_oversized_image_returns_422() -> None:
 
 
 def test_extract_with_non_json_model_output_returns_empty_books() -> None:
-    """Non-JSON model output should not raise — books falls back to empty list."""
-    mock_output = {"choices": [{"message": {"content": "not valid json at all"}}]}
+    """Model returning a dict with no 'books' key should not raise — books falls back to empty list."""
+    mock_output: dict[str, object] = {}
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -195,9 +186,7 @@ def test_extract_with_non_json_model_output_returns_empty_books() -> None:
 
 def test_extract_partial_book_fields_are_returned() -> None:
     """Book entries missing optional fields should use None/[] defaults, not error."""
-    mock_output = _mock_together_response(
-        {"books": [{"title": "Only a Title", "raw_text": "Some text only"}]}
-    )
+    mock_output = {"books": [{"title": "Only a Title", "raw_text": "Some text only"}]}
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -223,7 +212,7 @@ def test_extract_partial_book_fields_are_returned() -> None:
 
 def test_extract_model_returns_non_list_books_field_gives_empty() -> None:
     """If the model returns books as a non-list (malformed), fall back to empty list."""
-    mock_output = _mock_together_response({"books": "not a list"})
+    mock_output: dict[str, object] = {"books": "not a list"}
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
