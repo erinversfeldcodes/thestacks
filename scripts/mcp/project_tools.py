@@ -13,6 +13,7 @@ Registration: .claude/settings.json mcpServers.project-tools
 from __future__ import annotations
 
 import datetime
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,16 @@ def _find_issue_file(number: int) -> Path | None:
 
 def _find_plan_file(number: int) -> Path | None:
     matches = list(PLANS_DIR.glob(f"{number:03d}-*.md"))
+    return matches[0] if matches else None
+
+
+def _find_state_file(number: int) -> Path | None:
+    """Find an active state file (excludes *-state-complete.json)."""
+    matches = [
+        p
+        for p in PLANS_DIR.glob(f"{number:03d}-*-state.json")
+        if not p.name.endswith("-state-complete.json")
+    ]
     return matches[0] if matches else None
 
 
@@ -191,6 +202,7 @@ def next_issue_number() -> int:
 def update_progress(number: int, note: str) -> dict[str, Any]:
     """
     Append a timestamped progress note to an issue's Progress Notes section.
+    Also appends to state.notes[] if an active state file exists for this issue.
 
     Args:
         number: Issue number.
@@ -215,26 +227,51 @@ def update_progress(number: int, note: str) -> dict[str, Any]:
     updated = text.rstrip("\n") + "\n" + new_line + "\n"
     path.write_text(updated)
 
+    # Also append to state file notes[] if one exists.
+    state_path = _find_state_file(number)
+    if state_path is not None:
+        import json
+
+        state = json.loads(state_path.read_text())
+        state.setdefault("notes", []).append(new_line)
+        state["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        state_path.write_text(json.dumps(state, indent=2) + "\n")
+
     return {"ok": True, "appended": new_line}
 
 
 @mcp.tool()
 def get_plan_status(issue_number: int) -> dict[str, Any]:
     """
-    Read the plan file for an issue and return its status.
+    Return the execution status of a plan for an issue.
+
+    Prefers the machine-readable state file (`plans/NNN-*-state.json`) if it
+    exists, falling back to parsing the plan markdown for phase headings.
 
     Args:
         issue_number: The issue number whose plan to read.
 
-    Returns plan existence, declared status, and phase list if parseable.
+    Returns plan existence, status, current phase, and phase detail.
     """
-    path = _find_plan_file(issue_number)
-    if path is None:
+
+    # Prefer state file — it is the authoritative machine-readable source.
+    state_path = _find_state_file(issue_number)
+    if state_path is not None:
+        state = json.loads(state_path.read_text())
+        return {
+            "exists": True,
+            "source": "state_file",
+            "file": state_path.name,
+            **state,
+        }
+
+    # Fall back to plan markdown.
+    plan_path = _find_plan_file(issue_number)
+    if plan_path is None:
         return {"exists": False, "issue_number": issue_number}
 
-    text = path.read_text()
+    text = plan_path.read_text()
 
-    # Extract **Status**: line from header block.
     plan_status = "unknown"
     for line in text.splitlines()[:20]:
         m = re.match(r"^\*\*Status\*\*:\s*(.+)$", line)
@@ -242,7 +279,6 @@ def get_plan_status(issue_number: int) -> dict[str, Any]:
             plan_status = m.group(1).strip()
             break
 
-    # Detect phase headings: "## Phase 1A", "### 1B —", etc.
     phases = []
     phase_re = re.compile(r"^#{2,3}\s+(?:Phase\s+)?(\d+[A-Za-z]?)\b", re.IGNORECASE)
     for line in text.splitlines():
@@ -252,7 +288,8 @@ def get_plan_status(issue_number: int) -> dict[str, Any]:
 
     result: dict[str, Any] = {
         "exists": True,
-        "file": path.name,
+        "source": "plan_markdown",
+        "file": plan_path.name,
         "plan_status": plan_status,
     }
     if phases:
