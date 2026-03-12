@@ -210,7 +210,13 @@ _fastapi_image = (
 
 @app.function(
     image=_fastapi_image,
-    secrets=[modal.Secret.from_name("thestacks-vision")],
+    secrets=[
+        modal.Secret.from_name("thestacks-vision"),
+        # Bake the app name into the ASGI container so VisionClient can look up
+        # the correct GPU class. For ephemeral preview deploys the app name differs
+        # from the default "thestacks-vision", so we cannot hardcode it in the app.
+        modal.Secret.from_dict({"MODAL_APP_NAME": MODAL_APP_NAME}),
+    ],
     # Keep the ASGI container alive long enough for all E2E tests to complete.
     # ASGI apps handle concurrency natively — no @modal.concurrent needed.
     scaledown_window=300,
