@@ -108,7 +108,7 @@ cd apps/scraper && cargo fuzz run [target]
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write Rust code, tests, TOML configs, and return a completion report.
+DO: Write Rust code, tests, TOML configs, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Challenge the Brief
 

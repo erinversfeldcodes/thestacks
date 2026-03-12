@@ -112,16 +112,27 @@ case "$EXT" in
     ;;
 
   py)
-    run_check \
-      "ruff format --check ${FILE_PATH}" \
-      "cd ${REPO_ROOT}/apps/vision && ruff format ${FILE_PATH}" \
-      bash -c "cd '${REPO_ROOT}/apps/vision' && ruff format --check '${FILE_PATH}'"
+    # Prefer the vision venv ruff; fall back to system ruff; skip if absent.
+    if [[ -f "${REPO_ROOT}/apps/vision/.venv/bin/ruff" ]]; then
+      RUFF="${REPO_ROOT}/apps/vision/.venv/bin/ruff"
+    elif command -v ruff > /dev/null 2>&1; then
+      RUFF="ruff"
+    else
+      RUFF=""
+    fi
 
-    if [[ $FAIL -eq 0 ]]; then
+    if [[ -n "$RUFF" ]]; then
       run_check \
-        "ruff check ${FILE_PATH}" \
-        "cd ${REPO_ROOT}/apps/vision && ruff check --fix ${FILE_PATH}" \
-        bash -c "cd '${REPO_ROOT}/apps/vision' && ruff check '${FILE_PATH}'"
+        "ruff format --check ${FILE_PATH}" \
+        "cd ${REPO_ROOT}/apps/vision && ruff format ${FILE_PATH}" \
+        bash -c "'${RUFF}' format --check '${FILE_PATH}'"
+
+      if [[ $FAIL -eq 0 ]]; then
+        run_check \
+          "ruff check ${FILE_PATH}" \
+          "cd ${REPO_ROOT}/apps/vision && ruff check --fix ${FILE_PATH}" \
+          bash -c "'${RUFF}' check '${FILE_PATH}'"
+      fi
     fi
 
     # mypy — only for files inside apps/vision/.
