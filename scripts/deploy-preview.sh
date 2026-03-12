@@ -342,8 +342,10 @@ if [[ -n "${smoke_token}" ]]; then
         echo "FAIL deploy: all warmup uploads failed"
         e2e_failed=1
     else
-        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 2 min)..."
-        warmup_deadline=$(( $(date +%s) + 120 ))
+        # 6 minutes: Modal GPU cold start (~60s) + up to 4 serial Oban inferences (~60s each)
+        # + Open Library resolution. Must match or exceed Playwright PIPELINE_TIMEOUT (5 min).
+        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 6 min)..."
+        warmup_deadline=$(( $(date +%s) + 360 ))
         # Track done IDs as a space-separated string (bash 3.2 compatible; no declare -A).
         warmup_done_ids=""
         all_done=0
@@ -376,7 +378,8 @@ if [[ -n "${smoke_token}" ]]; then
             echo "PASS deploy: warmup passed (all pipelines resolved/rejected)"
         else
             remaining=$(( ${#warmup_ids[@]} - done_count ))
-            echo "WARN deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
+            echo "FAIL deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
+            echo "    E2E tests skipped — they would also time out on the same stalled pipelines."
             echo "--- Core app logs (last 60 lines for diagnosis) ---"
             (fly logs --app "${CORE_APP}" 2>&1 &
              FLY_LOG_PID=$!
@@ -384,6 +387,7 @@ if [[ -n "${smoke_token}" ]]; then
              kill $FLY_LOG_PID 2>/dev/null
              wait $FLY_LOG_PID 2>/dev/null) | tail -60 || true
             echo "--- End core logs ---"
+            e2e_failed=1
         fi
     fi
 else
