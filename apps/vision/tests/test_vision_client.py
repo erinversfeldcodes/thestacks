@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,7 +48,7 @@ async def test_classify_returns_dict(client: VisionClient) -> None:
 
 async def test_extract_timeout_returns_504(client: VisionClient) -> None:
     """Modal timeout surfaces as 504."""
-    aio_mock = AsyncMock(side_effect=asyncio.TimeoutError())
+    aio_mock = AsyncMock(side_effect=TimeoutError())
     method_mock = MagicMock()
     method_mock.remote.aio = aio_mock
     instance_mock = MagicMock()
@@ -66,7 +65,7 @@ async def test_extract_timeout_returns_504(client: VisionClient) -> None:
 
 async def test_classify_timeout_returns_504(client: VisionClient) -> None:
     """Modal timeout on classify surfaces as 504."""
-    aio_mock = AsyncMock(side_effect=asyncio.TimeoutError())
+    aio_mock = AsyncMock(side_effect=TimeoutError())
     method_mock = MagicMock()
     method_mock.remote.aio = aio_mock
     instance_mock = MagicMock()
