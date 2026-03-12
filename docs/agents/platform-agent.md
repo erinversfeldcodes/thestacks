@@ -101,7 +101,7 @@ buf breaking proto/ --against '.git#branch=main'
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write Dockerfiles, CI configs, Fly configs, Nix flakes, and return a completion report.
+DO: Write Dockerfiles, CI configs, Fly configs, Nix flakes, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Challenge the Brief
 

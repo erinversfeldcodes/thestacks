@@ -120,7 +120,7 @@ TEST_TARGET=dev mix test
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write tests, test configs, chaos scenarios, load scripts, and return a completion report.
+DO: Write tests, test configs, chaos scenarios, load scripts, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Completion Report Format
 1. Summary of what was tested

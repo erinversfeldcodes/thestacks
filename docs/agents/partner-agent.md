@@ -91,7 +91,7 @@ When a partner and a scraper both have data for the same entity, partner data wi
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write Elixir contexts, controllers, plugs, Elm pages, tests, and return a completion report.
+DO: Write Elixir contexts, controllers, plugs, Elm pages, tests, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Completion Report Format
 1. Summary of what was implemented

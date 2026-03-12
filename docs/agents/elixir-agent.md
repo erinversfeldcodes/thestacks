@@ -130,7 +130,7 @@ DO NOT:
 
 DO:
 - Write code, tests, and configuration
-- Update Progress Notes in the issue file
+- Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly
 - Return a structured completion report
 
 ### Challenge the Brief

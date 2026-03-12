@@ -110,7 +110,7 @@ gitleaks detect
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write security config, auth modules, validation rules, scanning configs, and return a completion report.
+DO: Write security config, auth modules, validation rules, scanning configs, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Completion Report Format
 1. Summary of what was implemented
