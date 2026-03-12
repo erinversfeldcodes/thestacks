@@ -2,7 +2,7 @@ defmodule Stacks.Events do
   @moduledoc """
   Event emission module. Inserts events into the `op.event_log` table.
   The event_log is append-only — records are never updated or deleted (except
-  GDPR-mandated PII scrubbing of payloads).
+  GDPR erasure, which zeroes out payloads for deleted-user events).
   """
 
   require Logger
