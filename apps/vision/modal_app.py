@@ -4,7 +4,7 @@ Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
 This file defines two Modal functions:
 
   1. VisionModel  — GPU class (A10G) for running Qwen2.5-VL inference.
-  2. vision_api   — CPU function hosting the FastAPI sidecar via @modal.asgi_app().
+  2. vision_api   — CPU function hosting the FastAPI app via @modal.asgi_app().
                     HTTPS endpoint: https://erinversfeldcodes--thestacks-vision-vision-api.modal.run
 
 Deploy with:
@@ -83,8 +83,6 @@ _EXTRACT_PROMPT = (
     image=image,
     # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
     # jobs are serialised on a single A10G) + inference (~60s for long inputs).
-    # The previous 120s was too tight: a queued call (90s wait + 60s inference
-    # = 150s total) would be killed, causing Oban retry cascades.
     timeout=300,
     # Keep the container alive for 5 minutes after the last request.
     # This amortises cold-start cost across batches of images (e.g. processing
@@ -177,10 +175,10 @@ def _parse_json(text: str) -> dict:
     return {}
 
 
-# ── FastAPI sidecar (ASGI) ────────────────────────────────────────────────────
-# Hosts the existing FastAPI app on Modal's serverless infrastructure.
-# Elixir core calls this endpoint via HMAC-authenticated HTTP — identical to
-# local dev where the sidecar runs at localhost:8000.
+# ── FastAPI vision service (ASGI) ─────────────────────────────────────────────
+# Hosts the FastAPI app on Modal's serverless infrastructure.
+# Elixir core calls this endpoint via HMAC-authenticated HTTPS. In local dev
+# the service runs at localhost:8000 via uvicorn.
 #
 # The Modal secret "thestacks-vision" must contain VISION_HMAC_SECRET.
 # Create or update with:

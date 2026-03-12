@@ -29,21 +29,22 @@ def _make_modal_mock(return_value: dict) -> MagicMock:
     return cls_mock
 
 
-async def test_extract_returns_wrapped_response(client: VisionClient) -> None:
-    """Successful Modal call is wrapped in the TogetherResponse envelope."""
+async def test_extract_returns_dict(client: VisionClient) -> None:
+    """Successful Modal call returns the result dict directly."""
     cls_mock = _make_modal_mock({"books": [{"title": "Test Book", "author": "Test Author"}]})
     with patch.object(client, "_modal_cls", cls_mock):
         result = await client.extract([_VALID_IMAGE])
-    assert "choices" in result
-    assert result["choices"][0]["message"]["content"]
+    assert "books" in result
+    assert result["books"][0]["title"] == "Test Book"
 
 
-async def test_classify_returns_wrapped_response(client: VisionClient) -> None:
-    """Successful Modal call is wrapped in the TogetherResponse envelope."""
+async def test_classify_returns_dict(client: VisionClient) -> None:
+    """Successful Modal call returns the result dict directly."""
     cls_mock = _make_modal_mock({"classification": "book", "confidence": 0.95})
     with patch.object(client, "_modal_cls", cls_mock):
         result = await client.classify(_VALID_IMAGE)
-    assert "choices" in result
+    assert result["classification"] == "book"
+    assert result["confidence"] == 0.95
 
 
 async def test_extract_timeout_returns_504(client: VisionClient) -> None:

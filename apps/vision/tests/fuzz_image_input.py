@@ -1,8 +1,8 @@
-"""Fuzz target for image input parsing in the vision sidecar.
+"""Fuzz target for image input parsing in the Modal vision service.
 
 Exercises four distinct paths:
   1. _fuzz_base64_and_size   — base64 decode + size check logic (unit level)
-  2. _fuzz_model_output_parsing — JSON parsing of Together AI response (unit level)
+  2. _fuzz_model_output_parsing — JSON parsing of model output (unit level)
   3. _fuzz_http_body          — raw bytes as the HTTP request body through the full
                                 ASGI stack: FastAPI JSON parsing → Pydantic validation
                                 → base64 decode → size check
@@ -57,7 +57,7 @@ _MOCK_CLASSIFY = {
     "choices": [{"message": {"content": '{"classification":"ambiguous","confidence":0.5}'}}]
 }
 
-# Patch VisionClient methods permanently so no requests reach Together AI.
+# Patch VisionClient methods permanently so no requests reach Modal.
 # Safe: this file is not collected by pytest (name does not match test_*.py / *_test.py).
 _extract_patcher = patch(
     "app.services.vision_client.VisionClient.extract",
@@ -104,7 +104,7 @@ def _fuzz_base64_and_size(raw: bytes) -> None:
 
 
 def _fuzz_model_output_parsing(raw: bytes) -> None:
-    """Simulate the JSON parsing path applied to Together AI model output."""
+    """Simulate the JSON parsing path applied to vision model output."""
     try:
         content = raw.decode("utf-8", errors="replace")
         parsed: object = json.loads(content)

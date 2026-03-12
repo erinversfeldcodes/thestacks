@@ -29,7 +29,7 @@ just test-elm
 # Rust scraper
 just test-rust
 
-# Python vision sidecar
+# Python vision service
 just test-python
 
 # All linters

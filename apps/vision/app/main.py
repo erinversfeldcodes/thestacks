@@ -1,5 +1,4 @@
 import base64
-import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -11,7 +10,7 @@ from app.config import settings
 from app.models.classification import Classification, ClassificationRequest, ClassificationResponse
 from app.models.extraction import ExtractedBook, ExtractionRequest, ExtractionResponse
 from app.services.hmac_auth import verify_hmac
-from app.services.vision_client import TogetherResponse, VisionClient
+from app.services.vision_client import VisionClient
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -29,7 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.vision_client.close()
 
 
-app = FastAPI(title="The Stacks Vision Sidecar", version="0.1.0", lifespan=lifespan, debug=False)
+app = FastAPI(title="The Stacks Vision Service", version="0.1.0", lifespan=lifespan, debug=False)
 
 
 @app.get("/health", status_code=200)
@@ -61,22 +60,10 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
 
     client: VisionClient = request.app.state.vision_client
     log.info("calling vision model for extraction")
-    raw_output: TogetherResponse = await client.extract(body.images)
-
-    try:
-        content = raw_output["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        content = ""
-    parsed: dict[str, object] = {}
-    try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        log.warning(
-            "extraction: failed to parse JSON", raw_content=content[:500] if content else ""
-        )
+    parsed: dict[str, object] = await client.extract(body.images)
 
     if not parsed:
-        log.warning("extraction: empty parse result", raw_content=content[:500] if content else "")
+        log.warning("extraction: empty result from vision model")
 
     books: list[ExtractedBook] = []
     raw_books = parsed.get("books")
@@ -130,17 +117,7 @@ async def classify(request: Request, body: ClassificationRequest) -> Classificat
 
     client: VisionClient = request.app.state.vision_client
     log.info("calling vision model for classification")
-    raw_output: TogetherResponse = await client.classify(body.image)
-
-    try:
-        content = raw_output["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        content = ""
-    parsed: dict[str, object] = {}
-    try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        parsed = {}
+    parsed: dict[str, object] = await client.classify(body.image)
 
     raw_classification = parsed.get("classification", "ambiguous")
     try:

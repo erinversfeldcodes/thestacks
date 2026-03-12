@@ -29,7 +29,6 @@ semgrep scan --config auto --error
 
 # Dockerfile linting
 hadolint deploy/Dockerfile.core
-hadolint deploy/Dockerfile.vision
 hadolint deploy/Dockerfile.scraper
 
 # Infrastructure-as-code scanning
@@ -70,11 +69,9 @@ if command -v dockle &>/dev/null; then
         echo "Running dockle CIS benchmark..."
         docker build -q -t stacks-dockle-core -f deploy/Dockerfile.core . && \
             dockle --exit-code 1 --exit-level WARN stacks-dockle-core
-        docker build -q -t stacks-dockle-vision -f deploy/Dockerfile.vision . && \
-            dockle --exit-code 1 --exit-level WARN stacks-dockle-vision
         docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper . && \
             dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
-        docker rmi stacks-dockle-core stacks-dockle-vision stacks-dockle-scraper 2>/dev/null || true
+        docker rmi stacks-dockle-core stacks-dockle-scraper 2>/dev/null || true
     else
         echo "SKIP: docker not available — cannot run dockle (dockle requires a built image)"
     fi

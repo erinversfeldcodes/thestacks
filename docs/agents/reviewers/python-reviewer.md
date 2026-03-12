@@ -26,23 +26,23 @@ You review Python/FastAPI code changes produced by the python-agent. You never w
 
 ### 3. Test Correctness & Completeness
 - **Correctness**: Do tests assert the actual response body and status codes, not just that a call was made? Are mocks realistic — do they return the same shape as the real service would?
-- **Completeness**: Is there coverage for: happy path, HMAC rejection (missing header, wrong token, replayed token), malformed input (wrong content type, missing required fields, oversized payload), external service failure (timeout, 5xx from Together AI), and model output that cannot be parsed?
+- **Completeness**: Is there coverage for: happy path, HMAC rejection (missing header, wrong token, replayed token), malformed input (wrong content type, missing required fields, oversized payload), external service failure (timeout, 5xx from Modal), and model output that cannot be parsed?
 - **Fixture quality**: Are `pytest` fixtures well-scoped (`function` vs `session`)? Do they clean up correctly?
-- **No live external calls in tests**: Vision client must be mocked. Tests must not call Together AI or Replicate.
+- **No live external calls in tests**: Vision client must be mocked. Tests must not call Modal.
 - **Test performance**: All tests should complete quickly. Flag any test that does real I/O, sleeps, or initialises a full model.
 
 ### 4. Performance
 - **Blocking in async context**: Scan every `async def` for synchronous calls — `requests.get`, `open()`, `time.sleep`, CPU-intensive loops. Any of these stall the event loop.
 - **HTTP client lifecycle**: Is `httpx.AsyncClient` instantiated once (at app startup) and reused, or created per request? Per-request instantiation kills connection pooling and adds latency.
 - **Pydantic validation overhead**: Large or deeply nested models validated on every request. If the payload is a raw image binary plus metadata, ensure only the metadata is parsed through Pydantic.
-- **Model inference latency**: Is there a timeout configured on Together AI / Replicate calls? What happens if the model takes 30 seconds? The endpoint should not hang indefinitely.
+- **Model inference latency**: Is there a timeout configured on Modal calls? What happens if the model takes 30 seconds? The endpoint should not hang indefinitely.
 - **Startup time**: Does the app defer expensive initialisation (model loading, client setup) to lifespan, or does it block the import phase? Slow startups cause Fly.io health check failures.
 - **Connection pool sizing**: Is the `httpx.AsyncClient` configured with appropriate `max_connections` and `max_keepalive_connections` for the expected request volume?
 
 ### 5. Security
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
 - **HMAC auth**: Every non-health endpoint validates the `X-Internal-Token` header using constant-time comparison (`hmac.compare_digest`). Missing or invalid tokens return 401.
-- **Never trust model output**: The sidecar returns raw extractions only. It must not attempt ISBN validation, book lookup, or any decision-making based on model output. That is Phoenix's responsibility.
+- **Never trust model output**: The vision service returns raw extractions only. It must not attempt ISBN validation, book lookup, or any decision-making based on model output. That is Phoenix's responsibility.
 - **Model version pinning**: Model identifiers must come from `config.py`, not be hardcoded in service calls. No `latest` aliases.
 - **Input size limits**: Is there a maximum payload size enforced? An unbounded image upload will exhaust memory.
 - **Dependency security**: `pip audit` (or `safety`) in CI. No known CVEs in pinned deps.
@@ -51,7 +51,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 
 ### 6. Alternative Approaches Research
 Before returning your verdict, actively research the following and include findings in your report:
-- Are there alternative Python vision/OCR libraries or approaches (e.g. local open-source models, different Together AI models, Google Vision API, AWS Textract) that might offer better accuracy, lower latency, or lower cost for book cover extraction?
+- Are there alternative Python vision/OCR libraries or approaches (e.g. local open-source models, different alternative vision models, Google Vision API, AWS Textract) that might offer better accuracy, lower latency, or lower cost for book cover extraction?
 - Are there alternative FastAPI patterns for HMAC auth (e.g. middleware vs `Depends`, shared secret rotation strategies)?
 - Are there alternative async HTTP clients or patterns worth considering (`aiohttp`, `httpx` with `h2` HTTP/2 support)?
 - Are there known issues or performance characteristics of `Qwen2.5-VL-7B-Instruct` for book cover extraction specifically, and are there better-suited models?
@@ -70,7 +70,7 @@ Load and check against:
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
-  - What endpoint shapes, Pydantic model fields, or response contracts does it depend on from the sidecar?
+  - What endpoint shapes, Pydantic model fields, or response contracts does it depend on from the vision service?
   - Does the current implementation expose those contracts correctly?
   - Are there any model choices, endpoint paths, or response shapes that downstream work will need changed?
 - State a clear verdict: **READY** or **GAPS**
@@ -97,7 +97,7 @@ Load and check against:
    - `ruff check .` — any lint issues
    - `ruff format --check .` — any format issues
    Any non-zero exit is a **required revision**. Do not skip this step.
-6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the sidecar API contract adequately supports downstream Elixir callers.
+6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the vision service API contract adequately supports downstream Elixir callers.
 7. Assess each file against all axes
 8. Produce the review report
 
@@ -157,7 +157,7 @@ For each story:
 
 ### Security
 - HMAC auth: [all non-health endpoints protected? constant-time comparison?]
-- Model output trust: [raw extraction only? no decisions in sidecar?]
+- Model output trust: [raw extraction only? no decisions in vision service?]
 - Model version: [pinned in config? no 'latest'?]
 - Input size limits: [enforced?]
 - Dependency security: [pip audit clean?]
@@ -170,7 +170,7 @@ For each story:
 
 ### Forward Compatibility
 Downstream issues identified: [list issue numbers and titles]
-- **Issue #NNN — [Title]**: [What it requires from the sidecar] — [Provided? Y/N] — [Any gaps]
+- **Issue #NNN — [Title]**: [What it requires from the vision service] — [Provided? Y/N] — [Any gaps]
 Verdict: READY | GAPS
 
 ### Required Revisions (if NEEDS_REVISION or FAILED)

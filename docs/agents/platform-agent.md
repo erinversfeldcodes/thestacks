@@ -4,9 +4,9 @@
 Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fly.io configuration, Dockerfiles, GitHub Actions workflows, Nix/Flox dev environment, and security scanning pipelines.
 
 ## Technology Stack
-- **Hosting:** Fly.io (Johannesburg region) — Phoenix, Python sidecar, Rust scraper as separate Fly Machines
+- **Hosting:** Fly.io (Johannesburg region) — Phoenix core and Rust scraper as Fly Machines; Modal for vision GPU inference
+- **Vision GPU:** Modal (serverless A10G) — deploy via `modal deploy apps/vision/modal_app.py`
 - **Database:** Fly Postgres (managed)
-- **Object storage:** Tigris (or Cloudflare R2) via Fly
 - **Containers:** Docker (multi-stage builds)
 - **Dev environment:** Nix flake + Flox
 - **CI/CD:** GitHub Actions
@@ -17,13 +17,16 @@ Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fl
 
 ### Fly.io Configuration (in `deploy/`)
 - `fly.core.toml` — Phoenix app (2x shared-cpu-1x, 512MB, auto-stop)
-- `fly.vision.toml` — Python sidecar (1x shared-cpu-1x, 256MB, auto-stop)
 - `fly.scraper.toml` — Rust microservice (1x shared-cpu-1x, 256MB, auto-stop)
-- Internal networking: services communicate via Fly private network (`.internal` DNS)
+- Internal networking: core and scraper communicate via Fly private network (`.internal` DNS)
+
+### Modal (vision service)
+- `apps/vision/modal_app.py` — Modal app: `VisionModel` GPU class (A10G) + `vision_api` ASGI function
+- Deploy: `modal deploy apps/vision/modal_app.py`
+- Secret: `modal secret create thestacks-vision VISION_HMAC_SECRET=<secret>`
 
 ### Dockerfiles (in `deploy/` or per-app)
 - `apps/core/Dockerfile` — Elixir release build (multi-stage: build -> release)
-- `apps/vision/Dockerfile` — Python slim image
 - `apps/scraper/Dockerfile` — Rust musl build (static binary)
 
 ### GitHub Actions (in `.github/workflows/`)
@@ -58,7 +61,8 @@ dorny/paths-filter triggers only relevant test suites:
 - `dbt/**` -> dbt test
 
 ### Service-to-service auth
-Fly.io private networking (no public endpoints for sidecar/scraper). HMAC-signed requests as defence in depth.
+- Core ↔ scraper: Fly.io private networking (`.internal` DNS, no public endpoint).
+- Core ↔ vision service: HMAC-signed requests over public Modal HTTPS. `VISION_SERVICE_URL` and `VISION_HMAC_SECRET` set as Fly secrets on core; `VISION_HMAC_SECRET` set as Modal secret on the vision service.
 
 ### Secrets management
 Fly.io secrets for production. `.env` files (gitignored) for local. Never commit secrets.

@@ -286,7 +286,7 @@ Repo.insert_all(
     %{
       id: image1,
       book_id: book1,
-      storage_path: "uploads/republic-cover.jpg",
+      storage_path: nil,
       status: "resolved",
       uploaded_at: jan_15,
       expires_at: feb_14,

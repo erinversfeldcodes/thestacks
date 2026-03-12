@@ -43,12 +43,12 @@
 
 Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, **--** = not involved.
 
-| Story | Elm | Phoenix | Python Sidecar | Rust Scraper | PostgreSQL | dbt | External APIs |
+| Story | Elm | Phoenix | Vision Service | Rust Scraper | PostgreSQL | dbt | External APIs |
 |-------|-----|---------|----------------|--------------|------------|-----|---------------|
-| US-1.1.1 | W (upload form, confirm) | RW (intake, pre-process, create) | RW (vision) | -- | W (books, images) | -- | Together AI / Replicate, Open Library, Google Books |
+| US-1.1.1 | W (upload form, confirm) | RW (intake, pre-process, create) | RW (vision) | -- | W (books, images) | -- | Modal vision service, Open Library, Google Books |
 | US-1.1.2 | R (error display) | R (validation) | -- | -- | R (books) | -- | Open Library, Google Books |
-| US-1.1.3 | R (error display) | R (validation) | R (classification) | -- | W (audit_log) | -- | Together AI / Replicate |
-| US-1.1.7 | RW (bulk drop zone, review screen, shelf selector) | RW (batch intake, pre-process, grouping, batch jobs) | RW (classify + extract per image) | -- | W (books, images, batch_id, group_id) | -- | Together AI / Replicate, Open Library, Google Books |
+| US-1.1.3 | R (error display) | R (validation) | R (classification) | -- | W (audit_log) | -- | Modal (Qwen2.5-VL-7B-Instruct) |
+| US-1.1.7 | RW (bulk drop zone, review screen, shelf selector) | RW (batch intake, pre-process, grouping, batch jobs) | RW (classify + extract per image) | -- | W (books, images, batch_id, group_id) | -- | Modal vision service, Open Library, Google Books |
 | US-1.1.4 | R (gate UI) | RW (flag + gate) | -- | -- | RW (books, audit_log) | R (BISAC view) | -- |
 | US-1.1.5 | RW (ISBN form) | RW (validate + create) | -- | -- | W (books, shelf_placements) | -- | Open Library, Google Books |
 | US-1.1.6 | RW (duplicate UI) | R (dedup check) | -- | -- | R (books) | -- | -- |
@@ -73,7 +73,7 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-2.4.1 | R (events display) | RW (event matching) | -- | -- | RW (bookstore_events, bookstores) | R (event view) | Brave Search, SearXNG |
 | US-2.5.1 | R (approval UI) | RW (discovery + approval) | -- | -- | RW (discovered_sources, audit_log) | -- | Brave Search, SearXNG |
 | US-3.1.1 | RW (cork board) | RW (spaces) | -- | -- | RW (third_spaces, third_space_events) | -- | Brave Search, SearXNG |
-| US-4.1.1 | R (status display) | RW (pipeline) | RW (classification) | -- | RW (books, audit_log) | -- | Together AI / Replicate, Open Library, Google Books |
+| US-4.1.1 | R (status display) | RW (pipeline) | RW (classification) | -- | RW (books, audit_log) | -- | Modal vision service, Open Library, Google Books |
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
 | US-5.1.1 | RW (dashboard) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
@@ -92,7 +92,7 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-11.1.3 | RW (leave group) | RW (membership) | -- | -- | RW (group_members) | -- | -- |
 | US-11.1.4 | RW (member list) | RW (member mgmt) | -- | -- | RW (group_members, group_invitations) | -- | -- |
 | US-12.1.1 | RW (post editor) | RW (post) | -- | -- | RW (blog_posts) | -- | -- |
-| US-12.1.2 | R (associations display) | R (associations) | RW (LLM call) | -- | RW (post_book_associations) | -- | Together AI / Replicate |
+| US-12.1.2 | R (associations display) | R (associations) | RW (LLM call) | -- | RW (post_book_associations) | -- | Together AI (LLM — future feature) |
 | US-12.1.3 | R (blog archive) | R (posts) | -- | -- | R (blog_posts, post_book_associations) | -- | -- |
 | US-13.1.1 | RW (comment UI) | RW (comment) | -- | -- | RW (comments) | -- | -- |
 | US-13.1.2 | R (filtered thread) | R (recursive CTE) | -- | -- | R (comments, user_blocks) | -- | -- |
@@ -418,7 +418,7 @@ US-1.1.1 (Upload + Identify)
 | **Backend (Phoenix)** | `StacksWeb.UploadController.create_batch/2` — accepts N images, stores each, enqueues `BatchIdentifyJob`. `StacksWeb.UploadController.batch_status/2` — polls overall batch progress. `Stacks.Books.group_by_isbn/1` — merges images that resolved to the same ISBN into a single group. |
 | **Database** | **Write:** `op.uploaded_images` with `batch_id UUID` and `group_id UUID` columns (new — migration required). **Write:** `op.books`, `op.bookshelf_placements`, `op.audit_log` per confirmed book. |
 | **Jobs (Oban)** | `Stacks.Workers.BatchIdentifyJob` — orchestrator: fans out one `IdentifyBookJob` per image, collects results, performs grouping, writes batch status. |
-| **External Services** | Together AI / Replicate (classify + extract per image). Open Library, Google Books (ISBN resolution per confirmed book). |
+| **External Services** | Modal vision service (classify + extract per image). Open Library, Google Books (ISBN resolution per confirmed book). |
 | **dbt Models** | `int_bulk_upload_batch_size`, `int_bulk_upload_confirmation_rate` (how many detected books users confirm vs. dismiss). |
 | **Infrastructure** | No new services. Requires `batch_id` and `group_id` migration on `op.uploaded_images`. |
 | **Dependencies** | US-1.1.1 (single-image pipeline); Issue #008 (multi-book extraction API — `/extract` must return `books: list` before this can be implemented); Issue #009 (bulk upload issue). |
@@ -822,7 +822,7 @@ US-1.1.1 (Upload + Identify)
 | **Backend (Phoenix)** | `Stacks.Discovery` context. `Discovery.Agent` GenServer or Oban-driven. `Discovery.search_and_score/1` -- calls search APIs, runs LLM scoring. `Discovery.approve_source/1`, `Discovery.reject_source/1`. |
 | **Database** | **Write:** `op.discovered_sources` (url, type, confidence, status, approved_at). `op.audit_log`. **Read:** `op.books`, `op.authors` (to generate search queries). |
 | **Jobs (Oban)** | `Stacks.Workers.SourceDiscoveryJob` -- scheduled (e.g., daily). `Stacks.Workers.ScoreSourceJob` -- LLM confidence scoring per discovered URL. |
-| **External Services** | Brave Search API, SearXNG (self-hosted), Together AI / Replicate (for LLM scoring). |
+| **External Services** | Brave Search API, SearXNG (self-hosted), Together AI (LLM scoring — future feature). |
 | **dbt Models** | `stg_discovered_sources`, `int_source_approval_rate`. |
 | **Infrastructure** | SearXNG instance on Fly.io. Rate limiting for Brave Search API. |
 | **Dependencies** | US-1.1.1 (books/authors must exist to search for). |
@@ -870,7 +870,7 @@ US-1.1.1 (Upload + Identify)
 | **Backend (Phoenix)** | `Stacks.Moderation` context. `Moderation.Pipeline` -- orchestrates 4 steps as a state machine. Steps: `classify_image/1` -> `resolve_isbn/1` -> `classify_subject/1` -> `store_with_tier/1`. |
 | **Database** | **Write:** `op.books` (visibility_tier), `op.audit_log` (each step logged). **Read:** `op.books` (dedup). |
 | **Jobs (Oban)** | Integrated into `IdentifyBookJob` as sub-steps, or `Stacks.Workers.ModerationPipelineJob` as separate orchestrator. |
-| **External Services** | Together AI / Replicate (step 1), Open Library / Google Books (step 2). |
+| **External Services** | Modal vision service (step 1), Open Library / Google Books (step 2). |
 | **dbt Models** | `int_moderation_outcomes`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1 (runs as part of upload). |
@@ -1491,7 +1491,7 @@ Which user stories touch each database table:
 
 | API / Service | Stories | Purpose |
 |---------------|---------|---------|
-| Together AI / Replicate | US-1.1.1, US-1.1.3, US-2.5.1, US-4.1.1 | Vision model (book identification, classification), LLM scoring |
+| Modal | US-1.1.1, US-1.1.3, US-4.1.1 | Vision model (book identification, classification via Qwen2.5-VL-7B) |
 | Open Library | US-1.1.1, US-1.1.2, US-4.1.1 | ISBN resolution, book metadata |
 | Google Books | US-1.1.1, US-1.1.2, US-4.1.1 | ISBN resolution fallback, metadata |
 | Brave Search | US-2.3.1, US-2.4.1, US-2.5.1, US-3.1.1 | Source discovery, author search, event search |

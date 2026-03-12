@@ -25,7 +25,7 @@ defmodule Core.Application do
   # Without :inet6, Erlang's gen_tcp defaults to :inet (IPv4) and cannot dial
   # them. We detect internal URLs at startup and configure the pool accordingly.
   defp finch_spec do
-    vision_url = Application.get_env(:core, :vision_sidecar_url, "http://localhost:8000")
+    vision_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
 
     pools =
       if String.contains?(vision_url, ".internal") do

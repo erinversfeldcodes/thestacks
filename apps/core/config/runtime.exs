@@ -23,11 +23,11 @@ end
 config :core, :vision_hmac_secret, vision_hmac_secret
 
 if config_env() == :prod do
-  vision_sidecar_url =
-    System.get_env("VISION_SIDECAR_URL") ||
-      raise "environment variable VISION_SIDECAR_URL is missing."
+  vision_service_url =
+    System.get_env("VISION_SERVICE_URL") ||
+      raise "environment variable VISION_SERVICE_URL is missing."
 
-  config :core, :vision_sidecar_url, vision_sidecar_url
+  config :core, :vision_service_url, vision_service_url
 
   database_url =
     System.get_env("DATABASE_URL") ||

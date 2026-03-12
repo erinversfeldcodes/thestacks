@@ -16,7 +16,7 @@ One test per user story interaction flow. The test walks through the steps descr
 describe "US-1.1.1: Upload Photos to Add a Book" do
   test "user uploads a photo and the book appears on the chosen shelf" do
     # 1. Upload 1-3 images
-    # 2. Assert vision sidecar is called
+    # 2. Assert vision service is called
     # 3. Assert ISBN is resolved
     # 4. Assert book is created with correct metadata
     # 5. Assert book appears on the chosen shelf
@@ -59,7 +59,7 @@ Validate API request/response shapes against the Protobuf-generated JSON schemas
 
 ### 6. Chaos / Resilience Tests
 Simulate failure conditions:
-- Vision sidecar down -> graceful degradation
+- Vision service down -> graceful degradation
 - Database connection pool exhausted -> 503 with retry-after
 - Budget exceeded -> user-friendly message, manual ISBN entry still works
 - Partner flood -> rate limiter kicks in

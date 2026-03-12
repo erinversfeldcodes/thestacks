@@ -4,7 +4,7 @@
 # In CI (or any fresh environment) this script:
 #   1. Starts Phoenix on :4000 with a live DB
 #   2. Serves the pre-built Elm frontend on :4001
-#   3. Starts the vision sidecar on :8000 (if present)
+#   3. Starts the vision service locally on :8000 (if present; in production this is Modal)
 #   4. Waits for each service to be ready
 #   5. Runs `npm test` (playwright) inside e2e/
 #   6. Stops all services on exit (trap)
@@ -100,12 +100,12 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
         SERVICES_STARTED+=(phoenix)
     fi
 
-    # Vision sidecar on :8000 (optional)
+    # Vision service on :8000 (optional — local dev only; in CI/production this is Modal)
     if [[ -f "$REPO_ROOT/apps/vision/app/main.py" ]]; then
         if port_open 8000; then
-            echo "  Vision sidecar already running on :8000 — skipping start"
+            echo "  Vision service already running on :8000 — skipping start"
         else
-            echo "==> Starting vision sidecar on :8000..."
+            echo "==> Starting vision service on :8000..."
             (
                 cd "$REPO_ROOT/apps/vision"
                 .venv/bin/uvicorn app.main:app --port 8000

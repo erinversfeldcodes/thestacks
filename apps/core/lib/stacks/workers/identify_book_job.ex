@@ -1,6 +1,6 @@
 defmodule Stacks.Workers.IdentifyBookJob do
   @moduledoc """
-  Oban worker that processes an uploaded image through the vision sidecar
+  Oban worker that processes an uploaded image through the Modal vision service
   to identify and create/update a book record.
 
   The image is passed as base64 in the job args — no filesystem access needed.
