@@ -26,6 +26,11 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load local .env for dev secrets (FLY_API_TOKEN, NEON_*, etc.) when outside CI.
+if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
+    set -a; source "$REPO_ROOT/.env"; set +a
+fi
+
 # Colours for section banners
 RED='\033[0;31m'
 GREEN='\033[0;32m'
