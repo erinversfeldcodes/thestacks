@@ -200,7 +200,8 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 | `FLY_API_TOKEN` | Deploy + destroy ephemeral apps |
 | `NEON_PROJECT_ID` | Create/delete per-PR Neon branches |
 | `NEON_API_KEY` | Neon branch management API |
-| `TOGETHER_API_KEY` | Vision sidecar in preview env |
+| `MODAL_TOKEN_ID` | Modal deploy + URL lookup for vision sidecar |
+| `MODAL_TOKEN_SECRET` | Modal deploy + URL lookup for vision sidecar |
 | `VISION_HMAC_SECRET` | Elixir → vision HMAC auth in preview |
 | `SECRET_KEY_BASE` | Phoenix in preview env |
 | `GITHUB_TOKEN` | ossf/scorecard, PR body updates |
@@ -247,9 +248,9 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 - Issues #001, #002, #003 committed to `main`
 - Human: Fly.io org, apps, and Postgres cluster provisioned
 - Human: Neon project created (`NEON_PROJECT_ID` available)
-- Human: Tigris bucket and credentials provisioned
+- Human: Cloudflare R2 bucket and API tokens provisioned
 - Human: Domain and DNS configured
-- Human: GitHub secrets populated (FLY_API_TOKEN, NEON_*, TOGETHER_API_KEY, etc.)
+- Human: GitHub secrets populated (FLY_API_TOKEN, NEON_*, MODAL_TOKEN_ID, MODAL_TOKEN_SECRET, etc.)
 
 ## Agent Assignment
 - **platform-agent** (`docs/agents/platform-agent.md`)
