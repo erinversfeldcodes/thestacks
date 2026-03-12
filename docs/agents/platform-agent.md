@@ -4,7 +4,7 @@
 Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fly.io configuration, Dockerfiles, GitHub Actions workflows, Nix/Flox dev environment, and security scanning pipelines.
 
 ## Technology Stack
-- **Hosting:** Fly.io (Johannesburg region) — Phoenix core and Rust scraper as Fly Machines; Modal for vision GPU inference
+- **Hosting:** Fly.io (IAD — Ashburn, Virginia) — Phoenix core and Rust scraper as Fly Machines; Modal for vision GPU inference
 - **Vision GPU:** Modal (serverless A10G) — deploy via `modal deploy apps/vision/modal_app.py`
 - **Database:** Fly Postgres (managed)
 - **Containers:** Docker (multi-stage builds)

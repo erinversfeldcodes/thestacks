@@ -7,7 +7,7 @@ Wire up the full deployment stack: Fly.io app configs, multi-stage Dockerfiles f
 N/A — infrastructure.
 
 ## Goal
-A green CI pipeline with strong confidence in deployability and security, and a first successful Fly.io deployment of all three services (core, vision, scraper) to the JHB region. Every push to a feature branch runs the full local suite; after passing, the stack is deployed to an ephemeral preview environment, Playwright E2E tests are run against it, and the environment is destroyed. Results are posted to the open PR.
+A green CI pipeline with strong confidence in deployability and security, and a first successful Fly.io deployment of all three services (core, vision, scraper) to the IAD region. Every push to a feature branch runs the full local suite; after passing, the stack is deployed to an ephemeral preview environment, Playwright E2E tests are run against it, and the environment is destroyed. Results are posted to the open PR.
 
 ## Technical Requirements
 
@@ -16,7 +16,7 @@ See roadmap: `plans/consolidated-roadmap.md` § Phase 1E.
 ---
 
 ### 1E.1 — Fly.io Configuration (already complete)
-- `deploy/fly.core.toml` — Phoenix app, JHB region, health check at `/api/health` ✅
+- `deploy/fly.core.toml` — Phoenix app, IAD region, health check at `/api/health` ✅
 - `deploy/fly.vision.toml` — Python sidecar, private networking only ✅
 - `deploy/fly.scraper.toml` — Rust scraper, private networking only ✅
 - `deploy/Dockerfile.core` — multi-stage Elixir release ✅
@@ -144,7 +144,7 @@ deploy-preview:
   if: github.event_name == 'pull_request'
   steps:
     - Create Neon branch for this PR
-    - Deploy stacks-core-pr-{pr_num}, stacks-vision-pr-{pr_num} to Fly.io (JHB)
+    - Deploy stacks-core-pr-{pr_num}, stacks-vision-pr-{pr_num} to Fly.io (IAD)
     - Run Playwright E2E against https://stacks-core-pr-{pr_num}.fly.dev
     - Post deployed E2E results to PR (second sentinel block in PR body)
     - Destroy Fly apps + Neon branch (always, even on failure)
@@ -200,7 +200,8 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 | `FLY_API_TOKEN` | Deploy + destroy ephemeral apps |
 | `NEON_PROJECT_ID` | Create/delete per-PR Neon branches |
 | `NEON_API_KEY` | Neon branch management API |
-| `TOGETHER_API_KEY` | Vision sidecar in preview env |
+| `MODAL_TOKEN_ID` | Modal deploy + URL lookup for vision sidecar |
+| `MODAL_TOKEN_SECRET` | Modal deploy + URL lookup for vision sidecar |
 | `VISION_HMAC_SECRET` | Elixir → vision HMAC auth in preview |
 | `SECRET_KEY_BASE` | Phoenix in preview env |
 | `GITHUB_TOKEN` | ossf/scorecard, PR body updates |
@@ -211,8 +212,8 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 
 **Infrastructure (1E.1)**
 - [x] `deploy/Dockerfile.*` builds all three services
-- [x] `deploy/fly.*.toml` configs present for JHB region
-- [ ] First `fly deploy` to JHB succeeds for all three apps (needs credentials)
+- [x] `deploy/fly.*.toml` configs present for IAD region
+- [ ] First `fly deploy` to IAD succeeds for all three apps (needs credentials)
 - [ ] Phoenix health check (`/api/health`) returns 200 on Fly
 - [ ] Vision sidecar unreachable from public internet (private networking only)
 - [ ] `.env.example` matches all vars in `config/runtime.exs`
@@ -247,9 +248,9 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 - Issues #001, #002, #003 committed to `main`
 - Human: Fly.io org, apps, and Postgres cluster provisioned
 - Human: Neon project created (`NEON_PROJECT_ID` available)
-- Human: Tigris bucket and credentials provisioned
+- Human: Cloudflare R2 bucket and API tokens provisioned
 - Human: Domain and DNS configured
-- Human: GitHub secrets populated (FLY_API_TOKEN, NEON_*, TOGETHER_API_KEY, etc.)
+- Human: GitHub secrets populated (FLY_API_TOKEN, NEON_*, MODAL_TOKEN_ID, MODAL_TOKEN_SECRET, etc.)
 
 ## Agent Assignment
 - **platform-agent** (`docs/agents/platform-agent.md`)

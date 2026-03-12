@@ -1086,7 +1086,7 @@ US-1.1.1 (Upload + Identify)
 | **Backend (Phoenix)** | `Stacks.GDPR.ImageRetention` -- `cleanup_expired_images/0`. Generates thumbnail on upload, stores separately. |
 | **Database** | **Write:** `op.uploaded_images` (delete originals, keep thumbnail_url). **Read:** `op.uploaded_images` (where uploaded_at < 30 days ago). |
 | **Jobs (Oban)** | `Stacks.Workers.ImageRetentionJob` -- daily scheduled cleanup. |
-| **External Services** | Object storage (Tigris / S3) -- delete original files. |
+| **External Services** | Object storage (Cloudflare R2) -- delete original files. |
 | **dbt Models** | `mart_image_retention_stats`. |
 | **Infrastructure** | Object storage lifecycle policies as backup. |
 | **Dependencies** | US-1.1.1 (images must be uploaded). |

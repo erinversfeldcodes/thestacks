@@ -167,19 +167,19 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
         || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
     echo "$modal_deploy_output"
 
-    # Extract the actual serving URL from the deploy output.
-    # Modal truncates the subdomain when the app name is long and appends a hash,
-    # so we cannot safely construct the URL from the app name — we must read it.
-    # The URL appears on a line like:
-    #   ├── 🔨 Created web function vision_api => https://...modal.run
-    # When the URL wraps across two terminal lines we join first, then grep.
-    VISION_SERVICE_URL="$(echo "$modal_deploy_output" | tr -d '\n' | \
-        grep -oE 'https://[a-zA-Z0-9._-]+\.modal\.run' | head -1)"
+    # Query the deployed function's web URL via the Modal SDK rather than parsing
+    # deploy output (which wraps lines unpredictably and uses non-ASCII box chars).
+    VISION_SERVICE_URL="$(MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
+        python3 -c "
+import modal
+f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
+print(f.web_url)
+" 2>/dev/null)"
     if [[ -z "$VISION_SERVICE_URL" ]]; then
-        echo "FAIL deploy: could not determine Modal vision service URL from deploy output" >&2
+        echo "FAIL deploy: could not retrieve Modal vision service URL via SDK" >&2
         exit 1
     fi
-    echo "    Vision URL (actual): ${VISION_SERVICE_URL}"
+    echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
@@ -342,8 +342,10 @@ if [[ -n "${smoke_token}" ]]; then
         echo "FAIL deploy: all warmup uploads failed"
         e2e_failed=1
     else
-        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 2 min)..."
-        warmup_deadline=$(( $(date +%s) + 120 ))
+        # 6 minutes: Modal GPU cold start (~60s) + up to 4 serial Oban inferences (~60s each)
+        # + Open Library resolution. Must match or exceed Playwright PIPELINE_TIMEOUT (5 min).
+        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 6 min)..."
+        warmup_deadline=$(( $(date +%s) + 360 ))
         # Track done IDs as a space-separated string (bash 3.2 compatible; no declare -A).
         warmup_done_ids=""
         all_done=0
@@ -376,7 +378,8 @@ if [[ -n "${smoke_token}" ]]; then
             echo "PASS deploy: warmup passed (all pipelines resolved/rejected)"
         else
             remaining=$(( ${#warmup_ids[@]} - done_count ))
-            echo "WARN deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
+            echo "FAIL deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
+            echo "    E2E tests skipped — they would also time out on the same stalled pipelines."
             echo "--- Core app logs (last 60 lines for diagnosis) ---"
             (fly logs --app "${CORE_APP}" 2>&1 &
              FLY_LOG_PID=$!
@@ -384,6 +387,7 @@ if [[ -n "${smoke_token}" ]]; then
              kill $FLY_LOG_PID 2>/dev/null
              wait $FLY_LOG_PID 2>/dev/null) | tail -60 || true
             echo "--- End core logs ---"
+            e2e_failed=1
         fi
     fi
 else
