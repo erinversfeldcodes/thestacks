@@ -11,6 +11,7 @@
 #   4. Install Elixir tooling (hex, rebar, deps)
 #   5. Install Elm tooling (npm deps in frontend/)
 #   6. Create Python 3.12 virtualenv for apps/vision and install pip deps
+#   6b. Create Python 3.13+ virtualenv for scripts/mcp (project tools MCP server)
 #   7. Install pip-based global tools (dbt-postgres, sqlfluff, semgrep, checkov)
 #   8. Install Rust components (rustfmt, clippy) and cargo-audit
 #   9. Ensure PostgreSQL is running and create the dev database + run migrations
@@ -129,6 +130,23 @@ info "Installing vision app dependencies into virtualenv..."
                              --quiet
 
 success "Python virtualenv ready at apps/vision/.venv"
+
+# ── 6b. Python virtualenv (scripts/mcp — project tools MCP server) ───────────
+step "Python virtualenv (scripts/mcp)"
+MCP_VENV_DIR="$REPO_ROOT/scripts/mcp/.venv"
+MCP_PYTHON_BIN="$(command -v python3.13 || command -v python3.12 || command -v python3)"
+
+if [[ ! -d "$MCP_VENV_DIR" ]]; then
+    info "Creating MCP server virtualenv at scripts/mcp/.venv..."
+    "$MCP_PYTHON_BIN" -m venv "$MCP_VENV_DIR"
+else
+    success "MCP server virtualenv already exists"
+fi
+
+info "Installing MCP server dependencies..."
+"$MCP_VENV_DIR/bin/pip" install --upgrade pip --quiet
+"$MCP_VENV_DIR/bin/pip" install -r scripts/mcp/requirements.txt --quiet
+success "MCP server virtualenv ready at scripts/mcp/.venv"
 
 # ── 7. Pip-based global CLI tools ─────────────────────────────────────────────
 # These run outside the vision venv — they're dev toolchain tools used by
