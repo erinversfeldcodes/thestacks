@@ -23,11 +23,11 @@ import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
 
 
-{-| Maximum number of poll attempts before giving up (~90 seconds at 2s intervals).
+{-| Maximum number of poll attempts before giving up (~300 seconds at 2s intervals).
 -}
 maxPollCount : Int
 maxPollCount =
-    45
+    150
 
 
 type UploadResult
