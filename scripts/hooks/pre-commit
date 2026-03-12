@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# pre-commit — Git pre-commit hook: lint gate on staged files.
+#
+# Runs per-language format and lint checks against files staged for commit.
+# Exits non-zero if any check fails, blocking the commit.
+#
+# Checks staged files only (git diff --cached), so it only validates what
+# will actually land in the commit — not the full working tree.
+#
+# Install: just install-hooks (via scripts/install-hooks.sh)
+# Skip:    git commit --no-verify
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+STAGED_FILES=$(git -C "$REPO_ROOT" diff --name-only --cached 2>/dev/null || true)
+
+if [[ -z "$STAGED_FILES" ]]; then
+  exit 0
+fi
+
+# Detect which language families have staged changes.
+HAS_ELIXIR=0
+HAS_ELM=0
+HAS_RUST=0
+HAS_PYTHON=0
+HAS_PROTO=0
+HAS_DOCKERFILE=0
+HAS_NPM=0
+
+while IFS= read -r f; do
+  # Use tr for bash 3.x compat (macOS ships bash 3.2).
+  ext=$(printf '%s' "${f##*.}" | tr '[:upper:]' '[:lower:]')
+  bname=$(basename "$f")
+  case "$ext" in
+    ex|exs) HAS_ELIXIR=1 ;;
+    elm)    HAS_ELM=1    ;;
+    rs)     HAS_RUST=1   ;;
+    py)     HAS_PYTHON=1 ;;
+    proto)  HAS_PROTO=1  ;;
+  esac
+  case "$bname" in
+    Dockerfile*) HAS_DOCKERFILE=1 ;;
+  esac
+  case "$bname" in
+    package.json|package-lock.json) HAS_NPM=1 ;;
+  esac
+done <<< "$STAGED_FILES"
+
+FAIL=0
+SUMMARY=()
+
+run_check() {
+  local label="$1"
+  local fix_cmd="$2"
+  shift 2
+  local output
+  output=$("$@" 2>&1)
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    FAIL=1
+    SUMMARY+=("FAIL: ${label}")
+    SUMMARY+=("Run: ${fix_cmd}")
+    SUMMARY+=("${output}")
+    SUMMARY+=("")
+  fi
+}
+
+# --- Elixir ---
+if [[ $HAS_ELIXIR -eq 1 ]]; then
+  ELIXIR_FILES=$(echo "$STAGED_FILES" | grep -E '\.(ex|exs)$' || true)
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    ABS="${REPO_ROOT}/${f}"
+    [[ -f "$ABS" ]] || continue
+    run_check \
+      "mix format --check-formatted ${ABS}" \
+      "cd ${REPO_ROOT}/apps/core && mix format ${ABS}" \
+      bash -c "cd '${REPO_ROOT}/apps/core' && mix format --check-formatted '${ABS}'"
+  done <<< "$ELIXIR_FILES"
+
+  if [[ $FAIL -eq 0 ]]; then
+    run_check \
+      "mix credo --strict (apps/core)" \
+      "cd ${REPO_ROOT}/apps/core && mix credo --strict" \
+      bash -c "cd '${REPO_ROOT}/apps/core' && mix credo --strict"
+  fi
+
+  if [[ $FAIL -eq 0 ]]; then
+    run_check \
+      "mix sobelow (apps/core)" \
+      "cd '${REPO_ROOT}/apps/core' && mix sobelow --exit" \
+      bash -c "cd '${REPO_ROOT}/apps/core' && mix sobelow"
+  fi
+fi
+
+# --- Elm ---
+if [[ $HAS_ELM -eq 1 ]]; then
+  ELM_FILES=$(echo "$STAGED_FILES" | grep -E '\.elm$' || true)
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    ABS="${REPO_ROOT}/${f}"
+    [[ -f "$ABS" ]] || continue
+    run_check \
+      "elm-format --validate ${ABS}" \
+      "cd ${REPO_ROOT}/frontend && elm-format ${ABS}" \
+      bash -c "cd '${REPO_ROOT}/frontend' && elm-format --validate '${ABS}'"
+  done <<< "$ELM_FILES"
+fi
+
+# --- Rust ---
+if [[ $HAS_RUST -eq 1 ]]; then
+  run_check \
+    "cargo fmt --check (apps/scraper)" \
+    "cd ${REPO_ROOT}/apps/scraper && cargo fmt" \
+    bash -c "cd '${REPO_ROOT}/apps/scraper' && cargo fmt --check"
+
+  if [[ $FAIL -eq 0 ]] && command -v cargo > /dev/null 2>&1; then
+    run_check \
+      "cargo clippy -- -D warnings (apps/scraper)" \
+      "cd ${REPO_ROOT}/apps/scraper && cargo clippy -- -D warnings" \
+      bash -c "cd '${REPO_ROOT}/apps/scraper' && cargo clippy -- -D warnings"
+  fi
+fi
+
+# --- Python ---
+if [[ $HAS_PYTHON -eq 1 ]]; then
+  PYTHON_FILES=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    ABS="${REPO_ROOT}/${f}"
+    [[ -f "$ABS" ]] || continue
+    run_check \
+      "ruff format --check ${ABS}" \
+      "cd ${REPO_ROOT}/apps/vision && ruff format ${ABS}" \
+      bash -c "cd '${REPO_ROOT}/apps/vision' && ruff format --check '${ABS}'"
+    run_check \
+      "ruff check ${ABS}" \
+      "cd ${REPO_ROOT}/apps/vision && ruff check --fix ${ABS}" \
+      bash -c "cd '${REPO_ROOT}/apps/vision' && ruff check '${ABS}'"
+  done <<< "$PYTHON_FILES"
+fi
+
+# --- Protobuf ---
+if [[ $HAS_PROTO -eq 1 ]]; then
+  run_check \
+    "buf lint proto/" \
+    "cd ${REPO_ROOT} && buf lint proto/" \
+    bash -c "cd '${REPO_ROOT}' && buf lint proto/"
+fi
+
+# --- Dockerfile ---
+if [[ $HAS_DOCKERFILE -eq 1 ]]; then
+  DOCKERFILE_FILES=$(echo "$STAGED_FILES" | grep -E '(^|/)Dockerfile' || true)
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    ABS="${REPO_ROOT}/${f}"
+    [[ -f "$ABS" ]] || continue
+    if command -v hadolint > /dev/null 2>&1; then
+      run_check \
+        "hadolint ${ABS}" \
+        "hadolint ${ABS}" \
+        hadolint "$ABS"
+    fi
+  done <<< "$DOCKERFILE_FILES"
+fi
+
+# --- NPM ---
+if [[ $HAS_NPM -eq 1 ]]; then
+  if command -v npm > /dev/null 2>&1; then
+    NPM_FILES=$(echo "$STAGED_FILES" | grep -E '(^|/)package(-lock)?\.json$' || true)
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      NPM_DIR="${REPO_ROOT}/$(dirname "$f")"
+      [[ -d "$NPM_DIR" ]] || continue
+      run_check \
+        "npm audit --audit-level=high (${NPM_DIR})" \
+        "cd ${NPM_DIR} && npm audit --audit-level=high" \
+        bash -c "cd '${NPM_DIR}' && npm audit --audit-level=high"
+    done <<< "$NPM_FILES"
+  fi
+fi
+
+if [[ $FAIL -ne 0 ]]; then
+  echo "" >&2
+  printf '%s\n' "${SUMMARY[@]}" >&2
+  echo "Fix the above failures before committing. Use git commit --no-verify to skip." >&2
+  exit 1
+fi
+
+exit 0
