@@ -295,12 +295,12 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Upload` module -- drag-and-drop / camera capture, upload progress bar, result confirmation. Types: `UploadMsg`, `UploadModel`, `PhotoFile`. Ports for file-input interop. |
-| **Backend (Phoenix)** | `Stacks.Books` context -- `Books.upload_and_identify/2`, `Books.create/1`, `Books.find_or_create_author/1`. `StacksWeb.UploadController` (REST). Calls Python sidecar via HTTP. |
-| **Database** | **Write:** `op.books`, `op.authors`, `op.uploaded_images`, `op.shelf_placements`, `op.audit_log`. **Read:** `op.books` (dedup check by ISBN). |
-| **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` -- async vision call. `Stacks.Workers.EnrichBookJob` -- fetch metadata from Open Library / Google Books after ISBN resolved. |
-| **External Services** | Together AI or Replicate (Qwen2.5-VL / Llama 4 / PaliGemma) for vision. Open Library API for ISBN lookup. Google Books API as fallback. |
+| **Backend (Phoenix)** | `Stacks.Books` context -- `Books.store_upload/2` reads the Plug temp file and base64-encodes the bytes; enqueues `IdentifyBookJob` with the image in Oban job args. `Books.create/1`, `Books.find_or_create_author/1`. `StacksWeb.UploadController` (REST). Image is never written to permanent storage. |
+| **Database** | **Write:** `op.books`, `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.books` (dedup check by ISBN). Oban job args hold the base64 image in Postgres until the worker processes them. |
+| **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` -- sends base64 image to Modal vision service over HMAC-authenticated HTTPS. `Stacks.Workers.EnrichBookJob` -- fetch metadata from Open Library / Google Books after ISBN resolved. |
+| **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup. Google Books API as fallback. |
 | **dbt Models** | None directly; feeds `stg_books`, `stg_uploaded_images` staging models. |
-| **Infrastructure** | Python sidecar deployed as separate Fly.io machine. Image upload to object storage (Tigris / S3-compatible on Fly). |
+| **Infrastructure** | Modal hosts the Python vision service (separate from Fly.io). No object storage for uploads -- image bytes live in Oban job args (Postgres) for the duration of processing. |
 | **Dependencies** | US-8.1.5 (audit logging), US-8.1.3 (consent). |
 
 ---
@@ -335,10 +335,10 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Extends `Page.Upload` -- `NotABook` variant. Displays rejection with humour/clarity. |
-| **Backend (Phoenix)** | `Stacks.Books.classify_image/1` -- first step in pipeline. Calls Python sidecar with classification prompt. Returns `{:error, :not_a_book, category}`. |
+| **Backend (Phoenix)** | `Stacks.Books.classify_image/1` -- first step in pipeline. Calls Modal vision service `/classify` endpoint with classification prompt. Returns `{:error, :not_a_book, category}`. |
 | **Database** | **Write:** `op.audit_log` (classification result + rejection reason). |
 | **Jobs (Oban)** | Part of `IdentifyBookJob` pipeline (step 1). |
-| **External Services** | Together AI / Replicate (same vision model, classification prompt). |
+| **External Services** | Modal / Qwen2.5-VL-7B-Instruct (same vision model, classification prompt). |
 | **dbt Models** | `int_upload_rejection_rate`, `int_rejection_categories`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1. |

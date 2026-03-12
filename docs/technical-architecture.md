@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.2
-> **Last updated:** 2026-03-12
+> **Version:** 1.3
+> **Last updated:** 2026-03-13
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -49,14 +49,14 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 |-----------|-----------|-----------|
 | Core API, orchestration, job processing | **Elixir + Phoenix** | OTP supervision trees are ideal for orchestrating unreliable external sources. Fault tolerance, backpressure, and lightweight concurrency make it the right tool for a system that talks to dozens of flaky scrapers and APIs. |
 | Frontend SPA | **Elm** | Type-safe with zero runtime exceptions. The shelf-spine-detail state machine demands robust UI state management. Elm's compiler catches entire categories of bugs before they ship. |
-| Vision model sidecar | **Python + FastAPI** | Small HTTP microservice for image-to-text extraction via hosted open-source vision models. Python has the best ML ecosystem; keeping it as a sidecar isolates it from the core. |
+| Vision service | **Python + FastAPI on Modal** | Serverless GPU service for image classification and book extraction via Qwen2.5-VL-7B-Instruct. Runs on Modal (A10G GPU), not co-located with the core. Receives base64-encoded images over HMAC-authenticated HTTPS from Oban workers. Python has the best ML ecosystem; Modal provides cold-start-amortised GPU inference without managing containers or GPU hosts. |
 | Bookshop price scraper | **Rust** | Standalone OSS tool, deployable as a Lambda or separate container. Performance and correctness matter for scraping. Configurable via TOML files per store per country. |
 
 ### Infrastructure
 
 | Service | Purpose |
 |---------|---------|
-| **Fly.io** | Primary hosting. Has a Johannesburg region. Excellent Elixir support. Deploys Phoenix app, Python sidecar, and Rust scraper as separate Fly Machines. |
+| **Fly.io** | Primary hosting. Has a Johannesburg region. Excellent Elixir support. Deploys the Phoenix core app and Rust scraper as Fly Machines. The Python vision service runs on Modal (not Fly). |
 | **Fly Postgres** | Managed PostgreSQL for the operational database. |
 | **Nix / Flox** | Development environment. `flake.nix` is the single source of truth for reproducible builds. Contributors run `nix develop` for an identical setup. |
 | **Docker** | Container builds for Fly.io deployment. |
@@ -122,20 +122,20 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 └─────────┬───────────────┬───────────────┬──────────────────┘
           │               │               │
 ┌─────────▼───────┐ ┌─────▼───────┐ ┌────▼───────────────┐
-│ Python Sidecar  │ │ Rust Scraper│ │ PostgreSQL          │
-│ (FastAPI)       │ │ Microservice│ │                     │
-│ Vision model    │ │ (bookshop   │ │ ┌── op schema      │
-│ via Together    │ │  prices)    │ │ ├── wh schema      │
-│ AI / Replicate  │ │             │ │ ├── audit           │
-│                 │ │             │ │ └── event_log       │
+│ Modal           │ │ Rust Scraper│ │ PostgreSQL          │
+│ (Python/FastAPI │ │ Microservice│ │                     │
+│  serverless GPU │ │ (bookshop   │ │ ┌── op schema      │
+│  A10G)          │ │  prices)    │ │ ├── wh schema      │
+│ Qwen2.5-VL-7B   │ │             │ │ ├── audit           │
+│ HMAC over HTTPS │ │             │ │ └── event_log       │
 └─────────────────┘ └─────────────┘ └─────────────────────┘
 ```
 
 **Data flow summary:**
 
 1. User uploads a photo or enters an ISBN via the Elm frontend.
-2. Phoenix receives the request, enqueues an Oban job.
-3. The vision job calls the Python sidecar, which calls Together AI / Replicate.
+2. Phoenix receives the multipart upload, reads the temp file, base64-encodes the bytes, inserts an `uploaded_images` record, and enqueues an `IdentifyBookJob` with the base64 image in the Oban job args. The temp file is discarded — the image is never written to permanent storage.
+3. The Oban worker sends the base64-encoded image to the Modal vision service (Qwen2.5-VL-7B-Instruct on A10G) over HMAC-authenticated HTTPS. Modal classifies the image, then extracts book titles/authors/ISBNs.
 4. ISBN is resolved via Open Library (primary) or Google Books (fallback).
 5. Enrichment jobs fan out: prices via the Rust scraper, reviews via web scraping, author info via Open Library + web.
 6. All raw data lands in the `op` schema (operational).
@@ -317,23 +317,23 @@ Uploaded book photos are an attack surface. Defence in depth:
 | **EXIF stripping** | Strip all EXIF metadata **after** orientation and flip correction. User photos may contain GPS coordinates, device info, and timestamps — all PII. Order matters: strip last, not first. |
 | **Filename sanitization** | `Path.basename(filename)` — prevent path traversal. Generate UUID-based names for storage. |
 | **Image reprocessing** | Re-encode uploaded images to a canonical format (JPEG, max 2048px longest edge) after orientation/flip correction and EXIF stripping. This neutralises image-based exploits (ImageTragick-style). |
-| **Virus scanning** | Optional: ClamAV sidecar for uploaded files. Low priority for single-user but important for marketplace. |
+| **Virus scanning** | Optional: ClamAV for uploaded files. Low priority for single-user but important for marketplace. |
 
 ### Service-to-Service Authentication
 
-The Phoenix core, Python sidecar, and Rust scraper communicate over HTTP. These must not be publicly accessible.
+The Phoenix core communicates with the Modal vision service and the Rust scraper over HTTP. Authentication differs by service type:
 
-| Approach | Implementation |
-|----------|---------------|
-| **Network isolation** | Fly.io private networking — services communicate via `*.internal` DNS. Not exposed to public internet. |
-| **Shared HMAC token** | Each request includes `X-Internal-Token: <unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded). The sidecar validates the signature and rejects tokens whose timestamp is more than ±60 seconds from the server clock (replay protection). The secret is the `VISION_HMAC_SECRET` environment variable, shared between the Elixir core and the Python vision sidecar. The Elixir side generates this token via `Stacks.AI.Client.auth_token/2`; the Python side verifies it in `apps/vision/app/services/hmac_auth.py`. |
-| **No public endpoints** | Python sidecar and Rust scraper have no public-facing routes. Only the Phoenix app is internet-accessible. |
+| Service | Approach | Implementation |
+|---------|----------|---------------|
+| **Modal vision service** | **Shared HMAC token over public HTTPS** | Modal exposes a public HTTPS endpoint. Each request from the Elixir core includes `X-Internal-Token: <unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded). The Modal FastAPI app validates the signature and rejects tokens whose timestamp is more than ±60 seconds from the server clock (replay protection). The secret is `VISION_HMAC_SECRET`, set as a Fly.io secret on the core and as a Modal secret on the vision service. The Elixir side generates tokens via `Stacks.AI.Client.auth_token/2`; the Python side verifies in `apps/vision/app/services/hmac_auth.py`. |
+| **Rust scraper** | **Fly.io private networking** | Communicates via `*.internal` DNS on the Fly private network. Not exposed to the public internet. |
+| **No other external services** | — | The vision pipeline is the only service that crosses infrastructure boundaries (Fly → Modal). All other inter-service communication stays on the Fly private network. |
 
 ### Secrets Management
 
 | Secret Type | Storage | Access |
 |-------------|---------|--------|
-| Production API keys (Together AI, Brave, Stitch) | Fly.io secrets (`flyctl secrets set`) | Environment variables in production |
+| Production API keys (Brave, Stitch, VISION_HMAC_SECRET) | Fly.io secrets (`flyctl secrets set`) | Environment variables in production |
 | Encryption keys (pgcrypto, application-level) | SOPS-encrypted file in repo, decrypted at deploy time | `age` key stored in Fly.io secrets |
 | Development secrets | `.env.development` (gitignored) | `.env.example` template committed |
 | CI secrets | GitHub Actions secrets | Scoped to workflows |
@@ -1301,9 +1301,31 @@ Completed purchases (fixed price or accepted offer).
 
 ## Image Storage
 
-> **Upload pipeline vs persistent storage:** Raw user uploads for ISBN extraction are **not** stored in object storage. The image bytes are passed directly in the Oban job args (base64-encoded) so any Fly machine can process the job without shared filesystem access. Object storage is used only for processed outputs (book covers). See [Fly.io Deployment Constraints](#flyio-deployment-constraints) for why local disk storage across multiple machines is not viable.
+### Upload pipeline — no persistent image storage
 
-User-uploaded book photos are ephemeral — they exist only to be sent to the vision sidecar and are never displayed to users. Book cover thumbnails (sourced from Open Library or extracted post-identification) are the persistent artefacts that need object storage.
+User-uploaded photos for ISBN extraction are **not** stored in object storage. The upload pipeline works as follows:
+
+```
+User uploads photo (multipart/form-data)
+  → Phoenix writes to Plug temp file (OS temp dir, process-scoped)
+  → Books.store_upload/2: File.read → Base.encode64 → insert op.uploaded_images record
+  → IdentifyBookJob enqueued with base64 image in Oban job args (Postgres)
+  → Plug temp file discarded — image never written to permanent storage
+  → Oban worker sends base64 to Modal vision service over HMAC-authenticated HTTPS
+  → Modal: classify → extract books → return titles/authors/ISBNs
+  → ISBN resolved via Open Library / Google Books
+  → uploaded_images record updated: status = resolved, book_id set
+  → Oban cron job deletes uploaded_images records older than 30 days (GDPR retention)
+```
+
+**Why this design:**
+- Fly.io runs multiple machines with no shared filesystem — writing to local disk would mean only the machine that received the upload could process the job. Putting the image bytes directly in Oban job args (Postgres) means any machine can dequeue and process any job.
+- The image is ephemeral — it exists only to extract an ISBN. There is no user value in storing it after identification.
+- `op.uploaded_images.storage_path` is nullable; it is not populated in the current implementation. Object storage (`uploads/` path) is reserved for a future pre-processing step (EXIF stripping, orientation correction, re-encoding) but is not in use.
+
+### Persistent cover images
+
+Book cover thumbnails are the persistent artefacts that require object storage. These are sourced from Open Library or Google Books — not extracted from uploads.
 
 ### Provider: Fly.io Tigris (or Cloudflare R2)
 
@@ -1317,33 +1339,18 @@ User-uploaded book photos are ephemeral — they exist only to be sent to the vi
 
 **Recommendation:** Tigris for simplicity (same platform as compute), R2 as fallback.
 
-### Storage Layout
+### Storage Layout (covers only — uploads are not persisted)
 
 ```
 stacks-images/
-  ├── uploads/                    # Raw user uploads (GDPR: 30-day TTL)
-  │   └── {uuid}.jpg             # UUID-named, EXIF-stripped, re-encoded
   ├── covers/                     # Book cover thumbnails (permanent)
-  │   └── {isbn}-cover.jpg       # Sourced from Open Library or extracted from upload
+  │   └── {isbn}-cover.jpg       # Sourced from Open Library or Google Books
   └── marketplace/                # Marketplace listing photos (future)
       └── {listing_id}/{n}.jpg   # Multiple photos per listing
 ```
 
-### Lifecycle
-
-```
-User uploads photo
-  → EXIF stripped, re-encoded to JPEG (max 2048px)
-  → Stored in uploads/{uuid}.jpg
-  → Sent to vision model for ISBN extraction
-  → On success: book cover extracted/fetched → stored in covers/{isbn}-cover.jpg
-  → Upload marked as resolved
-  → Oban cron job deletes uploads/ objects older than 30 days (GDPR retention)
-```
-
 ### Access Control
 
-- `uploads/` — Private. Only accessible by the Phoenix app (via Tigris/R2 API with credentials). Never served directly to browsers.
 - `covers/` — Public-readable. Served via CDN for book display. No authentication needed (these are published book covers).
 - `marketplace/` — Public-readable (listing photos are visible to all users).
 
