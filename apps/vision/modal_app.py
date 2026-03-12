@@ -5,7 +5,7 @@ This file defines two Modal functions:
 
   1. VisionModel  — GPU class (A10G) for running Qwen2.5-VL inference.
   2. vision_api   — CPU function hosting the FastAPI app via @modal.asgi_app().
-                    HTTPS endpoint: https://erinversfeldcodes--thestacks-vision-vision-api.modal.run
+                    HTTPS endpoint: https://erinversfeldcodes--{MODAL_APP_NAME}-vision-api.modal.run
 
 Deploy with:
     modal deploy apps/vision/modal_app.py
@@ -16,12 +16,15 @@ than downloading ~15GB from HuggingFace on every container start.
 """
 
 import json
+import os
 import re
 from pathlib import Path
 
 import modal
 
-MODAL_APP_NAME = "thestacks-vision"
+# Per-PR deploys override this via the MODAL_APP_NAME env var.
+# Local / production deploys use the default.
+MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 

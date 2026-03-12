@@ -10,12 +10,14 @@
 # Optional env vars:
 #   NEON_API_KEY        — Neon API key (required to delete Neon branch)
 #   NEON_PROJECT_ID     — Neon project ID (required to delete Neon branch)
+#   MODAL_TOKEN_ID      — Modal API token ID (required to delete Modal app)
+#   MODAL_TOKEN_SECRET  — Modal API token secret
 #   GITHUB_HEAD_REF     — set automatically in GitHub Actions
 #
 # Usage:
 #   scripts/cleanup-preview.sh
 #   scripts/cleanup-preview.sh --branch my-feature-branch
-#   scripts/cleanup-preview.sh --branch my-feature-branch --neon-branch-id br-xxxx
+#   scripts/cleanup-preview.sh --branch my-feature-branch --neon-branch-name preview/my-feature-branch
 
 set -euo pipefail
 
@@ -23,11 +25,11 @@ export PATH="${HOME}/.local/bin:${PATH}"
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 BRANCH=""
-NEON_BRANCH_ID=""
+NEON_BRANCH_NAME=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --branch)          BRANCH="$2";          shift 2 ;;
-        --neon-branch-id)  NEON_BRANCH_ID="$2";  shift 2 ;;
+        --branch)           BRANCH="$2";           shift 2 ;;
+        --neon-branch-name) NEON_BRANCH_NAME="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -41,10 +43,11 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
-# Vision service is a Modal-hosted ASGI app (shared, not per-PR) — no cleanup needed.
+MODAL_APP="thestacks-vision-${SANITISED}"
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
 echo "    Core app:   ${CORE_APP}"
+echo "    Modal app:  ${MODAL_APP}"
 
 # ── Fly apps ─────────────────────────────────────────────────────────────────
 if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
@@ -53,37 +56,38 @@ else
     echo "    SKIP: flyctl not available or FLY_API_TOKEN not set — skipping Fly cleanup."
 fi
 
+# ── Modal app ────────────────────────────────────────────────────────────────
+if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]] && command -v python3 &>/dev/null; then
+    MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
+        python3 -m modal app delete "${MODAL_APP}" --yes 2>/dev/null \
+        && echo "    Modal app ${MODAL_APP} deleted." \
+        || echo "    Modal app ${MODAL_APP} not found (already gone)."
+else
+    echo "    SKIP: MODAL_TOKEN_ID not set — skipping Modal cleanup."
+fi
+
 # ── Neon branch ───────────────────────────────────────────────────────────────
 if [[ -n "${NEON_API_KEY:-}" ]] && [[ -n "${NEON_PROJECT_ID:-}" ]]; then
-    if [[ -n "$NEON_BRANCH_ID" ]]; then
-        # Branch ID provided explicitly — delete directly
-        curl -s -X DELETE \
-            -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${NEON_BRANCH_ID}" \
-            >/dev/null 2>&1 || true
-        echo "    Neon branch ${NEON_BRANCH_ID} deleted."
-    else
-        # Look up branch by name (preview/<sanitised>)
-        NEON_BRANCH_NAME="preview/${SANITISED}"
-        echo "    Looking up Neon branch '${NEON_BRANCH_NAME}'..."
-        branch_id="$(curl -sL \
-            -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
-            | python3 -c "
+    # Use the name passed from deploy-preview.sh, or derive it from the branch.
+    [[ -z "$NEON_BRANCH_NAME" ]] && NEON_BRANCH_NAME="preview/${SANITISED}"
+    echo "    Looking up Neon branch '${NEON_BRANCH_NAME}'..."
+    branch_id="$(curl -sL \
+        -H "Authorization: Bearer ${NEON_API_KEY}" \
+        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+        | python3 -c "
 import json, sys
 branches = json.load(sys.stdin).get('branches', [])
 match = next((b['id'] for b in branches if b['name'] == '${NEON_BRANCH_NAME}'), '')
 print(match)
 " 2>/dev/null || true)"
-        if [[ -n "$branch_id" ]]; then
-            curl -s -X DELETE \
-                -H "Authorization: Bearer ${NEON_API_KEY}" \
-                "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${branch_id}" \
-                >/dev/null 2>&1 || true
-            echo "    Neon branch ${branch_id} (${NEON_BRANCH_NAME}) deleted."
-        else
-            echo "    Neon branch '${NEON_BRANCH_NAME}' not found (already gone)."
-        fi
+    if [[ -n "$branch_id" ]]; then
+        curl -s -X DELETE \
+            -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${branch_id}" \
+            >/dev/null 2>&1 || true
+        echo "    Neon branch ${NEON_BRANCH_NAME} deleted."
+    else
+        echo "    Neon branch '${NEON_BRANCH_NAME}' not found (already gone)."
     fi
 else
     echo "    SKIP: NEON_API_KEY or NEON_PROJECT_ID not set — skipping Neon cleanup."
