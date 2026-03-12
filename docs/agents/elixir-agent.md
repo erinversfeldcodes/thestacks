@@ -133,10 +133,31 @@ DO:
 - Update Progress Notes in the issue file
 - Return a structured completion report
 
+### Challenge the Brief
+
+Before writing any code, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** requirements or interfaces that are ambiguous or missing detail
+- **Risky:** assumptions that are likely to be wrong, or that will be hard to undo
+- **Suboptimal:** a better library, pattern, or approach exists for this specific Elixir/Phoenix problem
+- **Inconsistent:** the plan conflicts with existing code, architecture docs, or The Stacks standards
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `mix test` (from `apps/core/`) and confirm it passes. Record the exact output (pass count, any skips).
+2. Run `mix credo --strict` and confirm no issues.
+3. If the work includes a new or changed API endpoint, exercise it with a real HTTP request (e.g., via `curl` or a test conn) and confirm the response looks correct.
+4. If any test fails or behaviour is unexpected, fix it before submitting.
+
+Do not submit a completion report with failing tests or an untested feature.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. **Spec Coverage Matrix** — enumerate every context, controller, Oban worker, and plug named
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Spec Coverage Matrix** — enumerate every context, controller, Oban worker, and plug named
    in the Technical Requirements section of the issue. For each item, record:
 
    | Item | Implemented | Tested (happy + error path) | Notes |
@@ -146,12 +167,13 @@ DO:
    Any row with ❌ in either column **must** have an explicit justification (deferred, blocked,
    out-of-scope). A row with ❌ and no justification is a blocker — do not submit.
 
-4. Test commands run with **verbatim exit code** (not a summary). Example:
+5. **Test Results** — verbatim output from self-verification:
    ```
    $ mix test
    ...45 tests, 0 failures
    $ mix credo --strict
    ...no issues found
    ```
-5. DoD items satisfied — cite file:line evidence for each checked item. Do not tick an item
+   Include happy-path exercise result if an endpoint or feature was exercised with real input.
+6. DoD items satisfied — cite file:line evidence for each checked item. Do not tick an item
    without evidence.

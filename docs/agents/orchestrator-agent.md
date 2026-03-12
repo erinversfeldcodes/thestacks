@@ -84,11 +84,14 @@ Use the Agent tool:
     ## COMPLETION REPORT FORMAT
     1. Summary of what was implemented
     2. Files created/modified (absolute paths)
-    3. Spec Coverage Matrix — every item named in the Technical Requirements section:
+    3. Pre-implementation Flags — issues identified during Challenge the Brief
+       (underspecified, risky, suboptimal, or inconsistent elements of the plan). "None" if clean.
+    4. Spec Coverage Matrix — every item named in the Technical Requirements section:
        | Item | Implemented | Tested (happy + error) | Notes |
        Any ❌ without justification is a blocker.
-    4. Test commands run with verbatim exit code
-    5. DoD items satisfied — with file:line evidence for each
+    5. Test Results — verbatim output from the self-verification test run, including pass count and any skips.
+       Do not submit without running tests. Include happy-path exercise result if applicable.
+    6. DoD items satisfied — with file:line evidence for each
 ```
 
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
@@ -148,13 +151,20 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 5. **Wait for subagent results.** Synthesise findings into a draft plan.
 
-6. Write the plan following the **Plan Style Guide** below.
+6. **Approach Exploration.** Before drafting the plan, consider whether the approach implied by the research represents the best solution to the problem. Specifically:
+   - Are there fundamentally different architectural approaches? What are the tradeoffs?
+   - Does the roadmap phase assume a specific technology or pattern that may have better alternatives?
+   - Are there known footguns, deprecation warnings, or community debates about the chosen approach?
 
-7. **Present plan synopsis to the human. MANDATORY STOP.**
-   Show: issue title, phases with objectives, specialist agent(s) assigned, estimated scope.
+   Produce a short (3–5 bullet) **Approach Options** section in the plan that the human can review before implementation begins. For each option: what it is, the tradeoff against the chosen approach, and a recommendation. The human may override the recommendation before the plan is executed. This does not block planning — continue to write the full plan, but include this section so the human can act on it before the implementation prompt is issued.
+
+7. Write the plan following the **Plan Style Guide** below.
+
+8. **Present plan synopsis to the human. MANDATORY STOP.**
+   Show: issue title, phases with objectives, specialist agent(s) assigned, estimated scope, and the Approach Options section.
    Wait for explicit approval before proceeding.
 
-8. On approval: write `plans/<NNN>-<slug>-plan.md` with the full plan content.
+9. On approval: write `plans/<NNN>-<slug>-plan.md` with the full plan content.
 
 ---
 
@@ -228,6 +238,15 @@ After the human confirms the commit, proceed to the next plan phase.
 When all plan phases are approved and committed:
 1. Write `plans/<NNN>-<slug>-complete.md`.
 2. Present final summary to the human.
+3. **Retrospective.** After the human has accepted the implementation (committed or merged), run a structured retrospective by answering the following three questions — drawing on the full session: the completion reports, the reviewer findings, the human's override decisions, and any revision cycles.
+
+   **What worked well?** Phases that completed without revision, reviewer findings that were spot-on, plan decisions that paid off.
+
+   **What caused friction?** Revision cycles and their root causes. Human overrides and why the agent got it wrong. Reviewer findings that required implementation rework. Plan assumptions that turned out to be false.
+
+   **What should change in the agent system?** Specific, actionable changes to agent prompts, standards files, or the orchestrator protocol that would prevent the friction points from recurring. Each suggestion should name the file to change and describe the change.
+
+   Write the retrospective to `plans/<NNN>-<slug>-retro.md`. Use `plans/retro-template.md` as the template. The human decides which suggestions to act on — they become candidates for the next agent system improvement issue.
 
 ---
 
@@ -244,6 +263,12 @@ When all plan phases are approved and committed:
 
 ## Research Summary
 [Key findings from Researcher: current state, gaps, chosen approach.]
+
+## Approach Options
+- **Option A (chosen):** [What it is] — [tradeoff] — Recommended.
+- **Option B:** [What it is] — [tradeoff] — Not recommended because [reason].
+- **Option C:** [What it is] — [tradeoff] — Not recommended because [reason].
+[3–5 bullets. Human may override before implementation begins.]
 
 ## Phases
 
@@ -292,7 +317,7 @@ Scope: primary directory or domain (e.g., `core`, `frontend`, `scraper`, `proto`
 
 Three mandatory stops where you **must** present output and wait for human confirmation:
 
-1. **After plan presentation** (end of Phase 1, step 7)
+1. **After plan presentation** (end of Phase 1, step 8)
 2. **After each phase commit** (end of Phase 2C)
 3. **After completion** (end of Phase 3)
 
