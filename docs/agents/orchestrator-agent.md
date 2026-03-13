@@ -227,7 +227,30 @@ Delegate implementation to the specialist. The prompt must include:
 
 **State update:** When the completion report is received, update `last_action` in the state file.
 
-### 2B — Spec Coverage Gate (before review)
+### 2B-i — Automated Regression Gate
+
+After receiving the specialist's completion report, run the automated test suite before any manual checks:
+
+1. Identify the domain(s) from the phase's agent assignment (elixir, elm, rust, python).
+2. Call `mcp__project-tools__run_test_suite(domain)` for each relevant domain.
+3. **If all suites pass:** proceed to 2B-ii (Spec Coverage Gate).
+4. **If any suite fails:** return the failure to the specialist WITHOUT invoking the reviewer. Use this format:
+
+```
+REGRESSION GATE FAILED: [domain] test suite
+Command: [command]
+Output:
+[verbatim test output]
+
+Fix the above failures and resubmit your completion report.
+This counts as revision cycle N of 2.
+```
+
+This counts as a revision cycle. If revision cycle limit (2) is reached, stop and consult the human.
+
+This gate is automated and objective — no orchestrator judgment required.
+
+### 2B-ii — Spec Coverage Gate (before review)
 
 Before delegating to the reviewer, **you** must verify the agent's Spec Coverage Matrix:
 
