@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,31 @@ def _parse_issue(path: Path) -> dict[str, Any]:
         "dependencies": dependencies,
         "progress_notes": progress_notes,
     }
+
+
+def _extract_summary(domain: str, output: str) -> str:
+    """Extract a human-readable test summary from command output."""
+    patterns: dict[str, re.Pattern[str]] = {
+        "elixir": re.compile(r"\d+ tests?, \d+ failures?"),
+        "elm": re.compile(r"TEST RUN (PASSED|FAILED)|\d+ passed"),
+        "rust": re.compile(r"test result:.*"),
+        "python": re.compile(r"\d+ passed|FAILED"),
+    }
+
+    pattern = patterns.get(domain)
+    if pattern:
+        for line in reversed(output.splitlines()):
+            m = pattern.search(line)
+            if m:
+                return m.group(0).strip()
+
+    # Fall back to the last non-empty line.
+    for line in reversed(output.splitlines()):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+
+    return "No output"
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +355,68 @@ def get_agent(name: str) -> dict[str, Any]:
         "role": _section_text(sections, "Role"),
         "owned_domains": _section_text(sections, "Owned Domains"),
         "raw_content": text,
+    }
+
+
+@mcp.tool()
+def run_test_suite(domain: str, worktree_path: str | None = None) -> dict[str, Any]:
+    """
+    Run the test suite for a given domain and return structured results.
+
+    Args:
+        domain: One of "elixir", "elm", "rust", "python".
+        worktree_path: Optional path override for worktree isolation
+                       (defaults to REPO_ROOT).
+
+    Returns a dict with domain, passed, summary, output, and command keys.
+    """
+    domain_config: dict[str, tuple[str, str]] = {
+        "elixir": ("mix test", "apps/core"),
+        "elm": ("npx elm-test", "frontend"),
+        "rust": ("cargo test", "apps/scraper"),
+        "python": ("pytest", "apps/vision"),
+    }
+
+    if domain not in domain_config:
+        supported = ", ".join(sorted(domain_config.keys()))
+        return {"error": f"Unsupported domain '{domain}'. Supported: {supported}"}
+
+    command, rel_dir = domain_config[domain]
+    base = Path(worktree_path) if worktree_path else REPO_ROOT
+    cwd = base / rel_dir
+
+    if not cwd.is_dir():
+        return {"error": f"Working directory does not exist: {cwd}"}
+
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(cwd),
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "domain": domain,
+            "passed": False,
+            "summary": "Test run timed out after 300 seconds",
+            "output": "",
+            "command": command,
+        }
+
+    combined_output = result.stdout + result.stderr
+    # Truncate to last 5000 chars if very long.
+    if len(combined_output) > 5000:
+        combined_output = combined_output[-5000:]
+
+    return {
+        "domain": domain,
+        "passed": result.returncode == 0,
+        "summary": _extract_summary(domain, combined_output),
+        "output": combined_output,
+        "command": command,
     }
 
 
