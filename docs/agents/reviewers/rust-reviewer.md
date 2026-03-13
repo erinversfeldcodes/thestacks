@@ -15,12 +15,12 @@ You review Rust code changes produced by the rust-agent. You never write code. Y
 
 This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately without evaluating remaining axes.
 
-### 1. Task Completion & User Story Concordance
+### 1. Task Completion & User Story Concordance (judgment — reviewer only)
 - Read the phase objective and every DoD item from the invoking prompt
 - Check each DoD item — is it satisfied? Cite specific evidence (file:line) for each
 - For **every** user story listed in the issue file, trace the full scraper flow end-to-end: TOML config load → HTTP request → HTML/ISBN parse → structured output → response to Phoenix. Verify the story's acceptance criteria are met. Do not stop at one story.
 
-### 2. Rust Community Standards
+### 2. Rust Community Standards (mechanical — specialist self-checks)
 - **Error handling**: `thiserror` for library error types, `anyhow` for application-level propagation. No `unwrap()` or `expect()` in library code — these panic in production. `?` for propagation. Errors should be informative enough to diagnose without a debugger.
 - **Ownership and borrowing**: Prefer borrowing over cloning. No unnecessary `clone()` — each one is a potential performance issue. Lifetimes used correctly — don't `'static` everything to satisfy the borrow checker.
 - **Type system**: Newtypes for domain concepts (`struct Isbn(String)`, `struct PriceCents(i32)`). Enums for state machines and result variants. `Option` and `Result` handled explicitly — no silent discards.
@@ -32,7 +32,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **TOML configs**: Strongly typed deserialization into structs. No raw string matching on config values. Config errors should surface at startup, not at scrape time.
 - **Dependencies**: Minimal. Each crate justified by the problem it solves. Versions pinned in `Cargo.toml`. `cargo audit` clean.
 
-### 3. Test Correctness & Completeness
+### 3. Test Correctness & Completeness (mixed — specialist checks test presence; reviewer assesses test quality)
 - **Correctness**: Do tests assert the actual parsed output, not just that the function returned `Ok`? A price parsing test that asserts `result.is_ok()` is not testing correctness.
 - **Completeness**: Is there coverage for: happy path, network failures (timeout, 5xx, DNS failure), malformed HTML (missing elements, unexpected structure), invalid ISBNs in page content, config validation errors, edge cases in price parsing (comma separators, currency symbols, ranges)?
 - **Property-based tests**: `proptest` for price parsing and ISBN validation — these are the highest-value fuzz targets. Are they present?
@@ -40,7 +40,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **No live network in tests**: All HTTP calls must be mocked (`wiremock` or similar). Tests must not make real requests.
 - **Test performance**: Async tests should not have unnecessary `sleep` or timeouts. Flag slow tests.
 
-### 4. Performance
+### 4. Performance (mixed — specialist checks clone patterns; reviewer assesses performance trade-offs)
 - **Unnecessary clones**: Scan for `.clone()` calls on large types (HTML strings, response bodies). These are often avoidable with borrowing or `Arc`.
 - **Async task spawning**: Is `tokio::spawn` used correctly — for genuinely concurrent work, not for every small operation? Over-spawning creates scheduler overhead.
 - **HTTP connection reuse**: Is `reqwest::Client` instantiated once and reused across requests, or created per scrape? Per-request instantiation disables connection pooling.
@@ -48,7 +48,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Retry and backoff strategy**: Is there exponential backoff with jitter on retries? Fixed-interval retries under load cause thundering herd.
 - **Allocation patterns**: Are large intermediate buffers allocated unnecessarily? Is there streaming where a buffered approach would exhaust memory on large pages?
 
-### 5. Security
+### 5. Security (mechanical — specialist self-checks)
 Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
 - **HMAC auth**: Requests from Phoenix to the scraper must be authenticated with HMAC. The scraper must reject unsigned requests.
 - **Rate limiting per domain**: The scraper must not hammer a bookshop site. Verify there is per-domain rate limiting with configurable delays.
@@ -57,7 +57,7 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **No credential storage**: Any site credentials (for login-walled content) must come from environment variables or encrypted config — never hardcoded.
 - **Timeout enforcement**: Every outbound HTTP request must have a timeout. An untimeout'd request can hang a thread indefinitely.
 
-### 6. Alternative Approaches Research
+### 6. Alternative Approaches Research (judgment — reviewer only)
 Before returning your verdict, actively research the following and include findings in your report:
 - Are there alternative Rust scraping libraries or approaches (`scraper`, `select`, `reqwest` + custom parsing, `headless_chrome`, `playwright` via FFI) with better performance, accuracy, or maintenance status?
 - Are there alternative async runtimes or patterns worth considering for this workload?
@@ -69,13 +69,13 @@ For each significant finding, state: **what** the alternative is, the **tradeoff
 
 This section is mandatory. The human will decide what to act on.
 
-### 7. Project Coding Standards
+### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
 - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `cargo test` for unit + integration, `proptest` for price parsing and ISBN validation, `cargo-fuzz` targets for TOML and HTML parsing
 - `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — HMAC auth, rate limiting, robots.txt compliance, timeout enforcement
 
-### 8. Forward Compatibility
+### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
 - Read `plans/consolidated-roadmap.md` for context on what immediately follows this phase
 - For each identified downstream issue:
@@ -89,6 +89,8 @@ Load and check against:
 ## Review Process
 
 0a. **Step 0a: Test-First Audit** — Before any other review, check Axis 0 (Test-First Compliance). If failing test evidence is absent from the completion report, return NEEDS_REVISION immediately.
+
+0b. **Self-Review Acknowledgement** — Check the specialist's Self-Review table in their completion report. Axes marked PASS may be spot-checked rather than re-run in full. Focus your review time on judgment axes (1, 6, 8) and any mixed axes where you assess quality beyond the mechanical check. A missing or empty Self-Review section is a blocker — return NEEDS_REVISION.
 
 0. **Independent Spec Coverage Audit** — do this *before* reading the completion report:
    - Extract the full inventory of required items from the issue's Technical Requirements section:

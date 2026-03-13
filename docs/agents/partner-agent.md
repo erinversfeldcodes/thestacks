@@ -108,8 +108,29 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `mix test`
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/elixir-reviewer.md` (and `docs/agents/reviewers/protobuf-reviewer.md` if proto files were touched) and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| `mix format` | Run `mix format --check-formatted` — must pass |
+| `mix credo --strict` | Run and confirm zero warnings |
+| Typespecs on public functions | Every public function has `@spec` and `@doc` |
+| Partner data isolation | Partners never see user data; data flow is partner → platform only |
+| Proto schema compliance | If proto files touched: `buf lint` and `buf breaking` pass |
+| Tests passing | `mix test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
 3. Test commands run and results
 4. DoD items satisfied for this phase
+5. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

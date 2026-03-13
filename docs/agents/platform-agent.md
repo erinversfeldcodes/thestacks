@@ -139,6 +139,24 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `just test` (or the relevant build/validation command for the phase)
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/platform-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| Dockerfile best practices | Multi-stage build, minimal runtime image, non-root USER, no secrets in layers, specific COPYs (not `.`), Hadolint-clean |
+| Fly.io config | Health checks configured, private networking for internal services, secrets via CLI not TOML, IAD region, `force_https` |
+| CI workflow correctness | dorny/paths-filter triggers correct jobs, caching strategy present, security scanning included, deploy gated on tests |
+| Nix/Flox completeness | All tools version-pinned, devShell includes all project dependencies |
+| justfile recipes | All common commands present, composable (no hardcoded paths) |
+| `.env.example` | All required vars documented, no real credentials |
+| Build succeeds | Docker build, `buf lint`, `flyctl config validate` — whichever applies |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -153,3 +171,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    Include health check result or CI trace summary if applicable.
 5. Build/deploy commands run and results
 6. DoD items satisfied for this phase
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.

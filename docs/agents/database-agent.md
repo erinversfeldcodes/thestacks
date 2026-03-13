@@ -132,6 +132,26 @@ Do not write any production code until the Orchestrator confirms the failing tes
 
 **Test command:** `mix test` (Ecto tests run through ExUnit)
 
+### Self-Review
+
+Before submitting your completion report, load `docs/agents/reviewers/database-reviewer.md` and self-check the following mechanical axes:
+
+| Check | How to verify |
+|-------|---------------|
+| Reversible migrations | Every migration has `up`/`down` or uses reversible `change` operations |
+| One concern per migration | Each migration file handles one logical change |
+| Lock-safe DDL | Large-table alterations use `disable_ddl_transaction!` + `CONCURRENTLY` |
+| Timestamps | `timestamps(type: :utc_datetime_usec)` on all tables |
+| UUID primary keys | All tables use `binary_id` |
+| SQL naming | Lowercase, snake_case, tables plural, columns singular |
+| Changesets validate | Required fields, format validations, unique constraints |
+| No Repo in schemas | Schemas are data-only; Repo calls live in contexts |
+| Tests passing | `mix test` passes with zero failures |
+
+Fix any failures before submitting. Include a **Self-Review** section in your completion report (see Completion Report Format below).
+
+A missing or empty Self-Review section is a reviewer blocker.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
@@ -157,3 +177,7 @@ Do not write any production code until the Orchestrator confirms the failing tes
    ```
    Include representative insert/query result if a new table was exercised with real data.
 6. DoD items satisfied — cite file:line evidence for each checked item.
+7. **Self-Review** — mechanical axes checked before submission:
+   | Axis | Result | Notes |
+   |------|--------|-------|
+   A missing or empty self-review table is a reviewer blocker.
