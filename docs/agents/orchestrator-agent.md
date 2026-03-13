@@ -43,7 +43,7 @@ This replaces the pattern of the human manually reconstructing context from memo
 
 ## Context Conservation Strategy
 
-**Delegate (use Agent tool) when:**
+**Delegate (use Agent tool or Agent Teams teammates) when:**
 - The task touches more than 10 files
 - The task spans multiple domains (e.g., Elixir + Elm + Protobuf)
 - Specialised expertise is required
@@ -56,6 +56,17 @@ This replaces the pattern of the human manually reconstructing context from memo
 - Synthesising subagent reports into plans or summaries
 
 Up to 10 parallel Agent invocations are allowed in a single response.
+
+### Hybrid Execution Model
+
+This orchestrator uses a **hybrid** approach (decided in Issue #024):
+
+- **Orchestrator handles**: planning, mandatory stops, regression gates, review delegation, state management, and cross-cutting concern identification
+- **Agent Teams teammates handle**: parallel specialist execution within implementation phases
+
+When delegating parallel phases, prefer Agent Teams teammates over sequential Agent tool subagents. The orchestrator must embed cross-cutting concerns (integration points between phases) in each teammate's prompt at spawn time — do not rely on teammates to discover these independently.
+
+Agent Teams requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (configured in `.claude/settings.json`).
 
 ---
 
@@ -119,6 +130,17 @@ Use the Agent tool:
 ```
 
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
+
+### Parallel Phases via Agent Teams
+
+When the plan marks phases as independent (see Plan Style Guide), prefer spawning Agent Teams **teammates** for parallel execution:
+
+1. Create a team and spawn one teammate per independent phase
+2. Each teammate's prompt must include the full specialist agent `.md` content, phase scope, and any **cross-cutting concerns** that connect this phase to other parallel phases
+3. The orchestrator waits for all teammates to complete before running regression gates
+4. After verification, shut down teammates and proceed with sequential phases or direct orchestrator work
+
+**Cross-cutting concern rule:** Before spawning teammates, identify any integration points between parallel phases (e.g., one phase gates a function that another phase calls). Embed these as explicit instructions in the relevant teammate prompts. This prevents the integration gap class of bugs discovered in the Issue #024 trial.
 
 ---
 
