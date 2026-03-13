@@ -10,6 +10,9 @@ from project_tools import (
     run_test_suite,
     _extract_summary,
     _parse_feedback_file,
+    _worktree_info,
+    create_worktree,
+    remove_worktree,
     get_feedback_summary,
 )
 
@@ -244,6 +247,102 @@ class TestGetFeedbackSummary(unittest.TestCase):
         """Nonexistent agent returns empty list, not an error."""
         result = get_feedback_summary(agent_name="no-such-agent-xyz")
         self.assertEqual(result, [])
+
+
+# ---------------------------------------------------------------------------
+# Worktree tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestWorktreeInfo(unittest.TestCase):
+    """Test _worktree_info helper returns correct path and branch."""
+
+    def test_basic(self):
+        path, branch = _worktree_info(14, "2")
+        self.assertTrue(str(path).endswith(".claude/worktrees/014-phase-2"))
+        self.assertEqual(branch, "worktree/014-phase-2")
+
+    def test_alphanumeric_phase(self):
+        path, branch = _worktree_info(7, "2a")
+        self.assertTrue(str(path).endswith(".claude/worktrees/007-phase-2a"))
+        self.assertEqual(branch, "worktree/007-phase-2a")
+
+    def test_large_issue_number(self):
+        path, branch = _worktree_info(123, "1")
+        self.assertTrue(str(path).endswith(".claude/worktrees/123-phase-1"))
+        self.assertEqual(branch, "worktree/123-phase-1")
+
+
+class TestCreateWorktree(unittest.TestCase):
+    """Test create_worktree tool."""
+
+    @patch("project_tools.Path.exists", return_value=True)
+    def test_already_exists(self, _mock_exists: MagicMock):
+        result = create_worktree(14, "2")
+        self.assertIn("error", result)
+        self.assertIn("already exists", result["error"])
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.Path.mkdir")
+    @patch("project_tools.Path.exists", return_value=False)
+    def test_success(
+        self,
+        _mock_exists: MagicMock,
+        _mock_mkdir: MagicMock,
+        mock_run: MagicMock,
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        result = create_worktree(14, "2")
+        self.assertIn("path", result)
+        self.assertIn("branch", result)
+        self.assertEqual(result["branch"], "worktree/014-phase-2")
+        self.assertTrue(result["path"].endswith("014-phase-2"))
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.Path.mkdir")
+    @patch("project_tools.Path.exists", return_value=False)
+    def test_git_failure(
+        self,
+        _mock_exists: MagicMock,
+        _mock_mkdir: MagicMock,
+        mock_run: MagicMock,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=128, stdout="", stderr="fatal: branch already exists"
+        )
+        result = create_worktree(14, "2")
+        self.assertIn("error", result)
+        self.assertIn("branch already exists", result["error"])
+
+
+class TestRemoveWorktree(unittest.TestCase):
+    """Test remove_worktree tool."""
+
+    @patch("project_tools.Path.exists", return_value=False)
+    def test_no_worktree(self, _mock_exists: MagicMock):
+        result = remove_worktree(14, "2")
+        self.assertIn("error", result)
+        self.assertIn("No worktree at", result["error"])
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.Path.exists", return_value=True)
+    def test_success(self, _mock_exists: MagicMock, mock_run: MagicMock):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        result = remove_worktree(14, "2")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["removed_path"].endswith("014-phase-2"))
+        self.assertEqual(result["removed_branch"], "worktree/014-phase-2")
+        self.assertEqual(mock_run.call_count, 2)
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.Path.exists", return_value=True)
+    def test_git_remove_failure(self, _mock_exists: MagicMock, mock_run: MagicMock):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="fatal: not a worktree"
+        )
+        result = remove_worktree(14, "2")
+        self.assertIn("error", result)
+        self.assertIn("not a worktree", result["error"])
 
 
 if __name__ == "__main__":

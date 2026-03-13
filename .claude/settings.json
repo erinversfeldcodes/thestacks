@@ -1,5 +1,8 @@
 {
   "enableAllProjectMcpServers": true,
+  "worktree": {
+    "symlinkDirectories": ["deps", "_build", "node_modules", "apps/vision/.venv"]
+  },
   "hooks": {
     "PostToolUse": [
       {
