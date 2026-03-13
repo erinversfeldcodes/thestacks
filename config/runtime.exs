@@ -27,11 +27,11 @@ if config_env() != :test do
 end
 
 if config_env() == :prod do
-  vision_sidecar_url =
-    System.get_env("VISION_SIDECAR_URL") ||
-      raise "environment variable VISION_SIDECAR_URL is missing."
+  vision_service_url =
+    System.get_env("VISION_SERVICE_URL") ||
+      raise "environment variable VISION_SERVICE_URL is missing."
 
-  config :core, :vision_sidecar_url, vision_sidecar_url
+  config :core, :vision_service_url, vision_service_url
 end
 
 if config_env() == :prod do
