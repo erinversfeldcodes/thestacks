@@ -97,6 +97,11 @@ Use the Agent tool:
     - Call `mcp__project-tools__update_progress(NNN, note)` to append progress notes — do not edit the issue file directly
     - Return a structured completion summary when done
 
+    ## KNOWN GAPS (if any)
+    [If `mcp__project-tools__get_feedback_summary(agent_name)` returns open entries,
+    list them here as a brief "watch for these known issues" section.
+    If no open feedback entries exist, omit this section entirely.]
+
     ## COMPLETION REPORT FORMAT
     1. Summary of what was implemented
     2. Files created/modified (absolute paths)
@@ -289,6 +294,16 @@ touches multiple stacks, invoke multiple reviewers in parallel.
 - Present the reviewer's report to the human for mediation
 - The human decides which revisions to accept, modify, or dismiss
 - **State update:** Increment `revision_cycles`, set `reviewer_verdict: "NEEDS_REVISION"`, update `last_action`. If the reviewer flagged a decision for the human, append to `human_decisions_pending`.
+- **Feedback logging:** For each reviewer finding, assess whether it indicates a gap in the specialist's prompt (not just a one-off implementation miss). If yes, append a structured entry to `docs/agents/feedback/<specialist-agent>.md`:
+  ```
+  ## YYYY-MM-DD — Issue #NNN, Phase N
+  **Reviewer axis:** [axis name]
+  **Finding:** [what was flagged]
+  **Root cause:** [why the prompt didn't prevent this]
+  **Prompt change needed:** [specific change to the agent's .md file]
+  **Status:** open
+  ```
+  Not every NEEDS_REVISION triggers a feedback entry — only findings that reveal systematic prompt gaps.
 - Return to 2A with the human-approved revision requirements
 - Limit to 2 revision cycles. If still failing, stop and consult human.
 
