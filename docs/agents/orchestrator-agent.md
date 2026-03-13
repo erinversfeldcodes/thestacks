@@ -199,6 +199,14 @@ For each phase in the approved plan:
 
 ### 2A-i — Delegate Test Writing
 
+Before delegating, create an isolated worktree for this phase:
+
+1. Call `mcp__project-tools__create_worktree(issue_number, phase)` to create the worktree
+2. Pass the returned `path` to the specialist as `worktree_path` — all file operations happen there
+3. If the plan marks phases as independent (see Plan Style Guide), multiple worktrees may be active simultaneously
+
+**State update:** Record `worktree_path` in the state file for this phase.
+
 The specialist writes tests first, before any production code. Delegate to the appropriate specialist agent(s) via Agent tool.
 
 Your prompt must include:
@@ -287,6 +295,11 @@ touches multiple stacks, invoke multiple reviewers in parallel.
 - The human decides: accept the verdict, request further changes, or override
 - On human acceptance: write `plans/<NNN>-<slug>-phase-N-complete.md`
 - Provide commit message (see Git Commit Style Guide)
+- **Worktree merge:** If the phase used a worktree, merge it into the feature branch:
+  1. `git checkout <feature-branch>`
+  2. `git merge <worktree-branch> --no-ff -m "<commit message>"`
+  3. Call `mcp__project-tools__remove_worktree(issue_number, phase)` to clean up
+  If merge conflicts occur, present them to the human for resolution.
 - **State update:** Set phase → `complete`, record `completed_at` and `reviewer_verdict: "APPROVED"`.
 - **MANDATORY STOP.** Wait for human to commit before proceeding to next phase.
 
@@ -356,7 +369,8 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "completed_at": "2026-03-13T12:00:00Z",
       "revision_cycles": 0,
       "reviewer_verdict": "APPROVED",
-      "last_action": "Phase 1 approved and committed"
+      "last_action": "Phase 1 approved and committed",
+      "worktree_path": null
     },
     "2": {
       "status": "in_progress",
@@ -365,7 +379,8 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "completed_at": null,
       "revision_cycles": 1,
       "reviewer_verdict": "NEEDS_REVISION",
-      "last_action": "elm-agent submitted completion report; reviewer returned NEEDS_REVISION — spacing issue in BookDetail.elm"
+      "last_action": "elm-agent submitted completion report; reviewer returned NEEDS_REVISION — spacing issue in BookDetail.elm",
+      "worktree_path": ".claude/worktrees/014-phase-2"
     },
     "3": {
       "status": "pending",
@@ -374,7 +389,8 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "completed_at": null,
       "revision_cycles": 0,
       "reviewer_verdict": null,
-      "last_action": null
+      "last_action": null,
+      "worktree_path": null
     }
   },
   "human_decisions_pending": [
@@ -425,6 +441,10 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
 
 ### Phase 2: [Title]
 ...
+
+### Parallel Execution (optional)
+**Independent phases**: [List phase numbers that have no data dependency and can run simultaneously]
+**Merge order**: [Order in which worktree branches merge into the feature branch, respecting dependencies]
 
 ## Open Questions
 [Unresolved questions. "None" if all resolved.]
