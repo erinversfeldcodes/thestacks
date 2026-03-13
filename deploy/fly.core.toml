@@ -1,10 +1,13 @@
 app = "thestacks-core"
-primary_region = "jnb"
+primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "5s"
 
 [build]
   dockerfile = "Dockerfile.core"
+
+[deploy]
+  release_command = "/app/bin/core eval 'Stacks.Release.migrate()'"
 
 [env]
   PHX_HOST = "thestacks.fly.dev"
