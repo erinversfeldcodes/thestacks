@@ -72,13 +72,12 @@ SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
 MODAL_APP="thestacks-vision-${SANITISED}"
-VISION_SERVICE_URL="https://erinversfeldcodes--${MODAL_APP}-vision-api.modal.run"
+VISION_SERVICE_URL=""  # set after Modal deploy — do not construct; Modal may truncate the subdomain
 NEON_BRANCH_NAME=""
 
 echo "==> Deploy preview for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
 echo "    Modal app:   ${MODAL_APP}"
-echo "    Vision URL:  ${VISION_SERVICE_URL}"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 cleanup() {
@@ -162,10 +161,25 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
 
     echo ""
     echo "==> Deploying vision service to Modal (app: ${MODAL_APP})..."
-    MODAL_APP_NAME="${MODAL_APP}" \
+    modal_deploy_output="$(MODAL_APP_NAME="${MODAL_APP}" \
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1 \
-        || { echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
+        python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1)" \
+        || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
+    echo "$modal_deploy_output"
+
+    # Extract the actual serving URL from the deploy output.
+    # Modal truncates the subdomain when the app name is long and appends a hash,
+    # so we cannot safely construct the URL from the app name — we must read it.
+    # The URL appears on a line like:
+    #   ├── 🔨 Created web function vision_api => https://...modal.run
+    # When the URL wraps across two terminal lines we join first, then grep.
+    VISION_SERVICE_URL="$(echo "$modal_deploy_output" | tr -d '\n' | \
+        grep -oE 'https://[a-zA-Z0-9._-]+\.modal\.run' | head -1)"
+    if [[ -z "$VISION_SERVICE_URL" ]]; then
+        echo "FAIL deploy: could not determine Modal vision service URL from deploy output" >&2
+        exit 1
+    fi
+    echo "    Vision URL (actual): ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
