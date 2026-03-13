@@ -24,6 +24,23 @@ Do this before any other step.
 
 ---
 
+## Session Resume
+
+After loading project context, check for in-progress work:
+
+1. Call `mcp__project-tools__get_plan_status` for any issue you are working on, or scan `plans/` for `*-state.json` files with `"status": "in_progress"`.
+2. If found, read the state file and summarise to the human:
+   - Active phase and its current status
+   - Last action recorded
+   - Revision cycle count for the active phase
+   - Any items in `human_decisions_pending`
+3. Ask: "Continue from here, or start fresh?"
+4. If continuing: pick up from `current_phase`, using `last_action` for context. Do not re-run completed phases.
+
+This replaces the pattern of the human manually reconstructing context from memory or conversation summaries.
+
+---
+
 ## Context Conservation Strategy
 
 **Delegate (use Agent tool) when:**
@@ -164,6 +181,8 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 9. On approval: write `plans/<NNN>-<slug>-plan.md` with the full plan content.
 
+10. Create the initial state file at `plans/<NNN>-<slug>-state.json` with all phases set to `pending`. See the **State File** section below for the schema.
+
 ---
 
 ## Phase 2: Implementation Cycle
@@ -181,6 +200,10 @@ Your prompt must include:
 - Paths to standards files from the agent's Context Loading Requirements
 - The issue number for `mcp__project-tools__update_progress(number, note)` calls
 - The constraint: complete only this phase
+
+**State update:** When the phase starts, update the state file: set the phase to `in_progress` and record `started_at`.
+
+**State update:** When the completion report is received, update `last_action` in the state file.
 
 ### 2B — Spec Coverage Gate (before review)
 
@@ -214,16 +237,19 @@ touches multiple stacks, invoke multiple reviewers in parallel.
 - The human decides: accept the verdict, request further changes, or override
 - On human acceptance: write `plans/<NNN>-<slug>-phase-N-complete.md`
 - Provide commit message (see Git Commit Style Guide)
+- **State update:** Set phase → `complete`, record `completed_at` and `reviewer_verdict: "APPROVED"`.
 - **MANDATORY STOP.** Wait for human to commit before proceeding to next phase.
 
 **If NEEDS_REVISION:**
 - Present the reviewer's report to the human for mediation
 - The human decides which revisions to accept, modify, or dismiss
+- **State update:** Increment `revision_cycles`, set `reviewer_verdict: "NEEDS_REVISION"`, update `last_action`. If the reviewer flagged a decision for the human, append to `human_decisions_pending`.
 - Return to 2A with the human-approved revision requirements
 - Limit to 2 revision cycles. If still failing, stop and consult human.
 
 **If FAILED:**
 - Stop immediately. Present failure details and wait for instructions.
+- **State update:** Set `last_action` to describe the failure.
 
 ### 2E — Next Phase
 
@@ -235,6 +261,7 @@ After the human confirms the commit, proceed to the next plan phase.
 
 When all plan phases are approved and committed:
 1. Write `plans/<NNN>-<slug>-complete.md`.
+1a. **State update:** Set top-level `status` → `complete`. Rename `plans/<NNN>-<slug>-state.json` → `plans/<NNN>-<slug>-state-complete.json` as the archived record.
 2. Present final summary to the human.
 3. **Retrospective.** After the human has accepted the implementation (committed or merged), run a structured retrospective by answering the following three questions — drawing on the full session: the completion reports, the reviewer findings, the human's override decisions, and any revision cycles.
 
@@ -245,6 +272,62 @@ When all plan phases are approved and committed:
    **What should change in the agent system?** Specific, actionable changes to agent prompts, standards files, or the orchestrator protocol that would prevent the friction points from recurring. Each suggestion should name the file to change and describe the change.
 
    Write the retrospective to `plans/<NNN>-<slug>-retro.md`. Use `plans/retro-template.md` as the template. The human decides which suggestions to act on — they become candidates for the next agent system improvement issue.
+
+---
+
+## State File
+
+Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. Create it when the plan is approved (Phase 1, step 10). Update it at every transition listed in Phase 2. Only the Orchestrator writes this file — specialist agents never touch it.
+
+**Schema:**
+```json
+{
+  "issue": 14,
+  "slug": "agent-system-improvements",
+  "created_at": "2026-03-13T10:00:00Z",
+  "updated_at": "2026-03-13T14:32:00Z",
+  "status": "in_progress",
+  "current_phase": "2",
+  "phases": {
+    "1": {
+      "status": "complete",
+      "agent": "elixir-agent",
+      "started_at": "2026-03-13T10:30:00Z",
+      "completed_at": "2026-03-13T12:00:00Z",
+      "revision_cycles": 0,
+      "reviewer_verdict": "APPROVED",
+      "last_action": "Phase 1 approved and committed"
+    },
+    "2": {
+      "status": "in_progress",
+      "agent": "elm-agent",
+      "started_at": "2026-03-13T13:00:00Z",
+      "completed_at": null,
+      "revision_cycles": 1,
+      "reviewer_verdict": "NEEDS_REVISION",
+      "last_action": "elm-agent submitted completion report; reviewer returned NEEDS_REVISION — spacing issue in BookDetail.elm"
+    },
+    "3": {
+      "status": "pending",
+      "agent": null,
+      "started_at": null,
+      "completed_at": null,
+      "revision_cycles": 0,
+      "reviewer_verdict": null,
+      "last_action": null
+    }
+  },
+  "human_decisions_pending": [
+    "Reviewer flagged N+1 query in Shelving.get_bookshelf_books/2 — accept fix or defer to Issue #018?"
+  ],
+  "notes": []
+}
+```
+
+**Lifecycle:**
+- `plans/*-state.json` is gitignored (transient execution state — not committed)
+- On completion, rename to `plans/{NNN}-{slug}-state-complete.json` (may be committed as historical record)
+- `mcp__project-tools__get_plan_status(issue_number)` reads the state file if present, falling back to plan markdown
 
 ---
 
