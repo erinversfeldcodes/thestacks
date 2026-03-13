@@ -43,8 +43,9 @@ install_hook() {
 }
 
 echo "Installing git hooks..."
+install_hook "pre-commit"
 install_hook "pre-push"
-echo "Done. Use 'git push --no-verify' to skip hooks on a push."
+echo "Done. Use 'git commit --no-verify' / 'git push --no-verify' to skip hooks."
 
 # ── Claude Code hooks ──────────────────────────────────────────────────────────
 # .claude/settings.json is checked in and auto-loaded by Claude Code when it
