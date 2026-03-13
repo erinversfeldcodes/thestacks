@@ -64,8 +64,9 @@ visibilityTierDecoder =
             )
 
 
-{-| Decodes an optional integer field. Returns Nothing when the field is absent,
-Just n when present and valid, and fails if the field is present with the wrong type.
+{-| Decodes an optional integer field. Returns Nothing when the field is absent
+or null, Just n when present with an integer value, and fails if the field is
+present with the wrong type.
 -}
 optionalInt : String -> Decoder (Maybe Int)
 optionalInt fieldName =
@@ -77,7 +78,7 @@ optionalInt fieldName =
                         Decode.succeed Nothing
 
                     Ok _ ->
-                        Decode.field fieldName Decode.int |> Decode.map Just
+                        Decode.field fieldName (Decode.nullable Decode.int)
             )
 
 
