@@ -80,7 +80,8 @@ defmodule Stacks.AI.Client do
     path = "/#{endpoint_path(endpoint)}"
     req = build_vision_request(path, payload)
 
-    case Finch.request(req, Stacks.Finch) do
+    # 210s gives the sidecar headroom beyond its own 180s Together AI timeout.
+    case Finch.request(req, Stacks.Finch, receive_timeout: 210_000) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         Jason.decode(resp_body)
 

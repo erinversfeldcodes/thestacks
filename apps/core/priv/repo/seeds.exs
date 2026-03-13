@@ -76,7 +76,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -97,7 +98,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -137,7 +139,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -225,7 +228,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -257,7 +261,8 @@ Repo.insert_all(
       updated_at: jan_10
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -271,7 +276,8 @@ Repo.insert_all(
       moved_at: jan_10
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -288,7 +294,8 @@ Repo.insert_all(
       updated_at: jan_15
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -304,7 +311,8 @@ Repo.insert_all(
       occurred_at: jan_01
     }
   ],
-  prefix: "audit"
+  prefix: "audit",
+  on_conflict: :nothing
 )
 
 IO.puts("Seeds loaded successfully.")
