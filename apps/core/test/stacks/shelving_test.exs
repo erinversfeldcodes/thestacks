@@ -147,6 +147,30 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  describe "remove_book/2 — unauthorized" do
+    setup :setup_user_bookshelf_book
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+      assert {:error, :unauthorized} = Shelving.remove_book(placement.id, other_user.id)
+    end
+  end
+
+  describe "place_book/3" do
+    test "creates a placement and returns {:ok, placement}" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      assert placement.book_id == book.id
+    end
+
+    test "creates the bookshelf if it does not exist" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
+    end
+  end
+
   describe "spine_data/1" do
     setup :setup_user_bookshelf_book
 
