@@ -96,10 +96,32 @@ cd dbt && dbt docs generate
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write migrations, Ecto schemas, dbt models, and return a completion report.
 
+### Challenge the Brief
+
+Before writing any code, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** column types, nullability constraints, index strategies, or dbt model grain that are ambiguous or missing detail
+- **Risky:** irreversible migrations, missing `down/0` implementations, assumptions about existing data volume or distribution that may be wrong
+- **Suboptimal:** a better index type, JSONB query pattern, or dbt materialisation strategy exists for this specific use case
+- **Inconsistent:** the plan conflicts with existing table conventions (UUID PKs, TIMESTAMPTZ, soft deletes), the three-schema separation (op/wh/audit), or Protobuf-defined field types
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `mix ecto.migrate` and confirm it succeeds without errors.
+2. Run `mix test` (scoped to repo/schema tests if applicable) and confirm it passes. Record the exact output.
+3. Run `dbt test` for any new or changed dbt models and confirm all tests pass.
+4. If a new table was created, insert a representative row and query it back to confirm column types and constraints behave as expected.
+5. If any step fails, fix it before submitting.
+
+Do not submit a completion report with migration failures, failing tests, or untested schema changes.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. **Spec Coverage Matrix** — enumerate every table, index, Ecto schema, and dbt model named in
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Spec Coverage Matrix** — enumerate every table, index, Ecto schema, and dbt model named in
    the Technical Requirements section of the issue. For each item, record:
 
    | Item | Migration written | Schema module written | dbt model written | Tested | Notes |
@@ -109,7 +131,7 @@ DO: Write migrations, Ecto schemas, dbt models, and return a completion report.
    Any row with ❌ in a required column **must** have an explicit justification. A row with ❌
    and no justification is a blocker — do not submit.
 
-4. Migration and test commands run with **verbatim exit code**:
+5. **Test Results** — verbatim output from self-verification:
    ```
    $ mix ecto.migrate
    ...
@@ -118,4 +140,5 @@ DO: Write migrations, Ecto schemas, dbt models, and return a completion report.
    $ dbt test
    ...XX passed
    ```
-5. DoD items satisfied — cite file:line evidence for each checked item.
+   Include representative insert/query result if a new table was exercised with real data.
+6. DoD items satisfied — cite file:line evidence for each checked item.

@@ -112,10 +112,32 @@ cd frontend && npx playwright test
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write Elm code, tests, CSS, and return a completion report.
 
+### Challenge the Brief
+
+Before writing any code, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** view states, interaction flows, or API shapes that are ambiguous or missing detail
+- **Risky:** assumptions about data shapes, decoder compatibility, or Elm version constraints that may be wrong
+- **Suboptimal:** a cleaner Elm pattern or library exists for this specific problem
+- **Inconsistent:** the plan conflicts with existing Elm modules, the RemoteData pattern, or The Stacks visual design rules
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `elm-test` and confirm it passes. Record the exact output (test count, any skips).
+2. Run `elm-format src/ --validate` and confirm no formatting issues.
+3. Run `elm make src/Main.elm` and confirm the build succeeds with no errors or warnings.
+4. If the work includes a new view or interaction, trace through the Model-Update-View cycle mentally (or via elm-program-test) with a realistic user scenario and confirm the output looks correct.
+5. If any step fails, fix it before submitting.
+
+Do not submit a completion report with failing tests, build errors, or an untested view flow.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. **Spec Coverage Matrix** — enumerate every Page, Component, and type module named in the
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Spec Coverage Matrix** — enumerate every Page, Component, and type module named in the
    Technical Requirements section of the issue. For each item, record:
 
    | Item | Implemented | Tested (elm-program-test / unit) | Notes |
@@ -125,11 +147,14 @@ DO: Write Elm code, tests, CSS, and return a completion report.
    Any row with ❌ in either column **must** have an explicit justification. A row with ❌ and
    no justification is a blocker — do not submit.
 
-4. Test commands run with **verbatim exit code**:
+5. **Test Results** — verbatim output from self-verification:
    ```
    $ cd frontend && elm-test
    ...XX tests passed
    $ cd frontend && elm-format src/ --validate
    ...
+   $ cd frontend && elm make src/Main.elm
+   ...
    ```
-5. DoD items satisfied — cite file:line evidence for each checked item.
+   Include any happy-path trace result if a view or interaction was exercised.
+6. DoD items satisfied — cite file:line evidence for each checked item.
