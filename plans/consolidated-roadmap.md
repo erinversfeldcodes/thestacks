@@ -596,6 +596,13 @@ Uses `dorny/paths-filter` for monorepo path-scoped jobs:
 - [ ] `nix develop` drops into working shell on clean machine
 - [ ] All `justfile` recipes work
 
+**Pre-launch gate (Issue #005 — Neon branch data isolation):**
+- [ ] `staging` Neon branch created; preview branches clone from `staging`, not `main`
+- [ ] `deploy-preview.sh` uses `NEON_PARENT_BRANCH` (default: `staging`) for branch creation
+- [ ] `Stacks.Release.seed/0` is not called in production deploy path
+- [ ] `docs/deployment/NEON_BRANCH_TOPOLOGY.md` documents `main → staging → preview/<branch>` topology
+- [ ] Must be completed before real users register — see `issues/005-neon-preview-branch-data-isolation.md`
+
 #### Phase 1 Integration Test
 After all tracks merge:
 - [ ] Register owner account via API
