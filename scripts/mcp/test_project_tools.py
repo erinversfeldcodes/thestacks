@@ -14,7 +14,9 @@ from project_tools import (
     create_worktree,
     remove_worktree,
     get_feedback_summary,
+    draft_issue,
 )
+from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
 
 
 class TestExtractSummary(unittest.TestCase):
@@ -343,6 +345,157 @@ class TestRemoveWorktree(unittest.TestCase):
         result = remove_worktree(14, "2")
         self.assertIn("error", result)
         self.assertIn("not a worktree", result["error"])
+
+
+# ---------------------------------------------------------------------------
+# DoD templates tests
+# ---------------------------------------------------------------------------
+
+
+class TestDoDTemplates(unittest.TestCase):
+    """Test DOD_TEMPLATES covers all required domains."""
+
+    def test_required_domains_present(self):
+        required = {"elixir", "elm", "rust", "python", "platform", "database"}
+        self.assertTrue(required.issubset(set(DOD_TEMPLATES.keys())))
+
+    def test_each_domain_has_items(self):
+        for domain, items in DOD_TEMPLATES.items():
+            with self.subTest(domain=domain):
+                self.assertIsInstance(items, list)
+                self.assertGreater(len(items), 0)
+
+
+class TestDomainAgents(unittest.TestCase):
+    """Test DOMAIN_AGENTS mapping."""
+
+    def test_expected_mappings(self):
+        expected = {
+            "elixir": "elixir-agent",
+            "elm": "elm-agent",
+            "rust": "rust-agent",
+            "python": "python-agent",
+            "platform": "platform-agent",
+            "database": "database-agent",
+            "protobuf": "protobuf-agent",
+            "partner": "partner-agent",
+            "security": "security-agent",
+        }
+        self.assertEqual(DOMAIN_AGENTS, expected)
+
+
+# ---------------------------------------------------------------------------
+# draft_issue tests
+# ---------------------------------------------------------------------------
+
+
+class TestDraftIssueSingleDomain(unittest.TestCase):
+    """Test draft_issue with a single domain."""
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_single_domain_dod(self, _mock_list: MagicMock):
+        result = draft_issue(
+            title="Add book search",
+            roadmap_context="Implement full-text book search.",
+            domains=["elixir"],
+        )
+        self.assertEqual(result["title"], "Add book search")
+        self.assertEqual(result["summary"], "Implement full-text book search.")
+        self.assertEqual(result["dod_items"], DOD_TEMPLATES["elixir"])
+        self.assertIn("elixir-agent", result["agent_assignment"])
+        self.assertEqual(result["goal"], "[To be refined by human]")
+
+
+class TestDraftIssueMultipleDomains(unittest.TestCase):
+    """Test draft_issue with multiple domains combines DoD items."""
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_combined_dod(self, _mock_list: MagicMock):
+        result = draft_issue(
+            title="Full stack feature",
+            roadmap_context="Spans elixir and elm.",
+            domains=["elixir", "elm"],
+        )
+        # Should have all elixir items + all elm items (no overlap).
+        expected = DOD_TEMPLATES["elixir"] + DOD_TEMPLATES["elm"]
+        self.assertEqual(result["dod_items"], expected)
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_deduplication(self, _mock_list: MagicMock):
+        # Both elixir and database share "mix test" related items but with
+        # different text, so all should appear. Passing same domain twice
+        # should deduplicate.
+        result = draft_issue(
+            title="Test dedup",
+            roadmap_context="Dedup test.",
+            domains=["elixir", "elixir"],
+        )
+        self.assertEqual(result["dod_items"], DOD_TEMPLATES["elixir"])
+
+
+class TestDraftIssueUnknownDomain(unittest.TestCase):
+    """Test draft_issue with unknown domain doesn't error."""
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_unknown_domain_skipped(self, _mock_list: MagicMock):
+        result = draft_issue(
+            title="Mystery domain",
+            roadmap_context="Uses an unknown domain.",
+            domains=["cobol"],
+        )
+        self.assertEqual(result["dod_items"], [])
+        self.assertEqual(result["agent_assignment"], "")
+        self.assertEqual(result["dependencies"], "None.")
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_mixed_known_unknown(self, _mock_list: MagicMock):
+        result = draft_issue(
+            title="Mixed",
+            roadmap_context="Mix of known and unknown.",
+            domains=["cobol", "rust"],
+        )
+        self.assertEqual(result["dod_items"], DOD_TEMPLATES["rust"])
+        self.assertIn("rust-agent", result["agent_assignment"])
+
+
+class TestDraftIssueDependencyDetection(unittest.TestCase):
+    """Test dependency detection finds issues with matching domains."""
+
+    @patch("project_tools._find_issue_file", return_value=None)
+    @patch(
+        "project_tools.list_issues",
+        return_value=[
+            {"number": 5, "title": "Elixir context refactor", "status": "open"},
+            {"number": 6, "title": "Add new partner API", "status": "open"},
+            {"number": 7, "title": "Fix CSS bug", "status": "open"},
+        ],
+    )
+    def test_domain_keyword_match(self, _mock_list: MagicMock, _mock_find: MagicMock):
+        result = draft_issue(
+            title="Elixir feature",
+            roadmap_context="New elixir work.",
+            domains=["elixir"],
+        )
+        # Issue #5 has "Elixir" in the title, should be suggested.
+        self.assertEqual(len(result["suggested_dependencies"]), 1)
+        self.assertEqual(result["suggested_dependencies"][0]["issue"], 5)
+        self.assertIn("domain: elixir", result["suggested_dependencies"][0]["reason"])
+
+
+class TestDraftIssueAgentFormatting(unittest.TestCase):
+    """Test agent assignment formatting."""
+
+    @patch("project_tools.list_issues", return_value=[])
+    def test_agent_formatting(self, _mock_list: MagicMock):
+        result = draft_issue(
+            title="Multi-agent",
+            roadmap_context="Multiple agents needed.",
+            domains=["elixir", "elm"],
+        )
+        lines = result["agent_assignment"].split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertIn("**elixir-agent**", lines[0])
+        self.assertIn("**elm-agent**", lines[1])
 
 
 if __name__ == "__main__":

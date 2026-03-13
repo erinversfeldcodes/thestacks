@@ -21,6 +21,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -653,6 +655,129 @@ Not directly tied to a user story.
 
     path.write_text(content)
     return {"number": number, "file": str(path.relative_to(REPO_ROOT))}
+
+
+@mcp.tool()
+def draft_issue(
+    title: str,
+    roadmap_context: str,
+    domains: list[str],
+) -> dict[str, Any]:
+    """
+    Draft a new issue with auto-populated DoD items, agent assignments,
+    and suggested dependencies based on the specified domains.
+
+    Returns a dict matching the create_issue input shape, plus a
+    suggested_dependencies field for human review.
+
+    Args:
+        title: Short descriptive title for the issue.
+        roadmap_context: 1-2 sentence description of what needs to be done
+                         and why (becomes the summary).
+        domains: List of domain strings (e.g. ["elixir", "database"]).
+    """
+    # 1. Collect DoD items (deduplicated, preserving order).
+    seen: set[str] = set()
+    combined_dod: list[str] = []
+    for domain in domains:
+        for item in DOD_TEMPLATES.get(domain, []):
+            if item not in seen:
+                seen.add(item)
+                combined_dod.append(item)
+
+    # 2. Derive agent assignment.
+    agent_lines: list[str] = []
+    agent_names: set[str] = set()
+    for domain in domains:
+        agent = DOMAIN_AGENTS.get(domain)
+        if agent:
+            agent_names.add(agent)
+            agent_lines.append(f"- **{agent}** for {domain}")
+    agent_assignment_text = "\n".join(agent_lines) if agent_lines else ""
+
+    # 3. Detect dependencies from open issues.
+    open_issues = list_issues(status="open")
+    suggested_deps: list[dict[str, str]] = []
+    dep_lines: list[str] = []
+    for issue in open_issues:
+        if "error" in issue:
+            continue
+        issue_title = issue.get("title", "")
+        issue_title_lower = issue_title.lower()
+
+        # Check domain keyword match in title.
+        matching_reasons: list[str] = []
+        for domain in domains:
+            if domain.lower() in issue_title_lower:
+                matching_reasons.append(f"domain: {domain}")
+
+        # Check agent name match in agent_assignment (need full issue data).
+        issue_path = _find_issue_file(issue["number"])
+        if issue_path is not None:
+            full_issue = _parse_issue(issue_path)
+            issue_agent_text = full_issue.get("agent_assignment", "")
+            for agent in agent_names:
+                if agent in issue_agent_text:
+                    matching_reasons.append(f"agent: {agent}")
+
+        if matching_reasons:
+            reason = ", ".join(matching_reasons)
+            dep_lines.append(
+                f"- Issue #{issue['number']:03d} ({issue_title})"
+                f" — potential overlap: [{reason}]"
+            )
+            suggested_deps.append(
+                {
+                    "issue": issue["number"],
+                    "title": issue_title,
+                    "reason": reason,
+                }
+            )
+
+    dependencies_text = "\n".join(dep_lines) if dep_lines else "None."
+
+    # 4. Build technical requirements stub with standards references.
+    standards_map: dict[str, list[str]] = {
+        "elixir": [
+            "docs/agents/standards/code-quality.md",
+            "docs/agents/standards/testing.md",
+        ],
+        "elm": ["docs/agents/standards/code-quality.md"],
+        "rust": ["docs/agents/standards/code-quality.md"],
+        "python": [
+            "docs/agents/standards/code-quality.md",
+            "docs/agents/standards/security.md",
+        ],
+        "platform": ["docs/agents/standards/code-quality.md"],
+        "database": [
+            "docs/agents/standards/code-quality.md",
+            "docs/agents/standards/testing.md",
+        ],
+    }
+
+    ref_paths: set[str] = set()
+    for domain in domains:
+        for p in standards_map.get(domain, []):
+            ref_paths.add(p)
+
+    refs_section = "\n".join(f"- {p}" for p in sorted(ref_paths))
+    technical_requirements_text = (
+        "### Standards References\n"
+        f"{refs_section}\n\n"
+        "[Additional technical requirements to be filled in by human]"
+    )
+
+    # 5. Return draft matching create_issue input shape.
+    return {
+        "title": title,
+        "summary": roadmap_context,
+        "goal": "[To be refined by human]",
+        "technical_requirements": technical_requirements_text,
+        "dod_items": combined_dod,
+        "dependencies": dependencies_text,
+        "agent_assignment": agent_assignment_text,
+        "suggested_dependencies": suggested_deps,
+    }
 
 
 @mcp.tool()
