@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.1
-> **Last updated:** 2026-03-06
+> **Version:** 1.2
+> **Last updated:** 2026-03-12
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -26,7 +26,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 14. [Frontend Architecture (Elm)](#frontend-architecture-elm)
 15. [Observability & Metrics](#observability--metrics)
 16. [Testing Strategy](#testing-strategy)
-17. [CI/CD Pipeline](#cicd-pipeline)
+17. [CI/CD Pipeline](#cicd-pipeline) — includes [Fly.io Deployment Constraints](#flyio-deployment-constraints)
 18. [Error Handling & Resilience](#error-handling--resilience)
 19. [Backup & Disaster Recovery](#backup--disaster-recovery)
 20. [Legal & Compliance (Scraping)](#legal--compliance-scraping)
@@ -65,7 +65,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 
 | Service | Role | Cost |
 |---------|------|------|
-| **Together AI** or **Replicate** | Hosted open-source vision model endpoint (Qwen2.5-VL, Llama 4 Scout, or PaliGemma 2) | Pay-per-call |
+| **Modal** | Serverless GPU inference for the vision sidecar. Chosen over Together AI and Replicate because Modal caches container images between invocations, reducing cold start from 2–3 minutes (raw GPU allocation) to ~15–30 seconds. Demonstrating self-hosted model deployment is a project goal; managed vision APIs (Claude, GPT-4V) were ruled out for this reason. Keep-warm strategies (periodic pings) were ruled out as an anti-pattern. See [Fly.io Deployment Constraints](#flyio-deployment-constraints) for context on why cold start matters. | Pay-per-second GPU time |
 | **Open Library API** | ISBN resolution, book metadata, subject classifications | Free, open source |
 | **Google Books API** | Fallback ISBN resolution | Free tier |
 | **Brave Search API** | Primary search for source discovery | Free tier: 2k queries/mo; Paid: $3/1k |
@@ -460,11 +460,12 @@ Search results → LLM → confidence score + suggested config
 # config/config.exs
 config :the_stacks, :ai,
   vision_model: "Qwen/Qwen2.5-VL-7B-Instruct",
-  vision_provider: :together_ai,
-  vision_api_version: "2025-01-01",
+  vision_provider: :modal,
   summarisation_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct",
   summarisation_provider: :together_ai
 ```
+
+**Why Modal for vision, Together AI for summarisation:** Modal's container caching keeps cold starts in the 15–30s range, acceptable for bursty upload batches where the first image pays the cost and subsequent images hit a warm container. Together AI's 2–3 minute cold start (raw GPU allocation with no container caching) was unacceptable for interactive use. Summarisation is a background job with no latency expectation, so Together AI is fine there.
 
 When the provider updates a model, we do not automatically adopt it. Process:
 1. Pin to specific model version in config
@@ -1300,7 +1301,9 @@ Completed purchases (fixed price or accepted offer).
 
 ## Image Storage
 
-User-uploaded book photos and book cover thumbnails need object storage. The `uploaded_images.storage_path` field references objects in this store.
+> **Upload pipeline vs persistent storage:** Raw user uploads for ISBN extraction are **not** stored in object storage. The image bytes are passed directly in the Oban job args (base64-encoded) so any Fly machine can process the job without shared filesystem access. Object storage is used only for processed outputs (book covers). See [Fly.io Deployment Constraints](#flyio-deployment-constraints) for why local disk storage across multiple machines is not viable.
+
+User-uploaded book photos are ephemeral — they exist only to be sent to the vision sidecar and are never displayed to users. Book cover thumbnails (sourced from Open Library or extracted post-identification) are the persistent artefacts that need object storage.
 
 ### Provider: Fly.io Tigris (or Cloudflare R2)
 
@@ -4437,6 +4440,45 @@ In addition to per-PR tests, scheduled pipelines run heavier test suites:
 | **Weekly (Monday 09:00)** | Security scanning | `mix deps.audit` + `pip audit` + `cargo audit` (full dependency scan) |
 | **Weekly (Monday 09:00)** | Visual regression | Full Playwright screenshot suite against preview |
 | **Pre-release (manual)** | Performance benchmarks | Benchee suite for hot path latency verification |
+
+### Fly.io Deployment Constraints
+
+Lessons learned deploying to Fly.io that have shaped architectural decisions.
+
+#### Multi-machine HA and ephemeral filesystems
+
+Fly deploys two machines by default for zero-downtime rolling deploys (high availability). Each machine has a completely isolated ephemeral filesystem — `/tmp` on machine A is invisible to machine B. Fly's load balancer routes requests to either machine with no stickiness guarantee.
+
+**Consequence:** anything written to local disk by an HTTP handler may not be readable by an Oban job, because Oban picks up jobs on whichever machine polls the queue first.
+
+**Decision:** the upload pipeline does not write image files to disk. Image bytes are base64-encoded at upload time and passed directly in the Oban job args. The job reads from its own args, calls the vision sidecar, then discards the bytes. No shared filesystem needed.
+
+**What this rules out permanently:** local file storage for any data that background jobs need to read. Use the database or object storage (Tigris/R2) for anything that must survive across machines.
+
+#### Erlang DNS resolution on Fly's 6PN internal network
+
+Fly's internal `.internal` hostnames (e.g. `stacks-vision-preview.internal`) resolve via Fly's private DNS server at `fdaa::3` — an IPv6-only address. Erlang's built-in DNS resolver (`inet_res`) opens UDP/TCP sockets to nameservers using IPv4 by default and cannot reach an IPv6 nameserver, producing `:nxdomain` errors.
+
+**Symptom:** Oban jobs calling the vision sidecar fail immediately with `%Mint.TransportError{reason: :nxdomain}`.
+
+**Fix:** configure Erlang to use the native OS resolver (`getaddrinfo` via musl libc) instead of `inet_res`. musl automatically selects socket address family based on the nameserver address — IPv6 nameserver gets an IPv6 socket. This is done via an `inetrc` file baked into the Docker image:
+
+```
+# /app/etc/inetrc (created in Dockerfile.core runtime stage)
+{lookup, [native]}.
+```
+
+```toml
+# deploy/fly.core.toml [env]
+ERL_INETRC = "/app/etc/inetrc"
+```
+
+**What does NOT work:**
+- `config :kernel, inet6: true` in `config/runtime.exs` — the kernel application is already loaded by the time Config.Provider runs; Elixir raises an error and aborts boot.
+- `config :kernel, inet6: true` in `config/prod.exs` — compiles correctly into `sys.config` and boots successfully, but disrupts Oban's PostgreSQL connection handling in ways that prevent job processing.
+- `ERL_AFLAGS = "-kernel inet6 true"` in `fly.core.toml` — sets inet6 before the kernel boots (correct timing) but causes the machine to fail health checks, likely due to socket binding conflicts with Fly's proxy.
+
+The native resolver approach is the most targeted fix: it only changes name resolution behaviour, leaving all socket operations and Oban unaffected.
 
 ---
 
