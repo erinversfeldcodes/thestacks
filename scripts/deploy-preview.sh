@@ -71,17 +71,19 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
-VISION_SERVICE_URL="https://erinversfeldcodes--thestacks-vision-vision-api.modal.run"
-NEON_BRANCH_ID=""
+MODAL_APP="thestacks-vision-${SANITISED}"
+VISION_SERVICE_URL="https://erinversfeldcodes--${MODAL_APP}-vision-api.modal.run"
+NEON_BRANCH_NAME=""
 
 echo "==> Deploy preview for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
+echo "    Modal app:   ${MODAL_APP}"
 echo "    Vision URL:  ${VISION_SERVICE_URL}"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 cleanup() {
     local neon_args=""
-    [[ -n "$NEON_BRANCH_ID" ]] && neon_args="--neon-branch-id ${NEON_BRANCH_ID}"
+    [[ -n "$NEON_BRANCH_NAME" ]] && neon_args="--neon-branch-name ${NEON_BRANCH_NAME}"
     bash "${REPO_ROOT}/scripts/cleanup-preview.sh" --branch "${BRANCH}" ${neon_args}
 }
 trap cleanup EXIT
@@ -108,7 +110,7 @@ match = [b['id'] for b in branches if b['name'] == 'preview/${SANITISED}']
 print(match[0] if match else '')
 " 2>/dev/null || true)"
     if [[ -n "$stale_id" ]]; then
-        echo "    Deleting stale branch ${stale_id}..."
+        echo "    Deleting stale branch preview/${SANITISED}..."
         curl -sL -X DELETE \
             -H "Authorization: Bearer ${NEON_API_KEY}" \
             "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${stale_id}" > /dev/null
@@ -122,16 +124,16 @@ print(match[0] if match else '')
         -d "{\"branch\": {\"name\": \"preview/${SANITISED}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
         "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?include_passwords=true")"
 
-    # Use python3 for reliable JSON parsing (jq may not be present)
-    NEON_BRANCH_ID="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['branch']['id'])" 2>/dev/null || true)"
     NEON_CONNECTION_URI="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['connection_uris'][0]['connection_uri'])" 2>/dev/null || true)"
+    neon_branch_name="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['branch']['name'])" 2>/dev/null || true)"
 
-    if [[ -z "$NEON_BRANCH_ID" ]]; then
+    if [[ "$neon_branch_name" != "preview/${SANITISED}" ]]; then
         echo "FAIL deploy: Neon branch creation failed" >&2
         echo "$neon_response" | head -5 >&2
         exit 1
     fi
-    echo "    Neon branch created: ${NEON_BRANCH_ID}"
+    NEON_BRANCH_NAME="preview/${SANITISED}"
+    echo "    Neon branch created: ${NEON_BRANCH_NAME}"
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
         echo "    Connection URI obtained."
     else
@@ -149,8 +151,8 @@ fi
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     echo ""
     echo "==> Syncing Modal secret 'thestacks-vision'..."
-    # Include MODAL_TOKEN_ID/SECRET in the Modal secret so vision_api's Python
-    # SDK can authenticate when making cross-container calls to VisionModel.
+    # The secret is shared across all PR deployments — it contains the same
+    # HMAC key and Modal tokens regardless of branch. Only the app is per-PR.
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
         python3 -m modal secret create thestacks-vision \
             "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}" \
@@ -159,7 +161,8 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
             --force 2>&1 || { echo "FAIL deploy: Modal secret sync failed"; exit 1; }
 
     echo ""
-    echo "==> Deploying vision service to Modal..."
+    echo "==> Deploying vision service to Modal (app: ${MODAL_APP})..."
+    MODAL_APP_NAME="${MODAL_APP}" \
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
         python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1 \
         || { echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
@@ -221,8 +224,8 @@ fly_deploy_with_retry() {
         done
 
         if [[ $attempt -lt 2 ]]; then
-            echo "    App not reachable — waiting 120s for machines + TCP sockets to settle, then retrying..."
-            sleep 120
+            echo "    App not reachable — waiting 30s for machines + TCP sockets to settle, then retrying..."
+            sleep 30
         fi
     done
     return 1
@@ -244,7 +247,7 @@ echo "PASS deploy: core app deployed"
 # the health endpoint here we keep it warm and confirm it started correctly.
 echo ""
 echo "==> Waiting for ${CORE_URL}/api/health..."
-RETRIES=18
+RETRIES=10
 until curl -sf --max-time 15 "${CORE_URL}/api/health" &>/dev/null; do
     if [[ $RETRIES -le 0 ]]; then
         echo "FAIL deploy: health check timed out for ${CORE_URL}"
@@ -325,8 +328,8 @@ if [[ -n "${smoke_token}" ]]; then
         echo "FAIL deploy: all warmup uploads failed"
         e2e_failed=1
     else
-        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 5 min)..."
-        warmup_deadline=$(( $(date +%s) + 300 ))
+        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 2 min)..."
+        warmup_deadline=$(( $(date +%s) + 120 ))
         # Track done IDs as a space-separated string (bash 3.2 compatible; no declare -A).
         warmup_done_ids=""
         all_done=0
@@ -494,7 +497,7 @@ if command -v jwt_tool &>/dev/null; then
         echo "SKIP jwt_tool: could not obtain JWT (login endpoint unreachable or credentials wrong)"
     fi
 else
-    echo "SKIP: jwt_tool not installed (pip install jwt_tool)"
+    echo "SKIP: jwt_tool not installed (run setup.sh to install)"
 fi
 
 # ── IDOR test (cross-user resource access) ────────────────────────────────────
