@@ -15,6 +15,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Events
   alias Stacks.Moderation
 
   @impl true
@@ -83,6 +84,13 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: resolved image #{image_id} → #{length(book_ids)} book(s)")
+
+      Events.emit_safe(%{
+        event_type: "image.resolved",
+        aggregate_type: "image",
+        aggregate_id: image_id,
+        payload: %{book_count: length(book_ids)}
+      })
     else
       Logger.warning("IdentifyBookJob: image #{image_id} not found for resolve")
     end
@@ -111,6 +119,13 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
+
+      Events.emit_safe(%{
+        event_type: "image.rejected",
+        aggregate_type: "image",
+        aggregate_id: image_id,
+        payload: %{reason: reason}
+      })
     else
       Logger.warning("IdentifyBookJob: image #{image_id} not found for reject")
     end
