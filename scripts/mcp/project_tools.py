@@ -487,6 +487,99 @@ def run_test_suite(domain: str, worktree_path: str | None = None) -> dict[str, A
     }
 
 
+def _worktree_info(issue_number: int, phase: str) -> tuple[Path, str]:
+    """Return (worktree_path, branch_name) for the given issue and phase."""
+    label = f"{issue_number:03d}-phase-{phase}"
+    path = REPO_ROOT / ".claude" / "worktrees" / label
+    branch = f"worktree/{label}"
+    return path, branch
+
+
+@mcp.tool()
+def create_worktree(issue_number: int, phase: str) -> dict[str, Any]:
+    """
+    Create a git worktree for a specialist agent to work in isolation.
+
+    Creates a worktree at .claude/worktrees/<issue>-phase-<phase> branched
+    from the current HEAD of the active branch.
+
+    Args:
+        issue_number: The issue number (e.g., 14).
+        phase: The phase identifier (e.g., "2" or "2a").
+
+    Returns {"path": "<absolute path>", "branch": "worktree/<issue>-phase-<phase>"}
+    """
+    wt_path, branch = _worktree_info(issue_number, phase)
+
+    if wt_path.exists():
+        return {"error": f"Worktree already exists at {wt_path}"}
+
+    # Ensure parent directory exists.
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        ["git", "worktree", "add", str(wt_path), "-b", branch],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+
+    if result.returncode != 0:
+        return {
+            "error": result.stderr.strip()
+            or f"git worktree add failed (exit {result.returncode})"
+        }
+
+    return {"path": str(wt_path), "branch": branch}
+
+
+@mcp.tool()
+def remove_worktree(issue_number: int, phase: str) -> dict[str, Any]:
+    """
+    Remove a git worktree and its associated branch.
+
+    Args:
+        issue_number: The issue number.
+        phase: The phase identifier.
+
+    Returns {"ok": true, "removed_path": "...", "removed_branch": "..."}
+    """
+    wt_path, branch = _worktree_info(issue_number, phase)
+
+    if not wt_path.exists():
+        return {"error": f"No worktree at {wt_path}"}
+
+    # Remove worktree.
+    result = subprocess.run(
+        ["git", "worktree", "remove", str(wt_path), "--force"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+
+    if result.returncode != 0:
+        return {
+            "error": result.stderr.strip()
+            or f"git worktree remove failed (exit {result.returncode})"
+        }
+
+    # Clean up branch.
+    result = subprocess.run(
+        ["git", "branch", "-D", branch],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+
+    if result.returncode != 0:
+        return {
+            "error": result.stderr.strip()
+            or f"git branch -D failed (exit {result.returncode})"
+        }
+
+    return {"ok": True, "removed_path": str(wt_path), "removed_branch": branch}
+
+
 @mcp.tool()
 def create_issue(
     title: str,
