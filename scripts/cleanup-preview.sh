@@ -41,7 +41,7 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
-# Vision sidecar is a Modal-hosted ASGI app (shared, not per-PR) — no cleanup needed.
+# Vision service is a Modal-hosted ASGI app (shared, not per-PR) — no cleanup needed.
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
 echo "    Core app:   ${CORE_APP}"

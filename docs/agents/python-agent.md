@@ -1,15 +1,15 @@
 # The Stacks — Python Agent
 
 ## Role
-Develop and maintain the Python/FastAPI vision sidecar: image-to-text extraction via hosted open-source vision models, content moderation classification, and the HTTP interface consumed by the Phoenix core.
+Develop and maintain the Python/FastAPI vision service: image-to-text extraction via the Modal-hosted Qwen2.5-VL model, content moderation classification, and the HTTP interface consumed by the Phoenix core.
 
 ## Technology Stack
-- **Framework:** FastAPI
+- **Framework:** FastAPI (ASGI app deployed via Modal `@modal.asgi_app()`)
 - **Language:** Python 3.12+
 - **Linting:** ruff (linting + formatting)
 - **Type checking:** Type hints everywhere, validated by mypy or pyright
 - **Models:** Pydantic v2 for request/response schemas
-- **Vision model providers:** Together AI, Replicate (hosted open-source: Qwen2.5-VL, Llama 4 Scout, PaliGemma 2)
+- **Vision model:** Qwen2.5-VL-7B-Instruct on Modal (A10G GPU)
 - **Testing:** pytest, Atheris (fuzzing)
 
 ## Owned Domains
@@ -21,15 +21,15 @@ Develop and maintain the Python/FastAPI vision sidecar: image-to-text extraction
 
 ### Modules
 - `app/main.py` — FastAPI app, routes, middleware
-- `app/models/extract.py` — Pydantic models for extraction request/response
-- `app/models/classify.py` — Pydantic models for classification
-- `app/providers/together.py` — Together AI client
-- `app/providers/replicate.py` — Replicate client
-- `app/providers/base.py` — Provider interface (swap models via config)
-- `app/config.py` — Environment-based config (model name, provider, budget limits)
+- `app/models/extraction.py` — Pydantic models for extraction request/response
+- `app/models/classification.py` — Pydantic models for classification
+- `app/services/vision_client.py` — Modal client (calls `VisionModel` class on Modal)
+- `app/services/hmac_auth.py` — HMAC token validation (shared secret with Elixir core)
+- `app/config.py` — Environment-based config (model name, budget limits)
+- `apps/vision/modal_app.py` — Modal app definition (`VisionModel` GPU class + `vision_api` ASGI function)
 
 ### Content Moderation Role
-The vision sidecar handles steps 1 and 2 of the 4-step moderation pipeline:
+The vision service handles steps 1 and 2 of the 4-step moderation pipeline:
 1. **Is it a book?** — classify endpoint determines if the image is a book
 2. **Extract text** — extract endpoint pulls visible text for ISBN resolution
 Steps 3 (ISBN resolve) and 4 (BISAC classification) happen in Elixir.
@@ -37,13 +37,13 @@ Steps 3 (ISBN resolve) and 4 (BISAC classification) happen in Elixir.
 ## Key Patterns
 
 ### Budget controls
-The sidecar tracks per-day and per-month spend. If budget is exceeded, it returns a 429 with a clear message. The Phoenix core handles graceful degradation.
+Budget tracking is delegated to Phoenix (via `Stacks.AI.BudgetTracker`). The vision service itself makes no spend decisions.
 
 ### Model version pinning
-The model ID is pinned in config, not hardcoded. Model upgrades are explicit and tested.
+The model ID is pinned in config (`modal_app.py`), not hardcoded in request paths. Model upgrades are explicit and tested.
 
 ### Never trust model output
-The sidecar returns raw extracted text. It does NOT validate ISBNs or make book identity decisions. That's the Elixir core's job.
+The vision service returns raw extracted dicts. It does NOT validate ISBNs or make book identity decisions. That's the Elixir core's job.
 
 ## Context Loading Requirements
 ```
@@ -53,8 +53,8 @@ The sidecar returns raw extracted text. It does NOT validate ISBNs or make book 
 ```
 
 ## Integration Handoffs
-- **elixir-agent:** HTTP interface contract (request/response JSON). Phoenix calls the sidecar via HTTPoison/Req.
-- **platform-agent:** Dockerfile, Fly Machine config, environment variables for API keys and budget limits.
+- **elixir-agent:** HTTP interface contract (request/response JSON). Phoenix calls the vision service via `Stacks.AI.Client`.
+- **platform-agent:** Modal deployment (`modal deploy apps/vision/modal_app.py`), Modal secret management, environment variables.
 - **security-agent:** AI safety concerns (prompt injection via image text, PII in vision output, cost explosion).
 
 ## Pre-approved Commands

@@ -20,7 +20,7 @@
 2. A drop zone appears. Drag-and-drop and file picker are both supported. Accepted inputs include photos of covers, spines, back covers, mirrored or rotated photos, and screenshots containing book titles or recommendations.
 3. The user drops or selects one image. (For bulk upload of multiple images, see US-1.1.7.)
 4. The system pre-processes the image before sending it to the vision model: orientation is corrected using EXIF data, horizontal mirroring is detected and corrected, and the image is re-encoded to a canonical format with EXIF stripped.
-5. The system sends the pre-processed image to an open-source vision model (hosted on Together AI or Replicate) to extract visible text — title, author, ISBN barcode, publisher information. If the image contains multiple identifiable books, all are extracted.
+5. The system sends the pre-processed image to an open-source vision model (Qwen2.5-VL-7B-Instruct hosted on Modal) to extract visible text — title, author, ISBN barcode, publisher information. If the image contains multiple identifiable books, all are extracted.
 6. The extracted text is used to query the Open Library API and Google Books API to resolve an ISBN.
 7. If an ISBN is found, the system presents the identified book for confirmation (title, author, cover image). The user selects which shelf to place it on (defaulting to AntiLibrary) and confirms.
 8. The book is created with full metadata and its spine slides into place on the chosen shelf with a soft thud animation.
@@ -696,7 +696,7 @@ The moderation pipeline runs automatically on every upload:
 - **Source Discovery:** Count of configured sources, sources pending user review, Brave Search API and SearXNG usage (calls this month, remaining quota).
 - **Costs:** An itemised monthly cost breakdown with data pulled from billing APIs:
   - Fly.io hosting
-  - Vision API (Together AI / Replicate) calls and cost
+  - Vision API (Modal) calls and cost
   - Brave Search API usage
   - Domain registration
   - Total monthly cost

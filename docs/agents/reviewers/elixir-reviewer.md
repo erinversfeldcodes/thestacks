@@ -46,10 +46,10 @@ Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/sec
 - **Authorisation**: User can only act on their own resources. No horizontal privilege escalation.
 - **Input validation**: All external input validated at the API boundary. Ecto changesets enforce this — check that no raw params reach the DB.
 - **Argon2 hashing**: Passwords hashed with Argon2. No plaintext or MD5/SHA1 storage.
-- **HMAC service-to-service**: Internal calls to vision sidecar and scraper use HMAC token validation.
+- **HMAC service-to-service**: Calls to the Modal vision service use HMAC token validation (`X-Internal-Token`). Calls to the Rust scraper use Fly private networking.
 - **Rate limiting**: Auth endpoints and upload endpoints have rate limiting applied.
 - **GDPR compliance**: Personal data classified correctly. `Stacks.Audit` called for all significant actions. Event log payloads do not contain unnecessary PII.
-- **AI safety**: Vision model output is never trusted directly. ISBNs from the sidecar are always verified against Open Library or Google Books before any book is created.
+- **AI safety**: Vision model output is never trusted directly. ISBNs from the vision service are always verified against Open Library or Google Books before any book is created.
 - **Cloak encryption**: Sensitive fields (metadata in audit log) encrypted at rest.
 
 ### 6. Alternative Approaches Research

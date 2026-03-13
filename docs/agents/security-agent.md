@@ -48,8 +48,8 @@ Threat model (from technical-architecture.md section 5):
 
 ### Content Moderation
 4-step pipeline:
-1. Is it a book? (vision sidecar)
-2. Extract text (vision sidecar)
+1. Is it a book? (Modal vision service)
+2. Extract text (Modal vision service)
 3. Resolve ISBN (Open Library / Google Books)
 4. Classify subjects for age-gating (BISAC codes — rule-based, no ML)
 
@@ -73,7 +73,7 @@ Elm does NOT require `unsafe-eval`. This is a security advantage.
 | Auth endpoints | 5/min | Per IP |
 | Upload | 10/min | Per user |
 | Partner API | 100/min, 10k/day | Per API key |
-| Vision sidecar | Budget-controlled | Per day/month |
+| Vision service (Modal) | Budget-controlled | Per day/month |
 
 ### Database Security
 - Separate roles per schema (stacks_app, stacks_dbt, stacks_readonly)

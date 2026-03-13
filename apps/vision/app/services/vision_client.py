@@ -1,6 +1,4 @@
 import asyncio
-import json
-from typing import TypedDict
 
 import modal
 from fastapi import HTTPException
@@ -8,35 +6,17 @@ from fastapi import HTTPException
 from app.config import settings
 
 
-class _Message(TypedDict):
-    content: str
-
-
-class _Choice(TypedDict):
-    message: _Message
-
-
-# TogetherResponse shape is kept so main.py's parsing logic (choices[0].message.content)
-# works without modification. The name is legacy; the underlying transport is now Modal.
-class TogetherResponse(TypedDict):
-    choices: list[_Choice]
-
-
-def _wrap(result: dict) -> TogetherResponse:
-    return {"choices": [{"message": {"content": json.dumps(result)}}]}
-
-
 class VisionClient:
     """Calls the Modal-hosted Qwen2.5-VL model for book classification and extraction.
 
     Credentials are read from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET env vars (set as
-    Fly secrets on the vision sidecar, or from ~/.modal.toml in local dev).
+    Fly secrets on the core app, or from ~/.modal.toml in local dev).
     """
 
     def __init__(self) -> None:
         self._modal_cls = modal.Cls.from_name("thestacks-vision", "VisionModel")
 
-    async def extract(self, images: list[str]) -> TogetherResponse:
+    async def extract(self, images: list[str]) -> dict:
         try:
             model = self._modal_cls()
             result = await asyncio.wait_for(
@@ -51,9 +31,9 @@ class VisionClient:
             raise HTTPException(
                 status_code=502, detail=f"Vision model request failed: {exc}"
             ) from exc
-        return _wrap(result if isinstance(result, dict) else {"books": []})
+        return result if isinstance(result, dict) else {"books": []}
 
-    async def classify(self, image: str) -> TogetherResponse:
+    async def classify(self, image: str) -> dict:
         try:
             model = self._modal_cls()
             result = await asyncio.wait_for(
@@ -68,7 +48,7 @@ class VisionClient:
             raise HTTPException(
                 status_code=502, detail=f"Vision model request failed: {exc}"
             ) from exc
-        return _wrap(
+        return (
             result
             if isinstance(result, dict)
             else {"classification": "ambiguous", "confidence": 0.0}

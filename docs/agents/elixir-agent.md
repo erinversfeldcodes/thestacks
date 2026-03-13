@@ -92,7 +92,7 @@ end
 ## Integration Handoffs
 - **database-agent:** Schema changes, migrations, dbt model updates
 - **elm-agent:** API contracts (request/response shapes), WebSocket channels
-- **python-agent:** Vision sidecar HTTP interface, health checks
+- **python-agent:** Vision service HTTP interface (`VISION_SERVICE_URL`), health checks
 - **rust-agent:** Scraper HTTP interface, price data format
 - **protobuf-agent:** Schema changes require proto file updates first
 - **platform-agent:** Fly.io config, Oban queue tuning, environment variables

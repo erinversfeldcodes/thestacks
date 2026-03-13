@@ -8,7 +8,7 @@
 #
 # Optional env vars:
 #   NEON_API_KEY        — Neon API key (required when using Neon branch)
-#   MODAL_TOKEN_ID      — Modal API token ID (vision sidecar calls Modal for inference)
+#   MODAL_TOKEN_ID      — Modal API token ID (vision service deployed to Modal for inference)
 #   MODAL_TOKEN_SECRET  — Modal API token secret
 #   VISION_HMAC_SECRET  — Elixir → vision HMAC auth
 #   SECRET_KEY_BASE     — Phoenix secret key base
@@ -71,14 +71,12 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
-# Vision sidecar runs as a Modal-hosted ASGI app (not a Fly machine).
-# The endpoint is permanent and shared across all preview deploys.
-VISION_SIDECAR_URL="https://erinversfeldcodes--thestacks-vision-vision-api.modal.run"
+VISION_SERVICE_URL="https://erinversfeldcodes--thestacks-vision-vision-api.modal.run"
 NEON_BRANCH_ID=""
 
 echo "==> Deploy preview for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
-echo "    Vision URL:  ${VISION_SIDECAR_URL}"
+echo "    Vision URL:  ${VISION_SERVICE_URL}"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 cleanup() {
@@ -144,8 +142,8 @@ else
     NEON_CONNECTION_URI=""
 fi
 
-# ── Deploy vision sidecar to Modal ────────────────────────────────────────────
-# The vision sidecar is a Modal-hosted ASGI app. Deploy it here so the latest
+# ── Deploy vision service to Modal ────────────────────────────────────────────
+# The vision service is a Modal-hosted ASGI app. Deploy it here so the latest
 # code is live before the core app starts calling it. If apps/vision/ hasn't
 # changed since the last deploy, Modal's build cache makes this near-instant.
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
@@ -161,11 +159,11 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
             --force 2>&1 || { echo "FAIL deploy: Modal secret sync failed"; exit 1; }
 
     echo ""
-    echo "==> Deploying vision sidecar to Modal..."
+    echo "==> Deploying vision service to Modal..."
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
         python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1 \
         || { echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
-    echo "PASS deploy: vision sidecar deployed to Modal"
+    echo "PASS deploy: vision service deployed to Modal"
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
     echo "      The existing Modal deployment (if any) will be used."
@@ -183,7 +181,7 @@ fly secrets set \
     SECRET_KEY_BASE="${SECRET_KEY_BASE:-}" \
     VISION_HMAC_SECRET="${VISION_HMAC_SECRET:-}" \
     CLOAK_KEY="${CLOAK_KEY:-}" \
-    VISION_SIDECAR_URL="${VISION_SIDECAR_URL}" \
+    VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
     PHX_HOST="${CORE_APP}.fly.dev" \
     ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
     --app "${CORE_APP}" --stage

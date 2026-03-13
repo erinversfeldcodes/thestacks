@@ -30,7 +30,7 @@ config :core, Stacks.Accounts.Guardian,
   secret_key: "change_me_in_production_via_runtime_exs_at_least_32_chars_long"
 
 config :core, :vision_client, Stacks.AI.Client
-config :core, :vision_sidecar_url, "http://localhost:8000"
+config :core, :vision_service_url, "http://localhost:8000"
 config :core, :vision_hmac_secret, "dev-only-hmac-secret-change-in-production"
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
