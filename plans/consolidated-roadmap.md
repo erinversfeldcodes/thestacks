@@ -1,6 +1,6 @@
 # Plan: The Stacks — Consolidated Implementation Roadmap
 **Created**: 2026-03-05
-**Updated**: 2026-03-07
+**Updated**: 2026-03-13
 **Status**: Draft
 **Branch**: `main` (greenfield — no existing code)
 
@@ -20,7 +20,7 @@ The Stacks is a greenfield, open-source, self-hosted book management and discove
 
 - **Core**: Elixir + Phoenix (OTP supervision, Oban job processing, Guardian JWT)
 - **Frontend**: Elm SPA (zero runtime exceptions, TEA architecture, RemoteData pattern)
-- **Vision sidecar**: Python + FastAPI (hosted open-source models via Together AI / Replicate)
+- **Vision service**: Python + FastAPI on Modal (Qwen2.5-VL-7B-Instruct on A10G GPU; HMAC-authenticated HTTPS; not co-located with core)
 - **Price scraper**: Rust microservice (TOML config per store, standalone OSS tool)
 - **Database**: PostgreSQL with 3 schemas (`op`, `wh`, `audit`), 3 DB roles
 - **Data transforms**: dbt (staging -> intermediate -> marts)
@@ -40,7 +40,7 @@ The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indi
 | Phase 1A (DB + migrations) | **Sonnet 4.6** | Well-specified schema from docs; mechanical translation |
 | Phase 1B (Elixir contexts) | **Opus 4.6** | Architectural judgment — context boundaries, Ecto.Multi patterns, event emission design |
 | Phase 1C (Elm frontend) | **Sonnet 4.6** | TEA patterns are mechanical once types are defined |
-| Phase 1D (Python sidecar) | **Sonnet 4.6** | Small, well-specified FastAPI service |
+| Phase 1D (Python vision service on Modal) | **Sonnet 4.6** | Small, well-specified FastAPI service deployed to Modal |
 | Phase 1D.1 (Vision eval framework) | **Sonnet 4.6** | Framework harness is mechanical; corpus assembly and model decision are human |
 | Phase 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
 | Phase 1E (Platform + CI) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
@@ -59,10 +59,9 @@ Agents cannot create accounts. This must be done by a human before Phase 1E (fir
 
 | Service | Required for | What to provision |
 |---------|-------------|-------------------|
-| Fly.io | Phase 1E deploy | Organisation created; 3 apps (`thestacks-core`, `thestacks-vision`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets |
+| Fly.io | Phase 1E deploy | Organisation created; 2 apps (`thestacks-core`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
 | Fly Postgres | Phase 1E DB | Postgres cluster in JHB; connection string; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
-| Tigris / S3-compatible (Fly) | Phase 1E image storage | Bucket created; access keys; `TIGRIS_ACCESS_KEY_ID`, `TIGRIS_SECRET_ACCESS_KEY`, `TIGRIS_BUCKET_NAME` in `.env` |
-| Together AI | Phase 1B vision calls | API key; `TOGETHER_AI_API_KEY` in `.env` |
+| **Modal** | Phase 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret (`thestacks-vision`). Same secret set as Fly.io secret on `thestacks-core`. |
 | Brave Search | Phase 2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
 | Resend or Postmark | Phase 3 partner notifications | API key; `EMAIL_API_KEY` in `.env` |
 | Domain + DNS | Phase 1E | Domain pointed to Fly.io; TLS via Fly |
