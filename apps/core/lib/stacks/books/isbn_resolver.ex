@@ -312,20 +312,7 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp make_request(url) do
-    req = Finch.build(:get, url)
-
-    case Finch.request(req, Stacks.Finch) do
-      {:ok, %Finch.Response{status: 200, body: body}} ->
-        Jason.decode(body)
-
-      {:ok, %Finch.Response{status: status}} ->
-        Logger.warning("ISBNResolver: unexpected status #{status} for #{url}")
-        {:error, :unexpected_status}
-
-      {:error, reason} ->
-        Logger.warning("ISBNResolver: request failed for #{url}: #{inspect(reason)}")
-        {:error, reason}
-    end
+    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient).get(url)
   end
 
   defp parse_open_library(data, isbn) when is_map(data) and map_size(data) > 0 do
