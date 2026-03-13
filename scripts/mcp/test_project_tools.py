@@ -1,11 +1,17 @@
-"""Tests for run_test_suite MCP tool and _extract_summary helper."""
+"""Tests for project_tools MCP server helpers and tools."""
 
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from project_tools import run_test_suite, _extract_summary
+from project_tools import (
+    run_test_suite,
+    _extract_summary,
+    _parse_feedback_file,
+    get_feedback_summary,
+)
 
 
 class TestExtractSummary(unittest.TestCase):
@@ -141,6 +147,103 @@ class TestRunTestSuiteReturnKeys(unittest.TestCase):
         result = run_test_suite("elixir")
         self.assertFalse(result["passed"])
         self.assertIn("timed out", result["summary"])
+
+
+# ---------------------------------------------------------------------------
+# Feedback parsing tests
+# ---------------------------------------------------------------------------
+
+_HEADER = """\
+# Feedback Log: test-agent
+
+> Preamble text.
+
+<!-- Entries below this line -->
+"""
+
+_OPEN_ENTRY = """\
+## 2026-03-13 — Issue #014, Phase 2
+**Reviewer axis:** Code Quality
+**Finding:** Missing typespecs on 3 public functions
+**Root cause:** Prompt does not require typespecs
+**Prompt change needed:** Add typespec rule
+**Status:** open
+"""
+
+_APPLIED_ENTRY = """\
+## 2026-03-10 — Issue #012, Phase 1
+**Reviewer axis:** Security
+**Finding:** Hardcoded secret in config
+**Root cause:** No secret-scanning reminder
+**Prompt change needed:** Add secret-scanning step
+**Status:** applied (commit: abc1234)
+"""
+
+_SECOND_OPEN_ENTRY = """\
+## 2026-03-12 — Issue #013, Phase 3
+**Reviewer axis:** Testing
+**Finding:** No property tests for parser
+**Root cause:** Prompt only mentions unit tests
+**Prompt change needed:** Add property testing guidance
+**Status:** open
+"""
+
+
+class TestParseFeedbackFile(unittest.TestCase):
+    """Test _parse_feedback_file helper."""
+
+    def _write(self, tmp: Path, content: str) -> Path:
+        path = tmp / "test-agent.md"
+        path.write_text(content)
+        return path
+
+    def test_one_open_one_applied(self):
+        """Only the open entry is returned."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                Path(tmp), _HEADER + _OPEN_ENTRY + "---\n" + _APPLIED_ENTRY
+            )
+            result = _parse_feedback_file(path)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["agent"], "test-agent")
+            self.assertEqual(result[0]["date"], "2026-03-13")
+            self.assertEqual(result[0]["issue"], "#014")
+            self.assertEqual(result[0]["phase"], "2")
+            self.assertEqual(result[0]["reviewer_axis"], "Code Quality")
+            self.assertEqual(result[0]["status"], "open")
+
+    def test_header_only(self):
+        """File with no entries returns empty list."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), _HEADER)
+            self.assertEqual(_parse_feedback_file(path), [])
+
+    def test_multiple_open(self):
+        """All open entries are returned."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                Path(tmp),
+                _HEADER + _OPEN_ENTRY + "---\n" + _SECOND_OPEN_ENTRY,
+            )
+            result = _parse_feedback_file(path)
+            self.assertEqual(len(result), 2)
+            self.assertEqual(result[0]["issue"], "#014")
+            self.assertEqual(result[1]["issue"], "#013")
+
+
+class TestGetFeedbackSummary(unittest.TestCase):
+    """Test get_feedback_summary tool."""
+
+    def test_nonexistent_agent(self):
+        """Nonexistent agent returns empty list, not an error."""
+        result = get_feedback_summary(agent_name="no-such-agent-xyz")
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ISSUES_DIR = REPO_ROOT / "issues"
 PLANS_DIR = REPO_ROOT / "plans"
 AGENTS_DIR = REPO_ROOT / "docs" / "agents"
+FEEDBACK_DIR = REPO_ROOT / "docs" / "agents" / "feedback"
 
 mcp = FastMCP("project-tools")
 
@@ -154,6 +155,72 @@ def _extract_summary(domain: str, output: str) -> str:
             return stripped
 
     return "No output"
+
+
+def _parse_feedback_file(path: Path) -> list[dict[str, Any]]:
+    """Parse a feedback log file and return open entries as dicts."""
+    text = path.read_text()
+
+    # Only parse content after the marker.
+    marker = "<!-- Entries below this line -->"
+    marker_idx = text.find(marker)
+    if marker_idx == -1:
+        return []
+    body = text[marker_idx + len(marker) :]
+
+    # Derive agent name from filename stem.
+    agent = path.stem
+
+    # Split on ## headings (each entry starts with ## YYYY-MM-DD ...).
+    entry_re = re.compile(r"^## ", re.MULTILINE)
+    parts = entry_re.split(body)
+
+    # Field extractors.
+    heading_re = re.compile(
+        r"^(\d{4}-\d{2}-\d{2})\s*—\s*Issue\s*#(\d+),?\s*Phase\s*(\S+)"
+    )
+    field_re = re.compile(r"^\*\*(.+?):\*\*\s*(.+)$", re.MULTILINE)
+
+    field_map = {
+        "Reviewer axis": "reviewer_axis",
+        "Finding": "finding",
+        "Root cause": "root_cause",
+        "Prompt change needed": "prompt_change_needed",
+        "Status": "status",
+    }
+
+    results: list[dict[str, Any]] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        # Parse heading line.
+        first_line = part.split("\n", 1)[0]
+        hm = heading_re.match(first_line)
+        if not hm:
+            continue
+
+        entry: dict[str, Any] = {
+            "agent": agent,
+            "date": hm.group(1),
+            "issue": f"#{hm.group(2)}",
+            "phase": hm.group(3),
+        }
+
+        # Extract bold fields.
+        for fm in field_re.finditer(part):
+            key = field_map.get(fm.group(1))
+            if key:
+                entry[key] = fm.group(2).strip()
+
+        # Only include open entries.
+        if entry.get("status", "").lower() != "open":
+            continue
+
+        results.append(entry)
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +560,35 @@ Not directly tied to a user story.
 
     path.write_text(content)
     return {"number": number, "file": str(path.relative_to(REPO_ROOT))}
+
+
+@mcp.tool()
+def get_feedback_summary(agent_name: str | None = None) -> list[dict[str, Any]]:
+    """
+    Return open feedback entries for specialist agents.
+
+    Reads structured entries from docs/agents/feedback/<agent-name>.md files.
+    Only entries with status "open" are returned; applied entries are skipped.
+
+    Args:
+        agent_name: Optional agent name (e.g. "elixir-agent"). If None,
+                    returns open entries across all agents.
+
+    Returns a list of dicts with keys: agent, date, issue, phase,
+    reviewer_axis, finding, root_cause, prompt_change_needed, status.
+    """
+    if agent_name is not None:
+        path = FEEDBACK_DIR / f"{agent_name}.md"
+        if not path.exists():
+            return []
+        return _parse_feedback_file(path)
+
+    # All agents.
+    results: list[dict[str, Any]] = []
+    if FEEDBACK_DIR.is_dir():
+        for path in sorted(FEEDBACK_DIR.glob("*.md")):
+            results.extend(_parse_feedback_file(path))
+    return results
 
 
 # ---------------------------------------------------------------------------
