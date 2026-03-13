@@ -61,7 +61,9 @@ dev:
 setup:
     bash setup.sh
 
-# Install git hooks (symlinks scripts/hooks/* into .git/hooks/)
+# Install git hooks and ensure Claude Code hook scripts are executable.
+# Claude Code hooks (.claude/settings.json) activate automatically — this
+# just ensures execute bits are set after a fresh clone.
 install-hooks:
     bash scripts/install-hooks.sh
 
