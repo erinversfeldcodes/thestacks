@@ -74,3 +74,5 @@ frontend/public
 /priv/
 !apps/core/priv/repo/
 test-results/
+apps/core/priv/static/elm.js
+apps/core/priv/static/index.html
