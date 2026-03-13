@@ -104,8 +104,8 @@ State files track transient execution state and should not be committed alongsid
 - [x] `plans/*-state.json` added to `.gitignore`
 - [x] `mcp__project-tools__get_plan_status` reads state file first, falls back to plan markdown
 - [x] `mcp__project-tools__update_progress` also appends to `state.notes[]` when state file exists
-- [ ] At least one real session run with state file: state correctly reflects phase progression and is readable at session start
-- [ ] Human decisions pending list tested: item added on reviewer flag, removed after human decides
+- [x] At least one real session run with state file: state correctly reflects phase progression and is readable at session start
+- [x] Human decisions pending list tested: item added on reviewer flag, removed after human decides
 
 ## Dependencies
 - Issue #016 (MCP server) — optional integration; state file is useful standalone but integrates cleanly with `get_plan_status` if #016 is implemented
