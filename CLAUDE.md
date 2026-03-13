@@ -45,6 +45,19 @@ Partners (bookshops, reading groups, cafes) push data via JSON API validated aga
 ### Testing Philosophy
 12-layer test strategy across 4 execution environments (local offline, local->deployed, CI, CI->deployed). `TEST_TARGET` env var controls mock/real service wiring. See `docs/technical-architecture.md` section 16.
 
+## Claude Code Hooks
+
+Automated standards enforcement is configured in `.claude/settings.json` and activates automatically when Claude Code opens this project — no setup required beyond `just install-hooks`.
+
+| Hook | Trigger | What it checks |
+|------|---------|---------------|
+| `PostToolUse` | After every file write/edit | Format check for the edited file (mix format, elm-format, cargo fmt, ruff, buf lint) |
+| `Stop` | End of every response | Full lint suite for all changed files: format + credo + sobelow (Elixir), fmt (Elm/Rust), ruff (Python), buf (proto) |
+
+If a hook fails, the error and a `Run: ...` fix command are surfaced inline. Fix and continue — the session won't proceed past a Stop hook failure.
+
+Run `just install-hooks` after a fresh clone to ensure hook scripts have their execute bit set.
+
 ## Agent System
 
 Invoke the orchestrator for multi-phase work:
