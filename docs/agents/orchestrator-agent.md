@@ -135,25 +135,34 @@ Run this phase **before** planning whenever starting work on a new feature or ro
    - Priority (P0 / P1 / P2 / P3)
    - Any constraints or context not already captured in the roadmap
 
-3. Call `mcp__project-tools__create_issue(title, summary, goal, technical_requirements, dod_items, agent_assignment)` to create the draft issue file. Fill in:
-   - Title, summary (from human input + roadmap)
-   - Goal, technical_requirements, dod_items (draft — mark unclear items with `[TBD]`)
-   - agent_assignment (from the Domain Routing Table in `AGENTS.md`)
+3. Call `mcp__project-tools__draft_issue(title, roadmap_context, domains)` to generate a pre-populated issue draft. The tool:
+   - Collects domain-specific DoD items from `scripts/mcp/dod_templates.py`
+   - Derives agent assignment from the domain routing table
+   - Scans open issues for potential dependencies (keyword + agent overlap)
+   - Includes relevant standards references in the technical requirements stub
+
+   Review the returned draft and adjust as needed:
+   - Refine `goal` (the tool returns a placeholder)
+   - Expand `technical_requirements` beyond the standards stubs
+   - Confirm or dismiss `suggested_dependencies`
+   - Add issue-specific DoD items beyond the domain defaults
+
+4. Call `mcp__project-tools__create_issue(title, summary, goal, technical_requirements, dod_items, agent_assignment)` with the approved content to create the issue file. Fill in any fields the human adjusted in step 3.
 
    The tool returns `{"number": NNN, "file": "issues/NNN-slug.md"}`. The slug is derived from the title automatically. If the title needs a specific slug, adjust the title or rename the file after creation.
 
    The slug must match the intended branch name: lowercase, hyphens, no special characters. Example: `042-bookshelf-placement-history`.
 
-4. **Present the draft issue to the human. MANDATORY STOP.**
+5. **Present the draft issue to the human. MANDATORY STOP.**
    Wait for explicit approval or edits before proceeding.
 
-5. On approval: write the final issue file, then create the branch:
+6. On approval: write the final issue file, then create the branch:
    ```
    git checkout -b NNN-slug main
    ```
    Confirm the branch was created before proceeding.
 
-6. Proceed to Phase 1. The pre-push hook will create the GitHub issue and draft PR automatically on first push.
+7. Proceed to Phase 1. The pre-push hook will create the GitHub issue and draft PR automatically on first push.
 
 ---
 
