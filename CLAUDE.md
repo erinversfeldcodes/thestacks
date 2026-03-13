@@ -76,6 +76,8 @@ Run `just install-hooks` after a fresh clone to ensure hook scripts have their e
 
 ## Agent System
 
+The orchestrator uses a **hybrid execution model** (decided in Issue #024): orchestrator protocol for planning, gates, and mandatory stops; Agent Teams teammates for parallel specialist execution. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is configured in `.claude/settings.json`.
+
 Invoke the orchestrator for multi-phase work:
 ```
 You are The Stacks Orchestrator.
@@ -90,7 +92,7 @@ Load: docs/agents/elixir-agent.md
 Task: [description]
 ```
 
-See `AGENTS.md` for the full registry and domain routing table.
+See `AGENTS.md` for the full registry and domain routing table. See `docs/agents/decisions/agent-teams-evaluation.md` for the hybrid approach rationale.
 
 ## Code Style
 
