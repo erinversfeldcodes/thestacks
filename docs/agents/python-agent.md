@@ -72,10 +72,32 @@ cd apps/vision && mypy app/
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write Python code, tests, Pydantic models, and return a completion report.
 
+### Challenge the Brief
+
+Before writing any code, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** endpoint contracts, Pydantic model fields, or error handling paths that are ambiguous or missing detail
+- **Risky:** assumptions about Modal GPU availability, vision model behaviour, or HMAC auth flows that may be wrong or hard to undo
+- **Suboptimal:** a better FastAPI pattern, Pydantic v2 idiom, or existing library would serve this problem better
+- **Inconsistent:** the plan conflicts with the existing vision service interface, the "never trust model output" rule, or the budget control pattern
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `pytest` and confirm it passes. Record the exact output (pass count, any skips).
+2. Run `ruff check .` and `ruff format .` and confirm no issues.
+3. Run `mypy app/` and confirm no type errors.
+4. If the work includes a new endpoint, exercise it with a realistic request (e.g., via `curl` or `httpx` in a test script) and confirm the response matches the expected schema.
+5. If any step fails, fix it before submitting.
+
+Do not submit a completion report with failing tests, type errors, or an untested endpoint.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. **Spec Coverage Matrix** — enumerate every endpoint, module, and Pydantic model named in the
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Spec Coverage Matrix** — enumerate every endpoint, module, and Pydantic model named in the
    Technical Requirements section of the issue. For each item, record:
 
    | Item | Implemented | Tested (happy + error path) | Notes |
@@ -85,7 +107,7 @@ DO: Write Python code, tests, Pydantic models, and return a completion report.
    Any row with ❌ in either column **must** have an explicit justification. A row with ❌ and
    no justification is a blocker — do not submit.
 
-4. Test commands run with **verbatim exit code**:
+5. **Test Results** — verbatim output from self-verification:
    ```
    $ pytest
    ...XX passed
@@ -94,4 +116,5 @@ DO: Write Python code, tests, Pydantic models, and return a completion report.
    $ mypy app/
    ...Success: no issues found
    ```
-5. DoD items satisfied — cite file:line evidence for each checked item.
+   Include happy-path exercise result if an endpoint was exercised with a realistic request.
+6. DoD items satisfied — cite file:line evidence for each checked item.

@@ -110,10 +110,32 @@ cd apps/scraper && cargo fuzz run [target]
 DO NOT: Write plan files, commit messages, or proceed to next phase.
 DO: Write Rust code, tests, TOML configs, and return a completion report.
 
+### Challenge the Brief
+
+Before writing any code, read the phase plan carefully and identify anything that seems:
+- **Underspecified:** scraper selector logic, price parsing edge cases, or API response shapes that are ambiguous or missing detail
+- **Risky:** assumptions about store HTML structure stability, robots.txt compliance, or rate limit values that may be wrong or legally sensitive
+- **Suboptimal:** a better Rust crate, axum pattern, or CSS selector strategy exists for this specific problem
+- **Inconsistent:** the plan conflicts with existing TOML config schema, the `thiserror`/`anyhow` error handling pattern, or the robots.txt compliance requirement
+
+Raise each finding explicitly in your completion report under "Pre-implementation Flags". If no flags, state "None". Do not block on flags — implement as planned, but flag first.
+
+### Self-Verification
+
+Before submitting your completion report:
+1. Run `cargo test` and confirm it passes. Record the exact output (test count, any skips).
+2. Run `cargo clippy -- -D warnings` and confirm no warnings.
+3. Run `cargo fmt -- --check` and confirm no formatting issues.
+4. If the work includes a new scraper or endpoint, exercise it with a realistic ISBN and store config and confirm the output price data looks correct and matches the `price_snapshots` schema.
+5. If any step fails, fix it before submitting.
+
+Do not submit a completion report with failing tests, clippy warnings, or an untested scraper path.
+
 ### Completion Report Format
 1. Summary of what was implemented
 2. Files created/modified (absolute paths)
-3. **Spec Coverage Matrix** — enumerate every endpoint, module, and TOML config named in the
+3. **Pre-implementation Flags** — issues identified during Challenge the Brief. "None" if clean.
+4. **Spec Coverage Matrix** — enumerate every endpoint, module, and TOML config named in the
    Technical Requirements section of the issue. For each item, record:
 
    | Item | Implemented | Tested (happy + error path) | Notes |
@@ -123,7 +145,7 @@ DO: Write Rust code, tests, TOML configs, and return a completion report.
    Any row with ❌ in either column **must** have an explicit justification. A row with ❌ and
    no justification is a blocker — do not submit.
 
-4. Test commands run with **verbatim exit code**:
+5. **Test Results** — verbatim output from self-verification:
    ```
    $ cargo test
    ...XX tests passed
@@ -132,4 +154,5 @@ DO: Write Rust code, tests, TOML configs, and return a completion report.
    $ cargo fmt -- --check
    ...
    ```
-5. DoD items satisfied — cite file:line evidence for each checked item.
+   Include happy-path exercise result if a scraper or endpoint was exercised with real input.
+6. DoD items satisfied — cite file:line evidence for each checked item.
