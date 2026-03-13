@@ -56,7 +56,8 @@ app = modal.App(MODAL_APP_NAME)
 _CLASSIFY_PROMPT = (
     "Does this image contain enough information to identify a book?\n\n"
     'Answer "book" if: the image shows a physical book (cover, spine, back, or barcode), '
-    "OR the image is a screenshot or photo of text that mentions a specific book title or author.\n\n"
+    "OR the image is a screenshot or photo of text that mentions a specific book title or "
+    "author.\n\n"
     'Answer "not_book" if: the image has no book-related content whatsoever '
     "(a pet, food, a landscape, a selfie with no book context).\n\n"
     'Answer "ambiguous" if: there is some possible book-related content but not enough '
@@ -147,7 +148,9 @@ class VisionModel:
                 top_p=None,
             )
 
-        output_ids = [out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids)]
+        output_ids = [
+            out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
+        ]
         response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
         return _parse_json(response)
 
@@ -214,6 +217,6 @@ def vision_api():
     import sys
 
     sys.path.insert(0, "/app")
-    from app.main import app as fastapi_app  # noqa: PLC0415
+    from app.main import app as fastapi_app
 
     return fastapi_app
