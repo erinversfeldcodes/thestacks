@@ -65,6 +65,14 @@ setup:
 install-hooks:
     bash scripts/install-hooks.sh
 
+# Install or update flyctl from GitHub releases (superfly/homebrew-tap is abandoned)
+install-flyctl:
+    bash scripts/install-flyctl.sh
+
+# Check if flyctl update is available
+check-flyctl:
+    bash scripts/install-flyctl.sh --check
+
 # Run every CI check locally in CI order (sequential, all groups)
 # Optionally pass group names to run a subset: just ci elixir dbt
 ci *GROUPS:
@@ -168,3 +176,19 @@ buf-lint:
 # Generate code from protobuf schemas
 buf-generate:
     buf generate proto/
+
+# Run E2E tests with service lifecycle management
+test-e2e-ci:
+    scripts/test-e2e.sh
+
+# Check licence compliance
+check-licenses:
+    scripts/check-licenses.sh
+
+# Lint changed migrations with squawk
+squawk:
+    scripts/security-squawk.sh
+
+# Deploy ephemeral preview + run E2E against it + destroy
+deploy-preview:
+    scripts/deploy-preview.sh

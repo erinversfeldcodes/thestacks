@@ -1,10 +1,13 @@
 app = "thestacks-core"
-primary_region = "jnb"
+primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "5s"
 
 [build]
   dockerfile = "Dockerfile.core"
+
+[deploy]
+  release_command = "/app/bin/core eval 'Stacks.Release.migrate()'"
 
 [env]
   PHX_HOST = "thestacks.fly.dev"
@@ -14,7 +17,7 @@ kill_timeout = "5s"
 [http_service]
   internal_port = 4000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 0
 

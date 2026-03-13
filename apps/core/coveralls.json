@@ -1,0 +1,9 @@
+{
+  "minimum_coverage": 80,
+  "skip_files": [
+    "test/",
+    "priv/",
+    "lib/stacks_web/telemetry.ex",
+    "lib/stacks/release.ex"
+  ]
+}

@@ -77,10 +77,41 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"error" => "not found"} = json_response(conn, 404)
     end
 
+    test "returns 422 for an invalid (non-UUID) image_id", %{conn: conn} do
+      conn = get(conn, "/api/upload/not-a-uuid/status")
+      assert %{"error" => "invalid image_id"} = json_response(conn, 422)
+    end
+
     test "returns 401 without auth token" do
       conn = build_conn()
       conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
       assert json_response(conn, 401)
+    end
+
+    test "returns book_ids for a resolved image with book_ids populated", %{conn: conn} do
+      book = insert(:book)
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          book_id: book.id,
+          book_ids: [book.id]
+        )
+
+      conn2 = get(conn, "/api/upload/#{image.id}/status")
+      data = json_response(conn2, 200)
+      assert data["status"] == "resolved"
+      assert book.id in data["book_ids"]
+    end
+
+    test "returns book_id as singleton when book_ids is empty", %{conn: conn} do
+      book = insert(:book)
+      image = insert(:uploaded_image, status: "resolved", book_id: book.id, book_ids: [])
+
+      conn2 = get(conn, "/api/upload/#{image.id}/status")
+      data = json_response(conn2, 200)
+      assert data["status"] == "resolved"
+      assert book.id in data["book_ids"]
     end
   end
 end

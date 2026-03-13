@@ -44,7 +44,7 @@ The project is in active early development. Current progress:
 - CI test coverage for the core data pipeline
 - Linting toolchain across all languages
 
-The frontend, vision sidecar, scraper, and partner integrations are under active development.
+The frontend, vision service, scraper, and partner integrations are under active development.
 
 ---
 
@@ -54,7 +54,7 @@ The frontend, vision sidecar, scraper, and partner integrations are under active
 |-----------|-----------|-----------|
 | Core API + orchestration | Elixir + Phoenix | `apps/core/` |
 | Frontend SPA | Elm | `frontend/` |
-| Vision model sidecar | Python + FastAPI | `apps/vision/` |
+| Vision service (Modal) | Python + FastAPI | `apps/vision/` |
 | Bookshop price scraper | Rust + Axum | `apps/scraper/` |
 | Data transforms | dbt | `dbt/` |
 | Schema contracts | Protobuf + buf | `proto/` |

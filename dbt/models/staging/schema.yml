@@ -2,19 +2,26 @@ version: 2
 
 models:
   - name: stg_books
+    description: >
+      One row per book in the catalogue. Books enter the system only after ISBN
+      verification against Open Library or Google Books.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: isbn
+        description: Verified ISBN-13 (or ISBN-10 for legacy entries).
         tests:
           - not_null
           - unique
       - name: title
+        description: Book title as returned by the ISBN resolver.
         tests:
           - not_null
       - name: author_id
+        description: FK to stg_authors.
         tests:
           - relationships:
               arguments:
@@ -22,32 +29,44 @@ models:
                 field: id
 
   - name: stg_authors
+    description: >
+      One row per author. Populated automatically when a book is added via the
+      ISBN resolver; open_library_id links back to the canonical source.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: name
+        description: Author display name.
         tests:
           - not_null
 
   - name: stg_users
+    description: >
+      Platform users. Includes the single owner account and any registered
+      community users. PII (email, display_name) is encrypted at rest via Cloak.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: email
+        description: Unique login email (Cloak-encrypted in the op table).
         tests:
           - not_null
           - unique
       - name: role
+        description: Platform role — owner has full admin access.
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['owner', 'user']
       - name: profile_visibility
+        description: Visibility of the user's public profile page.
         tests:
           - not_null
           - accepted_values:
@@ -55,12 +74,17 @@ models:
                 values: ['owner', 'group', 'platform']
 
   - name: stg_bookshelves
+    description: >
+      Virtual bookshelves — named collections of books owned by a user.
+      Each user has exactly five bookshelves (one per name enum value).
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: user_id
+        description: FK to the owning user.
         tests:
           - not_null
           - relationships:
@@ -68,12 +92,14 @@ models:
                 to: ref('stg_users')
                 field: id
       - name: name
+        description: Bookshelf category name (enum).
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home']
       - name: visibility
+        description: Who can see this bookshelf.
         tests:
           - not_null
           - accepted_values:
@@ -81,12 +107,17 @@ models:
                 values: ['owner', 'group', 'platform']
 
   - name: stg_bookshelf_placements
+    description: >
+      A placement is a book's current position on a bookshelf. A book may appear
+      on at most one bookshelf at a time per user.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: book_id
+        description: FK to the placed book.
         tests:
           - not_null
           - relationships:
@@ -94,6 +125,7 @@ models:
                 to: ref('stg_books')
                 field: id
       - name: bookshelf_id
+        description: FK to the containing bookshelf.
         tests:
           - not_null
           - relationships:
@@ -101,29 +133,36 @@ models:
                 to: ref('stg_bookshelves')
                 field: id
       - name: visibility
+        description: Visibility of this placement (may differ from bookshelf default).
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['owner', 'group', 'platform']
       - name: listing_mode
+        description: Marketplace listing type when the book is for sale (nullable).
         tests:
           - accepted_values:
               arguments:
                 values: ['open_bid', 'closed_bid']
       - name: listing_status
+        description: Current marketplace listing status (nullable).
         tests:
           - accepted_values:
               arguments:
                 values: ['draft', 'active', 'sold', 'removed', 'expired']
 
   - name: stg_bookshelf_placement_history
+    description: >
+      Immutable audit trail of every bookshelf move. One row per move event.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: book_id
+        description: FK to the moved book.
         tests:
           - not_null
           - relationships:
@@ -131,33 +170,46 @@ models:
                 to: ref('stg_books')
                 field: id
       - name: moved_at
+        description: Timestamp of the move event.
         tests:
           - not_null
 
   - name: stg_uploaded_images
+    description: >
+      User-uploaded book cover images. Images expire 30 days after upload
+      (GDPR retention policy); status tracks vision-model processing.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: status
+        description: Vision-model processing status.
         tests:
           - accepted_values:
               arguments:
                 values: ['pending', 'resolved', 'rejected']
 
   - name: stg_audit_log
+    description: >
+      Append-only audit log for all significant platform events. Entries are
+      never deleted except for GDPR erasure of PII within the metadata payload.
     columns:
       - name: id
+        description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
       - name: action
+        description: Event action identifier (e.g. user.registered, book.placed).
         tests:
           - not_null
       - name: resource_type
+        description: The entity type that was acted upon.
         tests:
           - not_null
       - name: occurred_at
+        description: Timestamp when the event occurred.
         tests:
           - not_null

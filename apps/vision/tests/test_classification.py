@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import json
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -20,12 +19,8 @@ def _make_header(path: str = "/classify") -> dict[str, str]:
     return {"X-Internal-Token": f"{ts}.{token_hex}"}
 
 
-def _mock_together_response(content: dict[str, object]) -> dict[str, object]:
-    return {"choices": [{"message": {"content": json.dumps(content)}}]}
-
-
 def test_classify_returns_book_classification() -> None:
-    mock_output = _mock_together_response({"classification": "book", "confidence": 0.95})
+    mock_output = {"classification": "book", "confidence": 0.95}
     with (
         patch(
             "app.services.vision_client.VisionClient.classify",
@@ -47,7 +42,7 @@ def test_classify_returns_book_classification() -> None:
 
 
 def test_classify_returns_not_book_classification() -> None:
-    mock_output = _mock_together_response({"classification": "not_book", "confidence": 0.88})
+    mock_output = {"classification": "not_book", "confidence": 0.88}
     with (
         patch(
             "app.services.vision_client.VisionClient.classify",
@@ -68,7 +63,7 @@ def test_classify_returns_not_book_classification() -> None:
 
 
 def test_classify_confidence_is_between_0_and_1() -> None:
-    mock_output = _mock_together_response({"classification": "ambiguous", "confidence": 0.5})
+    mock_output = {"classification": "ambiguous", "confidence": 0.5}
     with (
         patch(
             "app.services.vision_client.VisionClient.classify",
@@ -119,7 +114,7 @@ def test_classify_screenshot_with_book_mention_returns_book() -> None:
     have produced "not_book" or "ambiguous". This test validates that the endpoint
     correctly surfaces a "book" classification from the model for screenshot inputs.
     """
-    mock_output = _mock_together_response({"classification": "book", "confidence": 0.9})
+    mock_output = {"classification": "book", "confidence": 0.9}
     with (
         patch(
             "app.services.vision_client.VisionClient.classify",
@@ -143,7 +138,7 @@ def test_classify_screenshot_with_book_mention_returns_book() -> None:
 
 def test_classify_unknown_classification_falls_back_to_ambiguous() -> None:
     """Unknown classification string from model should default to ambiguous."""
-    mock_output = _mock_together_response({"classification": "unknown_value", "confidence": 0.3})
+    mock_output = {"classification": "unknown_value", "confidence": 0.3}
     with (
         patch(
             "app.services.vision_client.VisionClient.classify",

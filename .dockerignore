@@ -1,0 +1,56 @@
+# Version control
+.git
+.github
+
+# Local secrets
+.env
+.env.*
+
+# Elixir/Mix build artefacts (built inside Docker, not needed in context)
+_build
+deps
+*.ez
+erl_crash.dump
+
+# Frontend build artefacts (pre-built elm.js/css are committed; node_modules not needed)
+frontend/node_modules
+frontend/elm-stuff
+
+# Other app build artefacts
+apps/vision/__pycache__
+apps/vision/.venv
+apps/vision/app/__pycache__
+apps/scraper/target
+
+# Data / analytics (not needed for core build)
+dbt
+
+# Docs, issues, plans (not needed in Docker context)
+docs
+issues
+plans
+AGENTS.md
+CLAUDE.md
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+LICENSE
+README.md
+*.md
+
+# Scripts (not needed inside container)
+scripts
+
+# Proto (compiled outputs committed; raw protos not needed)
+proto
+
+# Test fixtures / images (only e2e needs them, not runtime)
+e2e
+images
+
+# Editor / OS
+.DS_Store
+.vscode
+.idea
+*.iml

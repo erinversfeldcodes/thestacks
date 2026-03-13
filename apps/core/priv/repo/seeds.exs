@@ -2,7 +2,9 @@
 # Run with: mix run apps/core/priv/repo/seeds.exs
 # Or via:   just test-dbt  (which resets the DB first)
 #
-# Dev login: owner@thestacks.app / dev-password-123
+# Dev logins:
+#   owner@thestacks.app / dev-password-123  (owner role)
+#   user@thestacks.app  / dev-password-456  (user role — for IDOR/E2E tests)
 
 alias Core.Repo
 
@@ -11,6 +13,7 @@ u = &Ecto.UUID.dump!/1
 
 # Fixture IDs
 user1 = u.("a1b2c3d4-0000-0000-0000-000000000001")
+user2 = u.("a1b2c3d4-0000-0000-0000-000000000002")
 author1 = u.("a1b2c3d4-0000-0000-0000-000000000101")
 author2 = u.("a1b2c3d4-0000-0000-0000-000000000102")
 book1 = u.("a1b2c3d4-0000-0000-0000-000000000201")
@@ -21,6 +24,11 @@ shelf2 = u.("a1b2c3d4-0000-0000-0000-000000000302")
 shelf3 = u.("a1b2c3d4-0000-0000-0000-000000000303")
 shelf4 = u.("a1b2c3d4-0000-0000-0000-000000000304")
 shelf5 = u.("a1b2c3d4-0000-0000-0000-000000000305")
+shelf6 = u.("a1b2c3d4-0000-0000-0000-000000000306")
+shelf7 = u.("a1b2c3d4-0000-0000-0000-000000000307")
+shelf8 = u.("a1b2c3d4-0000-0000-0000-000000000308")
+shelf9 = u.("a1b2c3d4-0000-0000-0000-000000000309")
+shelf10 = u.("a1b2c3d4-0000-0000-0000-000000000310")
 place1 = u.("a1b2c3d4-0000-0000-0000-000000000401")
 place2 = u.("a1b2c3d4-0000-0000-0000-000000000402")
 history1 = u.("a1b2c3d4-0000-0000-0000-000000000501")
@@ -52,9 +60,24 @@ Repo.insert_all(
       consent_analytics_at: jan_01,
       created_at: jan_01,
       updated_at: jan_01
+    },
+    %{
+      id: user2,
+      email: "user@thestacks.app",
+      display_name: "Test User",
+      password_hash: Argon2.hash_pwd_salt("dev-password-456"),
+      role: "user",
+      profile_visibility: "owner",
+      age_verified: false,
+      country_code: "ZA",
+      city: "Cape Town",
+      consent_analytics: false,
+      created_at: jan_01,
+      updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -75,7 +98,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -115,7 +139,8 @@ Repo.insert_all(
       updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -160,9 +185,51 @@ Repo.insert_all(
       visibility: "owner",
       created_at: jan_01,
       updated_at: jan_01
+    },
+    # user2's bookshelves (used for IDOR tests — separate owner, private resources)
+    %{
+      id: shelf6,
+      user_id: user2,
+      name: "antilibrary",
+      visibility: "owner",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: shelf7,
+      user_id: user2,
+      name: "library",
+      visibility: "owner",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: shelf8,
+      user_id: user2,
+      name: "wishlist",
+      visibility: "owner",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: shelf9,
+      user_id: user2,
+      name: "reading_pile",
+      visibility: "owner",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: shelf10,
+      user_id: user2,
+      name: "looking_for_home",
+      visibility: "owner",
+      created_at: jan_01,
+      updated_at: jan_01
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -194,7 +261,8 @@ Repo.insert_all(
       updated_at: jan_10
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -208,7 +276,8 @@ Repo.insert_all(
       moved_at: jan_10
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -217,7 +286,7 @@ Repo.insert_all(
     %{
       id: image1,
       book_id: book1,
-      storage_path: "uploads/republic-cover.jpg",
+      storage_path: nil,
       status: "resolved",
       uploaded_at: jan_15,
       expires_at: feb_14,
@@ -225,7 +294,8 @@ Repo.insert_all(
       updated_at: jan_15
     }
   ],
-  prefix: "op"
+  prefix: "op",
+  on_conflict: :nothing
 )
 
 Repo.insert_all(
@@ -241,7 +311,8 @@ Repo.insert_all(
       occurred_at: jan_01
     }
   ],
-  prefix: "audit"
+  prefix: "audit",
+  on_conflict: :nothing
 )
 
 IO.puts("Seeds loaded successfully.")

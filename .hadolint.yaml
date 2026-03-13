@@ -1,1 +1,7 @@
 # .hadolint.yaml — hadolint configuration for The Stacks
+
+ignored:
+  # Alpine apk does not have a stable version pinning mechanism comparable to
+  # apt/yum. The Alpine base image itself pins the package repository snapshot,
+  # so DL3018 adds churn with no meaningful security benefit here.
+  - DL3018

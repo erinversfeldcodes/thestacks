@@ -1,7 +1,6 @@
 from collections.abc import AsyncGenerator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from fastapi import HTTPException
 
@@ -17,68 +16,98 @@ async def client() -> AsyncGenerator[VisionClient, None]:
     await c.close()
 
 
+def _make_modal_mock(return_value: dict) -> MagicMock:
+    """Build a mock modal.Cls handle whose method.remote.aio() returns return_value."""
+    aio_mock = AsyncMock(return_value=return_value)
+    method_mock = MagicMock()
+    method_mock.remote.aio = aio_mock
+    instance_mock = MagicMock()
+    instance_mock.extract = method_mock
+    instance_mock.classify = method_mock
+    cls_mock = MagicMock(return_value=instance_mock)
+    return cls_mock
+
+
+async def test_extract_returns_dict(client: VisionClient) -> None:
+    """Successful Modal call returns the result dict directly."""
+    cls_mock = _make_modal_mock({"books": [{"title": "Test Book", "author": "Test Author"}]})
+    with patch.object(client, "_modal_cls", cls_mock):
+        result = await client.extract([_VALID_IMAGE])
+    assert "books" in result
+    assert result["books"][0]["title"] == "Test Book"
+
+
+async def test_classify_returns_dict(client: VisionClient) -> None:
+    """Successful Modal call returns the result dict directly."""
+    cls_mock = _make_modal_mock({"classification": "book", "confidence": 0.95})
+    with patch.object(client, "_modal_cls", cls_mock):
+        result = await client.classify(_VALID_IMAGE)
+    assert result["classification"] == "book"
+    assert result["confidence"] == 0.95
+
+
 async def test_extract_timeout_returns_504(client: VisionClient) -> None:
-    """Together AI timeout should surface as 504."""
+    """Modal timeout surfaces as 504."""
+    aio_mock = AsyncMock(side_effect=TimeoutError())
+    method_mock = MagicMock()
+    method_mock.remote.aio = aio_mock
+    instance_mock = MagicMock()
+    instance_mock.extract = method_mock
+    cls_mock = MagicMock(return_value=instance_mock)
+
     with (
-        patch.object(client._client, "post", side_effect=httpx.TimeoutException("timed out")),
+        patch.object(client, "_modal_cls", cls_mock),
         pytest.raises(HTTPException) as exc_info,
     ):
         await client.extract([_VALID_IMAGE])
     assert exc_info.value.status_code == 504
-
-
-async def test_extract_upstream_5xx_returns_502(client: VisionClient) -> None:
-    """Together AI 5xx should surface as 502."""
-    mock_response = MagicMock()
-    mock_response.status_code = 503
-    error = httpx.HTTPStatusError("upstream error", request=MagicMock(), response=mock_response)
-    with (
-        patch.object(client._client, "post", side_effect=error),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.extract([_VALID_IMAGE])
-    assert exc_info.value.status_code == 502
-    assert "503" in exc_info.value.detail
-
-
-async def test_extract_network_error_returns_502(client: VisionClient) -> None:
-    """Generic network error should surface as 502."""
-    with (
-        patch.object(client._client, "post", side_effect=httpx.HTTPError("connection failed")),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.extract([_VALID_IMAGE])
-    assert exc_info.value.status_code == 502
 
 
 async def test_classify_timeout_returns_504(client: VisionClient) -> None:
-    """Together AI timeout on classify should surface as 504."""
+    """Modal timeout on classify surfaces as 504."""
+    aio_mock = AsyncMock(side_effect=TimeoutError())
+    method_mock = MagicMock()
+    method_mock.remote.aio = aio_mock
+    instance_mock = MagicMock()
+    instance_mock.classify = method_mock
+    cls_mock = MagicMock(return_value=instance_mock)
+
     with (
-        patch.object(client._client, "post", side_effect=httpx.TimeoutException("timed out")),
+        patch.object(client, "_modal_cls", cls_mock),
         pytest.raises(HTTPException) as exc_info,
     ):
         await client.classify(_VALID_IMAGE)
     assert exc_info.value.status_code == 504
 
 
-async def test_classify_upstream_5xx_returns_502(client: VisionClient) -> None:
-    """Together AI 5xx on classify should surface as 502."""
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    error = httpx.HTTPStatusError("upstream error", request=MagicMock(), response=mock_response)
+async def test_extract_remote_error_returns_502(client: VisionClient) -> None:
+    """Modal remote execution failure surfaces as 502."""
+    aio_mock = AsyncMock(side_effect=RuntimeError("container crashed"))
+    method_mock = MagicMock()
+    method_mock.remote.aio = aio_mock
+    instance_mock = MagicMock()
+    instance_mock.extract = method_mock
+    cls_mock = MagicMock(return_value=instance_mock)
+
     with (
-        patch.object(client._client, "post", side_effect=error),
+        patch.object(client, "_modal_cls", cls_mock),
         pytest.raises(HTTPException) as exc_info,
     ):
-        await client.classify(_VALID_IMAGE)
+        await client.extract([_VALID_IMAGE])
     assert exc_info.value.status_code == 502
-    assert "500" in exc_info.value.detail
 
 
-async def test_classify_network_error_returns_502(client: VisionClient) -> None:
-    """Generic network error on classify should surface as 502."""
+async def test_classify_remote_error_returns_502(client: VisionClient) -> None:
+    """Modal remote execution failure on classify surfaces as 502."""
+    aio_mock = AsyncMock(side_effect=RuntimeError("container crashed"))
+    method_mock = MagicMock()
+    method_mock.remote.aio = aio_mock
+    instance_mock = MagicMock()
+    instance_mock.classify = method_mock
+    cls_mock = MagicMock(return_value=instance_mock)
+
     with (
-        patch.object(client._client, "post", side_effect=httpx.HTTPError("connection failed")),
+        patch.object(client, "_modal_cls", cls_mock),
         pytest.raises(HTTPException) as exc_info,
     ):
         await client.classify(_VALID_IMAGE)

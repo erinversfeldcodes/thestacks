@@ -2,7 +2,6 @@ module Api exposing
     ( AuthResponse
     , PollResponse
     , PollStatus(..)
-    , authResponseDecoder
     , getBook
     , getBookshelf
     , login
@@ -27,7 +26,7 @@ import Url.Builder
 
 baseUrl : String
 baseUrl =
-    "http://localhost:4000"
+    ""
 
 
 type alias AuthResponse =

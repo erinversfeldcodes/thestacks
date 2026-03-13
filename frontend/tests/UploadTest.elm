@@ -127,7 +127,7 @@ suite =
                             Upload.init
 
                         timedOut =
-                            { base | uploadState = Success "img-1", pollCount = 45 }
+                            { base | uploadState = Success "img-1", pollCount = 150 }
 
                         ( model, _ ) =
                             Upload.update CheckStatus timedOut (Just "tok")

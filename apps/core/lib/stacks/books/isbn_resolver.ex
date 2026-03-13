@@ -8,6 +8,7 @@ defmodule Stacks.Books.ISBNResolver do
   require Logger
 
   @open_library_url "https://openlibrary.org/api/books"
+  @open_library_search_url "https://openlibrary.org/search.json"
   @google_books_url "https://www.googleapis.com/books/v1/volumes"
 
   @open_library_fuse :isbn_resolver_open_library
@@ -62,12 +63,23 @@ defmodule Stacks.Books.ISBNResolver do
         []
       end
 
+    # Strip subtitle (text after : or —) for books with long titles like
+    # "Born Again Bodies: Flesh and Spirit in American Christianity" → "Born Again Bodies"
+    main_title = strip_subtitle(title)
+
     base_candidates = [
       {title, author},
       {title, surname},
       {trimmed_title, author},
       {trimmed_title, surname}
     ]
+
+    subtitle_candidates =
+      if main_title do
+        [{main_title, author}, {main_title, surname}, {main_title, nil}]
+      else
+        []
+      end
 
     last_resort = [
       {title, nil},
@@ -76,16 +88,40 @@ defmodule Stacks.Books.ISBNResolver do
     ]
 
     candidates =
-      ([{title, author}] ++ enriched_prefix ++ base_candidates ++ last_resort)
+      ([{title, author}] ++
+         enriched_prefix ++ base_candidates ++ subtitle_candidates ++ last_resort)
       |> Enum.uniq()
       |> Enum.reject(fn {t, _} -> is_nil(t) or String.trim(t) == "" end)
 
-    Enum.find_value(candidates, {:error, :not_found}, fn {t, a} ->
-      case google_books_search(t, a) do
-        {:ok, _, _} = result -> result
-        _ -> nil
-      end
-    end)
+    Enum.find_value(candidates, {:error, :not_found}, &try_candidate/1)
+  end
+
+  defp try_candidate({t, a}) do
+    case open_library_title_search(t, a) do
+      {:ok, _, _} = result ->
+        result
+
+      _ ->
+        case google_books_search(t, a) do
+          {:ok, _, _} = result -> result
+          _ -> nil
+        end
+    end
+  end
+
+  # Strip subtitle after `:`, `–`, or `—` (handles long academic titles like
+  # "Born Again Bodies: Flesh and Spirit in American Christianity" → "Born Again Bodies").
+  defp strip_subtitle(nil), do: nil
+
+  defp strip_subtitle(title) do
+    case Regex.split(~r/\s*[:–—]\s*/, title, parts: 2) do
+      [main, _] ->
+        stripped = String.trim(main)
+        if stripped == "" or stripped == title, do: nil, else: stripped
+
+      _ ->
+        nil
+    end
   end
 
   # Drop the last whitespace-separated token (handles cut-off words at end of title).
@@ -133,6 +169,55 @@ defmodule Stacks.Books.ISBNResolver do
     |> Enum.reject(&(&1 in @stop_words))
     |> Enum.uniq()
     |> Enum.join(" ")
+  end
+
+  # Search Open Library by title + optional author.
+  # Returns {isbn, metadata} with partial metadata from the search result,
+  # so store_book can skip the secondary ISBN lookup (which often fails for
+  # obscure editions). Prefers ISBN-13 over ISBN-10.
+  defp open_library_title_search(title, author) do
+    params =
+      [
+        {"title", title},
+        {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
+        {"limit", "5"}
+      ]
+      |> then(fn p ->
+        if author && author != "", do: p ++ [{"author", author}], else: p
+      end)
+
+    url = "#{@open_library_search_url}?#{URI.encode_query(params)}"
+
+    case make_request(url) do
+      {:ok, %{"docs" => docs}} when is_list(docs) ->
+        Enum.find_value(docs, {:error, :not_found}, &build_ol_metadata/1)
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
+  defp build_ol_metadata(doc) do
+    isbns = Map.get(doc, "isbn", [])
+
+    isbn =
+      Enum.find(isbns, &(String.length(&1) == 13)) ||
+        Enum.find(isbns, &(String.length(&1) == 10))
+
+    if isbn do
+      author_str = doc |> Map.get("author_name", []) |> Enum.join(", ")
+
+      {:ok, isbn,
+       %{
+         title: doc["title"],
+         author: if(author_str != "", do: author_str, else: nil),
+         subjects: doc |> Map.get("subject", []) |> Enum.take(5),
+         publication_year: doc["first_publish_year"],
+         source: :open_library
+       }}
+    else
+      nil
+    end
   end
 
   defp google_books_search(title, author) do
@@ -227,20 +312,7 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp make_request(url) do
-    req = Finch.build(:get, url)
-
-    case Finch.request(req, Stacks.Finch) do
-      {:ok, %Finch.Response{status: 200, body: body}} ->
-        Jason.decode(body)
-
-      {:ok, %Finch.Response{status: status}} ->
-        Logger.warning("ISBNResolver: unexpected status #{status} for #{url}")
-        {:error, :unexpected_status}
-
-      {:error, reason} ->
-        Logger.warning("ISBNResolver: request failed for #{url}: #{inspect(reason)}")
-        {:error, reason}
-    end
+    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient).get(url)
   end
 
   defp parse_open_library(data, isbn) when is_map(data) and map_size(data) > 0 do

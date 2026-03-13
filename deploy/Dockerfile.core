@@ -1,7 +1,7 @@
 # Build stage
-FROM hexpm/elixir:1.18.1-erlang-27.2.1-alpine-3.21.2 AS builder
+FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0
+RUN apk add --no-cache build-base git
 
 WORKDIR /app
 
@@ -9,35 +9,53 @@ ENV MIX_ENV=prod
 
 RUN mix local.hex --force && mix local.rebar --force
 
+# Copy only what mix deps.get needs — changes here bust the deps cache.
 COPY mix.exs mix.lock ./
-COPY config/config.exs config/config.exs
-COPY config/prod.exs config/prod.exs
-COPY config/runtime.exs config/runtime.exs
 COPY apps/core/mix.exs apps/core/mix.exs
 RUN mix deps.get --only prod && mix deps.compile
 
+# Config and priv — changes here re-run compile+release, not deps.
+# Priv (migrations) is placed before lib because it changes less often
+# than app code, so a code-only change doesn't bust the priv layer.
+COPY config/config.exs config/config.exs
+COPY config/prod.exs config/prod.exs
+COPY config/runtime.exs config/runtime.exs
 COPY apps/core/config/ apps/core/config/
-COPY apps/core/lib apps/core/lib
 COPY apps/core/priv apps/core/priv
+
+# Source code — most frequently changed layer, last before compilation.
+COPY apps/core/lib apps/core/lib
+
+# Bundle the pre-built Elm frontend into Phoenix static assets
+COPY frontend/index.html apps/core/priv/static/index.html
+COPY frontend/elm.js apps/core/priv/static/elm.js
+COPY frontend/css apps/core/priv/static/css
 
 RUN mix compile && mix release core
 
 # Runtime stage
-FROM alpine:3.21.2 AS runtime
+FROM alpine:3.21.6 AS runtime
 
-RUN apk add --no-cache libstdc++=14.2.0-r4 openssl=3.3.6-r0 ncurses-libs=6.5_p20241006-r3
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
 
 RUN addgroup -S stacks && adduser -S stacks -G stacks
 WORKDIR /app
 
 COPY --from=builder --chown=stacks:stacks /app/_build/prod/rel/core ./
 
+# Use the native OS resolver (musl getaddrinfo) instead of Erlang's inet_res.
+# musl automatically opens IPv6 sockets when the nameserver is IPv6, allowing
+# Oban jobs to resolve *.internal hostnames via Fly's DNS at fdaa::3 without
+# setting inet6: true globally (which disrupts Oban's DB connections).
+RUN mkdir -p /app/etc && echo '{lookup, [native]}.' > /app/etc/inetrc && chown stacks:stacks /app/etc/inetrc
+
 USER stacks
 
 ENV PHX_SERVER=true
+ENV ERL_INETRC=/app/etc/inetrc
 EXPOSE 4000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD bin/core rpc "System.no_halt(true)" 2>/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:4000/api/health || exit 1
 
 CMD ["bin/core", "start"]

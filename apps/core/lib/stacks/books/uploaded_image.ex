@@ -38,7 +38,7 @@ defmodule Stacks.Books.UploadedImage do
       :book_id,
       :book_ids
     ])
-    |> validate_required([:storage_path, :status, :uploaded_at, :expires_at])
+    |> validate_required([:status, :uploaded_at, :expires_at])
     |> validate_inclusion(:status, @valid_statuses)
   end
 end

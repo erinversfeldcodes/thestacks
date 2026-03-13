@@ -18,6 +18,8 @@ config :core, CoreWeb.Endpoint,
     "dev-only-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-to-accept-it",
   watchers: []
 
+config :core, :rate_limiting_enabled, false
+
 config :logger, :console, format: "[$level] $message\n"
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime

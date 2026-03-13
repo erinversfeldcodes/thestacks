@@ -18,7 +18,7 @@
 |-----------|-----------|-----------|
 | Core API + orchestration | Elixir + Phoenix | `apps/core/` |
 | Frontend SPA | Elm | `frontend/` |
-| Vision model sidecar | Python + FastAPI | `apps/vision/` |
+| Vision service (Modal) | Python + FastAPI | `apps/vision/` |
 | Bookshop price scraper | Rust microservice | `apps/scraper/` |
 | Data transforms | dbt | `dbt/` |
 | Schema contracts | Protobuf + buf | `proto/` |

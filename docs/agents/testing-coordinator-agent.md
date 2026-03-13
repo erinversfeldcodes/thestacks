@@ -27,7 +27,7 @@ Controlled by `TEST_TARGET` environment variable:
 | Environment | TEST_TARGET | External Services | Database |
 |-------------|-------------|-------------------|----------|
 | Fully local (offline) | `local` | Mocked (Mox, WireMock) | Local Postgres |
-| Local -> deployed dev | `dev` | Real (Together AI, Open Library, etc.) | Dev Fly Postgres |
+| Local -> deployed dev | `dev` | Real (Modal, Open Library, etc.) | Dev Fly Postgres |
 | CI pipeline | `ci` | Mocked | CI Postgres (GitHub Actions service) |
 | CI -> deployed preview | `preview` | Real | Preview Fly Postgres |
 
@@ -52,7 +52,7 @@ Reference: `docs/implementation-mapping.md` maps each story to its technical com
 
 | Scenario | What Breaks | Expected Behaviour |
 |----------|------------|-------------------|
-| Vision outage | Python sidecar returns 503 | Upload shows "try again later", book not created, no data loss |
+| Vision outage | Modal vision service returns 503 | Upload shows "try again later", book not created, no data loss |
 | DB stress | Postgres connection pool exhausted | API returns 503 with retry-after, Oban jobs back off |
 | Budget exhaustion | Vision GenServer budget exceeded | Upload shows "daily limit reached", manual ISBN entry still works |
 | Partner flood | Partner sends 10k inventory items | Rate limiter rejects at 100/min, partial sync succeeds |

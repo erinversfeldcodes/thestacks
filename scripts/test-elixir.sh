@@ -12,7 +12,22 @@ MIX_ENV=test mix ecto.drop --quiet
 MIX_ENV=test mix ecto.create --quiet
 MIX_ENV=test mix ecto.migrate --quiet
 
-mix test
+coverage_output="$(cd "$REPO_ROOT/apps/core" && mix coveralls 2>&1)"
+echo "$coverage_output"
+
+# Enforce minimum coverage threshold (excoveralls minimum_coverage config does not
+# set a non-zero exit code on its own — parse the [TOTAL] line ourselves).
+MINIMUM_COVERAGE=80
+total="$(echo "$coverage_output" | grep '^\[TOTAL\]' | grep -oE '[0-9]+\.[0-9]+')"
+if [[ -z "$total" ]]; then
+    echo "ERROR: could not parse coverage total from excoveralls output" >&2
+    exit 1
+fi
+pct="${total%.*}"  # integer part only for comparison
+if [[ "$pct" -lt "$MINIMUM_COVERAGE" ]]; then
+    echo "ERROR: coverage ${total}% is below minimum ${MINIMUM_COVERAGE}%" >&2
+    exit 1
+fi
 
 # Verify all migrations are reversible
-(cd apps/core && MIX_ENV=test mix ecto.rollback --all --quiet)
+(cd "$REPO_ROOT/apps/core" && MIX_ENV=test mix ecto.rollback --all --quiet)

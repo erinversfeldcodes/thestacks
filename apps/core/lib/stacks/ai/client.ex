@@ -1,6 +1,6 @@
 defmodule Stacks.AI.Client do
   @moduledoc """
-  HTTP client for calling the vision sidecar.
+  HTTP client for calling the Modal vision service.
 
   The actual implementation is swappable via Application env:
     config :core, :vision_client, Stacks.AI.Client      # real HTTP client
@@ -10,12 +10,12 @@ defmodule Stacks.AI.Client do
 
   ## Service-to-Service Authentication
 
-  Requests to the vision sidecar are authenticated using a timestamp-based HMAC scheme:
+  Requests to the Modal vision service are authenticated using a timestamp-based HMAC scheme:
 
     - Header: `X-Internal-Token`
     - Value: `<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded)
-    - Replay window: ±60 seconds (enforced by the sidecar)
-    - Secret: `VISION_HMAC_SECRET` env var (shared between core and vision sidecar)
+    - Replay window: ±60 seconds (enforced by the Modal service)
+    - Secret: `VISION_HMAC_SECRET` env var (shared between core and Modal vision service)
   """
 
   alias Stacks.AI.BudgetTracker
@@ -23,7 +23,7 @@ defmodule Stacks.AI.Client do
 
   @behaviour ClientBehaviour
 
-  @fuse_name :vision_sidecar
+  @fuse_name :vision_service
 
   @impl true
   def call_vision(endpoint, payload) do
@@ -35,7 +35,7 @@ defmodule Stacks.AI.Client do
 
   @doc false
   def do_call_vision(endpoint, payload) do
-    case BudgetTracker.check_budget(:together_ai) do
+    case BudgetTracker.check_budget(:modal) do
       :ok ->
         case :fuse.ask(@fuse_name, :sync) do
           :ok -> make_vision_request(endpoint, payload)
@@ -63,7 +63,7 @@ defmodule Stacks.AI.Client do
 
   @doc false
   def build_vision_request(path, payload) do
-    base_url = Application.get_env(:core, :vision_sidecar_url, "http://localhost:8000")
+    base_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
     url = "#{base_url}#{path}"
     body = Jason.encode!(payload)
 
@@ -80,7 +80,8 @@ defmodule Stacks.AI.Client do
     path = "/#{endpoint_path(endpoint)}"
     req = build_vision_request(path, payload)
 
-    case Finch.request(req, Stacks.Finch) do
+    # 210s gives the Modal service headroom beyond its own 300s inference timeout.
+    case Finch.request(req, Stacks.Finch, receive_timeout: 210_000) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         Jason.decode(resp_body)
 

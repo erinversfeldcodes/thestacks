@@ -14,8 +14,8 @@ defmodule StacksWeb.UploadController do
   def create(conn, %{"image" => %Plug.Upload{} = upload}) do
     user = Guardian.Plug.current_resource(conn)
 
-    with {:ok, image} <- Books.store_upload(user.id, upload),
-         {:ok, _job} <- Books.upload_and_identify(user.id, image.id) do
+    with {:ok, {image, image_b64}} <- Books.store_upload(user.id, upload),
+         {:ok, _job} <- Books.upload_and_identify(user.id, image.id, image_b64) do
       conn
       |> put_status(202)
       |> json(%{status: "accepted", image_id: image.id})

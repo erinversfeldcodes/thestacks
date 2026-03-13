@@ -26,6 +26,11 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load local .env for dev secrets (FLY_API_TOKEN, NEON_*, etc.) when outside CI.
+if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
+    set -a; source "$REPO_ROOT/.env"; set +a
+fi
+
 # Colours for section banners
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,7 +55,10 @@ run_group() {
 # Determine which groups to run (default: all).
 # NOTE: Do NOT use GROUPS — it is a bash built-in read-only variable (user GIDs).
 if [[ $# -eq 0 ]]; then
-    CI_GROUPS=(elixir elm rust python proto dbt security)
+    # e2e is excluded from the default run — it requires all services to be live,
+    # depends on vision model timing, and is covered by deploy-preview.sh smoke tests.
+    # Run explicitly with: scripts/ci.sh e2e
+    CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
 else
     CI_GROUPS=("$@")
 fi
@@ -124,13 +132,37 @@ if has_group security; then
     if ! run_group "security: scans" bash scripts/security.sh; then FAILED+=(security); fi
 fi
 
+# ── Squawk (migration safety) ──────────────────────────────────────────────────
+if has_group squawk; then
+    if ! run_group "squawk: migration lint" bash scripts/security-squawk.sh; then FAILED+=(squawk); fi
+fi
+
+# ── E2E ───────────────────────────────────────────────────────────────────────
+if has_group e2e; then
+    if ! run_group "e2e: playwright" bash scripts/test-e2e.sh; then FAILED+=(e2e); fi
+fi
+
+# ── Licenses ──────────────────────────────────────────────────────────────────
+if has_group licenses; then
+    if ! run_group "licenses: compliance" bash scripts/check-licenses.sh; then FAILED+=(licenses); fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [[ ${#FAILED[@]} -eq 0 ]]; then
     echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
-    exit 0
 else
     echo -e "${RED}${BOLD}Failed checks:${RESET}"
     for f in "${FAILED[@]}"; do echo "  - $f"; done
+fi
+
+# ── Deploy preview (runs only if all local checks passed) ─────────────────────
+if [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
+    echo ""
+    echo -e "${CYAN}${BOLD}=== deploy: preview + E2E ===${RESET}"
+    bash scripts/deploy-preview.sh || true
+fi
+
+if [[ ${#FAILED[@]} -ne 0 ]]; then
     exit 1
 fi

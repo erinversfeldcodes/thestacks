@@ -22,7 +22,7 @@ Agents are plain .md files. Invoke the Orchestrator as:
 | researcher | docs/agents/orchestrator/researcher-agent.md | Research subagent — codebase + doc analysis |
 | elixir-agent | docs/agents/elixir-agent.md | Phoenix, Oban, EDA, contexts, partner API |
 | elm-agent | docs/agents/elm-agent.md | Elm SPA, shelves, spines, cork board, partner dashboard |
-| python-agent | docs/agents/python-agent.md | FastAPI vision sidecar, content moderation |
+| python-agent | docs/agents/python-agent.md | FastAPI vision service (Modal), content moderation |
 | rust-agent | docs/agents/rust-agent.md | Bookshop price scraper, TOML config |
 | database-agent | docs/agents/database-agent.md | PostgreSQL, Ecto, dbt, migrations, schemas |
 | platform-agent | docs/agents/platform-agent.md | Fly.io, Docker, Nix/Flox, CI/CD, GitHub Actions |
@@ -73,7 +73,7 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 |---|---|
 | Phoenix, Elixir, OTP, Oban, context, GenServer, supervision, event bus | elixir-agent |
 | Elm, frontend, shelf, spine, cork board, reading pile, UI, SPA | elm-agent |
-| vision, FastAPI, Python, Together AI, Replicate, image classification | python-agent |
+| vision, FastAPI, Python, Modal, Qwen, image classification | python-agent |
 | Rust, scraper, price, bookshop, TOML, ISBN extraction | rust-agent |
 | database, PostgreSQL, Ecto, migration, schema, dbt, SQL | database-agent |
 | Fly.io, Docker, Nix, Flox, CI/CD, GitHub Actions, deployment | platform-agent |

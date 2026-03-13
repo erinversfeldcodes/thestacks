@@ -1,6 +1,6 @@
 # Plan: The Stacks — Consolidated Implementation Roadmap
 **Created**: 2026-03-05
-**Updated**: 2026-03-07
+**Updated**: 2026-03-13
 **Status**: Draft
 **Branch**: `main` (greenfield — no existing code)
 
@@ -20,7 +20,7 @@ The Stacks is a greenfield, open-source, self-hosted book management and discove
 
 - **Core**: Elixir + Phoenix (OTP supervision, Oban job processing, Guardian JWT)
 - **Frontend**: Elm SPA (zero runtime exceptions, TEA architecture, RemoteData pattern)
-- **Vision sidecar**: Python + FastAPI (hosted open-source models via Together AI / Replicate)
+- **Vision service**: Python + FastAPI on Modal (Qwen2.5-VL-7B-Instruct on A10G GPU; HMAC-authenticated HTTPS; not co-located with core)
 - **Price scraper**: Rust microservice (TOML config per store, standalone OSS tool)
 - **Database**: PostgreSQL with 3 schemas (`op`, `wh`, `audit`), 3 DB roles
 - **Data transforms**: dbt (staging -> intermediate -> marts)
@@ -40,7 +40,7 @@ The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indi
 | Phase 1A (DB + migrations) | **Sonnet 4.6** | Well-specified schema from docs; mechanical translation |
 | Phase 1B (Elixir contexts) | **Opus 4.6** | Architectural judgment — context boundaries, Ecto.Multi patterns, event emission design |
 | Phase 1C (Elm frontend) | **Sonnet 4.6** | TEA patterns are mechanical once types are defined |
-| Phase 1D (Python sidecar) | **Sonnet 4.6** | Small, well-specified FastAPI service |
+| Phase 1D (Python vision service on Modal) | **Sonnet 4.6** | Small, well-specified FastAPI service deployed to Modal |
 | Phase 1D.1 (Vision eval framework) | **Sonnet 4.6** | Framework harness is mechanical; corpus assembly and model decision are human |
 | Phase 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
 | Phase 1E (Platform + CI) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
@@ -59,10 +59,9 @@ Agents cannot create accounts. This must be done by a human before Phase 1E (fir
 
 | Service | Required for | What to provision |
 |---------|-------------|-------------------|
-| Fly.io | Phase 1E deploy | Organisation created; 3 apps (`thestacks-core`, `thestacks-vision`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets |
+| Fly.io | Phase 1E deploy | Organisation created; 2 apps (`thestacks-core`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
 | Fly Postgres | Phase 1E DB | Postgres cluster in JHB; connection string; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
-| Tigris / S3-compatible (Fly) | Phase 1E image storage | Bucket created; access keys; `TIGRIS_ACCESS_KEY_ID`, `TIGRIS_SECRET_ACCESS_KEY`, `TIGRIS_BUCKET_NAME` in `.env` |
-| Together AI | Phase 1B vision calls | API key; `TOGETHER_AI_API_KEY` in `.env` |
+| **Modal** | Phase 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret (`thestacks-vision`). Same secret set as Fly.io secret on `thestacks-core`. |
 | Brave Search | Phase 2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
 | Resend or Postmark | Phase 3 partner notifications | API key; `EMAIL_API_KEY` in `.env` |
 | Domain + DNS | Phase 1E | Domain pointed to Fly.io; TLS via Fly |
@@ -107,10 +106,8 @@ thestacks/
   scrapers/za/
   deploy/
     fly.core.toml
-    fly.vision.toml
     fly.scraper.toml
     Dockerfile.core
-    Dockerfile.vision
     Dockerfile.scraper
   nix/flake.nix
   .github/workflows/ci.yml
@@ -131,7 +128,7 @@ thestacks/
 8. `justfile` with recipes: `dev`, `test`, `lint`, `format`, `db-create`, `db-migrate`, `db-reset`, `buf-lint`, `buf-generate`, `deploy-core`, `deploy-vision`, `deploy-scraper`
 9. `.env.example` with all production env vars documented
 10. `.github/workflows/ci.yml` with dorny/paths-filter for monorepo (Elixir, Elm, Rust, Python, Proto paths)
-11. `deploy/Dockerfile.core` (multi-stage Elixir release), `deploy/Dockerfile.vision`, `deploy/Dockerfile.scraper`
+11. `deploy/Dockerfile.core` (multi-stage Elixir release), `deploy/Dockerfile.scraper`; `apps/vision/modal_app.py` (Modal builds the vision container)
 
 **DoD:**
 - [ ] `nix develop` drops into shell with all tools available
@@ -224,7 +221,7 @@ packages:
 ### Phase 1B — Elixir Core Contexts (elixir-agent)
 **Objective**: All Phoenix contexts, controllers, and Oban workers for MVP stories exist and pass tests. No frontend yet — API-only.
 **Starts after**: Phase 1A committed.
-**Parallel with**: Phase 1C (Elm) and Phase 1D (Python sidecar) can start once context interfaces are defined (after day 1 of 1B).
+**Parallel with**: Phase 1C (Elm) and Phase 1D (Python vision service) can start once context interfaces are defined (after day 1 of 1B).
 
 #### 1B.1 — Foundation Contexts
 
@@ -281,7 +278,7 @@ packages:
 - `Stacks.Workers.ImageRetentionJob` — daily cleanup of images older than 30 days
 
 **`Stacks.AI.BudgetTracker`** — GenServer for per-provider daily/monthly caps
-**`Stacks.AI.Client`** — HTTP client with Fuse circuit breaker wrapping Together AI / Replicate calls
+**`Stacks.AI.Client`** — HTTP client with Fuse circuit breaker wrapping Modal vision service calls
 
 **Files:**
 - `apps/core/lib/core/books.ex`, `books/book.ex`, `books/isbn_resolver.ex`
@@ -314,7 +311,7 @@ packages:
 - [ ] `mix credo --strict` passes
 - [ ] `mix sobelow --config` passes (no high-severity findings)
 - [ ] Guardian auth pipeline works: register -> login -> access protected route -> logout
-- [ ] Upload flow works end-to-end via API: upload image -> identify book -> place on shelf (with mocked vision sidecar)
+- [ ] Upload flow works end-to-end via API: upload image -> identify book -> place on shelf (with mocked vision service)
 - [ ] Shelf operations: move, abandon, re-read, remove all write correct history records
 - [ ] Search returns results with full-text matching
 - [ ] Audit log captures all significant actions
@@ -425,7 +422,7 @@ packages:
 - `apps/vision/app/main.py` — FastAPI app with 3 endpoints
 - `apps/vision/app/models/extraction.py` — Pydantic models for request/response
 - `apps/vision/app/models/classification.py`
-- `apps/vision/app/services/vision_client.py` — Together AI / Replicate HTTP client
+- `apps/vision/app/services/vision_client.py` — Modal client (calls `VisionModel` on Modal)
 - `apps/vision/app/services/hmac_auth.py` — HMAC token validation for internal requests
 - `apps/vision/app/config.py` — model version pinning, budget defaults
 - `apps/vision/tests/` — pytest test files
@@ -435,11 +432,11 @@ packages:
 **Key constraints:**
 - Never trust model output — always return raw extraction, let Phoenix validate
 - Model version pinned in config (`Qwen/Qwen2.5-VL-7B-Instruct`)
-- Budget tracking delegated to Phoenix (sidecar just makes calls)
+- Budget tracking delegated to Phoenix (vision service just makes calls)
 - HMAC auth on all endpoints — reject requests without valid `X-Internal-Token`
 - `/extract` returns `books: list[ExtractedBook]` — always a list, even for single-book images. Empty list = nothing extractable. See Issue #008.
 - `/classify` prompt: "Does this image contain enough information to identify a book?" — accepts screenshots and non-physical-book images. See Issue #008.
-- Image pre-processing (orientation, horizontal flip correction, EXIF strip) happens in Phoenix **before** the image reaches the sidecar. The sidecar receives a canonical JPEG.
+- Image pre-processing (orientation, horizontal flip correction, EXIF strip) happens in Phoenix **before** the image reaches the vision service. The vision service receives a canonical JPEG.
 
 **Test command**: `cd apps/vision && python -m pytest`
 **DoD:**
@@ -456,7 +453,7 @@ packages:
 ### Phase 1D.1 — Vision Model Evaluation Framework (python-agent + human)
 **Objective**: Build a reusable, repeatable evaluation framework for vision model selection. The framework must be re-runnable whenever a new model appears, a prompt changes, or an architectural decision has model-selection implications. Establish a quantitative baseline for the current model and compare candidates.
 
-**Starts after**: Phase 1D committed and Together AI API key provisioned (can proceed before Phase 1E).
+**Starts after**: Phase 1D committed and Modal deployment in place (can proceed before Phase 1E).
 **Does not block**: Phase 1D.2 (local OCR pre-pass) or Phase 1E deployment. Models are swappable via `VISION_MODEL_NAME` env var. Initial performance at the 7B level is acceptable; the framework provides evidence for upgrading when needed.
 **Should complete before**: Production launch at meaningful scale. The ISBN hard gate means silent misidentification is the primary risk. A benchmark failure may warrant a model upgrade before opening to users beyond the owner.
 **Issue**: `issues/005-vision-model-benchmark.md`
@@ -517,7 +514,7 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 ---
 
 ### Phase 1D.2 — Local OCR Pre-pass (python-agent)
-**Objective**: Add an in-process Tesseract/EasyOCR pass for ISBN barcodes before calling the Together AI VLM. When a barcode is cleanly readable locally, skip the VLM entirely — reducing API cost and latency for the common case.
+**Objective**: Add an in-process Tesseract/EasyOCR pass for ISBN barcodes before calling the Modal VLM. When a barcode is cleanly readable locally, skip the VLM entirely — reducing API cost and latency for the common case.
 
 **Starts after**: Phase 1D committed. Does not require Phase 1D.1 to complete first — Phase 1D.2 is model-agnostic and additive. When local OCR finds nothing, the code path is identical to today. When it finds a barcode, it short-circuits the VLM call. Either way, the active VLM model does not matter.
 **Parallel with**: Phase 1D.1 and Phase 1E (does not block deployment).
@@ -528,7 +525,7 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 **Implementation** (in-process, no new service):
 - Add `pytesseract` (wraps system Tesseract) and/or `pyzbar` (pure-Python barcode decoder) to `requirements.txt`
 - New function `local_isbn_scan(image_bytes) -> str | None` in `app/services/local_ocr.py`
-- In `POST /extract`: attempt local scan first → if ISBN found with high confidence, return immediately without calling Together AI → if not found or low confidence, fall through to VLM
+- In `POST /extract`: attempt local scan first → if ISBN found with high confidence, return immediately without calling Modal → if not found or low confidence, fall through to VLM
 - Threshold for "high confidence local result" is configurable via `app/config.py` (`local_ocr_confidence_threshold`, default `0.9`)
 - The VLM path is always the fallback — local OCR failure is silent (not an error)
 
@@ -536,7 +533,7 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 - `apps/vision/app/services/local_ocr.py` — barcode + basic OCR scan
 - `apps/vision/app/config.py` — `local_ocr_enabled: bool = True`, `local_ocr_confidence_threshold: float = 0.9`
 - `apps/vision/tests/test_local_ocr.py`
-- `deploy/Dockerfile.vision` — add `tesseract-ocr` system package
+- `apps/vision/modal_app.py` — add `tesseract-ocr` to the Modal image pip_install / apt_install step
 
 **DoD:**
 - [ ] `local_isbn_scan` returns a valid ISBN string or `None`
@@ -557,11 +554,10 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 
 **Files:**
 - `deploy/fly.core.toml` — Phoenix app, JHB region, 256MB RAM, health check at `/health`
-- `deploy/fly.vision.toml` — Python sidecar, JHB, 512MB RAM (model inference), private networking only
 - `deploy/fly.scraper.toml` — Rust scraper, JHB, 256MB, private networking only
 - `deploy/Dockerfile.core` — multi-stage Elixir release (build with 1.18+, OTP 27; run on Alpine)
-- `deploy/Dockerfile.vision` — Python 3.12 slim
 - `deploy/Dockerfile.scraper` — Rust multi-stage (builder + Alpine runtime)
+- `apps/vision/modal_app.py` — Modal app definition (vision service; Modal builds the container)
 
 #### 1E.2 — CI Pipeline (`.github/workflows/ci.yml`)
 
@@ -588,18 +584,25 @@ Uses `dorny/paths-filter` for monorepo path-scoped jobs:
 **Test command**: `just test && just lint`
 **DoD:**
 - [ ] `fly deploy -c deploy/fly.core.toml` succeeds
-- [ ] `fly deploy -c deploy/fly.vision.toml` succeeds (private networking)
 - [ ] `fly deploy -c deploy/fly.scraper.toml` succeeds (private networking)
+- [ ] `modal deploy apps/vision/modal_app.py` succeeds
 - [ ] Phoenix app responds at public URL
-- [ ] Vision sidecar reachable from Phoenix via `*.internal` DNS
+- [ ] Vision service (Modal) reachable via `VISION_SERVICE_URL`
 - [ ] CI pipeline passes on push to `main`
 - [ ] `nix develop` drops into working shell on clean machine
 - [ ] All `justfile` recipes work
 
+**Pre-launch gate (Issue #005 — Neon branch data isolation):**
+- [ ] `staging` Neon branch created; preview branches clone from `staging`, not `main`
+- [ ] `deploy-preview.sh` uses `NEON_PARENT_BRANCH` (default: `staging`) for branch creation
+- [ ] `Stacks.Release.seed/0` is not called in production deploy path
+- [ ] `docs/deployment/NEON_BRANCH_TOPOLOGY.md` documents `main → staging → preview/<branch>` topology
+- [ ] Must be completed before real users register — see `issues/005-neon-preview-branch-data-isolation.md`
+
 #### Phase 1 Integration Test
 After all tracks merge:
 - [ ] Register owner account via API
-- [ ] Upload a book photo -> vision sidecar identifies it -> ISBN resolved -> book on shelf
+- [ ] Upload a book photo -> vision service identifies it -> ISBN resolved -> book on shelf
 - [ ] Browse all 5 shelf views (4 show empty states, 1 shows the book)
 - [ ] Click spine -> book detail page renders
 - [ ] Move book between shelves -> history recorded
@@ -1076,11 +1079,11 @@ Migrations:
   - Visibility ceiling: post visibility ≤ profile visibility
 - `Stacks.Blog.BookAssociations`
   - `associate_manually/3`, `confirm_suggestion/2`, `dismiss_suggestion/2`
-- `Stacks.Workers.PostBookAssociationWorker` — Oban worker triggered on `blog.post_published`; calls Python sidecar `/associate`; stores suggestions with confidence; fires `blog.associations_suggested` event
+- `Stacks.Workers.PostBookAssociationWorker` — Oban worker triggered on `blog.post_published`; calls vision service `/associate`; stores suggestions with confidence; fires `blog.associations_suggested` event
 - `Stacks.Comments` context
   - `create_comment/3`, `delete_comment/1`, `hide_comment/1` (moderation)
   - `get_comment_tree/2` — recursive CTE with block-graph filter; hidden sub-trees collapse (not shown with `[hidden]`)
-- Python sidecar `POST /associate` endpoint — accept post text, return `[{isbn, confidence}]` (deferred from Phase 1D)
+- vision service `POST /associate` endpoint — accept post text, return `[{isbn, confidence}]` (deferred from Phase 1D)
 - **`Stacks.Books.BookDetailCache`** — ETS-backed GenServer caching the assembled `get_book_detail/1` response per `(user_id, book_id)`. On cache miss the full join runs and populates the cache. Subscribe to the following events for invalidation:
   - `blog.post_published` / `blog.associations_updated` → invalidate `(user_id, book_id)` for all books associated with the post
   - `placement.updated` → invalidate `(user_id, book_id)`
