@@ -51,6 +51,11 @@ proto/gen/
 # Node
 node_modules/
 
+# Claude Code — user-local files (project settings.json is checked in)
+.claude/settings.local.json
+.claude/worktrees/
+plans/*-state.json
+
 # IDE
 .idea/
 .vscode/
