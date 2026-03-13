@@ -95,17 +95,32 @@ The server starts on demand when Claude Code launches and is available as `mcp__
 
 The server reads files directly — no database, no index file to maintain. Issue and plan files are the source of truth. Adding the `mcp` package to `scripts/mcp/requirements.txt` is the only new dependency.
 
+### 16.6 — Agent and CLAUDE.md Updates
+
+The MCP tools exist but agents will not use them unless directed to. The orchestrator and all specialist agents must be updated to prefer `mcp__project-tools__*` over manual file reads for issue and plan operations.
+
+**`CLAUDE.md`:** Add a section documenting the available MCP tools and directing agents to use them for issue/plan operations instead of `Read` + markdown parsing.
+
+**`docs/agents/orchestrator-agent.md`:** Update issue lookup, plan status checks, issue creation, and progress note steps to call the MCP tools. Replace any instruction to `ls issues/` or read issue files directly.
+
+**All specialist agent docs (`docs/agents/*-agent.md`):** Update the completion report step that appends progress notes to use `update_progress` instead of editing the file directly.
+
+The goal is that no agent ever does `Read issues/014-*.md` when `get_issue(14)` is available.
+
 ## Definition of Done
 
-- [ ] `scripts/mcp/project_tools.py` implemented with all 6 tools
-- [ ] `scripts/mcp/requirements.txt` with pinned `mcp` version
-- [ ] Server registered in `.claude/settings.json`
-- [ ] `get_issue`, `list_issues`, `next_issue_number` tested against real issue files
-- [ ] `update_progress` tested: appends correctly, does not corrupt existing content
-- [ ] `get_plan_status` tested against a real plan file
-- [ ] `create_issue` tested: creates valid file, returns correct number
-- [ ] Error cases tested: non-existent issue, malformed markdown, missing plan
-- [ ] `scripts/mcp/README.md` documents how to run and test the server locally
+- [x] `scripts/mcp/project_tools.py` implemented with all 7 tools (get_issue, list_issues, next_issue_number, update_progress, get_plan_status, get_agent, create_issue)
+- [x] `scripts/mcp/requirements.txt` with pinned `mcp>=1.26.0`
+- [x] Server registered in `.mcp.json`; auto-approved via `enableAllProjectMcpServers` in `.claude/settings.json`
+- [x] `get_issue`, `list_issues`, `next_issue_number` tested against real issue files
+- [x] `update_progress` tested: appends correctly, validates non-empty note and issue existence
+- [x] `get_plan_status` tested: returns `exists: false` correctly for issues with no plan file
+- [x] `create_issue` tested: creates valid file with correct number, file verified and cleaned up
+- [x] Error cases tested: non-existent issue returns structured error; empty note rejected; missing agent returns available list
+- [x] `scripts/mcp/README.md` documents setup, tools, registration, and local testing
+- [x] `CLAUDE.md` updated: MCP tools section added, agents directed to prefer them over manual file reads
+- [x] `docs/agents/orchestrator-agent.md` updated: next_issue_number, get_issue, create_issue, update_progress replacing manual file operations
+- [x] All specialist agent docs updated: DO: line includes `update_progress` instruction across all 9 agents
 
 ## Dependencies
 - Issue #015 (Claude Code hooks) — both modify `.claude/settings.json`; coordinate to avoid conflicts
@@ -118,3 +133,5 @@ The server reads files directly — no database, no index file to maintain. Issu
 ## Progress Notes
 <!-- Updated by agents during execution -->
 - 2026-03-13: Issue created from agentic techniques gap analysis.
+- 2026-03-13: Implemented. All 7 tools verified against real project files. MCP registered in .mcp.json (not settings.json — schema validation revealed correct location). ruff hook updated to use vision venv path.
+- 2026-03-13: Agent integration complete. CLAUDE.md MCP tools table added. Orchestrator updated to call next_issue_number/get_issue/create_issue/update_progress instead of manual file ops. All 9 specialist agents updated with update_progress instruction. All DoD items complete.

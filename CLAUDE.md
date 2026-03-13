@@ -45,6 +45,22 @@ Partners (bookshops, reading groups, cafes) push data via JSON API validated aga
 ### Testing Philosophy
 12-layer test strategy across 4 execution environments (local offline, local->deployed, CI, CI->deployed). `TEST_TARGET` env var controls mock/real service wiring. See `docs/technical-architecture.md` section 16.
 
+## Project Tools MCP Server
+
+A local MCP server (`scripts/mcp/project_tools.py`) is registered in `.mcp.json` and starts automatically with every Claude Code session. It exposes project-management operations as first-class tools — **always prefer these over reading and parsing issue or plan files manually.**
+
+| Tool | Use instead of |
+|------|---------------|
+| `mcp__project-tools__get_issue(number)` | Reading `issues/NNN-*.md` directly |
+| `mcp__project-tools__list_issues(status?)` | `ls issues/` + manual parsing |
+| `mcp__project-tools__next_issue_number()` | Counting files in `issues/` |
+| `mcp__project-tools__update_progress(number, note)` | Editing the Progress Notes section of an issue file |
+| `mcp__project-tools__get_plan_status(issue_number)` | Reading `plans/NNN-*.md` directly |
+| `mcp__project-tools__get_agent(name)` | Reading `docs/agents/*.md` to construct subagent prompts |
+| `mcp__project-tools__create_issue(title, summary, ...)` | Copying `issues/TEMPLATE.md` and filling it in manually |
+
+Setup after a fresh clone: `python3 -m venv scripts/mcp/.venv && scripts/mcp/.venv/bin/pip install -r scripts/mcp/requirements.txt`
+
 ## Claude Code Hooks
 
 Automated standards enforcement is configured in `.claude/settings.json` and activates automatically when Claude Code opens this project — no setup required beyond `just install-hooks`.

@@ -94,7 +94,7 @@ cd dbt && dbt docs generate
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write migrations, Ecto schemas, dbt models, and return a completion report.
+DO: Write migrations, Ecto schemas, dbt models, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Challenge the Brief
 
