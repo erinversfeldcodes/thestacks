@@ -77,8 +77,7 @@ Use the Agent tool:
     ## CONSTRAINTS
     - Complete only this phase; do not proceed further
     - Do not write plan files (Orchestrator handles this)
-    - Update Progress Notes in issue file at:
-      /Users/erinversfeld/thestacks/issues/NNN-[slug].md
+    - Call `mcp__project-tools__update_progress(NNN, note)` to append progress notes — do not edit the issue file directly
     - Return a structured completion summary when done
 
     ## COMPLETION REPORT FORMAT
@@ -104,19 +103,19 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 ### Steps
 
-1. Determine the next available issue number by listing `issues/` and finding the highest `NNN` prefix, then incrementing by 1.
+1. Call `mcp__project-tools__next_issue_number()` to get the next available issue number.
 
 2. Ask the human for:
    - Issue title (one short sentence)
    - Priority (P0 / P1 / P2 / P3)
    - Any constraints or context not already captured in the roadmap
 
-3. Write a draft issue file at `issues/NNN-<slug>.md` using `issues/TEMPLATE.md` as the template. Fill in:
-   - Title, priority, summary (from human input + roadmap)
-   - User Stories (from `docs/user-stories.md` if relevant)
-   - Goal, Technical Requirements, Definition of Done (draft — mark unclear items with `[TBD]`)
-   - Agent Assignment (from the Domain Routing Table in `AGENTS.md`)
-   - Leave Progress Notes blank
+3. Call `mcp__project-tools__create_issue(title, summary, goal, technical_requirements, dod_items, agent_assignment)` to create the draft issue file. Fill in:
+   - Title, summary (from human input + roadmap)
+   - Goal, technical_requirements, dod_items (draft — mark unclear items with `[TBD]`)
+   - agent_assignment (from the Domain Routing Table in `AGENTS.md`)
+
+   The tool returns `{"number": NNN, "file": "issues/NNN-slug.md"}`. The slug is derived from the title automatically. If the title needs a specific slug, adjust the title or rename the file after creation.
 
    The slug must match the intended branch name: lowercase, hyphens, no special characters. Example: `042-bookshelf-placement-history`.
 
@@ -139,8 +138,7 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 1. Read `/Users/erinversfeld/thestacks/AGENTS.md` and `/Users/erinversfeld/thestacks/CLAUDE.md`.
 
-2. If an issue number was given, find and read the issue file:
-   `/Users/erinversfeld/thestacks/issues/<NNN>-*.md`
+2. If an issue number was given, call `mcp__project-tools__get_issue(NNN)` to load structured issue metadata (title, summary, DoD items, agent assignment, dependencies, progress notes).
 
 3. Identify domain(s) from the routing table.
 
@@ -181,7 +179,7 @@ Your prompt must include:
 - Phase objective and scope
 - Relevant issue sections (Goal, Technical Requirements, DoD items for this phase)
 - Paths to standards files from the agent's Context Loading Requirements
-- The issue file path for Progress Notes updates
+- The issue number for `mcp__project-tools__update_progress(number, note)` calls
 - The constraint: complete only this phase
 
 ### 2B — Spec Coverage Gate (before review)

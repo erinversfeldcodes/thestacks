@@ -110,7 +110,7 @@ cd frontend && npx playwright test
 
 ### When Invoked as Subagent
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write Elm code, tests, CSS, and return a completion report.
+DO: Write Elm code, tests, CSS, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Challenge the Brief
 

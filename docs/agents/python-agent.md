@@ -70,7 +70,7 @@ cd apps/vision && mypy app/
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write Python code, tests, Pydantic models, and return a completion report.
+DO: Write Python code, tests, Pydantic models, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
 
 ### Challenge the Brief
 
