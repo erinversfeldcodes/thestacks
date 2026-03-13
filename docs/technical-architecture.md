@@ -375,8 +375,33 @@ The Stacks uses AI in three places: vision model (book identification), LLM (rev
 | **Hallucinated URLs** | LLM generates review summary with fabricated source URLs | Users visit non-existent or malicious links | Validate all URLs returned by LLM. Only include URLs that were in the original scraped data. |
 | **Malicious TOML generation** | Source discovery LLM suggests a scraper config that targets a malicious site | Scraper makes requests to attacker-controlled server | Human approval required for all new sources. Validate URL against known patterns. |
 | **Cost explosion** | Bug in retry logic or runaway Oban jobs cause unlimited AI API calls | Large unexpected bill from Modal or future AI providers | Budget controls, circuit breakers, per-day caps. |
-| **PII leakage to AI provider** | User photos contain faces, background context, GPS (EXIF) | Personal data sent to third-party AI service | Strip EXIF, re-encode images, crop to book region where possible. Document in privacy policy. |
-| **Model output drift** | Hosted model updates change output format or quality | Silent degradation of book identification accuracy | Pin model version. Test suite with known book images. Alert on identification failure rate increase. |
+| **PII in uploaded images** | User photos contain faces, background context, GPS (EXIF) | User photos processed inside Modal's GPU container; bytes leave Fly.io | Strip EXIF, re-encode images, crop to book region where possible. Document in privacy policy. Note: images are processed inside Modal's isolated GPU container — no data is forwarded to a third-party AI API. |
+| **Prompt injection via background content** | Image contains URLs on a t-shirt, poster, or background (e.g. "visit evil.com") that the vision model might open | Unexpected network requests from Modal container; potential SSRF | Modal containers have no outbound network access by default. Future: pre-process image to extract only book-cover region before sending. |
+| **Model supply chain — weights** | Qwen2.5-VL-7B-Instruct weights downloaded from HuggingFace by name at `modal deploy` time without a pinned commit hash or checksum | Poisoned or backdoored model weights silently introduced | Pin to a specific HuggingFace commit SHA. Verify weight checksums post-download. |
+| **Model supply chain — pip deps** | `apps/vision/requirements.txt` uses `>=` bounds, not exact pins | Transitive dep update introduces vulnerability or behavioural change at next deploy | Switch to exact versions (`==`) or use `pip-compile` to produce a locked `requirements.txt`. |
+| **Model output drift** | Model weights updated on HuggingFace without notice | Silent degradation of book identification accuracy | Pin model commit hash. Test suite with known book images. Alert on identification failure rate increase. |
+
+### Model Provenance
+
+#### Vision model — Qwen2.5-VL-7B-Instruct
+
+| Property | Value |
+|----------|-------|
+| **Model** | `Qwen/Qwen2.5-VL-7B-Instruct` |
+| **Developer** | Alibaba DAMO Academy |
+| **Licence** | Apache 2.0 |
+| **Source** | HuggingFace (`https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct`) |
+| **How it arrives** | Downloaded to Modal's volume at `modal deploy` time; baked into the container image |
+| **Inference** | Runs entirely inside Modal's isolated A10G GPU container — no data forwarded to Alibaba or any external AI API |
+| **Data at rest** | Images are processed in-memory inside the container; no image storage on Modal's side |
+
+**At inference time, Alibaba receives nothing.** The weights are downloaded once (at deploy time) and run locally within Modal's container network. Alibaba has no visibility into queries or responses after that point.
+
+**Distinction from review summarisation:** Together AI (`:together_ai` circuit breaker) is used for a *future* review-summarisation feature — it is not involved in vision inference. `TOGETHER_API_KEY` is a future credential; it does not belong in the vision sidecar section of `.env.example`.
+
+**Supply chain risks:**
+- Weights are fetched by model name, not by commit hash — a compromised or updated HuggingFace repo could introduce different weights at the next deploy. Mitigation: pin to a specific commit SHA in `modal_app.py` and verify SHA post-download.
+- `apps/vision/requirements.txt` uses `>=` version bounds — a transitive dep update could change behaviour at the next deploy. Mitigation: use exact pins (`==`) or `pip-compile`.
 
 ### Budget Controls
 
@@ -1346,7 +1371,7 @@ Tigris's zero-egress benefit applies only within the Fly.io network. Since the i
 | Egress within Fly.io | $0 | $0.01/GB |
 | S3-compatible | Yes | Yes |
 
-For upload images, R2 wins. For cover images (served to Fly machines), Tigris is equivalent or better.
+For upload images, R2 wins on egress. Cover images are also stored in R2 for consistency; the egress cost to Fly machines (~$0.01/GB) is negligible at this scale.
 
 ### Image event log and missing-purge alarm
 
@@ -1792,7 +1817,7 @@ The default developer experience. Everything runs on your machine with no networ
 | Modal vision service | Mox mock (Elixir), `responses` library (Python) |
 | Open Library / Google Books | Mox mock + fixture JSON files |
 | Brave Search / SearXNG | Mox mock + fixture JSON files |
-| Tigris / R2 (object storage) | Local filesystem (`tmp/test_uploads/`) or MinIO in Docker Compose |
+| R2 (object storage) | Local filesystem (`tmp/test_uploads/`) or MinIO in Docker Compose |
 | Stitch Money / Pargo | Mox mock (not needed until marketplace phase) |
 
 ```bash
@@ -1846,7 +1871,7 @@ just teardown-dev
 - Real PostgreSQL (Fly Postgres), not a Docker container
 - Real network between services (Fly private networking)
 - Real TLS certificates
-- Real image storage (Tigris)
+- Real image storage (R2)
 - AI provider still mocked at the service level (controlled by env var on the deployed service) — we don't want dev testing to burn AI budget
 
 **What this catches:**
@@ -2087,7 +2112,7 @@ Mox.defmock(TheStacks.AI.MockVision, for: TheStacks.AI.VisionProvider)
 | `PaymentProvider` | `StitchMoneyClient` | Stitch Money API (future) |
 | `KYCProvider` | `SmileIdentityClient` | Smile Identity / Yoti (future) |
 | `ShippingProvider` | `PargoClient` | Pargo shipping API (future) |
-| `ObjectStorage` | `TigrisStorage` | Fly Tigris / R2 image storage |
+| `ObjectStorage` | `R2Storage` | Cloudflare R2 image storage |
 | `LLMProvider` | `TogetherAILLM` | LLM for summaries + source eval |
 
 This means **every test can run without any external network calls**. Fast, deterministic, no flakiness from third-party outages.
@@ -4521,7 +4546,7 @@ Fly deploys two machines by default for zero-downtime rolling deploys (high avai
 
 **Decision:** the upload pipeline does not write image files to disk. Image bytes are base64-encoded at upload time and passed directly in the Oban job args. The job reads from its own args, calls the vision service, then discards the bytes. No shared filesystem needed.
 
-**What this rules out permanently:** local file storage for any data that background jobs need to read. Use the database or object storage (Tigris/R2) for anything that must survive across machines.
+**What this rules out permanently:** local file storage for any data that background jobs need to read. Use the database or object storage (R2) for anything that must survive across machines.
 
 #### Erlang DNS resolution on Fly's 6PN internal network
 
@@ -4628,8 +4653,8 @@ The system should function with reduced capability when components fail:
 | Layer | Mechanism | Frequency | Retention |
 |-------|-----------|-----------|-----------|
 | **Fly Postgres** | Automatic WAL-based snapshots | Continuous (point-in-time recovery) | 7 days |
-| **Application backup** | Oban-scheduled `pg_dump` to Tigris/R2 | Daily at 02:00 UTC | 30 days |
-| **Image storage** | Tigris/R2 built-in durability (11 nines) | N/A | N/A |
+| **Application backup** | Oban-scheduled `pg_dump` to R2 | Daily at 02:00 UTC | 30 days |
+| **Image storage** | R2 built-in durability (11 nines) | N/A | N/A |
 | **Scraper configs** | Git repository | Every commit | Forever |
 | **dbt models** | Git repository | Every commit | Forever |
 
