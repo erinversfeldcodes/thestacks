@@ -167,19 +167,19 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
         || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
     echo "$modal_deploy_output"
 
-    # Extract the actual serving URL from the deploy output.
-    # Modal truncates the subdomain when the app name is long and appends a hash,
-    # so we cannot safely construct the URL from the app name — we must read it.
-    # The URL appears on a line like:
-    #   ├── 🔨 Created web function vision_api => https://...modal.run
-    # When the URL wraps across two terminal lines we join first, then grep.
-    VISION_SERVICE_URL="$(echo "$modal_deploy_output" | tr -d '\n' | \
-        grep -oE 'https://[a-zA-Z0-9._-]+\.modal\.run' | head -1)"
+    # Query the deployed function's web URL via the Modal SDK rather than parsing
+    # deploy output (which wraps lines unpredictably and uses non-ASCII box chars).
+    VISION_SERVICE_URL="$(MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
+        python3 -c "
+import modal
+f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
+print(f.web_url)
+" 2>/dev/null)"
     if [[ -z "$VISION_SERVICE_URL" ]]; then
-        echo "FAIL deploy: could not determine Modal vision service URL from deploy output" >&2
+        echo "FAIL deploy: could not retrieve Modal vision service URL via SDK" >&2
         exit 1
     fi
-    echo "    Vision URL (actual): ${VISION_SERVICE_URL}"
+    echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
