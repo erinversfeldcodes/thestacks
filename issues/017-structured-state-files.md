@@ -98,10 +98,12 @@ State files track transient execution state and should not be committed alongsid
 
 ## Definition of Done
 
-- [ ] State file schema documented in `docs/agents/orchestrator-agent.md`
-- [ ] Orchestrator updated with state file write instructions at each transition event
-- [ ] Orchestrator updated with Resume protocol at session start
-- [ ] `plans/*-state.json` added to `.gitignore`
+- [x] State file schema documented in `docs/agents/orchestrator-agent.md`
+- [x] Orchestrator updated with state file write instructions at each transition event (phase start, completion report, reviewer verdict, NEEDS_REVISION, APPROVED, FAILED, completion)
+- [x] Orchestrator updated with Resume protocol at session start
+- [x] `plans/*-state.json` added to `.gitignore`
+- [x] `mcp__project-tools__get_plan_status` reads state file first, falls back to plan markdown
+- [x] `mcp__project-tools__update_progress` also appends to `state.notes[]` when state file exists
 - [ ] At least one real session run with state file: state correctly reflects phase progression and is readable at session start
 - [ ] Human decisions pending list tested: item added on reviewer flag, removed after human decides
 
@@ -115,3 +117,4 @@ Orchestrator session (no specialist agent required — changes are to orchestrat
 ## Progress Notes
 <!-- Updated by agents during execution -->
 - 2026-03-13: Issue created from agentic techniques gap analysis.
+- 2026-03-13: Implemented. Resume protocol and State File section added to orchestrator-agent.md. State file write instructions added at every transition point in Phase 1 and Phase 2. MCP get_plan_status updated to prefer state file; update_progress syncs to state.notes[]. Two DoD items remain as runtime verification (require an actual orchestrated session).
