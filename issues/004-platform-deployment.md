@@ -7,7 +7,7 @@ Wire up the full deployment stack: Fly.io app configs, multi-stage Dockerfiles f
 N/A — infrastructure.
 
 ## Goal
-A green CI pipeline with strong confidence in deployability and security, and a first successful Fly.io deployment of all three services (core, vision, scraper) to the JHB region. Every push to a feature branch runs the full local suite; after passing, the stack is deployed to an ephemeral preview environment, Playwright E2E tests are run against it, and the environment is destroyed. Results are posted to the open PR.
+A green CI pipeline with strong confidence in deployability and security, and a first successful Fly.io deployment of all three services (core, vision, scraper) to the IAD region. Every push to a feature branch runs the full local suite; after passing, the stack is deployed to an ephemeral preview environment, Playwright E2E tests are run against it, and the environment is destroyed. Results are posted to the open PR.
 
 ## Technical Requirements
 
@@ -16,7 +16,7 @@ See roadmap: `plans/consolidated-roadmap.md` § Phase 1E.
 ---
 
 ### 1E.1 — Fly.io Configuration (already complete)
-- `deploy/fly.core.toml` — Phoenix app, JHB region, health check at `/api/health` ✅
+- `deploy/fly.core.toml` — Phoenix app, IAD region, health check at `/api/health` ✅
 - `deploy/fly.vision.toml` — Python sidecar, private networking only ✅
 - `deploy/fly.scraper.toml` — Rust scraper, private networking only ✅
 - `deploy/Dockerfile.core` — multi-stage Elixir release ✅
@@ -144,7 +144,7 @@ deploy-preview:
   if: github.event_name == 'pull_request'
   steps:
     - Create Neon branch for this PR
-    - Deploy stacks-core-pr-{pr_num}, stacks-vision-pr-{pr_num} to Fly.io (JHB)
+    - Deploy stacks-core-pr-{pr_num}, stacks-vision-pr-{pr_num} to Fly.io (IAD)
     - Run Playwright E2E against https://stacks-core-pr-{pr_num}.fly.dev
     - Post deployed E2E results to PR (second sentinel block in PR body)
     - Destroy Fly apps + Neon branch (always, even on failure)
@@ -211,8 +211,8 @@ All DAST tools only run against the ephemeral preview — never production. ZAP 
 
 **Infrastructure (1E.1)**
 - [x] `deploy/Dockerfile.*` builds all three services
-- [x] `deploy/fly.*.toml` configs present for JHB region
-- [ ] First `fly deploy` to JHB succeeds for all three apps (needs credentials)
+- [x] `deploy/fly.*.toml` configs present for IAD region
+- [ ] First `fly deploy` to IAD succeeds for all three apps (needs credentials)
 - [ ] Phoenix health check (`/api/health`) returns 200 on Fly
 - [ ] Vision sidecar unreachable from public internet (private networking only)
 - [ ] `.env.example` matches all vars in `config/runtime.exs`

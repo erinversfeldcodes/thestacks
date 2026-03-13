@@ -26,7 +26,7 @@ The Stacks is a greenfield, open-source, self-hosted book management and discove
 - **Data transforms**: dbt (staging -> intermediate -> marts)
 - **Event bus**: Oban-backed EDA with `event_log` table (no Kafka, no RabbitMQ)
 - **Schema contracts**: Protobuf + buf (JSON on wire, `.proto` as source of truth)
-- **Infrastructure**: Fly.io (JHB region), Nix/Flox dev environment, Docker for deploys
+- **Infrastructure**: Fly.io (IAD region), Nix/Flox dev environment, Docker for deploys
 - **Partner integration**: One-directional (partner -> platform), API key auth (Argon2), Protobuf-validated payloads
 
 ---
@@ -60,7 +60,7 @@ Agents cannot create accounts. This must be done by a human before Phase 1E (fir
 | Service | Required for | What to provision |
 |---------|-------------|-------------------|
 | Fly.io | Phase 1E deploy | Organisation created; 2 apps (`thestacks-core`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
-| Fly Postgres | Phase 1E DB | Postgres cluster in JHB; connection string; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
+| Fly Postgres | Phase 1E DB | Postgres cluster in IAD; connection string; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
 | **Modal** | Phase 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret (`thestacks-vision`). Same secret set as Fly.io secret on `thestacks-core`. |
 | Brave Search | Phase 2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
 | Resend or Postmark | Phase 3 partner notifications | API key; `EMAIL_API_KEY` in `.env` |
@@ -553,8 +553,8 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 #### 1E.1 — Fly.io Configuration
 
 **Files:**
-- `deploy/fly.core.toml` — Phoenix app, JHB region, 256MB RAM, health check at `/health`
-- `deploy/fly.scraper.toml` — Rust scraper, JHB, 256MB, private networking only
+- `deploy/fly.core.toml` — Phoenix app, IAD region, 256MB RAM, health check at `/health`
+- `deploy/fly.scraper.toml` — Rust scraper, IAD, 256MB, private networking only
 - `deploy/Dockerfile.core` — multi-stage Elixir release (build with 1.18+, OTP 27; run on Alpine)
 - `deploy/Dockerfile.scraper` — Rust multi-stage (builder + Alpine runtime)
 - `apps/vision/modal_app.py` — Modal app definition (vision service; Modal builds the container)

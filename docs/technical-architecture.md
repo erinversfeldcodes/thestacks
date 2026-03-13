@@ -56,7 +56,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 
 | Service | Purpose |
 |---------|---------|
-| **Fly.io** | Primary hosting. Has a Johannesburg region. Excellent Elixir support. Deploys the Phoenix core app and Rust scraper as Fly Machines. The Python vision service runs on Modal (not Fly). |
+| **Fly.io** | Primary hosting. Deployed to the IAD (Ashburn, Virginia) region. Excellent Elixir support. Deploys the Phoenix core app and Rust scraper as Fly Machines. The Python vision service runs on Modal (not Fly). |
 | **Fly Postgres** | Managed PostgreSQL for the operational database. |
 | **Nix / Flox** | Development environment. `flake.nix` is the single source of truth for reproducible builds. Contributors run `nix develop` for an identical setup. |
 | **Docker** | Container builds for Fly.io deployment. |
@@ -4493,7 +4493,7 @@ deploy (main branch only)
 |-------------|---------|---------------|
 | `development` | Local dev via `nix develop` | Docker Compose (PG, vision service, Rust scraper) |
 | `ci` | GitHub Actions | Ephemeral PG service container |
-| `production` | Live system | Fly.io (JHB region) |
+| `production` | Live system | Fly.io (IAD region) |
 
 No staging environment initially — single-user system doesn't warrant the cost. Use Fly.io's `--app stacks-core-preview` for testing deploys if needed.
 
