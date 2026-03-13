@@ -88,22 +88,25 @@ defmodule Stacks.Books.ISBNResolver do
     ]
 
     candidates =
-      ([{title, author}] ++ enriched_prefix ++ base_candidates ++ subtitle_candidates ++ last_resort)
+      ([{title, author}] ++
+         enriched_prefix ++ base_candidates ++ subtitle_candidates ++ last_resort)
       |> Enum.uniq()
       |> Enum.reject(fn {t, _} -> is_nil(t) or String.trim(t) == "" end)
 
-    Enum.find_value(candidates, {:error, :not_found}, fn {t, a} ->
-      case open_library_title_search(t, a) do
-        {:ok, _, _} = result ->
-          result
+    Enum.find_value(candidates, {:error, :not_found}, &try_candidate/1)
+  end
 
-        _ ->
-          case google_books_search(t, a) do
-            {:ok, _, _} = result -> result
-            _ -> nil
-          end
-      end
-    end)
+  defp try_candidate({t, a}) do
+    case open_library_title_search(t, a) do
+      {:ok, _, _} = result ->
+        result
+
+      _ ->
+        case google_books_search(t, a) do
+          {:ok, _, _} = result -> result
+          _ -> nil
+        end
+    end
   end
 
   # Strip subtitle after `:`, `–`, or `—` (handles long academic titles like
@@ -174,7 +177,11 @@ defmodule Stacks.Books.ISBNResolver do
   # obscure editions). Prefers ISBN-13 over ISBN-10.
   defp open_library_title_search(title, author) do
     params =
-      [{"title", title}, {"fields", "key,title,isbn,author_name,subject,first_publish_year"}, {"limit", "5"}]
+      [
+        {"title", title},
+        {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
+        {"limit", "5"}
+      ]
       |> then(fn p ->
         if author && author != "", do: p ++ [{"author", author}], else: p
       end)
@@ -183,30 +190,33 @@ defmodule Stacks.Books.ISBNResolver do
 
     case make_request(url) do
       {:ok, %{"docs" => docs}} when is_list(docs) ->
-        Enum.find_value(docs, {:error, :not_found}, fn doc ->
-          isbns = Map.get(doc, "isbn", [])
-          isbn = Enum.find(isbns, &(String.length(&1) == 13)) ||
-                 Enum.find(isbns, &(String.length(&1) == 10))
-
-          if isbn do
-            author_str = doc |> Map.get("author_name", []) |> Enum.join(", ")
-
-            metadata = %{
-              title: doc["title"],
-              author: if(author_str != "", do: author_str, else: nil),
-              subjects: doc |> Map.get("subject", []) |> Enum.take(5),
-              publication_year: doc["first_publish_year"],
-              source: :open_library
-            }
-
-            {:ok, isbn, metadata}
-          else
-            nil
-          end
-        end)
+        Enum.find_value(docs, {:error, :not_found}, &build_ol_metadata/1)
 
       _ ->
         {:error, :not_found}
+    end
+  end
+
+  defp build_ol_metadata(doc) do
+    isbns = Map.get(doc, "isbn", [])
+
+    isbn =
+      Enum.find(isbns, &(String.length(&1) == 13)) ||
+        Enum.find(isbns, &(String.length(&1) == 10))
+
+    if isbn do
+      author_str = doc |> Map.get("author_name", []) |> Enum.join(", ")
+
+      {:ok, isbn,
+       %{
+         title: doc["title"],
+         author: if(author_str != "", do: author_str, else: nil),
+         subjects: doc |> Map.get("subject", []) |> Enum.take(5),
+         publication_year: doc["first_publish_year"],
+         source: :open_library
+       }}
+    else
+      nil
     end
   end
 
