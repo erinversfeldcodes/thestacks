@@ -87,7 +87,7 @@ STARTED_PIDS=()
 if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     ensure_postgres
 
-    # Phoenix on :4000
+    # Phoenix on :4000 (serves both API and the pre-built Elm frontend via Plug.Static)
     if port_open 4000; then
         echo "  Phoenix already running on :4000 — skipping start"
     else
@@ -98,19 +98,6 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
         ) &>/tmp/stacks-phoenix.log &
         STARTED_PIDS+=($!)
         SERVICES_STARTED+=(phoenix)
-    fi
-
-    # Frontend on :4001
-    if port_open 4001; then
-        echo "  Frontend already running on :4001 — skipping start"
-    else
-        echo "==> Serving frontend on :4001..."
-        (
-            cd "$REPO_ROOT"
-            npx serve -s frontend -l 4001 --no-clipboard
-        ) &>/tmp/stacks-frontend.log &
-        STARTED_PIDS+=($!)
-        SERVICES_STARTED+=(frontend)
     fi
 
     # Vision sidecar on :8000 (optional)
@@ -139,7 +126,6 @@ cleanup() {
         done
         # Ensure ports are freed
         lsof -ti :4000 | xargs kill -9 2>/dev/null || true
-        lsof -ti :4001 | xargs kill -9 2>/dev/null || true
         lsof -ti :8000 | xargs kill -9 2>/dev/null || true
     fi
 }
@@ -152,7 +138,6 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     # the DB pool is connected and routes are compiled — the health endpoint
     # returns 200 only when the app is fully initialised.
     wait_for_health "http://localhost:4000/api/health" "Phoenix" 120
-    wait_for_health "http://localhost:4001" "Frontend" 30
     if [[ -f "$REPO_ROOT/apps/vision/app/main.py" ]]; then
         wait_for_health "http://localhost:8000/health" "Vision" 30
     fi
@@ -163,5 +148,5 @@ echo ""
 echo "==> Running Playwright E2E tests..."
 (
     cd "$REPO_ROOT/e2e"
-    BASE_URL="${BASE_URL:-http://localhost:4001}" npm test
+    BASE_URL="${BASE_URL:-http://localhost:4000}" npm test
 )
