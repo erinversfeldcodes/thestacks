@@ -133,7 +133,7 @@ success "Python virtualenv ready at apps/vision/.venv"
 # ── 7. Pip-based global CLI tools ─────────────────────────────────────────────
 # These run outside the vision venv — they're dev toolchain tools used by
 # scripts/ and CI, not runtime app dependencies.
-step "Global pip tools (dbt-postgres, sqlfluff, checkov)"
+step "Global pip tools (dbt-postgres, sqlfluff, checkov, jwt_tool)"
 
 # Use the mise-managed pip, falling back to pip3
 PIP_BIN="$(mise which pip 2>/dev/null || command -v pip3 || command -v pip)"
@@ -153,6 +153,25 @@ install_pip_tool "dbt-postgres" "dbt"
 install_pip_tool "sqlfluff" "sqlfluff"
 install_pip_tool "sqlfluff-templater-dbt" "sqlfluff"   # no separate binary — installed alongside
 install_pip_tool "checkov" "checkov"
+
+# jwt_tool has no Python package — clone the repo and create a wrapper script.
+JWT_TOOL_DIR="$HOME/.local/share/jwt_tool"
+if ! command -v jwt_tool &>/dev/null; then
+    info "Installing jwt_tool from GitHub..."
+    mkdir -p "$HOME/.local/bin"
+    if [[ -d "$JWT_TOOL_DIR/.git" ]]; then
+        git -C "$JWT_TOOL_DIR" pull --quiet
+    else
+        git clone --quiet https://github.com/ticarpi/jwt_tool.git "$JWT_TOOL_DIR"
+    fi
+    "$PIP_BIN" install --user --quiet termcolor cprint pycryptodomex requests
+    printf '#!/usr/bin/env bash\nexec python3 "%s/jwt_tool.py" "$@"\n' "$JWT_TOOL_DIR" \
+        > "$HOME/.local/bin/jwt_tool"
+    chmod +x "$HOME/.local/bin/jwt_tool"
+    success "jwt_tool installed at $HOME/.local/bin/jwt_tool"
+else
+    success "jwt_tool already available"
+fi
 
 # Ensure user pip bin is on PATH for the rest of this script
 for pybin in "$HOME/Library/Python/"*/bin "$HOME/.local/bin"; do
@@ -249,11 +268,13 @@ echo ""
 
 # Remind about tools that need Nix or that weren't installed
 MISSING=()
-command -v buf     &>/dev/null || MISSING+=("buf (brew install bufbuild/buf/buf)")
-command -v semgrep &>/dev/null || MISSING+=("semgrep (brew install semgrep)")
-command -v checkov &>/dev/null || MISSING+=("checkov (pip install checkov)")
-command -v trivy   &>/dev/null || MISSING+=("trivy (brew install trivy)")
+command -v buf      &>/dev/null || MISSING+=("buf (brew install bufbuild/buf/buf)")
+command -v semgrep  &>/dev/null || MISSING+=("semgrep (brew install semgrep)")
+command -v checkov  &>/dev/null || MISSING+=("checkov (pip install checkov)")
+command -v trivy    &>/dev/null || MISSING+=("trivy (brew install trivy)")
 command -v gitleaks &>/dev/null || MISSING+=("gitleaks (brew install gitleaks)")
+command -v nuclei   &>/dev/null || MISSING+=("nuclei (brew install nuclei)")
+command -v jwt_tool &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo -e "  ${YELLOW}${BOLD}Optional tools not found (install manually):${RESET}"
