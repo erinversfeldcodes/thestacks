@@ -2,7 +2,9 @@
 
 > **Purpose:** Map every user story to the specific technical components required to implement it. This document is the bridge between _what the user experiences_ and _how the system delivers it_.
 >
-> **Last updated:** 2026-03-05
+> **Last updated:** 2026-03-14
+>
+> **Note on story numbering:** This document uses a sub-numbered scheme (e.g., US-1.3.2 for Book Detail, US-1.4.1 for Search, US-1.5.x for shelf movements, US-8.1.x for GDPR) that was established before the user stories document (`docs/user-stories.md`) was reorganised. The user stories doc now uses US-1.4.1 for Book Detail, US-1.5.x for Search, US-1.6.x for the reading journey, and US-8.x (without the `.1` sub-level) for GDPR. Both documents refer to the same features; the mapping here is authoritative for implementation details.
 
 ---
 
@@ -21,6 +23,15 @@
    - [7. Marketplace](#7-marketplace-future)
    - [8. GDPR & Privacy](#8-gdpr--privacy)
    - [9. Partner Integration](#9-partner-integration)
+   - [10. Visibility & Privacy](#10-visibility--privacy)
+   - [11. Groups](#11-groups)
+   - [12. Blog & Writing](#12-blog--writing)
+   - [13. Comments & Offers](#13-comments--offers)
+   - [14. Authentication](#14-authentication)
+   - [15. Home & Navigation](#15-home--navigation)
+   - [16. Error Handling](#16-error-handling)
+   - [17. Settings](#17-settings)
+   - [18. Looking for a Home Shelf](#18-looking-for-a-home-shelf)
 
 ---
 
@@ -35,6 +46,7 @@
 | **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. Depop/Vinted model: public Q&A + private offer threads. Closed bid mode. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups. Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-13.1.1, US-13.1.2 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering. Requires Phase 6 visibility infrastructure. |
+| **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.2.1, US-14.3.1, US-14.3.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-18.1.1 | Authentication, home page, global navigation, error handling, settings access, and the fifth bookshelf (Looking for a Home). These are foundational UX stories that ship with Phase 1 MVP. |
 | **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `offer_threads`, `groups`, `user_blocks`. |
 
 ---
@@ -50,22 +62,22 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-1.1.3 | R (error display) | R (validation) | R (classification) | -- | W (audit_log) | -- | Modal (Qwen2.5-VL-7B-Instruct) |
 | US-1.1.7 | RW (bulk drop zone, review screen, shelf selector) | RW (batch intake, pre-process, grouping, batch jobs) | RW (classify + extract per image) | -- | W (books, images, batch_id, group_id) | -- | Modal vision service, Open Library, Google Books |
 | US-1.1.4 | R (gate UI) | RW (flag + gate) | -- | -- | RW (books, audit_log) | R (BISAC view) | -- |
-| US-1.1.5 | RW (ISBN form) | RW (validate + create) | -- | -- | W (books, shelf_placements) | -- | Open Library, Google Books |
+| US-1.1.5 | RW (ISBN form) | RW (validate + create) | -- | -- | W (books, bookshelf_placements) | -- | Open Library, Google Books |
 | US-1.1.6 | RW (duplicate UI) | R (dedup check) | -- | -- | R (books) | -- | -- |
-| US-1.2.1 | RW (shelf view) | R (shelf data) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
-| US-1.2.2 | RW (shelf view) | R (shelf data) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
-| US-1.2.3 | RW (shelf view) | R (shelf data) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
-| US-1.2.4 | RW (pile view) | R (shelf data) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
+| US-1.2.1 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-1.2.2 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-1.2.3 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-1.2.4 | RW (pile view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-1.2.5 | RW (navigation) | -- | -- | -- | -- | -- | -- |
-| US-1.3.1 | RW (spine render) | R (book data) | -- | -- | R (books, shelf_placements) | -- | -- |
-| US-1.3.2 | RW (detail page) | R (book + related) | -- | -- | R (books, authors, review_snapshots, price_snapshots, my_writing_links) | -- | -- |
-| US-1.4.1 | RW (search UI) | R (search query) | -- | -- | R (books, authors, shelves) | -- | -- |
-| US-1.5.1 | RW (move action) | RW (placement) | -- | -- | RW (shelf_placements, shelf_placement_history) | -- | -- |
-| US-1.5.2 | RW (abandon action) | RW (placement) | -- | -- | RW (shelf_placements, shelf_placement_history) | -- | -- |
-| US-1.5.3 | RW (re-read action) | RW (placement) | -- | -- | RW (shelf_placements, shelf_placement_history, books) | -- | -- |
-| US-1.5.4 | RW (format picker) | RW (format) | -- | -- | RW (shelf_placements) | -- | -- |
-| US-1.6.4 | RW (remove action) | RW (soft delete) | -- | -- | RW (shelf_placements, shelf_placement_history) | -- | -- |
-| US-1.6.5 | R (empty states) | R (shelf data) | -- | -- | R (shelves, shelf_placements) | -- | -- |
+| US-1.3.1 | RW (spine render) | R (book data) | -- | -- | R (books, bookshelf_placements) | -- | -- |
+| US-1.3.2 | RW (detail page) | R (book + related) | -- | -- | R (books, authors, review_snapshots, price_snapshots) | -- | -- |
+| US-1.4.1 | RW (search UI) | R (search query) | -- | -- | R (books, authors, bookshelves) | -- | -- |
+| US-1.5.1 | RW (move action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
+| US-1.5.2 | RW (abandon action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
+| US-1.5.3 | RW (re-read action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history, books) | -- | -- |
+| US-1.5.4 | RW (format picker) | RW (format) | -- | -- | RW (bookshelf_placements) | -- | -- |
+| US-1.6.4 | RW (remove action) | RW (soft delete) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
+| US-1.6.5 | R (empty states) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements) | -- | -- |
 | US-2.1.1 | R (review display) | RW (aggregation) | -- | -- | RW (review_snapshots) | R (sentiment view) | GoodReads, Reddit, Storygraph |
 | US-2.2.1 | R (price display) | R (price data) | -- | RW (scrape) | RW (price_snapshots, bookstores) | R (price history view) | -- |
 | US-2.2.2 | -- | RW (config mgmt) | -- | R (config) | RW (bookstores) | -- | -- |
@@ -76,14 +88,14 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-4.1.1 | R (status display) | RW (pipeline) | RW (classification) | -- | RW (books, audit_log) | -- | Modal vision service, Open Library, Google Books |
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
 | US-5.1.1 | RW (dashboard) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
-| US-6.1.1 | -- | RW (feed gen) | -- | -- | R (shelves, shelf_placements, books) | -- | -- |
-| US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (shelf_placements, uploaded_images) | -- | -- |
-| US-7.2 | RW (purchase flow) | RW (transaction) | -- | -- | RW (shelf_placements, offer_threads, offer_messages, audit_log) | -- | Stitch Money, Pargo |
+| US-6.1.1 | -- | RW (feed gen) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (bookshelf_placements, uploaded_images) | -- | -- |
+| US-7.2 | RW (purchase flow) | RW (transaction) | -- | -- | RW (bookshelf_placements, offer_threads, offer_messages, audit_log) | -- | Stitch Money, Pargo |
 | US-7.3 | RW (KYC flow) | RW (verification) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
 | US-10.1.1 | RW (privacy settings) | RW (profile visibility) | -- | -- | RW (users) | -- | -- |
 | US-10.1.2 | RW (block UI) | RW (block) | -- | -- | RW (user_blocks) | -- | -- |
-| US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (shelves, groups) | -- | -- |
-| US-10.2.2 | RW (placement menu) | RW (placement visibility) | -- | -- | RW (shelf_placements, visibility_grants) | -- | -- |
+| US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (bookshelves, groups) | -- | -- |
+| US-10.2.2 | RW (placement menu) | RW (placement visibility) | -- | -- | RW (bookshelf_placements, visibility_grants) | -- | -- |
 | US-10.2.3 | RW (post editor) | RW (post visibility) | -- | -- | RW (blog_posts, groups) | -- | -- |
 | US-10.3.1 | RW (preview mode) | R (resolve_visibility as viewer) | -- | -- | R (all user content tables, user_blocks, group_members) | -- | -- |
 | US-10.4.1 | -- | R (noindex headers) | -- | -- | -- | -- | -- |
@@ -117,6 +129,19 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-9.7.1 | RW (status page) | R (partner status) | -- | -- | R (partners) | -- | Resend / Postmark (confirmation email) |
 | US-9.7.2 | RW (profile form) | RW (partner update) | -- | -- | RW (partners, audit_log) | -- | -- |
 | US-9.8.1 | R (availability display) | R (partner inventory) | -- | -- | R (partner_inventory, books) | -- | -- |
+| US-14.1.1 | RW (registration form) | RW (account creation) | -- | -- | W (users, audit_log) | -- | -- |
+| US-14.2.1 | RW (login form) | RW (authentication) | -- | -- | R (users), W (audit_log) | -- | -- |
+| US-14.3.1 | R (nav state) | R (current user) | -- | -- | R (users) | -- | -- |
+| US-14.3.2 | R (token refresh) | RW (token lifecycle) | -- | -- | R (users) | -- | -- |
+| US-15.1.1 | RW (home page) | R (summaries) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-15.2.1 | RW (navigation) | -- | -- | -- | -- | -- | -- |
+| US-15.2.2 | RW (swipe nav) | -- | -- | -- | -- | -- | -- |
+| US-15.3.1 | R (footer) | -- | -- | -- | -- | -- | -- |
+| US-16.1.1 | R (404 page) | R (error response) | -- | -- | -- | -- | -- |
+| US-16.2.1 | R (error display) | R (error responses) | -- | -- | -- | -- | -- |
+| US-16.3.1 | R (auth redirect) | R (401 response) | -- | -- | -- | -- | -- |
+| US-17.1.1 | RW (settings pages) | R (user data) | -- | -- | R (users) | -- | -- |
+| US-18.1.1 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 
 ---
 
@@ -376,7 +401,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Page.Upload` -- `ManualISBNEntry` variant. `Components.ISBNInput` with client-side ISBN-10/ISBN-13 checksum validation (mod-10/mod-13). Inline validation feedback before submit. |
 | **Backend (Phoenix)** | `Stacks.Books.create_from_isbn/1` -- skips vision, goes straight to ISBN resolution. Same `ISBNResolver` pipeline as US-1.1.1. |
-| **Database** | Same as US-1.1.1 (books, shelf_placements, audit_log). |
+| **Database** | Same as US-1.1.1 (books, bookshelf_placements, audit_log). |
 | **Jobs (Oban)** | `EnrichBookJob` -- same as US-1.1.1. |
 | **External Services** | Open Library, Google Books (ISBN resolution). |
 | **dbt Models** | `int_upload_method` (track manual vs. vision entry rates). |
@@ -396,7 +421,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Components.DuplicateDetected` -- shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. |
 | **Backend (Phoenix)** | `Stacks.Books.find_existing/1` -- ISBN dedup check (already implicit in US-1.1.1, now surfaced to user). Returns existing book data if found. |
-| **Database** | **Read:** `op.books` (ISBN lookup), `op.shelf_placements` (current shelf). |
+| **Database** | **Read:** `op.books` (ISBN lookup), `op.bookshelf_placements` (current shelf). |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | `int_duplicate_detection_rate`. |
@@ -434,12 +459,12 @@ US-1.1.1 (Upload + Identify)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Shelf.Library` module. Shared `Shelf.View` component with theme config (`ShelfTheme` type: `{ wood: DarkWalnut, backdrop: GreenDamask }`). Renders list of spines via `Components.Spine`. |
-| **Backend (Phoenix)** | `Stacks.Shelving` context -- `Shelves.get_shelf_books/2` with shelf_type `:library`. `StacksWeb.ShelfController.show/2`. |
-| **Database** | **Read:** `op.shelves`, `op.shelf_placements`, `op.books`, `op.authors`. |
+| **Frontend (Elm)** | `Page.Bookshelf.Library` module. Shared `Shelf.View` component with theme config (`ShelfTheme` type: `{ wood: DarkWalnut, backdrop: GreenDamask }`). Renders list of spines via `Components.Spine`. |
+| **Backend (Phoenix)** | `Stacks.Shelving` context -- `Shelving.get_bookshelf_books/2` with bookshelf_name `:library`. `StacksWeb.BookshelfController.show/2`. |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`, `op.authors`. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
-| **dbt Models** | `stg_shelf_placements`, `int_shelf_composition`. |
+| **dbt Models** | `stg_bookshelf_placements`, `int_shelf_composition`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1 (books must exist). |
 
@@ -454,8 +479,8 @@ US-1.1.1 (Upload + Identify)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Shelf.AntiLibrary` module. `ShelfTheme` config: `{ wood: LightOak, backdrop: BotanicalPrints }`. Same `Shelf.View` component as Library. |
-| **Backend (Phoenix)** | Same `Stacks.Shelving` context, shelf_type `:anti_library`. |
+| **Frontend (Elm)** | `Page.Bookshelf.AntiLibrary` module. `ShelfTheme` config: `{ wood: LightOak, backdrop: BotanicalPrints }`. Same `Shelf.View` component as Library. |
+| **Backend (Phoenix)** | Same `Stacks.Shelving` context, bookshelf_name `:antilibrary`. |
 | **Database** | Same as US-1.2.1. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -474,8 +499,8 @@ US-1.1.1 (Upload + Identify)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Shelf.WishList` module. `ShelfTheme` config: `{ wood: BlueGrey, backdrop: WatercolourFlorals }`. |
-| **Backend (Phoenix)** | Same `Stacks.Shelving` context, shelf_type `:wish_list`. |
+| **Frontend (Elm)** | `Page.Bookshelf.WishList` module. `ShelfTheme` config: `{ wood: BlueGrey, backdrop: WatercolourFlorals }`. |
+| **Backend (Phoenix)** | Same `Stacks.Shelving` context, bookshelf_name `:wishlist`. |
 | **Database** | Same as US-1.2.1. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -494,8 +519,8 @@ US-1.1.1 (Upload + Identify)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Shelf.ReadingPile` module. Different layout from shelves -- vertical stack / pile metaphor rather than horizontal shelf. `PileView` component with armchair background. |
-| **Backend (Phoenix)** | Same `Stacks.Shelving` context, shelf_type `:reading_pile`. May include reading progress data. |
+| **Frontend (Elm)** | `Page.Bookshelf.ReadingPile` module. Different layout from shelves -- vertical stack / pile metaphor rather than horizontal shelf. `PileView` component with armchair background. |
+| **Backend (Phoenix)** | Same `Stacks.Shelving` context, bookshelf_name `:reading_pile`. May include reading progress data. |
 | **Database** | Same as US-1.2.1. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -535,8 +560,8 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.Spine` module. Types: `SpineData { pageCount: Int, wearLevel: WearLevel, hasWriting: Bool, colour: SpineColour }`. `WearLevel` = `Pristine | Softened | Cracking | WellRead | WellLoved`. CSS/SVG rendering with texture maps per wear level. |
-| **Backend (Phoenix)** | `Stacks.Shelving.spine_data/1` -- computes wear level from shelf_placement_history (number of reads, time on shelves). Returns precomputed spine metadata. |
-| **Database** | **Read:** `op.books` (page_count), `op.shelf_placement_history` (engagement calc), `op.my_writing_links` (has_writing flag). |
+| **Backend (Phoenix)** | `Stacks.Shelving.spine_data/1` -- computes wear level from bookshelf_placement_history (number of reads, time on shelves). Returns precomputed spine metadata. |
+| **Database** | **Read:** `op.books` (page_count), `op.bookshelf_placement_history` (engagement calc). |
 | **Jobs (Oban)** | `Stacks.Workers.RecalculateWearJob` -- periodic recalculation of wear levels (or on shelf-move events). |
 | **External Services** | None. |
 | **dbt Models** | `int_book_engagement` (materialized view for wear calculation). |
@@ -556,7 +581,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Page.BookDetail` module. Sub-components: `Components.CoverImage`, `Components.BookMeta`, `Components.ReviewSummary` (stub in Phase 1), `Components.PriceInfo` (stub in Phase 1), `Components.AuthorCard`, `Components.WritingLinks`, `Components.ShelfMover`, `Components.PartnerAvailability` (Phase 3+, "Available at [Shop] for R149"). Messages: `MoveToShelf ShelfType`, `OpenExternalLink Url`. |
 | **Backend (Phoenix)** | `Stacks.Books.get_book_detail/1` -- aggregates book + author + reviews + prices + writing links + partner availability (Phase 3+). `StacksWeb.BookController.show/2`. |
-| **Database** | **Read:** `op.books`, `op.authors`, `op.review_snapshots`, `op.price_snapshots`, `op.my_writing_links`, `op.shelf_placements`. Phase 3+: `op.partner_inventory`, `op.partner_events` (for ISBN-linked events). |
+| **Database** | **Read:** `op.books`, `op.authors`, `op.review_snapshots`, `op.price_snapshots`, `op.bookshelf_placements`. Phase 3+: `op.partner_inventory`, `op.partner_events` (for ISBN-linked events), `op.blog_posts`, `op.post_book_associations`. |
 | **Jobs (Oban)** | None directly (data populated by enrichment jobs). |
 | **External Services** | None at render time. |
 | **dbt Models** | `int_book_detail_view` (pre-joined view for performance). |
@@ -576,7 +601,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Page.Search` module. `Components.SearchBar` (debounced input). `Components.FilterPanel` (genre tags, format checkboxes, price range slider). `Components.SortSelector`. Types: `SearchQuery`, `SortField`, `FilterSet`. |
 | **Backend (Phoenix)** | `Stacks.Books.search_books/2` -- Ecto query with full-text search (`pg_trgm` or `tsvector`), dynamic sort, filter composition. `StacksWeb.SearchController.index/2`. |
-| **Database** | **Read:** `op.books` (with GIN index on title/author tsvector), `op.authors`, `op.shelves`, `op.shelf_placements`, `op.price_snapshots` (for price filter). |
+| **Database** | **Read:** `op.books` (with GIN index on title/author tsvector), `op.authors`, `op.bookshelves`, `op.bookshelf_placements`, `op.price_snapshots` (for price filter). |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | None directly. |
@@ -595,11 +620,11 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.ShelfMover` -- dropdown or contextual menu showing valid target shelves. Animation of book sliding to new shelf. Confirmation toast. |
-| **Backend (Phoenix)** | `Stacks.Shelving.move_book/3` -- validates transition, updates placement, writes history. `StacksWeb.ShelfPlacementController.update/2`. |
-| **Database** | **Write:** `op.shelf_placements` (update shelf_id), `op.shelf_placement_history` (insert movement record). **Read:** `op.shelf_placements` (current location). |
+| **Backend (Phoenix)** | `Stacks.Shelving.move_book/3` -- validates transition, updates placement, writes history. `StacksWeb.BookshelfPlacementController.update/2`. |
+| **Database** | **Write:** `op.bookshelf_placements` (update shelf_id), `op.bookshelf_placement_history` (insert movement record). **Read:** `op.bookshelf_placements` (current location). |
 | **Jobs (Oban)** | `Stacks.Workers.RecalculateWearJob` triggered on move (wear may change). |
 | **External Services** | None. |
-| **dbt Models** | `stg_shelf_placement_history`, `int_book_journey`. |
+| **dbt Models** | `stg_bookshelf_placement_history`, `int_book_journey`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.2.1 -- US-1.2.4, US-1.3.2 (move action lives on detail page). |
 
@@ -616,7 +641,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Components.AbandonModal` -- optional textarea for note, confirm/cancel. Triggered from Reading Pile or Book Detail. |
 | **Backend (Phoenix)** | `Stacks.Shelving.abandon_book/2` -- special case of move with optional `abandon_note`. |
-| **Database** | **Write:** `op.shelf_placements`, `op.shelf_placement_history` (with note field). |
+| **Database** | **Write:** `op.bookshelf_placements`, `op.bookshelf_placement_history` (with note field). |
 | **Jobs (Oban)** | Wear recalculation. |
 | **External Services** | None. |
 | **dbt Models** | `int_abandonment_rate` (metrics). |
@@ -635,8 +660,8 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Re-read button on Book Detail when book is on Library shelf. Uses `Components.ShelfMover` with pre-selected target. |
-| **Backend (Phoenix)** | `Stacks.Shelving.reread_book/1` -- moves to Reading Pile, triggers wear recalculation. Read count is derived from `shelf_placement_history` (no denormalised counter). |
-| **Database** | **Write:** `op.shelf_placements`, `op.shelf_placement_history`. |
+| **Backend (Phoenix)** | `Stacks.Shelving.reread_book/1` -- moves to Reading Pile, triggers wear recalculation. Read count is derived from `bookshelf_placement_history` (no denormalised counter). |
+| **Database** | **Write:** `op.bookshelf_placements`, `op.bookshelf_placement_history`. |
 | **Jobs (Oban)** | `RecalculateWearJob`. |
 | **External Services** | None. |
 | **dbt Models** | `int_book_engagement`. |
@@ -655,8 +680,8 @@ US-1.1.1 (Upload + Identify)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.FormatPicker` -- multi-select checkboxes on Book Detail. Icons for each format. |
-| **Backend (Phoenix)** | `Stacks.Books.update_placement_formats/2`. Formats stored as `TEXT[]` on `shelf_placements`. |
-| **Database** | **Write:** `op.shelf_placements` (formats array). |
+| **Backend (Phoenix)** | `Stacks.Shelving.update_placement_formats/3`. Formats stored as `TEXT[]` on `bookshelf_placements`. |
+| **Database** | **Write:** `op.bookshelf_placements` (formats array). |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | `int_format_distribution`. |
@@ -669,14 +694,14 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Soft delete via `shelf_placements.removed_at`. Book row preserved. Reading history preserved. Confirmation dialog warns this removes from all shelves. |
+| **Summary** | Soft delete via `bookshelf_placements.removed_at`. Book row preserved. Reading history preserved. Confirmation dialog warns this removes from all shelves. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.RemoveBookModal` -- confirmation with book title, warning text ("This removes [title] from your collection. Your reading history is preserved."), confirm/cancel. Triggered from Book Detail page. |
-| **Backend (Phoenix)** | `Stacks.Shelving.remove_book/1` -- sets `removed_at` on all `shelf_placements` for the book. Does NOT delete the `books` row. Writes history record. |
-| **Database** | **Write:** `op.shelf_placements` (set removed_at), `op.shelf_placement_history` (removal record). **Read:** `op.shelf_placements` (current placements). |
+| **Backend (Phoenix)** | `Stacks.Shelving.remove_book/1` -- sets `removed_at` on all `bookshelf_placements` for the book. Does NOT delete the `books` row. Writes history record. |
+| **Database** | **Write:** `op.bookshelf_placements` (set removed_at), `op.bookshelf_placement_history` (removal record). **Read:** `op.bookshelf_placements` (current placements). |
 | **Jobs (Oban)** | `RecalculateWearJob` (no longer on shelf). |
 | **External Services** | None. |
 | **dbt Models** | `int_collection_churn`. |
@@ -694,9 +719,9 @@ US-1.1.1 (Upload + Identify)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.EmptyShelf` -- per-shelf variant with themed illustration and message. Rendered when `shelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
+| **Frontend (Elm)** | `Components.EmptyShelf` -- per-shelf variant with themed illustration and message. Rendered when `bookshelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
 | **Backend (Phoenix)** | None additional (empty state is client-side based on empty shelf data). |
-| **Database** | **Read:** `op.shelves`, `op.shelf_placements` (count check). |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements` (count check). |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | None. |
@@ -800,7 +825,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Page.Events` module. `Components.EventCard` -- store name, event type, date, matched book/author. Calendar-style or list view. |
 | **Backend (Phoenix)** | `Stacks.Enrichment.Events` context. `Enrichment.Events.get_matched_events/1` -- joins events with user's book/author graph. |
-| **Database** | **Write:** `op.bookstore_events`. **Read:** `op.bookstores`, `op.books`, `op.authors`, `op.shelf_placements`. |
+| **Database** | **Write:** `op.bookstore_events`. **Read:** `op.bookstores`, `op.books`, `op.authors`, `op.bookshelf_placements`. |
 | **Jobs (Oban)** | `Stacks.Workers.DiscoverBookstoreEventsJob` -- periodic search for events. |
 | **External Services** | Brave Search, SearXNG, bookstore websites. |
 | **dbt Models** | `stg_bookstore_events`, `int_event_matches`. |
@@ -936,7 +961,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | RSS icon/link on shelf pages. `Components.RSSLink`. No Elm rendering of feed itself (consumed by RSS readers). |
 | **Backend (Phoenix)** | `Stacks.Feeds` context. `Feeds.generate_atom/2` -- builds Atom XML for a shelf. `StacksWeb.FeedController.show/2` -- serves XML with correct content type. Cache with ETag/Last-Modified. |
-| **Database** | **Read:** `op.shelves`, `op.shelf_placements`, `op.books`, `op.authors`. |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`, `op.authors`. |
 | **Jobs (Oban)** | `Stacks.Workers.RegenerateFeedJob` -- regenerate cached feed when shelf changes (event-driven). |
 | **External Services** | None. |
 | **dbt Models** | None. |
@@ -1024,7 +1049,7 @@ US-1.1.1 (Upload + Identify)
 |-------|------------|
 | **Frontend (Elm)** | `Page.Settings.DataExport` -- format selector (JSON/CSV/OPDS), download button, progress indicator. |
 | **Backend (Phoenix)** | `Stacks.GDPR.Export` -- `export_user_data/2`. Collects from all user-related tables. Serialisers for JSON, CSV, OPDS. `StacksWeb.GDPRController.export/2`. |
-| **Database** | **Read:** All tables with user data: `op.books`, `op.shelves`, `op.shelf_placements`, `op.shelf_placement_history`, `op.my_writing_links`, `op.audit_log` (user's entries). |
+| **Database** | **Read:** All tables with user data: `op.books`, `op.bookshelves`, `op.bookshelf_placements`, `op.bookshelf_placement_history`, `op.blog_posts`, `op.audit_log` (user's entries). |
 | **Jobs (Oban)** | `Stacks.Workers.DataExportJob` -- async generation for large datasets. Notifies user when ready. |
 | **External Services** | None. |
 | **dbt Models** | None. |
@@ -1397,6 +1422,234 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
+### 14. Authentication
+
+---
+
+#### US-14.1.1 -- Register a New Account
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | First user becomes owner. Guardian JWT, Argon2 password hashing. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Login` module (registration form). Types: `User`, `RemoteData`. |
+| **Backend (Phoenix)** | `Stacks.Accounts` context -- `Accounts.register/1`. `StacksWeb.AuthController.register/2`. Guardian JWT token generation. |
+| **Database** | **Write:** `op.users`, `op.audit_log`. |
+| **Dependencies** | None (foundational). |
+
+---
+
+#### US-14.2.1 -- Sign In to an Existing Account
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Email + password login, JWT token returned. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Login` module (login form). |
+| **Backend (Phoenix)** | `Stacks.Accounts` context -- credential verification with Argon2. `StacksWeb.AuthController.login/2`. Guardian JWT signing. |
+| **Database** | **Read:** `op.users`. **Write:** `op.audit_log`. |
+| **Dependencies** | US-14.1.1 (account must exist). |
+
+---
+
+#### US-14.3.1 -- Authenticated Navigation State
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Elm SPA stores JWT, shows user-specific navigation when authenticated. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Types.User`, `Api` module (token storage), navigation state management. |
+| **Backend (Phoenix)** | `StacksWeb.AuthController.me/2` -- returns current user from JWT. `StacksWeb.Plugs.AuthPipeline`. |
+| **Database** | **Read:** `op.users`. |
+| **Dependencies** | US-14.2.1 (must be logged in). |
+
+---
+
+#### US-14.3.2 -- Session Expiry and Token Refresh
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | 24h access token, 7d refresh token. Graceful redirect to login on expiry. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Token expiry detection, automatic redirect to login page. |
+| **Backend (Phoenix)** | Guardian token lifecycle. Refresh token handling. |
+| **Database** | **Read:** `op.users`. |
+| **Dependencies** | US-14.2.1. |
+
+---
+
+### 15. Home & Navigation
+
+---
+
+#### US-15.1.1 -- View the Home Page
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Landing page with bookshelf summary, recent activity, and quick actions. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Home page module (or redirect to default bookshelf). |
+| **Backend (Phoenix)** | Aggregate queries for bookshelf summaries. |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`. |
+| **Dependencies** | US-14.3.1 (authenticated state). |
+
+---
+
+#### US-15.2.1 -- Navigate Between Sections via the Top Navigation Bar
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Persistent top navigation bar with links to bookshelves, search, upload, settings. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Navigation.Route` module. Main.elm handles URL routing via `Browser.application`. |
+| **Backend (Phoenix)** | `CoreWeb.Router` catch-all route serves Elm SPA for all non-API paths. |
+| **Database** | None. |
+| **Dependencies** | US-14.3.1 (navigation state depends on auth). |
+
+---
+
+#### US-15.2.2 -- Swipe Navigation Between Bookshelves (Mobile)
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Touch swipe gestures to navigate between bookshelves on mobile. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Navigation.SwipeNavigation` module. Touch event handling via ports or subscriptions. |
+| **Backend (Phoenix)** | None (client-side only). |
+| **Database** | None. |
+| **Dependencies** | US-1.2.5 (shelf navigation). |
+
+---
+
+#### US-15.3.1 -- View the Platform Footer
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Footer with links to settings, GDPR pages, and project info. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Footer component in Main.elm view. |
+| **Backend (Phoenix)** | None (static content). |
+| **Database** | None. |
+| **Dependencies** | None. |
+
+---
+
+### 16. Error Handling
+
+---
+
+#### US-16.1.1 -- View the 404 Not Found Page
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Themed 404 page matching the dark-academic aesthetic. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | 404 variant in route handling. Themed error display. |
+| **Backend (Phoenix)** | `CoreWeb.ErrorJSON` for API 404s. SPA catch-all handles client-side 404s. |
+| **Database** | None. |
+| **Dependencies** | US-15.2.1 (routing). |
+
+---
+
+#### US-16.2.1 -- Handle Network Failures Gracefully
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Display helpful error messages when API calls fail. Retry where appropriate. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Types.RemoteData` handles Loading/Success/Failure states. Error display components. |
+| **Backend (Phoenix)** | Structured error responses from all controllers. |
+| **Database** | None. |
+| **Dependencies** | None. |
+
+---
+
+#### US-16.3.1 -- Handle Unauthenticated Access to Protected Pages
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Redirect to login when accessing protected routes without valid JWT. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Route guard in Main.elm — redirects to login if no token. |
+| **Backend (Phoenix)** | `StacksWeb.Plugs.AuthPipeline` returns 401 for unauthenticated API requests. |
+| **Database** | None. |
+| **Dependencies** | US-14.2.1, US-15.2.1. |
+
+---
+
+### 17. Settings
+
+---
+
+#### US-17.1.1 -- Access Settings Pages
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Settings hub linking to age verification, consent management, and future profile settings. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Settings.AgeVerification`, `Page.Settings.Consent`. Settings navigation. |
+| **Backend (Phoenix)** | `StacksWeb.UserSettingsController`. |
+| **Database** | **Read:** `op.users`. |
+| **Dependencies** | US-14.3.1 (must be authenticated). |
+
+---
+
+### 18. Looking for a Home Shelf
+
+---
+
+#### US-18.1.1 -- Browse the Looking for a Home Shelf
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Fifth bookshelf for books the user wants to rehome. Marketplace-ready in future phases. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Bookshelf.LookingForHome` module. Same shelf rendering components as other bookshelves. |
+| **Backend (Phoenix)** | `Stacks.Shelving` context, bookshelf_name `:looking_for_home`. `StacksWeb.BookshelfController.show/2`. |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`. |
+| **Dependencies** | US-1.1.1 (books exist), US-1.2.1 (shelf infrastructure). |
+
+---
+
 ### Cross-cutting: Event-Driven Architecture
 
 | Layer | Components |
@@ -1429,16 +1682,23 @@ Which user stories touch each database table:
 |-------|---------|
 | `books` | US-1.1.1, US-1.1.2, US-1.1.4, US-1.1.5, US-1.1.6, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--4, US-2.1.1, US-2.2.1, US-2.3.1, US-2.4.1, US-4.1.1, US-7.1.1, US-7.2.1, US-8.1.1 |
 | `authors` | US-1.1.1, US-1.2.1--4, US-1.3.2, US-1.4.1, US-2.3.1, US-2.4.1, US-6.1.1, US-8.1.1 |
-| `shelves` | US-1.2.1--5, US-1.4.1, US-1.5.1, US-6.1.1, US-8.1.1 |
-| `shelf_placements` | US-1.1.5, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--3, US-1.6.4, US-1.6.5, US-2.4.1, US-6.1.1, US-8.1.1 |
-| `shelf_placement_history` | US-1.3.1, US-1.5.1--3, US-1.6.4, US-8.1.1 |
+| `bookshelves` | US-1.2.1--5, US-1.4.1, US-1.5.1, US-6.1.1, US-8.1.1 |
+| `bookshelf_placements` | US-1.1.5, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--3, US-1.6.4, US-1.6.5, US-2.4.1, US-6.1.1, US-8.1.1 |
+| `bookshelf_placement_history` | US-1.3.1, US-1.5.1--3, US-1.6.4, US-8.1.1 |
 | `review_snapshots` | US-1.3.2, US-2.1.1 |
 | `price_snapshots` | US-1.3.2, US-1.4.1, US-2.2.1 |
 | `bookstores` | US-2.2.1, US-2.2.2, US-2.4.1 |
 | `bookstore_events` | US-2.4.1 |
 | `third_spaces` | US-3.1.1 |
 | `third_space_events` | US-3.1.1 |
-| `my_writing_links` | US-1.3.1, US-1.3.2, US-8.1.1 |
+| `blog_posts` | US-12.1.1, US-12.1.2, US-12.1.3, US-10.2.3, US-8.1.1 |
+| `post_book_associations` | US-12.1.2 |
+| `comments` | US-13.1.1, US-13.1.2, US-13.2.1 |
+| `user_blocks` | US-10.1.2, US-13.1.2 |
+| `groups` | US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-10.2.1 |
+| `group_members` | US-11.1.2, US-11.1.3, US-11.1.4 |
+| `group_invitations` | US-11.1.2, US-11.1.4 |
+| `visibility_grants` | US-10.2.2 |
 | `uploaded_images` | US-1.1.1, US-7.1.1, US-8.1.4 |
 | `audit_log` | US-1.1.3, US-1.1.4, US-2.5.1, US-4.1.1, US-4.1.2, US-5.1.1, US-7.2.1, US-7.3.1, US-8.1.1, US-8.1.2, US-8.1.3, US-8.1.5 |
 | `discovered_sources` | US-2.3.1, US-2.5.1 |
@@ -1512,8 +1772,8 @@ Which user stories touch each database table:
 |-------|------|---------------|-------------------|
 | `stg_books` | Staging | US-1.1.1 | Many |
 | `stg_uploaded_images` | Staging | US-1.1.1 | US-8.1.4 |
-| `stg_shelf_placements` | Staging | US-1.5.1--3 | US-1.2.1--4 |
-| `stg_shelf_placement_history` | Staging | US-1.5.1--3 | US-1.3.1 |
+| `stg_bookshelf_placements` | Staging | US-1.5.1--3 | US-1.2.1--4 |
+| `stg_bookshelf_placement_history` | Staging | US-1.5.1--3 | US-1.3.1 |
 | `stg_review_snapshots` | Staging | US-2.1.1 | US-1.3.2 |
 | `stg_price_snapshots` | Staging | US-2.2.1 | US-1.3.2 |
 | `stg_authors` | Staging | US-1.1.1 | US-2.3.1 |
