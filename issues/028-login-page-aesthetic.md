@@ -7,7 +7,7 @@ Design and implement the login and registration pages with The Stacks' dark-acad
 User stories for auth flows will be produced by #026. This issue implements the visual/aesthetic layer for those flows.
 
 ## Goal
-A fully styled login and registration page that matches The Stacks' established visual language — warm parchment, serif typography, subtle animations, and the feeling of arriving at a curated, personal space. The pages should be functional (form inputs, validation feedback, error states) and beautiful.
+A fully styled login and registration page that matches The Stacks' established visual language — warm parchment, serif typography, subtle animations, and the feeling of arriving at a curated, personal space. The pages should be functional (form inputs, validation feedback, error states) and beautiful. Also, navbar elements which relate to pages that cannot be seen without logging in should not be visible when not logged in. The login should feel like providing your credentials to a secret magical door similar to /Users/erinversfeld/thestacks/door.jpg, with clear spacing between the field title and the entry field. The entry field should be long enough to clearly read one's email address. Upon login the door should animate to open and then dissolve into the anti-library.
 
 ## Technical Requirements
 - Implement login page in Elm, consistent with existing SPA architecture
@@ -30,6 +30,7 @@ A fully styled login and registration page that matches The Stacks' established 
 - [ ] Mobile responsive
 - [ ] Tests written and passing
 - [ ] Standards compliance verified
+- [ ] Update navbar so that items for resources which are not publically visible are not visible unless logged in
 
 ## Dependencies
 - #026 (user story gap analysis — produces auth user stories)

@@ -1,7 +1,7 @@
 # Issue #033: Global Book Catalogue — Browse All Books
 
 ## Summary
-Add a page where any user can browse all books in the system regardless of who uploaded them. No indication of whose shelf a book is on — purely a discovery and exploration view. Users can find titles they recognise and add them to their own shelves.
+Add a page where any user can browse all books in the system regardless of who uploaded them. No indication of whose shelf a book is on — purely a discovery and exploration view. Users can find titles they recognise and add them to their own shelves. This will always be visible to the public, similar to the costs page.
 
 ## User Stories
 No existing user story covers this — #026 may produce one. This issue describes the feature directly.
