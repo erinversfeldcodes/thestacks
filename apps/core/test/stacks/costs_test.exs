@@ -117,7 +117,7 @@ defmodule Stacks.CostsTest do
   end
 
   describe "cost_breakdown/0" do
-    test "returns a complete breakdown map" do
+    test "returns a complete breakdown map with categories and metrics" do
       now = DateTime.utc_now()
       period_start = %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
       days = Calendar.ISO.days_in_month(now.year, now.month)
@@ -142,11 +142,12 @@ defmodule Stacks.CostsTest do
         })
 
       breakdown = Costs.cost_breakdown()
-      assert is_list(breakdown.line_items)
+      assert is_list(breakdown.categories)
       assert breakdown.total_cents == 500
       assert breakdown.currency == "USD"
       assert is_float(breakdown.cost_per_book)
-      assert is_integer(breakdown.book_count)
+      assert is_map(breakdown.metrics)
+      assert is_integer(breakdown.metrics.books)
       assert is_list(breakdown.monthly_totals)
       assert %DateTime{} = breakdown.generated_at
     end
@@ -154,7 +155,20 @@ defmodule Stacks.CostsTest do
     test "returns zero cost_per_book when no books exist" do
       breakdown = Costs.cost_breakdown()
       assert breakdown.cost_per_book == 0.0
-      assert breakdown.book_count == 0
+      assert breakdown.metrics.books == 0
+    end
+  end
+
+  describe "usage_metrics/0" do
+    test "returns aggregate platform metrics without user data" do
+      metrics = Costs.usage_metrics()
+      assert is_integer(metrics.books)
+      assert is_integer(metrics.uploads)
+      assert is_integer(metrics.placements)
+      assert is_integer(metrics.db_size_bytes)
+      assert is_integer(metrics.avg_upload_payload_bytes)
+      assert is_integer(metrics.vision_jobs_this_month)
+      refute Map.has_key?(metrics, :users)
     end
   end
 
