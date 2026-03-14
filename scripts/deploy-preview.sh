@@ -1,27 +1,19 @@
 #!/usr/bin/env bash
-# scripts/deploy-preview.sh — deploy an ephemeral preview stack to Fly.io and
-# run E2E + DAST tests against it, then destroy everything.
+# scripts/deploy-preview.sh — deploy a preview stack, run tests, then clean up.
 #
-# Required env vars:
-#   FLY_API_TOKEN   — Fly.io API token
-#   NEON_PROJECT_ID — Neon project to branch from
+# This script orchestrates the full preview lifecycle:
+#   1. Deploy stack (via deploy-stack.sh)
+#   2. Warmup vision pipeline
+#   3. Run Playwright E2E tests
+#   4. Run security scans (ZAP, Nuclei, jwt_tool, IDOR)
+#   5. Clean up all resources
 #
-# Optional env vars:
-#   NEON_API_KEY        — Neon API key (required when using Neon branch)
-#   MODAL_TOKEN_ID      — Modal API token ID (vision service deployed to Modal for inference)
-#   MODAL_TOKEN_SECRET  — Modal API token secret
-#   VISION_HMAC_SECRET  — Elixir → vision HMAC auth
-#   SECRET_KEY_BASE     — Phoenix secret key base
-#   NEON_PARENT_BRANCH  — Name of Neon branch to use as parent for previews (default: staging)
-#   GITHUB_HEAD_REF     — set automatically in GitHub Actions
+# The cleanup trap ensures resources are destroyed even on failure.
+# To deploy WITHOUT cleanup (for manual inspection), use deploy-stack.sh directly.
 #
 # Usage:
 #   scripts/deploy-preview.sh
 #   scripts/deploy-preview.sh --branch my-feature-branch
-#
-# Outputs lines parseable by _parse_ci_output:
-#   PASS deploy: ...
-#   FAIL deploy: ...
 
 set -euo pipefail
 
@@ -32,313 +24,37 @@ if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# Prefer ~/.local/bin/flyctl (installed via scripts/install-flyctl.sh) over any
-# stale system flyctl (e.g. the superfly/homebrew-tap, last updated 2023).
 export PATH="${HOME}/.local/bin:${PATH}"
 
-# ── Preflight ─────────────────────────────────────────────────────────────────
-if [[ -z "${FLY_API_TOKEN:-}" ]]; then
-    echo "SKIP: FLY_API_TOKEN not set — skipping deploy preview."
-    exit 0
-fi
-
-if [[ -z "${NEON_PROJECT_ID:-}" ]]; then
-    echo "SKIP: NEON_PROJECT_ID not set — skipping deploy preview."
-    exit 0
-fi
-
-if ! command -v fly &>/dev/null; then
-    echo "SKIP: flyctl not installed (brew install flyctl)"
-    exit 0
-fi
-
-# ── Branch name → Fly app name ────────────────────────────────────────────────
-# Parse optional --branch arg
-BRANCH=""
+# ── Parse args ────────────────────────────────────────────────────────────────
+BRANCH_ARG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --branch) BRANCH="$2"; shift 2 ;;
+        --branch) BRANCH_ARG="--branch $2"; shift 2 ;;
         *) shift ;;
     esac
 done
 
-if [[ -z "$BRANCH" ]]; then
-    BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
-fi
-
-# Sanitise: lowercase, replace / and _ with -, truncate to 30 chars
+# Derive names for cleanup (same logic as deploy-stack.sh)
+BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
 SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-# Strip trailing hyphens that may result from truncation
 SANITISED="${SANITISED%-}"
-
 CORE_APP="stacks-core-pr-${SANITISED}"
-MODAL_APP="thestacks-vision-${SANITISED}"
-VISION_SERVICE_URL=""  # set after Modal deploy — do not construct; Modal may truncate the subdomain
-NEON_BRANCH_NAME=""
-
-echo "==> Deploy preview for branch: ${BRANCH}"
-echo "    Core app:    ${CORE_APP}"
-echo "    Modal app:   ${MODAL_APP}"
+CORE_URL="https://${CORE_APP}.fly.dev"
+NEON_BRANCH_NAME="preview/${SANITISED}"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 cleanup() {
-    local neon_args=""
-    [[ -n "$NEON_BRANCH_NAME" ]] && neon_args="--neon-branch-name ${NEON_BRANCH_NAME}"
-    bash "${REPO_ROOT}/scripts/cleanup-preview.sh" --branch "${BRANCH}" ${neon_args}
+    bash "${REPO_ROOT}/scripts/cleanup-preview.sh" --branch "${BRANCH}" --neon-branch-name "${NEON_BRANCH_NAME}"
 }
 trap cleanup EXIT
 
-# ── Pre-warm Modal container (cold start ~30s, amortised across deploy time) ──
-# Modal's scaledown_window keeps the container alive between requests during a
-# deploy session. No explicit pre-warm needed — the first E2E test will trigger
-# the container start, which is fast enough (~30s) to not impact test timeouts.
-
-# ── Create Neon branch ────────────────────────────────────────────────────────
-if [[ -n "${NEON_API_KEY:-}" ]]; then
-    echo ""
-    echo "==> Creating Neon DB branch for preview..."
-
-    # Resolve parent branch name to ID
-    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
-    echo "    Parent branch: ${NEON_PARENT_BRANCH}"
-    NEON_PARENT_BRANCH_ID="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == '${NEON_PARENT_BRANCH}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
-
-    if [[ -z "$NEON_PARENT_BRANCH_ID" ]]; then
-        echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_PROJECT_ID}" >&2
-        echo "    Create it first: neon branches create --name ${NEON_PARENT_BRANCH}" >&2
-        exit 1
-    fi
-    echo "    Parent branch ID: ${NEON_PARENT_BRANCH_ID}"
-
-    # If a stale branch with this name exists (e.g. from a previously killed run),
-    # delete it first so the create below succeeds cleanly.
-    stale_id="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == 'preview/${SANITISED}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
-    if [[ -n "$stale_id" ]]; then
-        echo "    Deleting stale branch preview/${SANITISED}..."
-        curl -sL -X DELETE \
-            -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${stale_id}" > /dev/null
-    fi
-
-    # Request an endpoint alongside the branch so a connection URI is available
-    # immediately. include_passwords=true returns the full connection string.
-    neon_response="$(curl -sL -X POST \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{\"branch\": {\"name\": \"preview/${SANITISED}\", \"parent_id\": \"${NEON_PARENT_BRANCH_ID}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?include_passwords=true")"
-
-    NEON_CONNECTION_URI="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['connection_uris'][0]['connection_uri'])" 2>/dev/null || true)"
-    neon_branch_name="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['branch']['name'])" 2>/dev/null || true)"
-
-    if [[ "$neon_branch_name" != "preview/${SANITISED}" ]]; then
-        echo "FAIL deploy: Neon branch creation failed" >&2
-        echo "$neon_response" | head -5 >&2
-        exit 1
-    fi
-    NEON_BRANCH_NAME="preview/${SANITISED}"
-    echo "    Neon branch created: ${NEON_BRANCH_NAME}"
-    if [[ -n "$NEON_CONNECTION_URI" ]]; then
-        echo "    Connection URI obtained."
-    else
-        echo "    WARNING: no connection URI returned — DATABASE_URL will not be set for core app."
-    fi
-else
-    echo "SKIP: NEON_API_KEY not set — skipping Neon branch creation."
-    NEON_CONNECTION_URI=""
-fi
-
-# ── Deploy vision service to Modal ────────────────────────────────────────────
-# The vision service is a Modal-hosted ASGI app. Deploy it here so the latest
-# code is live before the core app starts calling it. If apps/vision/ hasn't
-# changed since the last deploy, Modal's build cache makes this near-instant.
-if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
-    echo ""
-    echo "==> Syncing Modal secret 'thestacks-vision'..."
-    # The secret is shared across all PR deployments — it contains the same
-    # HMAC key and Modal tokens regardless of branch. Only the app is per-PR.
-    MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal secret create thestacks-vision \
-            "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}" \
-            "MODAL_TOKEN_ID=${MODAL_TOKEN_ID}" \
-            "MODAL_TOKEN_SECRET=${MODAL_TOKEN_SECRET}" \
-            --force 2>&1 || { echo "FAIL deploy: Modal secret sync failed"; exit 1; }
-
-    echo ""
-    echo "==> Deploying vision service to Modal (app: ${MODAL_APP})..."
-    modal_deploy_output="$(MODAL_APP_NAME="${MODAL_APP}" \
-    MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1)" \
-        || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
-    echo "$modal_deploy_output"
-
-    # Query the deployed function's web URL via the Modal SDK rather than parsing
-    # deploy output (which wraps lines unpredictably and uses non-ASCII box chars).
-    VISION_SERVICE_URL="$(MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -c "
-import modal
-f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
-print(f.web_url)
-" 2>/dev/null)"
-    if [[ -z "$VISION_SERVICE_URL" ]]; then
-        echo "FAIL deploy: could not retrieve Modal vision service URL via SDK" >&2
-        exit 1
-    fi
-    echo "    Vision URL: ${VISION_SERVICE_URL}"
-    echo "PASS deploy: vision service deployed to Modal"
-else
-    echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
-    echo "      The existing Modal deployment (if any) will be used."
-fi
-
-# ── Create core app (destroy any stale one first) ─────────────────────────────
-echo ""
-echo "==> Creating ephemeral Fly app..."
-fly apps destroy "${CORE_APP}" --yes 2>&1 | grep -v "^Error" || true
-fly apps create "${CORE_APP}" 2>&1 || true
-
-# ── Stage core secrets ────────────────────────────────────────────────────────
-# Stage before deploy so they're available on first boot.
-fly secrets set \
-    SECRET_KEY_BASE="${SECRET_KEY_BASE:-}" \
-    VISION_HMAC_SECRET="${VISION_HMAC_SECRET:-}" \
-    CLOAK_KEY="${CLOAK_KEY:-}" \
-    VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
-    PHX_HOST="${CORE_APP}.fly.dev" \
-    RATE_LIMIT_AUTH="60" \
-    ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
-    --app "${CORE_APP}" --stage
-
-# ── Deploy core (then vision if changed) — sequential ─────────────────────────
-# fly deploy blocks until release_command (migrations) + health checks pass.
-# Sequential avoids simultaneous Fly Machines API polling that causes timeouts.
-#
-# fly_deploy_with_retry <app> <toml> <label>
-# fly deploy sometimes exits non-zero due to local TCP port exhaustion
-# (EADDRNOTAVAIL / "request canceled") during health check polling.  In that
-# case the machine is often actually running fine.  After any failure we check
-# the HTTPS health endpoint directly; if it responds we treat the deploy as
-# successful.  If not, we wait 120s (clears TIME_WAIT sockets) and retry once.
-fly_deploy_with_retry() {
-    local app="$1" toml="$2" label="$3"
-    local app_url="https://${app}.fly.dev"
-    local attempt
-
-    for attempt in 1 2; do
-        if (cd "$REPO_ROOT" && fly deploy \
-                --app "${app}" \
-                --config "${toml}" \
-                --image-label "${label}" \
-                --no-cache); then
-            return 0
-        fi
-
-        echo "    fly deploy failed (attempt ${attempt}/2) — checking if app is reachable..."
-        local retries=6
-        while [[ $retries -gt 0 ]]; do
-            if curl -sf --max-time 10 "${app_url}/api/health" &>/dev/null; then
-                echo "    App is healthy at ${app_url} — treating deploy as successful."
-                return 0
-            fi
-            sleep 10
-            ((retries--))
-        done
-
-        if [[ $attempt -lt 2 ]]; then
-            echo "    App not reachable — waiting 30s for machines + TCP sockets to settle, then retrying..."
-            sleep 30
-        fi
-    done
-    return 1
-}
-
-CORE_URL="https://${CORE_APP}.fly.dev"
-
-# ── Build Elm frontend ─────────────────────────────────────────────────────
-# The Dockerfile copies frontend/elm.js as a pre-built artifact.
-# Rebuild it here so the deployed app always has the latest Elm code.
-echo ""
-echo "==> Rebuilding Elm frontend..."
-if command -v npx &>/dev/null && [[ -f "$REPO_ROOT/frontend/elm.json" ]]; then
-    (cd "$REPO_ROOT/frontend" && npx elm make src/Main.elm --optimize --output=elm.js) \
-        || { echo "FAIL deploy: Elm build failed"; exit 1; }
-    echo "    elm.js rebuilt"
-else
-    echo "    SKIP: npx or elm.json not found — using existing elm.js"
-fi
-
-echo ""
-echo "==> Deploying ${CORE_APP}..."
-if ! fly_deploy_with_retry "${CORE_APP}" "${REPO_ROOT}/deploy/fly.core.toml" "pr-${SANITISED}"; then
-    echo "FAIL deploy: core app deployment failed"
-    exit 1
-fi
-echo "PASS deploy: core app deployed"
-
-# ── Health check immediately after core deploy ────────────────────────────────
-# Run this BEFORE vision deploy: auto_stop_machines=true means the core machine
-# can stop if no traffic arrives during the vision build (~3 min). By hitting
-# the health endpoint here we keep it warm and confirm it started correctly.
-echo ""
-echo "==> Waiting for ${CORE_URL}/api/health..."
-RETRIES=10
-until curl -sf --max-time 15 "${CORE_URL}/api/health" &>/dev/null; do
-    if [[ $RETRIES -le 0 ]]; then
-        echo "FAIL deploy: health check timed out for ${CORE_URL}"
-        exit 1
-    fi
-    echo "    Not ready — retrying in 10s ($RETRIES attempts left)..."
-    sleep 10
-    ((RETRIES--))
-done
-echo "PASS deploy: health check passed"
-
-# ── Seed the Neon branch ──────────────────────────────────────────────────────
-# Migrations ran inside fly deploy (release_command in fly.core.toml).
-# Seeds are preview-only fixtures, so we run them separately via fly machine exec
-# which goes through the Fly Machines API — no WireGuard/SSH tunnel required.
-echo ""
-echo "==> Seeding ${CORE_APP}..."
-machine_id="$(fly machines list --app "${CORE_APP}" --json 2>/dev/null \
-    | python3 -c "
-import json,sys
-machines = json.load(sys.stdin)
-started = [m for m in machines if m.get('state') == 'started']
-print(started[0]['id'] if started else '')
-" 2>/dev/null || true)"
-
-if [[ -n "${machine_id}" ]]; then
-    fly machine exec "${machine_id}" \
-        "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
-        --app "${CORE_APP}" --timeout 60 2>&1 \
-        || { echo "FAIL deploy: seeds failed"; exit 1; }
-    echo "PASS deploy: seeds applied"
-else
-    echo "WARN deploy: could not find running machine to run seeds"
-fi
+# ── Deploy ────────────────────────────────────────────────────────────────────
+bash "${REPO_ROOT}/scripts/deploy-stack.sh" ${BRANCH_ARG}
 
 e2e_failed=0
 
-# ── Upload smoke test + warmup (warms Modal GPU container for all E2E images) ──
-# Submit all 4 E2E test images concurrently to warm the VisionModel GPU container
-# and pre-resolve all book records. When E2E tests run, Books.find_existing(isbn)
-# returns immediately, and VisionModel containers are already warm.
+# ── Upload smoke test + warmup ────────────────────────────────────────────────
 echo ""
 echo "==> Upload smoke test / warmup against ${CORE_URL}/api/upload..."
 smoke_login="$(curl -sf "${CORE_URL}/api/auth/login" \
@@ -347,7 +63,6 @@ smoke_login="$(curl -sf "${CORE_URL}/api/auth/login" \
 smoke_token="$(echo "${smoke_login}" | python3 -c \
     "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
 if [[ -n "${smoke_token}" ]]; then
-    # Submit all 4 E2E test images (the same images Playwright will use).
     warmup_images=(
         "${REPO_ROOT}/images/screenshot_mildly_obscured.jpg"
         "${REPO_ROOT}/images/screenshot_image_reversed_and_cut_off.jpg"
@@ -378,17 +93,13 @@ if [[ -n "${smoke_token}" ]]; then
         echo "FAIL deploy: all warmup uploads failed"
         e2e_failed=1
     else
-        # 6 minutes: Modal GPU cold start (~60s) + up to 4 serial Oban inferences (~60s each)
-        # + Open Library resolution. Must match or exceed Playwright PIPELINE_TIMEOUT (5 min).
         echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 6 min)..."
         warmup_deadline=$(( $(date +%s) + 360 ))
-        # Track done IDs as a space-separated string (bash 3.2 compatible; no declare -A).
         warmup_done_ids=""
         all_done=0
         while [[ $(date +%s) -lt $warmup_deadline ]]; do
             all_done=1
             for img_id in "${warmup_ids[@]}"; do
-                # Skip if already marked done.
                 case " ${warmup_done_ids} " in
                     *" ${img_id} "*) continue ;;
                 esac
@@ -408,15 +119,13 @@ if [[ -n "${smoke_token}" ]]; then
             fi
             sleep 5
         done
-        # Count done ids (words in string).
         done_count=$(echo "${warmup_done_ids}" | wc -w | tr -d ' ')
         if [[ $all_done -eq 1 ]]; then
             echo "PASS deploy: warmup passed (all pipelines resolved/rejected)"
         else
             remaining=$(( ${#warmup_ids[@]} - done_count ))
             echo "FAIL deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
-            echo "    E2E tests skipped — they would also time out on the same stalled pipelines."
-            echo "--- Core app logs (last 60 lines for diagnosis) ---"
+            echo "--- Core app logs (last 60 lines) ---"
             (fly logs --app "${CORE_APP}" 2>&1 &
              FLY_LOG_PID=$!
              sleep 10
@@ -430,10 +139,7 @@ else
     echo "WARN deploy: warmup skipped — could not authenticate"
 fi
 
-# ── Run Playwright E2E against deployed stack ─────────────────────────────────
-# Keep the Fly machine alive with a background ping during Playwright setup
-# (Playwright installs browsers on first run — 30-120s with no app traffic,
-# which can trigger Fly's auto_stop_machines and cold-start the machine).
+# ── Playwright E2E ────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running Playwright E2E against ${CORE_URL}..."
 (while true; do
@@ -442,7 +148,6 @@ echo "==> Running Playwright E2E against ${CORE_URL}..."
 done) &
 KEEP_ALIVE_PID=$!
 
-# Capture Fly logs during E2E so we can diagnose upload pipeline failures.
 FLY_LOGS_FILE="$(mktemp)"
 (fly logs --app "${CORE_APP}" 2>&1) > "${FLY_LOGS_FILE}" &
 FLY_LOGS_PID=$!
@@ -450,7 +155,7 @@ FLY_LOGS_PID=$!
 E2E_SERVICES=none BASE_URL="${CORE_URL}" bash "${REPO_ROOT}/scripts/test-e2e.sh" 2>&1 || e2e_failed=1
 
 kill "${KEEP_ALIVE_PID}" 2>/dev/null || true
-sleep 3  # Let log capture drain any final lines
+sleep 3
 kill "${FLY_LOGS_PID}" 2>/dev/null || true
 wait "${FLY_LOGS_PID}" 2>/dev/null || true
 
@@ -460,9 +165,7 @@ tail -200 "${FLY_LOGS_FILE}" || true
 echo "--- End core logs ---"
 rm -f "${FLY_LOGS_FILE}"
 
-# ── Post-E2E DB diagnostic (runs always, most useful when E2E fails) ──────────
-# Query the DB directly for recent uploaded_images and oban_jobs so we can see
-# whether Oban jobs completed, were rejected, or never ran.
+# ── Post-E2E DB diagnostic ───────────────────────────────────────────────────
 if [[ -n "${NEON_CONNECTION_URI:-}" ]] && command -v psql &>/dev/null; then
     echo ""
     echo "--- DB: recent uploaded_images (last 10) ---"
@@ -483,13 +186,10 @@ else
     echo "FAIL deploy: deployed E2E tests failed"
 fi
 
-# ── OWASP ZAP baseline (passive DAST) ────────────────────────────────────────
+# ── OWASP ZAP ────────────────────────────────────────────────────────────────
 echo ""
 if command -v docker &>/dev/null; then
     echo "==> Running OWASP ZAP baseline scan against ${CORE_URL}..."
-    # Capture ZAP output; check FAIL-NEW count directly — spider errors cause exit 2 even
-    # with no actual security failures (expected for an API-only backend with no root route).
-    # || true prevents set -e from exiting on ZAP's non-zero exit (warnings/spider errors).
     zap_output="$(docker run --rm \
         --mount type=tmpfs,destination=/zap/wrk \
         ghcr.io/zaproxy/zaproxy:stable \
@@ -504,11 +204,10 @@ else
     echo "SKIP: docker not available — skipping OWASP ZAP scan"
 fi
 
-# ── Nuclei (JWT + misconfig templates) ───────────────────────────────────────
+# ── Nuclei ────────────────────────────────────────────────────────────────────
 echo ""
 if command -v nuclei &>/dev/null; then
     echo "==> Running Nuclei (jwt + misconfig) against ${CORE_URL}..."
-    # || true: nuclei exits non-zero when findings are present; we parse output ourselves.
     nuclei_output="$(nuclei -u "${CORE_URL}" \
         -tags jwt,misconfiguration \
         -severity medium,high,critical \
@@ -523,20 +222,16 @@ else
     echo "SKIP: nuclei not installed (brew install nuclei)"
 fi
 
-# ── jwt_tool (JWT attack surface) ─────────────────────────────────────────────
+# ── jwt_tool ─────────────────────────────────────────────────────────────────
 echo ""
 if command -v jwt_tool &>/dev/null; then
     echo "==> Running jwt_tool against ${CORE_URL}/api/auth/login..."
-    # Obtain a JWT from the preview environment
     login_resp="$(curl -sf "${CORE_URL}/api/auth/login" \
         -H "Content-Type: application/json" \
         -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null)" || true
     jwt_token="$(echo "${login_resp}" | python3 -c \
         "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
     if [[ -n "${jwt_token}" ]]; then
-        # -X a: try all exploits (alg:none, HMAC confusion, kid injection, etc.)
-        # -t: target endpoint to probe with forged tokens
-        # -rh: request header template (*JWT* is replaced by jwt_tool with forged token)
         jwt_output="$(jwt_tool "${jwt_token}" \
             -t "${CORE_URL}/api/auth/me" \
             -rh "Authorization: Bearer *JWT*" \
@@ -548,15 +243,13 @@ if command -v jwt_tool &>/dev/null; then
             echo "PASS deploy: jwt_tool — no exploitable JWT vulnerabilities"
         fi
     else
-        echo "SKIP jwt_tool: could not obtain JWT (login endpoint unreachable or credentials wrong)"
+        echo "SKIP jwt_tool: could not obtain JWT"
     fi
 else
     echo "SKIP: jwt_tool not installed (run setup.sh to install)"
 fi
 
-# ── IDOR test (cross-user resource access) ────────────────────────────────────
-# Verifies that user2 cannot read or mutate user1's private placements.
-# Requires both seed users: owner@thestacks.app and user@thestacks.app.
+# ── IDOR test ─────────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running IDOR test (cross-user resource access)..."
 idor_failed=0
@@ -576,7 +269,6 @@ u2_token="$(echo "${u2_resp}" | python3 -c \
 if [[ -z "${u1_token}" ]] || [[ -z "${u2_token}" ]]; then
     echo "SKIP: IDOR test — could not authenticate both seed users"
 else
-    # Get user1's library; extract a placement ID
     u1_library="$(curl -sf "${CORE_URL}/api/bookshelves/library" \
         -H "Authorization: Bearer ${u1_token}" 2>/dev/null)" || true
     placement_id="$(echo "${u1_library}" | python3 -c \
@@ -584,7 +276,6 @@ else
         2>/dev/null || true)"
 
     if [[ -n "${placement_id}" ]]; then
-        # Attempt to delete user1's placement as user2 — must be 403 or 404, not 200
         idor_status="$(curl -o /dev/null -s -w "%{http_code}" \
             -X DELETE "${CORE_URL}/api/placements/${placement_id}" \
             -H "Authorization: Bearer ${u2_token}")"

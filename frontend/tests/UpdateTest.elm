@@ -10,6 +10,7 @@ import Types.Book exposing (Author, Book, VisibilityTier(..))
 import Types.RemoteData exposing (RemoteData(..))
 
 
+
 -- Helpers
 
 
@@ -58,6 +59,7 @@ sampleBook =
     , subjects = []
     , visibilityTier = Public
     }
+
 
 
 -- Library update tests
