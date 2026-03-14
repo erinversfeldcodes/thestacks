@@ -70,7 +70,7 @@ bookshelfEmptyState =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "empty-shelf" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Your library is empty" ]
+                    [ Selector.text "Your library is waiting" ]
 
 
 bookshelfErrorState : Test
