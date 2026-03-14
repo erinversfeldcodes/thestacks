@@ -270,6 +270,19 @@ fly_deploy_with_retry() {
 
 CORE_URL="https://${CORE_APP}.fly.dev"
 
+# ── Build Elm frontend ─────────────────────────────────────────────────────
+# The Dockerfile copies frontend/elm.js as a pre-built artifact.
+# Rebuild it here so the deployed app always has the latest Elm code.
+echo ""
+echo "==> Rebuilding Elm frontend..."
+if command -v npx &>/dev/null && [[ -f "$REPO_ROOT/frontend/elm.json" ]]; then
+    (cd "$REPO_ROOT/frontend" && npx elm make src/Main.elm --optimize --output=elm.js) \
+        || { echo "FAIL deploy: Elm build failed"; exit 1; }
+    echo "    elm.js rebuilt"
+else
+    echo "    SKIP: npx or elm.json not found — using existing elm.js"
+fi
+
 echo ""
 echo "==> Deploying ${CORE_APP}..."
 if ! fly_deploy_with_retry "${CORE_APP}" "${REPO_ROOT}/deploy/fly.core.toml" "pr-${SANITISED}"; then

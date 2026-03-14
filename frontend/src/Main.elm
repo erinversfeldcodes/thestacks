@@ -15,6 +15,7 @@ import Page.Bookshelf.Library as Library
 import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Bookshelf.WishList as WishList
+import Page.CostTransparency as CostTransparency
 import Page.Login as Login
 import Page.Search as Search
 import Page.Settings.AgeVerification as AgeVerification
@@ -56,6 +57,7 @@ type Page
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
+    | PageCostTransparency CostTransparency.Model
     | PageNotFound
 
 
@@ -164,6 +166,13 @@ initPage route maybeAuth maybePreviousRoute =
         SettingsAgeVerification ->
             ( PageSettingsAgeVerification AgeVerification.init, Cmd.none )
 
+        CostTransparency ->
+            let
+                ( model, cmd ) =
+                    CostTransparency.init
+            in
+            ( PageCostTransparency model, Cmd.map CostTransparencyMsg cmd )
+
         NotFound ->
             ( PageNotFound, Cmd.none )
 
@@ -186,6 +195,7 @@ type Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
+    | CostTransparencyMsg CostTransparency.Msg
     | SwipeReceived String
     | SwipeIgnored
 
@@ -497,6 +507,20 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        CostTransparencyMsg subMsg ->
+            case model.page of
+                PageCostTransparency subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            CostTransparency.update subMsg subModel
+                    in
+                    ( { model | page = PageCostTransparency newSubModel }
+                    , Cmd.map CostTransparencyMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         SwipeReceived direction ->
             let
                 maybeNext =
@@ -617,6 +641,9 @@ pageTitle route =
         SettingsAgeVerification ->
             "Age Verification — The Stacks"
 
+        CostTransparency ->
+            "Cost Transparency — The Stacks"
+
         NotFound ->
             "Not Found — The Stacks"
 
@@ -706,6 +733,9 @@ viewPage model =
 
         PageSettingsAgeVerification subModel ->
             Html.map AgeVerificationMsg (AgeVerification.view subModel)
+
+        PageCostTransparency subModel ->
+            Html.map CostTransparencyMsg (CostTransparency.view subModel)
 
         PageNotFound ->
             viewNotFound

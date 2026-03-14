@@ -3,6 +3,8 @@ defmodule Core.Application do
 
   use Application
 
+  alias Stacks.Workers.RefreshCostsJob
+
   @impl true
   def start(_type, _args) do
     children = [
@@ -18,7 +20,19 @@ defmodule Core.Application do
     ]
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
-    Supervisor.start_link(children, opts)
+    result = Supervisor.start_link(children, opts)
+
+    # Enqueue RefreshCostsJob on startup so cost data is populated immediately
+    # after a deploy. The daily cron keeps it fresh after that.
+    case result do
+      {:ok, _pid} ->
+        Oban.insert(RefreshCostsJob.new(%{}))
+
+      _ ->
+        :ok
+    end
+
+    result
   end
 
   # Fly's internal .internal hostnames resolve to IPv6 (6PN) addresses only.
