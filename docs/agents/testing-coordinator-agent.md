@@ -27,9 +27,9 @@ Controlled by `TEST_TARGET` environment variable:
 | Environment | TEST_TARGET | External Services | Database |
 |-------------|-------------|-------------------|----------|
 | Fully local (offline) | `local` | Mocked (Mox, WireMock) | Local Postgres |
-| Local -> deployed dev | `dev` | Real (Modal, Open Library, etc.) | Dev Fly Postgres |
+| Local -> deployed dev | `dev` | Real (Modal, Open Library, etc.) | Dev Neon PostgreSQL |
 | CI pipeline | `ci` | Mocked | CI Postgres (GitHub Actions service) |
-| CI -> deployed preview | `preview` | Real | Preview Fly Postgres |
+| CI -> deployed preview | `preview` | Real | Preview Neon PostgreSQL |
 
 ### Wiring Pattern
 ```elixir
