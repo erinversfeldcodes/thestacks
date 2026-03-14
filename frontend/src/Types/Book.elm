@@ -2,6 +2,7 @@ module Types.Book exposing
     ( Author
     , Book
     , VisibilityTier(..)
+    , authorName
     , bookDecoder
     )
 
@@ -17,6 +18,7 @@ type alias Author =
 
 type VisibilityTier
     = Public
+    | AgeGated
     | Unlisted
     | Private
 
@@ -25,7 +27,7 @@ type alias Book =
     { id : String
     , isbn : String
     , title : String
-    , author : Author
+    , author : Maybe Author
     , description : Maybe String
     , coverImageUrl : Maybe String
     , pageCount : Maybe Int
@@ -34,6 +36,18 @@ type alias Book =
     , subjects : List String
     , visibilityTier : VisibilityTier
     }
+
+
+{-| Returns the author's name, or "Unknown Author" when author is nil.
+-}
+authorName : Book -> String
+authorName book =
+    case book.author of
+        Just a ->
+            a.name
+
+        Nothing ->
+            "Unknown Author"
 
 
 authorDecoder : Decoder Author
@@ -52,6 +66,9 @@ visibilityTierDecoder =
                 case s of
                     "public" ->
                         Decode.succeed Public
+
+                    "age_gated" ->
+                        Decode.succeed AgeGated
 
                     "unlisted" ->
                         Decode.succeed Unlisted
@@ -102,7 +119,7 @@ bookDecoder =
         (Decode.field "id" Decode.string)
         (Decode.field "isbn" Decode.string)
         (Decode.field "title" Decode.string)
-        (Decode.field "author" authorDecoder)
+        (Decode.field "author" (Decode.nullable authorDecoder))
         (Decode.maybe (Decode.field "description" Decode.string))
         (Decode.maybe (Decode.field "cover_image_url" Decode.string))
         (optionalInt "page_count")
