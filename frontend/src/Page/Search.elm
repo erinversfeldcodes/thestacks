@@ -15,7 +15,7 @@ import Html.Attributes exposing (class)
 import Http
 import Process
 import Task
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, authorName)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -195,7 +195,7 @@ viewBookResult : Book -> Html Msg
 viewBookResult book =
     div [ class "search-result" ]
         [ h3 [ class "search-result__title" ] [ text book.title ]
-        , p [ class "search-result__author" ] [ text book.author.name ]
+        , p [ class "search-result__author" ] [ text (authorName book) ]
         , case book.publicationYear of
             Just year ->
                 p [ class "search-result__year" ] [ text (String.fromInt year) ]

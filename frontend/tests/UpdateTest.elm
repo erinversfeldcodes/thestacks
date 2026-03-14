@@ -31,9 +31,11 @@ bookDetailInit =
     , formatPickerOpen = False
     , selectedBookshelf = "library"
     , selectedFormats = []
+    , moveState = NotAsked
     , removeState = NotAsked
     , previousRoute = Nothing
     , showAgeGate = False
+    , entryAnimationActive = False
     }
 
 
@@ -50,7 +52,7 @@ sampleBook =
     { id = "book-1"
     , isbn = "9780000000000"
     , title = "Test Book"
-    , author = sampleAuthor
+    , author = Just sampleAuthor
     , description = Nothing
     , coverImageUrl = Nothing
     , pageCount = Nothing
