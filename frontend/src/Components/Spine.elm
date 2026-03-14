@@ -1,5 +1,6 @@
 module Components.Spine exposing
-    ( WearLevel(..)
+    ( SpineTexture(..)
+    , WearLevel(..)
     , spine
     , spineWidth
     )
@@ -11,6 +12,11 @@ import Html.Attributes exposing (class, style, title)
 type WearLevel
     = Pristine
     | Softened
+
+
+type SpineTexture
+    = Cloth
+    | Leather
 
 
 spineWidth : Int -> Int
@@ -26,6 +32,29 @@ wearLevelClass wearLevel =
 
         Softened ->
             "spine--softened"
+
+
+textureClass : SpineTexture -> String
+textureClass texture =
+    case texture of
+        Cloth ->
+            "spine--cloth"
+
+        Leather ->
+            "spine--leather"
+
+
+{-| Deterministic color index from a string (title).
+Produces a stable index so the same book always gets the same color.
+-}
+colorIndex : String -> Int
+colorIndex s =
+    modBy 8 (List.foldl (\c acc -> acc + Char.toCode c) 0 (String.toList s))
+
+
+colorClass : Int -> String
+colorClass idx =
+    "spine--color-" ++ String.fromInt idx
 
 
 bookmarkSvg : Html msg
@@ -47,6 +76,7 @@ bookmarkSvg =
 spine :
     { pageCount : Int
     , wearLevel : WearLevel
+    , texture : SpineTexture
     , title : String
     , author : String
     }
@@ -58,14 +88,23 @@ spine config =
 
         widthStr =
             String.fromInt widthPx ++ "px"
+
+        idx =
+            colorIndex config.title
     in
     div
         [ class "spine"
         , class (wearLevelClass config.wearLevel)
+        , class (textureClass config.texture)
+        , class (colorClass idx)
         , style "width" widthStr
         , title (config.title ++ " — " ++ config.author)
         ]
-        [ bookmarkSvg
+        [ div [ class "spine__edge spine__edge--top" ] []
+        , bookmarkSvg
+        , div [ class "spine__band spine__band--top" ] []
         , span [ class "spine__text" ]
             [ text (config.title ++ " · " ++ config.author) ]
+        , div [ class "spine__band spine__band--bottom" ] []
+        , div [ class "spine__edge spine__edge--bottom" ] []
         ]
