@@ -1,6 +1,6 @@
 module Page.Search exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , update
     , view
