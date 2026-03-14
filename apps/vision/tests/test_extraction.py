@@ -98,7 +98,7 @@ def test_extract_returns_multiple_books() -> None:
 
 def test_extract_returns_empty_books_list_when_nothing_extractable() -> None:
     """Empty books list (not an error) when model finds nothing."""
-    mock_output = {"books": []}
+    mock_output: dict[str, object] = {"books": []}
     with (
         patch(
             "app.services.vision_client.VisionClient.extract",
@@ -233,3 +233,138 @@ def test_extract_model_returns_non_list_books_field_gives_empty() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["books"] == []
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: local OCR pre-pass in /extract endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestExtractLocalOCRPrePass:
+    """Integration tests for the local OCR pre-pass that short-circuits VLM.
+
+    These tests use ``create=True`` on patches so they run before the
+    production import / config field exists, producing assertion failures
+    (not AttributeError during setup).
+    """
+
+    def test_prepass_hit_returns_local_ocr_model_and_confidence_1(self) -> None:
+        """When local_isbn_scan finds an ISBN, /extract returns immediately.
+
+        - model_used should be "local_ocr"
+        - confidence should be 1.0
+        - VLM should NOT be called
+        """
+        with (
+            patch(
+                "app.main.local_isbn_scan",
+                create=True,
+                return_value="9780156001311",
+            ) as mock_scan,
+            patch(
+                "app.services.vision_client.VisionClient.extract",
+                new_callable=AsyncMock,
+            ) as mock_vlm,
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/extract",
+                json={"images": [_VALID_IMAGE]},
+                headers=_make_header(),
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["model_used"] == "local_ocr"
+        assert len(data["books"]) == 1
+        assert data["books"][0]["confidence"] == 1.0
+        assert "9780156001311" in data["books"][0]["potential_isbns"]
+        mock_scan.assert_called()
+        mock_vlm.assert_not_called()
+
+    def test_prepass_miss_falls_through_to_vlm(self) -> None:
+        """When local_isbn_scan returns None, /extract falls through to VLM."""
+        mock_vlm_output = {
+            "books": [
+                {
+                    "title": "The Name of the Rose",
+                    "author": "Umberto Eco",
+                    "potential_isbns": ["9780156001311"],
+                    "raw_text": "The Name of the Rose",
+                }
+            ]
+        }
+        with (
+            patch(
+                "app.main.local_isbn_scan",
+                create=True,
+                return_value=None,
+            ) as mock_scan,
+            patch(
+                "app.services.vision_client.VisionClient.extract",
+                new_callable=AsyncMock,
+                return_value=mock_vlm_output,
+            ) as mock_vlm,
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/extract",
+                json={"images": [_VALID_IMAGE]},
+                headers=_make_header(),
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["model_used"] == settings.model_name
+        assert len(data["books"]) == 1
+        assert data["books"][0]["title"] == "The Name of the Rose"
+        mock_scan.assert_called()
+        mock_vlm.assert_called_once()
+
+    def test_prepass_disabled_skips_scan_and_calls_vlm(self) -> None:
+        """When local_ocr_enabled=False, pre-pass is skipped entirely."""
+        mock_vlm_output = {
+            "books": [
+                {
+                    "title": "Foucault's Pendulum",
+                    "author": "Umberto Eco",
+                    "potential_isbns": ["9780156032971"],
+                    "raw_text": "Foucault's Pendulum",
+                }
+            ]
+        }
+        # Pydantic Settings objects don't support patch.object with create=True
+        # (delattr fails on teardown). Instead, temporarily set the attribute
+        # via object.__setattr__ and restore it manually.
+        _had_attr = hasattr(settings, "local_ocr_enabled")
+        object.__setattr__(settings, "local_ocr_enabled", False)
+        try:
+            with (
+                patch(
+                    "app.main.local_isbn_scan",
+                    create=True,
+                    return_value="9780156032971",
+                ) as mock_scan,
+                patch(
+                    "app.services.vision_client.VisionClient.extract",
+                    new_callable=AsyncMock,
+                    return_value=mock_vlm_output,
+                ) as mock_vlm,
+                TestClient(app) as client,
+            ):
+                response = client.post(
+                    "/extract",
+                    json={"images": [_VALID_IMAGE]},
+                    headers=_make_header(),
+                )
+        finally:
+            if _had_attr:
+                object.__setattr__(settings, "local_ocr_enabled", True)
+            else:
+                object.__delattr__(settings, "local_ocr_enabled")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["model_used"] == settings.model_name
+        mock_scan.assert_not_called()
+        mock_vlm.assert_called_once()
