@@ -9,6 +9,24 @@ const DEV_PASSWORD = "dev-password-123";
 const PIPELINE_TIMEOUT = 300_000;
 
 async function signIn(page: import("@playwright/test").Page) {
+  // Retry login up to 3 times — rate limiting or transient errors can cause
+  // 401/429 on preview deploys with many sequential tests.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.goto("/login");
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+    await page.click("button.login-form__submit");
+    try {
+      await page.waitForURL("/", { timeout: 15_000 });
+      return; // success
+    } catch {
+      if (attempt < 3) {
+        // Wait for rate limit window to clear before retrying
+        await page.waitForTimeout(10_000);
+      }
+    }
+  }
+  // Final attempt without catch — let it throw on failure
   await page.goto("/login");
   await page.fill('input[id="email"]', DEV_EMAIL);
   await page.fill('input[id="password"]', DEV_PASSWORD);
