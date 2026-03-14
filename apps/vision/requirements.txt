@@ -6,3 +6,5 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 structlog==24.4.0
 modal>=0.73.0
+pyzbar>=0.1.9
+Pillow>=10.0.0
