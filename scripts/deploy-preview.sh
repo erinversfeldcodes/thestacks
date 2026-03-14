@@ -221,6 +221,7 @@ fly secrets set \
     CLOAK_KEY="${CLOAK_KEY:-}" \
     VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
     PHX_HOST="${CORE_APP}.fly.dev" \
+    RATE_LIMIT_AUTH="60" \
     ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
     --app "${CORE_APP}" --stage
 

@@ -10,6 +10,7 @@ from app.config import settings
 from app.models.classification import Classification, ClassificationRequest, ClassificationResponse
 from app.models.extraction import ExtractedBook, ExtractionRequest, ExtractionResponse
 from app.services.hmac_auth import verify_hmac
+from app.services.local_ocr import local_isbn_scan
 from app.services.vision_client import VisionClient
 
 structlog.configure(
@@ -56,6 +57,22 @@ async def extract(request: Request, body: ExtractionRequest) -> ExtractionRespon
             raise HTTPException(
                 status_code=422,
                 detail=f"Image at index {idx} exceeds max size of {settings.max_image_size_bytes} bytes",  # noqa: E501
+            )
+
+    # Local OCR pre-pass: attempt barcode decode before calling VLM.
+    if settings.local_ocr_enabled:
+        first_decoded = base64.b64decode(body.images[0], validate=True)
+        isbn = local_isbn_scan(first_decoded)
+        if isbn is not None:
+            log.info("local OCR pre-pass hit", isbn=isbn)
+            return ExtractionResponse(
+                books=[
+                    ExtractedBook(
+                        potential_isbns=[isbn],
+                        confidence=1.0,
+                    )
+                ],
+                model_used="local_ocr",
             )
 
     client: VisionClient = request.app.state.vision_client
