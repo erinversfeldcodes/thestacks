@@ -151,7 +151,7 @@ success "MCP server virtualenv ready at scripts/mcp/.venv"
 # ── 7. Pip-based global CLI tools ─────────────────────────────────────────────
 # These run outside the vision venv — they're dev toolchain tools used by
 # scripts/ and CI, not runtime app dependencies.
-step "Global pip tools (dbt-postgres, sqlfluff, checkov, jwt_tool)"
+step "Global pip tools (dbt-postgres, sqlfluff, checkov, dbt-checkpoint, jwt_tool)"
 
 # Use the mise-managed pip, falling back to pip3
 PIP_BIN="$(mise which pip 2>/dev/null || command -v pip3 || command -v pip)"
@@ -171,6 +171,7 @@ install_pip_tool "dbt-postgres" "dbt"
 install_pip_tool "sqlfluff" "sqlfluff"
 install_pip_tool "sqlfluff-templater-dbt" "sqlfluff"   # no separate binary — installed alongside
 install_pip_tool "checkov" "checkov"
+install_pip_tool "dbt-checkpoint" "dbt-checkpoint"
 
 # jwt_tool has no Python package — clone the repo and create a wrapper script.
 JWT_TOOL_DIR="$HOME/.local/share/jwt_tool"
@@ -291,8 +292,13 @@ command -v semgrep  &>/dev/null || MISSING+=("semgrep (brew install semgrep)")
 command -v checkov  &>/dev/null || MISSING+=("checkov (pip install checkov)")
 command -v trivy    &>/dev/null || MISSING+=("trivy (brew install trivy)")
 command -v gitleaks &>/dev/null || MISSING+=("gitleaks (brew install gitleaks)")
-command -v nuclei   &>/dev/null || MISSING+=("nuclei (brew install nuclei)")
-command -v jwt_tool &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
+command -v nuclei         &>/dev/null || MISSING+=("nuclei (brew install nuclei)")
+command -v trufflehog     &>/dev/null || MISSING+=("trufflehog (brew install trufflehog)")
+command -v syft           &>/dev/null || MISSING+=("syft (brew install syft)")
+command -v grype          &>/dev/null || MISSING+=("grype (brew install grype)")
+command -v dockle         &>/dev/null || MISSING+=("dockle (brew install goodwithtech/r/dockle)")
+command -v dbt-checkpoint &>/dev/null || MISSING+=("dbt-checkpoint (pip install dbt-checkpoint)")
+command -v jwt_tool       &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo -e "  ${YELLOW}${BOLD}Optional tools not found (install manually):${RESET}"
