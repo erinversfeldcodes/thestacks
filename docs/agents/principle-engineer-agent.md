@@ -47,7 +47,7 @@ Ask questions that reveal systemic issues:
 - "Are dbt models in wh schema properly anonymised?"
 
 **Resilience:**
-- "What's the blast radius if Fly Postgres has a 30-minute outage?"
+- "What's the blast radius if Neon PostgreSQL has a 30-minute outage?"
 - "Can the system serve cached data during a full database outage?"
 - "What happens to in-flight Oban jobs during a deployment?"
 
