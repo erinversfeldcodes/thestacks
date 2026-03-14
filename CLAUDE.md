@@ -58,6 +58,7 @@ A local MCP server (`scripts/mcp/project_tools.py`) is registered in `.mcp.json`
 | `mcp__project-tools__get_plan_status(issue_number)` | Reading `plans/NNN-*.md` directly |
 | `mcp__project-tools__get_agent(name)` | Reading `docs/agents/*.md` to construct subagent prompts |
 | `mcp__project-tools__create_issue(title, summary, ...)` | Copying `issues/TEMPLATE.md` and filling it in manually |
+| `mcp__project-tools__run_e2e_gate(issue_number)` | Manually running `scripts/deploy-preview.sh` and parsing output |
 
 Setup after a fresh clone: `python3 -m venv scripts/mcp/.venv && scripts/mcp/.venv/bin/pip install -r scripts/mcp/requirements.txt`
 
