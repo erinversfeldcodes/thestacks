@@ -163,19 +163,98 @@ defmodule Stacks.Books do
   end
 
   @doc """
+  Returns a paginated list of all books with optional search, subject filter,
+  and sort order. No ownership data is included — this powers the public
+  catalogue endpoint.
+
+  ## Options
+
+    * `:search` — free-text search against `title_tsv` (optional)
+    * `:subject` — filter to books containing this subject (optional)
+    * `:sort` — one of `"title"`, `"author"`, `"recent"` (default `"title"`)
+    * `:page` — 1-based page number (default 1)
+    * `:per_page` — items per page (default 24, max 100)
+
+  Returns `{books, total_count}`.
+  """
+  @spec list_catalogue(keyword()) :: {[Book.t()], non_neg_integer()}
+  def list_catalogue(opts \\ []) do
+    search = Keyword.get(opts, :search)
+    subject = Keyword.get(opts, :subject)
+    sort = Keyword.get(opts, :sort, "title")
+    page = max(Keyword.get(opts, :page, 1), 1)
+    per_page = min(max(Keyword.get(opts, :per_page, 24), 1), 100)
+    offset = (page - 1) * per_page
+
+    base =
+      Book
+      |> preload(:author)
+
+    filtered =
+      base
+      |> maybe_search(search)
+      |> maybe_filter_subject(subject)
+
+    total = Repo.aggregate(filtered, :count)
+
+    books =
+      filtered
+      |> apply_sort(sort)
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+
+    {books, total}
+  end
+
+  defp maybe_search(query, nil), do: query
+  defp maybe_search(query, ""), do: query
+
+  defp maybe_search(query, search) do
+    safe_query = String.replace(search, ~r/[^\w\s]/, "")
+
+    where(
+      query,
+      [b],
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^safe_query)
+    )
+  end
+
+  defp maybe_filter_subject(query, nil), do: query
+  defp maybe_filter_subject(query, ""), do: query
+
+  defp maybe_filter_subject(query, subject) do
+    where(query, [b], ^subject in b.subjects)
+  end
+
+  defp apply_sort(query, "author") do
+    query
+    |> join(:left, [b], a in assoc(b, :author), as: :author_sort)
+    |> order_by([b, author_sort: a], asc_nulls_last: a.name, asc: b.title)
+  end
+
+  defp apply_sort(query, "recent") do
+    order_by(query, [b], desc: b.created_at)
+  end
+
+  defp apply_sort(query, _title) do
+    order_by(query, [b], asc: b.title)
+  end
+
+  @doc """
   Full-text search on book titles using the stored `title_tsv` tsvector column.
   Returns up to `limit` results (default 20).
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
-    safe_query = String.replace(query, ~r/[^\w\s]/, "") <> ":*"
+    safe_query = String.replace(query, ~r/[^\w\s]/, "")
 
     Book
     |> where(
       [b],
       fragment(
-        "title_tsv @@ to_tsquery('english', ?)",
+        "title_tsv @@ plainto_tsquery('english', ?)",
         ^safe_query
       )
     )

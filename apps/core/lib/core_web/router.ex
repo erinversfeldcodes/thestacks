@@ -53,6 +53,8 @@ defmodule CoreWeb.Router do
 
     get "/search", SearchController, :index
 
+    get "/catalogue", CatalogueController, :index
+
     get "/bookshelves/:bookshelf_name", BookshelfController, :show
 
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
