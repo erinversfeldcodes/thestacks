@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.3
-> **Last updated:** 2026-03-13
+> **Version:** 1.4
+> **Last updated:** 2026-03-14
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -57,7 +57,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 | Service | Purpose |
 |---------|---------|
 | **Fly.io** | Primary hosting. Deployed to the IAD (Ashburn, Virginia) region. Excellent Elixir support. Deploys the Phoenix core app and Rust scraper as Fly Machines. The Python vision service runs on Modal (not Fly). |
-| **Fly Postgres** | Managed PostgreSQL for the operational database. |
+| **Neon** | Serverless PostgreSQL for the operational database. Connection string requires `?sslmode=require`. |
 | **Nix / Flox** | Development environment. `flake.nix` is the single source of truth for reproducible builds. Contributors run `nix develop` for an identical setup. |
 | **Docker** | Container builds for Fly.io deployment. |
 
@@ -153,8 +153,9 @@ thestacks/
 ├── apps/
 │   ├── core/              # Elixir Phoenix umbrella app
 │   │   ├── lib/
-│   │   │   ├── core/      # Domain logic, contexts
-│   │   │   └── core_web/  # Phoenix controllers, channels, views
+│   │   │   ├── stacks/      # Domain logic, contexts (Stacks.*)
+│   │   │   ├── stacks_web/  # API controllers (StacksWeb.*)
+│   │   │   └── core_web/    # Health check, error views (CoreWeb.*)
 │   │   ├── priv/
 │   │   │   └── repo/
 │   │   │       └── migrations/
@@ -174,9 +175,13 @@ thestacks/
 ├── frontend/              # Elm app
 │   ├── src/
 │   │   ├── Main.elm
-│   │   ├── Shelf.elm
-│   │   ├── Book.elm
-│   │   └── ...
+│   │   ├── Api.elm
+│   │   ├── Page/           # Bookshelf/, BookDetail, Upload, Search, Login, Settings/
+│   │   ├── Components/     # Spine, ISBNInput, FilterPanel, FormatPicker, etc.
+│   │   ├── Types/          # Book, Placement, RemoteData, User
+│   │   ├── Navigation/     # Route, SwipeNavigation
+│   │   ├── Animation/      # RoomTransition, SlideTransition
+│   │   └── Theme/
 │   ├── elm.json
 │   └── index.html
 ├── scrapers/              # TOML configs per country
@@ -216,7 +221,10 @@ thestacks/
 │   └── technical-architecture.md
 └── deploy/                # Fly.io configs, Dockerfiles
     ├── fly.core.toml
-    └── fly.scraper.toml
+    ├── fly.scraper.toml
+    ├── Dockerfile.core
+    ├── Dockerfile.vision
+    └── Dockerfile.scraper
 ```
 
 ---
@@ -288,7 +296,7 @@ GenServer-based sliding window rate limiter, inspired by Fliekflow's multi-tier 
 
 | Endpoint | Limit | Rationale |
 |----------|-------|-----------|
-| `POST /api/books` (image upload) | 10/min | Expensive — triggers vision model |
+| `POST /api/upload` (image upload) | 10/min | Expensive — triggers vision model |
 | `POST /api/auth/login` | 5/min | Brute-force prevention |
 | `GET /api/metrics` | 60/min | Public but cacheable |
 | `GET /feed/*` | 60/min | RSS readers can be aggressive |
@@ -356,7 +364,7 @@ Automated in CI (see [CI/CD Pipeline](#cicd-pipeline)):
 
 | Measure | Implementation |
 |---------|---------------|
-| **Separate DB roles** | `stacks_app` (read/write on `op` schema), `stacks_dbt` (read on `op`, write on `wh`), `stacks_audit` (append-only on `audit` schema) |
+| **Separate DB roles** | `stacks_app` (CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`), `stacks_dbt` (SELECT on `op` + `audit`, CRUD on `wh`), `stacks_readonly` (SELECT on `op` + `wh`) |
 | **Connection pooling** | Ecto via `DBConnection` pool. Connection string uses SSL (`sslmode=require`). |
 | **Row-level security** | Not needed for single-user. Add RLS policies when multi-user launches — each user sees only their shelves. |
 | **Parameterised queries** | Ecto enforces parameterised queries by default. No raw SQL interpolation. |
@@ -408,7 +416,7 @@ The Stacks uses AI in three places: vision model (book identification), LLM (rev
 Inspired by Fliekflow's `RunwayMLUsageTracker` pattern:
 
 ```elixir
-defmodule TheStacks.AI.BudgetTracker do
+defmodule Stacks.AI.BudgetTracker do
   use GenServer
 
   # Configurable per provider
@@ -682,9 +690,9 @@ The user account. Single-user initially, multi-user ready.
 ### Entity Relationship Overview
 
 ```
-users 1──* shelves 1──* shelf_placements *──1 books *──1 authors
-      │                    │    │                │          │
-      │          shelf_placement_history          │          │
+users 1──* bookshelves 1──* bookshelf_placements *──1 books *──1 authors
+      │                         │    │                │          │
+      │          bookshelf_placement_history          │          │
       │                         │                │          │
       │              ┌──────────┘     review_snapshots      │
       │              │                price_snapshots──*bookstores
@@ -700,7 +708,7 @@ users 1──* shelves 1──* shelf_placements *──1 books *──1 authors
       │
       1──* user_blocks
       │
-      └──* visibility_grants (polymorphic — shelves, placements, posts)
+      └──* visibility_grants (polymorphic — bookshelves, placements, posts)
 
 partners 1──* partner_inventory *──? books (via ISBN)
          1──* partner_events
@@ -740,7 +748,7 @@ The core entity. ISBN is the hard gate — no book without one.
 
 **Notes:**
 - `page_count`, `publisher`, `publication_year`, `language` are fetched during ISBN enrichment from Open Library / Google Books.
-- `read_count` is intentionally NOT stored — it's derived from `shelf_placement_history` (count of `to_shelf = 'reading_pile'` transitions). No denormalised counter.
+- `read_count` is intentionally NOT stored — it's derived from `bookshelf_placement_history` (count of `to_bookshelf` transitions to the reading pile bookshelf). No denormalised counter.
 - `bisac_codes` are derived from `subjects` during the content moderation pipeline, stored for fast age-gate checks.
 
 ### `authors`
@@ -754,58 +762,58 @@ The core entity. ISBN is the hard gate — no book without one.
 | `open_library_id` | `TEXT` | |
 | `bio` | `TEXT` | |
 
-### `shelves`
+### `bookshelves`
 
-A user has exactly five shelves, named by the fixed enum.
+A user has exactly five bookshelves, named by the fixed enum. Ecto schema: `Stacks.Shelving.Bookshelf`, table: `op.bookshelves`.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `user_id` | `UUID` | Foreign key to `users` |
 | `name` | `ENUM('antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home')` | |
-| `visibility` | `ENUM('owner', 'group', 'platform')` | Default `'owner'` for all shelves except `looking_for_home` which defaults to `'platform'`. Ceiling: cannot exceed `users.profile_visibility`. |
+| `visibility` | `ENUM('owner', 'group', 'platform')` | Default `'owner'` for all bookshelves except `looking_for_home` which defaults to `'platform'`. Ceiling: cannot exceed `users.profile_visibility`. |
 | `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when `visibility = 'group'`. |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
 **Notes:**
 - `looking_for_home` defaults to `'platform'` visibility but this default only activates when the user's profile is also set to `'platform'`. If profile is `'owner'`, the ceiling applies.
-- Individual user allowlists/denylists for shelves are managed via `visibility_grants` and `user_blocks` rather than on this table.
+- Individual user allowlists/denylists for bookshelves are managed via `visibility_grants` and `user_blocks` rather than on this table.
 
-### `shelf_placements`
+### `bookshelf_placements`
 
-A book's placement on a shelf, with metadata. Soft-delete via `removed_at` preserves history.
+A book's placement on a bookshelf, with metadata. Soft-delete via `removed_at` preserves history. Ecto schema: `Stacks.Shelving.Placement`, table: `op.bookshelf_placements`.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `book_id` | `UUID` | Foreign key to `books` |
-| `shelf_id` | `UUID` | Foreign key to `shelves` |
+| `bookshelf_id` | `UUID` | Foreign key to `bookshelves` |
 | `position` | `INTEGER` | Order on shelf |
 | `placed_at` | `TIMESTAMPTZ` | |
 | `removed_at` | `TIMESTAMPTZ` | `NULL` — soft remove for history |
 | `formats` | `TEXT[]` | e.g. `['hardcover', 'kindle', 'audiobook']` |
 | `personal_rating` | `INTEGER` | `NULL` — optional |
 | `notes` | `TEXT` | `NULL`, encrypted (Tier 2) |
-| `visibility` | `ENUM('owner', 'group', 'platform')` | `NULL` — inherits shelf visibility when NULL. Can only be equal to or more restrictive than the shelf's visibility. |
+| `visibility` | `ENUM('owner', 'group', 'platform')` | `NULL` — inherits bookshelf visibility when NULL. Can only be equal to or more restrictive than the bookshelf's visibility. |
 | `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when placement `visibility = 'group'`. |
 | `listing_mode` | `ENUM('open', 'offers', 'closed_bid')` | `NULL` — only set for `looking_for_home` placements. |
 | `listing_status` | `ENUM('active', 'pending', 'sold')` | `NULL` — only set for `looking_for_home` placements. |
 | `listing_price_cents` | `INTEGER` | `NULL` — fixed price in smallest currency unit. |
 | `listing_min_price_cents` | `INTEGER` | `NULL` — minimum acceptable offer for `offers` mode. |
 
-**Unique constraint:** `UNIQUE(book_id, shelf_id, removed_at)` — a book can only be on a shelf once at a time, but can be re-added after removal.
+**Unique constraint:** `UNIQUE(book_id, bookshelf_id, removed_at)` — a book can only be on a bookshelf once at a time, but can be re-added after removal.
 
-### `shelf_placement_history`
+### `bookshelf_placement_history`
 
-Tracks every shelf transition for reading journey analytics.
+Tracks every bookshelf transition for reading journey analytics. Ecto schema: `Stacks.Shelving.PlacementHistory`, table: `op.bookshelf_placement_history`.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `book_id` | `UUID` | Foreign key to `books` |
-| `from_shelf` | `UUID` | Foreign key to `shelves`, `NULL` = newly added |
-| `to_shelf` | `UUID` | Foreign key to `shelves`, `NULL` = removed |
+| `book_id` | `UUID` | Foreign key to `books` (stored as plain UUID, not FK) |
+| `from_bookshelf` | `UUID` | Bookshelf UUID, `NULL` = newly added (stored as plain UUID, not FK) |
+| `to_bookshelf` | `UUID` | Bookshelf UUID, `NULL` = removed (stored as plain UUID, not FK) |
 | `moved_at` | `TIMESTAMPTZ` | |
 
 ### `review_snapshots`
@@ -995,7 +1003,7 @@ Per-resource individual access grants. Used when visibility is set to "specific 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `resource_type` | `TEXT` | `NOT NULL` — e.g. `'shelf'`, `'blog_post'`, `'shelf_placement'` |
+| `resource_type` | `TEXT` | `NOT NULL` — e.g. `'bookshelf'`, `'blog_post'`, `'bookshelf_placement'` |
 | `resource_id` | `UUID` | `NOT NULL` |
 | `granted_to` | `UUID` | Foreign key to `users` |
 | `granted_by` | `UUID` | Foreign key to `users` |
@@ -1071,7 +1079,7 @@ Private negotiation threads on marketplace listings. One thread per buyer-listin
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `placement_id` | `UUID` | Foreign key to `shelf_placements` (the listing) |
+| `placement_id` | `UUID` | Foreign key to `bookshelf_placements` (the listing) |
 | `buyer_id` | `UUID` | Foreign key to `users` |
 | `status` | `ENUM('open', 'accepted', 'declined', 'expired')` | Default `'open'` |
 | `created_at` | `TIMESTAMPTZ` | |
@@ -1099,19 +1107,18 @@ Individual messages within an offer thread. Includes both conversational message
 
 ### `uploaded_images`
 
-Tracks the lifecycle of user-uploaded book photos. The image bytes themselves are stored in Cloudflare R2 and purged after 30 days. This table holds only the metadata needed to manage that lifecycle — it never contains image bytes.
+Tracks the lifecycle of user-uploaded book photos. Ecto schema: `Stacks.Books.UploadedImage`, table: `op.uploaded_images`.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `book_id` | `UUID` | Foreign key to `books`, `NULL` until resolved |
 | `book_ids` | `UUID[]` | All books identified (resolved images may match >1 spine) |
-| `storage_key` | `TEXT` | R2 object key — `uploads/{id}` |
-| `status` | `ENUM('pending', 'resolved', 'rejected', 'purged')` | |
+| `storage_path` | `TEXT` | `NULL` — storage path (nullable; image bytes may be held in Oban job args rather than persisted to storage) |
+| `status` | `ENUM('pending', 'resolved', 'rejected')` | |
 | `rejection_reason` | `TEXT` | `NULL` |
 | `uploaded_at` | `TIMESTAMPTZ` | |
-| `purge_at` | `TIMESTAMPTZ` | R2 object will be deleted at this time (30 days from upload) |
-| `purged_at` | `TIMESTAMPTZ` | Set when the R2 object is actually deleted — `NULL` until then |
+| `expires_at` | `TIMESTAMPTZ` | When the image data should be cleaned up (30 days from upload) |
 
 ### `audit_log`
 
@@ -1244,7 +1251,7 @@ Persistent event store for the internal event bus. All significant state changes
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `event_type` | `TEXT` | `NOT NULL` — e.g. `'book.created'`, `'inventory.updated'`, `'shelf.moved'` |
-| `aggregate_type` | `TEXT` | `NOT NULL` — e.g. `'book'`, `'partner'`, `'shelf_placement'` |
+| `aggregate_type` | `TEXT` | `NOT NULL` — e.g. `'book'`, `'partner'`, `'bookshelf_placement'` |
 | `aggregate_id` | `UUID` | `NOT NULL` — the entity this event concerns |
 | `schema_version` | `INTEGER` | `NOT NULL`, default `1` — for event upcasting |
 | `payload` | `JSONB` | `NOT NULL` — the event data, validated against Protobuf-generated schema |
@@ -1331,30 +1338,28 @@ Completed purchases (fixed price or accepted offer).
 
 User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds or the 30-day TTL expires, the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
 
-The upload pipeline:
+**Current implementation:** Image bytes are base64-encoded and stored in Oban job args (in PostgreSQL). The `IdentifyBookJob` worker sends the base64 image directly to the Modal vision service over HMAC-authenticated HTTPS. No external object storage is used for uploads in the current phase.
+
+The upload pipeline (current):
 
 ```
 User uploads photo (multipart/form-data)
   → Phoenix writes to Plug temp file (OS temp dir, process-scoped)
   → Books.store_upload/2:
-      ├── PUT image bytes to Cloudflare R2 (key: uploads/{image_id})
-      ├── Insert op.uploaded_images (storage_key, status=pending, purge_at=+30d)
-      └── Emit image.submitted event {storage_key, purge_at}
-  → IdentifyBookJob enqueued with {user_id, image_id, storage_key}
+      ├── Read temp file, base64-encode bytes
+      ├── Insert op.uploaded_images (status=pending, expires_at=+30d)
+      └── Emit image.submitted event
+  → IdentifyBookJob enqueued with {user_id, image_id, image_b64}
   → Plug temp file discarded
-  → At job execution: worker generates short-lived presigned GET URL from storage_key
-  → POST to Modal vision service: {image_url: presigned_url}
-      — image bytes never transit Fly.io machines
-  → Modal fetches image directly from R2 via presigned URL
+  → At job execution: worker sends base64 image to Modal vision service
   → Modal: classify → extract books → return titles/authors/ISBNs
   → ISBN resolved via Open Library / Google Books
   → uploaded_images updated: status = resolved, book_id(s) set
-  → Emit image.resolved event {storage_key, purge_at, book_count}
-  → Retention job (daily):
-      ├── DELETE from R2
-      ├── Set uploaded_images.purged_at
-      └── Emit image.purged event {storage_key, reason}
+  → Emit image.resolved event
+  → Retention job (daily): cleanup expired images
 ```
+
+**Planned future architecture:** When image volume grows, migrate to Cloudflare R2 with presigned URLs. The worker would generate a short-lived GET URL and pass it to Modal, avoiding transit of image bytes through Fly.io machines. See below for the R2 storage design.
 
 **Why the presigned URL approach, not embedding bytes:**
 
@@ -1466,7 +1471,7 @@ Application-level encryption for Tier 3 uses key management via **age** (the enc
 | Right | Implementation |
 |-------|---------------|
 | **Right to access** | Export endpoint dumps all user data as JSON/CSV |
-| **Right to erasure** | Cascade delete: user -> all shelves, notes, images. Anonymise warehouse records. |
+| **Right to erasure** | Cascade delete: user -> all bookshelves, notes, images. Anonymise warehouse records. |
 | **Right to portability** | Export in JSON, CSV, and potentially OPDS catalog format |
 | **Data minimisation** | Store only `age_verified` boolean, not KYC documents |
 | **Consent** | Track consent per data use with timestamps |
@@ -1644,7 +1649,7 @@ The frontend uses a hybrid rendering strategy:
 
 | Route Pattern | Renderer | Rationale |
 |--------------|----------|-----------|
-| `/public/shelf/:name` | Phoenix server-rendered HTML | SEO — public shelves should be indexable |
+| `/public/bookshelf/:name` | Phoenix server-rendered HTML | SEO — public bookshelves should be indexable |
 | `/public/book/:isbn` | Phoenix server-rendered HTML | SEO — book pages should be indexable |
 | `/metrics` | Phoenix server-rendered HTML | Public transparency page |
 | All interactive routes | Elm SPA | Complex UI state: shelf rendering, animations, spine interactions, upload flow, book detail |
@@ -1855,7 +1860,7 @@ just deploy-dev
 #   stacks-core-dev-<username>.fly.dev
 #   stacks-vision-dev-<username>.fly.dev
 #   stacks-scraper-dev-<username>.fly.dev
-#   + a Fly Postgres dev instance
+#   + a Neon PostgreSQL dev instance
 
 # Run tests against it
 TEST_TARGET=remote \
@@ -1868,7 +1873,7 @@ just teardown-dev
 ```
 
 **What's different from local:**
-- Real PostgreSQL (Fly Postgres), not a Docker container
+- Real PostgreSQL (Neon PostgreSQL), not a Docker container
 - Real network between services (Fly private networking)
 - Real TLS certificates
 - Real image storage (R2)
@@ -2339,8 +2344,8 @@ describe "the reading journey" do
     # Full history preserved
     history = Repo.all(ShelfPlacementHistory) |> Enum.sort_by(& &1.moved_at)
     assert length(history) == 4
-    shelves = Enum.map(history, & &1.to_shelf.name)
-    assert shelves == [:wishlist, :antilibrary, :reading_pile, :library]
+    bookshelves = Enum.map(history, & &1.to_bookshelf)
+    assert bookshelves == [:wishlist, :antilibrary, :reading_pile, :library]
   end
 
   test "abandon a book: Reading Pile → AntiLibrary with note" do
@@ -3152,7 +3157,7 @@ defmodule TheStacks.Resilience.BudgetExhaustedTest do
 
   test "jobs snooze when AI budget is exceeded" do
     # Set budget to nearly exhausted
-    TheStacks.AI.BudgetTracker.set_daily_spend(490)  # of 500 limit
+    Stacks.AI.BudgetTracker.set_daily_spend(490)  # of 500 limit
 
     # First call succeeds (still under budget)
     expect(MockVision, :identify_book, fn _img ->
@@ -3259,7 +3264,7 @@ export function browseShelves() {
   const shelves = ['library', 'antilibrary', 'wishlist', 'reading_pile'];
   const shelf = shelves[Math.floor(Math.random() * shelves.length)];
 
-  const res = http.get(`${__ENV.BASE_URL}/api/shelves/${shelf}`, {
+  const res = http.get(`${__ENV.BASE_URL}/api/bookshelves/${shelf}`, {
     headers: { Authorization: `Bearer ${__ENV.TOKEN}` },
   });
 
@@ -3597,8 +3602,8 @@ suiteNavigation =
                     |> expectViewHas [ text "Library" ]
                     |> clickButton "AntiLibrary"
                     -- Shelf data is fetched
-                    |> ProgramTest.expectHttpRequestWasMade "GET" "/api/shelves/antilibrary"
-                    |> simulateHttpOk "GET" "/api/shelves/antilibrary" antilibraryFixture
+                    |> ProgramTest.expectHttpRequestWasMade "GET" "/api/bookshelves/antilibrary"
+                    |> simulateHttpOk "GET" "/api/bookshelves/antilibrary" antilibraryFixture
                     -- Correct shelf is now displayed
                     |> expectViewHas [ text "AntiLibrary" ]
                     |> expectViewHasNot [ text "Library" ]
@@ -3608,7 +3613,7 @@ suiteNavigation =
             \_ ->
                 startOnShelf "library"
                     |> clickButton "Reading Pile"
-                    |> simulateHttpOk "GET" "/api/shelves/reading_pile" readingPileFixture
+                    |> simulateHttpOk "GET" "/api/bookshelves/reading_pile" readingPileFixture
                     -- Reading pile uses a different layout
                     |> expectViewHas [ attribute "data-testid" "reading-pile" ]
                     |> expectViewHasNot [ attribute "data-testid" "bookshelf" ]
@@ -3673,7 +3678,7 @@ suiteRSS =
         [ test "RSS feed link is visible on public shelf" <|
             \_ ->
                 startOnShelf "library"
-                    |> simulateHttpOk "GET" "/api/shelves/library" libraryFixture
+                    |> simulateHttpOk "GET" "/api/bookshelves/library" libraryFixture
                     |> expectViewHas
                         [ tag "a"
                         , attribute "href" "/feed/library.xml"
@@ -3710,7 +3715,7 @@ suiteErrorHandling =
         [ test "API timeout shows friendly message, not blank screen" <|
             \_ ->
                 startOnShelf "library"
-                    |> ProgramTest.simulateHttpResponse "GET" "/api/shelves/library"
+                    |> ProgramTest.simulateHttpResponse "GET" "/api/bookshelves/library"
                         (ProgramTest.httpResponse 503
                             (Encode.object
                                 [ ( "error", Encode.string "service_temporarily_unavailable" )
@@ -3725,7 +3730,7 @@ suiteErrorHandling =
         , test "network error shows offline message" <|
             \_ ->
                 startOnShelf "library"
-                    |> ProgramTest.simulateHttpResponse "GET" "/api/shelves/library"
+                    |> ProgramTest.simulateHttpResponse "GET" "/api/bookshelves/library"
                         ProgramTest.networkError
                     |> expectViewHas [ text "network" ]
                     |> expectViewHas [ text "Retry" ]
@@ -4137,7 +4142,7 @@ defmodule TheStacks.Security.APISecurityTest do
         {:get, "/api/books"},
         {:post, "/api/books"},
         {:put, "/api/books/fake-id/shelf"},
-        {:get, "/api/shelves/library"},
+        {:get, "/api/bookshelves/library"},
         {:delete, "/api/account"},
       ]
 
@@ -4186,7 +4191,7 @@ defmodule TheStacks.Security.APISecurityTest do
       other_user = insert(:user)
       other_shelf = insert(:shelf, user: other_user, name: :library)
 
-      conn = authed_conn() |> get("/api/shelves/#{other_shelf.id}")
+      conn = authed_conn() |> get("/api/bookshelves/#{other_shelf.id}")
       assert conn.status == 403
     end
   end
@@ -4581,13 +4586,13 @@ The native resolver approach is the most targeted fix: it only changes name reso
 
 ```
 Application
-  ├── TheStacks.Repo (Ecto / PostgreSQL)
-  ├── TheStacks.Endpoint (Phoenix HTTP)
-  ├── TheStacks.Oban (job processing)
-  ├── TheStacks.AI.BudgetTracker (GenServer — cost tracking)
-  ├── TheStacks.RateLimiter (GenServer — request rate limiting)
-  ├── TheStacks.SecurityMonitor (GenServer — threat detection)
-  └── TheStacks.Telemetry (metrics emission)
+  ├── Stacks.Repo (Ecto / PostgreSQL)
+  ├── CoreWeb.Endpoint (Phoenix HTTP)
+  ├── Oban (job processing)
+  ├── Stacks.AI.BudgetTracker (GenServer — cost tracking)
+  ├── StacksWeb.Plugs.RateLimiter (GenServer — request rate limiting)
+  ├── Stacks.SecurityMonitor (GenServer — threat detection)
+  └── Core.Telemetry (metrics emission)
 ```
 
 **Restart strategy:** `one_for_one` at the top level. If `BudgetTracker` crashes, it restarts without affecting `Repo` or `Oban`. GenServers that hold ephemeral state (RateLimiter, BudgetTracker) rebuild from Postgres on restart.
@@ -4652,7 +4657,7 @@ The system should function with reduced capability when components fail:
 
 | Layer | Mechanism | Frequency | Retention |
 |-------|-----------|-----------|-----------|
-| **Fly Postgres** | Automatic WAL-based snapshots | Continuous (point-in-time recovery) | 7 days |
+| **Neon PostgreSQL** | Automatic WAL-based snapshots | Continuous (point-in-time recovery) | 7 days |
 | **Application backup** | Oban-scheduled `pg_dump` to R2 | Daily at 02:00 UTC | 30 days |
 | **Image storage** | R2 built-in durability (11 nines) | N/A | N/A |
 | **Scraper configs** | Git repository | Every commit | Forever |
@@ -4668,7 +4673,7 @@ The system should function with reduced capability when components fail:
 ### Restore Procedure
 
 ```
-1. Provision new Fly Postgres instance
+1. Provision new Neon PostgreSQL instance
 2. Restore from latest pg_dump (or Fly PiTR snapshot)
    $ flyctl postgres restore --app stacks-db --source <snapshot_id>
 3. Deploy Phoenix app (pulls latest image)
