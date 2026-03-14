@@ -6,6 +6,7 @@
 tap "bufbuild/buf"           # buf (protobuf toolchain)
 tap "oven-sh/bun"            # bun (optional JS runtime, not required)
 tap "superfly/tap"           # flyctl
+tap "goodwithtech/r"         # dockle
 
 # ── Runtime version manager ───────────────────────────────────────────────────
 # mise manages Elixir, Erlang, Node, Python, and Rust at the exact versions
@@ -36,6 +37,10 @@ brew "hadolint"
 brew "nuclei"
 brew "semgrep"
 brew "trivy"
+brew "trufflehog"
+brew "syft"
+brew "grype"
+brew "goodwithtech/r/dockle"
 # checkov installed via pip (see setup.sh); jwt_tool cloned from GitHub (not on PyPI)
 
 # ── Misc dev tools ────────────────────────────────────────────────────────────
