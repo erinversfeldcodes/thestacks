@@ -61,7 +61,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
     end
   end
 
-  defp get_limit(:auth), do: @auth_limit
+  defp get_limit(:auth), do: Application.get_env(:core, :rate_limit_auth, @auth_limit)
   defp get_limit(:upload), do: @upload_limit
   defp get_limit(_), do: @global_limit
 

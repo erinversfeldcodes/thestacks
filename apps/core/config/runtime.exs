@@ -22,6 +22,10 @@ end
 
 config :core, :vision_hmac_secret, vision_hmac_secret
 
+if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
+  config :core, :rate_limit_auth, String.to_integer(auth_limit)
+end
+
 if config_env() == :prod do
   vision_service_url =
     System.get_env("VISION_SERVICE_URL") ||
