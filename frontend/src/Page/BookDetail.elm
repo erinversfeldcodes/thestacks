@@ -12,12 +12,12 @@ import Components.AgeGate exposing (ageGate)
 import Components.FormatPicker exposing (formatPicker)
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
-import Html exposing (Html, button, div, h1, h2, h3, img, p, section, text)
-import Html.Attributes exposing (alt, class, src)
+import Html exposing (Html, a, button, div, h1, h2, h3, img, p, section, span, text)
+import Html.Attributes exposing (alt, class, href, src, target)
 import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route exposing (Route)
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, authorName)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -28,11 +28,13 @@ type alias Model =
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
-    , selectedBookshelf : String
+    , selectedBookshelf : String -- DEFERRED: Replace with BookshelfName union type when ShelfMover and Api.moveBook are refactored. See Issue #030 item #6.
     , selectedFormats : List Format
+    , moveState : RemoteData Http.Error ()
     , removeState : RemoteData Http.Error ()
     , previousRoute : Maybe Route
     , showAgeGate : Bool
+    , entryAnimationActive : Bool
     }
 
 
@@ -44,6 +46,7 @@ type OutMsg
 type Msg
     = BookLoaded (Result Http.Error Book)
     | OpenBookshelfMover
+    | CloseBookshelfMover
     | SelectBookshelf String
     | ConfirmMove
     | MoveCompleted (Result Http.Error ())
@@ -55,6 +58,7 @@ type Msg
     | ToggleFormat Format
     | VerifyAge
     | DismissAgeGate
+    | EntryAnimationFinished
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -75,9 +79,11 @@ init bookId maybeToken maybePreviousRoute =
       , formatPickerOpen = False
       , selectedBookshelf = "library"
       , selectedFormats = []
+      , moveState = NotAsked
       , removeState = NotAsked
       , previousRoute = maybePreviousRoute
       , showAgeGate = False
+      , entryAnimationActive = True
       }
     , cmd
     )
@@ -106,13 +112,16 @@ update msg model maybeToken =
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
 
+        CloseBookshelfMover ->
+            ( { model | bookshelfMoverOpen = False }, Cmd.none, NoOut )
+
         SelectBookshelf bookshelf ->
             ( { model | selectedBookshelf = bookshelf }, Cmd.none, NoOut )
 
         ConfirmMove ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
-                    ( { model | bookshelfMoverOpen = False }
+                    ( { model | bookshelfMoverOpen = False, moveState = Loading }
                     , Api.moveBook placement.id model.selectedBookshelf token MoveCompleted
                     , NoOut
                     )
@@ -120,8 +129,13 @@ update msg model maybeToken =
                 _ ->
                     ( model, Cmd.none, NoOut )
 
-        MoveCompleted _ ->
-            ( model, Cmd.none, NoOut )
+        MoveCompleted result ->
+            case result of
+                Ok _ ->
+                    ( { model | moveState = Success () }, Cmd.none, NoOut )
+
+                Err err ->
+                    ( { model | moveState = Failure err }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
             ( { model | removeModalOpen = True }, Cmd.none, NoOut )
@@ -155,6 +169,9 @@ update msg model maybeToken =
             ( { model | formatPickerOpen = not model.formatPickerOpen }, Cmd.none, NoOut )
 
         ToggleFormat format ->
+            -- DEFERRED: Format toggles are display-only for now. Backend persistence
+            -- via PUT /api/placements/:id/formats will be added when the placement
+            -- format API is wired up. See Issue #030 review feedback item #5.
             let
                 newFormats =
                     if List.member format model.selectedFormats then
@@ -165,10 +182,21 @@ update msg model maybeToken =
             in
             ( { model | selectedFormats = newFormats }, Cmd.none, NoOut )
 
+        EntryAnimationFinished ->
+            ( { model | entryAnimationActive = False }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--book-detail" ]
+    let
+        animationClass =
+            if model.entryAnimationActive then
+                " book-detail-enter"
+
+            else
+                ""
+    in
+    div [ class ("page page--book-detail" ++ animationClass) ]
         [ if model.showAgeGate then
             ageGate
                 { onVerify = VerifyAge
@@ -176,7 +204,7 @@ view model =
                 }
 
           else
-            div []
+            div [ class "book-detail__parchment" ]
                 [ case model.book of
                     NotAsked ->
                         text ""
@@ -210,7 +238,21 @@ view model =
 viewBook : Model -> Book -> Html Msg
 viewBook model book =
     div [ class "book-detail" ]
-        [ section [ class "book-detail__hero" ]
+        [ viewHero model book
+        , viewAboutSection book
+        , viewReviewsSection
+        , viewPricesSection
+        , viewAuthorSection book
+        , viewWritingSection
+        , viewShelfActions model
+        , viewDangerZone model
+        ]
+
+
+viewHero : Model -> Book -> Html Msg
+viewHero model book =
+    section [ class "book-detail__hero" ]
+        [ div [ class "book-detail__cover-frame" ]
             [ div [ class "book-detail__cover" ]
                 [ case book.coverImageUrl of
                     Just url ->
@@ -223,87 +265,211 @@ viewBook model book =
 
                     Nothing ->
                         div [ class "book-detail__cover-placeholder" ]
-                            [ text "📖" ]
+                            [ span [ class "book-detail__cover-placeholder-text" ]
+                                [ text (String.left 1 book.title) ]
+                            ]
                 ]
-            , div [ class "book-detail__meta" ]
-                [ h1 [ class "book-detail__title" ] [ text book.title ]
-                , h2 [ class "book-detail__author" ] [ text book.author.name ]
-                , case book.publicationYear of
+            ]
+        , div [ class "book-detail__meta" ]
+            [ h1 [ class "book-detail__title" ] [ text book.title ]
+            , h2 [ class "book-detail__author" ] [ text (authorName book) ]
+            , div [ class "book-detail__meta-details" ]
+                [ case book.publicationYear of
                     Just year ->
-                        p [ class "book-detail__year" ] [ text (String.fromInt year) ]
+                        span [ class "book-detail__meta-item" ]
+                            [ text (String.fromInt year) ]
 
                     Nothing ->
                         text ""
                 , case book.publisher of
                     Just publisher ->
-                        p [ class "book-detail__publisher" ] [ text publisher ]
+                        span [ class "book-detail__meta-item" ]
+                            [ text publisher ]
 
                     Nothing ->
                         text ""
                 , case book.pageCount of
                     Just pages ->
-                        p [ class "book-detail__pages" ]
+                        span [ class "book-detail__meta-item" ]
                             [ text (String.fromInt pages ++ " pages") ]
 
                     Nothing ->
                         text ""
-                , p [ class "book-detail__isbn" ] [ text ("ISBN: " ++ book.isbn) ]
                 ]
+            , p [ class "book-detail__isbn" ] [ text ("ISBN " ++ book.isbn) ]
+            , viewFormats model
             ]
-        , section [ class "book-detail__description" ]
+        ]
+
+
+viewFormats : Model -> Html Msg
+viewFormats model =
+    div [ class "book-detail__formats" ]
+        [ formatPicker
+            { selected = model.selectedFormats
+            , onToggle = ToggleFormat
+            }
+        ]
+
+
+viewAboutSection : Book -> Html Msg
+viewAboutSection book =
+    section [ class "book-detail__section book-detail__about" ]
+        [ h3 [ class "book-detail__section-title" ] [ text "About" ]
+        , div [ class "book-detail__about-body" ]
             [ case book.description of
                 Just desc ->
-                    p [] [ text desc ]
+                    p [ class "book-detail__about-text" ] [ text desc ]
 
                 Nothing ->
-                    text ""
+                    p [ class "book-detail__about-text book-detail__about-text--empty" ]
+                        [ text "No synopsis available yet." ]
             ]
-        , section [ class "book-detail__author-card" ]
-            [ h3 [] [ text "About the Author" ]
-            , p [] [ text book.author.name ]
-            , case book.author.bio of
-                Just bio ->
-                    p [] [ text bio ]
+        ]
 
-                Nothing ->
-                    text ""
+
+viewReviewsSection : Html Msg
+viewReviewsSection =
+    section [ class "book-detail__section book-detail__reviews" ]
+        [ h3 [ class "book-detail__section-title" ] [ text "What People Think" ]
+        , div [ class "book-detail__reviews-grid" ]
+            [ viewReviewSource "GoodReads" "goodreads"
+            , viewReviewSource "Storygraph" "storygraph"
+            , viewReviewSource "Reddit" "reddit"
             ]
-        , section [ class "book-detail__shelf-actions" ]
-            [ button [ class "btn btn--secondary", onClick OpenBookshelfMover ]
-                [ text "Move to Bookshelf" ]
-            , if model.bookshelfMoverOpen then
-                shelfMover
+        ]
+
+
+viewReviewSource : String -> String -> Html Msg
+viewReviewSource sourceName sourceClass =
+    div [ class ("book-detail__review-card book-detail__review-card--" ++ sourceClass) ]
+        [ div [ class "book-detail__review-header" ]
+            [ span [ class "book-detail__review-source" ] [ text sourceName ]
+            ]
+        , div [ class "book-detail__review-body" ]
+            [ p [ class "stub-notice" ] [ text "Sentiment data coming soon" ]
+            ]
+        ]
+
+
+viewPricesSection : Html Msg
+viewPricesSection =
+    section [ class "book-detail__section book-detail__prices" ]
+        [ h3 [ class "book-detail__section-title" ] [ text "Where to Buy (ZAR)" ]
+        , div [ class "book-detail__prices-grid" ]
+            [ p [ class "stub-notice" ]
+                [ text "Bookshop price comparison coming soon" ]
+            ]
+        ]
+
+
+viewAuthorSection : Book -> Html Msg
+viewAuthorSection book =
+    case book.author of
+        Just author ->
+            section [ class "book-detail__section book-detail__author-card" ]
+                [ h3 [ class "book-detail__section-title" ] [ text "The Author" ]
+                , div [ class "book-detail__author-info" ]
+                    [ div [ class "book-detail__author-avatar" ]
+                        [ span [ class "book-detail__author-initial" ]
+                            [ text (String.left 1 author.name) ]
+                        ]
+                    , div [ class "book-detail__author-details" ]
+                        [ p [ class "book-detail__author-name" ] [ text author.name ]
+                        , case author.bio of
+                            Just bio ->
+                                p [ class "book-detail__author-bio" ] [ text bio ]
+
+                            Nothing ->
+                                text ""
+                        ]
+                    ]
+                ]
+
+        Nothing ->
+            text ""
+
+
+viewWritingSection : Html Msg
+viewWritingSection =
+    section [ class "book-detail__section book-detail__writing" ]
+        [ h3 [ class "book-detail__section-title" ] [ text "My Writing" ]
+        , div [ class "book-detail__writing-body" ]
+            [ p [ class "stub-notice" ]
+                [ text "Link your blog posts about this book" ]
+            , button [ class "btn btn--secondary btn--sm" ]
+                [ text "Add Post" ]
+            ]
+        ]
+
+
+viewShelfActions : Model -> Html Msg
+viewShelfActions model =
+    section [ class "book-detail__section book-detail__shelf-actions" ]
+        [ h3 [ class "book-detail__section-title" ] [ text "Move to Shelf" ]
+        , if model.bookshelfMoverOpen then
+            div []
+                [ shelfMover
                     { currentBookshelf = model.selectedBookshelf
                     , selectedBookshelf = model.selectedBookshelf
                     , onSelectBookshelf = SelectBookshelf
                     , onMove = ConfirmMove
                     }
+                , button
+                    [ class "btn btn--ghost btn--sm"
+                    , onClick CloseBookshelfMover
+                    ]
+                    [ text "Cancel" ]
+                ]
 
-              else
-                text ""
-            ]
-        , section [ class "book-detail__formats" ]
-            [ button [ class "btn btn--ghost", onClick ToggleFormatPicker ]
-                [ text "Formats" ]
-            , if model.formatPickerOpen then
-                formatPicker
-                    { selected = model.selectedFormats
-                    , onToggle = ToggleFormat
-                    }
-
-              else
-                text ""
-            ]
-        , section [ class "book-detail__reviews" ]
-            [ h3 [] [ text "Reviews" ]
-            , p [ class "stub-notice" ] [ text "Reviews coming in Phase 2" ]
-            ]
-        , section [ class "book-detail__prices" ]
-            [ h3 [] [ text "Where to Buy" ]
-            , p [ class "stub-notice" ] [ text "Price comparison coming in Phase 2" ]
-            ]
-        , section [ class "book-detail__danger-zone" ]
-            [ button [ class "btn btn--danger", onClick OpenRemoveModal ]
-                [ text "Remove from Bookshelf" ]
-            ]
+          else
+            button [ class "btn btn--secondary", onClick OpenBookshelfMover ]
+                [ text "Choose Bookshelf" ]
+        , viewMoveState model.moveState
         ]
+
+
+viewMoveState : RemoteData Http.Error () -> Html Msg
+viewMoveState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Moving..." ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Moved successfully." ]
+
+        Failure _ ->
+            div [ class "book-detail__status book-detail__status--error" ]
+                [ text "Failed to move book. Please try again." ]
+
+
+viewDangerZone : Model -> Html Msg
+viewDangerZone model =
+    section [ class "book-detail__section book-detail__danger-zone" ]
+        [ button [ class "btn btn--danger btn--sm", onClick OpenRemoveModal ]
+            [ text "Remove from Bookshelf" ]
+        , viewRemoveState model.removeState
+        ]
+
+
+viewRemoveState : RemoteData Http.Error () -> Html Msg
+viewRemoveState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Removing..." ]
+
+        Success _ ->
+            text ""
+
+        Failure _ ->
+            div [ class "book-detail__status book-detail__status--error" ]
+                [ text "Failed to remove book. Please try again." ]
