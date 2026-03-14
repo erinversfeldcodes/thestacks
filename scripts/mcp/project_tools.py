@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
 from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
+from mcp.server.fastmcp import FastMCP
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -116,9 +116,7 @@ def _parse_issue(path: Path) -> dict[str, Any]:
     # Dependencies
     deps_raw = _section_text(sections, "Dependencies")
     dependencies = [
-        line.lstrip("- ").strip()
-        for line in deps_raw.splitlines()
-        if line.startswith("-")
+        line.lstrip("- ").strip() for line in deps_raw.splitlines() if line.startswith("-")
     ]
 
     return {
@@ -178,9 +176,7 @@ def _parse_feedback_file(path: Path) -> list[dict[str, Any]]:
     parts = entry_re.split(body)
 
     # Field extractors.
-    heading_re = re.compile(
-        r"^(\d{4}-\d{2}-\d{2})\s*—\s*Issue\s*#(\d+),?\s*Phase\s*(\S+)"
-    )
+    heading_re = re.compile(r"^(\d{4}-\d{2}-\d{2})\s*—\s*Issue\s*#(\d+),?\s*Phase\s*(\S+)")
     field_re = re.compile(r"^\*\*(.+?):\*\*\s*(.+)$", re.MULTILINE)
 
     field_map = {
@@ -255,9 +251,7 @@ def list_issues(status: str = "all") -> list[dict[str, Any]]:
     Returns each issue's number, title, status, and DoD completion ratio.
     """
     if status not in ("open", "complete", "all"):
-        return [
-            {"error": f"Invalid status '{status}'. Use 'open', 'complete', or 'all'."}
-        ]
+        return [{"error": f"Invalid status '{status}'. Use 'open', 'complete', or 'all'."}]
 
     results = []
     for path in sorted(ISSUES_DIR.glob("[0-9][0-9][0-9]-*.md")):
@@ -329,7 +323,7 @@ def update_progress(number: int, note: str) -> dict[str, Any]:
 
         state = json.loads(state_path.read_text())
         state.setdefault("notes", []).append(new_line)
-        state["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        state["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
         state_path.write_text(json.dumps(state, indent=2) + "\n")
 
     return {"ok": True, "appended": new_line}
@@ -527,8 +521,7 @@ def create_worktree(issue_number: int, phase: str) -> dict[str, Any]:
 
     if result.returncode != 0:
         return {
-            "error": result.stderr.strip()
-            or f"git worktree add failed (exit {result.returncode})"
+            "error": result.stderr.strip() or f"git worktree add failed (exit {result.returncode})"
         }
 
     return {"path": str(wt_path), "branch": branch}
@@ -574,8 +567,7 @@ def remove_worktree(issue_number: int, phase: str) -> dict[str, Any]:
 
     if result.returncode != 0:
         return {
-            "error": result.stderr.strip()
-            or f"git branch -D failed (exit {result.returncode})"
+            "error": result.stderr.strip() or f"git branch -D failed (exit {result.returncode})"
         }
 
     return {"ok": True, "removed_path": str(wt_path), "removed_branch": branch}
@@ -636,7 +628,7 @@ Not directly tied to a user story.
 {goal.strip() or "[What does success look like?]"}
 
 ## Technical Requirements
-{technical_requirements.strip() or "[Specific technical details, constraints, architecture references.]"}
+{technical_requirements.strip() or "[Specific technical details, constraints, references.]"}
 
 ## Definition of Done
 {dod_section}
@@ -806,6 +798,145 @@ def get_feedback_summary(agent_name: str | None = None) -> list[dict[str, Any]]:
         for path in sorted(FEEDBACK_DIR.glob("*.md")):
             results.extend(_parse_feedback_file(path))
     return results
+
+
+# ---------------------------------------------------------------------------
+# E2E gate helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_deploy_output(output: str) -> dict[str, Any]:
+    """Parse deploy-preview.sh output for PASS/FAIL lines and preview URL.
+
+    Returns a dict with keys: passed, preview_url, pass_lines, fail_lines.
+    """
+    pass_lines: list[str] = []
+    fail_lines: list[str] = []
+    preview_url: str | None = None
+
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("PASS deploy:"):
+            pass_lines.append(stripped)
+        elif stripped.startswith("FAIL deploy:"):
+            fail_lines.append(stripped)
+        # Extract the preview URL from the deploy output.
+        # The script prints lines like: "    Core app:    stacks-core-pr-xxx"
+        # and the URL is "https://<app>.fly.dev".
+        if "Core app:" in line and not preview_url:
+            # Extract app name after "Core app:"
+            parts = line.split("Core app:")
+            if len(parts) == 2:
+                app_name = parts[1].strip()
+                if app_name:
+                    preview_url = f"https://{app_name}.fly.dev"
+
+    # Also check for the explicit URL pattern in the output
+    for line in output.splitlines():
+        if "fly.dev" in line and "https://" in line:
+            url_match = re.search(r"https://[\w.-]+\.fly\.dev", line)
+            if url_match and not preview_url:
+                preview_url = url_match.group(0)
+
+    passed = len(fail_lines) == 0 and len(pass_lines) > 0
+
+    return {
+        "passed": passed,
+        "preview_url": preview_url,
+        "pass_lines": pass_lines,
+        "fail_lines": fail_lines,
+    }
+
+
+@mcp.tool()
+def run_e2e_gate(issue_number: int) -> dict[str, Any]:
+    """
+    Deploy a preview environment and run E2E tests against it.
+
+    Invokes scripts/deploy-preview.sh which:
+    1. Creates a Neon preview branch
+    2. Deploys to a Fly.io preview app
+    3. Runs Playwright E2E tests against the preview URL
+    4. Runs DAST scans (OWASP ZAP, Nuclei, jwt_tool, IDOR)
+    5. Cleans up on exit
+
+    The script's output is parsed for PASS/FAIL lines to determine the result.
+
+    Args:
+        issue_number: The issue number (used to derive the branch name for
+                      the preview deployment).
+
+    Returns a dict with:
+        - passed: bool — True if all E2E tests passed
+        - preview_url: str | None — the preview app URL
+        - summary: str — human-readable result summary
+        - pass_lines: list[str] — all PASS lines from the output
+        - fail_lines: list[str] — all FAIL lines from the output
+        - output: str — full output (truncated to last 5000 chars)
+    """
+    deploy_script = REPO_ROOT / "scripts" / "deploy-preview.sh"
+    if not deploy_script.exists():
+        return {"error": f"Deploy script not found: {deploy_script}"}
+
+    # Determine the current branch name for the --branch argument.
+    try:
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(REPO_ROOT),
+        )
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+    except subprocess.TimeoutExpired:
+        branch = ""
+
+    cmd = ["bash", str(deploy_script)]
+    if branch:
+        cmd.extend(["--branch", branch])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=900,  # 15 minutes — deploy + E2E + DAST can be slow
+            cwd=str(REPO_ROOT),
+            env={**os.environ},
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "preview_url": None,
+            "summary": "E2E gate timed out after 900 seconds",
+            "pass_lines": [],
+            "fail_lines": ["FAIL deploy: timed out"],
+            "output": "",
+        }
+
+    combined_output = result.stdout + result.stderr
+    # Truncate to last 5000 chars if very long.
+    if len(combined_output) > 5000:
+        combined_output = combined_output[-5000:]
+
+    parsed = _parse_deploy_output(result.stdout + result.stderr)
+
+    if parsed["passed"]:
+        summary = f"E2E gate passed ({len(parsed['pass_lines'])} checks passed)"
+    else:
+        summary = (
+            f"E2E gate failed ({len(parsed['fail_lines'])} failures, "
+            f"{len(parsed['pass_lines'])} passed)"
+        )
+
+    return {
+        "passed": parsed["passed"],
+        "preview_url": parsed["preview_url"],
+        "summary": summary,
+        "pass_lines": parsed["pass_lines"],
+        "fail_lines": parsed["fail_lines"],
+        "output": combined_output,
+    }
 
 
 # ---------------------------------------------------------------------------
