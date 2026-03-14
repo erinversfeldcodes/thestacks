@@ -9,11 +9,12 @@ defmodule StacksWeb.CostControllerTest do
       response = json_response(conn, 200)
 
       assert %{"data" => data} = response
-      assert is_list(data["line_items"])
+      assert is_list(data["categories"])
       assert is_integer(data["total_cents"])
       assert data["currency"] == "USD"
       assert is_number(data["cost_per_book"])
-      assert is_integer(data["book_count"])
+      assert is_map(data["metrics"])
+      assert is_integer(data["metrics"]["books"])
       assert is_list(data["monthly_totals"])
       assert is_binary(data["generated_at"])
     end
@@ -26,6 +27,9 @@ defmodule StacksWeb.CostControllerTest do
       refute String.contains?(body, "user_id")
       refute String.contains?(body, "email")
       refute String.contains?(body, "password")
+
+      # metrics should not contain user count
+      refute Map.has_key?(response["data"]["metrics"], "users")
     end
   end
 end
