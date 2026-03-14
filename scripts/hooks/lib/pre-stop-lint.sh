@@ -126,16 +126,26 @@ fi
 
 # --- Elm ---
 if [[ $HAS_ELM -eq 1 ]]; then
-  ELM_FILES=$(echo "$ALL_CHANGED" | grep -E '\.elm$' || true)
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    ABS="${REPO_ROOT}/${f}"
-    [[ -f "$ABS" ]] || continue
-    run_check \
-      "elm-format --validate ${ABS}" \
-      "cd ${REPO_ROOT}/frontend && elm-format ${ABS}" \
-      bash -c "cd '${REPO_ROOT}/frontend' && elm-format --validate '${ABS}'"
-  done <<< "$ELM_FILES"
+  if [[ -x "${REPO_ROOT}/frontend/node_modules/.bin/elm-format" ]]; then
+    ELM_FORMAT="${REPO_ROOT}/frontend/node_modules/.bin/elm-format"
+  elif command -v elm-format > /dev/null 2>&1; then
+    ELM_FORMAT="elm-format"
+  else
+    ELM_FORMAT=""
+  fi
+
+  if [[ -n "$ELM_FORMAT" ]]; then
+    ELM_FILES=$(echo "$ALL_CHANGED" | grep -E '\.elm$' || true)
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      ABS="${REPO_ROOT}/${f}"
+      [[ -f "$ABS" ]] || continue
+      run_check \
+        "elm-format --validate ${ABS}" \
+        "cd ${REPO_ROOT}/frontend && elm-format ${ABS}" \
+        bash -c "'${ELM_FORMAT}' --validate '${ABS}'"
+    done <<< "$ELM_FILES"
+  fi
 fi
 
 # --- Rust ---
