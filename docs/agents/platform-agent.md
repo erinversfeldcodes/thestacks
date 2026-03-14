@@ -6,7 +6,7 @@ Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fl
 ## Technology Stack
 - **Hosting:** Fly.io (IAD — Ashburn, Virginia) — Phoenix core and Rust scraper as Fly Machines; Modal for vision GPU inference
 - **Vision GPU:** Modal (serverless A10G) — deploy via `modal deploy apps/vision/modal_app.py`
-- **Database:** Fly Postgres (managed)
+- **Database:** Neon PostgreSQL (serverless, connection string requires `?sslmode=require`)
 - **Containers:** Docker (multi-stage builds)
 - **Dev environment:** Nix flake + Flox
 - **CI/CD:** GitHub Actions
