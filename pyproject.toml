@@ -1,0 +1,10 @@
+# Root-level ruff config — applies to ALL Python files in the repo.
+# This ensures scripts/mcp/, apps/vision/, and any other Python code
+# use the same formatting and lint rules.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "TCH", "RUF"]
