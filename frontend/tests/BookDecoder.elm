@@ -3,7 +3,7 @@ module BookDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Book exposing (VisibilityTier(..), bookDecoder)
+import Types.Book exposing (VisibilityTier(..), authorName, bookDecoder)
 
 
 minimalBookJson : String
@@ -76,7 +76,7 @@ suite =
                             [ \b -> Expect.equal "book-001" b.id
                             , \b -> Expect.equal "9780306406157" b.isbn
                             , \b -> Expect.equal "The Great Book" b.title
-                            , \b -> Expect.equal "Jane Doe" b.author.name
+                            , \b -> Expect.equal "Jane Doe" (authorName b)
                             , \b -> Expect.equal Nothing b.description
                             , \b -> Expect.equal Nothing b.coverImageUrl
                             , \b -> Expect.equal [] b.subjects
@@ -104,7 +104,7 @@ suite =
                             , \b ->
                                 Expect.equal
                                     (Just "A prolific author of fine books.")
-                                    b.author.bio
+                                    (Maybe.andThen .bio b.author)
                             ]
                             book
 
@@ -130,7 +130,7 @@ suite =
                 in
                 case result of
                     Ok book ->
-                        Expect.equal "Jane Doe" book.author.name
+                        Expect.equal "Jane Doe" (authorName book)
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
@@ -159,6 +159,55 @@ suite =
 
                     Err _ ->
                         Expect.pass
+        , test "decodes age_gated visibility tier" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "id": "book-ag",
+                            "isbn": "9780306406157",
+                            "title": "Age Gated Book",
+                            "author": {
+                                "id": "author-ag",
+                                "name": "Mature Author"
+                            },
+                            "visibility_tier": "age_gated"
+                        }
+                        """
+
+                    result =
+                        Decode.decodeString bookDecoder json
+                in
+                case result of
+                    Ok book ->
+                        Expect.equal AgeGated book.visibilityTier
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "decodes book with null author" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "id": "book-na",
+                            "isbn": "9780306406157",
+                            "title": "Authorless Book",
+                            "author": null,
+                            "visibility_tier": "public"
+                        }
+                        """
+
+                    result =
+                        Decode.decodeString bookDecoder json
+                in
+                case result of
+                    Ok book ->
+                        Expect.equal Nothing book.author
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "fails when page_count is wrong type (string instead of int)" <|
             \_ ->
                 let
