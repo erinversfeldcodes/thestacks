@@ -4,7 +4,7 @@
 Develop and maintain the PostgreSQL database: Ecto schemas, migrations, query optimisation, dbt models, and data integrity. You own the data model across all three schemas (op, wh, audit).
 
 ## Technology Stack
-- **Database:** PostgreSQL 16 (Fly Postgres)
+- **Database:** PostgreSQL (Neon serverless)
 - **ORM:** Ecto 3.x
 - **Migrations:** Ecto migrations (in `apps/core/priv/repo/migrations/`)
 - **Data transforms:** dbt (in `dbt/`)
@@ -75,7 +75,7 @@ No UPDATE or DELETE on event_log (except GDPR erasure of PII in payloads). Parti
 ## Integration Handoffs
 - **elixir-agent:** Ecto schema modules must match migration definitions
 - **protobuf-agent:** New tables for partner/event data should align with .proto definitions
-- **platform-agent:** Fly Postgres config, backup strategy
+- **platform-agent:** Neon PostgreSQL config, backup strategy
 - **security-agent:** Encryption at rest, role separation, GDPR column-level encryption (Cloak)
 
 ## Pre-approved Commands
