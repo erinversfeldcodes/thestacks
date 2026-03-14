@@ -1511,4 +1511,377 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 
 ---
 
+## 14. Authentication & Account
+
+### 14.1 Registration
+
+#### US-14.1.1 Register a New Account
+
+**As a** new user, **I want to** create an account on The Stacks **so that** I can start building my personal book collection.
+
+**What the user wants to accomplish:** Set up their identity on the platform so they can begin adding books, organising shelves, and accessing all features that require authentication.
+
+**How they accomplish it:**
+1. The user navigates to The Stacks and clicks "Sign In" in the top navigation.
+2. The authentication page loads with two tabs: "Sign In" and "Register". The user clicks the "Register" tab.
+3. The registration form appears with three fields: Display Name, Email, and Password.
+4. The user enters their chosen display name (the name that will appear on their profile and in any shared spaces), their email address, and a password.
+5. The user clicks "Create Account".
+6. The system validates the input, creates the account, and returns a JWT token.
+7. On success, the user is authenticated immediately and redirected to the home page. Their display name appears in the top navigation where "Sign In" previously was.
+
+**What they see on the page:**
+- The registration page has a warm parchment background consistent with the platform aesthetic. The heading reads "Create Account" in a serif typeface.
+- Two tabs at the top of the form allow switching between "Sign In" and "Register" modes without a page reload.
+- The Display Name field has a placeholder: "Your name". The Email field has a placeholder: "you@example.com". The Password field shows masked dots.
+- While submitting, the button displays a small turning-page spinner and is disabled to prevent double submission.
+- On error (e.g., email already in use), a warm-toned error message appears below the form fields: "Registration failed. Email may already be in use."
+- On success, the page transitions to the home view with the user's display name visible in the navigation.
+
+**Acceptance criteria:**
+- [ ] Registration form collects display name, email, and password
+- [ ] Switching between Sign In and Register tabs preserves entered email and password
+- [ ] Successful registration returns a JWT and authenticates the user immediately
+- [ ] The user is redirected to the home page after successful registration
+- [ ] Duplicate email addresses produce a clear, non-technical error message
+- [ ] The submit button is disabled during the API request to prevent double submission
+- [ ] Rate limiting is applied to the registration endpoint to prevent abuse
+
+**Technical note:** In the single-user (self-hosted) phase, the first user to register becomes the platform owner. No public registration beyond the owner is available until the multi-user phase.
+
+---
+
+### 14.2 Login
+
+#### US-14.2.1 Sign In to an Existing Account
+
+**As a** returning user, **I want to** sign in to my account **so that** I can access my book collection and all authenticated features.
+
+**What the user wants to accomplish:** Authenticate with their existing credentials and resume using the platform where they left off.
+
+**How they accomplish it:**
+1. The user navigates to The Stacks. If not already authenticated, they click "Sign In" in the top navigation.
+2. The authentication page loads with the "Sign In" tab active by default.
+3. The user enters their email and password.
+4. The user clicks "Sign In".
+5. The system validates the credentials against the stored Argon2-hashed password.
+6. On success, the system issues a JWT token (24h access, 7d refresh) and redirects the user to the home page.
+7. The top navigation updates to show the user's display name in place of the "Sign In" link.
+
+**What they see on the page:**
+- The sign-in page has the same warm parchment background as the rest of the platform. The heading reads "Sign In" in serif typeface.
+- Two input fields: Email ("you@example.com") and Password (masked).
+- A "Sign In" button styled as a primary action in the platform's dark-academic palette.
+- While submitting, the button shows a small spinner and is disabled.
+- On invalid credentials, a single error message appears: "Invalid email or password." The message is intentionally vague to prevent email enumeration.
+- On success, a smooth transition to the home page.
+
+**Acceptance criteria:**
+- [ ] Login form collects email and password
+- [ ] Successful login returns a JWT and stores it for subsequent API requests
+- [ ] The user is redirected to the home page after successful login
+- [ ] Invalid credentials produce a generic error message (no email enumeration)
+- [ ] The submit button is disabled during the API request
+- [ ] Rate limiting is applied to the login endpoint to prevent brute-force attacks
+
+---
+
+### 14.3 Session Management
+
+#### US-14.3.1 Authenticated Navigation State
+
+**As an** authenticated user, **I want** the navigation to reflect my signed-in state **so that** I can confirm I am logged in and see my identity at a glance.
+
+**What the user wants to accomplish:** Have persistent visual confirmation that they are authenticated, without needing to check a settings page.
+
+**How they accomplish it:**
+This is automatic. When the user is authenticated, the top navigation updates.
+
+**What they see on the page:**
+- When signed in, the "Sign In" link in the navigation is replaced by the user's display name, rendered in the same serif typeface as other navigation items.
+- The display name is not clickable in the current phase (no profile page yet). It serves as a visual indicator of the authenticated session.
+- All protected pages (bookshelves, upload, search, settings) are accessible. API requests include the JWT automatically.
+
+**Acceptance criteria:**
+- [ ] The navigation shows "Sign In" when unauthenticated and the user's display name when authenticated
+- [ ] The auth token is included in all API requests to protected endpoints
+- [ ] Protected pages function correctly when authenticated
+
+---
+
+#### US-14.3.2 Session Expiry and Token Refresh
+
+**As a** user whose session has expired, **I want to** be gracefully returned to the sign-in page **so that** I can re-authenticate without losing context about where I was.
+
+**What the user wants to accomplish:** Understand why an action failed (expired session) and recover quickly without confusion.
+
+**How they accomplish it:**
+1. The user's JWT access token expires after 24 hours.
+2. If a refresh token is available and valid (within 7-day window), the system silently obtains a new access token without user intervention.
+3. If both tokens have expired, the next API request returns a 401 Unauthorized response.
+4. The frontend detects the 401 and redirects the user to the sign-in page.
+
+**What they see on the page:**
+- If the token refreshes silently, the user sees nothing — the experience is seamless.
+- If the session has fully expired, the user is redirected to the sign-in page. No harsh error message — simply the sign-in form ready for credentials.
+- After re-authentication, the user is returned to the home page.
+
+**Acceptance criteria:**
+- [ ] Access tokens expire after 24 hours
+- [ ] Refresh tokens are valid for 7 days and can silently renew access tokens
+- [ ] Expired sessions result in a redirect to the sign-in page, not an error screen
+- [ ] Re-authentication redirects the user to the home page
+
+---
+
+## 15. Home & Navigation
+
+### 15.1 Home Page
+
+#### US-15.1.1 View the Home Page
+
+**As a** user, **I want to** see a welcoming landing page when I visit The Stacks **so that** I understand what the platform is and can navigate to my collection or add a book.
+
+**What the user wants to accomplish:** Orient themselves on arrival — whether they are a first-time visitor or a returning user — and quickly reach their primary actions.
+
+**How they accomplish it:**
+1. The user navigates to the root URL of The Stacks instance.
+2. The home page loads with the platform title, a subtitle, and primary action links.
+
+**What they see on the page:**
+- A centred layout with "The Stacks" as the main heading in the platform's serif typeface.
+- A subtitle: "Your personal library, beautifully organised." — warm, inviting, understated.
+- Two primary action buttons: "View Library" (navigates to the Library bookshelf) and "Add a Book" (navigates to the upload page). Both are styled in the platform's dark-academic palette — the first as a primary button, the second as a secondary button.
+- The overall aesthetic is restrained and elegant — no hero images, no marketing copy, no onboarding carousel. The page trusts the user to know what they want.
+- The global navigation is visible at the top, and the footer is visible at the bottom.
+
+**Acceptance criteria:**
+- [ ] The home page renders at the root URL
+- [ ] The page displays the platform title and subtitle
+- [ ] "View Library" navigates to `/library`
+- [ ] "Add a Book" navigates to `/upload`
+- [ ] The page is accessible to both authenticated and unauthenticated users
+
+---
+
+### 15.2 Global Navigation
+
+#### US-15.2.1 Navigate Between Sections via the Top Navigation Bar
+
+**As a** user, **I want** a persistent top navigation bar **so that** I can move between my bookshelves, search, upload, and settings from any page.
+
+**What the user wants to accomplish:** Access any section of the platform in one click, regardless of which page they are currently viewing.
+
+**How they accomplish it:**
+1. The top navigation bar is always visible, fixed at the top of every page.
+2. The user clicks a navigation item to move to that section.
+
+**What they see on the page:**
+- A header bar containing the platform logo ("The Stacks", linking to the home page) and a horizontal navigation list.
+- Navigation items: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home, Search, Add Book.
+- The currently active page's navigation item is visually highlighted with an active state (e.g., a subtle underline or brighter text).
+- When authenticated, the user's display name appears as the last item in the navigation. When unauthenticated, "Sign In" appears instead, linking to the login page.
+- The navigation uses the platform's serif typeface and dark-academic colour palette. Items are styled as clean text links within a warm header bar.
+
+**Acceptance criteria:**
+- [ ] The navigation bar appears on every page
+- [ ] All navigation items link to the correct routes
+- [ ] The active page is visually indicated in the navigation
+- [ ] The navigation shows "Sign In" when unauthenticated and the user's display name when authenticated
+- [ ] The platform logo links back to the home page
+
+---
+
+#### US-15.2.2 Swipe Navigation Between Bookshelves (Mobile)
+
+**As a** mobile user, **I want to** swipe left or right to move between adjacent bookshelves **so that** browsing my collection feels fluid and tactile on a touch device.
+
+**What the user wants to accomplish:** Navigate between bookshelves using the natural swipe gesture familiar from mobile interfaces, reinforcing the spatial metaphor of moving between rooms.
+
+**How they accomplish it:**
+1. On a bookshelf page (Library, Antilibrary, Wish List, Reading Pile, Looking for a Home), the user swipes left or right on the screen.
+2. A left swipe navigates to the next bookshelf in the sequence. A right swipe navigates to the previous bookshelf.
+3. The shelf order follows the navigation bar order: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home.
+4. Swiping past the first or last shelf in the sequence does nothing — there is no wraparound.
+
+**What they see on the page:**
+- The same shelf transition animations as clicking the navigation: horizontal slides for adjacent shelves, fade-through-darkness for room transitions (as defined in US-1.2.5).
+- No visible swipe indicator or gesture hint — the interaction is discoverable but not prompted.
+
+**Acceptance criteria:**
+- [ ] Swipe left on a bookshelf navigates to the next shelf in sequence
+- [ ] Swipe right navigates to the previous shelf in sequence
+- [ ] Swiping at the boundaries (first or last shelf) produces no navigation
+- [ ] Swipe navigation triggers the same transition animations as click navigation
+- [ ] Swipe gestures are detected via JavaScript ports and communicated to the Elm runtime
+
+---
+
+### 15.3 Footer
+
+#### US-15.3.1 View the Platform Footer
+
+**As a** user, **I want** a simple footer on every page **so that** I can see basic platform information and know I have reached the bottom of the page content.
+
+**What the user wants to accomplish:** Have a visual anchor at the bottom of the page that reinforces the platform identity without being distracting.
+
+**How they accomplish it:**
+This is automatic — the footer appears on every page.
+
+**What they see on the page:**
+- A footer bar at the bottom of the page with the text: "The Stacks — open source book management".
+- The footer is styled in muted tones consistent with the platform aesthetic — understated, not attention-grabbing.
+- The footer does not contain navigation links, social media icons, or legal boilerplate in this phase.
+
+**Acceptance criteria:**
+- [ ] The footer appears on every page
+- [ ] The footer displays the platform tagline
+- [ ] The footer is visually consistent with the platform aesthetic
+
+---
+
+## 16. Error States & Edge Cases
+
+### 16.1 Page Not Found
+
+#### US-16.1.1 View the 404 Not Found Page
+
+**As a** user who has navigated to a URL that does not exist, **I want to** see a clear, friendly error page **so that** I understand the page was not found and can navigate back to a valid part of the platform.
+
+**What the user wants to accomplish:** Recover from a broken link, a mistyped URL, or a stale bookmark without feeling lost or confused.
+
+**How they accomplish it:**
+1. The user navigates to any URL that does not match a known route (e.g., `/nonexistent-page`).
+2. The Elm router cannot parse the URL and falls through to the `NotFound` route.
+3. A dedicated not-found page is rendered.
+
+**What they see on the page:**
+- A page heading: "Page Not Found" — direct and unambiguous.
+- A brief explanation: "The page you're looking for doesn't exist."
+- A primary action button: "Go Home" linking back to the root URL.
+- The page uses the same layout and aesthetic as the rest of the platform — navigation and footer are visible, so the user does not feel ejected from the application.
+- The browser tab title reads "Not Found — The Stacks".
+
+**Acceptance criteria:**
+- [ ] Any unrecognised URL renders the not-found page instead of a blank screen or browser error
+- [ ] The page displays a heading, explanation, and a link to the home page
+- [ ] The global navigation and footer remain visible
+- [ ] The browser tab title updates to "Not Found — The Stacks"
+
+---
+
+### 16.2 Network & API Errors
+
+#### US-16.2.1 Handle Network Failures Gracefully
+
+**As a** user whose network connection is unreliable, **I want** API failures to be communicated clearly **so that** I understand what went wrong and can retry when my connection is restored.
+
+**What the user wants to accomplish:** Distinguish between a platform problem and a local connectivity issue, and know that their data is safe.
+
+**How they accomplish it:**
+This is automatic — the Elm frontend uses the `RemoteData` pattern for all API interactions, which explicitly models loading, success, and failure states.
+
+**What they see on the page:**
+- When an API request fails due to a network error, the affected section of the page displays an inline error message rather than crashing or going blank.
+- Error messages are specific to the context: "Couldn't load your Library. Check your connection and try again." or "Upload failed. Please try again."
+- On the login/registration form, API errors appear as form-level messages below the fields.
+- No data is lost — form inputs are preserved, and the user can retry without re-entering information.
+- The rest of the page remains functional. A failure in one section (e.g., loading a bookshelf) does not take down the entire application.
+
+**Acceptance criteria:**
+- [ ] All API-backed pages use RemoteData to model loading, success, and failure states
+- [ ] Network failures display contextual inline error messages, not generic browser errors
+- [ ] Form inputs are preserved when a submission fails
+- [ ] Failures in one section do not affect the rest of the page
+- [ ] The user can retry failed actions without refreshing the page
+
+---
+
+### 16.3 Authentication Errors
+
+#### US-16.3.1 Handle Unauthenticated Access to Protected Pages
+
+**As a** user who is not signed in, **I want** protected pages to redirect me to the sign-in page **so that** I can authenticate and then access the content I was trying to reach.
+
+**What the user wants to accomplish:** Understand that the content they are trying to access requires authentication, and be guided to sign in rather than seeing a raw error.
+
+**How they accomplish it:**
+1. The user navigates directly to a protected URL (e.g., `/library`, `/upload`, `/settings/consent`) without being authenticated.
+2. The API returns a 401 Unauthorized response.
+3. The frontend redirects the user to the sign-in page.
+
+**What they see on the page:**
+- The sign-in page loads normally. No error banner or warning — the redirect itself communicates the need to authenticate.
+- After signing in, the user is redirected to the home page.
+
+**Acceptance criteria:**
+- [ ] Unauthenticated API requests to protected endpoints return 401
+- [ ] The frontend handles 401 responses by redirecting to the sign-in page
+- [ ] The sign-in page loads cleanly after the redirect
+- [ ] After authentication, the user is redirected to the home page
+
+---
+
+## 17. Settings & Preferences
+
+### 17.1 Settings Navigation
+
+#### US-17.1.1 Access Settings Pages
+
+**As a** user, **I want to** access my privacy and account settings **so that** I can manage consent preferences, age verification, data exports, and audit logs.
+
+**What the user wants to accomplish:** Find and navigate to the various settings pages that control their account's privacy, data, and content preferences.
+
+**How they accomplish it:**
+1. Settings pages are accessible via direct URL routes: `/settings/consent` for privacy consent management, and `/settings/age-verification` for the age verification self-declaration.
+2. Additionally, settings are referenced from user stories in the GDPR section (US-8.1 through US-8.5) which describe data export, account deletion, consent management, image retention, and audit log features.
+
+**What they see on the page:**
+- **Consent Settings** (`/settings/consent`): A page titled "Privacy Settings" showing toggleable consent items with timestamps, as described in US-8.3. Each consent category has a clear description, an on/off toggle, and a record of when consent was last changed.
+- **Age Verification** (`/settings/age-verification`): A page titled "Age Verification" with the self-declaration toggle described in US-4.2. In the single-user phase, this is a simple "I confirm I am 18+" checkbox.
+- Both pages use the platform's parchment background and serif typography, consistent with the warm, trustworthy tone appropriate for privacy-related settings.
+
+**Acceptance criteria:**
+- [ ] `/settings/consent` renders the consent management page
+- [ ] `/settings/age-verification` renders the age verification page
+- [ ] Both pages are only accessible to authenticated users
+- [ ] Both pages are visually consistent with the platform aesthetic
+- [ ] Settings changes are persisted via API calls and reflected immediately
+
+---
+
+## 18. Bookshelf — Looking for a Home
+
+### 18.1 Browse the Looking for a Home Shelf
+
+#### US-18.1.1 Browse the Looking for a Home Shelf
+
+**As a** user, **I want to** browse my "Looking for a Home" shelf **so that** I can see all the books I have listed or intend to list for second-hand sale, displayed as books ready to find a new reader.
+
+**What the user wants to accomplish:** View the books they are willing to part with, in an aesthetic that conveys transition and possibility rather than loss.
+
+**How they accomplish it:**
+1. The user clicks "Looking for a Home" in the top navigation.
+2. The page transitions in with a horizontal slide (adjacent to the other bookshelves in the navigation sequence).
+3. The Looking for a Home shelf loads with all books the user has placed there.
+
+**What they see on the page:**
+- **Setting:** A window ledge or market stall — a transitional space that suggests books are on their way somewhere new. The aesthetic is warm but transient: perhaps a sunny window with books propped against the glass, or a wooden crate at a street market.
+- **Shelving:** Lighter, more open than the permanent shelves. The books are not tightly packed — there is breathing room between spines, suggesting they are ready to leave.
+- **Lighting:** Bright, optimistic light — morning sun through a window or the open air of a market. A visual contrast with the Library's lamplight, signalling that these books are moving outward.
+- **Shelf label:** "Looking for a Home" styled in the same serif typeface and brass plate convention as other shelves.
+- **Books:** Spines are well-read (these books have been through the collection) but presented attractively — the visual equivalent of a book cleaned up for resale.
+- **Relationship to the marketplace:** This shelf is the staging area for the marketplace feature described in Section 7 (US-7.1, US-7.2). Books placed here may or may not have active listings. In the pre-marketplace phase, this shelf simply holds books the user intends to sell or give away.
+- **Default visibility:** Unlike other shelves which default to "Only me", the Looking for a Home shelf defaults to "Platform users" visibility when the profile is set to discoverable — because the intent is for other users to see these books are available.
+
+**Acceptance criteria:**
+- [ ] The Looking for a Home shelf is accessible via `/looking-for-home`
+- [ ] The page renders books placed on this shelf with the appropriate aesthetic
+- [ ] The shelf appears in the navigation bar between Reading Pile and Search
+- [ ] The shelf supports the same interactions as other bookshelves (click spine to view detail, move between shelves)
+- [ ] The empty state displays an encouraging message about finding books new homes
+- [ ] Swipe navigation includes this shelf in the bookshelf sequence
+
+---
+
 *This document covers the complete feature set of The Stacks as specified. User stories are numbered for reference and grouped by domain. Each story includes the user's goal, the interaction flow, and detailed UI descriptions consistent with the platform's dark-academic-meets-cottage-core aesthetic.*
