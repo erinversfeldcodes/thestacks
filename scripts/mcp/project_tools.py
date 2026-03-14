@@ -439,11 +439,11 @@ def run_test_suite(domain: str, worktree_path: str | None = None) -> dict[str, A
 
     Returns a dict with domain, passed, summary, output, and command keys.
     """
-    domain_config: dict[str, tuple[str, str]] = {
-        "elixir": ("mix test", "apps/core"),
-        "elm": ("npx elm-test", "frontend"),
-        "rust": ("cargo test", "apps/scraper"),
-        "python": ("pytest", "apps/vision"),
+    domain_config: dict[str, tuple[list[str], str]] = {
+        "elixir": (["mix", "test"], "apps/core"),
+        "elm": (["npx", "elm-test"], "frontend"),
+        "rust": (["cargo", "test"], "apps/scraper"),
+        "python": (["pytest"], "apps/vision"),
     }
 
     if domain not in domain_config:
@@ -460,7 +460,6 @@ def run_test_suite(domain: str, worktree_path: str | None = None) -> dict[str, A
     try:
         result = subprocess.run(
             command,
-            shell=True,
             capture_output=True,
             text=True,
             timeout=300,

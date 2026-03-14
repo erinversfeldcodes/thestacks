@@ -89,10 +89,19 @@ case "$EXT" in
     ;;
 
   elm)
-    run_check \
-      "elm-format --validate ${FILE_PATH}" \
-      "cd ${REPO_ROOT}/frontend && elm-format ${FILE_PATH}" \
-      bash -c "cd '${REPO_ROOT}/frontend' && elm-format --validate '${FILE_PATH}'"
+    if [[ -x "${REPO_ROOT}/frontend/node_modules/.bin/elm-format" ]]; then
+      ELM_FMT="${REPO_ROOT}/frontend/node_modules/.bin/elm-format"
+    elif command -v elm-format > /dev/null 2>&1; then
+      ELM_FMT="elm-format"
+    else
+      ELM_FMT=""
+    fi
+    if [[ -n "$ELM_FMT" ]]; then
+      run_check \
+        "elm-format --validate ${FILE_PATH}" \
+        "cd ${REPO_ROOT}/frontend && elm-format ${FILE_PATH}" \
+        bash -c "'${ELM_FMT}' --validate '${FILE_PATH}'"
+    fi
     ;;
 
   rs)
