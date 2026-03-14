@@ -68,6 +68,15 @@ When delegating parallel phases, prefer Agent Teams teammates over sequential Ag
 
 Agent Teams requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (configured in `.claude/settings.json`).
 
+### Agent Queuing Constraint
+
+Do not queue multiple sequential prompts to a single agent via `resume`. When an agent
+completes its task, it exits — queued prompts are silently dropped. Instead:
+
+- Launch a **separate agent** for each independent phase
+- If phases must be sequential, wait for the previous agent to complete before launching the next
+- Use `resume` only to continue an agent's **interrupted** work, not to send new tasks
+
 ---
 
 ## Domain Routing
@@ -140,7 +149,18 @@ When the plan marks phases as independent (see Plan Style Guide), prefer spawnin
 3. The orchestrator waits for all teammates to complete before running regression gates
 4. After verification, shut down teammates and proceed with sequential phases or direct orchestrator work
 
+Each teammate prompt must end with:
+"When your task is complete, submit your completion report and stop immediately.
+Do not wait for further instructions or acknowledgment."
+
 **Cross-cutting concern rule:** Before spawning teammates, identify any integration points between parallel phases (e.g., one phase gates a function that another phase calls). Embed these as explicit instructions in the relevant teammate prompts. This prevents the integration gap class of bugs discovered in the Issue #024 trial.
+
+### Teammate Cleanup Fallback
+
+If a teammate does not respond to shutdown within 60 seconds:
+1. Proceed with team deletion regardless
+2. Log the unresponsive teammate in the state file notes
+3. Any uncommitted work in the teammate's worktree is preserved for manual recovery
 
 ---
 
@@ -250,6 +270,12 @@ Your prompt must include:
   - Cover every DoD item for this phase
   - Fail with meaningful assertion failures (not compile errors)
   - Return the failing test output as evidence
+- **E2E test authoring (when applicable):** If this phase introduces user-facing behaviour that
+  unit tests cannot adequately verify (file uploads, multi-step flows, real database interactions,
+  vision pipeline), instruct the specialist to also write Playwright E2E tests in `e2e/tests/`.
+  E2E tests should test against real API responses (no `page.route()` mocking). They will fail
+  initially because the feature does not exist yet. Not every phase needs new E2E tests — the
+  existing smoke tests provide baseline coverage.
 - The constraint: complete only the test-writing step
 
 **State update:** When the test-writing step starts, update the state file: set the phase to `in_progress` and record `started_at`.
@@ -309,15 +335,75 @@ Before delegating to the reviewer, **you** must verify the agent's Spec Coverage
 This gate exists because the reviewer audits code quality; coverage completeness is your
 responsibility as Orchestrator.
 
+### 2B-iii — Deploy Preview + E2E Gate (optional)
+
+**Skip this step** if the phase is documentation-only, touches only agent prompts or plan files,
+or does not modify any code that runs in the deployed environment (Elixir, Elm, Rust, Python,
+migrations, Dockerfiles, Fly configs). When skipping, record `"e2e_skipped": true` and
+`"e2e_skip_reason": "<reason>"` in the phase's state file entry and proceed directly to 2C.
+
+After the spec coverage gate passes, deploy a preview environment and run E2E tests:
+
+1. Call `mcp__project-tools__run_e2e_gate(issue_number)` with the current issue number.
+   The tool:
+   - Runs `scripts/deploy-preview.sh` to deploy a Fly.io preview app with a Neon preview branch
+   - Waits for the health check at `/api/health`
+   - Runs Playwright E2E tests against the preview URL
+   - Parses the output for PASS/FAIL lines
+   - Returns a structured result with `passed`, `preview_url`, `summary`, and `output`
+
+2. **State update:** Record `preview_url` in the phase's state file entry.
+
+3. **If E2E gate passes:** proceed to 2C (Delegate Review). Include the E2E results and
+   preview URL in the reviewer prompt.
+
+4. **If E2E gate fails:** return the failure to the specialist with the preview URL for debugging.
+   The specialist can check logs via `fly logs --app <preview-app>`. Use this format:
+
+```
+E2E GATE FAILED
+Preview URL: [preview_url]
+Summary: [summary]
+Output (last 3000 chars):
+[truncated output]
+
+Diagnose and fix the above E2E failures, then resubmit your completion report.
+This counts as revision cycle N of 2.
+```
+
+This counts as a revision cycle. If revision cycle limit (2) is reached, stop and consult the human.
+
+E2E failures that are clearly environmental (flaky network, cold start timeouts) should be retried
+once before counting as a revision cycle. The orchestrator makes this judgment call.
+
+### 2B-iv — Preview Cleanup
+
+After the phase is complete (approved and committed), or when the issue is fully complete:
+- The preview environment is torn down automatically by `scripts/deploy-preview.sh`'s cleanup trap
+- If manual cleanup is needed, run `scripts/cleanup-preview.sh --branch <branch-name>`
+- Remove the `preview_url` from the state file
+
+On issue completion (Phase 3), ensure all preview resources are cleaned up.
+
 ### 2C — Delegate Review
 
-After the spec coverage gate passes, delegate to the **stack-specific reviewer** via Agent tool.
-Use the Reviewer Routing table in `AGENTS.md` to select the correct reviewer(s). If a phase
-touches multiple stacks, invoke multiple reviewers in parallel.
+After the spec coverage gate (and E2E gate, if applicable) passes, delegate to the **stack-specific
+reviewer** via Agent tool. Use the Reviewer Routing table in `AGENTS.md` to select the correct
+reviewer(s). If a phase touches multiple stacks, invoke multiple reviewers in parallel.
 
 - Embed full content of the relevant reviewer `.md` file from `docs/agents/reviewers/`
 - Include: phase objective, files modified, DoD items, standards paths, and the agent's
   Spec Coverage Matrix (so the reviewer can run their independent Step 0 audit against it)
+- **If E2E gate was run:** include the E2E test results and the preview URL in the reviewer prompt
+
+The reviewer gains an additional advisory check when E2E results are present:
+
+> **E2E Coverage Assessment**
+> - Do the E2E tests exercise the feature against real infrastructure?
+> - Are there gaps where unit tests pass but E2E tests would catch regressions?
+> - Is the E2E test coverage proportional to the feature's risk?
+
+This is advisory, not a blocker — the reviewer flags E2E coverage gaps as suggestions, not NEEDS_REVISION.
 
 ### 2D — Act on Review Result
 
@@ -333,6 +419,11 @@ touches multiple stacks, invoke multiple reviewers in parallel.
   If merge conflicts occur, present them to the human for resolution.
 - **State update:** Set phase → `complete`, record `completed_at` and `reviewer_verdict: "APPROVED"`.
 - **MANDATORY STOP.** Wait for human to commit before proceeding to next phase.
+
+**Commit verification:** Before proceeding to the next phase, run `git status` to check for
+uncommitted changes from this phase. If uncommitted changes exist, present them to the human
+and request a commit. Do not mark a phase as complete while uncommitted phase work exists in
+the working tree.
 
 **If NEEDS_REVISION:**
 - Present the reviewer's report to the human for mediation
@@ -356,6 +447,10 @@ touches multiple stacks, invoke multiple reviewers in parallel.
 - **State update:** Set `last_action` to describe the failure.
 
 ### 2E — Next Phase
+
+**Branch hygiene check:** If the next phase requires switching branches or creating a worktree,
+verify the current branch has no uncommitted changes from previous phases. Uncommitted fixes
+will be lost on branch switch. Run `git status` and alert the human if the working tree is dirty.
 
 After the human confirms the commit, proceed to the next plan phase.
 
@@ -401,7 +496,11 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "revision_cycles": 0,
       "reviewer_verdict": "APPROVED",
       "last_action": "Phase 1 approved and committed",
-      "worktree_path": null
+      "worktree_path": null,
+      "committed": true,
+      "preview_url": "https://stacks-core-pr-014-agent-system.fly.dev",
+      "e2e_skipped": false,
+      "e2e_skip_reason": null
     },
     "2": {
       "status": "in_progress",
@@ -411,7 +510,11 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "revision_cycles": 1,
       "reviewer_verdict": "NEEDS_REVISION",
       "last_action": "elm-agent submitted completion report; reviewer returned NEEDS_REVISION — spacing issue in BookDetail.elm",
-      "worktree_path": ".claude/worktrees/014-phase-2"
+      "worktree_path": ".claude/worktrees/014-phase-2",
+      "committed": false,
+      "preview_url": null,
+      "e2e_skipped": false,
+      "e2e_skip_reason": null
     },
     "3": {
       "status": "pending",
@@ -421,7 +524,11 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
       "revision_cycles": 0,
       "reviewer_verdict": null,
       "last_action": null,
-      "worktree_path": null
+      "worktree_path": null,
+      "committed": false,
+      "preview_url": null,
+      "e2e_skipped": false,
+      "e2e_skip_reason": null
     }
   },
   "human_decisions_pending": [
@@ -430,6 +537,8 @@ Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. 
   "notes": []
 }
 ```
+
+The `committed` field is set to `true` only after the human confirms the commit for that phase. It must remain `false` while uncommitted phase work exists.
 
 **Lifecycle:**
 - `plans/*-state.json` is gitignored (transient execution state — not committed)
@@ -529,3 +638,18 @@ Last Action: [what just happened]
 Next Action: [what will happen next, or what you are waiting for]
 ---
 ```
+
+---
+
+## Working Tree Hygiene
+
+Fixes applied during a phase (bug fixes, linting corrections, config changes) must be committed
+before the phase is considered complete. The orchestrator must:
+
+1. After each phase completion, run `git status` to check for uncommitted changes
+2. If changes exist, present them to the human and request a commit
+3. Do not mark a phase as complete while uncommitted changes from that phase exist
+4. Before switching branches or creating worktrees, verify clean working tree
+
+This prevents the recurring issue of fixes being applied to the working tree, then lost when
+branches change — requiring the same fix to be re-applied multiple times.
