@@ -23,6 +23,12 @@ defmodule CoreWeb.Router do
     get "/health", HealthController, :index
   end
 
+  # Public endpoints — no authentication required
+  scope "/api", StacksWeb do
+    pipe_through :api
+    get "/costs", CostController, :index
+  end
+
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_auth]
     post "/auth/register", AuthController, :register
