@@ -9,12 +9,21 @@ module Page.CostTransparency exposing
 
 {-| Public cost transparency page.
 
-Displays the platform's infrastructure costs in the curator's desk aesthetic.
-No authentication required. All data is aggregate operational costs.
+Displays the platform's infrastructure costs with consumer-friendly
+explanations. No authentication required. All data is aggregate
+operational costs — no user data is ever exposed.
+
+Follows the 5-layer model from the cost transparency research:
+
+1.  Total at the top (the human number)
+2.  Story-driven breakdown (what happens when you use the app)
+3.  Per-service detail (expandable category cards)
+4.  Real usage metrics from the database
+5.  Monthly trend over time
 
 -}
 
-import Html exposing (Html, div, h1, h2, h3, p, span, table, tbody, td, text, th, thead, tr)
+import Html exposing (Html, div, h1, h2, h3, p, span, text)
 import Html.Attributes exposing (class)
 import Http
 import Json.Decode as Decode exposing (Decoder)
@@ -25,14 +34,27 @@ import Types.RemoteData exposing (RemoteData(..))
 -- MODEL
 
 
-type alias CostLineItem =
-    { category : String
-    , service : String
+type alias CostItem =
+    { service : String
     , description : Maybe String
     , amountCents : Int
-    , currency : String
-    , periodStart : String
-    , periodEnd : String
+    }
+
+
+type alias CostCategory =
+    { category : String
+    , totalCents : Int
+    , items : List CostItem
+    }
+
+
+type alias Metrics =
+    { books : Int
+    , uploads : Int
+    , placements : Int
+    , dbSizeBytes : Int
+    , avgUploadPayloadBytes : Int
+    , visionJobsThisMonth : Int
     }
 
 
@@ -44,11 +66,11 @@ type alias MonthlyTotal =
 
 
 type alias CostBreakdown =
-    { lineItems : List CostLineItem
-    , totalCents : Int
+    { totalCents : Int
     , currency : String
     , costPerBook : Float
-    , bookCount : Int
+    , categories : List CostCategory
+    , metrics : Metrics
     , monthlyTotals : List MonthlyTotal
     , generatedAt : String
     }
@@ -99,26 +121,41 @@ costBreakdownDecoder : Decoder CostBreakdown
 costBreakdownDecoder =
     Decode.field "data"
         (Decode.map7 CostBreakdown
-            (Decode.field "line_items" (Decode.list costLineItemDecoder))
             (Decode.field "total_cents" Decode.int)
             (Decode.field "currency" Decode.string)
             (Decode.field "cost_per_book" Decode.float)
-            (Decode.field "book_count" Decode.int)
+            (Decode.field "categories" (Decode.list categoryDecoder))
+            (Decode.field "metrics" metricsDecoder)
             (Decode.field "monthly_totals" (Decode.list monthlyTotalDecoder))
             (Decode.field "generated_at" Decode.string)
         )
 
 
-costLineItemDecoder : Decoder CostLineItem
-costLineItemDecoder =
-    Decode.map7 CostLineItem
+categoryDecoder : Decoder CostCategory
+categoryDecoder =
+    Decode.map3 CostCategory
         (Decode.field "category" Decode.string)
+        (Decode.field "total_cents" Decode.int)
+        (Decode.field "items" (Decode.list costItemDecoder))
+
+
+costItemDecoder : Decoder CostItem
+costItemDecoder =
+    Decode.map3 CostItem
         (Decode.field "service" Decode.string)
         (Decode.maybe (Decode.field "description" Decode.string))
         (Decode.field "amount_cents" Decode.int)
-        (Decode.field "currency" Decode.string)
-        (Decode.field "period_start" Decode.string)
-        (Decode.field "period_end" Decode.string)
+
+
+metricsDecoder : Decoder Metrics
+metricsDecoder =
+    Decode.map6 Metrics
+        (Decode.field "books" Decode.int)
+        (Decode.field "uploads" Decode.int)
+        (Decode.field "placements" Decode.int)
+        (Decode.field "db_size_bytes" Decode.int)
+        (Decode.field "avg_upload_payload_bytes" Decode.int)
+        (Decode.field "vision_jobs_this_month" Decode.int)
 
 
 monthlyTotalDecoder : Decoder MonthlyTotal
@@ -150,68 +187,131 @@ view model =
                 p [ class "error" ] [ text "Failed to load cost data. Please try again later." ]
 
             Success breakdown ->
-                div [ class "costs__content" ]
-                    [ viewCostTable breakdown
-                    , viewTotalSection breakdown
-                    , viewMonthlyTrend breakdown.monthlyTotals
-                    , viewPhilosophyNote
-                    ]
+                viewBreakdown breakdown
         ]
 
 
-viewCostTable : CostBreakdown -> Html Msg
-viewCostTable breakdown =
-    div [ class "costs__ledger" ]
-        [ h2 [ class "costs__section-title" ] [ text "Current Period" ]
-        , table [ class "costs__table ledger-table" ]
-            [ thead []
-                [ tr []
-                    [ th [ class "ledger-table__th" ] [ text "Category" ]
-                    , th [ class "ledger-table__th" ] [ text "Service" ]
-                    , th [ class "ledger-table__th" ] [ text "Description" ]
-                    , th [ class "ledger-table__th ledger-table__th--amount" ] [ text "Amount" ]
-                    ]
-                ]
-            , tbody []
-                (List.map viewCostRow breakdown.lineItems)
+viewBreakdown : CostBreakdown -> Html Msg
+viewBreakdown breakdown =
+    div [ class "costs__content" ]
+        [ viewTotalBanner breakdown
+        , viewStorySection breakdown
+        , viewCategoryCards breakdown.categories
+        , viewMonthlyTrend breakdown.monthlyTotals
+        , viewPhilosophy
+        ]
+
+
+
+-- LAYER 1: The Human Number
+
+
+viewTotalBanner : CostBreakdown -> Html Msg
+viewTotalBanner breakdown =
+    div [ class "costs__banner" ]
+        [ div [ class "costs__banner-total" ]
+            [ span [ class "costs__banner-label" ] [ text "Total monthly cost" ]
+            , span [ class "costs__banner-amount" ] [ text (formatCents breakdown.totalCents) ]
+            ]
+        , div [ class "costs__banner-formula" ]
+            (breakdown.categories
+                |> List.map
+                    (\cat ->
+                        span [ class "costs__banner-term" ]
+                            [ text (formatCategoryName cat.category ++ " " ++ formatCents cat.totalCents) ]
+                    )
+                |> List.intersperse (span [ class "costs__banner-plus" ] [ text " + " ])
+            )
+        ]
+
+
+
+-- LAYER 2: Story-driven breakdown
+
+
+viewStorySection : CostBreakdown -> Html Msg
+viewStorySection breakdown =
+    let
+        m =
+            breakdown.metrics
+    in
+    div [ class "costs__stories" ]
+        [ h2 [ class "costs__section-title" ] [ text "Where Your Data Lives" ]
+        , div [ class "costs__story-grid" ]
+            [ viewStoryCard "Upload & Identify"
+                ("When you photograph a book, we send the image to a vision model on a GPU. "
+                    ++ "It reads the title, author, and ISBN, then we verify against Open Library. "
+                    ++ String.fromInt m.visionJobsThisMonth
+                    ++ " identifications this month."
+                )
+                (categoryTotal "compute" breakdown.categories)
+            , viewStoryCard "Store & Shelve"
+                ("Each book has metadata — title, author, ISBN, cover URL — plus your "
+                    ++ "placement on a shelf. "
+                    ++ String.fromInt m.books
+                    ++ " books catalogued, "
+                    ++ String.fromInt m.placements
+                    ++ " shelf placements. Database: "
+                    ++ formatBytes m.dbSizeBytes
+                    ++ "."
+                )
+                (categoryTotal "database" breakdown.categories)
+            , viewStoryCard "Serve & Browse"
+                ("The app runs on a small VM in Virginia (IAD). Every page load, "
+                    ++ "API call, and shelf browse is served from here. The vision "
+                    ++ "sidecar proxies GPU requests via HMAC-authenticated HTTPS."
+                )
+                (categoryTotal "hosting" breakdown.categories)
             ]
         ]
 
 
-viewCostRow : CostLineItem -> Html Msg
-viewCostRow item =
-    tr [ class "ledger-table__row" ]
-        [ td [ class "ledger-table__td" ] [ text (formatCategory item.category) ]
-        , td [ class "ledger-table__td ledger-table__td--service" ] [ text item.service ]
-        , td [ class "ledger-table__td ledger-table__td--description" ]
+viewStoryCard : String -> String -> Int -> Html Msg
+viewStoryCard title narrative cents =
+    div [ class "costs__story-card" ]
+        [ h3 [ class "costs__story-title" ] [ text title ]
+        , p [ class "costs__story-text" ] [ text narrative ]
+        , span [ class "costs__story-cost" ] [ text (formatCents cents ++ "/mo") ]
+        ]
+
+
+
+-- LAYER 3: Per-service detail
+
+
+viewCategoryCards : List CostCategory -> Html Msg
+viewCategoryCards categories =
+    div [ class "costs__categories" ]
+        [ h2 [ class "costs__section-title" ] [ text "By Service" ]
+        , div [ class "costs__category-grid" ]
+            (List.map viewCategoryCard categories)
+        ]
+
+
+viewCategoryCard : CostCategory -> Html Msg
+viewCategoryCard cat =
+    div [ class "costs__category-card" ]
+        [ div [ class "costs__category-header" ]
+            [ h3 [ class "costs__category-name" ] [ text (formatCategoryName cat.category) ]
+            , span [ class "costs__category-total" ] [ text (formatCents cat.totalCents) ]
+            ]
+        , div [ class "costs__category-items" ]
+            (List.map viewServiceItem cat.items)
+        ]
+
+
+viewServiceItem : CostItem -> Html Msg
+viewServiceItem item =
+    div [ class "costs__service-item" ]
+        [ div [ class "costs__service-name" ] [ text item.service ]
+        , div [ class "costs__service-desc" ]
             [ text (Maybe.withDefault "" item.description) ]
-        , td [ class "ledger-table__td ledger-table__td--amount" ]
-            [ text (formatCents item.amountCents) ]
+        , div [ class "costs__service-amount" ] [ text (formatCents item.amountCents) ]
         ]
 
 
-viewTotalSection : CostBreakdown -> Html Msg
-viewTotalSection breakdown =
-    div [ class "costs__totals" ]
-        [ h2 [ class "costs__section-title" ] [ text "Summary" ]
-        , div [ class "costs__summary-grid" ]
-            [ div [ class "costs__summary-card" ]
-                [ h3 [ class "costs__card-label" ] [ text "Monthly Total" ]
-                , span [ class "costs__card-value" ]
-                    [ text (formatCents breakdown.totalCents) ]
-                ]
-            , div [ class "costs__summary-card" ]
-                [ h3 [ class "costs__card-label" ] [ text "Books in System" ]
-                , span [ class "costs__card-value" ]
-                    [ text (String.fromInt breakdown.bookCount) ]
-                ]
-            , div [ class "costs__summary-card" ]
-                [ h3 [ class "costs__card-label" ] [ text "Cost per Book" ]
-                , span [ class "costs__card-value" ]
-                    [ text ("$" ++ String.fromFloat breakdown.costPerBook) ]
-                ]
-            ]
-        ]
+
+-- LAYER 4: Monthly trend
 
 
 viewMonthlyTrend : List MonthlyTotal -> Html Msg
@@ -254,11 +354,22 @@ viewTrendBar maxCents total =
         ]
 
 
-viewPhilosophyNote : Html Msg
-viewPhilosophyNote =
+
+-- LAYER 5: Philosophy
+
+
+viewPhilosophy : Html Msg
+viewPhilosophy =
     div [ class "costs__philosophy" ]
         [ p [ class "costs__philosophy-text" ]
-            [ text "Every number here is real, unfiltered, and automated." ]
+            [ text
+                ("Every number on this page is real. Costs are computed from "
+                    ++ "published rate cards and actual database metrics — not estimates "
+                    ++ "or projections. The Stacks is open-source and maintainer-funded; "
+                    ++ "this page exists because we believe you should know exactly "
+                    ++ "what it costs run this platform."
+                )
+            ]
         ]
 
 
@@ -285,8 +396,32 @@ formatCents cents =
     "$" ++ String.fromInt dollars ++ "." ++ centStr
 
 
-formatCategory : String -> String
-formatCategory category =
+formatBytes : Int -> String
+formatBytes bytes =
+    if bytes >= 1073741824 then
+        String.fromFloat (toFloat bytes / 1073741824 |> roundTo 1) ++ " GB"
+
+    else if bytes >= 1048576 then
+        String.fromFloat (toFloat bytes / 1048576 |> roundTo 1) ++ " MB"
+
+    else if bytes >= 1024 then
+        String.fromFloat (toFloat bytes / 1024 |> roundTo 1) ++ " KB"
+
+    else
+        String.fromInt bytes ++ " B"
+
+
+roundTo : Int -> Float -> Float
+roundTo places value =
+    let
+        factor =
+            toFloat (10 ^ places)
+    in
+    toFloat (round (value * factor)) / factor
+
+
+formatCategoryName : String -> String
+formatCategoryName category =
     case category of
         "hosting" ->
             "Hosting"
@@ -302,3 +437,11 @@ formatCategory category =
 
         other ->
             other
+
+
+categoryTotal : String -> List CostCategory -> Int
+categoryTotal name categories =
+    categories
+        |> List.filter (\c -> c.category == name)
+        |> List.map .totalCents
+        |> List.sum
