@@ -8,6 +8,8 @@ defmodule Stacks.Costs.PlatformCost do
   @foreign_key_type :binary_id
   @schema_prefix "op"
 
+  @type t :: %__MODULE__{}
+
   @valid_categories ~w(hosting compute database domain)
 
   schema "platform_costs" do
