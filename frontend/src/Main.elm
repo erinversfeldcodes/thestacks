@@ -15,6 +15,7 @@ import Page.Bookshelf.Library as Library
 import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Bookshelf.WishList as WishList
+import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
 import Page.Search as Search
@@ -58,6 +59,7 @@ type Page
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
     | PageCostTransparency CostTransparency.Model
+    | PageCatalogue Catalogue.Model
     | PageNotFound
 
 
@@ -173,6 +175,13 @@ initPage route maybeAuth maybePreviousRoute =
             in
             ( PageCostTransparency model, Cmd.map CostTransparencyMsg cmd )
 
+        Catalogue ->
+            let
+                ( model, cmd ) =
+                    Catalogue.init maybeToken
+            in
+            ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
+
         NotFound ->
             ( PageNotFound, Cmd.none )
 
@@ -196,6 +205,7 @@ type Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
     | CostTransparencyMsg CostTransparency.Msg
+    | CatalogueMsg Catalogue.Msg
     | SwipeReceived String
     | SwipeIgnored
 
@@ -521,6 +531,23 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        CatalogueMsg subMsg ->
+            case model.page of
+                PageCatalogue subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Catalogue.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageCatalogue newSubModel }
+                    , Cmd.map CatalogueMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         SwipeReceived direction ->
             let
                 maybeNext =
@@ -644,6 +671,9 @@ pageTitle route =
         CostTransparency ->
             "Cost Transparency — The Stacks"
 
+        Catalogue ->
+            "Catalogue — The Stacks"
+
         NotFound ->
             "Not Found — The Stacks"
 
@@ -655,23 +685,28 @@ viewNav model =
             [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ] ]
         , nav [ class "app-nav" ]
             [ ul [ class "app-nav__list" ]
-                [ navItem model.route Library "Library"
-                , navItem model.route AntiLibrary "Antilibrary"
-                , navItem model.route WishList "Wish List"
-                , navItem model.route ReadingPile "Reading Pile"
-                , navItem model.route LookingForHome "Looking for a Home"
-                , navItem model.route Search "Search"
-                , navItem model.route Upload "Add Book"
-                , case model.auth of
+                (case model.auth of
                     Nothing ->
-                        navItem model.route Login "Sign In"
+                        [ navItem model.route CostTransparency "Costs"
+                        , navItem model.route Login "Sign In"
+                        ]
 
                     Just auth ->
-                        Html.li [ class "app-nav__item" ]
+                        [ navItem model.route Library "Library"
+                        , navItem model.route AntiLibrary "Antilibrary"
+                        , navItem model.route WishList "Wish List"
+                        , navItem model.route ReadingPile "Reading Pile"
+                        , navItem model.route LookingForHome "Looking for a Home"
+                        , navItem model.route Catalogue "Catalogue"
+                        , navItem model.route Search "Search"
+                        , navItem model.route Upload "Add Book"
+                        , navItem model.route SettingsConsent "Settings"
+                        , li [ class "app-nav__item" ]
                             [ Html.span [ class "app-nav__user" ]
                                 [ text auth.user.displayName ]
                             ]
-                ]
+                        ]
+                )
             ]
         ]
 
@@ -736,6 +771,9 @@ viewPage model =
 
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
+
+        PageCatalogue subModel ->
+            Html.map CatalogueMsg (Catalogue.view subModel)
 
         PageNotFound ->
             viewNotFound

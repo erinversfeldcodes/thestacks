@@ -1,9 +1,11 @@
 module Api exposing
     ( AuthResponse
+    , CatalogueResponse
     , PollResponse
     , PollStatus(..)
     , getBook
     , getBookshelf
+    , getCatalogue
     , login
     , moveBook
     , pollUploadStatus
@@ -298,6 +300,57 @@ updateAgeVerification verified token toMsg =
         , url = baseUrl ++ "/api/settings/age_verification"
         , body = Http.jsonBody (Encode.object [ ( "age_verified", Encode.bool verified ) ])
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Response from GET /api/catalogue — paginated book list.
+-}
+type alias CatalogueResponse =
+    { books : List Book
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+catalogueResponseDecoder : Decoder CatalogueResponse
+catalogueResponseDecoder =
+    Decode.map4 CatalogueResponse
+        (Decode.field "books" (Decode.list bookDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.field "per_page" Decode.int)
+
+
+{-| GET /api/catalogue — fetch paginated book catalogue.
+-}
+getCatalogue :
+    { search : Maybe String
+    , subject : Maybe String
+    , sort : String
+    , page : Int
+    }
+    -> String
+    -> (Result Http.Error CatalogueResponse -> msg)
+    -> Cmd msg
+getCatalogue params token toMsg =
+    let
+        queryParams =
+            [ Just (Url.Builder.string "sort" params.sort)
+            , Just (Url.Builder.int "page" params.page)
+            , params.search |> Maybe.map (Url.Builder.string "search")
+            , params.subject |> Maybe.map (Url.Builder.string "subject")
+            ]
+                |> List.filterMap identity
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg catalogueResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

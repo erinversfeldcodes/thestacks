@@ -1,6 +1,11 @@
 module TestHelpers exposing
-    ( libraryProgram
+    ( bookDetailProgram
+    , libraryProgram
+    , loginProgram
     , searchProgram
+    , simulateAuthErrorResponse
+    , simulateAuthResponse
+    , simulateBookDetailResponse
     , simulateBookResponse
     , simulateBookshelfResponse
     , simulatePollResponse
@@ -16,12 +21,14 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (PollResponse, PollStatus(..))
+import Api exposing (AuthResponse, PollResponse, PollStatus(..))
 import Dict
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Page.BookDetail as BookDetail
 import Page.Bookshelf.Library as Library
+import Page.Login as Login
 import Page.Search as Search
 import Page.Upload as Upload
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -45,7 +52,7 @@ testBook =
     { id = "book-test-001"
     , isbn = "9780141988511"
     , title = "The Power of Habit"
-    , author = { id = "author-test-001", name = "Charles Duhigg", bio = Nothing }
+    , author = Just { id = "author-test-001", name = "Charles Duhigg", bio = Nothing }
     , description = Just "A fascinating exploration of habit formation."
     , coverImageUrl = Just "https://example.com/covers/habit.jpg"
     , pageCount = Just 371
@@ -81,18 +88,23 @@ encodeBook book =
          , ( "isbn", Encode.string book.isbn )
          , ( "title", Encode.string book.title )
          , ( "author"
-           , Encode.object
-                ([ ( "id", Encode.string book.author.id )
-                 , ( "name", Encode.string book.author.name )
-                 ]
-                    ++ (case book.author.bio of
-                            Just bio ->
-                                [ ( "bio", Encode.string bio ) ]
+           , case book.author of
+                Just author ->
+                    Encode.object
+                        ([ ( "id", Encode.string author.id )
+                         , ( "name", Encode.string author.name )
+                         ]
+                            ++ (case author.bio of
+                                    Just bio ->
+                                        [ ( "bio", Encode.string bio ) ]
 
-                            Nothing ->
-                                []
-                       )
-                )
+                                    Nothing ->
+                                        []
+                               )
+                        )
+
+                Nothing ->
+                    Encode.null
            )
          , ( "subjects", Encode.list Encode.string book.subjects )
          , ( "visibility_tier", encodeVisibilityTier book.visibilityTier )
@@ -111,6 +123,9 @@ encodeVisibilityTier tier =
         case tier of
             Public ->
                 "public"
+
+            AgeGated ->
+                "age_gated"
 
             Unlisted ->
                 "unlisted"
@@ -260,6 +275,69 @@ simulateBookshelfResponse placements =
     in
     Http.GoodStatus_
         { url = "/api/bookshelves/library"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| Create a successful auth HTTP response.
+Parameters: token, userId, email, displayName.
+-}
+simulateAuthResponse : String -> String -> String -> String -> Http.Response String
+simulateAuthResponse token userId email displayName =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "token", Encode.string token )
+                    , ( "user"
+                      , Encode.object
+                            [ ( "id", Encode.string userId )
+                            , ( "email", Encode.string email )
+                            , ( "display_name", Encode.string displayName )
+                            ]
+                      )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/auth/login"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| Create an auth error HTTP response with the given status code.
+-}
+simulateAuthErrorResponse : Int -> Http.Response String
+simulateAuthErrorResponse statusCode =
+    Http.BadStatus_
+        { url = "/api/auth/login"
+        , statusCode = statusCode
+        , statusText = "Error"
+        , headers = Dict.empty
+        }
+        ""
+
+
+{-| Create an HTTP response containing a book detail JSON payload.
+Uses encodeBook to create a proper response wrapping a Book value.
+-}
+simulateBookDetailResponse : String -> Book -> Http.Response String
+simulateBookDetailResponse bookId book =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book ) ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
         , statusCode = 200
         , statusText = "OK"
         , headers = Dict.empty
@@ -514,6 +592,74 @@ searchEffects msg model maybeToken =
             SimulatedEffect.Cmd.none
 
 
+{-| Translate BookDetail page Cmds into SimulatedEffects.
+
+The BookDetail page uses:
+
+  - Http.request (getBook, moveBook, removeBook)
+
+-}
+bookDetailEffects : BookDetail.Msg -> BookDetail.Model -> Maybe String -> SimulatedEffect BookDetail.Msg
+bookDetailEffects msg model maybeToken =
+    case msg of
+        BookDetail.ConfirmMove ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/move"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
+                        , expect = SimulatedEffect.Http.expectWhatever BookDetail.MoveCompleted
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.ConfirmRemove ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "DELETE"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect = SimulatedEffect.Http.expectWhatever BookDetail.RemoveCompleted
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| Translate BookDetail init Cmds into SimulatedEffects.
+-}
+bookDetailInitEffects : String -> Maybe String -> SimulatedEffect BookDetail.Msg
+bookDetailInitEffects bookId maybeToken =
+    case maybeToken of
+        Just token ->
+            SimulatedEffect.Http.request
+                { method = "GET"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/books/" ++ bookId
+                , body = SimulatedEffect.Http.emptyBody
+                , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded (Decode.field "book" bookDecoder)
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            SimulatedEffect.Cmd.none
+
+
 
 -- PROGRAM TEST HARNESSES
 
@@ -601,5 +747,134 @@ searchProgram maybeToken =
                 in
                 ( newModel, searchEffects msg model maybeToken )
         , view = Search.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Decode an AuthResponse. Mirrors Api.authResponseDecoder which is not exposed.
+-}
+decodeAuthResponse : Decode.Decoder AuthResponse
+decodeAuthResponse =
+    Decode.map4 AuthResponse
+        (Decode.field "token" Decode.string)
+        (Decode.at [ "user", "id" ] Decode.string)
+        (Decode.at [ "user", "email" ] Decode.string)
+        (Decode.at [ "user", "display_name" ] Decode.string)
+
+
+{-| Translate Login page Cmds into SimulatedEffects.
+
+The Login page uses:
+
+  - Http.post (login, register)
+  - Process.sleep via Task.perform (door animation delays)
+
+-}
+loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
+loginEffects msg model =
+    case msg of
+        Login.FormSubmitted ->
+            case model.mode of
+                Login.LoginMode ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = []
+                        , url = "/api/auth/login"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object
+                                    [ ( "email", Encode.string model.email )
+                                    , ( "password", Encode.string model.password )
+                                    ]
+                                )
+                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse decodeAuthResponse
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Login.RegisterMode ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = []
+                        , url = "/api/auth/register"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object
+                                    [ ( "email", Encode.string model.email )
+                                    , ( "password", Encode.string model.password )
+                                    , ( "display_name", Encode.string model.displayName )
+                                    ]
+                                )
+                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse decodeAuthResponse
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+        Login.GotAuthResponse (Ok authResponse) ->
+            SimulatedEffect.Task.perform (\_ -> Login.DoorOpeningStarted authResponse) (SimulatedEffect.Process.sleep 200)
+
+        Login.DoorOpeningStarted authResponse ->
+            SimulatedEffect.Task.perform (\_ -> Login.DoorFullyOpened authResponse) (SimulatedEffect.Process.sleep 1200)
+
+        _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| Create a ProgramTest harness for the Login page.
+
+The OutMsg from Login.update is discarded in this harness. Tests that
+need to assert on OutMsg should use the raw update function directly.
+
+Usage:
+
+    ProgramTest.start () loginProgram
+
+-}
+loginProgram : ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
+loginProgram =
+    ProgramTest.createElement
+        { init = \() -> ( Login.init, SimulatedEffect.Cmd.none )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        Login.update msg model
+                in
+                ( newModel, loginEffects msg model )
+        , view = Login.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Create a ProgramTest harness for the BookDetail page.
+
+The auth token and bookId are baked in at harness creation time because
+BookDetail.init requires them to fire the initial HTTP request.
+
+The OutMsg from BookDetail.update is discarded in this harness.
+
+Usage:
+
+    ProgramTest.start () (bookDetailProgram "book-1" (Just "test-token"))
+
+-}
+bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgram bookId maybeToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        BookDetail.init bookId maybeToken Nothing
+                in
+                ( model, bookDetailInitEffects bookId maybeToken )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        BookDetail.update msg model maybeToken
+                in
+                ( newModel, bookDetailEffects msg newModel maybeToken )
+        , view = BookDetail.view
         }
         |> ProgramTest.withSimulatedEffects identity
