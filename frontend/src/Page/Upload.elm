@@ -19,7 +19,7 @@ import Json.Decode as Decode
 import Navigation.Route as Route
 import Process
 import Task
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, authorName)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -455,7 +455,7 @@ viewIdentifiedBook : Book -> Html Msg
 viewIdentifiedBook book =
     li [ class "upload-result__book-item" ]
         [ p [ class "upload-result__book-title" ] [ text book.title ]
-        , p [ class "upload-result__book-author" ] [ text book.author.name ]
+        , p [ class "upload-result__book-author" ] [ text (authorName book) ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
             , class "btn btn--primary"

@@ -117,10 +117,15 @@ encodeBookForSearch book =
          , ( "isbn", Encode.string book.isbn )
          , ( "title", Encode.string book.title )
          , ( "author"
-           , Encode.object
-                [ ( "id", Encode.string book.author.id )
-                , ( "name", Encode.string book.author.name )
-                ]
+           , case book.author of
+                Just author ->
+                    Encode.object
+                        [ ( "id", Encode.string author.id )
+                        , ( "name", Encode.string author.name )
+                        ]
+
+                Nothing ->
+                    Encode.null
            )
          , ( "subjects", Encode.list Encode.string book.subjects )
          , ( "visibility_tier", Encode.string "public" )

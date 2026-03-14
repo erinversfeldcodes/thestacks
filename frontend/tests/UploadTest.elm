@@ -14,7 +14,7 @@ dummyBook =
     { id = "book-1"
     , isbn = "9780141988511"
     , title = "Test Book"
-    , author = { id = "author-1", name = "Test Author", bio = Nothing }
+    , author = Just { id = "author-1", name = "Test Author", bio = Nothing }
     , description = Nothing
     , coverImageUrl = Nothing
     , pageCount = Nothing
