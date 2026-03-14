@@ -60,7 +60,7 @@ Agents cannot create accounts. This must be done by a human before Phase 1E (fir
 | Service | Required for | What to provision |
 |---------|-------------|-------------------|
 | Fly.io | Phase 1E deploy | Organisation created; 2 apps (`thestacks-core`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
-| Fly Postgres | Phase 1E DB | Postgres cluster in IAD; connection string; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
+| Neon PostgreSQL | Phase 1E DB | Serverless PostgreSQL; connection string with `?sslmode=require`; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
 | **Modal** | Phase 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret (`thestacks-vision`). Same secret set as Fly.io secret on `thestacks-core`. |
 | Brave Search | Phase 2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
 | Resend or Postmark | Phase 3 partner notifications | API key; `EMAIL_API_KEY` in `.env` |
@@ -1143,6 +1143,27 @@ Security is not a separate phase — it's woven into every phase. The security-a
 | Phase 5B | PCI considerations for payment flow, KYC webhook verification |
 | Phase 6B | `resolve_visibility/2` gate on all content endpoints, block graph prevents information leakage, `ViewAsPlug` owner-only guard, `noindex`/`nofollow` meta on non-platform-visible content, `robots.txt` disallow for auth-walled routes |
 | Phase 7B | LLM output validation (never trust `/associate` without ISBN verification), comment moderation pipeline, blog content CSP |
+
+---
+
+## Cross-cutting: Testing Enhancements (incremental across phases)
+
+Testing infrastructure grows alongside features. The testing standards (`docs/agents/standards/testing.md`) define when each type of test is required; this section sequences the introduction of additional testing frameworks.
+
+### Phase 1 (MVP)
+
+| Enhancement | What | Where it fits |
+|-------------|------|---------------|
+| **Accessibility testing** | Add `@axe-core/playwright` alongside existing Playwright E2E tests. Every E2E test run also checks WCAG compliance (contrast, ARIA, alt text). Near-zero effort — axe-core injects into existing Playwright test hooks. | Layer 10 (Playwright E2E). Add to `frontend/e2e/` setup. CI runs it with every Playwright pass. |
+| **Migration rollback testing** | After `mix ecto.migrate`, run `mix ecto.rollback --all` then `mix ecto.migrate` again in CI. Proves every migration is reversible and re-runnable. | CI pipeline (`scripts/ci.sh` elixir group). Add as a step after the existing migration check. |
+| **API fuzz testing (Schemathesis)** | Auto-generate adversarial HTTP payloads from Protobuf-generated JSON schemas and fire them at Phoenix endpoints. Catches input validation gaps that hand-written tests miss. Pairs with the property-based testing philosophy. | Layer 12 (Security Testing). Add `schemathesis` to Python dev dependencies. CI runs it against a local Phoenix instance after unit tests pass. |
+
+### Phase 2+ (Enrichment and beyond)
+
+| Enhancement | What | Where it fits |
+|-------------|------|---------------|
+| **Mutation testing** | Muzak (Elixir) and cargo-mutants (Rust) validate that tests actually catch bugs, not just that they pass. Slow and expensive — run as a periodic audit (monthly or per-milestone), not as a CI gate. | Periodic audit. Results inform whether test quality is keeping pace with code complexity. |
+| **RSS/Atom feed validation** | Once US-6.1 (shelf RSS feeds) ships, add a small integration test that validates feed output: parses as valid Atom, entries have required fields (title, updated, id, link), content matches expected book data. | Layer 2 (Integration Tests). A handful of assertions in an existing test file, not a separate framework. |
 
 ---
 

@@ -54,6 +54,17 @@ proptest! {
 }
 ```
 
+**Required when:**
+- A function parses, validates, or transforms untrusted input (user input, API payloads, scraped data) → property test that the function never crashes on arbitrary input
+- A function has a mathematical invariant (checksum, rounding, conversion) → property test that the invariant holds for all generated inputs
+- A codec (encoder/decoder pair) exists → round-trip property test (`decode(encode(x)) == x`)
+- A sorting, filtering, or ranking function exists → property test that output satisfies the ordering/filtering contract
+
+**Not required for:**
+- CRUD operations with no transformation logic
+- Simple pass-through functions or delegations
+- View rendering (elm-program-test covers this)
+
 ### 5. Contract Tests
 Validate API request/response shapes against the Protobuf-generated JSON schemas. Ensures frontend and backend agree on data shapes.
 
@@ -87,8 +98,31 @@ models:
         tests: [not_null]
 ```
 
+**Required when:**
+- A new Ecto migration adds or modifies a table → corresponding dbt staging model (`stg_*`) must be created or updated with schema tests (not_null, unique, accepted_values, relationships)
+- A new column is added to an existing table → dbt schema test for the column's constraints (nullability, type, valid values)
+- A foreign key relationship is added → dbt relationship test (`relationships: {to: ref('stg_other'), field: id}`)
+- A new dbt model (staging, intermediate, or mart) is added → schema tests for all columns, plus a `dbt test` run confirming they pass
+- An enum or constrained-value column is added → `accepted_values` test matching the Ecto/Protobuf enum definition
+
+**Not required for:**
+- Code-only changes with no schema impact
+- Changes to indexes or constraints that don't affect column semantics (dbt doesn't test these)
+
 ### 9. elm-program-test (Primary frontend testing)
 Tests the full Elm app (Model-Update-View) without a browser. Simulates user interactions and asserts on rendered output.
+
+**Required when any of these change:**
+- A new page or route is added → program test covering the page's happy path and error states
+- An existing page's `update` function gains new `Msg` variants → tests for the new user interactions
+- A new API call is introduced → test covering all `RemoteData` states (Loading, Success, Failure)
+- Navigation logic changes → test that route transitions work correctly
+- A user story interaction flow is implemented → program test simulating the full flow from the user's perspective
+
+**Not required for:**
+- Pure CSS/aesthetic changes with no logic impact
+- Changes only to shared types or decoders (unit tests cover those)
+- Changes to components that are already covered by an existing page-level program test
 
 ### 10. Playwright E2E
 Real browser tests for concerns elm-program-test can't cover: file uploads, CSS rendering, animations. Minimal — only what requires a real browser.
@@ -157,6 +191,10 @@ TEST_TARGET=preview just test
 | Unit | 80% line coverage | Focus on business logic, not boilerplate |
 | Integration | Every service boundary | Phoenix <-> Vision, Phoenix <-> Scraper, Phoenix <-> Open Library |
 | Contract | Every API endpoint | Request + response shape validation |
+| Property-based | Every parser, validator, codec, and invariant | Untrusted input never crashes. Round-trips hold. |
+| dbt | Every table and column in the warehouse | Schema tests for all staging models. Relationship tests for all FKs. |
+| elm-program-test | Every page with user interactions | New page = new program test. New Msg variant = new test case. |
+| Playwright E2E | Flows requiring real browser | File uploads, CSS rendering, animations only |
 | Chaos | Every scenario in the resilience matrix | See technical-architecture.md section 18 |
 
 ---
@@ -195,3 +233,7 @@ test/
 4. New API endpoint -> contract test + integration test
 5. New Oban worker -> unit test for the worker + chaos test for failure mode
 6. New proto schema -> contract test for generated types
+7. New or modified Elm page/route -> elm-program-test covering user interaction flows (see Layer 9)
+8. New Msg variant or API call in Elm -> program test case for the new interaction path
+9. New parser, validator, or codec -> property-based test proving it handles arbitrary input (see Layer 4)
+10. New or modified Ecto migration -> dbt staging model + schema tests for affected tables/columns (see Layer 8)
