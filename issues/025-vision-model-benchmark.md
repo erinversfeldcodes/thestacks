@@ -1,4 +1,4 @@
-# Issue #005: Vision Model Evaluation Framework
+# Issue #025: Vision Model Evaluation Framework
 
 ## Summary
 Build a reusable, repeatable evaluation framework for vision model selection in The Stacks. The framework must be re-runnable whenever a new model appears, a prompt changes, or an architectural decision (e.g. adding a local OCR pre-pass) has implications for model choice. Results are committed to the repository so decisions are documented and reproducible.
