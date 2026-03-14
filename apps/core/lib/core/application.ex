@@ -22,14 +22,14 @@ defmodule Core.Application do
     opts = [strategy: :one_for_one, name: Core.Supervisor]
     result = Supervisor.start_link(children, opts)
 
-    # Enqueue RefreshCostsJob on startup so cost data is populated immediately
-    # after a deploy. The daily cron keeps it fresh after that.
-    case result do
-      {:ok, _pid} ->
+    # Enqueue RefreshCostsJob shortly after startup so cost data is populated
+    # immediately after a deploy. Delayed to ensure Oban is fully initialized.
+    # The daily cron keeps it fresh after that.
+    if match?({:ok, _}, result) do
+      Task.start(fn ->
+        Process.sleep(5_000)
         Oban.insert(RefreshCostsJob.new(%{}))
-
-      _ ->
-        :ok
+      end)
     end
 
     result

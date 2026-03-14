@@ -9,13 +9,12 @@ simulated HTTP responses. No authentication is required for this page.
 
 import Http
 import Json.Encode as Encode
-import Page.CostTransparency as CostTransparency exposing (Msg(..))
+import Page.CostTransparency as CostTransparency
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import Types.RemoteData exposing (RemoteData(..))
 
 
 suite : Test
@@ -24,7 +23,8 @@ suite =
         [ loadAndDisplayCosts
         , showsLoadingState
         , showsErrorState
-        , displaysTotalAndCostPerBook
+        , displaysTotalBanner
+        , displaysStoryCards
         , displaysPhilosophyNote
         , displaysMonthlyTrend
         ]
@@ -74,23 +74,45 @@ sampleCostResponseJson =
         (Encode.object
             [ ( "data"
               , Encode.object
-                    [ ( "line_items"
+                    [ ( "total_cents", Encode.int 1309 )
+                    , ( "currency", Encode.string "USD" )
+                    , ( "cost_per_book", Encode.float 1.19 )
+                    , ( "categories"
                       , Encode.list identity
-                            [ costItemJson "hosting" "Fly.io Core" "Phoenix API server" 534
-                            , costItemJson "compute" "Modal Vision API" "Vision inference" 200
-                            , costItemJson "database" "Neon PostgreSQL" "Serverless DB" 0
-                            , costItemJson "domain" "Domain Registration" "Annual domain" 100
+                            [ categoryJson "hosting"
+                                1068
+                                [ serviceJson "Fly.io Core" "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD)" 534
+                                , serviceJson "Fly.io Vision Sidecar" "FastAPI HMAC proxy to Modal" 534
+                                ]
+                            , categoryJson "compute"
+                                141
+                                [ serviceJson "Modal GPU Inference" "Qwen2.5-VL-7B on A10G" 141
+                                ]
+                            , categoryJson "domain"
+                                100
+                                [ serviceJson "Domain Registration" "thestacks.app" 100
+                                ]
+                            , categoryJson "database"
+                                0
+                                [ serviceJson "Neon PostgreSQL" "Serverless Postgres (free tier)" 0
+                                ]
                             ]
                       )
-                    , ( "total_cents", Encode.int 834 )
-                    , ( "currency", Encode.string "USD" )
-                    , ( "cost_per_book", Encode.float 0.42 )
-                    , ( "book_count", Encode.int 20 )
+                    , ( "metrics"
+                      , Encode.object
+                            [ ( "books", Encode.int 11 )
+                            , ( "uploads", Encode.int 5 )
+                            , ( "placements", Encode.int 2 )
+                            , ( "db_size_bytes", Encode.int 8929280 )
+                            , ( "avg_upload_payload_bytes", Encode.int 0 )
+                            , ( "vision_jobs_this_month", Encode.int 47 )
+                            ]
+                      )
                     , ( "monthly_totals"
                       , Encode.list identity
-                            [ monthlyTotalJson "2026-01-01T00:00:00Z" "2026-01-31T23:59:59Z" 750
-                            , monthlyTotalJson "2026-02-01T00:00:00Z" "2026-02-28T23:59:59Z" 800
-                            , monthlyTotalJson "2026-03-01T00:00:00Z" "2026-03-31T23:59:59Z" 834
+                            [ monthlyTotalJson "2026-01-01T00:00:00Z" "2026-01-31T23:59:59Z" 1200
+                            , monthlyTotalJson "2026-02-01T00:00:00Z" "2026-02-28T23:59:59Z" 1250
+                            , monthlyTotalJson "2026-03-01T00:00:00Z" "2026-03-31T23:59:59Z" 1309
                             ]
                       )
                     , ( "generated_at", Encode.string "2026-03-14T12:00:00Z" )
@@ -100,31 +122,36 @@ sampleCostResponseJson =
         )
 
 
-costItemJson : String -> String -> String -> Int -> Encode.Value
-costItemJson category service description amountCents =
+categoryJson : String -> Int -> List Encode.Value -> Encode.Value
+categoryJson category totalCents items =
     Encode.object
         [ ( "category", Encode.string category )
-        , ( "service", Encode.string service )
+        , ( "total_cents", Encode.int totalCents )
+        , ( "items", Encode.list identity items )
+        ]
+
+
+serviceJson : String -> String -> Int -> Encode.Value
+serviceJson service description amountCents =
+    Encode.object
+        [ ( "service", Encode.string service )
         , ( "description", Encode.string description )
         , ( "amount_cents", Encode.int amountCents )
-        , ( "currency", Encode.string "USD" )
-        , ( "period_start", Encode.string "2026-03-01T00:00:00Z" )
-        , ( "period_end", Encode.string "2026-03-31T23:59:59Z" )
         ]
 
 
 monthlyTotalJson : String -> String -> Int -> Encode.Value
-monthlyTotalJson start end totalCents =
+monthlyTotalJson periodStart periodEnd totalCents =
     Encode.object
-        [ ( "period_start", Encode.string start )
-        , ( "period_end", Encode.string end )
+        [ ( "period_start", Encode.string periodStart )
+        , ( "period_end", Encode.string periodEnd )
         , ( "total_cents", Encode.int totalCents )
         ]
 
 
 loadAndDisplayCosts : Test
 loadAndDisplayCosts =
-    test "load_costs: init fetches data -> renders cost table with line items" <|
+    test "load_costs: init fetches data -> renders service names in category cards" <|
         \() ->
             startCostPage
                 |> ProgramTest.simulateHttpOk "GET"
@@ -133,7 +160,7 @@ loadAndDisplayCosts =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Fly.io Core" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Modal Vision API" ]
+                    [ Selector.text "Modal GPU Inference" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Neon PostgreSQL" ]
                 |> ProgramTest.expectViewHas
@@ -161,20 +188,36 @@ showsErrorState =
                     [ Selector.text "Failed to load cost data." ]
 
 
-displaysTotalAndCostPerBook : Test
-displaysTotalAndCostPerBook =
-    test "total_and_cost_per_book: displays summary cards" <|
+displaysTotalBanner : Test
+displaysTotalBanner =
+    test "total_banner: displays total monthly cost" <|
         \() ->
             startCostPage
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "$8.34" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "20" ]
+                    [ Selector.text "Total monthly cost" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "$0.42" ]
+                    [ Selector.text "$13.09" ]
+
+
+displaysStoryCards : Test
+displaysStoryCards =
+    test "story_cards: displays three story sections with metrics" <|
+        \() ->
+            startCostPage
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/costs"
+                    sampleCostResponseJson
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Upload & Identify" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Store & Shelve" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "47 identifications" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "11 books" ]
 
 
 displaysPhilosophyNote : Test
@@ -186,7 +229,7 @@ displaysPhilosophyNote =
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Every number here is real, unfiltered, and automated." ]
+                    [ Selector.text "Every number on this page is real." ]
 
 
 displaysMonthlyTrend : Test
