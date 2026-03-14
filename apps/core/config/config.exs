@@ -13,7 +13,8 @@ config :core, Oban,
     Oban.Plugins.Pruner,
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Stacks.Workers.ImageRetentionJob}
+       {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
+       {"0 6 * * *", Stacks.Workers.RefreshCostsJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 5, scraper: 5]
