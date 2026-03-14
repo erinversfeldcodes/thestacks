@@ -244,7 +244,8 @@ fly_deploy_with_retry() {
         if (cd "$REPO_ROOT" && fly deploy \
                 --app "${app}" \
                 --config "${toml}" \
-                --image-label "${label}"); then
+                --image-label "${label}" \
+                --no-cache); then
             return 0
         fi
 
