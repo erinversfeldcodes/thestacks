@@ -4,7 +4,6 @@ module TestHelpers exposing
     , simulateBookResponse
     , simulateBookshelfResponse
     , simulatePollResponse
-    , simulateSearchResponse
     , testBook
     , testPlacement
     , uploadProgram
@@ -22,9 +21,9 @@ import Dict
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
-import Page.Bookshelf.Library as Library exposing (Msg(..))
-import Page.Search as Search exposing (Msg(..))
-import Page.Upload as Upload exposing (Msg(..))
+import Page.Bookshelf.Library as Library
+import Page.Search as Search
+import Page.Upload as Upload
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
@@ -268,24 +267,6 @@ simulateBookshelfResponse placements =
         json
 
 
-{-| Create an HTTP response for a search results listing.
--}
-simulateSearchResponse : List Book -> Http.Response String
-simulateSearchResponse books =
-    let
-        json =
-            Encode.encode 0
-                (Encode.list encodeBook books)
-    in
-    Http.GoodStatus_
-        { url = "/api/books/search"
-        , statusCode = 200
-        , statusText = "OK"
-        , headers = Dict.empty
-        }
-        json
-
-
 
 -- DECODERS (not exposed from Api, rebuilt here for simulated effects)
 
@@ -470,8 +451,8 @@ uploadEffects msg model maybeToken =
 
 {-| Translate Library page Cmds into SimulatedEffects.
 -}
-libraryEffects : Library.Msg -> Library.Model -> SimulatedEffect Library.Msg
-libraryEffects _ _ =
+libraryEffects : SimulatedEffect Library.Msg
+libraryEffects =
     SimulatedEffect.Cmd.none
 
 
@@ -592,7 +573,7 @@ libraryProgram maybeToken =
                     ( newModel, _, _ ) =
                         Library.update msg model
                 in
-                ( newModel, libraryEffects msg model )
+                ( newModel, libraryEffects )
         , view = Library.view
         }
         |> ProgramTest.withSimulatedEffects identity

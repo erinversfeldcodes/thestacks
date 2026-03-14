@@ -9,7 +9,7 @@ simulated HTTP responses and user interactions.
 
 import Dict
 import Http
-import Page.Bookshelf.Library as Library exposing (Msg(..))
+import Page.Bookshelf.Library as Library
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector

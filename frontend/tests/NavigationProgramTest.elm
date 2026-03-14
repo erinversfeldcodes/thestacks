@@ -14,7 +14,6 @@ Together these prove that navigating to a URL renders the right page.
 -}
 
 import Expect
-import Html
 import Navigation.Route as Route exposing (Route(..))
 import Page.Bookshelf.Library as Library
 import Page.Search as Search
