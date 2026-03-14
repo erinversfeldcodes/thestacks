@@ -16,6 +16,48 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.waitForURL("/", { timeout: 60_000 });
 }
 
+test.describe("Upload pipeline — barcode pre-pass", () => {
+  test(
+    "identifies The Name of the Rose from barcode_isbn_clean.jpg via local OCR",
+    async ({ page }) => {
+      // The barcode pre-pass should short-circuit the VLM entirely.
+      // 60s is generous — the pre-pass itself takes milliseconds; the rest
+      // is Open Library lookup + Elm polling.
+      test.setTimeout(60_000);
+
+      await signIn(page);
+
+      await page.click('a[href="/upload"]');
+      await page.waitForURL("/upload");
+
+      const fileChooserPromise = page.waitForEvent("filechooser");
+      await page.click("button.btn--primary");
+      const fileChooser = await fileChooserPromise;
+      await fileChooser.setFiles(
+        path.join(__dirname, "../../images/barcode_isbn_clean.jpg")
+      );
+
+      await expect(page.locator(".upload-area__loading p")).toHaveText(
+        "Identifying your book...",
+        { timeout: 30_000 }
+      );
+
+      await expect(page.locator(".upload-result--identified")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const result = page.locator(".upload-result--identified");
+      await expect(result).toContainText("Name of the Rose", {
+        ignoreCase: true,
+      });
+      await expect(result).toContainText("Eco");
+
+      const viewBookLink = result.locator('a[href^="/books/"]');
+      await expect(viewBookLink).toBeVisible();
+    }
+  );
+});
+
 test.describe("Upload pipeline", () => {
   test(
     "identifies multiple books from screenshot_mixed_text.jpg",
