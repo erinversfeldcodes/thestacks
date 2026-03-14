@@ -9,13 +9,12 @@ simulated HTTP responses. No authentication is required for this page.
 
 import Http
 import Json.Encode as Encode
-import Page.CostTransparency as CostTransparency exposing (Msg(..))
+import Page.CostTransparency as CostTransparency
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import Types.RemoteData exposing (RemoteData(..))
 
 
 suite : Test
