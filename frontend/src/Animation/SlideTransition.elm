@@ -1,5 +1,6 @@
 module Animation.SlideTransition exposing
-    ( slideInRight
+    ( slideInLeft
+    , slideInRight
     , slideOutRight
     )
 
@@ -12,3 +13,8 @@ slideInRight =
 slideOutRight : String
 slideOutRight =
     "slide-out-right"
+
+
+slideInLeft : String
+slideInLeft =
+    "slide-in-left"
