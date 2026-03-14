@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
 from project_tools import (
-    run_test_suite,
     _extract_summary,
+    _parse_deploy_output,
     _parse_feedback_file,
     _worktree_info,
     create_worktree,
-    remove_worktree,
-    get_feedback_summary,
     draft_issue,
+    get_feedback_summary,
+    remove_worktree,
+    run_e2e_gate,
+    run_test_suite,
 )
-from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
 
 
 class TestExtractSummary(unittest.TestCase):
@@ -207,9 +209,7 @@ class TestParseFeedbackFile(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write(
-                Path(tmp), _HEADER + _OPEN_ENTRY + "---\n" + _APPLIED_ENTRY
-            )
+            path = self._write(Path(tmp), _HEADER + _OPEN_ENTRY + "---\n" + _APPLIED_ENTRY)
             result = _parse_feedback_file(path)
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0]["agent"], "test-agent")
@@ -339,9 +339,7 @@ class TestRemoveWorktree(unittest.TestCase):
     @patch("project_tools.subprocess.run")
     @patch("project_tools.Path.exists", return_value=True)
     def test_git_remove_failure(self, _mock_exists: MagicMock, mock_run: MagicMock):
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="fatal: not a worktree"
-        )
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="fatal: not a worktree")
         result = remove_worktree(14, "2")
         self.assertIn("error", result)
         self.assertIn("not a worktree", result["error"])
@@ -496,6 +494,192 @@ class TestDraftIssueAgentFormatting(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertIn("**elixir-agent**", lines[0])
         self.assertIn("**elm-agent**", lines[1])
+
+
+# ---------------------------------------------------------------------------
+# E2E gate tests
+# ---------------------------------------------------------------------------
+
+_DEPLOY_OUTPUT_SUCCESS = """\
+==> Deploy preview for branch: feat/test
+    Core app:    stacks-core-pr-feat-test
+    Modal app:   thestacks-vision-feat-test
+==> Creating Neon DB branch for preview...
+    Neon branch created: preview/feat-test
+PASS deploy: vision service deployed to Modal
+==> Deploying stacks-core-pr-feat-test...
+PASS deploy: core app deployed
+PASS deploy: health check passed
+PASS deploy: seeds applied
+PASS deploy: warmup passed (all pipelines resolved/rejected)
+==> Running Playwright E2E against https://stacks-core-pr-feat-test.fly.dev...
+PASS deploy: deployed E2E tests passed
+PASS deploy: OWASP ZAP baseline passed (FAIL-NEW: 0)
+PASS deploy: Nuclei scan clean
+PASS deploy: jwt_tool — no exploitable JWT vulnerabilities
+PASS deploy: IDOR tests passed
+"""
+
+_DEPLOY_OUTPUT_E2E_FAIL = """\
+==> Deploy preview for branch: feat/test
+    Core app:    stacks-core-pr-feat-test
+    Modal app:   thestacks-vision-feat-test
+PASS deploy: vision service deployed to Modal
+PASS deploy: core app deployed
+PASS deploy: health check passed
+PASS deploy: seeds applied
+FAIL deploy: warmup timed out — 2/4 pipeline(s) still pending
+FAIL deploy: deployed E2E tests failed
+"""
+
+_DEPLOY_OUTPUT_NO_PASS_NO_FAIL = """\
+==> Deploy preview for branch: feat/test
+    Core app:    stacks-core-pr-feat-test
+SKIP: FLY_API_TOKEN not set — skipping deploy preview.
+"""
+
+
+class TestParseDeployOutput(unittest.TestCase):
+    """Test _parse_deploy_output helper."""
+
+    def test_all_pass(self):
+        result = _parse_deploy_output(_DEPLOY_OUTPUT_SUCCESS)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["preview_url"], "https://stacks-core-pr-feat-test.fly.dev")
+        self.assertGreater(len(result["pass_lines"]), 0)
+        self.assertEqual(len(result["fail_lines"]), 0)
+
+    def test_with_failures(self):
+        result = _parse_deploy_output(_DEPLOY_OUTPUT_E2E_FAIL)
+        self.assertFalse(result["passed"])
+        self.assertEqual(len(result["fail_lines"]), 2)
+        self.assertGreater(len(result["pass_lines"]), 0)
+
+    def test_no_pass_no_fail(self):
+        result = _parse_deploy_output(_DEPLOY_OUTPUT_NO_PASS_NO_FAIL)
+        self.assertFalse(result["passed"])
+        self.assertEqual(len(result["pass_lines"]), 0)
+        self.assertEqual(len(result["fail_lines"]), 0)
+
+    def test_empty_output(self):
+        result = _parse_deploy_output("")
+        self.assertFalse(result["passed"])
+        self.assertIsNone(result["preview_url"])
+
+    def test_preview_url_from_core_app_line(self):
+        output = "    Core app:    my-app-name\nPASS deploy: done\n"
+        result = _parse_deploy_output(output)
+        self.assertEqual(result["preview_url"], "https://my-app-name.fly.dev")
+
+    def test_preview_url_from_https_line(self):
+        output = (
+            "==> Waiting for https://stacks-core-pr-xyz.fly.dev/api/health...\n"
+            "PASS deploy: health check passed\n"
+        )
+        result = _parse_deploy_output(output)
+        self.assertEqual(result["preview_url"], "https://stacks-core-pr-xyz.fly.dev")
+
+
+class TestRunE2EGateScriptMissing(unittest.TestCase):
+    """Test run_e2e_gate when deploy script is missing."""
+
+    @patch("project_tools.REPO_ROOT", Path("/nonexistent/repo"))
+    def test_missing_script(self):
+        result = run_e2e_gate(36)
+        self.assertIn("error", result)
+        self.assertIn("not found", result["error"])
+
+
+class TestRunE2EGateSuccess(unittest.TestCase):
+    """Test run_e2e_gate with mocked subprocess."""
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
+    def test_success(self, mock_run: MagicMock):
+        # First call: git rev-parse for branch name
+        # Second call: deploy script
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="feat/test\n", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=_DEPLOY_OUTPUT_SUCCESS,
+                stderr="",
+            ),
+        ]
+        # Patch the script path to exist
+        with patch.object(Path, "exists", return_value=True):
+            result = run_e2e_gate(36)
+        self.assertTrue(result["passed"])
+        self.assertIn("passed", result["summary"])
+        self.assertEqual(result["preview_url"], "https://stacks-core-pr-feat-test.fly.dev")
+        self.assertGreater(len(result["pass_lines"]), 0)
+        self.assertEqual(len(result["fail_lines"]), 0)
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
+    def test_failure(self, mock_run: MagicMock):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="feat/test\n", stderr=""),
+            MagicMock(
+                returncode=1,
+                stdout=_DEPLOY_OUTPUT_E2E_FAIL,
+                stderr="",
+            ),
+        ]
+        with patch.object(Path, "exists", return_value=True):
+            result = run_e2e_gate(36)
+        self.assertFalse(result["passed"])
+        self.assertIn("failed", result["summary"])
+        self.assertGreater(len(result["fail_lines"]), 0)
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
+    def test_timeout(self, mock_run: MagicMock):
+        import subprocess as sp
+
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="feat/test\n", stderr=""),
+            sp.TimeoutExpired(cmd="deploy-preview.sh", timeout=900),
+        ]
+        with patch.object(Path, "exists", return_value=True):
+            result = run_e2e_gate(36)
+        self.assertFalse(result["passed"])
+        self.assertIn("timed out", result["summary"])
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
+    def test_output_truncation(self, mock_run: MagicMock):
+        long_output = "x" * 10000 + "\nPASS deploy: done\n"
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="feat/test\n", stderr=""),
+            MagicMock(returncode=0, stdout=long_output, stderr=""),
+        ]
+        with patch.object(Path, "exists", return_value=True):
+            result = run_e2e_gate(36)
+        self.assertLessEqual(len(result["output"]), 5000)
+
+    @patch("project_tools.subprocess.run")
+    @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
+    def test_return_keys(self, mock_run: MagicMock):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="main\n", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout="PASS deploy: done\n",
+                stderr="",
+            ),
+        ]
+        with patch.object(Path, "exists", return_value=True):
+            result = run_e2e_gate(1)
+        expected_keys = {
+            "passed",
+            "preview_url",
+            "summary",
+            "pass_lines",
+            "fail_lines",
+            "output",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
 
 
 if __name__ == "__main__":
