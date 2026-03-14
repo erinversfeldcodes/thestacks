@@ -12,6 +12,7 @@
 #   MODAL_TOKEN_SECRET  — Modal API token secret
 #   VISION_HMAC_SECRET  — Elixir → vision HMAC auth
 #   SECRET_KEY_BASE     — Phoenix secret key base
+#   NEON_PARENT_BRANCH  — Name of Neon branch to use as parent for previews (default: staging)
 #   GITHUB_HEAD_REF     — set automatically in GitHub Actions
 #
 # Usage:
@@ -97,6 +98,26 @@ if [[ -n "${NEON_API_KEY:-}" ]]; then
     echo ""
     echo "==> Creating Neon DB branch for preview..."
 
+    # Resolve parent branch name to ID
+    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
+    echo "    Parent branch: ${NEON_PARENT_BRANCH}"
+    NEON_PARENT_BRANCH_ID="$(curl -sL \
+        -H "Authorization: Bearer ${NEON_API_KEY}" \
+        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+        | python3 -c "
+import json,sys
+branches = json.load(sys.stdin).get('branches', [])
+match = [b['id'] for b in branches if b['name'] == '${NEON_PARENT_BRANCH}']
+print(match[0] if match else '')
+" 2>/dev/null || true)"
+
+    if [[ -z "$NEON_PARENT_BRANCH_ID" ]]; then
+        echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_PROJECT_ID}" >&2
+        echo "    Create it first: neon branches create --name ${NEON_PARENT_BRANCH}" >&2
+        exit 1
+    fi
+    echo "    Parent branch ID: ${NEON_PARENT_BRANCH_ID}"
+
     # If a stale branch with this name exists (e.g. from a previously killed run),
     # delete it first so the create below succeeds cleanly.
     stale_id="$(curl -sL \
@@ -120,7 +141,7 @@ print(match[0] if match else '')
     neon_response="$(curl -sL -X POST \
         -H "Authorization: Bearer ${NEON_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"branch\": {\"name\": \"preview/${SANITISED}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
+        -d "{\"branch\": {\"name\": \"preview/${SANITISED}\", \"parent_id\": \"${NEON_PARENT_BRANCH_ID}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
         "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?include_passwords=true")"
 
     NEON_CONNECTION_URI="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['connection_uris'][0]['connection_uri'])" 2>/dev/null || true)"
@@ -289,7 +310,7 @@ print(started[0]['id'] if started else '')
 
 if [[ -n "${machine_id}" ]]; then
     fly machine exec "${machine_id}" \
-        "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed()'\"" \
+        "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
         --app "${CORE_APP}" --timeout 60 2>&1 \
         || { echo "FAIL deploy: seeds failed"; exit 1; }
     echo "PASS deploy: seeds applied"

@@ -10,6 +10,12 @@ defmodule Stacks.Release do
   Or via fly ssh console:
 
       fly ssh console --app <app> -C "/app/bin/core eval 'Stacks.Release.migrate()'"
+
+  ## Seed gating
+
+  `seed/0` is gated behind the `ALLOW_SEEDS` environment variable. Set
+  `ALLOW_SEEDS=true` to enable seeding — this should only be done for dev
+  and preview environments, never for production.
   """
 
   @app :core
@@ -23,10 +29,15 @@ defmodule Stacks.Release do
   end
 
   def seed do
-    load_app()
+    if seeds_allowed?() do
+      load_app()
 
-    for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, fn _repo -> run_seeds() end)
+      for repo <- repos() do
+        {:ok, _, _} = Ecto.Migrator.with_repo(repo, fn _repo -> run_seeds() end)
+      end
+    else
+      IO.puts("Seeds are disabled (ALLOW_SEEDS != \"true\"). Skipping.")
+      :ok
     end
   end
 
@@ -39,6 +50,8 @@ defmodule Stacks.Release do
       IO.puts("Seeds file not found at #{seeds_file}, skipping.")
     end
   end
+
+  defp seeds_allowed?, do: System.get_env("ALLOW_SEEDS") == "true"
 
   defp repos, do: Application.fetch_env!(@app, :ecto_repos)
 
