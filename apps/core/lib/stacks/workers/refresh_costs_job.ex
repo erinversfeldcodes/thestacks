@@ -2,10 +2,10 @@ defmodule Stacks.Workers.RefreshCostsJob do
   @moduledoc """
   Daily Oban worker that refreshes platform cost data.
 
-  Inserts or updates cost line items in `op.platform_costs` for the current
-  billing period. In production, this would pull from billing APIs (Fly.io,
-  Modal, Neon, domain registrar). Currently uses static placeholder values
-  that represent the actual expected costs.
+  Computes costs from known infrastructure pricing and actual usage metrics.
+  Pricing is derived from published rate cards (Fly.io, Modal, Neon) and the
+  actual VM specs in `deploy/fly.core.toml`. Usage-proportional costs (Modal
+  inference) are estimated from the number of vision jobs this month.
 
   The worker emits a `costs.refreshed` event on success.
   """
@@ -17,6 +17,18 @@ defmodule Stacks.Workers.RefreshCostsJob do
   alias Stacks.Costs
   alias Stacks.Events
 
+  # ── Known pricing (from published rate cards) ─────────────────────────────
+  # Fly.io shared-cpu-1x, 512MB: $5.34/mo (see fly.core.toml [[vm]])
+  # Modal A10G GPU: ~$0.000463/sec (~$0.028/inference at ~60s)
+  # Neon free tier: $0 (0.5 GiB storage, 190 compute hours)
+  # Domain: ~$12/year = $1.00/month amortised
+
+  @fly_core_cents 534
+  @fly_vision_cents 534
+  @modal_per_inference_cents 3
+  @neon_cents 0
+  @domain_monthly_cents 100
+
   @impl true
   def perform(_job) do
     Logger.info("RefreshCostsJob: refreshing platform cost data")
@@ -25,7 +37,8 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_start = beginning_of_month(now)
     period_end = end_of_month(now)
 
-    cost_items = build_cost_items(period_start, period_end)
+    vision_jobs = Costs.vision_jobs_this_month()
+    cost_items = build_cost_items(period_start, period_end, vision_jobs)
 
     results =
       Enum.map(cost_items, fn item ->
@@ -49,7 +62,11 @@ defmodule Stacks.Workers.RefreshCostsJob do
         event_type: "costs.refreshed",
         aggregate_type: "platform",
         aggregate_id: Ecto.UUID.generate(),
-        payload: %{item_count: length(cost_items), period: DateTime.to_iso8601(period_start)},
+        payload: %{
+          item_count: length(cost_items),
+          period: DateTime.to_iso8601(period_start),
+          vision_jobs: vision_jobs
+        },
         metadata: %{actor: "system:refresh_costs_job"}
       })
 
@@ -61,39 +78,41 @@ defmodule Stacks.Workers.RefreshCostsJob do
     end
   end
 
-  defp build_cost_items(period_start, period_end) do
+  defp build_cost_items(period_start, period_end, vision_jobs) do
     base = %{period_start: period_start, period_end: period_end, currency: "USD"}
+
+    modal_cents = vision_jobs * @modal_per_inference_cents
 
     [
       Map.merge(base, %{
         category: "hosting",
         service: "Fly.io Core",
-        description: "Phoenix API server (shared-cpu-1x, 256MB)",
-        amount_cents: 534
+        description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD)",
+        amount_cents: @fly_core_cents
       }),
       Map.merge(base, %{
         category: "hosting",
-        service: "Fly.io Vision",
-        description: "Vision sidecar (shared-cpu-1x, 256MB)",
-        amount_cents: 534
+        service: "Fly.io Vision Sidecar",
+        description: "FastAPI HMAC proxy to Modal (shared-cpu-1x, 512MB, IAD)",
+        amount_cents: @fly_vision_cents
       }),
       Map.merge(base, %{
         category: "compute",
-        service: "Modal Vision API",
-        description: "Together AI vision model inference",
-        amount_cents: 200
+        service: "Modal GPU Inference",
+        description: "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month (~$0.03/each)",
+        amount_cents: modal_cents
       }),
       Map.merge(base, %{
         category: "database",
         service: "Neon PostgreSQL",
-        description: "Serverless PostgreSQL (free tier)",
-        amount_cents: 0
+        description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
+        amount_cents: @neon_cents
       }),
       Map.merge(base, %{
         category: "domain",
         service: "Domain Registration",
-        description: "Annual domain registration (amortised monthly)",
-        amount_cents: 100
+        description: "thestacks.app — annual registration amortised monthly",
+        amount_cents: @domain_monthly_cents
       })
     ]
   end
