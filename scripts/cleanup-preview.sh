@@ -59,8 +59,8 @@ fi
 # ── Modal app ────────────────────────────────────────────────────────────────
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]] && command -v python3 &>/dev/null; then
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal app delete "${MODAL_APP}" --yes 2>/dev/null \
-        && echo "    Modal app ${MODAL_APP} deleted." \
+        python3 -m modal app stop "${MODAL_APP}" 2>/dev/null \
+        && echo "    Modal app ${MODAL_APP} stopped." \
         || echo "    Modal app ${MODAL_APP} not found (already gone)."
 else
     echo "    SKIP: MODAL_TOKEN_ID not set — skipping Modal cleanup."
