@@ -10,11 +10,12 @@ module Page.Bookshelf.WishList exposing
 import Api
 import Components.AgeGate exposing (ageGate)
 import Components.EmptyBookshelf exposing (emptyBookshelf)
-import Components.Spine exposing (WearLevel(..), spine)
-import Html exposing (Html, div, h1, p, text)
+import Components.Spine exposing (WearLevel(..))
+import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (class)
 import Http
 import Navigation.Route exposing (Route(..))
+import Page.Bookshelf.Helpers exposing (groupIntoRows, viewShelfLabel, viewShelfRow)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -74,59 +75,51 @@ update msg model =
 view : Model -> Html Msg
 view model =
     div [ class "page page--shelf shelf-wishlist" ]
-        [ h1 [ class "page__title" ] [ text "Wish List" ]
-        , if model.showAgeGate then
-            ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+        [ viewWallpaper
+        , div [ class "shelf-room" ]
+            [ viewShelfLabel "Wish List"
+            , if model.showAgeGate then
+                ageGate
+                    { onVerify = VerifyAge
+                    , onDismiss = DismissAgeGate
+                    }
 
-          else
-            case model.books of
-                NotAsked ->
-                    text ""
+              else
+                case model.books of
+                    NotAsked ->
+                        text ""
 
-                Loading ->
-                    div [ class "loading" ] [ text "Loading your wish list..." ]
+                    Loading ->
+                        div [ class "loading" ] [ text "Loading your wish list..." ]
 
-                Failure _ ->
-                    p [ class "error" ]
-                        [ text "Could not load your wish list. Please try again." ]
+                    Failure _ ->
+                        p [ class "error" ]
+                            [ text "Could not load your wish list. Please try again." ]
 
-                Success placements ->
-                    if List.isEmpty placements then
-                        emptyBookshelf
-                            { bookshelf = "wishlist"
-                            , message =
-                                "Nothing on your wishlist yet — snap photos of books you want to remember."
-                            }
+                    Success placements ->
+                        if List.isEmpty placements then
+                            emptyBookshelf
+                                { bookshelf = "wishlist"
+                                , message =
+                                    "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN."
+                                }
 
-                    else
-                        div [ class "bookshelf" ]
-                            [ div [ class "bookshelf__row" ]
-                                (List.map viewSpine placements)
-                            ]
+                        else
+                            viewBookshelf placements
+            ]
         ]
 
 
-viewSpine : Placement -> Html Msg
-viewSpine placement =
+viewWallpaper : Html msg
+viewWallpaper =
+    div [ class "wallpaper wallpaper--floral" ] []
+
+
+viewBookshelf : List Placement -> Html Msg
+viewBookshelf placements =
     let
-        ( title, author, pageCount ) =
-            case placement.book of
-                Just book ->
-                    ( book.title, book.author.name, Maybe.withDefault 200 book.pageCount )
-
-                Nothing ->
-                    ( "Unknown Title", "Unknown Author", 200 )
+        rows =
+            groupIntoRows 12 placements
     in
-    div [ class "bookshelf__book" ]
-        [ spine
-            { pageCount = pageCount
-
-            -- Wish list books haven't been purchased yet, so always pristine.
-            , wearLevel = Pristine
-            , title = title
-            , author = author
-            }
-        ]
+    div [ class "bookshelf bookshelf--rosewood" ]
+        (List.map (viewShelfRow Pristine) rows)

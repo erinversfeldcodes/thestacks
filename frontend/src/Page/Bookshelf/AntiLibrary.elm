@@ -10,11 +10,12 @@ module Page.Bookshelf.AntiLibrary exposing
 import Api
 import Components.AgeGate exposing (ageGate)
 import Components.EmptyBookshelf exposing (emptyBookshelf)
-import Components.Spine exposing (WearLevel(..), spine)
-import Html exposing (Html, div, h1, p, text)
+import Components.Spine exposing (WearLevel(..))
+import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (class)
 import Http
 import Navigation.Route exposing (Route(..))
+import Page.Bookshelf.Helpers exposing (groupIntoRows, viewShelfLabel, viewShelfRow)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -74,59 +75,51 @@ update msg model =
 view : Model -> Html Msg
 view model =
     div [ class "page page--shelf shelf-antilibrary" ]
-        [ h1 [ class "page__title" ] [ text "Antilibrary" ]
-        , if model.showAgeGate then
-            ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+        [ viewWallpaper
+        , div [ class "shelf-room" ]
+            [ viewShelfLabel "Antilibrary"
+            , if model.showAgeGate then
+                ageGate
+                    { onVerify = VerifyAge
+                    , onDismiss = DismissAgeGate
+                    }
 
-          else
-            case model.books of
-                NotAsked ->
-                    text ""
+              else
+                case model.books of
+                    NotAsked ->
+                        text ""
 
-                Loading ->
-                    div [ class "loading" ] [ text "Loading your antilibrary..." ]
+                    Loading ->
+                        div [ class "loading" ] [ text "Loading your antilibrary..." ]
 
-                Failure _ ->
-                    p [ class "error" ]
-                        [ text "Could not load your antilibrary. Please try again." ]
+                    Failure _ ->
+                        p [ class "error" ]
+                            [ text "Could not load your antilibrary. Please try again." ]
 
-                Success placements ->
-                    if List.isEmpty placements then
-                        emptyBookshelf
-                            { bookshelf = "antilibrary"
-                            , message =
-                                "Your antilibrary is empty — this is where the books you haven't read yet live. The bigger the better."
-                            }
+                    Success placements ->
+                        if List.isEmpty placements then
+                            emptyBookshelf
+                                { bookshelf = "antilibrary"
+                                , message =
+                                    "Books you own but haven't read yet. Upload a photo to start building your collection."
+                                }
 
-                    else
-                        div [ class "bookshelf" ]
-                            [ div [ class "bookshelf__row" ]
-                                (List.map viewSpine placements)
-                            ]
+                        else
+                            viewBookshelf placements
+            ]
         ]
 
 
-viewSpine : Placement -> Html Msg
-viewSpine placement =
+viewWallpaper : Html msg
+viewWallpaper =
+    div [ class "wallpaper wallpaper--botanical" ] []
+
+
+viewBookshelf : List Placement -> Html Msg
+viewBookshelf placements =
     let
-        ( title, author, pageCount ) =
-            case placement.book of
-                Just book ->
-                    ( book.title, book.author.name, Maybe.withDefault 200 book.pageCount )
-
-                Nothing ->
-                    ( "Unknown Title", "Unknown Author", 200 )
+        rows =
+            groupIntoRows 12 placements
     in
-    div [ class "bookshelf__book" ]
-        [ spine
-            { pageCount = pageCount
-
-            -- Antilibrary books are unread by definition, so always pristine.
-            , wearLevel = Pristine
-            , title = title
-            , author = author
-            }
-        ]
+    div [ class "bookshelf bookshelf--oak" ]
+        (List.map (viewShelfRow Pristine) rows)

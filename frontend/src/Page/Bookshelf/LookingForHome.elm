@@ -14,6 +14,7 @@ import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
 import Http
 import Navigation.Route exposing (Route(..))
+import Types.Book exposing (authorName)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -112,7 +113,7 @@ viewCover placement =
         ( title, author ) =
             case placement.book of
                 Just book ->
-                    ( book.title, book.author.name )
+                    ( book.title, authorName book )
 
                 Nothing ->
                     ( "Unknown Title", "Unknown Author" )
