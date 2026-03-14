@@ -1,6 +1,6 @@
 module Components.ShelfMover exposing (shelfMover)
 
-import Html exposing (Html, button, div, option, select, text)
+import Html exposing (Html, button, div, option, select, span, text)
 import Html.Attributes exposing (class, selected, value)
 import Html.Events exposing (onClick, onInput)
 
@@ -24,7 +24,8 @@ shelfMover :
     -> Html msg
 shelfMover config =
     div [ class "shelf-mover" ]
-        [ select
+        [ span [ class "shelf-mover__label" ] [ text "Move to:" ]
+        , select
             [ class "shelf-mover__select"
             , onInput config.onSelectBookshelf
             ]
@@ -42,5 +43,5 @@ shelfMover config =
             [ class "shelf-mover__btn"
             , onClick config.onMove
             ]
-            [ text "Move to Bookshelf" ]
+            [ text "Move" ]
         ]
