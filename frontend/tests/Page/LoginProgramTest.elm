@@ -4,13 +4,12 @@ module Page.LoginProgramTest exposing (suite)
 
 These tests exercise the full Login page lifecycle through
 simulated user interactions and HTTP responses, verifying
-the door metaphor animation, form validation, mode switching,
+the WAAPI port-driven transition, form validation, mode switching,
 and error display.
 
 -}
 
-import Http
-import Page.Login as Login exposing (Msg(..))
+import Page.Login as Login
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
@@ -28,12 +27,12 @@ suite : Test
 suite =
     describe "Page.Login (ProgramTest)"
         [ loginFormSubmitShowsSpinner
-        , loginSuccessDoorAnimation
+        , loginSuccessTransition
         , loginFailureShowsError
         , switchToRegisterShowsDisplayName
         , switchBackToLoginHidesDisplayName
         , submitDisabledDuringLoading
-        , submitDisabledDuringDoorAnimation
+        , submitDisabledDuringTransition
         ]
 
 
@@ -49,9 +48,9 @@ loginFormSubmitShowsSpinner =
                     [ Selector.class "spinner" ]
 
 
-loginSuccessDoorAnimation : Test
-loginSuccessDoorAnimation =
-    test "login_success_door_animation: successful auth -> door opening and open classes applied" <|
+loginSuccessTransition : Test
+loginSuccessTransition =
+    test "login_success_transition: successful auth -> submit button disabled during transition" <|
         \() ->
             startLogin
                 |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
@@ -60,14 +59,10 @@ loginSuccessDoorAnimation =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/login"
                     (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
-                -- After successful auth, a 200ms delay triggers DoorOpeningStarted
-                |> ProgramTest.advanceTime 200
-                |> ProgramTest.ensureViewHas
-                    [ Selector.class "login-door--opening" ]
-                -- After 1200ms more, DoorFullyOpened fires
-                |> ProgramTest.advanceTime 1200
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "login-door--open" ]
+                    [ Selector.class "login-card__submit"
+                    , Selector.disabled True
+                    ]
 
 
 loginFailureShowsError : Test
@@ -82,7 +77,7 @@ loginFailureShowsError =
                     "/api/auth/login"
                     (simulateAuthErrorResponse 401)
                 |> ProgramTest.ensureViewHas
-                    [ Selector.class "login-form__error" ]
+                    [ Selector.class "login-card__error" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "The door remains shut. Invalid credentials." ]
 
@@ -128,9 +123,9 @@ submitDisabledDuringLoading =
                     [ Selector.disabled True ]
 
 
-submitDisabledDuringDoorAnimation : Test
-submitDisabledDuringDoorAnimation =
-    test "submit_disabled_during_door_animation: button is disabled during door opening" <|
+submitDisabledDuringTransition : Test
+submitDisabledDuringTransition =
+    test "submit_disabled_during_transition: button is disabled during WAAPI transition" <|
         \() ->
             startLogin
                 |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
@@ -139,8 +134,7 @@ submitDisabledDuringDoorAnimation =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/login"
                     (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.advanceTime 200
-                |> ProgramTest.ensureViewHas
-                    [ Selector.class "login-door--opening" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.disabled True ]
+                    [ Selector.class "login-card__submit"
+                    , Selector.disabled True
+                    ]

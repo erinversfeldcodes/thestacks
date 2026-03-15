@@ -24,9 +24,9 @@ suite =
             [ test "starts in LoginMode" <|
                 \_ ->
                     Login.init.mode |> Expect.equal Login.LoginMode
-            , test "starts with DoorClosed" <|
+            , test "starts with Idle transition state" <|
                 \_ ->
-                    Login.init.doorState |> Expect.equal Login.DoorClosed
+                    Login.init.transitionState |> Expect.equal Login.Idle
             , test "starts with NotAsked submit state" <|
                 \_ ->
                     Login.init.submitState |> Expect.equal NotAsked
@@ -75,7 +75,7 @@ suite =
                             , displayName = ""
                             , mode = Login.LoginMode
                             , submitState = Failure Http.NetworkError
-                            , doorState = Login.DoorClosed
+                            , transitionState = Login.Idle
                             }
 
                         ( model, _, _ ) =
@@ -100,7 +100,7 @@ suite =
                     outMsg |> Expect.equal Login.NoOut
             ]
         , describe "auth response"
-            [ test "GotAuthResponse Ok sets Success but door stays closed initially" <|
+            [ test "GotAuthResponse Ok sets Success and transitions to Transitioning" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -108,16 +108,16 @@ suite =
                     in
                     Expect.all
                         [ \m -> m.submitState |> Expect.equal (Success fakeAuthResponse)
-                        , \m -> m.doorState |> Expect.equal Login.DoorClosed
+                        , \m -> m.transitionState |> Expect.equal Login.Transitioning
                         ]
                         model
-            , test "GotAuthResponse Ok does not emit LoggedIn yet (door animation pending)" <|
+            , test "GotAuthResponse Ok emits StartTransition (not LoggedIn yet)" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) Login.init
                     in
-                    outMsg |> Expect.equal Login.NoOut
+                    outMsg |> Expect.equal (Login.StartTransition fakeAuthResponse)
             , test "GotAuthResponse Err sets Failure" <|
                 \_ ->
                     let
@@ -126,22 +126,15 @@ suite =
                     in
                     model.submitState |> Expect.equal (Failure Http.NetworkError)
             ]
-        , describe "door animation"
-            [ test "DoorOpeningStarted sets doorState to DoorOpening" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Login.update (DoorOpeningStarted fakeAuthResponse) Login.init
-                    in
-                    model.doorState |> Expect.equal Login.DoorOpening
-            , test "DoorFullyOpened sets doorState to DoorOpen and emits LoggedIn" <|
+        , describe "transition completion"
+            [ test "TransitionCompleted sets transitionState to Complete and emits LoggedIn" <|
                 \_ ->
                     let
                         ( model, _, outMsg ) =
-                            Login.update (DoorFullyOpened fakeAuthResponse) Login.init
+                            Login.update (TransitionCompleted fakeAuthResponse) Login.init
                     in
                     Expect.all
-                        [ \_ -> model.doorState |> Expect.equal Login.DoorOpen
+                        [ \_ -> model.transitionState |> Expect.equal Login.Complete
                         , \_ -> outMsg |> Expect.equal (Login.LoggedIn fakeAuthResponse)
                         ]
                         ()

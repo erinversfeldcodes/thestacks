@@ -1,21 +1,19 @@
 module Page.Login exposing
-    ( DoorState(..)
-    , Mode(..)
+    ( Mode(..)
     , Model
     , Msg(..)
     , OutMsg(..)
+    , TransitionState(..)
     , init
     , update
     , view
     )
 
 import Api exposing (AuthResponse)
-import Html exposing (Html, button, div, h1, h2, input, label, p, span, text)
-import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
+import Html exposing (Html, button, div, h1, input, label, p, span, text)
+import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
-import Process
-import Task
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -25,7 +23,7 @@ type alias Model =
     , displayName : String
     , mode : Mode
     , submitState : RemoteData Http.Error AuthResponse
-    , doorState : DoorState
+    , transitionState : TransitionState
     }
 
 
@@ -34,10 +32,10 @@ type Mode
     | RegisterMode
 
 
-type DoorState
-    = DoorClosed
-    | DoorOpening
-    | DoorOpen
+type TransitionState
+    = Idle
+    | Transitioning
+    | Complete
 
 
 type Msg
@@ -47,12 +45,12 @@ type Msg
     | ModeSwitched Mode
     | FormSubmitted
     | GotAuthResponse (Result Http.Error AuthResponse)
-    | DoorOpeningStarted AuthResponse
-    | DoorFullyOpened AuthResponse
+    | TransitionCompleted AuthResponse
 
 
 type OutMsg
     = NoOut
+    | StartTransition AuthResponse
     | LoggedIn AuthResponse
 
 
@@ -63,7 +61,7 @@ init =
     , displayName = ""
     , mode = LoginMode
     , submitState = NotAsked
-    , doorState = DoorClosed
+    , transitionState = Idle
     }
 
 
@@ -102,22 +100,16 @@ update msg model =
             ( { model | submitState = Loading }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
-            ( { model | submitState = Success authResponse }
-            , Task.perform (\_ -> DoorOpeningStarted authResponse) (Process.sleep 200)
-            , NoOut
+            ( { model | submitState = Success authResponse, transitionState = Transitioning }
+            , Cmd.none
+            , StartTransition authResponse
             )
 
         GotAuthResponse (Err err) ->
             ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
-        DoorOpeningStarted authResponse ->
-            ( { model | doorState = DoorOpening }
-            , Task.perform (\_ -> DoorFullyOpened authResponse) (Process.sleep 1200)
-            , NoOut
-            )
-
-        DoorFullyOpened authResponse ->
-            ( { model | doorState = DoorOpen }
+        TransitionCompleted authResponse ->
+            ( { model | transitionState = Complete }
             , Cmd.none
             , LoggedIn authResponse
             )
@@ -125,160 +117,158 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div
-        [ class
-            ("page page--login"
-                ++ doorStateClass model.doorState
-            )
+    div [ class "page page--login" ]
+        [ div [ class "layer-arrival" ] []
+        , div [ class "layer-passage", id "passage" ] []
+        , div [ class "layer-passage-bright", id "passageBright" ] []
+        , div [ class "layer-bookshelf", id "bookshelf" ] []
+        , div [ class "layer-bookshelf-dim", id "bookshelfDim" ] []
+        , div [ class "layer-vignette", id "vignette" ] []
+        , div [ class "layer-wash", id "wash" ] []
+        , div [ class "login-overlay", id "overlay" ]
+            [ viewLoginCard model ]
         ]
-        [ viewDoor model
-        ]
 
 
-doorStateClass : DoorState -> String
-doorStateClass doorState =
-    case doorState of
-        DoorClosed ->
-            ""
-
-        DoorOpening ->
-            " login-door--opening"
-
-        DoorOpen ->
-            " login-door--open"
-
-
-viewDoor : Model -> Html Msg
-viewDoor model =
-    div [ class "login-entrance" ]
-        [ div [ class "login-door" ]
-            [ div [ class "login-door__frame" ]
-                [ div [ class "login-door__arch" ] []
-                , div [ class "login-door__panel login-door__panel--left" ] []
-                , div [ class "login-door__panel login-door__panel--right" ] []
-                , div [ class "login-door__handle login-door__handle--left" ] []
-                , div [ class "login-door__handle login-door__handle--right" ] []
-                ]
-            , div [ class "login-door__light" ] []
-            ]
-        , div [ class "login-form-area" ]
-            [ h1 [ class "login-form__heading" ]
-                [ text "The Stacks" ]
-            , p [ class "login-form__subheading" ]
-                [ text
-                    (case model.mode of
-                        LoginMode ->
-                            "Present your credentials to enter"
-
-                        RegisterMode ->
-                            "Register for entry to the collection"
-                    )
-                ]
-            , div [ class "login-form" ]
-                [ div [ class "login-form__tabs" ]
-                    [ button
-                        [ class
-                            (if model.mode == LoginMode then
-                                "login-form__tab login-form__tab--active"
-
-                             else
-                                "login-form__tab"
-                            )
-                        , onClick (ModeSwitched LoginMode)
-                        ]
-                        [ text "Sign In" ]
-                    , button
-                        [ class
-                            (if model.mode == RegisterMode then
-                                "login-form__tab login-form__tab--active"
-
-                             else
-                                "login-form__tab"
-                            )
-                        , onClick (ModeSwitched RegisterMode)
-                        ]
-                        [ text "Register" ]
-                    ]
-                , case model.mode of
-                    RegisterMode ->
-                        div [ class "login-form__field" ]
-                            [ label [ class "login-form__label", for "display-name" ]
-                                [ text "Display Name" ]
-                            , input
-                                [ id "display-name"
-                                , class "login-form__input"
-                                , type_ "text"
-                                , placeholder "Your name"
-                                , value model.displayName
-                                , onInput DisplayNameChanged
-                                ]
-                                []
-                            ]
-
+viewLoginCard : Model -> Html Msg
+viewLoginCard model =
+    div [ class "login-card" ]
+        [ h1 [ class "login-card__title" ] [ text "The Stacks" ]
+        , p [ class "login-card__subtitle" ]
+            [ text
+                (case model.mode of
                     LoginMode ->
-                        text ""
-                , div [ class "login-form__field" ]
-                    [ label [ class "login-form__label", for "email" ]
-                        [ text "Email" ]
-                    , input
-                        [ id "email"
-                        , class "login-form__input"
-                        , type_ "email"
-                        , placeholder "you@example.com"
-                        , value model.email
-                        , onInput EmailChanged
-                        ]
-                        []
-                    ]
-                , div [ class "login-form__field" ]
-                    [ label [ class "login-form__label", for "password" ]
-                        [ text "Password" ]
-                    , input
-                        [ id "password"
-                        , class "login-form__input"
-                        , type_ "password"
-                        , placeholder "Enter your password"
-                        , value model.password
-                        , onInput PasswordChanged
-                        ]
-                        []
-                    ]
-                , viewError model
-                , button
-                    [ class "btn btn--primary login-form__submit"
-                    , onClick FormSubmitted
-                    , disabled (isSubmitDisabled model)
-                    ]
-                    [ case model.submitState of
-                        Loading ->
-                            span [ class "spinner spinner--small" ] []
+                        "Present your credentials to enter"
 
-                        _ ->
-                            text
-                                (case model.mode of
-                                    LoginMode ->
-                                        "Enter the Stacks"
+                    RegisterMode ->
+                        "Register for entry to the collection"
+                )
+            ]
+        , div
+            [ class "login-card__tabs"
+            , attribute "role" "tablist"
+            ]
+            [ button
+                [ class
+                    (if model.mode == LoginMode then
+                        "login-card__tab login-card__tab--active"
 
-                                    RegisterMode ->
-                                        "Request Entry"
-                                )
-                    ]
+                     else
+                        "login-card__tab"
+                    )
+                , attribute "role" "tab"
+                , attribute "aria-selected"
+                    (if model.mode == LoginMode then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , onClick (ModeSwitched LoginMode)
                 ]
+                [ text "Sign In" ]
+            , button
+                [ class
+                    (if model.mode == RegisterMode then
+                        "login-card__tab login-card__tab--active"
+
+                     else
+                        "login-card__tab"
+                    )
+                , attribute "role" "tab"
+                , attribute "aria-selected"
+                    (if model.mode == RegisterMode then
+                        "true"
+
+                     else
+                        "false"
+                    )
+                , onClick (ModeSwitched RegisterMode)
+                ]
+                [ text "Register" ]
+            ]
+        , case model.mode of
+            RegisterMode ->
+                div [ class "login-card__field" ]
+                    [ label [ class "login-card__label", for "display-name" ]
+                        [ text "Display Name" ]
+                    , input
+                        [ id "display-name"
+                        , class "login-card__input"
+                        , type_ "text"
+                        , placeholder "Your name"
+                        , value model.displayName
+                        , onInput DisplayNameChanged
+                        ]
+                        []
+                    ]
+
+            LoginMode ->
+                text ""
+        , div [ class "login-card__field" ]
+            [ label [ class "login-card__label", for "email" ]
+                [ text "Email" ]
+            , input
+                [ id "email"
+                , class "login-card__input"
+                , type_ "email"
+                , placeholder "you@example.com"
+                , value model.email
+                , onInput EmailChanged
+                , attribute "aria-required" "true"
+                ]
+                []
+            ]
+        , div [ class "login-card__field" ]
+            [ label [ class "login-card__label", for "password" ]
+                [ text "Password" ]
+            , input
+                [ id "password"
+                , class "login-card__input"
+                , type_ "password"
+                , placeholder "Enter your password"
+                , value model.password
+                , onInput PasswordChanged
+                , attribute "aria-required" "true"
+                ]
+                []
+            ]
+        , viewError model
+        , button
+            [ class "login-card__submit"
+            , onClick FormSubmitted
+            , disabled (isSubmitDisabled model)
+            ]
+            [ case model.submitState of
+                Loading ->
+                    span [ class "spinner spinner--small" ] []
+
+                _ ->
+                    text
+                        (case model.mode of
+                            LoginMode ->
+                                "Enter the Stacks"
+
+                            RegisterMode ->
+                                "Request Entry"
+                        )
             ]
         ]
 
 
 isSubmitDisabled : Model -> Bool
 isSubmitDisabled model =
-    model.submitState == Loading || model.doorState /= DoorClosed
+    model.submitState == Loading || model.transitionState /= Idle
 
 
 viewError : Model -> Html Msg
 viewError model =
     case model.submitState of
         Failure err ->
-            p [ class "login-form__error" ]
-                [ text (errorMessage model.mode err) ]
+            div [ attribute "aria-live" "polite" ]
+                [ p [ class "login-card__error" ]
+                    [ text (errorMessage model.mode err) ]
+                ]
 
         _ ->
             text ""
