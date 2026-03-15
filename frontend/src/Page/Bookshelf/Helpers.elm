@@ -1,15 +1,17 @@
 module Page.Bookshelf.Helpers exposing
     ( groupIntoRows
     , pickTexture
+    , viewBookcase
     , viewShelfLabel
     , viewShelfRow
-    , viewSpine
+    , viewShelfRowClickable
     )
 
-import Components.Spine exposing (SpineTexture(..), WearLevel(..), spine)
-import Html exposing (Html, div, span, text)
+import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
+import Html exposing (Html, button, div, span, text)
 import Html.Attributes exposing (attribute, class)
-import Types.Book
+import Html.Events exposing (onClick)
+import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 
 
@@ -18,25 +20,63 @@ import Types.Placement exposing (Placement)
 pickTexture : String -> SpineTexture
 pickTexture s =
     let
-        hash =
+        h =
             List.foldl (\c acc -> acc + Char.toCode c) 0 (String.toList s)
     in
-    if modBy 3 hash == 0 then
+    if modBy 3 h == 0 then
         Leather
 
     else
         Cloth
 
 
-{-| Split a list into sublists of at most n elements.
+{-| Group placements into shelf rows based on accumulated spine width,
+matching the mockup's approach of fitting books until a max width is reached.
 -}
-groupIntoRows : Int -> List a -> List (List a)
-groupIntoRows n items =
-    if List.isEmpty items then
-        []
+groupIntoRows : Int -> List Placement -> List (List Placement)
+groupIntoRows maxWidth placements =
+    groupIntoRowsHelp maxWidth 0 [] placements
 
-    else
-        List.take n items :: groupIntoRows n (List.drop n items)
+
+groupIntoRowsHelp : Int -> Int -> List Placement -> List Placement -> List (List Placement)
+groupIntoRowsHelp maxWidth currentWidth currentRow remaining =
+    case remaining of
+        [] ->
+            if List.isEmpty currentRow then
+                []
+
+            else
+                [ List.reverse currentRow ]
+
+        p :: rest ->
+            let
+                pageCount =
+                    case p.book of
+                        Just bk ->
+                            Maybe.withDefault 200 bk.pageCount
+
+                        Nothing ->
+                            200
+
+                w =
+                    spineWidth pageCount + 2
+            in
+            if currentWidth + w > maxWidth && not (List.isEmpty currentRow) then
+                List.reverse currentRow :: groupIntoRowsHelp maxWidth w [ p ] rest
+
+            else
+                groupIntoRowsHelp maxWidth (currentWidth + w) (p :: currentRow) rest
+
+
+{-| Render a bookcase frame wrapping inner content with side panels.
+-}
+viewBookcase : List (Html msg) -> Html msg
+viewBookcase content =
+    div [ class "bookcase" ]
+        [ div [ class "bookcase__side--left" ] []
+        , div [ class "bookcase__side--right" ] []
+        , div [ class "bookcase__inner" ] content
+        ]
 
 
 {-| Render a shelf label with an aria-label for accessibility.
@@ -44,48 +84,114 @@ groupIntoRows n items =
 viewShelfLabel : String -> Html msg
 viewShelfLabel label =
     div [ class "shelf-label", attribute "aria-label" label ]
-        [ div [ class "shelf-label__plate" ]
-            [ span [ class "shelf-label__text" ] [ text label ] ]
-        ]
+        [ span [] [ text label ] ]
 
 
-{-| Render a single shelf row with role="list" for accessibility.
+{-| Render a single shelf row matching the mockup structure:
+.shelf-row > .shelf-row\_\_back + .shelf-row\_\_books + .shelf-row\_\_plank + .shelf-row\_\_lip
 -}
 viewShelfRow : WearLevel -> List Placement -> Html msg
 viewShelfRow wearLevel placements =
-    div [ class "bookshelf__shelf" ]
-        [ div [ class "bookshelf__back-panel" ] []
-        , div [ class "bookshelf__row", attribute "role" "list" ]
+    div [ class "shelf-row" ]
+        [ div [ class "shelf-row__back" ] []
+        , div [ class "shelf-row__books", attribute "role" "list" ]
             (List.map (viewSpine wearLevel) placements)
-        , div [ class "bookshelf__plank" ]
-            [ div [ class "bookshelf__plank-front" ] []
-            , div [ class "bookshelf__plank-edge" ] []
-            ]
+        , div [ class "shelf-row__plank" ] []
+        , div [ class "shelf-row__lip" ] []
         ]
 
 
-{-| Render a book spine with role="listitem" for accessibility.
+{-| Render a book element with role="listitem" for accessibility.
+Uses the new `book` function from Components.Spine that produces
+the full 3D structure with spine and cover.
 -}
 viewSpine : WearLevel -> Placement -> Html msg
 viewSpine wearLevel placement =
     let
-        ( bookTitle, author, pageCount ) =
+        bookData =
             case placement.book of
-                Just book ->
-                    ( book.title, Types.Book.authorName book, Maybe.withDefault 200 book.pageCount )
+                Just bk ->
+                    { title = bk.title
+                    , author = Types.Book.authorName bk
+                    , pageCount = Maybe.withDefault 200 bk.pageCount
+                    , coverUrl = bk.coverImageUrl
+                    }
 
                 Nothing ->
-                    ( "Unknown Title", "Unknown Author", 200 )
+                    { title = "Unknown Title"
+                    , author = "Unknown Author"
+                    , pageCount = 200
+                    , coverUrl = Nothing
+                    }
 
         texture =
-            pickTexture bookTitle
+            pickTexture bookData.title
     in
-    div [ class "bookshelf__book", attribute "role" "listitem" ]
-        [ spine
-            { pageCount = pageCount
+    div [ attribute "role" "listitem" ]
+        [ book
+            { pageCount = bookData.pageCount
             , wearLevel = wearLevel
             , texture = texture
-            , title = bookTitle
-            , author = author
+            , title = bookData.title
+            , author = bookData.author
+            , coverImageUrl = bookData.coverUrl
+            }
+        ]
+
+
+{-| Render a shelf row where each book spine is clickable.
+The onBookClicked callback receives the Book data when a spine is clicked.
+-}
+viewShelfRowClickable : WearLevel -> (Book -> msg) -> List Placement -> Html msg
+viewShelfRowClickable wearLevel onBookClicked placements =
+    div [ class "shelf-row" ]
+        [ div [ class "shelf-row__back" ] []
+        , div [ class "shelf-row__books" ]
+            (List.map (viewClickableSpine wearLevel onBookClicked) placements)
+        , div [ class "shelf-row__plank" ] []
+        , div [ class "shelf-row__lip" ] []
+        ]
+
+
+{-| Render a clickable book spine wrapped in a button element.
+The onBookClicked callback receives the Book data when the spine is clicked.
+Reusable across all shelf pages (Library, AntiLibrary, WishList, ReadingPile).
+-}
+viewClickableSpine : WearLevel -> (Book -> msg) -> Placement -> Html msg
+viewClickableSpine wearLevel onBookClicked placement =
+    let
+        bookData =
+            case placement.book of
+                Just bk ->
+                    bk
+
+                Nothing ->
+                    { id = ""
+                    , isbn = ""
+                    , title = "Unknown Title"
+                    , author = Nothing
+                    , description = Nothing
+                    , coverImageUrl = Nothing
+                    , pageCount = Just 200
+                    , publisher = Nothing
+                    , publicationYear = Nothing
+                    , subjects = []
+                    , visibilityTier = Types.Book.Public
+                    }
+
+        texture =
+            pickTexture bookData.title
+    in
+    button
+        [ class "book-button"
+        , onClick (onBookClicked bookData)
+        ]
+        [ Components.Spine.book
+            { pageCount = Maybe.withDefault 200 bookData.pageCount
+            , wearLevel = wearLevel
+            , texture = texture
+            , title = bookData.title
+            , author = Types.Book.authorName bookData
+            , coverImageUrl = bookData.coverImageUrl
             }
         ]

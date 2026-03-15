@@ -54,9 +54,9 @@ bookshelfRendersPlacements =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "bookshelf" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.class "bookshelf__book" ]
+                    [ Selector.class "book" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "spine" ]
+                    [ Selector.class "book__spine" ]
 
 
 bookshelfEmptyState : Test
