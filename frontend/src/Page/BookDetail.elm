@@ -12,8 +12,8 @@ import Components.AgeGate exposing (ageGate)
 import Components.FormatPicker exposing (formatPicker)
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
-import Html exposing (Html, a, button, div, h1, h2, h3, img, p, section, span, text)
-import Html.Attributes exposing (alt, class, href, src, target)
+import Html exposing (Html, button, div, h1, h2, h3, img, p, section, span, text)
+import Html.Attributes exposing (alt, class, src)
 import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route exposing (Route)
@@ -54,11 +54,9 @@ type Msg
     | CloseRemoveModal
     | ConfirmRemove
     | RemoveCompleted (Result Http.Error ())
-    | ToggleFormatPicker
     | ToggleFormat Format
     | VerifyAge
     | DismissAgeGate
-    | EntryAnimationFinished
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -165,9 +163,6 @@ update msg model maybeToken =
                 Err err ->
                     ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
-        ToggleFormatPicker ->
-            ( { model | formatPickerOpen = not model.formatPickerOpen }, Cmd.none, NoOut )
-
         ToggleFormat format ->
             -- DEFERRED: Format toggles are display-only for now. Backend persistence
             -- via PUT /api/placements/:id/formats will be added when the placement
@@ -181,9 +176,6 @@ update msg model maybeToken =
                         format :: model.selectedFormats
             in
             ( { model | selectedFormats = newFormats }, Cmd.none, NoOut )
-
-        EntryAnimationFinished ->
-            ( { model | entryAnimationActive = False }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

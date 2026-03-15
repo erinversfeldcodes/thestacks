@@ -19,8 +19,7 @@ import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import Types.Book exposing (Book, VisibilityTier(..), bookDecoder)
-import Types.RemoteData exposing (RemoteData(..))
+import Types.Book exposing (bookDecoder)
 
 
 suite : Test
