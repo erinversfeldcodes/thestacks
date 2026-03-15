@@ -76,7 +76,7 @@ apps/core/priv/static/uploads/
 e2e/test-results
 apps/core/cover/
 frontend/test-results
-frontend/public
+frontend/public/elm.js
 /priv/
 !apps/core/priv/repo/
 test-results/
