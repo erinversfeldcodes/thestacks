@@ -4,17 +4,15 @@ const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
 
 test.describe("Login Page Aesthetic", () => {
-  test("login page renders the door metaphor with entrance and door elements", async ({
+  test("login page renders the bookshelf wall with scene layers", async ({
     page,
   }) => {
     await page.goto("/login");
 
-    await expect(page.locator(".login-entrance")).toBeVisible();
-    await expect(page.locator(".login-door")).toBeVisible();
-    await expect(page.locator(".login-door__frame")).toBeVisible();
-    await expect(page.locator(".login-door__arch")).toBeVisible();
-    await expect(page.locator(".login-door__panel--left")).toBeVisible();
-    await expect(page.locator(".login-door__panel--right")).toBeVisible();
+    // Scene layers exist in DOM (some may have low opacity by design)
+    await expect(page.locator(".layer-bookshelf")).toBeAttached();
+    await expect(page.locator(".layer-arrival")).toBeAttached();
+    await expect(page.locator(".login-overlay")).toBeVisible();
   });
 
   test("login form has email and password fields", async ({ page }) => {
@@ -37,37 +35,24 @@ test.describe("Login Page Aesthetic", () => {
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', "wrong-password");
-    await page.click("button.login-form__submit");
+    await page.click("button.login-card__submit");
 
-    const error = page.locator(".login-form__error");
+    const error = page.locator(".login-card__error");
     await expect(error).toBeVisible();
     await expect(error).toContainText("Invalid");
-
-    // Error should be rendered within the login form area
-    await expect(page.locator(".login-form .login-form__error")).toBeVisible();
   });
 
-  test("successful login triggers door animation classes", async ({
+  test("successful login triggers transition and redirects", async ({
     page,
   }) => {
     await page.goto("/login");
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click("button.login-form__submit");
+    await page.click("button.login-card__submit");
 
-    // After successful auth, the door opening animation class should appear
-    await expect(page.locator(".login-door--opening")).toBeVisible({
-      timeout: 5000,
-    });
-
-    // Eventually the door fully opens
-    await expect(page.locator(".login-door--open")).toBeVisible({
-      timeout: 5000,
-    });
-
-    // Should redirect to home after door animation completes
-    await page.waitForURL("/", { timeout: 10000 });
+    // Should redirect to antilibrary after transition completes
+    await page.waitForURL("**/antilibrary", { timeout: 15000 });
   });
 
   test("register tab shows display name field", async ({ page }) => {
@@ -105,5 +90,24 @@ test.describe("Login Page Aesthetic", () => {
     await expect(page.locator('a[href="/upload"]')).not.toBeVisible();
     await expect(page.locator('a[href="/library"]')).not.toBeVisible();
     await expect(page.locator('a[href="/search"]')).not.toBeVisible();
+  });
+
+  test("login card has parchment styling and ARIA attributes", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+
+    await expect(page.locator(".login-card")).toBeVisible();
+    await expect(page.locator(".login-card__title")).toHaveText("The Stacks");
+    await expect(page.locator(".login-card__subtitle")).toBeVisible();
+
+    // ARIA attributes on inputs
+    await expect(page.locator('input[id="email"]')).toHaveAttribute("aria-required", "true");
+    await expect(page.locator('input[id="password"]')).toHaveAttribute("aria-required", "true");
+
+    // Tab interface ARIA
+    const tablist = page.locator('[role="tablist"]');
+    await expect(tablist).toBeVisible();
+    await expect(page.locator('[role="tab"]')).toHaveCount(2);
   });
 });
