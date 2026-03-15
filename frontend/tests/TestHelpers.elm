@@ -7,6 +7,7 @@ module TestHelpers exposing
     , simulateAuthResponse
     , simulateBookDetailResponse
     , simulateBookResponse
+    , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulatePollResponse
     , testBook
@@ -280,6 +281,19 @@ simulateBookshelfResponse placements =
         , headers = Dict.empty
         }
         json
+
+
+{-| Create an error HTTP response for a bookshelf listing with the given status code.
+-}
+simulateBookshelfErrorResponse : Int -> Http.Response String
+simulateBookshelfErrorResponse statusCode =
+    Http.BadStatus_
+        { url = "/api/bookshelves/library"
+        , statusCode = statusCode
+        , statusText = "Error"
+        , headers = Dict.empty
+        }
+        ""
 
 
 {-| Create a successful auth HTTP response.
@@ -809,12 +823,6 @@ loginEffects msg model =
                         , timeout = Nothing
                         , tracker = Nothing
                         }
-
-        Login.GotAuthResponse (Ok authResponse) ->
-            SimulatedEffect.Task.perform (\_ -> Login.DoorOpeningStarted authResponse) (SimulatedEffect.Process.sleep 200)
-
-        Login.DoorOpeningStarted authResponse ->
-            SimulatedEffect.Task.perform (\_ -> Login.DoorFullyOpened authResponse) (SimulatedEffect.Process.sleep 1200)
 
         _ ->
             SimulatedEffect.Cmd.none

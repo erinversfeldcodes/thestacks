@@ -9,13 +9,19 @@ module Page.Bookshelf.Library exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
-import Components.EmptyBookshelf exposing (emptyBookshelf)
+import Components.BookDetailOverlay exposing (viewBookDetailOverlay)
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, div, p, text)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (attribute, class)
 import Http
 import Navigation.Route exposing (Route(..))
-import Page.Bookshelf.Helpers exposing (groupIntoRows, viewShelfLabel, viewShelfRow)
+import Page.Bookshelf.Helpers
+    exposing
+        ( groupIntoRows
+        , viewBookcase
+        , viewShelfLabel
+        , viewShelfRowClickable
+        )
 import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
@@ -37,6 +43,8 @@ type Msg
     = BooksLoaded (Result Http.Error (List Placement))
     | VerifyAge
     | DismissAgeGate
+    | BookClicked Book
+    | DetailClosed
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -73,6 +81,12 @@ update msg model =
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
+        BookClicked bk ->
+            ( { model | selectedBook = Just bk }, Cmd.none, NoOut )
+
+        DetailClosed ->
+            ( { model | selectedBook = Nothing }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -87,27 +101,28 @@ view model =
                     }
 
               else
-                case model.books of
-                    NotAsked ->
-                        text ""
+                div [ attribute "aria-live" "polite" ]
+                    [ case model.books of
+                        NotAsked ->
+                            text ""
 
-                    Loading ->
-                        div [ class "loading" ] [ text "Loading your library..." ]
+                        Loading ->
+                            div [ class "loading" ] [ text "Loading your library..." ]
 
-                    Failure _ ->
-                        p [ class "error" ] [ text "Could not load your library. Please try again." ]
+                        Failure _ ->
+                            p [ class "error" ] [ text "Could not load your library. Please try again." ]
 
-                    Success placements ->
-                        if List.isEmpty placements then
-                            emptyBookshelf
-                                { bookshelf = "library"
-                                , message =
-                                    "Your library is waiting. Move a book here when you've finished reading it."
-                                }
+                        Success placements ->
+                            if List.isEmpty placements then
+                                div [ class "empty-msg empty-shelf empty-shelf--library" ]
+                                    [ p [] [ text "Your library is waiting. Move a book here when you've finished reading it." ]
+                                    ]
 
-                        else
-                            viewBookshelf placements
+                            else
+                                viewBookshelf placements
+                    ]
             ]
+        , viewBookDetailOverlay { onClose = DetailClosed } model.selectedBook
         ]
 
 
@@ -120,7 +135,9 @@ viewBookshelf : List Placement -> Html Msg
 viewBookshelf placements =
     let
         rows =
-            groupIntoRows 12 placements
+            groupIntoRows 600 placements
     in
     div [ class "bookshelf bookshelf--walnut" ]
-        (List.map (viewShelfRow Softened) rows)
+        [ viewBookcase
+            (List.map (viewShelfRowClickable Softened BookClicked) rows)
+        ]

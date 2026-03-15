@@ -1,10 +1,14 @@
 module Components.Spine exposing
     ( SpineTexture(..)
     , WearLevel(..)
+    , book
     , spine
+    , spineHeight
+    , spineLean
     , spineWidth
     )
 
+import Bitwise
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (class, style, title)
 
@@ -19,60 +23,255 @@ type SpineTexture
     | Leather
 
 
+{-| Deterministic hash of a string, matching the JS mockup:
+
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+
+Elm uses arbitrary-precision integers so we mask to 32-bit with Bitwise
+operations to match the JS `| 0` truncation behaviour then take abs.
+
+-}
+hash : String -> Int
+hash s =
+    let
+        fold c acc =
+            let
+                shifted =
+                    Bitwise.shiftLeftBy 5 acc - acc + Char.toCode c
+
+                -- Simulate JS `| 0` (truncate to signed 32-bit)
+                masked =
+                    Bitwise.or shifted 0
+            in
+            masked
+    in
+    abs (List.foldl fold 0 (String.toList s))
+
+
+{-| Spine width in pixels from page count.
+Matches mockup: max(35, min(55, round(pages / 12)))
+-}
 spineWidth : Int -> Int
 spineWidth pageCount =
-    max 8 (min 40 (pageCount // 10))
+    max 35 (min 55 (round (toFloat pageCount / 12)))
 
 
-wearLevelClass : WearLevel -> String
-wearLevelClass wearLevel =
-    case wearLevel of
-        Pristine ->
-            "spine--pristine"
+{-| Spine height in pixels from page count.
+Matches mockup: round(238 + min(pages/750, 1) \* 48 + hash(String(pages)) % 8)
+-}
+spineHeight : Int -> Int
+spineHeight pageCount =
+    let
+        base =
+            238
 
-        Softened ->
-            "spine--softened"
+        growth =
+            min (toFloat pageCount / 750) 1 * 48
 
-
-textureClass : SpineTexture -> String
-textureClass texture =
-    case texture of
-        Cloth ->
-            "spine--cloth"
-
-        Leather ->
-            "spine--leather"
+        jitter =
+            modBy 8 (hash (String.fromInt pageCount))
+    in
+    round (toFloat base + growth) + jitter
 
 
-{-| Deterministic color index from a string (title).
-Produces a stable index so the same book always gets the same color.
+{-| Slight lean angle in degrees from title.
+Matches mockup: ((hash(title) % 16) - 8) / 10
+-}
+spineLean : String -> Float
+spineLean titleStr =
+    toFloat (modBy 16 (hash titleStr) - 8) / 10
+
+
+{-| Simple color index (0-5) for selecting a texture palette.
 -}
 colorIndex : String -> Int
 colorIndex s =
-    modBy 8 (List.foldl (\c acc -> acc + Char.toCode c) 0 (String.toList s))
+    modBy 6 (hash s)
 
 
-colorClass : Int -> String
-colorClass idx =
-    "spine--color-" ++ String.fromInt idx
+{-| Whether text should use gold foil colouring.
+Matches mockup logic: (hash(title+'g') % 100) / 100 < goldProbability
+-}
+useGold : String -> Float -> Bool
+useGold titleStr goldProbability =
+    let
+        roll =
+            toFloat (modBy 100 (hash (titleStr ++ "g"))) / 100
+    in
+    roll < goldProbability
 
 
-bookmarkSvg : Html msg
-bookmarkSvg =
-    Html.node "svg"
-        [ Html.Attributes.attribute "xmlns" "http://www.w3.org/2000/svg"
-        , Html.Attributes.attribute "viewBox" "0 0 24 24"
-        , Html.Attributes.attribute "width" "10"
-        , Html.Attributes.attribute "height" "10"
-        , Html.Attributes.attribute "fill" "currentColor"
-        , class "spine__bookmark"
+{-| Texture data matching the mockup palette.
+Returns ( bgColor, textColor, goldProbability, isLeather )
+-}
+textureData : Int -> { bg : String, text_ : String, gold : Float, leather : Bool }
+textureData idx =
+    case idx of
+        0 ->
+            { bg = "#5c2030", text_ = "#d4c4a0", gold = 0.6, leather = True }
+
+        1 ->
+            { bg = "#2a4a30", text_ = "#d4c4a0", gold = 0.5, leather = True }
+
+        2 ->
+            { bg = "#1e2848", text_ = "#c8b890", gold = 0.7, leather = True }
+
+        3 ->
+            { bg = "#5a4030", text_ = "#f0e6d4", gold = 0.15, leather = False }
+
+        4 ->
+            { bg = "#6a2020", text_ = "#f0e4d0", gold = 0.25, leather = False }
+
+        _ ->
+            { bg = "#4a4a30", text_ = "#e8dcc8", gold = 0.15, leather = False }
+
+
+{-| Texture URL for a book based on its texture type and title hash.
+-}
+textureUrl : SpineTexture -> String -> String
+textureUrl texture titleStr =
+    let
+        idx =
+            colorIndex titleStr
+
+        subIdx =
+            modBy 3 idx
+
+        prefix =
+            case texture of
+                Leather ->
+                    "leather"
+
+                Cloth ->
+                    "cloth"
+    in
+    "url('/textures/" ++ prefix ++ "-" ++ String.fromInt subIdx ++ ".jpg')"
+
+
+{-| Render a complete book element with 3D spine, top, and cover.
+This produces the full `.book > .book__spine + .book__top + .book__cover`
+structure matching the reference mockup.
+-}
+book :
+    { pageCount : Int
+    , wearLevel : WearLevel
+    , texture : SpineTexture
+    , title : String
+    , author : String
+    , coverImageUrl : Maybe String
+    }
+    -> Html msg
+book config =
+    let
+        widthPx =
+            spineWidth config.pageCount
+
+        heightPx =
+            spineHeight config.pageCount
+
+        tilt =
+            spineLean config.title
+
+        idx =
+            colorIndex config.title
+
+        tex =
+            textureData idx
+
+        isGold =
+            useGold config.title tex.gold
+
+        titleColor =
+            if isGold then
+                "#d4af37"
+
+            else
+                tex.text_
+
+        titleShadow =
+            if isGold then
+                "0 0 3px rgba(212,175,55,0.2), 0 1px 2px rgba(0,0,0,0.6)"
+
+            else
+                "0 1px 2px rgba(0,0,0,0.6)"
+
+        authorColor =
+            if isGold then
+                "rgba(212,175,55,0.45)"
+
+            else
+                tex.text_
+
+        isLeather =
+            case config.texture of
+                Leather ->
+                    True
+
+                Cloth ->
+                    False
+
+        bands =
+            if isLeather then
+                [ div [ class "book__band", style "top" "16%" ] []
+                , div [ class "book__band", style "bottom" "16%" ] []
+                ]
+
+            else
+                []
+
+        coverBg =
+            case config.coverImageUrl of
+                Just url ->
+                    "url('" ++ String.replace "'" "" url ++ "')"
+
+                Nothing ->
+                    "none"
+
+        bgImage =
+            textureUrl config.texture config.title
+    in
+    div
+        [ class "book"
+        , style "width" (String.fromInt widthPx ++ "px")
+        , style "height" (String.fromInt heightPx ++ "px")
+        , style "transform" ("rotateZ(" ++ String.fromFloat tilt ++ "deg)")
+        , style "transform-style" "preserve-3d"
+        , title (config.title ++ " — " ++ config.author)
         ]
-        [ Html.node "path"
-            [ Html.Attributes.attribute "d" "M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" ]
+        [ div
+            [ class "book__spine"
+            , style "background-color" tex.bg
+            , style "background-image" bgImage
+            ]
+            (bands
+                ++ [ span
+                        [ class "book__title"
+                        , style "color" titleColor
+                        , style "text-shadow" titleShadow
+                        ]
+                        [ text config.title ]
+                   , span
+                        [ class "book__author"
+                        , style "color" authorColor
+                        ]
+                        [ text config.author ]
+                   ]
+            )
+        , div [ class "book__top" ] []
+        , div
+            [ class "book__cover"
+            , style "background-image" coverBg
+            , style "background-color" tex.bg
+            ]
             []
         ]
 
 
+{-| Legacy spine function kept for backward compatibility.
+Delegates to the new `book` function.
+-}
 spine :
     { pageCount : Int
     , wearLevel : WearLevel
@@ -82,29 +281,11 @@ spine :
     }
     -> Html msg
 spine config =
-    let
-        widthPx =
-            spineWidth config.pageCount
-
-        widthStr =
-            String.fromInt widthPx ++ "px"
-
-        idx =
-            colorIndex config.title
-    in
-    div
-        [ class "spine"
-        , class (wearLevelClass config.wearLevel)
-        , class (textureClass config.texture)
-        , class (colorClass idx)
-        , style "width" widthStr
-        , title (config.title ++ " — " ++ config.author)
-        ]
-        [ div [ class "spine__edge spine__edge--top" ] []
-        , bookmarkSvg
-        , div [ class "spine__band spine__band--top" ] []
-        , span [ class "spine__text" ]
-            [ text (config.title ++ " · " ++ config.author) ]
-        , div [ class "spine__band spine__band--bottom" ] []
-        , div [ class "spine__edge spine__edge--bottom" ] []
-        ]
+    book
+        { pageCount = config.pageCount
+        , wearLevel = config.wearLevel
+        , texture = config.texture
+        , title = config.title
+        , author = config.author
+        , coverImageUrl = Nothing
+        }
