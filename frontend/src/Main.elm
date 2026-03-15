@@ -2,11 +2,13 @@ port module Main exposing (main)
 
 import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
+import Api
 import Browser
 import Browser.Navigation as Nav
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (class, href)
 import Json.Decode as Decode
+import Json.Encode
 import Navigation.Route as Route exposing (Route(..))
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
@@ -27,6 +29,12 @@ import Url exposing (Url)
 
 
 port onSwipe : (Decode.Value -> msg) -> Sub msg
+
+
+port playLoginTransition : Json.Encode.Value -> Cmd msg
+
+
+port onLoginTransitionComplete : (Decode.Value -> msg) -> Sub msg
 
 
 main : Program () Model Msg
@@ -77,6 +85,7 @@ type alias Model =
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
+    , pendingAuthResponse : Maybe Api.AuthResponse
     }
 
 
@@ -96,6 +105,7 @@ init _ url key =
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
+      , pendingAuthResponse = Nothing
       }
     , cmd
     )
@@ -194,6 +204,7 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | LoginMsg Login.Msg
+    | LoginTransitionCompleted
     | LibraryMsg Library.Msg
     | AntiLibraryMsg AntiLibrary.Msg
     | WishListMsg WishList.Msg
@@ -259,6 +270,17 @@ update msg model =
                         Login.NoOut ->
                             ( baseModel, baseCmd )
 
+                        Login.StartTransition authResponse ->
+                            ( { baseModel | pendingAuthResponse = Just authResponse }
+                            , Cmd.batch
+                                [ baseCmd
+                                , playLoginTransition
+                                    (Json.Encode.object
+                                        [ ( "duration", Json.Encode.int 4000 ) ]
+                                    )
+                                ]
+                            )
+
                         Login.LoggedIn authResponse ->
                             let
                                 auth =
@@ -271,9 +293,45 @@ update msg model =
                                     , token = authResponse.token
                                     }
                             in
-                            ( { baseModel | auth = Just auth }
-                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key "/" ]
+                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
+                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        LoginTransitionCompleted ->
+            case ( model.page, model.pendingAuthResponse ) of
+                ( PageLogin subModel, Just authResponse ) ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Login.update (Login.TransitionCompleted authResponse) subModel
+
+                        baseModel =
+                            { model | page = PageLogin newSubModel }
+
+                        baseCmd =
+                            Cmd.map LoginMsg subCmd
+                    in
+                    case outMsg of
+                        Login.LoggedIn ar ->
+                            let
+                                auth =
+                                    { user =
+                                        { id = ar.userId
+                                        , email = ar.email
+                                        , displayName = ar.displayName
+                                        , role = "user"
+                                        }
+                                    , token = ar.token
+                                    }
+                            in
+                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
+                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            )
+
+                        _ ->
+                            ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
@@ -587,7 +645,10 @@ transitionClass from to =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    onSwipe decodeSwipe
+    Sub.batch
+        [ onSwipe decodeSwipe
+        , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        ]
 
 
 decodeSwipe : Decode.Value -> Msg
