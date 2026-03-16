@@ -16,9 +16,29 @@ user1 = u.("a1b2c3d4-0000-0000-0000-000000000001")
 user2 = u.("a1b2c3d4-0000-0000-0000-000000000002")
 author1 = u.("a1b2c3d4-0000-0000-0000-000000000101")
 author2 = u.("a1b2c3d4-0000-0000-0000-000000000102")
+author3 = u.("a1b2c3d4-0000-0000-0000-000000000103")
+author4 = u.("a1b2c3d4-0000-0000-0000-000000000104")
+author5 = u.("a1b2c3d4-0000-0000-0000-000000000105")
 book1 = u.("a1b2c3d4-0000-0000-0000-000000000201")
 book2 = u.("a1b2c3d4-0000-0000-0000-000000000202")
 book3 = u.("a1b2c3d4-0000-0000-0000-000000000203")
+book4 = u.("a1b2c3d4-0000-0000-0000-000000000204")
+book5 = u.("a1b2c3d4-0000-0000-0000-000000000205")
+book6 = u.("a1b2c3d4-0000-0000-0000-000000000206")
+book7 = u.("a1b2c3d4-0000-0000-0000-000000000207")
+book8 = u.("a1b2c3d4-0000-0000-0000-000000000208")
+book9 = u.("a1b2c3d4-0000-0000-0000-000000000209")
+book10 = u.("a1b2c3d4-0000-0000-0000-000000000210")
+book11 = u.("a1b2c3d4-0000-0000-0000-000000000211")
+book12 = u.("a1b2c3d4-0000-0000-0000-000000000212")
+book13 = u.("a1b2c3d4-0000-0000-0000-000000000213")
+book14 = u.("a1b2c3d4-0000-0000-0000-000000000214")
+book15 = u.("a1b2c3d4-0000-0000-0000-000000000215")
+book16 = u.("a1b2c3d4-0000-0000-0000-000000000216")
+book17 = u.("a1b2c3d4-0000-0000-0000-000000000217")
+book18 = u.("a1b2c3d4-0000-0000-0000-000000000218")
+book19 = u.("a1b2c3d4-0000-0000-0000-000000000219")
+book20 = u.("a1b2c3d4-0000-0000-0000-000000000220")
 shelf1 = u.("a1b2c3d4-0000-0000-0000-000000000301")
 shelf2 = u.("a1b2c3d4-0000-0000-0000-000000000302")
 shelf3 = u.("a1b2c3d4-0000-0000-0000-000000000303")
@@ -31,6 +51,24 @@ shelf9 = u.("a1b2c3d4-0000-0000-0000-000000000309")
 shelf10 = u.("a1b2c3d4-0000-0000-0000-000000000310")
 place1 = u.("a1b2c3d4-0000-0000-0000-000000000401")
 place2 = u.("a1b2c3d4-0000-0000-0000-000000000402")
+place3 = u.("a1b2c3d4-0000-0000-0000-000000000403")
+place4 = u.("a1b2c3d4-0000-0000-0000-000000000404")
+place5 = u.("a1b2c3d4-0000-0000-0000-000000000405")
+place6 = u.("a1b2c3d4-0000-0000-0000-000000000406")
+place7 = u.("a1b2c3d4-0000-0000-0000-000000000407")
+place8 = u.("a1b2c3d4-0000-0000-0000-000000000408")
+place9 = u.("a1b2c3d4-0000-0000-0000-000000000409")
+place10 = u.("a1b2c3d4-0000-0000-0000-000000000410")
+place11 = u.("a1b2c3d4-0000-0000-0000-000000000411")
+place12 = u.("a1b2c3d4-0000-0000-0000-000000000412")
+place13 = u.("a1b2c3d4-0000-0000-0000-000000000413")
+place14 = u.("a1b2c3d4-0000-0000-0000-000000000414")
+place15 = u.("a1b2c3d4-0000-0000-0000-000000000415")
+place16 = u.("a1b2c3d4-0000-0000-0000-000000000416")
+place17 = u.("a1b2c3d4-0000-0000-0000-000000000417")
+place18 = u.("a1b2c3d4-0000-0000-0000-000000000418")
+place19 = u.("a1b2c3d4-0000-0000-0000-000000000419")
+place20 = u.("a1b2c3d4-0000-0000-0000-000000000420")
 history1 = u.("a1b2c3d4-0000-0000-0000-000000000501")
 image1 = u.("a1b2c3d4-0000-0000-0000-000000000601")
 audit1 = u.("a1b2c3d4-0000-0000-0000-000000000701")
@@ -96,6 +134,27 @@ Repo.insert_all(
       open_library_id: "OL12823A",
       created_at: jan_01,
       updated_at: jan_01
+    },
+    %{
+      id: author3,
+      name: "Donna Tartt",
+      open_library_id: "OL34024A",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: author4,
+      name: "Umberto Eco",
+      open_library_id: "OL37023A",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: author5,
+      name: "Kazuo Ishiguro",
+      open_library_id: "OL20646A",
+      created_at: jan_01,
+      updated_at: jan_01
     }
   ],
   prefix: "op",
@@ -133,6 +192,193 @@ Repo.insert_all(
       title: "The Dispossessed",
       author_id: author1,
       page_count: 387,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book4,
+      isbn: "9780679410324",
+      title: "The Secret History",
+      author_id: author3,
+      page_count: 559,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book5,
+      isbn: "9780156030410",
+      title: "The Name of the Rose",
+      author_id: author4,
+      page_count: 536,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book6,
+      isbn: "9780571258093",
+      title: "The Remains of the Day",
+      author_id: author5,
+      page_count: 245,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book7,
+      isbn: "9780316769488",
+      title: "The Catcher in the Rye",
+      author_id: author3,
+      page_count: 234,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book8,
+      isbn: "9780060935467",
+      title: "To Kill a Mockingbird",
+      author_id: author3,
+      page_count: 336,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book9,
+      isbn: "9780743273565",
+      title: "The Great Gatsby",
+      author_id: author3,
+      page_count: 180,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book10,
+      isbn: "9780141439518",
+      title: "Pride and Prejudice",
+      author_id: author3,
+      page_count: 432,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book11,
+      isbn: "9780140449136",
+      title: "Crime and Punishment",
+      author_id: author4,
+      page_count: 671,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book12,
+      isbn: "9780060883287",
+      title: "One Hundred Years of Solitude",
+      author_id: author4,
+      page_count: 417,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book13,
+      isbn: "9780140283334",
+      title: "Atonement",
+      author_id: author5,
+      page_count: 351,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book14,
+      isbn: "9780571225385",
+      title: "Never Let Me Go",
+      author_id: author5,
+      page_count: 288,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book15,
+      isbn: "9780525559474",
+      title: "Klara and the Sun",
+      author_id: author5,
+      page_count: 303,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book16,
+      isbn: "9780062316097",
+      title: "Sapiens",
+      author_id: author4,
+      page_count: 443,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book17,
+      isbn: "9780374529260",
+      title: "Middlemarch",
+      author_id: author3,
+      page_count: 880,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book18,
+      isbn: "9780140449266",
+      title: "Anna Karenina",
+      author_id: author4,
+      page_count: 864,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book19,
+      isbn: "9780099511021",
+      title: "Wolf Hall",
+      author_id: author3,
+      page_count: 604,
+      language: "en",
+      visibility_tier: "public",
+      created_at: jan_01,
+      updated_at: jan_01
+    },
+    %{
+      id: book20,
+      isbn: "9780571347292",
+      title: "Hamnet",
+      author_id: author5,
+      page_count: 372,
       language: "en",
       visibility_tier: "public",
       created_at: jan_01,
@@ -259,6 +505,204 @@ Repo.insert_all(
       visibility: "owner",
       created_at: jan_10,
       updated_at: jan_10
+    },
+    %{
+      id: place3,
+      book_id: book4,
+      bookshelf_id: shelf2,
+      position: 2,
+      placed_at: jan_15,
+      formats: ["hardcover"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place4,
+      book_id: book5,
+      bookshelf_id: shelf2,
+      position: 3,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place5,
+      book_id: book6,
+      bookshelf_id: shelf2,
+      position: 4,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place6,
+      book_id: book7,
+      bookshelf_id: shelf2,
+      position: 5,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place7,
+      book_id: book8,
+      bookshelf_id: shelf2,
+      position: 6,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place8,
+      book_id: book9,
+      bookshelf_id: shelf2,
+      position: 7,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place9,
+      book_id: book10,
+      bookshelf_id: shelf2,
+      position: 8,
+      placed_at: jan_15,
+      formats: ["hardcover"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place10,
+      book_id: book11,
+      bookshelf_id: shelf2,
+      position: 9,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place11,
+      book_id: book12,
+      bookshelf_id: shelf2,
+      position: 10,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place12,
+      book_id: book13,
+      bookshelf_id: shelf2,
+      position: 11,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place13,
+      book_id: book14,
+      bookshelf_id: shelf2,
+      position: 12,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place14,
+      book_id: book15,
+      bookshelf_id: shelf2,
+      position: 13,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place15,
+      book_id: book16,
+      bookshelf_id: shelf2,
+      position: 14,
+      placed_at: jan_15,
+      formats: ["hardcover"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place16,
+      book_id: book17,
+      bookshelf_id: shelf2,
+      position: 15,
+      placed_at: jan_15,
+      formats: ["hardcover"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place17,
+      book_id: book18,
+      bookshelf_id: shelf2,
+      position: 16,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place18,
+      book_id: book19,
+      bookshelf_id: shelf2,
+      position: 17,
+      placed_at: jan_15,
+      formats: ["hardcover"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place19,
+      book_id: book20,
+      bookshelf_id: shelf2,
+      position: 18,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
+    },
+    %{
+      id: place20,
+      book_id: book3,
+      bookshelf_id: shelf1,
+      position: 2,
+      placed_at: jan_15,
+      formats: ["paperback"],
+      visibility: "owner",
+      created_at: jan_15,
+      updated_at: jan_15
     }
   ],
   prefix: "op",
