@@ -15,7 +15,8 @@ import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (class)
 import Http
 import Navigation.Route exposing (Route(..))
-import Page.Bookshelf.Helpers exposing (groupIntoRows, viewShelfLabel, viewShelfRow)
+import Page.Bookshelf.Helpers exposing (groupIntoRows, minShelfRows, viewBookcase, viewShelfLabel, viewShelfRowClickable)
+import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -35,6 +36,7 @@ type Msg
     = BooksLoaded (Result Http.Error (List Placement))
     | VerifyAge
     | DismissAgeGate
+    | BookClicked Book
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -71,6 +73,9 @@ update msg model =
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
+        BookClicked bk ->
+            ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+
 
 view : Model -> Html Msg
 view model =
@@ -87,10 +92,10 @@ view model =
               else
                 case model.books of
                     NotAsked ->
-                        text ""
+                        viewBookshelf []
 
                     Loading ->
-                        div [ class "loading" ] [ text "Loading your antilibrary..." ]
+                        viewBookshelf []
 
                     Failure _ ->
                         p [ class "error" ]
@@ -119,7 +124,11 @@ viewBookshelf : List Placement -> Html Msg
 viewBookshelf placements =
     let
         rows =
-            groupIntoRows 12 placements
+            groupIntoRows 990 placements
+
+        shelfViews =
+            List.map (viewShelfRowClickable Pristine BookClicked) rows
     in
-    div [ class "bookshelf bookshelf--oak" ]
-        (List.map (viewShelfRow Pristine) rows)
+    div [ class "bookshelf" ]
+        [ viewBookcase (minShelfRows 4 shelfViews)
+        ]
