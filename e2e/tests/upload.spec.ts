@@ -15,9 +15,9 @@ async function signIn(page: import("@playwright/test").Page) {
     await page.goto("/login");
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click("button.login-form__submit");
+    await page.click("button.login-card__submit");
     try {
-      await page.waitForURL("/", { timeout: 15_000 });
+      await page.waitForURL("**/antilibrary", { timeout: 15_000 });
       return; // success
     } catch {
       if (attempt < 3) {
@@ -30,8 +30,8 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.goto("/login");
   await page.fill('input[id="email"]', DEV_EMAIL);
   await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-form__submit");
-  await page.waitForURL("/", { timeout: 60_000 });
+  await page.click("button.login-card__submit");
+  await page.waitForURL("**/antilibrary", { timeout: 60_000 });
 }
 
 test.describe("Upload pipeline — barcode pre-pass", () => {
