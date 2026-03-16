@@ -13,8 +13,8 @@ dev:
     just db-create 2>/dev/null || true
     just db-migrate
 
-    echo "==> Compiling Elm..."
-    (cd frontend && npm run build)
+    echo "==> Building assets (Elm + CSS via esbuild)..."
+    (cd apps/core/assets && npm run deploy)
 
     # Kill any stale processes from a previous dev session on our ports.
     echo "==> Cleaning up stale dev processes..."
@@ -27,9 +27,6 @@ dev:
 
     echo "==> Starting Phoenix on http://localhost:4000"
     mix phx.server &
-
-    echo "==> Serving frontend on http://localhost:4001"
-    npx serve -s frontend -l 4001 --no-clipboard &
 
     if [ -f apps/vision/app/main.py ]; then
         if [ ! -f apps/vision/.venv/bin/uvicorn ]; then
@@ -51,10 +48,10 @@ dev:
     fi
 
     echo ""
-    echo "    The Stacks is running at http://localhost:4001"
+    echo "    The Stacks is running at http://localhost:4000"
     echo "    Press Ctrl-C to stop."
     echo ""
-    sleep 1 && open http://localhost:4001 &
+    sleep 1 && open http://localhost:4000 &
     wait
 
 # Bootstrap the full development environment (idempotent)

@@ -1,7 +1,7 @@
 # Build stage
 FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base git
+RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0 nodejs=22.15.1-r0 npm=10.9.1-r0
 
 WORKDIR /app
 
@@ -26,17 +26,34 @@ COPY apps/core/priv apps/core/priv
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
 
-# Bundle the pre-built Elm frontend into Phoenix static assets
-COPY frontend/index.html apps/core/priv/static/index.html
-COPY frontend/elm.js apps/core/priv/static/elm.js
-COPY frontend/css apps/core/priv/static/css
+# Asset pipeline: install npm deps (cached layer, changes only when package.json changes)
+COPY apps/core/assets/package.json apps/core/assets/package-lock.json* apps/core/assets/
+WORKDIR /app/apps/core/assets
+RUN npm ci
 
-RUN mix compile && mix release core
+# Copy asset build infrastructure (no symlinks — those are local dev only)
+WORKDIR /app
+COPY apps/core/assets/build.js apps/core/assets/build.js
+COPY apps/core/assets/js apps/core/assets/js
+
+# Copy frontend sources directly into the paths build.js expects
+COPY frontend/src apps/core/assets/elm/src
+COPY frontend/elm.json apps/core/assets/elm/elm.json
+COPY frontend/css apps/core/assets/css
+COPY frontend/public apps/core/assets/static
+
+# Build assets via esbuild + esbuild-plugin-elm, then generate digest manifest
+WORKDIR /app/apps/core/assets
+RUN node build.js --production
+
+# Compile Elixir, fingerprint static assets, build release
+WORKDIR /app
+RUN mix compile && mix phx.digest && mix release core
 
 # Runtime stage
 FROM alpine:3.21.6 AS runtime
 
-RUN apk add --no-cache libstdc++ openssl ncurses-libs
+RUN apk add --no-cache libstdc++=14.2.0-r4 openssl=3.3.6-r0 ncurses-libs=6.5_p20241006-r3
 
 RUN addgroup -S stacks && adduser -S stacks -G stacks
 WORKDIR /app
