@@ -134,6 +134,8 @@ h4 {
 /* ===== Header & Navigation ===== */
 
 .app-header {
+    position: relative;
+    z-index: 100;
     background-color: var(--shelf-bg, #3d2b1f);
     border-bottom: 1px solid var(--border);
     padding: 1rem 1.5rem;
@@ -300,112 +302,7 @@ h4 {
     }
 }
 
-/* ===== Bookshelf Layout ===== */
-
-.bookshelf {
-    position: relative;
-}
-
-.bookshelf__row {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    padding: 1.5rem 1rem 0.5rem;
-    background-color: var(--wallpaper-color, #2a3d2f);
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
-    min-height: 220px;
-    flex-wrap: wrap;
-}
-
-.bookshelf__row::after {
-    content: '';
-    display: block;
-    width: 100%;
-    height: 16px;
-    background-color: var(--shelf-bg);
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-    box-shadow: var(--shadow-md);
-}
-
-.bookshelf__book {
-    display: flex;
-    align-items: flex-end;
-}
-
-/* ===== Book Spine ===== */
-
-.spine {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 180px;
-    cursor: pointer;
-    position: relative;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    transition: transform 0.15s;
-}
-
-.spine:hover {
-    transform: translateY(-8px);
-}
-
-.spine__text {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    transform: rotate(180deg);
-    font-size: 9px;
-    font-family: var(--font-body);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    padding: 4px 2px;
-    max-height: 160px;
-}
-
-.spine__bookmark {
-    position: absolute;
-    top: 2px;
-    left: 50%;
-    transform: translateX(-50%);
-    opacity: 0.6;
-}
-
-/* Spine wear levels */
-
-.spine--pristine {
-    background: linear-gradient(to right, #8b7355, #c4a882, #8b7355);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-    color: #1a1208;
-}
-
-.spine--softened {
-    background: linear-gradient(to right, #7a6248, #b39468, #7a6248);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #1a1208;
-}
-
-.spine--cracking {
-    background: linear-gradient(to right, #6b5240, #9e7f58, #6b5240);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #e8dcc8;
-}
-
-.spine--wellread {
-    background: linear-gradient(to right, #5c4232, #8a6a48, #5c4232);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    color: #e8dcc8;
-    filter: contrast(0.95);
-}
-
-.spine--wellloved {
-    background: linear-gradient(to right, #4a3228, #7a5a38, #4a3228);
-    border: 1px solid rgba(255, 255, 255, 0.02);
-    color: #d4c4a8;
-    filter: contrast(0.9) brightness(0.95);
-}
+/* (Old bookshelf/spine layout removed — replaced by 3D bookcase below) */
 
 /* ===== Reading Pile (face-on) ===== */
 
@@ -1486,44 +1383,12 @@ h4 {
 }
 
 /* ===== Room Transitions (fade through dark) ===== */
+/* Disabled: all transition approaches (opacity, overlay) interfere with
+   CSS preserve-3d on the 3D bookshelf. Will revisit when migrating to
+   WebGL/elm-3d-scene which handles its own rendering pipeline. */
 
-@keyframes fade-through-dark-in {
-    0% {
-        opacity: 0;
-        background-color: #000;
-    }
-
-    50% {
-        opacity: 0.5;
-    }
-
-    100% {
-        opacity: 1;
-    }
-}
-
-@keyframes fade-through-dark-out {
-    0% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.5;
-    }
-
-    100% {
-        opacity: 0;
-        background-color: #000;
-    }
-}
-
-.fade-through-dark-in {
-    animation: fade-through-dark-in 0.5s ease-in-out;
-}
-
-.fade-through-dark-out {
-    animation: fade-through-dark-out 0.5s ease-in-out;
-}
+.fade-through-dark-in {}
+.fade-through-dark-out {}
 
 /* ===== Responsive ===== */
 
@@ -1945,354 +1810,236 @@ h4 {
     }
 }
 
-/* ===== Login Page — Library Door Aesthetic ===== */
+/* ===== Login Page — Bookshelf Wall / Parchment Card / Dolly Shot ===== */
 
 .page--login {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 80vh;
-    padding: 2rem 1rem;
-    background:
-        radial-gradient(ellipse at 50% 30%, rgba(74, 60, 40, 0.15), transparent 70%),
-        linear-gradient(180deg, #1a1208 0%, #2a1f14 50%, #1a1208 100%);
+    position: relative;
+    width: 100%;
+    height: 100vh;
     overflow: hidden;
-    transition: opacity 0.8s ease-out;
+    background: #0a0806;
 }
 
-.page--login.login-door--opening {
-    /* Let the door animation play */
+/* -- Scene layers (GPU-composited, WAAPI-animated) -- */
+
+.layer-arrival {
+    position: fixed; inset: 0; z-index: 0;
+    background: #f5eed6;
+    will-change: opacity;
+    transform: translateZ(0);
 }
 
-.page--login.login-door--open {
+.layer-passage {
+    position: fixed; inset: -10%; z-index: 1;
+    background: url('/textures/passage-beyond.png') center/cover no-repeat;
+    will-change: transform, opacity;
+    transform: translateZ(0) scale(1.05);
     opacity: 0;
-    transition: opacity 0.6s ease-in;
 }
 
-/* -- Entrance wrapper -- */
-
-.login-entrance {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2.5rem;
-    max-width: 440px;
-    width: 100%;
+.layer-passage-bright {
+    position: fixed; inset: 0; z-index: 2;
+    background: radial-gradient(ellipse at 50% 50%,
+        rgba(255, 230, 170, 0.5) 0%,
+        rgba(255, 210, 130, 0.2) 50%,
+        transparent 80%);
+    will-change: opacity;
+    transform: translateZ(0);
+    opacity: 0;
 }
 
-/* -- The Door -- */
-
-.login-door {
-    position: relative;
-    width: 220px;
-    height: 280px;
-    margin: 0 auto;
+.layer-bookshelf {
+    position: fixed; inset: -5%; z-index: 3;
+    background: url('/textures/bookshelf-wide-panoramic.png') center/cover no-repeat;
+    will-change: transform, opacity;
+    transform: translateZ(0) scale(1);
+    transform-origin: 50% 45%;
 }
 
-.login-door__frame {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border: 4px solid #5c4a36;
-    border-radius: 110px 110px 0 0;
-    background: linear-gradient(
-        180deg,
-        #3d2b1f 0%,
-        #2a1a10 40%,
-        #1a0e06 100%
-    );
-    box-shadow:
-        inset 0 0 40px rgba(0, 0, 0, 0.6),
-        0 4px 24px rgba(0, 0, 0, 0.8),
-        0 0 60px rgba(74, 60, 40, 0.2);
-    overflow: hidden;
+.layer-bookshelf-dim {
+    position: fixed; inset: 0; z-index: 4;
+    background: rgba(10, 8, 6, 0.45);
+    will-change: opacity;
+    transform: translateZ(0);
 }
 
-.login-door__arch {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    right: 4px;
-    height: 60px;
-    border-radius: 106px 106px 0 0;
-    background: linear-gradient(
-        180deg,
-        rgba(92, 74, 54, 0.3) 0%,
-        transparent 100%
-    );
+.layer-vignette {
+    position: fixed; inset: 0; z-index: 5;
+    background: radial-gradient(ellipse at 50% 50%, transparent 20%, rgba(10, 8, 6, 0.5) 100%);
+    will-change: opacity;
+    transform: translateZ(0);
 }
 
-/* Door panels */
-
-.login-door__panel {
-    position: absolute;
-    bottom: 0;
-    width: 46%;
-    height: 65%;
-    border: 2px solid rgba(92, 74, 54, 0.3);
-    border-radius: var(--radius-sm);
-    background: linear-gradient(
-        135deg,
-        rgba(92, 74, 54, 0.15) 0%,
-        rgba(42, 26, 16, 0.2) 100%
-    );
-    transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.login-door__panel--left {
-    left: 4%;
-    transform-origin: left center;
-}
-
-.login-door__panel--right {
-    right: 4%;
-    transform-origin: right center;
-}
-
-/* Door handles */
-
-.login-door__handle {
-    position: absolute;
-    bottom: 45%;
-    width: 8px;
-    height: 20px;
-    background: linear-gradient(180deg, #c8a050, #8b6914);
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-}
-
-.login-door__handle--left {
-    left: 42%;
-}
-
-.login-door__handle--right {
-    right: 42%;
-}
-
-/* Warm light behind the door */
-
-.login-door__light {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 0;
-    height: 0;
-    background: radial-gradient(
-        ellipse,
-        rgba(255, 220, 140, 0.6) 0%,
-        rgba(255, 200, 100, 0.2) 40%,
-        transparent 70%
-    );
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    transition: width 1.2s ease-out, height 1.2s ease-out, opacity 1.2s ease-out;
+.layer-wash {
+    position: fixed; inset: 0; z-index: 6;
+    background: #f5eed6;
+    will-change: opacity;
+    transform: translateZ(0);
     opacity: 0;
     pointer-events: none;
 }
 
-/* -- Door opening animation -- */
+/* -- Login overlay + card -- */
 
-.login-door--opening .login-door__panel--left {
-    transform: perspective(600px) rotateY(-75deg);
+.login-overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform, opacity;
+    transform: translateZ(0);
 }
 
-.login-door--opening .login-door__panel--right {
-    transform: perspective(600px) rotateY(75deg);
-}
-
-.login-door--opening .login-door__handle--left {
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.login-door--opening .login-door__handle--right {
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.login-door--opening .login-door__light {
-    width: 300px;
-    height: 300px;
-    opacity: 1;
-}
-
-.login-door--opening .login-door__frame {
-    background: linear-gradient(
-        180deg,
-        #5c4a36 0%,
-        #c8a050 30%,
-        #ffeebb 60%,
-        #fffde8 100%
-    );
-    box-shadow:
-        inset 0 0 40px rgba(255, 220, 140, 0.4),
-        0 0 80px rgba(255, 200, 100, 0.3);
-    transition: background 1s ease-out, box-shadow 1s ease-out;
-}
-
-.login-door--open .login-door {
-    opacity: 0;
-    transition: opacity 0.4s;
-}
-
-/* -- Form area -- */
-
-.login-form-area {
-    width: 100%;
-    text-align: center;
-}
-
-.login-form__heading {
-    font-family: var(--font-heading);
-    font-size: var(--size-3xl);
-    color: var(--text);
-    letter-spacing: 0.04em;
-    margin-bottom: 0.5rem;
-}
-
-.login-form__subheading {
-    font-family: var(--font-heading);
-    font-style: italic;
-    font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
-    margin-bottom: 2rem;
-}
-
-/* -- Form card (parchment) -- */
-
-.login-form {
-    background: linear-gradient(
-        145deg,
-        rgba(61, 43, 31, 0.7) 0%,
-        rgba(42, 31, 20, 0.85) 50%,
-        rgba(35, 24, 14, 0.9) 100%
-    );
-    border: 1px solid rgba(92, 74, 54, 0.4);
-    border-radius: var(--radius-lg);
-    padding: 2rem 2rem 1.5rem;
+.login-card {
+    max-width: 380px;
+    width: 90%;
+    background: linear-gradient(145deg, #f5eed6, #e8dcc0);
+    border-radius: 4px;
+    padding: 2.5rem 2rem 2rem;
+    color: #2c1f0e;
     box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    text-align: left;
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    position: relative;
 }
 
-/* -- Tabs -- */
+.login-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #8b4513, #a0522d, #8b4513);
+    border-radius: 4px 4px 0 0;
+}
 
-.login-form__tabs {
-    display: flex;
-    gap: 0;
+.login-card__title {
+    font-family: var(--font-heading);
+    font-size: 1.8rem;
+    font-weight: 600;
+    text-align: center;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.06em;
+}
+
+.login-card__subtitle {
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: 0.95rem;
+    color: #6b5a45;
+    text-align: center;
     margin-bottom: 1.75rem;
-    border-bottom: 1px solid rgba(92, 74, 54, 0.3);
 }
 
-.login-form__tab {
+.login-card__tabs {
+    display: flex;
+    border-bottom: 1px solid #c8b89a;
+    margin-bottom: 1.25rem;
+}
+
+.login-card__tab {
     flex: 1;
-    background: transparent;
+    padding: 0.5rem;
     border: none;
-    padding: 0.6rem 1rem;
+    background: transparent;
+    color: #8b7a65;
     font-family: var(--font-heading);
-    font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    font-size: 1rem;
     cursor: pointer;
-    transition: color 0.2s, border-color 0.2s;
     border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    transition: all 0.3s;
 }
 
-.login-form__tab:hover {
-    color: var(--text);
+.login-card__tab:hover {
+    color: #2c1f0e;
 }
 
-.login-form__tab--active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
+.login-card__tab--active {
+    color: #5c3a1e;
+    border-bottom-color: #8b4513;
 }
 
-/* -- Form fields -- */
-
-.login-form__field {
-    margin-bottom: 1.5rem;
+.login-card__field {
+    margin-bottom: 1.25rem;
 }
 
-.login-form__label {
+.login-card__label {
     display: block;
     font-family: var(--font-heading);
-    font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    font-size: 0.8rem;
+    color: #6b5a45;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.4rem;
 }
 
-.login-form__input {
-    display: block;
+.login-card__input {
     width: 100%;
-    padding: 0.75rem 1rem;
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(92, 74, 54, 0.5);
-    border-radius: var(--radius-md);
-    color: var(--text);
+    padding: 0.7rem 0.75rem;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid #c8b89a;
+    border-radius: 3px;
+    color: #2c1f0e;
     font-family: var(--font-body);
-    font-size: var(--size-base);
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    font-size: 1rem;
+    transition: border-color 0.3s, box-shadow 0.3s;
 }
 
-.login-form__input::placeholder {
-    color: rgba(160, 144, 112, 0.5);
+.login-card__input::placeholder {
+    color: #a09580;
     font-style: italic;
 }
 
-.login-form__input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.15);
+.login-card__input:focus {
+    outline: none;
+    border-color: #8b4513;
+    box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
 }
 
 /* -- Error state -- */
 
-.login-form__error {
-    color: #d4634a;
+.login-card__error {
+    color: #9b2c2c;
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-sm);
     padding: 0.75rem 1rem;
     margin-bottom: 1rem;
-    background-color: rgba(212, 99, 74, 0.08);
-    border: 1px solid rgba(212, 99, 74, 0.2);
-    border-radius: var(--radius-md);
+    background-color: rgba(155, 44, 44, 0.08);
+    border: 1px solid rgba(155, 44, 44, 0.2);
+    border-radius: 3px;
     line-height: 1.5;
 }
 
 /* -- Submit button -- */
 
-.login-form__submit {
+.login-card__submit {
     width: 100%;
-    padding: 0.85rem 1.5rem;
-    font-family: var(--font-heading);
-    font-size: var(--size-lg);
-    letter-spacing: 0.02em;
+    padding: 0.75rem;
     margin-top: 0.5rem;
-    background: linear-gradient(135deg, var(--accent), #3a6a48);
-    border: 1px solid rgba(74, 124, 89, 0.3);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+    border: 1px solid #5c3a1e;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #5c3a1e, #3d2610);
+    color: #f5eed6;
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: all 0.3s;
 }
 
-.login-form__submit:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+.login-card__submit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #6b4525, #4a2e15);
+    box-shadow: 0 2px 12px rgba(92, 58, 30, 0.3);
 }
 
-.login-form__submit:disabled {
+.login-card__submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    transform: none;
 }
 
 /* -- Spinner inside submit -- */
 
-.login-form__submit .spinner--small {
+.login-card__submit .spinner--small {
     width: 18px;
     height: 18px;
     border-width: 2px;
@@ -2313,41 +2060,19 @@ h4 {
 /* -- Login responsive -- */
 
 @media (max-width: 768px) {
-    .page--login {
-        min-height: 70vh;
-        padding: 1.5rem 1rem;
-    }
-
-    .login-door {
-        width: 160px;
-        height: 200px;
-    }
-
-    .login-entrance {
-        gap: 1.5rem;
-    }
-
-    .login-form__heading {
-        font-size: var(--size-xxl);
-    }
-
-    .login-form {
-        padding: 1.5rem 1.25rem 1.25rem;
+    .login-card {
+        width: 95%;
+        padding: 2rem 1.5rem 1.5rem;
     }
 }
 
 @media (max-width: 480px) {
-    .login-door {
-        width: 130px;
-        height: 170px;
+    .login-card {
+        padding: 1.5rem 1rem 1rem;
     }
 
-    .login-form__heading {
-        font-size: var(--size-xl);
-    }
-
-    .login-form {
-        padding: 1.25rem 1rem 1rem;
+    .login-card__title {
+        font-size: 1.5rem;
     }
 }
 
@@ -2559,4 +2284,421 @@ h4 {
     .catalogue__card-title {
         font-size: var(--size-sm);
     }
+}
+
+/* ===== Shelf Room (wraps label + bookcase on shelf pages) ===== */
+
+.page--shelf {
+    position: relative; /* Contain the absolutely-positioned wallpaper */
+}
+
+.shelf-room {
+    position: relative;
+    z-index: 1; /* Above the wallpaper (z-index: 0) */
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+}
+
+/* ===== 3D Bookcase & Shelf Structure (from library-mockup.html) ===== */
+
+:root {
+    --book-max-h: 290px;
+    --book-depth: 160px;
+    --plank-h: 18px;
+    --plank-lip: 10px;
+    --side-w: 24px;
+}
+
+/* --- BOOKCASE --- */
+
+.bookcase {
+    position: relative;
+    z-index: 5;
+    max-width: 1060px;
+    width: 100%;
+    margin: 0 auto;
+    overflow: visible; /* Allow 3D hover to extend outside */
+}
+
+/* Continuous side panels */
+
+.bookcase__side {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: var(--side-w);
+    background: url('/textures/shelf-walnut-plank.png') repeat;
+    background-size: 160px 160px;
+    filter: brightness(0.38) saturate(0.45);
+    z-index: 60; /* Above hovered books (z-index: 50) so sides mask the hover */
+}
+
+.bookcase__side--left {
+    left: 0;
+}
+
+.bookcase__side--right {
+    right: 0;
+}
+
+/* Inner edge shadow */
+
+.bookcase__side--left::after,
+.bookcase__side--right::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+}
+
+.bookcase__side--left::after {
+    right: 0;
+    background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.3));
+}
+
+.bookcase__side--right::after {
+    left: 0;
+    background: linear-gradient(270deg, transparent, rgba(0, 0, 0, 0.3));
+}
+
+/* Inner content area between sides */
+
+.bookcase__inner {
+    margin: 0 var(--side-w);
+}
+
+/* --- SHELF ROW --- */
+
+.shelf-row {
+    position: relative;
+    padding-bottom: calc(var(--plank-h) + var(--plank-lip));
+}
+
+/* Dark recessed back */
+
+.shelf-row__back {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--plank-h) + var(--plank-lip));
+    background: #060402;
+    box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.7);
+}
+
+/* Book row */
+
+.shelf-row__books {
+    position: relative;
+    min-height: var(--book-max-h);
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    padding: 0 8px;
+    z-index: 10;
+    perspective: 800px;
+}
+
+/* Plank */
+
+.shelf-row__plank {
+    position: absolute;
+    bottom: var(--plank-lip);
+    /* Extend under the side panels */
+    left: calc(-1 * var(--side-w));
+    right: calc(-1 * var(--side-w));
+    height: var(--plank-h);
+    background: url('/textures/shelf-walnut-plank.png') repeat-x;
+    background-size: auto 100%;
+    filter: brightness(0.38) saturate(0.45);
+    z-index: 15;
+}
+
+.shelf-row__plank::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Plank lip / front edge */
+
+.shelf-row__lip {
+    position: absolute;
+    bottom: 0;
+    left: calc(-1 * var(--side-w));
+    right: calc(-1 * var(--side-w));
+    height: var(--plank-lip);
+    background: url('/textures/shelf-walnut-plank.png') repeat-x;
+    background-size: auto 100%;
+    filter: brightness(0.25) saturate(0.4);
+    z-index: 15;
+}
+
+/* --- 3D BOOK --- */
+
+.book {
+    position: relative;
+    flex-shrink: 0;
+    margin-left: 1px;
+    transform-style: preserve-3d;
+    transform: translateZ(0) rotateY(0) rotateX(0) rotateZ(0);
+    cursor: pointer;
+    /* Smooth return when mouse leaves */
+    transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.book:hover {
+    z-index: 50;
+    /* Two-phase: pull forward then angle.
+       CSS transitions can't do phased motion, so we use a keyframe animation
+       on hover and the transition handles the return. */
+    animation: book-pull-out 0.8s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+/* The book stays mostly in the shelf — just pulled out enough to clear
+   its neighbors, then tilted down and to the side to reveal the cover.
+   Like one hand on the top of the spine, angling it toward you. */
+@keyframes book-pull-out {
+    0%   { transform: translateZ(0) rotateY(0) rotateX(0) rotateZ(0); }
+    35%  { transform: translateZ(40px) rotateY(-2deg) rotateX(0) rotateZ(0); }
+    100% { transform: translateZ(50px) rotateX(-25deg) rotateY(-40deg) rotateZ(-15deg); }
+}
+
+/* All three faces share this */
+
+.book__face {
+    position: absolute;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 2px;
+}
+
+/* --- SPINE --- */
+
+.book__spine {
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    transform: rotateY(0deg) translateZ(0px);
+}
+
+/* Spine curvature */
+
+.book__spine::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg,
+        rgba(255, 255, 255, 0.06) 0%, transparent 15%,
+        transparent 65%, rgba(0, 0, 0, 0.12) 88%, rgba(0, 0, 0, 0.2) 100%
+    );
+    pointer-events: none;
+    z-index: 2;
+}
+
+.book__band {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    height: 1.5px;
+    background: linear-gradient(90deg,
+        transparent 5%, rgba(255, 255, 255, 0.1) 30%,
+        rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.1) 70%, transparent 95%
+    );
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+    z-index: 1;
+}
+
+.book__title {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-family: var(--font-heading);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    line-height: 1.15;
+    overflow: hidden;
+    flex: 1;
+    padding: 12px 3px 6px;
+    z-index: 3;
+}
+
+.book__author {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-family: var(--font-heading);
+    font-size: 8px;
+    letter-spacing: 0.06em;
+    padding: 4px 3px 8px;
+    z-index: 3;
+    opacity: 0.6;
+}
+
+/* --- TOP (page edges) --- */
+
+.book__top {
+    width: 100%;
+    background:
+        repeating-linear-gradient(90deg,
+            #ede3cc 0px, #ede3cc 1px,
+            #e5d9c0 1px, #e5d9c0 2px
+        );
+}
+
+/* --- COVER --- */
+
+.book__cover {
+    height: 100%;
+    background-size: cover;
+    transform-origin: left center;
+}
+
+/* Cover inner shadow (hinge) */
+
+.book__cover::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 15px;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.3), transparent);
+}
+
+/* Empty shelf */
+
+.shelf-row--empty .shelf-row__books {
+    justify-content: center;
+    align-items: center;
+}
+
+/* Book button wrapper (clickable spine in Library) */
+
+.book-button {
+    all: unset;
+    display: inline-block;
+    cursor: pointer;
+}
+
+/* Wallpaper */
+
+.wallpaper {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.wallpaper--damask {
+    background-color: var(--wallpaper-color);
+    background-image: url('/textures/wallpaper-damask-green.png');
+    background-size: 200px;
+    opacity: 0.3;
+}
+
+/* Lighting overlay */
+
+.lighting {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 20%,
+        rgba(255, 200, 100, 0.08) 0%,
+        transparent 70%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Shelf Label */
+
+.shelf-label {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    color: var(--text);
+    text-align: center;
+    padding: 1rem 0;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    position: relative;
+    z-index: 2;
+}
+
+/* Empty Message */
+
+.empty-msg {
+    text-align: center;
+    padding: 3rem 2rem;
+    color: var(--text-muted);
+    font-style: italic;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+}
+
+/* Book Overlay (Library quick view — separate from BookDetail page) */
+
+.book-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 98;
+}
+
+.book-overlay__backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 99;
+}
+
+.book-overlay__content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    max-width: 480px;
+    width: 90%;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+}
+
+.book-overlay__title {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    margin-bottom: 0.5rem;
+}
+
+.book-overlay__author {
+    font-family: var(--font-heading);
+    font-style: italic;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.book-overlay__close {
+    display: block;
+    margin-top: 1.5rem;
+    padding: 0.5rem 1.5rem;
+    background: var(--accent);
+    color: var(--text);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+}
+
+.book-overlay__close:hover {
+    background: var(--accent-hover);
 }
