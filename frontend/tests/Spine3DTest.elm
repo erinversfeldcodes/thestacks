@@ -10,7 +10,7 @@ referencing a texture file path.
 
 -}
 
-import Components.Spine exposing (SpineTexture(..), WearLevel(..), book, spineHeight, spineLean, spineWidth)
+import Components.Spine exposing (SpineTexture(..), WearLevel(..), book, spineHeight, spineLean, spineWidth, textureUrl)
 import Expect
 import Html
 import Test exposing (Test, describe, test)
@@ -230,4 +230,4 @@ spineHasTextureBackgroundImage =
             sampleBook
                 |> Query.fromHtml
                 |> Query.find [ Selector.class "book__spine" ]
-                |> Query.has [ Selector.style "background-image" "url('/textures/leather-1.jpg')" ]
+                |> Query.has [ Selector.style "background-image" (textureUrl Leather "Moby Dick") ]

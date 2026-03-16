@@ -1,15 +1,15 @@
 module Page.BookshelfProgramTest exposing (suite)
 
-{-| Program tests for Page.Bookshelf.Library using elm-program-test.
+{-| Program tests for Page.Bookshelf using elm-program-test.
 
-These tests exercise the Library bookshelf page lifecycle through
+These tests exercise the Bookshelf page lifecycle through
 simulated HTTP responses and user interactions.
 
 -}
 
 import Dict
 import Http
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
@@ -18,7 +18,7 @@ import TestHelpers exposing (libraryProgram, simulateBookshelfResponse, testPlac
 
 {-| Helper to start a library program with an auth token.
 -}
-startLibrary : ProgramTest.ProgramTest Library.Model Library.Msg (ProgramTest.SimulatedEffect Library.Msg)
+startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
     ProgramTest.start () (libraryProgram (Just "test-token"))
 
@@ -36,11 +36,11 @@ suite =
 
 bookshelfLoadingState : Test
 bookshelfLoadingState =
-    test "bookshelf_loading_state: before HTTP response arrives, loading indicator is visible" <|
+    test "bookshelf_loading_state: before HTTP response arrives, empty bookcase is shown" <|
         \() ->
             startLibrary
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading your library..." ]
+                    [ Selector.class "bookcase" ]
 
 
 bookshelfRendersPlacements : Test
