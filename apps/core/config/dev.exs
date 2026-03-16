@@ -16,7 +16,9 @@ config :core, CoreWeb.Endpoint,
   debug_errors: true,
   secret_key_base:
     "dev-only-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-to-accept-it",
-  watchers: []
+  watchers: [
+    node: ["build.js", "--watch", cd: Path.expand("../apps/core/assets", __DIR__)]
+  ]
 
 config :core, :rate_limiting_enabled, false
 

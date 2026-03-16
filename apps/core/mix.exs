@@ -74,7 +74,10 @@ defmodule Core.MixProject do
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run apps/core/priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "assets.setup": ["cmd --cd assets npm install"],
+      "assets.build": ["cmd --cd assets node build.js"],
+      "assets.deploy": ["cmd --cd assets npm run deploy", "phx.digest"]
     ]
   end
 end

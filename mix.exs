@@ -18,10 +18,11 @@ defmodule Stacks.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
+      setup: ["deps.get", "cmd --app core --cd assets npm install", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "assets.deploy": ["cmd --app core mix assets.deploy"]
     ]
   end
 

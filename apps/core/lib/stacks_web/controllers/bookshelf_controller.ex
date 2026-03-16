@@ -41,7 +41,12 @@ defmodule StacksWeb.BookshelfController do
             isbn: b.isbn,
             title: b.title,
             cover_image_url: b.cover_image_url,
-            page_count: b.page_count
+            page_count: b.page_count,
+            description: b.description,
+            publisher: b.publisher,
+            publication_year: b.publication_year,
+            visibility_tier: b.visibility_tier,
+            author: format_author(b.author)
           }
       end
 
@@ -53,6 +58,17 @@ defmodule StacksWeb.BookshelfController do
       personal_rating: placement.personal_rating,
       notes: placement.notes,
       book: book
+    }
+  end
+
+  defp format_author(%Ecto.Association.NotLoaded{}), do: nil
+  defp format_author(nil), do: nil
+
+  defp format_author(author) do
+    %{
+      id: author.id,
+      name: author.name,
+      bio: nil
     }
   end
 end

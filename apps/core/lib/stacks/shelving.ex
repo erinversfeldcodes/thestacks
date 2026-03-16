@@ -46,7 +46,7 @@ defmodule Stacks.Shelving do
     )
     |> where([p], is_nil(p.removed_at))
     |> order_by([p], [p.position, p.placed_at])
-    |> preload(:book)
+    |> preload(book: :author)
     |> Repo.all()
   end
 
