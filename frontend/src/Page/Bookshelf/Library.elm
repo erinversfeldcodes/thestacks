@@ -9,7 +9,6 @@ module Page.Bookshelf.Library exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
-import Components.BookDetailOverlay exposing (viewBookDetailOverlay)
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (attribute, class)
@@ -18,6 +17,7 @@ import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers
     exposing
         ( groupIntoRows
+        , minShelfRows
         , viewBookcase
         , viewShelfLabel
         , viewShelfRowClickable
@@ -29,7 +29,6 @@ import Types.RemoteData exposing (RemoteData(..))
 
 type alias Model =
     { books : RemoteData Http.Error (List Placement)
-    , selectedBook : Maybe Book
     , showAgeGate : Bool
     }
 
@@ -44,7 +43,6 @@ type Msg
     | VerifyAge
     | DismissAgeGate
     | BookClicked Book
-    | DetailClosed
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -58,7 +56,7 @@ init maybeToken =
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, selectedBook = Nothing, showAgeGate = False }, cmd )
+    ( { books = Loading, showAgeGate = False }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -82,10 +80,7 @@ update msg model =
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
         BookClicked bk ->
-            ( { model | selectedBook = Just bk }, Cmd.none, NoOut )
-
-        DetailClosed ->
-            ( { model | selectedBook = Nothing }, Cmd.none, NoOut )
+            ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
 
 
 view : Model -> Html Msg
@@ -104,10 +99,10 @@ view model =
                 div [ attribute "aria-live" "polite" ]
                     [ case model.books of
                         NotAsked ->
-                            text ""
+                            viewBookshelf []
 
                         Loading ->
-                            div [ class "loading" ] [ text "Loading your library..." ]
+                            viewBookshelf []
 
                         Failure _ ->
                             p [ class "error" ] [ text "Could not load your library. Please try again." ]
@@ -122,7 +117,6 @@ view model =
                                 viewBookshelf placements
                     ]
             ]
-        , viewBookDetailOverlay { onClose = DetailClosed } model.selectedBook
         ]
 
 
@@ -135,9 +129,11 @@ viewBookshelf : List Placement -> Html Msg
 viewBookshelf placements =
     let
         rows =
-            groupIntoRows 600 placements
+            groupIntoRows 990 placements
+
+        shelfViews =
+            List.map (viewShelfRowClickable Softened BookClicked) rows
     in
-    div [ class "bookshelf bookshelf--walnut" ]
-        [ viewBookcase
-            (List.map (viewShelfRowClickable Softened BookClicked) rows)
+    div [ class "bookshelf" ]
+        [ viewBookcase (minShelfRows 4 shelfViews)
         ]

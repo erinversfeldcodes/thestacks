@@ -12,11 +12,9 @@ import Json.Encode
 import Navigation.Route as Route exposing (Route(..))
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
-import Page.Bookshelf.AntiLibrary as AntiLibrary
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
-import Page.Bookshelf.WishList as WishList
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
@@ -37,7 +35,13 @@ port playLoginTransition : Json.Encode.Value -> Cmd msg
 port onLoginTransitionComplete : (Decode.Value -> msg) -> Sub msg
 
 
-main : Program () Model Msg
+port saveAuth : Json.Encode.Value -> Cmd msg
+
+
+port clearAuth : () -> Cmd msg
+
+
+main : Program Decode.Value Model Msg
 main =
     Browser.application
         { init = init
@@ -56,9 +60,7 @@ main =
 type Page
     = PageHome
     | PageLogin Login.Model
-    | PageLibrary Library.Model
-    | PageAntiLibrary AntiLibrary.Model
-    | PageWishList WishList.Model
+    | PageBookshelf Bookshelf.Model
     | PageReadingPile ReadingPile.Model
     | PageLookingForHome LookingForHome.Model
     | PageBookDetail BookDetail.Model
@@ -89,19 +91,22 @@ type alias Model =
     }
 
 
-init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
-init _ url key =
+init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
     let
+        maybeAuth =
+            decodeFlags flags
+
         route =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage route Nothing Nothing
+            initPage route maybeAuth Nothing
     in
     ( { key = key
       , url = url
       , route = route
-      , auth = Nothing
+      , auth = maybeAuth
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
@@ -111,8 +116,75 @@ init _ url key =
     )
 
 
+decodeFlags : Decode.Value -> Maybe Auth
+decodeFlags flags =
+    let
+        authDecoder =
+            Decode.map4
+                (\token userId email displayName ->
+                    { user =
+                        { id = userId
+                        , email = email
+                        , displayName = displayName
+                        , role = "user"
+                        }
+                    , token = token
+                    }
+                )
+                (Decode.field "token" Decode.string)
+                (Decode.field "userId" Decode.string)
+                (Decode.field "email" Decode.string)
+                (Decode.field "displayName" Decode.string)
+    in
+    Decode.decodeValue authDecoder flags
+        |> Result.toMaybe
+
+
+requiresAuth : Route -> Bool
+requiresAuth route =
+    case route of
+        Home ->
+            False
+
+        Login ->
+            False
+
+        CostTransparency ->
+            False
+
+        Catalogue ->
+            False
+
+        NotFound ->
+            False
+
+        _ ->
+            True
+
+
 initPage : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
 initPage route maybeAuth maybePreviousRoute =
+    if requiresAuth route && maybeAuth == Nothing then
+        ( PageLogin Login.init, Cmd.none )
+
+    else
+        initPageAuthenticated route maybeAuth maybePreviousRoute
+
+
+initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
+initBookshelf config maybeAuth =
+    let
+        maybeToken =
+            Maybe.map .token maybeAuth
+
+        ( model, cmd ) =
+            Bookshelf.init config maybeToken
+    in
+    ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
+
+
+initPageAuthenticated : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
+initPageAuthenticated route maybeAuth maybePreviousRoute =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -125,25 +197,13 @@ initPage route maybeAuth maybePreviousRoute =
             ( PageLogin Login.init, Cmd.none )
 
         Library ->
-            let
-                ( model, cmd ) =
-                    Library.init maybeToken
-            in
-            ( PageLibrary model, Cmd.map LibraryMsg cmd )
+            initBookshelf Bookshelf.libraryConfig maybeAuth
 
         AntiLibrary ->
-            let
-                ( model, cmd ) =
-                    AntiLibrary.init maybeToken
-            in
-            ( PageAntiLibrary model, Cmd.map AntiLibraryMsg cmd )
+            initBookshelf Bookshelf.antiLibraryConfig maybeAuth
 
         WishList ->
-            let
-                ( model, cmd ) =
-                    WishList.init maybeToken
-            in
-            ( PageWishList model, Cmd.map WishListMsg cmd )
+            initBookshelf Bookshelf.wishListConfig maybeAuth
 
         ReadingPile ->
             let
@@ -196,6 +256,16 @@ initPage route maybeAuth maybePreviousRoute =
             ( PageNotFound, Cmd.none )
 
 
+encodeAuth : Auth -> Json.Encode.Value
+encodeAuth auth =
+    Json.Encode.object
+        [ ( "token", Json.Encode.string auth.token )
+        , ( "userId", Json.Encode.string auth.user.id )
+        , ( "email", Json.Encode.string auth.user.email )
+        , ( "displayName", Json.Encode.string auth.user.displayName )
+        ]
+
+
 
 -- UPDATE
 
@@ -205,9 +275,7 @@ type Msg
     | UrlChanged Url
     | LoginMsg Login.Msg
     | LoginTransitionCompleted
-    | LibraryMsg Library.Msg
-    | AntiLibraryMsg AntiLibrary.Msg
-    | WishListMsg WishList.Msg
+    | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
     | LookingForHomeMsg LookingForHome.Msg
     | BookDetailMsg BookDetail.Msg
@@ -294,7 +362,7 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
 
                 _ ->
@@ -327,7 +395,7 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
 
                         _ ->
@@ -336,80 +404,24 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        LibraryMsg subMsg ->
+        BookshelfMsg subMsg ->
             case model.page of
-                PageLibrary subModel ->
+                PageBookshelf subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            Library.update subMsg subModel
+                            Bookshelf.update subMsg subModel
 
                         baseModel =
-                            { model | page = PageLibrary newSubModel }
+                            { model | page = PageBookshelf newSubModel }
 
                         baseCmd =
-                            Cmd.map LibraryMsg subCmd
+                            Cmd.map BookshelfMsg subCmd
                     in
                     case outMsg of
-                        Library.NoOut ->
+                        Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
 
-                        Library.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
-                            )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        AntiLibraryMsg subMsg ->
-            case model.page of
-                PageAntiLibrary subModel ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            AntiLibrary.update subMsg subModel
-
-                        baseModel =
-                            { model | page = PageAntiLibrary newSubModel }
-
-                        baseCmd =
-                            Cmd.map AntiLibraryMsg subCmd
-                    in
-                    case outMsg of
-                        AntiLibrary.NoOut ->
-                            ( baseModel, baseCmd )
-
-                        AntiLibrary.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
-                            )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        WishListMsg subMsg ->
-            case model.page of
-                PageWishList subModel ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            WishList.update subMsg subModel
-
-                        baseModel =
-                            { model | page = PageWishList newSubModel }
-
-                        baseCmd =
-                            Cmd.map WishListMsg subCmd
-                    in
-                    case outMsg of
-                        WishList.NoOut ->
-                            ( baseModel, baseCmd )
-
-                        WishList.NavigateTo route ->
+                        Bookshelf.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
                                 [ baseCmd
@@ -800,14 +812,8 @@ viewPage model =
         PageLogin subModel ->
             Html.map LoginMsg (Login.view subModel)
 
-        PageLibrary subModel ->
-            Html.map LibraryMsg (Library.view subModel)
-
-        PageAntiLibrary subModel ->
-            Html.map AntiLibraryMsg (AntiLibrary.view subModel)
-
-        PageWishList subModel ->
-            Html.map WishListMsg (WishList.view subModel)
+        PageBookshelf subModel ->
+            Html.map BookshelfMsg (Bookshelf.view subModel)
 
         PageReadingPile subModel ->
             Html.map ReadingPileMsg (ReadingPile.view subModel)

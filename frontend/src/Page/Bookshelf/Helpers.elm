@@ -1,7 +1,9 @@
 module Page.Bookshelf.Helpers exposing
     ( groupIntoRows
+    , minShelfRows
     , pickTexture
     , viewBookcase
+    , viewEmptyShelfRow
     , viewShelfLabel
     , viewShelfRow
     , viewShelfRowClickable
@@ -73,8 +75,8 @@ groupIntoRowsHelp maxWidth currentWidth currentRow remaining =
 viewBookcase : List (Html msg) -> Html msg
 viewBookcase content =
     div [ class "bookcase" ]
-        [ div [ class "bookcase__side--left" ] []
-        , div [ class "bookcase__side--right" ] []
+        [ div [ class "bookcase__side bookcase__side--left" ] []
+        , div [ class "bookcase__side bookcase__side--right" ] []
         , div [ class "bookcase__inner" ] content
         ]
 
@@ -146,11 +148,34 @@ viewShelfRowClickable : WearLevel -> (Book -> msg) -> List Placement -> Html msg
 viewShelfRowClickable wearLevel onBookClicked placements =
     div [ class "shelf-row" ]
         [ div [ class "shelf-row__back" ] []
-        , div [ class "shelf-row__books" ]
+        , div [ class "shelf-row__books", attribute "role" "list" ]
             (List.map (viewClickableSpine wearLevel onBookClicked) placements)
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
         ]
+
+
+{-| An empty shelf row — just the back, plank, and lip with no books.
+-}
+viewEmptyShelfRow : Html msg
+viewEmptyShelfRow =
+    div [ class "shelf-row shelf-row--empty" ]
+        [ div [ class "shelf-row__back" ] []
+        , div [ class "shelf-row__books" ] []
+        , div [ class "shelf-row__plank" ] []
+        , div [ class "shelf-row__lip" ] []
+        ]
+
+
+{-| Pad a list of shelf row views to at least `minRows` by appending empty shelves.
+-}
+minShelfRows : Int -> List (Html msg) -> List (Html msg)
+minShelfRows minRows rows =
+    let
+        padding =
+            max 0 (minRows - List.length rows)
+    in
+    rows ++ List.repeat padding viewEmptyShelfRow
 
 
 {-| Render a clickable book spine wrapped in a button element.
@@ -184,6 +209,7 @@ viewClickableSpine wearLevel onBookClicked placement =
     in
     button
         [ class "book-button"
+        , attribute "role" "listitem"
         , onClick (onBookClicked bookData)
         ]
         [ Components.Spine.book
