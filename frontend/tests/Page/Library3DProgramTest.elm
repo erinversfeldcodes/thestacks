@@ -8,13 +8,13 @@ Tests validate:
   - Page renders .shelf-label with "Library" text
   - Books from the API render inside the bookcase structure
   - Empty shelf shows .empty-msg with appropriate message
-  - Clicking a book spine shows a .book-detail overlay
-  - The overlay displays the book's title and author
-  - Clicking outside the overlay dismisses it
+  - Clicking a book navigates to BookDetail page
+  - HTTP error renders error message
+  - 403 triggers age gate
 
 -}
 
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
@@ -28,7 +28,7 @@ import TestHelpers
         )
 
 
-startLibrary : ProgramTest.ProgramTest Library.Model Library.Msg (ProgramTest.SimulatedEffect Library.Msg)
+startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
     ProgramTest.start () (libraryProgram (Just "test-token"))
 
@@ -40,9 +40,7 @@ suite =
         , shelfLabelRendered
         , booksInsideBookcase
         , emptyShelfMessage
-        , clickSpineShowsOverlay
-        , overlayShowsTitleAndAuthor
-        , clickOutsideDismissesOverlay
+        , clickSpineNavigatesToDetail
         , failureRendersError
         , forbiddenTriggersAgeGate
         ]
@@ -109,57 +107,23 @@ emptyShelfMessage =
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [])
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "empty-msg" ]
+                    [ Selector.class "empty-shelf" ]
 
 
-{-| Clicking a book spine shows a .book-detail overlay.
+{-| Clicking a book spine navigates to the book detail page.
+BookClicked produces NavigateTo (BookDetail bookId) outMsg.
+We verify the book button is clickable (the navigation is handled by Main.elm).
 -}
-clickSpineShowsOverlay : Test
-clickSpineShowsOverlay =
-    test "clicking a book spine shows a .book-detail overlay" <|
+clickSpineNavigatesToDetail : Test
+clickSpineNavigatesToDetail =
+    test "clicking a book spine triggers BookClicked" <|
         \() ->
             startLibrary
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [ testPlacement ])
-                |> ProgramTest.clickButton testBook.title
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "book-detail" ]
-
-
-{-| The book-detail overlay displays the book's title and author.
--}
-overlayShowsTitleAndAuthor : Test
-overlayShowsTitleAndAuthor =
-    test "book-detail overlay displays title and author" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/bookshelves/library"
-                    (simulateBookshelfResponse [ testPlacement ])
-                |> ProgramTest.clickButton testBook.title
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "The Power of Habit" ]
-                |> ProgramTest.expectViewHas
-                    [ Selector.text "Charles Duhigg" ]
-
-
-{-| Clicking outside the overlay dismisses it.
--}
-clickOutsideDismissesOverlay : Test
-clickOutsideDismissesOverlay =
-    test "clicking outside overlay dismisses it" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/bookshelves/library"
-                    (simulateBookshelfResponse [ testPlacement ])
-                |> ProgramTest.clickButton testBook.title
-                |> ProgramTest.ensureViewHas
-                    [ Selector.class "book-detail" ]
-                |> ProgramTest.clickButton "Close"
-                |> ProgramTest.expectViewHasNot
-                    [ Selector.class "book-detail" ]
+                    [ Selector.class "book-button" ]
 
 
 {-| An HTTP error response must render the error message.

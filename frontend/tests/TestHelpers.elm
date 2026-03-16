@@ -28,7 +28,7 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.BookDetail as BookDetail
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import Page.Login as Login
 import Page.Search as Search
 import Page.Upload as Upload
@@ -541,16 +541,16 @@ uploadEffects msg model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-{-| Translate Library page Cmds into SimulatedEffects.
+{-| Translate Bookshelf page Cmds into SimulatedEffects.
 -}
-libraryEffects : SimulatedEffect Library.Msg
+libraryEffects : SimulatedEffect Bookshelf.Msg
 libraryEffects =
     SimulatedEffect.Cmd.none
 
 
-{-| Translate Library init Cmds into SimulatedEffects.
+{-| Translate Bookshelf init Cmds into SimulatedEffects.
 -}
-libraryInitEffects : Maybe String -> SimulatedEffect Library.Msg
+libraryInitEffects : Maybe String -> SimulatedEffect Bookshelf.Msg
 libraryInitEffects maybeToken =
     case maybeToken of
         Just token ->
@@ -560,7 +560,7 @@ libraryInitEffects maybeToken =
                 , url = "/api/bookshelves/library"
                 , body = SimulatedEffect.Http.emptyBody
                 , expect =
-                    SimulatedEffect.Http.expectJson Library.BooksLoaded
+                    SimulatedEffect.Http.expectJson Bookshelf.BooksLoaded
                         (Decode.field "placements" (Decode.list placementDecoder))
                 , timeout = Nothing
                 , tracker = Nothing
@@ -704,12 +704,12 @@ uploadProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Create a ProgramTest harness for the Library bookshelf page.
+{-| Create a ProgramTest harness for the Bookshelf page.
 
-The auth token is baked in at harness creation time because Library.init
+The auth token is baked in at harness creation time because Bookshelf.init
 requires it to fire the initial HTTP request.
 
-The OutMsg from Library.update is discarded in this harness. Tests that
+The OutMsg from Bookshelf.update is discarded in this harness. Tests that
 need to assert on OutMsg should use the raw update function directly.
 
 Usage:
@@ -717,24 +717,24 @@ Usage:
     ProgramTest.start () (libraryProgram (Just "test-token"))
 
 -}
-libraryProgram : Maybe String -> ProgramDefinition () Library.Model Library.Msg (SimulatedEffect Library.Msg)
+libraryProgram : Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 libraryProgram maybeToken =
     ProgramTest.createElement
         { init =
             \() ->
                 let
                     ( model, _ ) =
-                        Library.init maybeToken
+                        Bookshelf.init Bookshelf.libraryConfig maybeToken
                 in
                 ( model, libraryInitEffects maybeToken )
         , update =
             \msg model ->
                 let
                     ( newModel, _, _ ) =
-                        Library.update msg model
+                        Bookshelf.update msg model
                 in
                 ( newModel, libraryEffects )
-        , view = Library.view
+        , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
 
