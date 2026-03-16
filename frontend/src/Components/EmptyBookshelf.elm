@@ -35,7 +35,7 @@ hintText bookshelf =
             "Add one from a photo, a screenshot, or an ISBN."
 
         "reading_pile" ->
-            "Move a book from your AntiLibrary to start reading."
+            ""
 
         _ ->
             ""

@@ -23,15 +23,15 @@ viewBookDetailOverlay config maybeBook =
             text ""
 
         Just bk ->
-            div [ class "book-detail" ]
-                [ div [ class "book-detail__backdrop", onClick config.onClose ] []
+            div [ class "book-overlay" ]
+                [ div [ class "book-overlay__backdrop", onClick config.onClose ] []
                 , div
-                    [ class "book-detail__content"
+                    [ class "book-overlay__content"
                     , attribute "role" "dialog"
                     , attribute "aria-modal" "true"
                     ]
-                    [ h2 [ class "book-detail__title" ] [ text bk.title ]
-                    , p [ class "book-detail__author" ] [ text (Types.Book.authorName bk) ]
-                    , button [ class "book-detail__close", onClick config.onClose ] [ text "Close" ]
+                    [ h2 [ class "book-overlay__title" ] [ text bk.title ]
+                    , p [ class "book-overlay__author" ] [ text (Types.Book.authorName bk) ]
+                    , button [ class "book-overlay__close", onClick config.onClose ] [ text "Close" ]
                     ]
                 ]

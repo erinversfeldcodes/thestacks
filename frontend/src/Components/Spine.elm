@@ -6,6 +6,7 @@ module Components.Spine exposing
     , spineHeight
     , spineLean
     , spineWidth
+    , textureUrl
     )
 
 import Bitwise
@@ -139,15 +140,27 @@ textureUrl texture titleStr =
         subIdx =
             modBy 3 idx
 
-        prefix =
-            case texture of
-                Leather ->
-                    "leather"
+        variant =
+            case ( texture, subIdx ) of
+                ( Leather, 0 ) ->
+                    "spine-leather-burgundy"
 
-                Cloth ->
-                    "cloth"
+                ( Leather, 1 ) ->
+                    "spine-leather-green"
+
+                ( Leather, _ ) ->
+                    "spine-leather-navy"
+
+                ( Cloth, 0 ) ->
+                    "spine-cloth-brown"
+
+                ( Cloth, 1 ) ->
+                    "spine-cloth-red"
+
+                ( Cloth, _ ) ->
+                    "spine-cloth-olive"
     in
-    "url('/textures/" ++ prefix ++ "-" ++ String.fromInt subIdx ++ ".jpg')"
+    "url('/textures/" ++ variant ++ ".png')"
 
 
 {-| Render a complete book element with 3D spine, top, and cover.
@@ -232,16 +245,32 @@ book config =
         bgImage =
             textureUrl config.texture config.title
     in
+    let
+        depth =
+            160
+
+        halfDepth =
+            depth // 2
+
+        topTransform =
+            "rotateX(90deg) translateZ("
+                ++ String.fromInt halfDepth
+                ++ "px) translateY(-"
+                ++ String.fromInt halfDepth
+                ++ "px)"
+
+        coverTransform =
+            "rotateY(90deg)"
+    in
     div
         [ class "book"
         , style "width" (String.fromInt widthPx ++ "px")
         , style "height" (String.fromInt heightPx ++ "px")
-        , style "transform" ("rotateZ(" ++ String.fromFloat tilt ++ "deg)")
         , style "transform-style" "preserve-3d"
         , title (config.title ++ " — " ++ config.author)
         ]
         [ div
-            [ class "book__spine"
+            [ class "book__face book__spine"
             , style "background-color" tex.bg
             , style "background-image" bgImage
             ]
@@ -259,11 +288,31 @@ book config =
                         [ text config.author ]
                    ]
             )
-        , div [ class "book__top" ] []
         , div
-            [ class "book__cover"
-            , style "background-image" coverBg
+            [ class "book__face book__top"
+            , style "width" (String.fromInt widthPx ++ "px")
+            , style "height" (String.fromInt depth ++ "px")
+            , style "transform" topTransform
+            , style "top" "0"
+            , style "left" "0"
+            ]
+            []
+        , div
+            [ class "book__face book__cover"
+            , style "width" (String.fromInt depth ++ "px")
+            , style "height" (String.fromInt heightPx ++ "px")
+            , style "background-image"
+                (if coverBg == "none" then
+                    bgImage
+
+                 else
+                    coverBg
+                )
             , style "background-color" tex.bg
+            , style "transform" coverTransform
+            , style "transform-origin" "left center"
+            , style "top" "0"
+            , style "left" (String.fromInt widthPx ++ "px")
             ]
             []
         ]

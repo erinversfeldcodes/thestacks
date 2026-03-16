@@ -28,7 +28,8 @@ type alias Model =
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
-    , selectedBookshelf : String -- DEFERRED: Replace with BookshelfName union type when ShelfMover and Api.moveBook are refactored. See Issue #030 item #6.
+    , currentBookshelf : String -- The bookshelf the book is currently on (from placement or route context)
+    , selectedBookshelf : String -- The target bookshelf selected in the mover dropdown
     , selectedFormats : List Format
     , moveState : RemoteData Http.Error ()
     , removeState : RemoteData Http.Error ()
@@ -75,7 +76,8 @@ init bookId maybeToken maybePreviousRoute =
       , bookshelfMoverOpen = False
       , removeModalOpen = False
       , formatPickerOpen = False
-      , selectedBookshelf = "library"
+      , currentBookshelf = routeToBookshelf maybePreviousRoute
+      , selectedBookshelf = firstAvailableBookshelf (routeToBookshelf maybePreviousRoute)
       , selectedFormats = []
       , moveState = NotAsked
       , removeState = NotAsked
@@ -85,6 +87,43 @@ init bookId maybeToken maybePreviousRoute =
       }
     , cmd
     )
+
+
+{-| Derive the current bookshelf name from the route the user came from.
+-}
+routeToBookshelf : Maybe Route -> String
+routeToBookshelf maybeRoute =
+    case maybeRoute of
+        Just Route.Library ->
+            "library"
+
+        Just Route.AntiLibrary ->
+            "antilibrary"
+
+        Just Route.WishList ->
+            "wishlist"
+
+        Just Route.ReadingPile ->
+            "reading_pile"
+
+        Just Route.LookingForHome ->
+            "looking_for_home"
+
+        _ ->
+            ""
+
+
+{-| Select the first bookshelf that isn't the current one as default target.
+-}
+firstAvailableBookshelf : String -> String
+firstAvailableBookshelf current =
+    let
+        all =
+            [ "library", "antilibrary", "wishlist", "reading_pile", "looking_for_home" ]
+    in
+    List.filter (\s -> s /= current) all
+        |> List.head
+        |> Maybe.withDefault "antilibrary"
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -402,7 +441,7 @@ viewShelfActions model =
         , if model.bookshelfMoverOpen then
             div []
                 [ shelfMover
-                    { currentBookshelf = model.selectedBookshelf
+                    { currentBookshelf = model.currentBookshelf
                     , selectedBookshelf = model.selectedBookshelf
                     , onSelectBookshelf = SelectBookshelf
                     , onMove = ConfirmMove
