@@ -14,8 +14,8 @@ async function signInAndNavigate(
   await page.goto("/login");
   await page.fill('input[id="email"]', DEV_EMAIL);
   await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-form__submit");
-  await page.waitForURL("/", { timeout: 10000 });
+  await page.click("button.login-card__submit");
+  await page.waitForURL("**/antilibrary", { timeout: 15000 });
   // Navigate via SPA link or direct goto — bookshelf pages re-fetch on init
   await page.goto(path);
 }
