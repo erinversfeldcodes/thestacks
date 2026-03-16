@@ -581,6 +581,24 @@ Uses `dorny/paths-filter` for monorepo path-scoped jobs:
 - `docs/deployment/FLY_SETUP.md` — Fly.io app creation, secrets, scaling
 - `docs/deployment/DEV_SETUP.md` — local development with `nix develop`
 
+#### 1E.4 — Nix/Flox Reproducible Builds (Phase 1 priority)
+
+**Must be complete before Phase 1 ends.** The current build pipeline uses system-installed tools (Node.js, Elm, esbuild) which vary across developer machines and CI. By the end of Phase 1, all builds — local dev, CI, and Docker — must be reproducible via Nix/Flox.
+
+**What this means:**
+- `nix develop` provides the exact toolchain: Elixir, Erlang, Node.js, Elm, elm-format, elm-test, Rust, Python, buf, dbt, esbuild — all pinned versions
+- `nix build` produces the Docker image deterministically (no `apk add` with unpinned versions, no `npm ci` fetching latest)
+- CI runs inside the Nix shell (or uses a Nix-built Docker image), eliminating "works on my machine" class of bugs
+- The Docker multi-stage build can optionally be replaced with a Nix-built container (using `dockerTools.buildLayeredImage`) for fully reproducible, smaller images
+- `flake.lock` pins all inputs — Nixpkgs, Elm packages, Hex packages — so builds are identical regardless of when they run
+
+**Why this is Phase 1 priority:**
+- Alpine package version pinning in Dockerfiles is brittle (packages get removed from repos)
+- npm ci + esbuild-plugin-elm works but adds ~200MB to the builder layer
+- Nix caches aggressively — subsequent builds are near-instant
+- Fly.io supports deploying Nix-built images via `fly deploy --image`
+- Once real users are on the platform, build reproducibility is a reliability requirement, not a nice-to-have
+
 **Test command**: `just test && just lint`
 **DoD:**
 - [ ] `fly deploy -c deploy/fly.core.toml` succeeds

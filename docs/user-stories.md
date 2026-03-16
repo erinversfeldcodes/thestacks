@@ -1634,6 +1634,31 @@ This is automatic. When the user is authenticated, the top navigation updates.
 
 ---
 
+#### US-14.3.3 Log Out
+
+**As an** authenticated user, **I want to** sign out of The Stacks **so that** my session is ended and my personal data is no longer accessible from this browser.
+
+**What the user wants to accomplish:** End their session explicitly — especially important on shared or public devices, or when switching accounts.
+
+**How they accomplish it:**
+1. The user clicks their display name in the navigation bar, which reveals a "Sign Out" option.
+2. Clicking "Sign Out" clears the stored JWT from the browser, resets the Elm application state, and redirects to the sign-in page.
+
+**What they see on the page:**
+- The display name in the navigation becomes a subtle dropdown or clickable element. On click, a single "Sign Out" option appears.
+- After signing out, the user sees the sign-in page. The navigation reverts to the unauthenticated state (only "Costs" and "Sign In" visible).
+- No confirmation dialog — sign-out is immediate and reversible (they can just sign in again).
+
+**Acceptance criteria:**
+- [ ] A "Sign Out" action is accessible from the navigation when authenticated
+- [ ] Clicking "Sign Out" removes the JWT from localStorage via the `clearAuth` port
+- [ ] The Elm model's `auth` field is set to `Nothing`, clearing all personal data from application state
+- [ ] The user is redirected to the sign-in page after signing out
+- [ ] After signing out, navigating to a protected page redirects to sign-in
+- [ ] The sign-out action works in both normal and private browsing sessions
+
+---
+
 ## 15. Home & Navigation
 
 ### 15.1 Home Page
