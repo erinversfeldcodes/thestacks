@@ -59,7 +59,7 @@ type alias Model =
 
 
 type Msg
-    = GotFiles File (List File)
+    = GotFile File
     | DragOver
     | DragLeave
     | FilepickerRequested
@@ -101,7 +101,7 @@ sleepThenPoll =
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
 update msg model maybeToken =
     case msg of
-        GotFiles file _ ->
+        GotFile file ->
             case maybeToken of
                 Nothing ->
                     -- Not authenticated — send to login rather than silently hanging.
@@ -126,7 +126,7 @@ update msg model maybeToken =
             ( { model | isDragging = False }, Cmd.none )
 
         FilepickerRequested ->
-            ( model, Select.files [ "image/*" ] GotFiles )
+            ( model, Select.files [ "image/*" ] (\f _ -> GotFile f) )
 
         UploadAccepted result ->
             case result of
@@ -363,9 +363,8 @@ viewUploadArea model =
 
         onDropDecoder =
             Decode.at [ "dataTransfer", "files" ]
-                (Decode.map2 GotFiles
+                (Decode.map GotFile
                     (Decode.index 0 File.decoder)
-                    (Decode.succeed [])
                 )
 
         onDrop_ =

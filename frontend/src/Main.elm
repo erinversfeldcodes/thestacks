@@ -5,8 +5,9 @@ import Animation.SlideTransition as SlideTransition
 import Api
 import Browser
 import Browser.Navigation as Nav
-import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
+import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (class, href)
+import Html.Events exposing (onClick)
 import Json.Decode as Decode
 import Json.Encode
 import Navigation.Route as Route exposing (Route(..))
@@ -285,6 +286,7 @@ type Msg
     | AgeVerificationMsg AgeVerification.Msg
     | CostTransparencyMsg CostTransparency.Msg
     | CatalogueMsg Catalogue.Msg
+    | Logout
     | SwipeReceived String
     | SwipeIgnored
 
@@ -634,6 +636,11 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
+        Logout ->
+            ( { model | auth = Nothing, page = PageLogin Login.init }
+            , Cmd.batch [ clearAuth (), Nav.pushUrl model.key (Route.toPath Login) ]
+            )
+
         SwipeIgnored ->
             ( model, Cmd.none )
 
@@ -777,6 +784,10 @@ viewNav model =
                         , li [ class "app-nav__item" ]
                             [ Html.span [ class "app-nav__user" ]
                                 [ text auth.user.displayName ]
+                            ]
+                        , li [ class "app-nav__item" ]
+                            [ button [ class "app-nav__link app-nav__logout", onClick Logout ]
+                                [ text "Sign Out" ]
                             ]
                         ]
                 )
