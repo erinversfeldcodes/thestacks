@@ -51,9 +51,22 @@
     --text: #2c1f0e;
     --shelf-bg: #c8a97a;
     --shelf-text: #2c1f0e;
-    --wallpaper-color: #e8f0e0;
+    --wallpaper-color: #e8e4d6;
     --accent: #7a9e6e;
     --border: rgba(0, 0, 0, 0.1);
+}
+
+.shelf-antilibrary .bookcase__side {
+    filter: brightness(0.55) saturate(0.5) sepia(0.3);
+}
+
+.shelf-antilibrary .shelf-row__plank,
+.shelf-antilibrary .shelf-row__lip {
+    filter: brightness(0.5) saturate(0.5) sepia(0.3);
+}
+
+.shelf-antilibrary .shelf-row__back {
+    filter: brightness(0.3) saturate(0.4) sepia(0.3);
 }
 
 .shelf-wishlist {
@@ -65,13 +78,36 @@
     --accent: #7b9eb8;
 }
 
+.shelf-looking-for-home {
+    --bg: #e8eef5;
+    --text: #2c1f0e;
+    --shelf-bg: #b8a080;
+    --shelf-text: #2c1f0e;
+    --wallpaper-color: #dce8f0;
+    --accent: #6a8ea0;
+    --border: rgba(0, 0, 0, 0.1);
+}
+
+.shelf-looking-for-home .bookcase__side {
+    filter: brightness(0.5) saturate(0.45) sepia(0.15) hue-rotate(-10deg);
+}
+
+.shelf-looking-for-home .shelf-row__plank,
+.shelf-looking-for-home .shelf-row__lip {
+    filter: brightness(0.45) saturate(0.45) sepia(0.15) hue-rotate(-10deg);
+}
+
+.shelf-looking-for-home .shelf-row__back {
+    filter: brightness(0.35) saturate(0.4) sepia(0.15) hue-rotate(-10deg);
+}
+
 .shelf-reading-pile {
-    --bg: #2a1f14;
-    --text: #e8d4b8;
+    --bg: #2a1a2e;
+    --text: #e8dce8;
     --shelf-bg: #3d2b1f;
     --shelf-text: #e8d4b8;
-    --wallpaper-color: #1a1208;
-    --accent: #c8956c;
+    --wallpaper-color: #c8b0d0;
+    --accent: #9a6aaa;
 }
 
 /* ===== Base Reset & Body ===== */
@@ -183,6 +219,52 @@ h4 {
 .app-nav__item--active .app-nav__link {
     background-color: rgba(255, 255, 255, 0.1);
     color: var(--text);
+}
+
+/* ===== Nav Dropdowns ===== */
+
+.app-nav__dropdown {
+    position: relative;
+}
+
+.app-nav__dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    list-style: none;
+    background: var(--shelf-bg, #3d2b1f);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    min-width: 140px;
+    padding: 0.25rem 0;
+    z-index: 200;
+}
+
+.app-nav__dropdown:hover .app-nav__dropdown-menu,
+.app-nav__dropdown:focus-within .app-nav__dropdown-menu {
+    display: block;
+}
+
+.app-nav__dropdown-link {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-family: var(--font-body);
+    text-decoration: none;
+}
+
+.app-nav__dropdown-link:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    text-decoration: none;
 }
 
 /* ===== Footer ===== */
@@ -304,35 +386,261 @@ h4 {
 
 /* (Old bookshelf/spine layout removed — replaced by 3D bookcase below) */
 
-/* ===== Reading Pile (face-on) ===== */
+/* ===== Reading Pile (armchair scene) ===== */
 
-.pile-view {
+.reading-pile {
+    position: relative;
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.reading-pile__label {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    color: var(--text);
+    text-align: center;
+    padding: 1rem 0 0;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    position: relative;
+    z-index: 2;
+}
+
+.reading-pile__scene {
+    position: relative;
+    width: 100%;
+    min-height: 560px;
     display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
+    justify-content: center;
+    align-items: flex-end;
+    padding-bottom: 160px;
+    overflow: visible;
+}
+
+.reading-pile__floor {
+    position: absolute;
+    bottom: 0;
+    /* Break out of container to span full viewport width */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100vw;
+    height: 160px;
+    background: url('/textures/shelf-walnut-plank.png') repeat;
+    background-size: 160px 160px;
+    filter: brightness(0.32) saturate(0.45);
+    z-index: 0;
+}
+
+.reading-pile__chair-area {
+    position: relative;
+    width: 400px;
+    z-index: 1;
+    /* Pile grows upward in normal flow, pushing this container taller */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.reading-pile__empty-msg {
+    position: absolute;
+    top: 30%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    font-style: italic;
+    color: var(--text-muted, #a09070);
+    text-align: center;
     padding: 1rem;
+    max-width: 260px;
 }
 
-.pile-view__book {
-    width: 140px;
+/* ===== CSS Armchair ===== */
+
+.armchair {
+    position: relative;
+    width: 400px;
+    height: 360px;
+    margin: 0 auto;
 }
 
-.pile-view__cover {
-    width: 140px;
-    height: 200px;
-    background-color: var(--shelf-bg);
-    border-radius: var(--radius-sm);
+/* Chair back */
+.armchair__back {
+    position: absolute;
+    bottom: 160px;
+    left: 50px;
+    right: 50px;
+    height: 190px;
+    background: linear-gradient(180deg, #2a4a32 0%, #1e3a26 40%, #1a3020 100%);
+    border-radius: 100px 100px 0 0;
+    box-shadow: inset 0 -20px 40px rgba(0, 0, 0, 0.3),
+                inset 0 10px 20px rgba(255, 255, 255, 0.04);
+    background-image:
+        radial-gradient(circle at 25% 30%, rgba(0,0,0,0.12) 4px, transparent 4px),
+        radial-gradient(circle at 50% 25%, rgba(0,0,0,0.12) 4px, transparent 4px),
+        radial-gradient(circle at 75% 30%, rgba(0,0,0,0.12) 4px, transparent 4px),
+        radial-gradient(circle at 37% 55%, rgba(0,0,0,0.12) 4px, transparent 4px),
+        radial-gradient(circle at 63% 55%, rgba(0,0,0,0.12) 4px, transparent 4px),
+        radial-gradient(circle at 25% 75%, rgba(0,0,0,0.10) 4px, transparent 4px),
+        radial-gradient(circle at 50% 70%, rgba(0,0,0,0.10) 4px, transparent 4px),
+        radial-gradient(circle at 75% 75%, rgba(0,0,0,0.10) 4px, transparent 4px);
+    z-index: 1;
+}
+
+/* Seat cushion */
+.armchair__seat {
+    position: absolute;
+    bottom: 110px;
+    left: 40px;
+    right: 40px;
+    height: 60px;
+    background: linear-gradient(180deg, #2e5038 0%, #1e3828 60%, #183020 100%);
+    border-radius: 6px 6px 4px 4px;
+    box-shadow: inset 0 4px 8px rgba(255, 255, 255, 0.05),
+                inset 0 -6px 12px rgba(0, 0, 0, 0.3),
+                0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 3;
+}
+
+/* Arms — z-index HIGHER than books so they visually contain the pile */
+.armchair__arm {
+    position: absolute;
+    bottom: 110px;
+    width: 55px;
+    height: 160px;
+    background: linear-gradient(180deg, #2a4a32 0%, #1e3a26 100%);
+    border-radius: 28px 28px 6px 6px;
+    z-index: 20;
+}
+
+.armchair__arm--left {
+    left: 0;
+    box-shadow: inset 4px 6px 12px rgba(255, 255, 255, 0.05),
+                inset 0 -8px 16px rgba(0, 0, 0, 0.3),
+                -4px 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.armchair__arm--right {
+    right: 0;
+    box-shadow: inset -4px 6px 12px rgba(255, 255, 255, 0.05),
+                inset 0 -8px 16px rgba(0, 0, 0, 0.3),
+                4px 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Front panel below seat */
+.armchair__leg--fl,
+.armchair__leg--fr {
+    position: absolute;
+    width: 16px;
+    height: 110px;
+    background: linear-gradient(90deg, #5a3a20, #7a5030, #5a3a20);
+    border-radius: 3px 3px 5px 5px;
+    z-index: 0;
+    bottom: 0;
+}
+
+.armchair__leg--fl { left: 50px; }
+.armchair__leg--fr { right: 50px; }
+.armchair__leg--bl { display: none; }
+.armchair__leg--br { display: none; }
+
+/* ===== Book pile stacked on the chair seat ===== */
+
+.book-pile {
+    position: relative;
+    z-index: 10;
+    width: 280px;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    /* Negative margin pulls the pile down to overlap the chair seat */
+    margin-bottom: -170px;
+}
+
+/* --- Book pile items --- */
+
+.book-pile__book {
+    all: unset;
+    display: block;
+    cursor: pointer;
+    position: relative;
+    pointer-events: auto;
+    transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.book-pile__book:focus-visible .book {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Rotated wrapper: lays the shelf book flat */
+.book-pile__rotated-book {
+    transform: rotate(-90deg);
+    transform-origin: center center;
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 3rem;
-    box-shadow: var(--shadow-md);
-    cursor: pointer;
-    transition: transform 0.15s;
+    pointer-events: none;
 }
 
-.pile-view__cover:hover {
-    transform: translateY(-4px);
+.book-pile__rotated-book .book {
+    transform-style: preserve-3d;
+    pointer-events: none;
+}
+
+.book-pile__rotated-book .book__face {
+    pointer-events: none;
+}
+
+/* When selected, re-enable pointer events so the floated book is clickable */
+.book-pile__book--selected .book-pile__rotated-book,
+.book-pile__book--selected .book-pile__rotated-book .book,
+.book-pile__book--selected .book-pile__rotated-book .book__face {
+    pointer-events: auto;
+}
+
+/* Hide top face when flat (edge-on white line), restore when selected (book stands up) */
+.book-pile__rotated-book .book__top { display: none; }
+.book-pile__book--selected .book-pile__rotated-book .book__top { display: block; }
+.book-pile__book .book:hover { animation: none; }
+
+/* --- Selected: book floats right, stands upright, tilts to show cover --- */
+
+.book-pile__book--selected {
+    z-index: 200 !important;
+    transform: translateX(300px) rotate(90deg) !important;
+}
+
+.book-pile__book--selected .book-pile__rotated-book .book {
+    animation: pile-book-tilt 0.6s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+@keyframes pile-book-tilt {
+    0%   { transform: translateZ(0) rotateY(0) rotateX(0); }
+    100% { transform: translateZ(60px) rotateX(-30deg) rotateY(-55deg) rotateZ(-10deg); }
+}
+
+.book-pile:has(.book-pile__book--selected) {
+    z-index: 30;
+}
+
+/* Wallpaper: lavender dragons */
+.wallpaper--dragons {
+    background-color: var(--wallpaper-color);
+    background-image: url('/textures/wallpaper-lavender-dragons.png');
+    background-size: 250px;
+    opacity: 0.3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .book-pile__book--selected {
+        transform: none !important;
+    }
 }
 
 /* ===== Empty Shelf ===== */
@@ -1383,9 +1691,8 @@ h4 {
 }
 
 /* ===== Room Transitions (fade through dark) ===== */
-/* Disabled: all transition approaches (opacity, overlay) interfere with
-   CSS preserve-3d on the 3D bookshelf. Will revisit when migrating to
-   WebGL/elm-3d-scene which handles its own rendering pipeline. */
+/* Placeholder: room transition classes applied via Elm but not yet styled.
+   Safe to add opacity/overlay animations now that preserve-3d is removed. */
 
 .fade-through-dark-in {}
 .fade-through-dark-out {}
@@ -1406,14 +1713,6 @@ h4 {
     .app-nav__link {
         font-size: var(--size-xs);
         padding: 0.3rem 0.6rem;
-    }
-
-    .bookshelf__row {
-        min-height: 160px;
-    }
-
-    .spine {
-        height: 130px;
     }
 
     .book-detail__hero {
@@ -2290,6 +2589,7 @@ h4 {
 
 .page--shelf {
     position: relative; /* Contain the absolutely-positioned wallpaper */
+    overflow-x: hidden; /* Prevent horizontal scroll from hover-translated books */
 }
 
 .shelf-room {
@@ -2330,7 +2630,7 @@ h4 {
     width: var(--side-w);
     background: url('/textures/shelf-walnut-plank.png') repeat;
     background-size: 160px 160px;
-    filter: brightness(0.38) saturate(0.45);
+    filter: brightness(0.3) saturate(0.4);
     z-index: 60; /* Above hovered books (z-index: 50) so sides mask the hover */
 }
 
@@ -2376,7 +2676,7 @@ h4 {
     padding-bottom: calc(var(--plank-h) + var(--plank-lip));
 }
 
-/* Dark recessed back */
+/* Dark recessed back with warm sconce reflection */
 
 .shelf-row__back {
     position: absolute;
@@ -2384,8 +2684,11 @@ h4 {
     left: 0;
     right: 0;
     bottom: calc(var(--plank-h) + var(--plank-lip));
-    background: #060402;
-    box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.7);
+    background: url('/textures/shelf-walnut-plank.png') repeat;
+    background-size: 160px 160px;
+    filter: brightness(0.32) saturate(0.45);
+    box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.5),
+                inset 0 -8px 20px rgba(180, 140, 80, 0.04);
 }
 
 /* Book row */
@@ -2422,8 +2725,14 @@ h4 {
     top: 0;
     left: 0;
     right: 0;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.04);
+    height: 2px;
+    background: linear-gradient(90deg,
+        transparent 5%,
+        rgba(255, 220, 160, 0.08) 30%,
+        rgba(255, 220, 160, 0.12) 50%,
+        rgba(255, 220, 160, 0.08) 70%,
+        transparent 95%
+    );
 }
 
 /* Plank lip / front edge */
@@ -2581,12 +2890,45 @@ h4 {
     align-items: center;
 }
 
+.shelf-row__books--message {
+    justify-content: center;
+    align-items: center;
+}
+
+.shelf-row__empty-text {
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    font-style: italic;
+    color: var(--text-muted, #a09070);
+    text-align: center;
+    padding: 2rem 1.5rem;
+    opacity: 0.7;
+}
+
 /* Book button wrapper (clickable spine in Library) */
 
 .book-button {
     all: unset;
     display: inline-block;
     cursor: pointer;
+}
+
+.book-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+/* ===== Reduced Motion ===== */
+
+@media (prefers-reduced-motion: reduce) {
+    .book {
+        transition: none;
+    }
+
+    .book:hover {
+        animation: none;
+    }
 }
 
 /* Wallpaper */
@@ -2605,16 +2947,39 @@ h4 {
     opacity: 0.3;
 }
 
+.wallpaper--botanical {
+    background-color: var(--wallpaper-color);
+    background-image: url('/textures/wallpaper-botanical-cream.png');
+    background-size: 200px;
+    opacity: 0.35;
+}
+
+.wallpaper--floral {
+    background-color: var(--wallpaper-color);
+    background-image: url('/textures/wallpaper-floral-watercolour.png');
+    background-size: 200px;
+    opacity: 0.3;
+}
+
+.wallpaper--forest {
+    background-color: var(--wallpaper-color);
+    background-image: url('/textures/wallpaper-baby-blue-forest.png');
+    background-size: 250px;
+    opacity: 0.4;
+}
+
 /* Lighting overlay */
 
 .lighting {
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at 50% 20%,
-        rgba(255, 200, 100, 0.08) 0%,
-        transparent 70%);
+    background: radial-gradient(ellipse at 50% 15%,
+        rgba(255, 200, 100, 0.25) 0%,
+        rgba(255, 180, 80, 0.08) 40%,
+        transparent 75%);
     pointer-events: none;
-    z-index: 1;
+    z-index: 70;
+    mix-blend-mode: soft-light;
 }
 
 /* Shelf Label */
@@ -2702,3 +3067,4 @@ h4 {
 .book-overlay__close:hover {
     background: var(--accent-hover);
 }
+

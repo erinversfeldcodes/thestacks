@@ -1,6 +1,6 @@
 module Page.Bookshelf.ReadingPile exposing
     ( Model
-    , Msg
+    , Msg(..)
     , OutMsg(..)
     , init
     , update
@@ -9,14 +9,15 @@ module Page.Bookshelf.ReadingPile exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
-import Components.EmptyBookshelf exposing (emptyBookshelf)
-import Components.Spine exposing (WearLevel(..), spine, spineWidth)
-import Html exposing (Html, div, h2, p, text)
+import Components.Spine exposing (WearLevel(..))
+import Html exposing (Html, button, div, p, text)
 import Html.Attributes exposing (attribute, class, style)
+import Html.Events exposing (onClick, onMouseEnter, stopPropagationOn)
 import Http
+import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers exposing (pickTexture)
-import Types.Book
+import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -24,6 +25,7 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
+    , selectedBookId : Maybe String
     }
 
 
@@ -36,6 +38,9 @@ type Msg
     = BooksLoaded (Result Http.Error (List Placement))
     | VerifyAge
     | DismissAgeGate
+    | BookHovered String
+    | BookClicked Book
+    | Deselect
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -49,7 +54,7 @@ init maybeToken =
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, showAgeGate = False }, cmd )
+    ( { books = Loading, showAgeGate = False, selectedBookId = Nothing }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -72,98 +77,146 @@ update msg model =
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
+        BookHovered bookId ->
+            ( { model | selectedBookId = Just bookId }, Cmd.none, NoOut )
+
+        BookClicked bk ->
+            if model.selectedBookId == Just bk.id then
+                ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+
+            else
+                ( { model | selectedBookId = Just bk.id }, Cmd.none, NoOut )
+
+        Deselect ->
+            ( { model | selectedBookId = Nothing }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--shelf shelf-reading-pile" ]
-        [ div [ class "reading-nook" ]
-            [ div [ class "reading-nook__lamp" ] []
-            , div [ class "reading-nook__scene" ]
-                [ div [ class "reading-nook__armchair", attribute "aria-hidden" "true" ]
-                    [ div [ class "reading-nook__armchair-back" ] []
-                    , div [ class "reading-nook__armchair-seat" ] []
-                    , div [ class "reading-nook__armchair-arm reading-nook__armchair-arm--left" ] []
-                    , div [ class "reading-nook__armchair-arm reading-nook__armchair-arm--right" ] []
-                    ]
-                , div [ class "reading-nook__side-table" ]
-                    [ div [ class "reading-nook__table-top" ]
-                        [ if model.showAgeGate then
-                            ageGate
-                                { onVerify = VerifyAge
-                                , onDismiss = DismissAgeGate
-                                }
+    div
+        [ class "page page--shelf shelf-reading-pile"
+        , onClick Deselect
+        ]
+        [ div [ class "wallpaper wallpaper--dragons" ] []
+        , div [ class "lighting" ] []
+        , div [ class "reading-pile" ]
+            [ div [ class "reading-pile__label" ] [ text "Reading Pile" ]
+            , if model.showAgeGate then
+                ageGate
+                    { onVerify = VerifyAge
+                    , onDismiss = DismissAgeGate
+                    }
 
-                          else
-                            case model.books of
-                                NotAsked ->
-                                    text ""
+              else
+                div [ class "reading-pile__scene" ]
+                    [ div [ class "reading-pile__floor", attribute "aria-hidden" "true" ] []
+                    , div [ class "reading-pile__chair-area" ]
+                        [ case model.books of
+                            NotAsked ->
+                                text ""
 
-                                Loading ->
-                                    div [ class "loading" ] [ text "Loading your reading pile..." ]
+                            Loading ->
+                                div [ class "reading-pile__empty-msg" ]
+                                    [ text "Loading your reading pile..." ]
 
-                                Failure _ ->
-                                    p [ class "error" ]
-                                        [ text "Could not load your reading pile. Please try again." ]
+                            Failure _ ->
+                                p [ class "error" ]
+                                    [ text "Could not load your reading pile. Please try again." ]
 
-                                Success placements ->
-                                    if List.isEmpty placements then
-                                        emptyBookshelf
-                                            { bookshelf = "reading_pile"
-                                            , message =
-                                                "Nothing on the pile right now. Move a book from your AntiLibrary to start reading."
-                                            }
+                            Success placements ->
+                                if List.isEmpty placements then
+                                    div [ class "reading-pile__empty-msg" ]
+                                        [ text "Nothing on the pile right now. Move a book from your Antilibrary to start reading." ]
 
-                                    else
-                                        viewBookPile placements
+                                else
+                                    viewBookPile model.selectedBookId placements
+                        , div [ class "armchair", attribute "aria-hidden" "true" ]
+                            [ div [ class "armchair__back" ] []
+                            , div [ class "armchair__seat" ] []
+                            , div [ class "armchair__arm armchair__arm--left" ] []
+                            , div [ class "armchair__arm armchair__arm--right" ] []
+                            , div [ class "armchair__leg armchair__leg--fl" ] []
+                            , div [ class "armchair__leg armchair__leg--fr" ] []
+                            , div [ class "armchair__leg armchair__leg--bl" ] []
+                            , div [ class "armchair__leg armchair__leg--br" ] []
+                            ]
                         ]
-                    , div [ class "reading-nook__table-leg" ] []
                     ]
-                ]
-            , div [ class "reading-nook__rug", attribute "aria-hidden" "true" ] []
-            , h2 [ class "reading-nook__title" ] [ text "Reading Pile" ]
             ]
         ]
 
 
-viewBookPile : List Placement -> Html Msg
-viewBookPile placements =
-    div [ class "book-pile" ]
-        (List.indexedMap viewStackedBook placements)
+viewBookPile : Maybe String -> List Placement -> Html Msg
+viewBookPile selectedBookId placements =
+    div [ class "book-pile", attribute "role" "list" ]
+        (List.indexedMap (viewPiledBook selectedBookId) (List.take 50 placements))
 
 
-viewStackedBook : Int -> Placement -> Html Msg
-viewStackedBook index placement =
+viewPiledBook : Maybe String -> Int -> Placement -> Html Msg
+viewPiledBook selectedBookId index placement =
     let
-        ( bookTitle, author, pageCount ) =
+        bookData =
             case placement.book of
-                Just book ->
-                    ( book.title, Types.Book.authorName book, Maybe.withDefault 200 book.pageCount )
+                Just bk ->
+                    bk
 
                 Nothing ->
-                    ( "Unknown Title", "Unknown Author", 200 )
+                    { id = ""
+                    , isbn = ""
+                    , title = "Unknown Title"
+                    , author = Nothing
+                    , description = Nothing
+                    , coverImageUrl = Nothing
+                    , pageCount = Just 200
+                    , publisher = Nothing
+                    , publicationYear = Nothing
+                    , subjects = []
+                    , visibilityTier = Types.Book.Public
+                    }
 
-        thickness =
-            spineWidth pageCount
-
-        rotation =
-            modBy 7 (index * 3 + 2) - 3
-
-        rotationStr =
-            "rotate(" ++ String.fromInt rotation ++ "deg)"
+        pageCount =
+            Maybe.withDefault 200 bookData.pageCount
 
         texture =
-            pickTexture bookTitle
+            pickTexture bookData.title
+
+        spineW =
+            Components.Spine.spineWidth pageCount
+
+        spineH =
+            Components.Spine.spineHeight pageCount
+
+        offset =
+            (modBy 5 (index * 3 + 2) - 2) * 3
+
+        isSelected =
+            selectedBookId == Just bookData.id
+
+        bookClass =
+            if isSelected then
+                "book-pile__book book-pile__book--selected"
+
+            else
+                "book-pile__book"
     in
-    div
-        [ class "book-pile__book"
-        , style "height" (String.fromInt thickness ++ "px")
-        , style "transform" rotationStr
+    button
+        [ class bookClass
+        , attribute "role" "listitem"
+        , onMouseEnter (BookHovered bookData.id)
+        , stopPropagationOn "click"
+            (Decode.succeed ( BookClicked bookData, True ))
+        , style "width" (String.fromInt spineH ++ "px")
+        , style "height" (String.fromInt spineW ++ "px")
+        , style "margin-left" (String.fromInt offset ++ "px")
         ]
-        [ spine
-            { pageCount = pageCount
-            , wearLevel = Softened
-            , texture = texture
-            , title = bookTitle
-            , author = author
-            }
+        [ div [ class "book-pile__rotated-book" ]
+            [ Components.Spine.book
+                { pageCount = pageCount
+                , wearLevel = Softened
+                , texture = texture
+                , title = bookData.title
+                , author = Types.Book.authorName bookData
+                , coverImageUrl = bookData.coverImageUrl
+                }
+            ]
         ]
