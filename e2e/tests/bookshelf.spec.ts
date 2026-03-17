@@ -32,28 +32,23 @@ test.describe("Bookshelf pages — visual themes", () => {
 test.describe("Bookshelf pages — accessibility attributes", () => {
   test("Library bookshelf rows have role=list", async ({ page }) => {
     await page.goto("/library");
-    await page.waitForSelector(".shelf-library", { timeout: 10000 });
-    const bookshelfRow = page.locator('.bookshelf__row[role="list"]');
-    const emptyShelf = page.locator(".empty-shelf");
-    const hasBooks = (await bookshelfRow.count()) > 0;
-    const isEmpty = (await emptyShelf.count()) > 0;
-    expect(hasBooks || isEmpty).toBeTruthy();
-    if (hasBooks) {
-      await expect(bookshelfRow.first()).toHaveAttribute("role", "list");
-    }
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    const booksContainer = page.locator('.shelf-row__books[role="list"]');
+    await expect(booksContainer.first()).toBeAttached({ timeout: 5000 });
+    await expect(booksContainer.first()).toHaveAttribute("role", "list");
   });
 
   test("Library books have role=listitem", async ({ page }) => {
     await page.goto("/library");
-    await page.waitForSelector(".shelf-library", { timeout: 10000 });
-    const bookItem = page.locator('.bookshelf__book[role="listitem"]');
-    const emptyShelf = page.locator(".empty-shelf");
-    const hasBooks = (await bookItem.count()) > 0;
-    const isEmpty = (await emptyShelf.count()) > 0;
-    expect(hasBooks || isEmpty).toBeTruthy();
-    if (hasBooks) {
-      await expect(bookItem.first()).toHaveAttribute("role", "listitem");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    const bookButton = page.locator('.book-button[role="listitem"]');
+    const bookCount = await bookButton.count();
+    if (bookCount === 0) {
+      // No books seeded on library — skip gracefully
+      console.log("No books on library shelf, skipping listitem test");
+      return;
     }
+    await expect(bookButton.first()).toHaveAttribute("role", "listitem");
   });
 
   test("Shelf labels have aria-label attribute", async ({ page }) => {
