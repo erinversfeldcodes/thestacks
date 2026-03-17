@@ -32,7 +32,7 @@ hintText bookshelf =
             "Add a Book"
 
         "wishlist" ->
-            "Add one from a photo, a screenshot, or an ISBN."
+            ""
 
         "reading_pile" ->
             ""

@@ -6,6 +6,7 @@ module Page.Bookshelf exposing
     , antiLibraryConfig
     , init
     , libraryConfig
+    , lookingForHomeConfig
     , update
     , view
     , wishListConfig
@@ -13,7 +14,6 @@ module Page.Bookshelf exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
-import Components.EmptyBookshelf exposing (emptyBookshelf)
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (attribute, class)
@@ -24,6 +24,7 @@ import Page.Bookshelf.Helpers
         ( groupIntoRows
         , minShelfRows
         , viewBookcase
+        , viewEmptyShelfMessage
         , viewShelfLabel
         , viewShelfRowClickable
         )
@@ -36,10 +37,10 @@ import Types.RemoteData exposing (RemoteData(..))
 Everything else (model, update, view structure) is identical.
 -}
 type alias Config =
-    { apiName : String -- "library", "antilibrary", "wishlist"
-    , label : String -- "Library", "Antilibrary", "Wish List"
-    , themeClass : String -- "shelf-library", "shelf-antilibrary", "shelf-wishlist"
-    , wallpaperClass : String -- "wallpaper--damask", "wallpaper--botanical", "wallpaper--floral"
+    { apiName : String
+    , label : String
+    , themeClass : String
+    , wallpaperClass : String
     , wearLevel : WearLevel
     , emptyMessage : String
     }
@@ -78,6 +79,17 @@ wishListConfig =
     }
 
 
+lookingForHomeConfig : Config
+lookingForHomeConfig =
+    { apiName = "looking_for_home"
+    , label = "Looking for a Home"
+    , themeClass = "shelf-looking-for-home"
+    , wallpaperClass = "wallpaper--forest"
+    , wearLevel = Softened
+    , emptyMessage = "Nothing here yet — these are books looking for a new home."
+    }
+
+
 
 -- MODEL
 
@@ -104,7 +116,7 @@ type Msg
 init : Config -> Maybe String -> ( Model, Cmd Msg )
 init config maybeToken =
     let
-        cmd =
+        apiCmd =
             case maybeToken of
                 Just token ->
                     Api.getBookshelf config.apiName token BooksLoaded
@@ -112,7 +124,12 @@ init config maybeToken =
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, showAgeGate = False, config = config }, cmd )
+    ( { books = Loading
+      , showAgeGate = False
+      , config = config
+      }
+    , apiCmd
+    )
 
 
 
@@ -125,7 +142,10 @@ update msg model =
         BooksLoaded result ->
             case result of
                 Ok placements ->
-                    ( { model | books = Success placements }, Cmd.none, NoOut )
+                    ( { model | books = Success placements }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err (Http.BadStatus 403) ->
                     ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
@@ -155,6 +175,7 @@ view model =
     in
     div [ class ("page page--shelf " ++ cfg.themeClass) ]
         [ div [ class ("wallpaper " ++ cfg.wallpaperClass) ] []
+        , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
             [ viewShelfLabel cfg.label
             , if model.showAgeGate then
@@ -167,10 +188,10 @@ view model =
                 div [ attribute "aria-live" "polite" ]
                     [ case model.books of
                         NotAsked ->
-                            viewBookshelf cfg []
+                            viewBookshelf model []
 
                         Loading ->
-                            viewBookshelf cfg []
+                            viewBookshelf model []
 
                         Failure _ ->
                             p [ class "error" ]
@@ -178,26 +199,31 @@ view model =
 
                         Success placements ->
                             if List.isEmpty placements then
-                                emptyBookshelf
-                                    { bookshelf = cfg.apiName
-                                    , message = cfg.emptyMessage
-                                    }
+                                viewEmptyBookshelf model
 
                             else
-                                viewBookshelf cfg placements
+                                viewBookshelf model placements
                     ]
             ]
         ]
 
 
-viewBookshelf : Config -> List Placement -> Html Msg
-viewBookshelf cfg placements =
+viewEmptyBookshelf : Model -> Html Msg
+viewEmptyBookshelf model =
+    div [ class "bookshelf" ]
+        [ viewBookcase
+            (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
+        ]
+
+
+viewBookshelf : Model -> List Placement -> Html Msg
+viewBookshelf model placements =
     let
         rows =
             groupIntoRows 990 placements
 
         shelfViews =
-            List.map (viewShelfRowClickable cfg.wearLevel BookClicked) rows
+            List.map (viewShelfRowClickable model.config.wearLevel BookClicked) rows
     in
     div [ class "bookshelf" ]
         [ viewBookcase (minShelfRows 4 shelfViews)
