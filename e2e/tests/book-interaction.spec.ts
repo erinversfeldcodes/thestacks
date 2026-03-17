@@ -1,25 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { OWNER_AUTH_FILE } from "./helpers";
 
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
-
-async function signInAndGoToLibrary(page: import("@playwright/test").Page) {
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
-  await page.locator('a.app-nav__link[href="/library"]').click();
-  await page.waitForURL("**/library", { timeout: 10000 });
-  // Wait for books to load
-  await page.waitForTimeout(2000);
-}
+test.use({ storageState: OWNER_AUTH_FILE });
 
 test.describe("Book interaction — Library page", () => {
   test("book exists on the shelf and is wrapped in a clickable button", async ({
     page,
   }) => {
-    await signInAndGoToLibrary(page);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const books = page.locator(".book");
     const bookCount = await books.count();
@@ -40,7 +29,8 @@ test.describe("Book interaction — Library page", () => {
   });
 
   test("clicking a book navigates to the book detail page", async ({ page }) => {
-    await signInAndGoToLibrary(page);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const bookButton = page.locator("button.book-button, .book-button").first();
     const bookCount = await bookButton.count();
@@ -68,7 +58,8 @@ test.describe("Book interaction — Library page", () => {
   test("hovering over a book triggers 3D transform animation", async ({
     page,
   }) => {
-    await signInAndGoToLibrary(page);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const book = page.locator(".book").first();
     const bookCount = await book.count();
@@ -115,7 +106,8 @@ test.describe("Book interaction — Library page", () => {
   });
 
   test("book spine shows texture background image", async ({ page }) => {
-    await signInAndGoToLibrary(page);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const spine = page.locator(".book__spine").first();
     const spineCount = await spine.count();
@@ -142,7 +134,8 @@ test.describe("Book interaction — Library page", () => {
   test("book has 3D structure: spine, top, and cover faces", async ({
     page,
   }) => {
-    await signInAndGoToLibrary(page);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const book = page.locator(".book").first();
     const bookCount = await book.count();

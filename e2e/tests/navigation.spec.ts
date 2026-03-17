@@ -1,20 +1,8 @@
 import { test, expect } from "@playwright/test";
-
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
-
-async function signIn(page: import("@playwright/test").Page) {
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
-}
+import { OWNER_AUTH_FILE } from "./helpers";
 
 test.describe("Navbar navigation — authenticated", () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page);
-  });
+  test.use({ storageState: OWNER_AUTH_FILE });
 
   const navItems = [
     { label: "Library", path: "/library", href: "/library" },
@@ -30,6 +18,9 @@ test.describe("Navbar navigation — authenticated", () => {
 
   for (const item of navItems) {
     test(`clicking "${item.label}" navigates to ${item.path}`, async ({ page }) => {
+      await page.goto("/antilibrary");
+      await page.waitForSelector(".app-nav__link", { timeout: 10000 });
+
       // Use href to uniquely identify the link (avoids "Library" matching "Antilibrary")
       const navLink = page.locator(`a.app-nav__link[href="${item.href}"]`);
       await expect(navLink).toBeVisible({ timeout: 5000 });
@@ -48,6 +39,9 @@ test.describe("Navbar navigation — authenticated", () => {
   }
 
   test("navigating between all shelves preserves auth state", async ({ page }) => {
+    await page.goto("/antilibrary");
+    await page.waitForSelector(".app-nav__link", { timeout: 10000 });
+
     const shelves = [
       { href: "/library", label: "Library" },
       { href: "/antilibrary", label: "Antilibrary" },
@@ -58,7 +52,9 @@ test.describe("Navbar navigation — authenticated", () => {
 
     for (const shelf of shelves) {
       await page.locator(`a.app-nav__link[href="${shelf.href}"]`).click();
-      await page.waitForTimeout(500);
+      await expect(page).toHaveURL(new RegExp(shelf.href.replace(/\//g, "\\/")), {
+        timeout: 10000,
+      });
       await expect(page.locator(".app-nav__user")).toBeVisible();
     }
 
