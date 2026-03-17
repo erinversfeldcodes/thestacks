@@ -3,13 +3,14 @@ module Page.Bookshelf.Helpers exposing
     , minShelfRows
     , pickTexture
     , viewBookcase
+    , viewEmptyShelfMessage
     , viewShelfLabel
     , viewShelfRow
     , viewShelfRowClickable
     )
 
 import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
-import Html exposing (Html, button, div, span, text)
+import Html exposing (Html, button, div, p, span, text)
 import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book)
@@ -149,6 +150,19 @@ viewShelfRowClickable wearLevel onBookClicked placements =
         [ div [ class "shelf-row__back" ] []
         , div [ class "shelf-row__books", attribute "role" "list" ]
             (List.map (viewClickableSpine wearLevel onBookClicked) placements)
+        , div [ class "shelf-row__plank" ] []
+        , div [ class "shelf-row__lip" ] []
+        ]
+
+
+{-| A shelf row with a centered message — used as the first row when the bookshelf is empty.
+-}
+viewEmptyShelfMessage : String -> Html msg
+viewEmptyShelfMessage message =
+    div [ class "shelf-row shelf-row--empty" ]
+        [ div [ class "shelf-row__back" ] []
+        , div [ class "shelf-row__books shelf-row__books--message" ]
+            [ p [ class "shelf-row__empty-text" ] [ text message ] ]
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
         ]

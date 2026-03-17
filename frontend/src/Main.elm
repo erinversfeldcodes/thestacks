@@ -214,11 +214,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             ( PageReadingPile model, Cmd.map ReadingPileMsg cmd )
 
         LookingForHome ->
-            let
-                ( model, cmd ) =
-                    LookingForHome.init maybeToken
-            in
-            ( PageLookingForHome model, Cmd.map LookingForHomeMsg cmd )
+            initBookshelf Bookshelf.lookingForHomeConfig maybeAuth
 
         BookDetail bookId ->
             let
@@ -777,17 +773,25 @@ viewNav model =
                         , navItem model.route WishList "Wish List"
                         , navItem model.route ReadingPile "Reading Pile"
                         , navItem model.route LookingForHome "Looking for a Home"
-                        , navItem model.route Catalogue "Catalogue"
-                        , navItem model.route Search "Search"
-                        , navItem model.route Upload "Add Book"
-                        , navItem model.route SettingsConsent "Settings"
-                        , li [ class "app-nav__item" ]
-                            [ Html.span [ class "app-nav__user" ]
-                                [ text auth.user.displayName ]
+                        , navDropdown model.route
+                            Catalogue
+                            "Catalogue"
+                            [ ( Search, "Search" )
+                            , ( Upload, "Add Book" )
                             ]
-                        , li [ class "app-nav__item" ]
-                            [ button [ class "app-nav__link app-nav__logout", onClick Logout ]
-                                [ text "Sign Out" ]
+                        , li [ class "app-nav__item app-nav__dropdown" ]
+                            [ Html.span [ class "app-nav__link app-nav__user" ]
+                                [ text auth.user.displayName ]
+                            , ul [ class "app-nav__dropdown-menu" ]
+                                [ li []
+                                    [ a [ href (Route.toPath SettingsConsent), class "app-nav__dropdown-link" ]
+                                        [ text "Settings" ]
+                                    ]
+                                , li []
+                                    [ button [ class "app-nav__dropdown-link app-nav__logout", onClick Logout ]
+                                        [ text "Sign Out" ]
+                                    ]
+                                ]
                             ]
                         ]
                 )
@@ -811,6 +815,36 @@ navItem currentRoute targetRoute label =
     li [ class activeClass ]
         [ a [ href (Route.toPath targetRoute), class "app-nav__link" ]
             [ text label ]
+        ]
+
+
+navDropdown : Route -> Route -> String -> List ( Route, String ) -> Html Msg
+navDropdown currentRoute primaryRoute primaryLabel subItems =
+    let
+        isActive =
+            (currentRoute == primaryRoute)
+                || List.any (\( r, _ ) -> currentRoute == r) subItems
+
+        activeClass =
+            if isActive then
+                "app-nav__item app-nav__item--active app-nav__dropdown"
+
+            else
+                "app-nav__item app-nav__dropdown"
+    in
+    li [ class activeClass ]
+        [ a [ href (Route.toPath primaryRoute), class "app-nav__link" ]
+            [ text primaryLabel ]
+        , ul [ class "app-nav__dropdown-menu" ]
+            (List.map
+                (\( route, label ) ->
+                    li []
+                        [ a [ href (Route.toPath route), class "app-nav__dropdown-link" ]
+                            [ text label ]
+                        ]
+                )
+                subItems
+            )
         ]
 
 
@@ -862,7 +896,7 @@ viewHome =
     div [ class "page page--home" ]
         [ h1 [ class "home__title" ] [ text "The Stacks" ]
         , p [ class "home__subtitle" ]
-            [ text "Your personal library, beautifully organised." ]
+            [ text "Your personal collection, beautifully organised." ]
         , div [ class "home__actions" ]
             [ a [ href (Route.toPath Library), class "btn btn--primary" ]
                 [ text "View Library" ]
