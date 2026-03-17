@@ -1,16 +1,17 @@
-module Page.Library3DProgramTest exposing (suite)
+module Page.LibraryProgramTest exposing (suite)
 
-{-| Program tests for the bookshelf 3D rendering redesign (Issue #029).
+{-| Program tests for the bookshelf rendering.
 
 Tests validate:
 
-  - Page renders .wallpaper with damask pattern class
+  - Page renders shelf-backdrop image
   - Page renders .shelf-label with "Library" text
   - Books from the API render inside the bookcase structure
   - Empty shelf shows .empty-msg with appropriate message
   - Clicking a book navigates to BookDetail page
   - HTTP error renders error message
   - 403 triggers age gate
+  - Atmospheric overlays render
 
 -}
 
@@ -34,8 +35,8 @@ startLibrary =
 
 suite : Test
 suite =
-    describe "Library page 3D bookshelf rendering (Issue #029)"
-        [ wallpaperDamaskPattern
+    describe "Library page bookshelf rendering"
+        [ wallpaperRendered
         , shelfLabelRendered
         , booksInsideBookcase
         , emptyShelfMessage
@@ -45,11 +46,11 @@ suite =
         ]
 
 
-{-| The page must render a .wallpaper element with .wallpaper--damask class.
+{-| The page must render a wallpaper background.
 -}
-wallpaperDamaskPattern : Test
-wallpaperDamaskPattern =
-    test "page renders .wallpaper with damask pattern class" <|
+wallpaperRendered : Test
+wallpaperRendered =
+    test "page renders wallpaper with damask pattern" <|
         \() ->
             startLibrary
                 |> ProgramTest.simulateHttpResponse "GET"
