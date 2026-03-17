@@ -15,9 +15,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
+    // Setup project: authenticates once, saves storage state for reuse
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+    },
+    // Main test suite: all tests run after setup, with auth pre-loaded
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
     },
   ],
 });

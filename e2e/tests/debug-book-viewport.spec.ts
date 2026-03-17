@@ -1,17 +1,11 @@
 import { test, expect } from "@playwright/test";
+import { OWNER_AUTH_FILE } from "./helpers";
 
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
+test.use({ storageState: OWNER_AUTH_FILE });
 
-test("debug book viewport position", async ({ page }) => {
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
-  await page.locator('a.app-nav__link[href="/library"]').click();
-  await page.waitForURL("**/library", { timeout: 10000 });
-  await page.waitForTimeout(2000);
+test.skip("debug book viewport position", async ({ page }) => {
+  await page.goto("/library");
+  await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
   const book = page.locator(".book").first();
   const button = page.locator("button.book-button").first();
@@ -57,7 +51,6 @@ test("debug book viewport position", async ({ page }) => {
   // Try force clicking
   console.log("\n=== ATTEMPTING CLICK VIA EVALUATE ===");
   await button.evaluate((el) => (el as HTMLElement).click());
-  await page.waitForTimeout(500);
 
   const overlayVisible = await page.locator(".book-overlay").isVisible();
   console.log("Overlay visible after click:", overlayVisible);

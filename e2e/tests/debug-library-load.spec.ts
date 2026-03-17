@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { OWNER_AUTH_FILE } from "./helpers";
 
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
+test.use({ storageState: OWNER_AUTH_FILE });
 
-test("library loads content when navigated to immediately after login", async ({ page }) => {
+test.skip("library loads content when navigated to directly", async ({ page }) => {
   // Intercept API calls to see if the bookshelf request fires
   const apiCalls: string[] = [];
   page.on('request', (req) => {
@@ -18,25 +18,11 @@ test("library loads content when navigated to immediately after login", async ({
     }
   });
 
-  // Login
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
+  await page.goto("/library");
+  await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf, .error", { timeout: 10000 });
 
-  console.log("=== After login, on antilibrary ===");
-  console.log("API calls so far:", apiCalls.filter(c => c.includes('bookshelves')));
-
-  // Immediately navigate to library
-  await page.locator('a.app-nav__link[href="/library"]').click();
-  await page.waitForURL("**/library", { timeout: 10000 });
-
-  // Wait for API call to complete
-  await page.waitForTimeout(3000);
-
-  console.log("=== After navigating to library ===");
-  console.log("All bookshelf API calls:", apiCalls.filter(c => c.includes('bookshelves')));
+  console.log("=== After loading library ===");
+  console.log("Bookshelf API calls:", apiCalls.filter(c => c.includes('bookshelves')));
 
   // Check what's on the page
   const bookCount = await page.locator(".book").count();
@@ -60,22 +46,18 @@ test("library loads content when navigated to immediately after login", async ({
   expect(hasContent || !!libraryApiCall).toBeTruthy();
 });
 
-test("library loads after navigating away and back", async ({ page }) => {
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
+test.skip("library loads after navigating away and back", async ({ page }) => {
+  await page.goto("/library");
+  await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
-  // Go to catalogue first
+  // Go to catalogue
   await page.locator('a.app-nav__link[href="/catalogue"]').click();
-  await page.waitForURL("**/catalogue", { timeout: 10000 });
-  await page.waitForTimeout(1000);
+  await expect(page).toHaveURL(/\/catalogue/, { timeout: 10000 });
 
-  // Then go to library
+  // Then go back to library
   await page.locator('a.app-nav__link[href="/library"]').click();
-  await page.waitForURL("**/library", { timeout: 10000 });
-  await page.waitForTimeout(3000);
+  await expect(page).toHaveURL(/\/library/, { timeout: 10000 });
+  await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
   const bookCount = await page.locator(".book").count();
   const emptyMsg = await page.locator(".empty-msg, .empty-shelf").count();

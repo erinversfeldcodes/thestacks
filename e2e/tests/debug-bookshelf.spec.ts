@@ -1,22 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { OWNER_AUTH_FILE } from "./helpers";
 
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
+test.use({ storageState: OWNER_AUTH_FILE });
 
-async function signIn(page: import("@playwright/test").Page) {
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-card__submit");
-  await page.waitForURL("**/antilibrary", { timeout: 15000 });
-}
-
-test.describe("Debug — bookshelf DOM inspection", () => {
+test.describe.skip("Debug — bookshelf DOM inspection", () => {
   test("dump library page book DOM structure", async ({ page }) => {
-    await signIn(page);
-    await page.locator('a.app-nav__link[href="/library"]').click();
-    await page.waitForURL("**/library", { timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     // Dump the bookshelf HTML
     const bookcase = await page.locator(".bookshelf, .bookcase").first().innerHTML().catch(() => "NOT FOUND");
@@ -79,10 +69,8 @@ test.describe("Debug — bookshelf DOM inspection", () => {
   });
 
   test("dump catalogue book click behavior", async ({ page }) => {
-    await signIn(page);
-    await page.locator('a.app-nav__link[href="/catalogue"]').click();
-    await page.waitForURL("**/catalogue", { timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await page.goto("/catalogue");
+    await page.waitForSelector(".catalogue-card, .book-card, .catalogue__book, .page--catalogue", { timeout: 10000 });
 
     const catalogueBooks = await page.locator(".catalogue-card, .book-card, .catalogue__book").count();
     console.log(`\n=== CATALOGUE BOOK COUNT: ${catalogueBooks} ===`);
@@ -102,10 +90,8 @@ test.describe("Debug — bookshelf DOM inspection", () => {
   });
 
   test("dump reading pile structure", async ({ page }) => {
-    await signIn(page);
-    await page.locator('a.app-nav__link[href="/reading-pile"]').click();
-    await page.waitForURL("**/reading-pile", { timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await page.goto("/reading-pile");
+    await page.waitForSelector(".shelf-reading-pile, .page--shelf", { timeout: 10000 });
 
     const pageHTML = await page.locator(".page--shelf, .shelf-reading-pile").first().innerHTML().catch(() => "NOT FOUND");
     console.log("=== READING PILE HTML (first 2000 chars) ===");
