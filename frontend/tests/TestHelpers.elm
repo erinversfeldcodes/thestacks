@@ -521,7 +521,7 @@ uploadEffects msg model maybeToken =
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
-        Upload.GotFiles _ _ ->
+        Upload.GotFile _ ->
             case maybeToken of
                 Just token ->
                     SimulatedEffect.Http.request

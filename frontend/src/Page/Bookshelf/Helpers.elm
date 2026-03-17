@@ -3,7 +3,6 @@ module Page.Bookshelf.Helpers exposing
     , minShelfRows
     , pickTexture
     , viewBookcase
-    , viewEmptyShelfRow
     , viewShelfLabel
     , viewShelfRow
     , viewShelfRowClickable

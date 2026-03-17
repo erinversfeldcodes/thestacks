@@ -184,9 +184,6 @@ book config =
         heightPx =
             spineHeight config.pageCount
 
-        tilt =
-            spineLean config.title
-
         idx =
             colorIndex config.title
 

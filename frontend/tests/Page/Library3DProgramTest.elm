@@ -23,7 +23,6 @@ import TestHelpers
         ( libraryProgram
         , simulateBookshelfErrorResponse
         , simulateBookshelfResponse
-        , testBook
         , testPlacement
         )
 
