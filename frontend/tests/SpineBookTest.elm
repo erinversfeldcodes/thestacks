@@ -1,12 +1,10 @@
-module Spine3DTest exposing (suite)
+module SpineBookTest exposing (suite)
 
-{-| Tests for the 3D book rendering redesign in Components.Spine.
+{-| Tests for the book rendering in Components.Spine.
 
-These tests validate the DoD items for Issue #029: each book element
-must have a preserve-3d container, three face divs (spine, top, cover),
-title/author text, leather band elements, spine width based on the new
-formula (min 35px, max 55px via pages/12), and a background-image
-referencing a texture file path.
+These tests validate: each book element has three face divs (spine, top, cover),
+title/author text, leather band elements, spine width based on the formula
+(min 35px, max 55px via pages/12), and a background-image referencing a texture file path.
 
 -}
 
@@ -20,7 +18,7 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "Components.Spine 3D book structure"
+    describe "Components.Spine book structure"
         [ spineWidthNewFormula
         , spineHeightBoundary
         , spineLeanBoundary
