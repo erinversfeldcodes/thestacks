@@ -1,0 +1,15 @@
+{
+  "private": true,
+  "scripts": {
+    "deploy": "node build.js --production",
+    "watch": "node build.js --watch"
+  },
+  "dependencies": {
+    "elm": "^0.19.1-6",
+    "esbuild": "^0.27.4",
+    "esbuild-plugin-elm": "^0.0.12"
+  },
+  "overrides": {
+    "cross-spawn": "^7.0.6"
+  }
+}
