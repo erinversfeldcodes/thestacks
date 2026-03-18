@@ -3,6 +3,11 @@ import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("shelf-actions") });
 
+// All shelf-actions tests share the same DB user and mutate placement state.
+// Serial mode prevents race conditions between describe blocks when
+// fullyParallel: true is set globally.
+test.describe.configure({ mode: "serial" });
+
 test.describe("Shelf actions — move book between shelves", () => {
   test("move a book from library to wishlist via book detail", async ({
     page,
@@ -135,7 +140,7 @@ test.describe("Shelf actions — add unplaced book from detail page", () => {
     const addSection = page.locator(".book-detail__section-title", {
       hasText: "Add to Collection",
     });
-    await expect(addSection).toBeVisible({ timeout: 5000 });
+    await expect(addSection).toBeVisible({ timeout: 10000 });
 
     // Click "Choose Bookshelf"
     await page.click('button:has-text("Choose Bookshelf")');

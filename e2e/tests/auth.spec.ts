@@ -30,7 +30,7 @@ test.describe("Authentication", () => {
 
     await expect(page.locator(".login-card__error")).toBeVisible();
     await expect(page.locator(".login-card__error")).toContainText(
-      "Invalid credentials"
+      "The door remains shut."
     );
 
     // Should stay on login page
