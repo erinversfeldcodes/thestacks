@@ -1,11 +1,16 @@
 module Page.Login exposing
-    ( Mode(..)
+    ( FieldValidation(..)
+    , Mode(..)
     , Model
     , Msg(..)
     , OutMsg(..)
     , TransitionState(..)
     , init
+    , isSubmitDisabled
     , update
+    , validateDisplayName
+    , validateEmail
+    , validatePassword
     , view
     )
 
@@ -17,6 +22,12 @@ import Http
 import Types.RemoteData exposing (RemoteData(..))
 
 
+type FieldValidation
+    = Pristine
+    | Valid
+    | Invalid String
+
+
 type alias Model =
     { email : String
     , password : String
@@ -24,6 +35,9 @@ type alias Model =
     , mode : Mode
     , submitState : RemoteData Http.Error AuthResponse
     , transitionState : TransitionState
+    , emailValidation : FieldValidation
+    , passwordValidation : FieldValidation
+    , displayNameValidation : FieldValidation
     }
 
 
@@ -62,23 +76,59 @@ init =
     , mode = LoginMode
     , submitState = NotAsked
     , transitionState = Idle
+    , emailValidation = Pristine
+    , passwordValidation = Pristine
+    , displayNameValidation = Pristine
     }
+
+
+validateEmail : String -> FieldValidation
+validateEmail email =
+    if String.isEmpty email then
+        Pristine
+
+    else if String.contains "@" email && String.contains "." email then
+        Valid
+
+    else
+        Invalid "Please enter a valid email address"
+
+
+validatePassword : String -> FieldValidation
+validatePassword password =
+    if String.isEmpty password then
+        Pristine
+
+    else if String.length password >= 8 then
+        Valid
+
+    else
+        Invalid "Password must be at least 8 characters"
+
+
+validateDisplayName : String -> FieldValidation
+validateDisplayName name =
+    if String.isEmpty name then
+        Pristine
+
+    else
+        Valid
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
         EmailChanged email ->
-            ( { model | email = email, submitState = NotAsked }, Cmd.none, NoOut )
+            ( { model | email = email, submitState = NotAsked, emailValidation = validateEmail email }, Cmd.none, NoOut )
 
         PasswordChanged password ->
-            ( { model | password = password, submitState = NotAsked }, Cmd.none, NoOut )
+            ( { model | password = password, submitState = NotAsked, passwordValidation = validatePassword password }, Cmd.none, NoOut )
 
         DisplayNameChanged name ->
-            ( { model | displayName = name, submitState = NotAsked }, Cmd.none, NoOut )
+            ( { model | displayName = name, submitState = NotAsked, displayNameValidation = validateDisplayName name }, Cmd.none, NoOut )
 
         ModeSwitched mode ->
-            ( { model | mode = mode, submitState = NotAsked }, Cmd.none, NoOut )
+            ( { model | mode = mode, submitState = NotAsked, emailValidation = Pristine, passwordValidation = Pristine, displayNameValidation = Pristine }, Cmd.none, NoOut )
 
         FormSubmitted ->
             let
@@ -189,7 +239,7 @@ viewLoginCard model =
             ]
         , case model.mode of
             RegisterMode ->
-                div [ class "login-card__field" ]
+                div [ class (fieldClass model.displayNameValidation) ]
                     [ label [ class "login-card__label", for "display-name" ]
                         [ text "Display Name" ]
                     , input
@@ -201,11 +251,12 @@ viewLoginCard model =
                         , onInput DisplayNameChanged
                         ]
                         []
+                    , viewFieldHint model.displayNameValidation
                     ]
 
             LoginMode ->
                 text ""
-        , div [ class "login-card__field" ]
+        , div [ class (fieldClass model.emailValidation) ]
             [ label [ class "login-card__label", for "email" ]
                 [ text "Email" ]
             , input
@@ -218,8 +269,9 @@ viewLoginCard model =
                 , attribute "aria-required" "true"
                 ]
                 []
+            , viewFieldHint model.emailValidation
             ]
-        , div [ class "login-card__field" ]
+        , div [ class (fieldClass model.passwordValidation) ]
             [ label [ class "login-card__label", for "password" ]
                 [ text "Password" ]
             , input
@@ -232,6 +284,7 @@ viewLoginCard model =
                 , attribute "aria-required" "true"
                 ]
                 []
+            , viewFieldHint model.passwordValidation
             ]
         , viewError model
         , button
@@ -258,7 +311,53 @@ viewLoginCard model =
 
 isSubmitDisabled : Model -> Bool
 isSubmitDisabled model =
-    model.submitState == Loading || model.transitionState /= Idle
+    let
+        isInvalidOrPristine validation =
+            case validation of
+                Valid ->
+                    False
+
+                _ ->
+                    True
+
+        fieldsInvalid =
+            case model.mode of
+                LoginMode ->
+                    isInvalidOrPristine model.emailValidation
+                        || isInvalidOrPristine model.passwordValidation
+
+                RegisterMode ->
+                    isInvalidOrPristine model.emailValidation
+                        || isInvalidOrPristine model.passwordValidation
+                        || isInvalidOrPristine model.displayNameValidation
+    in
+    model.submitState == Loading || model.transitionState /= Idle || fieldsInvalid
+
+
+fieldClass : FieldValidation -> String
+fieldClass validation =
+    case validation of
+        Pristine ->
+            "login-card__field"
+
+        Valid ->
+            "login-card__field login-card__field--valid"
+
+        Invalid _ ->
+            "login-card__field login-card__field--error"
+
+
+viewFieldHint : FieldValidation -> Html Msg
+viewFieldHint validation =
+    case validation of
+        Invalid msg ->
+            div [ class "login-card__hint login-card__hint--error" ] [ text msg ]
+
+        Valid ->
+            div [ class "login-card__hint login-card__hint--valid" ] [ text "Looks good" ]
+
+        Pristine ->
+            text ""
 
 
 viewError : Model -> Html Msg
