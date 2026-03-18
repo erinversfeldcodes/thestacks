@@ -54,23 +54,44 @@ defmodule StacksWeb.CatalogueController do
   defp parse_int(_, default), do: default
 
   defp format_catalogue_book(book) do
-    author =
-      case book.author do
-        %Ecto.Association.NotLoaded{} -> nil
-        nil -> nil
-        author -> %{id: author.id, name: author.name}
-      end
+    editions = format_editions(book)
+    primary = Books.primary_edition(book)
 
     %{
       id: book.id,
-      isbn: book.isbn,
       title: book.title,
-      author: author,
-      cover_image_url: book.cover_image_url,
-      page_count: book.page_count,
+      author: format_author(book.author),
       subjects: book.subjects,
-      publication_year: book.publication_year,
-      visibility_tier: book.visibility_tier
+      visibility_tier: book.visibility_tier,
+      editions: editions,
+      edition_count: length(editions),
+      primary_edition: format_edition_or_nil(primary)
     }
   end
+
+  defp format_author(%Ecto.Association.NotLoaded{}), do: nil
+  defp format_author(nil), do: nil
+  defp format_author(author), do: %{id: author.id, name: author.name}
+
+  defp format_editions(%{editions: editions}) when is_list(editions) do
+    Enum.map(editions, &format_edition/1)
+  end
+
+  defp format_editions(_), do: []
+
+  defp format_edition(edition) do
+    %{
+      id: edition.id,
+      isbn: edition.isbn,
+      format_label: edition.format_label,
+      cover_image_url: edition.cover_image_url,
+      page_count: edition.page_count,
+      publisher: edition.publisher,
+      publication_year: edition.publication_year,
+      is_primary: edition.is_primary
+    }
+  end
+
+  defp format_edition_or_nil(nil), do: nil
+  defp format_edition_or_nil(edition), do: format_edition(edition)
 end

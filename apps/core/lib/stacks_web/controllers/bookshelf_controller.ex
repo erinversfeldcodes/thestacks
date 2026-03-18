@@ -36,17 +36,23 @@ defmodule StacksWeb.BookshelfController do
           nil
 
         b ->
+          primary = Stacks.Books.primary_edition(b)
+
+          editions =
+            case b.editions do
+              list when is_list(list) -> Enum.map(list, &format_edition/1)
+              _ -> []
+            end
+
           %{
             id: b.id,
-            isbn: b.isbn,
             title: b.title,
-            cover_image_url: b.cover_image_url,
-            page_count: b.page_count,
             description: b.description,
-            publisher: b.publisher,
-            publication_year: b.publication_year,
             visibility_tier: b.visibility_tier,
-            author: format_author(b.author)
+            author: format_author(b.author),
+            editions: editions,
+            edition_count: length(editions),
+            primary_edition: format_edition_or_nil(primary)
           }
       end
 
@@ -71,4 +77,20 @@ defmodule StacksWeb.BookshelfController do
       bio: nil
     }
   end
+
+  defp format_edition(edition) do
+    %{
+      id: edition.id,
+      isbn: edition.isbn,
+      format_label: edition.format_label,
+      cover_image_url: edition.cover_image_url,
+      page_count: edition.page_count,
+      publisher: edition.publisher,
+      publication_year: edition.publication_year,
+      is_primary: edition.is_primary
+    }
+  end
+
+  defp format_edition_or_nil(nil), do: nil
+  defp format_edition_or_nil(edition), do: format_edition(edition)
 end
