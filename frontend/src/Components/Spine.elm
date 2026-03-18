@@ -2,7 +2,6 @@ module Components.Spine exposing
     ( SpineTexture(..)
     , WearLevel(..)
     , book
-    , spine
     , spineHeight
     , spineLean
     , spineWidth
@@ -313,25 +312,3 @@ book config =
             ]
             []
         ]
-
-
-{-| Legacy spine function kept for backward compatibility.
-Delegates to the new `book` function.
--}
-spine :
-    { pageCount : Int
-    , wearLevel : WearLevel
-    , texture : SpineTexture
-    , title : String
-    , author : String
-    }
-    -> Html msg
-spine config =
-    book
-        { pageCount = config.pageCount
-        , wearLevel = config.wearLevel
-        , texture = config.texture
-        , title = config.title
-        , author = config.author
-        , coverImageUrl = Nothing
-        }

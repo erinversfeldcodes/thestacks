@@ -7,7 +7,7 @@ module Page.Upload exposing
     , view
     )
 
-import Api exposing (PollResponse, PollStatus(..))
+import Api exposing (BookDetailResponse, PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
@@ -66,8 +66,8 @@ type Msg
     | UploadAccepted (Result Http.Error String)
     | CheckStatus
     | StatusReceived (Result Http.Error PollResponse)
-    | GotIdentifiedBook String (Result Http.Error Book)
-    | GotDuplicateBook (Result Http.Error Book)
+    | GotIdentifiedBook String (Result Http.Error BookDetailResponse)
+    | GotDuplicateBook (Result Http.Error BookDetailResponse)
     | ManualIsbnChanged String
     | SubmitManualIsbn
     | EnterManualMode
@@ -187,7 +187,7 @@ update msg model maybeToken =
                                                 GotIdentifiedBook singleId
                                     in
                                     ( { model | pendingBookIds = [], collectedBooks = [] }
-                                    , Api.getBook singleId token callback
+                                    , Api.getBook singleId (Just token) callback
                                     )
 
                                 ( multiIds, Just token ) ->
@@ -198,7 +198,7 @@ update msg model maybeToken =
                                       }
                                     , Cmd.batch
                                         (List.map
-                                            (\bid -> Api.getBook bid token (GotIdentifiedBook bid))
+                                            (\bid -> Api.getBook bid (Just token) (GotIdentifiedBook bid))
                                             multiIds
                                         )
                                     )
@@ -217,8 +217,11 @@ update msg model maybeToken =
 
         GotIdentifiedBook bookId result ->
             case result of
-                Ok book ->
+                Ok response ->
                     let
+                        book =
+                            response.book
+
                         newCollected =
                             model.collectedBooks ++ [ book ]
 
@@ -269,8 +272,8 @@ update msg model maybeToken =
 
         GotDuplicateBook result ->
             case result of
-                Ok book ->
-                    ( { model | result = DuplicateDetected book }, Cmd.none )
+                Ok response ->
+                    ( { model | result = DuplicateDetected response.book }, Cmd.none )
 
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none )
