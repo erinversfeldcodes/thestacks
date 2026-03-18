@@ -24,6 +24,27 @@ defmodule Seeds do
     |> String.replace(~r/\s*\([^)]*\)\s*$/, "")
     |> String.trim()
   end
+
+  @doc "E2E test suite definitions: {user_uuid_index, slug, display_name}"
+  def e2e_suites do
+    [
+      {10, "age-gate", "E2E Age Gate"},
+      {11, "auth", "E2E Auth"},
+      {12, "book-detail", "E2E Book Detail"},
+      {13, "book-interaction", "E2E Book Interaction"},
+      {14, "bookshelf", "E2E Bookshelf"},
+      {15, "catalogue", "E2E Catalogue"},
+      {16, "editions", "E2E Editions"},
+      {17, "looking-for-home", "E2E Looking For Home"},
+      {18, "navigation", "E2E Navigation"},
+      {19, "reading-pile", "E2E Reading Pile"},
+      {20, "reading-pile-hover", "E2E Reading Pile Hover"},
+      {21, "search", "E2E Search"},
+      {22, "settings", "E2E Settings"},
+      {23, "shelf-actions", "E2E Shelf Actions"},
+      {24, "upload", "E2E Upload"}
+    ]
+  end
 end
 
 # ── Timestamps ──────────────────────────────────────────────────────────────
@@ -38,6 +59,26 @@ feb_14 = ~U[2026-02-14 00:00:00.000000Z]
 mar_01 = ~U[2026-03-01 00:00:00.000000Z]
 
 # ── Users ───────────────────────────────────────────────────────────────────
+
+e2e_users =
+  Enum.map(Seeds.e2e_suites(), fn {idx, slug, display} ->
+    %{
+      id: Seeds.uuid(idx),
+      email: "e2e-#{slug}@thestacks.test",
+      display_name: display,
+      password_hash: Argon2.hash_pwd_salt("e2e-password"),
+      role: "user",
+      profile_visibility: "owner",
+      age_verified: true,
+      age_verified_at: jan_01,
+      country_code: "ZA",
+      city: "Test City",
+      consent_analytics: true,
+      consent_analytics_at: jan_01,
+      created_at: jan_01,
+      updated_at: jan_01
+    }
+  end)
 
 Repo.insert_all(
   "users",
@@ -72,7 +113,7 @@ Repo.insert_all(
       created_at: jan_01,
       updated_at: jan_01
     }
-  ],
+  ] ++ e2e_users,
   prefix: "op",
   on_conflict: :nothing
 )
@@ -589,6 +630,103 @@ bookshelf_rows =
   end)
 
 Repo.insert_all("bookshelves", bookshelf_rows, prefix: "op", on_conflict: :nothing)
+
+# ── E2E user bookshelves ──────────────────────────────────────────────────
+# Each E2E user gets 5 bookshelves. UUID range: 400+ (5 per user, starting at user index * 10).
+
+e2e_bookshelf_rows =
+  Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
+    shelf_base = 400 + (user_idx - 10) * 10
+
+    Enum.with_index(bookshelf_names, fn name, i ->
+      %{
+        id: Seeds.uuid(shelf_base + i),
+        user_id: Seeds.uuid(user_idx),
+        name: name,
+        visibility: "owner",
+        created_at: jan_01,
+        updated_at: jan_01
+      }
+    end)
+  end)
+
+Repo.insert_all("bookshelves", e2e_bookshelf_rows, prefix: "op", on_conflict: :nothing)
+
+# ── E2E user placements ──────────────────────────────────────────────────
+# Each E2E user gets 5 books on library, 3 on antilibrary, 2 on reading_pile.
+# Uses works from the seed data. Placement UUID range: 5000+.
+
+# Collect all work IDs from the edition_to_work_map (unique work indices)
+all_work_indices = edition_to_work_map |> Map.values() |> Enum.uniq() |> Enum.sort()
+
+e2e_placement_rows =
+  Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
+    shelf_base = 400 + (user_idx - 10) * 10
+    place_base = 5000 + (user_idx - 10) * 20
+    # Each user gets a different slice of works so they don't collide
+    offset = (user_idx - 10) * 10
+    user_works = Enum.slice(all_work_indices, offset, 10)
+
+    library_works = Enum.take(user_works, 5)
+    antilibrary_works = Enum.slice(user_works, 5, 3)
+    reading_pile_works = Enum.slice(user_works, 8, 2)
+
+    library_shelf = Seeds.uuid(shelf_base + 1)
+    antilibrary_shelf = Seeds.uuid(shelf_base)
+    reading_pile_shelf = Seeds.uuid(shelf_base + 3)
+
+    library_placements =
+      Enum.with_index(library_works, fn work_idx, i ->
+        %{
+          id: Seeds.uuid(place_base + i),
+          book_id: Seeds.uuid(work_idx),
+          bookshelf_id: library_shelf,
+          position: i + 1,
+          placed_at: jan_10,
+          formats: ["paperback"],
+          visibility: "owner",
+          created_at: jan_10,
+          updated_at: jan_10
+        }
+      end)
+
+    antilibrary_placements =
+      Enum.with_index(antilibrary_works, fn work_idx, i ->
+        %{
+          id: Seeds.uuid(place_base + 10 + i),
+          book_id: Seeds.uuid(work_idx),
+          bookshelf_id: antilibrary_shelf,
+          position: i + 1,
+          placed_at: jan_15,
+          formats: ["paperback"],
+          visibility: "owner",
+          created_at: jan_15,
+          updated_at: jan_15
+        }
+      end)
+
+    reading_pile_placements =
+      Enum.with_index(reading_pile_works, fn work_idx, i ->
+        %{
+          id: Seeds.uuid(place_base + 15 + i),
+          book_id: Seeds.uuid(work_idx),
+          bookshelf_id: reading_pile_shelf,
+          position: i + 1,
+          placed_at: mar_01,
+          formats: ["paperback"],
+          visibility: "owner",
+          created_at: mar_01,
+          updated_at: mar_01
+        }
+      end)
+
+    library_placements ++ antilibrary_placements ++ reading_pile_placements
+  end)
+
+Repo.insert_all("bookshelf_placements", e2e_placement_rows,
+  prefix: "op",
+  on_conflict: :nothing
+)
 
 # ── Placements ──────────────────────────────────────────────────────────────
 

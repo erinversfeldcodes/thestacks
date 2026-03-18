@@ -65,8 +65,10 @@ test.describe("Authentication", () => {
     // waitForURL is more reliable than toHaveURL here — Nav.pushUrl is async
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
 
+    // The upload link is inside the Catalogue dropdown — hover to reveal it.
     // Use the nav link to preserve Elm's in-memory auth state.
     // A full page.goto("/upload") would reload and reset the model to auth=Nothing.
+    await page.hover('.app-nav__dropdown .app-nav__link:has-text("Catalogue")');
     await page.click('a[href="/upload"]');
     await page.waitForURL("/upload");
 

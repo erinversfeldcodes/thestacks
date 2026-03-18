@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("search") });
 
 test.describe("Search page", () => {
   test("search page renders with input field and title", async ({ page }) => {

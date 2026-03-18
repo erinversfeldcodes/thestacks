@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("reading-pile-hover") });
 
 test.describe("Reading Pile hover diagnostics", () => {
   test("screenshot hover sequence using mouse move", async ({ page }) => {

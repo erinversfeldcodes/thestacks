@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("settings") });
 
 test.describe("Settings — Privacy & Consent", () => {
   test("consent page loads with title and toggle", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
 test.describe("Catalogue — unauthenticated", () => {
   test("catalogue page loads without authentication", async ({ page }) => {
@@ -133,7 +133,7 @@ test.describe("Catalogue — unauthenticated", () => {
 });
 
 test.describe("Catalogue — authenticated", () => {
-  test.use({ storageState: OWNER_AUTH_FILE });
+  test.use({ storageState: suiteAuthFile("catalogue") });
 
   test("collection filter buttons are visible", async ({ page }) => {
     await page.goto("/catalogue");
