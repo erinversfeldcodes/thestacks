@@ -500,6 +500,8 @@ See current Phase 7B content (minus comments).
 - `mart_platform_searchable` (for platform-wide search index — refreshes every 5 min)
 - `mart_marketplace_activity`, `mart_transaction_volume`
 - `mart_blog_activity`
+- **Data quality models** (see `docs/data-quality.md`): `int_source_health`, `mart_data_quality_trend`, `mart_enrichment_gaps`, `mart_llm_faithfulness`
+- Source health monitoring infrastructure: Issue #068 — per-source health recording, HTML structure change detection, RSS liveness, LLM faithfulness tracking
 
 ---
 

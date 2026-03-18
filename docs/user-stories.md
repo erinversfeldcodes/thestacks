@@ -809,6 +809,11 @@ The moderation pipeline runs automatically on every upload:
   - Total monthly cost
   - Cost per book (total cost divided by number of books in collection)
   - Each line item is displayed as a row in a ledger-style table with a running total.
+- **Data Quality** (see `docs/data-quality.md`): Quality profiles per data product, not just pass/fail gauges:
+  - **Quality Trends:** Sparkline per enrichment category (prices, reviews, author, events) showing 12-week freshness/completeness trend — is quality improving or degrading?
+  - **Source Health:** A table of external data sources (scraper configs, review sites, RSS feeds) with per-source status: name, type, last successful fetch, consecutive failures, status (green = healthy, amber = degraded, red = broken). Broken sources are highlighted.
+  - **Enrichment Gaps:** Counts of books/authors with missing data: "47 books with no prices", "12 authors with no RSS feed". Clickable to drill into the affected list. Gaps are grouped by cause (no scraper config, config broken, source doesn't stock it, never scraped).
+  - **LLM Faithfulness:** Review summary spot-check agreement rate, blog association confirm/dismiss ratio, confidence distributions. A subtle indicator of whether AI-generated content is trustworthy.
 - **GDPR & Data:** Images pending deletion (those past the 30-day retention window), audit log entry count, encryption status, data export availability.
 - **Philosophy:** A note at the bottom in italic serif: "Every number here is real, unfiltered, and automated. If The Stacks ever becomes a paid service, you'll see exactly what it costs to run."
 

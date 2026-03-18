@@ -37,6 +37,12 @@ The `wh` schema contains pre-computed views for all analytical and aggregation q
 - `mart_transaction_volume.sql` — revenue tracking
 - `mart_blog_activity.sql` — post count, association count
 
+**Data quality models (see `docs/data-quality.md`):**
+- `int_source_health.sql` — per external source: `source_name`, `source_type`, `last_success_at`, `last_failure_at`, `consecutive_failures`, `selector_match_rate`, `status ENUM(healthy, degraded, broken)`. Thresholds: 3+ consecutive failures → degraded, 7+ → broken.
+- `mart_data_quality_trend.sql` — weekly rollup per enrichment category: price freshness %, review freshness %, author completeness %, event match rate %. 12-week rolling window. Alert if any category drops >10 percentage points week-over-week.
+- `mart_enrichment_gaps.sql` — books with zero prices (grouped by cause: no config, config broken, store doesn't stock), books with zero reviews, authors with no RSS/website. Exposed on metrics dashboard with drill-down.
+- `mart_llm_faithfulness.sql` — review summary: URL validation pass rate, confidence distribution. Blog associations: confirm/dismiss ratio per week, mean confidence. Source discovery: approval rate for high-confidence suggestions.
+
 **dbt scheduling (Oban integration):**
 - `Stacks.Workers.DbtRefreshJob` — configurable dbt run triggered by Oban.Cron
 - Frequency config: `mart_community_read_count` and `mart_platform_searchable` every 5 min; all others daily
@@ -54,6 +60,10 @@ The `wh` schema contains pre-computed views for all analytical and aggregation q
 - [ ] `DbtRefreshJob` Oban worker runs on schedule
 - [ ] 5-minute refresh configured for hot-path marts
 - [ ] All models documented in `schema.yml`
+- [ ] `int_source_health` correctly identifies broken scraper configs (test with a config that has 7+ consecutive failures)
+- [ ] `mart_data_quality_trend` shows 12-week rolling history
+- [ ] `mart_enrichment_gaps` correctly groups gaps by cause
+- [ ] `mart_llm_faithfulness` tracks confirm/dismiss ratios
 
 ## Dependencies
 Issues #042-044 (tables + staging models), Issues #050-051 (enrichment data populates staging)

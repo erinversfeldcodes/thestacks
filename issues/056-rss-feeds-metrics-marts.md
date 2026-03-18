@@ -37,6 +37,14 @@ Each public shelf has an Atom feed that RSS readers can subscribe to. The metric
 - Metrics context reads from `wh.mart_*` views (Issue #052)
 - If marts don't exist yet, gracefully return empty/placeholder data
 
+**Data quality dashboard enhancements (see `docs/data-quality.md`):**
+- `get_quality_trends/0` — reads from `mart_data_quality_trend`, returns 12-week sparkline data per category
+- `get_source_health/0` — reads from `int_source_health`, returns per-source status table (name, type, last success, consecutive failures, status)
+- `get_enrichment_gaps/0` — reads from `mart_enrichment_gaps`, returns gap counts with drill-down capability
+- `get_llm_faithfulness/0` — reads from `mart_llm_faithfulness`, returns confirm/dismiss ratios + confidence distributions
+- Metrics API endpoints: `/api/metrics/quality-trends`, `/api/metrics/source-health`, `/api/metrics/enrichment-gaps`
+- Per-book quality context in book detail API: "Prices last checked N days ago from M stores" — read from `int_source_health` + `price_snapshots`
+
 ## Definition of Done
 - [ ] Atom feed per public shelf returns valid XML (validate with feed parser)
 - [ ] Feed regenerates when shelf changes (event-driven)
@@ -46,6 +54,10 @@ Each public shelf has an Atom feed that RSS readers can subscribe to. The metric
 - [ ] API latency tracked via Telemetry
 - [ ] `mix test` passes
 - [ ] RSS feed validates as Atom 1.0
+- [ ] Metrics API returns quality trend sparkline data
+- [ ] Metrics API returns source health table with status per source
+- [ ] Metrics API returns enrichment gap counts
+- [ ] Book detail API includes per-book quality context (price freshness, source count)
 
 ## Dependencies
 Issue #046 (shelf data must exist for feeds), Issue #052 (dbt marts for metrics — graceful fallback if not ready)

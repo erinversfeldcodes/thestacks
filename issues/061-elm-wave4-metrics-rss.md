@@ -19,6 +19,11 @@ The metrics dashboard shows real operational data with the curator's desk aesthe
 - Source discovery: configured sources count, pending review count, Brave Search usage
 - Costs: itemised ledger table — Fly.io, Modal, Brave Search, domain. Running total. Cost per book.
 - GDPR: images pending deletion, audit log entries, encryption status
+- **Data quality section** (see `docs/data-quality.md`):
+  - Quality trend sparklines per enrichment category (12-week rolling, improving/degrading)
+  - Source health table: per scraper/source — name, type, last success, status (colour-coded: green/amber/red), consecutive failures
+  - Enrichment gap count cards: "47 books with no prices", "12 authors with no RSS" — clickable for drill-down list
+  - LLM faithfulness: review summary spot-check agreement rate, blog association confirm/dismiss ratio
 - Philosophy note at bottom in italic serif
 
 **RSS integration:**
@@ -31,6 +36,9 @@ The metrics dashboard shows real operational data with the curator's desk aesthe
 - [ ] Sparklines render as SVG
 - [ ] Job status table is colour-coded
 - [ ] Cost ledger shows itemised breakdown
+- [ ] Data quality trends render as sparklines (12-week history)
+- [ ] Source health table shows per-source status with colour coding
+- [ ] Enrichment gap counts displayed with drill-down to affected books/authors
 - [ ] RSS icon appears on public shelves
 - [ ] Feed URL is correct and displays explanation on click
 - [ ] Curator's desk aesthetic is implemented (not just a data table)

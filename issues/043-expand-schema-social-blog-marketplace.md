@@ -23,6 +23,7 @@ All tables for the expanded Phase 1 scope exist in one migration wave. No schema
 - `op.offer_messages` — `thread_id FK`, `sender_id FK`, `type ENUM(message, offer, counter, accept, decline)`, `body TEXT NULL`, `amount_cents INTEGER NULL`.
 - `op.listings` — `book_id FK`, `seller_id FK`, `status ENUM(draft, active, sold, removed, expired)`, `pricing_mode ENUM(fixed, offer)`, `price_cents`, `currency`, `condition ENUM`, `description`, `photo_urls TEXT[]`, `listed_at`, `expires_at`, `sold_at`.
 - `op.transactions` — `listing_id FK`, `offer_id FK NULL`, `buyer_id FK`, `seller_id FK`, `amount_cents`, `currency`, `payment_provider_ref`, `payment_status ENUM`, `shipping_provider_ref`, `shipping_status ENUM`, `shipping_cost_cents`.
+- `op.source_health_checks` — `source_name TEXT`, `source_type ENUM(scraper_config, review_source, rss_feed, event_source, llm_output)`, `last_success_at TIMESTAMPTZ`, `last_failure_at TIMESTAMPTZ NULL`, `last_failure_reason TEXT NULL`, `consecutive_failures INTEGER DEFAULT 0`, `total_successes INTEGER DEFAULT 0`, `total_failures INTEGER DEFAULT 0`, `status ENUM(healthy, degraded, broken)`. See Issue #068 and `docs/data-quality.md`.
 
 **Column additions:**
 - `users`: `onboarding_completed BOOLEAN DEFAULT false`, `notify_wishlist_availability BOOLEAN DEFAULT false`, `notify_marketplace BOOLEAN DEFAULT true`, `notify_group_invitations BOOLEAN DEFAULT true`, `notify_event_matches BOOLEAN DEFAULT false`.
