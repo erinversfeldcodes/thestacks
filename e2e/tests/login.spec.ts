@@ -83,8 +83,8 @@ test.describe("Login Page Aesthetic", () => {
     // Sign In link should be visible
     await expect(page.locator('a[href="/login"]')).toBeVisible();
 
-    // Costs link should be visible
-    await expect(page.locator('a[href="/costs"]')).toBeVisible();
+    // Catalogue link should be visible in nav
+    await expect(page.locator('a[href="/catalogue"]')).toBeVisible();
 
     // Authenticated-only nav items should not be visible
     await expect(page.locator('a[href="/upload"]')).not.toBeVisible();

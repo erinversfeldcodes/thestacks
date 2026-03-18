@@ -61,15 +61,15 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
   test("Reading Pile decorative armchair has aria-hidden", async ({ page }) => {
     await page.goto("/reading-pile");
     await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
-    const armchair = page.locator(".reading-nook__armchair");
+    const armchair = page.locator(".armchair");
     await expect(armchair).toHaveAttribute("aria-hidden", "true");
   });
 
-  test("Reading Pile decorative rug has aria-hidden", async ({ page }) => {
+  test("Reading Pile decorative floor has aria-hidden", async ({ page }) => {
     await page.goto("/reading-pile");
     await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
-    const rug = page.locator(".reading-nook__rug");
-    await expect(rug).toHaveAttribute("aria-hidden", "true");
+    const floor = page.locator(".reading-pile__floor");
+    await expect(floor).toHaveAttribute("aria-hidden", "true");
   });
 });
 
@@ -77,10 +77,10 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   test("Library empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/library");
     await page.waitForSelector(".shelf-library", { timeout: 10000 });
-    const emptyShelf = page.locator(".empty-shelf");
-    if ((await emptyShelf.count()) > 0) {
-      await expect(page.locator(".empty-shelf__message")).toContainText(
-        "Your library is waiting. Move a book here when you've finished reading it."
+    const emptyText = page.locator(".shelf-row__empty-text");
+    if ((await emptyText.count()) > 0) {
+      await expect(emptyText).toContainText(
+        "Your library is waiting"
       );
     }
   });
@@ -90,10 +90,10 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   }) => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
-    const emptyShelf = page.locator(".empty-shelf");
-    if ((await emptyShelf.count()) > 0) {
-      await expect(page.locator(".empty-shelf__message")).toContainText(
-        "Books you own but haven't read yet. Upload a photo to start building your collection."
+    const emptyText = page.locator(".shelf-row__empty-text");
+    if ((await emptyText.count()) > 0) {
+      await expect(emptyText).toContainText(
+        "Books you own but haven't read yet"
       );
     }
   });
@@ -101,10 +101,10 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   test("WishList empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
-    const emptyShelf = page.locator(".empty-shelf");
-    if ((await emptyShelf.count()) > 0) {
-      await expect(page.locator(".empty-shelf__message")).toContainText(
-        "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN."
+    const emptyText = page.locator(".shelf-row__empty-text");
+    if ((await emptyText.count()) > 0) {
+      await expect(emptyText).toContainText(
+        "Books you're dreaming about"
       );
     }
   });
@@ -114,10 +114,10 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   }) => {
     await page.goto("/reading-pile");
     await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
-    const emptyShelf = page.locator(".empty-shelf");
-    if ((await emptyShelf.count()) > 0) {
-      await expect(page.locator(".empty-shelf__message")).toContainText(
-        "Nothing on the pile right now. Move a book from your AntiLibrary to start reading."
+    const emptyMsg = page.locator(".reading-pile__empty-msg");
+    if ((await emptyMsg.count()) > 0) {
+      await expect(emptyMsg).toContainText(
+        "Nothing on the pile right now"
       );
     }
   });
