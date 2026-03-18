@@ -28,7 +28,7 @@ defmodule Stacks.GDPR.Export do
     placements =
       Placement
       |> where([p], p.bookshelf_id in ^bookshelf_ids)
-      |> preload(:book)
+      |> preload(book: :editions)
       |> Repo.all()
 
     histories =
@@ -71,7 +71,9 @@ defmodule Stacks.GDPR.Export do
   defp placement_to_map(placement) do
     %{
       id: placement.id,
-      book_isbn: placement.book && placement.book.isbn,
+      book_isbn:
+        placement.book &&
+          (Stacks.Books.primary_edition(placement.book) || %{isbn: nil}).isbn,
       book_title: placement.book && placement.book.title,
       bookshelf_id: placement.bookshelf_id,
       position: placement.position,
