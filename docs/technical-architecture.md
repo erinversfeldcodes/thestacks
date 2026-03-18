@@ -38,6 +38,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 26. [Potential OSS Contributions](#potential-oss-contributions)
 27. [Visibility & Privacy Architecture](#visibility--privacy-architecture)
 28. [Blog & LLM Associations](#blog--llm-associations)
+29. [Data Quality Framework](#data-quality-framework)
 
 ---
 
@@ -5555,6 +5556,43 @@ The LLM is instructed to return only books from the provided catalogue (no hallu
 `post_book_associations` are derived data generated from the post body. On right-to-erasure:
 - The source `blog_post` row is deleted (or body scrubbed if referenced in audit log).
 - All associated `post_book_associations` rows are deleted — they are derived and have no independent value without the post.
+
+---
+
+## Data Quality Framework
+
+Data quality is measured per data product relative to its consumer, not as a platform-wide score. See `docs/data-quality.md` for the full framework.
+
+### Key principles
+
+- **"Quality for what?"** — Prices being 3 days stale is fine for browsing, not for buying. Quality dimensions and SLAs vary by data product and consumer.
+- **Nutrition labels, not scores.** — Each data product publishes a quality profile (completeness, freshness, distributions, gaps). The metrics dashboard exposes profiles, not just green/amber/red gauges.
+- **Continuous monitoring with trends.** — `mart_data_quality_trend` tracks weekly quality rollups per category. Alert on 10+ percentage point week-over-week drops, not just current thresholds.
+- **Source health monitoring.** — Per scraper config, per review source, per RSS feed: track last success, error rate, and HTML structure change detection. `int_source_health` dbt model.
+- **LLM faithfulness tracking.** — Review summaries and blog associations have faithfulness metrics: confirm/dismiss ratios, confidence distributions, periodic human spot-checks. `mart_llm_faithfulness` dbt model.
+
+### dbt models for quality
+
+| Model | Purpose |
+|-------|---------|
+| `int_source_health` | Operational health per external source: last success, consecutive failures, selector match rate, status |
+| `mart_data_quality_trend` | Weekly rollup per enrichment category — freshness %, completeness %, trending over 12 weeks |
+| `mart_enrichment_gaps` | Books/authors with missing enrichment data, grouped by cause (no config, source broken, never scraped) |
+| `mart_llm_faithfulness` | LLM output quality: review summary agreement rate, blog association confirm/dismiss ratio, confidence distributions |
+
+### Source health detection
+
+- **HTML structure change detection:** Hash CSS selector paths per scraper config. If a selector that previously matched no longer matches, flag the config as `degraded`. After 7 consecutive failures, flag as `broken`.
+- **RSS feed liveness:** Weekly HEAD request. 2+ weeks of 404/410 → mark dead, clear from author, re-discover.
+- **Scraper config validity:** No results in 14 days → flag on metrics dashboard.
+
+### Metrics dashboard integration
+
+The data freshness section of the metrics dashboard (US-5.1) shows:
+- Quality trend sparklines (12-week history per category)
+- Source health table (per source: name, last success, status, failure count)
+- Enrichment gap counts with drill-down (books with no prices, authors with no RSS)
+- LLM faithfulness metrics (spot-check agreement rate, confirm/dismiss ratio)
 
 ---
 

@@ -43,10 +43,19 @@ Per the specification in the consolidated roadmap (Cross-cutting: Capacity Model
 - Cost-per-user projection at 10/100/1K/10K users with trigger points
 - Database growth model with partitioning triggers
 
+**Data quality framework (`docs/data-quality.md`):**
+Already created — review and validate against actual implementation:
+- Quality dimensions and SLAs per data product (prices, reviews, author intel, events, LLM outputs)
+- Source health monitoring specification (HTML change detection, RSS liveness, scraper config validity)
+- Metrics dashboard integration requirements (quality trends, source health table, enrichment gaps)
+- Confirm all referenced dbt models are scoped in Issue #052
+- Add runbook: `docs/runbooks/scraper-config-broken.md` — response when a scraper config stops producing results
+
 ## Definition of Done
 - [ ] At least 8 ADRs in `docs/decisions/`
-- [ ] At least 7 runbooks in `docs/runbooks/`
+- [ ] At least 7 runbooks in `docs/runbooks/` (including `scraper-config-broken.md`)
 - [ ] `docs/capacity-model.md` exists with all 4 sections
+- [ ] `docs/data-quality.md` reviewed against implementation — SLAs are realistic, all referenced dbt models exist
 - [ ] ADRs reference specific files and technical-architecture.md sections
 - [ ] Runbooks include actual commands to diagnose (not just descriptions)
 - [ ] Capacity model has specific numbers, not just "will scale"

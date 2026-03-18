@@ -1985,6 +1985,20 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 ---
 
+### Cross-cutting: Data Quality Framework
+
+| Layer | Components |
+|-------|------------|
+| **Summary** | Continuous quality monitoring per data product. Source health tracking, LLM faithfulness metrics, quality trend analysis. See `docs/data-quality.md` for the full framework. |
+| **Affects stories** | US-5.1 (metrics dashboard — data quality section), US-2.1.1–2.4.1 (enrichment — source health), US-12.1.2 (blog — LLM faithfulness) |
+| **Backend (Phoenix)** | `Stacks.Enrichment.SourceHealth` — `record_success/2`, `record_failure/3`. Instrumented in all enrichment workers. `Stacks.Workers.RSSLivenessJob` — weekly feed health check. |
+| **Database** | `op.source_health_checks` — per-source operational health with consecutive failure tracking and computed status (healthy/degraded/broken). |
+| **dbt Models** | `stg_source_health_checks`, `int_source_health` (per-source status), `mart_data_quality_trend` (12-week rollup), `mart_enrichment_gaps` (missing data by cause), `mart_llm_faithfulness` (LLM output quality). |
+| **Rust Scraper** | Returns `selector_match_rate` in scrape response — percentage of CSS selectors that found matches. Low rate indicates HTML structure change. |
+| **Elm** | Metrics dashboard: quality trend sparklines, source health table, enrichment gap cards, LLM faithfulness indicators. |
+
+---
+
 ## Quick Reference: Table-to-Story Mapping
 
 Which user stories touch each database table:
@@ -2018,6 +2032,7 @@ Which user stories touch each database table:
 | `partner_inventory` | US-9.2.1, US-9.2.2, US-9.5.1, US-9.8.1 (references `book_editions`, not `books`) |
 | `partner_events` | US-9.3.1, US-9.3.2, US-9.5.1, US-9.6.1 |
 | `partner_spaces` | US-9.4.1, US-9.5.1, US-9.6.1 |
+| `source_health_checks` | US-2.1.1, US-2.2.1, US-2.3.1, US-2.4.1, US-5.1 (quality dashboard) |
 | `event_log` | US-9.2.1, US-9.3.1, US-9.4.1, US-9.5.1 (+ all stories via EDA) |
 | `listings` | US-7.1.1, US-7.2.1 |
 | `offers` | US-7.2.1 |
@@ -2166,3 +2181,8 @@ Which user stories touch each database table:
 | `int_onboarding_completion_rate` | Intermediate | US-14.1.2 | US-5.1.1 |
 | `int_notification_delivery_rate` | Intermediate | US-17.3.1 | US-5.1.1 |
 | `int_opt_out_rate` | Intermediate | US-2.5.3 | US-5.1.1 |
+| `stg_source_health_checks` | Staging | US-2.1.1–2.4.1 (enrichment workers) | US-5.1.1 |
+| `int_source_health` | Intermediate | US-2.1.1–2.4.1 | US-5.1.1 (source health table) |
+| `mart_data_quality_trend` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (quality trend sparklines) |
+| `mart_enrichment_gaps` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (gap drill-down) |
+| `mart_llm_faithfulness` | Mart | US-12.1.2, US-2.1.1 | US-5.1.1 (LLM quality metrics) |
