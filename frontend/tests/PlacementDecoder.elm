@@ -40,11 +40,35 @@ fullPlacementJson =
     """
 
 
+placementWithBookshelfNameJson : String
+placementWithBookshelfNameJson =
+    """
+    {
+        "id": "placement-003",
+        "position": 1,
+        "placed_at": "2024-03-01T12:00:00Z",
+        "bookshelf_name": "library",
+        "formats": [],
+        "personal_rating": null,
+        "notes": null
+    }
+    """
+
+
+minimalIdOnlyJson : String
+minimalIdOnlyJson =
+    """
+    {
+        "id": "placement-004"
+    }
+    """
+
+
 missingRequiredFieldJson : String
 missingRequiredFieldJson =
     """
     {
-        "id": "placement-004"
+        "position": 1
     }
     """
 
@@ -63,11 +87,12 @@ suite =
                         Expect.all
                             [ \p -> Expect.equal "placement-001" p.id
                             , \p -> Expect.equal Nothing p.book
-                            , \p -> Expect.equal 1 p.position
-                            , \p -> Expect.equal "2024-01-15T10:00:00Z" p.placedAt
+                            , \p -> Expect.equal (Just 1) p.position
+                            , \p -> Expect.equal (Just "2024-01-15T10:00:00Z") p.placedAt
                             , \p -> Expect.equal [] p.formats
                             , \p -> Expect.equal Nothing p.personalRating
                             , \p -> Expect.equal Nothing p.notes
+                            , \p -> Expect.equal Nothing p.bookshelfName
                             ]
                             placement
 
@@ -83,7 +108,7 @@ suite =
                     Ok placement ->
                         Expect.all
                             [ \p -> Expect.equal "placement-002" p.id
-                            , \p -> Expect.equal 2 p.position
+                            , \p -> Expect.equal (Just 2) p.position
                             , \p ->
                                 case p.book of
                                     Just book ->
@@ -94,12 +119,46 @@ suite =
                             , \p -> Expect.equal [ Physical, EBook ] p.formats
                             , \p -> Expect.equal (Just 4) p.personalRating
                             , \p -> Expect.equal (Just "Interesting read") p.notes
+                            , \p -> Expect.equal Nothing p.bookshelfName
                             ]
                             placement
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
-        , test "fails when required fields are missing" <|
+        , test "decodes placement with bookshelf_name" <|
+            \_ ->
+                let
+                    result =
+                        Decode.decodeString placementDecoder placementWithBookshelfNameJson
+                in
+                case result of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal "placement-003" p.id
+                            , \p -> Expect.equal (Just "library") p.bookshelfName
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "decodes placement with only id (optional fields default to Nothing)" <|
+            \_ ->
+                let
+                    result =
+                        Decode.decodeString placementDecoder minimalIdOnlyJson
+                in
+                case result of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal "placement-004" p.id
+                            , \p -> Expect.equal Nothing p.position
+                            , \p -> Expect.equal Nothing p.placedAt
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "fails when id is missing" <|
             \_ ->
                 let
                     result =
@@ -107,7 +166,7 @@ suite =
                 in
                 case result of
                     Ok _ ->
-                        Expect.fail "Expected decode failure when position and placed_at are missing"
+                        Expect.fail "Expected decode failure when id is missing"
 
                     Err _ ->
                         Expect.pass

@@ -114,7 +114,6 @@ encodeBookForSearch : Book -> Encode.Value
 encodeBookForSearch book =
     Encode.object
         ([ ( "id", Encode.string book.id )
-         , ( "isbn", Encode.string book.isbn )
          , ( "title", Encode.string book.title )
          , ( "author"
            , case book.author of
@@ -127,19 +126,21 @@ encodeBookForSearch book =
                 Nothing ->
                     Encode.null
            )
+         , ( "editions", Encode.list identity [] )
+         , ( "edition_count", Encode.int 0 )
          , ( "subjects", Encode.list Encode.string book.subjects )
          , ( "visibility_tier", Encode.string "public" )
          ]
-            ++ (case book.pageCount of
-                    Just pc ->
-                        [ ( "page_count", Encode.int pc ) ]
-
-                    Nothing ->
-                        []
-               )
-            ++ (case book.publicationYear of
-                    Just py ->
-                        [ ( "publication_year", Encode.int py ) ]
+            ++ (case book.primaryEdition of
+                    Just ed ->
+                        [ ( "primary_edition"
+                          , Encode.object
+                                [ ( "id", Encode.string ed.id )
+                                , ( "isbn", Encode.string ed.isbn )
+                                , ( "is_primary", Encode.bool True )
+                                ]
+                          )
+                        ]
 
                     Nothing ->
                         []

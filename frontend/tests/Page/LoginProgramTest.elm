@@ -33,6 +33,9 @@ suite =
         , switchBackToLoginHidesDisplayName
         , submitDisabledDuringLoading
         , submitDisabledDuringTransition
+        , invalidEmailShowsErrorHint
+        , validEmailShowsValidState
+        , modeSwitchResetsValidation
         ]
 
 
@@ -138,3 +141,36 @@ submitDisabledDuringTransition =
                     [ Selector.class "login-card__submit"
                     , Selector.disabled True
                     ]
+
+
+invalidEmailShowsErrorHint : Test
+invalidEmailShowsErrorHint =
+    test "invalid_email_shows_error_hint: typing invalid email shows error hint text" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "nope"
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Please enter a valid email address" ]
+
+
+validEmailShowsValidState : Test
+validEmailShowsValidState =
+    test "valid_email_shows_valid_state: typing valid email shows valid hint" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "login-card__field--valid" ]
+
+
+modeSwitchResetsValidation : Test
+modeSwitchResetsValidation =
+    test "mode_switch_resets_validation: switching mode resets validation to pristine" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "nope"
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Please enter a valid email address" ]
+                |> ProgramTest.clickButton "Register"
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "Please enter a valid email address" ]

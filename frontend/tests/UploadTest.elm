@@ -12,14 +12,12 @@ import Types.RemoteData exposing (RemoteData(..))
 dummyBook : Book
 dummyBook =
     { id = "book-1"
-    , isbn = "9780141988511"
     , title = "Test Book"
-    , author = Just { id = "author-1", name = "Test Author", bio = Nothing }
+    , author = Just { id = "author-1", name = "Test Author", bio = Nothing, website = Nothing }
     , description = Nothing
-    , coverImageUrl = Nothing
-    , pageCount = Nothing
-    , publisher = Nothing
-    , publicationYear = Nothing
+    , editions = []
+    , primaryEdition = Nothing
+    , editionCount = 0
     , subjects = []
     , visibilityTier = Public
     }
@@ -204,7 +202,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok dummyBook)) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing })) modelPending Nothing
                     in
                     model.result |> Expect.equal (Identified [ dummyBook ])
             , test "Err sets result to IdentificationFailed when no books collected" <|
@@ -226,7 +224,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            Upload.update (GotDuplicateBook (Ok dummyBook)) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , test "Err sets result to IdentificationFailed" <|
