@@ -156,6 +156,9 @@ requiresAuth route =
         Catalogue ->
             False
 
+        BookDetail _ ->
+            False
+
         NotFound ->
             False
 
@@ -214,7 +217,11 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             ( PageReadingPile model, Cmd.map ReadingPileMsg cmd )
 
         LookingForHome ->
-            initBookshelf Bookshelf.lookingForHomeConfig maybeAuth
+            let
+                ( subModel, subCmd ) =
+                    LookingForHome.init maybeToken
+            in
+            ( PageLookingForHome subModel, Cmd.map LookingForHomeMsg subCmd )
 
         BookDetail bookId ->
             let
@@ -757,13 +764,20 @@ pageTitle route =
 viewNav : Model -> Html Msg
 viewNav model =
     header [ class "app-header" ]
-        [ div [ class "app-header__brand" ]
-            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ] ]
+        [ div [ class "app-header__brand app-nav__dropdown" ]
+            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
+            , ul [ class "app-nav__dropdown-menu" ]
+                [ li []
+                    [ a [ href (Route.toPath CostTransparency), class "app-nav__dropdown-link" ]
+                        [ text "Costs" ]
+                    ]
+                ]
+            ]
         , nav [ class "app-nav" ]
             [ ul [ class "app-nav__list" ]
                 (case model.auth of
                     Nothing ->
-                        [ navItem model.route CostTransparency "Costs"
+                        [ navItem model.route Catalogue "Catalogue"
                         , navItem model.route Login "Sign In"
                         ]
 
@@ -898,8 +912,8 @@ viewHome =
         , p [ class "home__subtitle" ]
             [ text "Your personal collection, beautifully organised." ]
         , div [ class "home__actions" ]
-            [ a [ href (Route.toPath Library), class "btn btn--primary" ]
-                [ text "View Library" ]
+            [ a [ href (Route.toPath AntiLibrary), class "btn btn--primary" ]
+                [ text "View Antilibrary" ]
             , a [ href (Route.toPath Upload), class "btn btn--secondary" ]
                 [ text "Add a Book" ]
             ]
