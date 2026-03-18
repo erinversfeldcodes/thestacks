@@ -194,15 +194,15 @@ fly secrets set \
     ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
     --app "${CORE_APP}" --stage
 
-# ── Build Elm frontend ────────────────────────────────────────────────────────
+# ── Build frontend assets ─────────────────────────────────────────────────────
 echo ""
-echo "==> Rebuilding Elm frontend..."
-if command -v npx &>/dev/null && [[ -f "$REPO_ROOT/frontend/elm.json" ]]; then
-    (cd "$REPO_ROOT/frontend" && npx elm make src/Main.elm --optimize --output=elm.js) \
-        || { echo "FAIL deploy: Elm build failed"; exit 1; }
-    echo "    elm.js rebuilt"
+echo "==> Rebuilding frontend assets via esbuild..."
+if command -v node &>/dev/null && [[ -f "$REPO_ROOT/apps/core/assets/build.js" ]]; then
+    (cd "$REPO_ROOT/apps/core/assets" && node build.js --production) \
+        || { echo "FAIL deploy: frontend build failed"; exit 1; }
+    echo "    app.js rebuilt"
 else
-    echo "    SKIP: npx or elm.json not found — using existing elm.js"
+    echo "    SKIP: node or build.js not found — Docker build will handle it"
 fi
 
 # ── Deploy core ──────────────────────────────────────────────────────────────
@@ -249,9 +249,9 @@ until curl -sf --max-time 15 "${CORE_URL}/api/health" &>/dev/null; do
 done
 echo "PASS deploy: health check passed"
 
-# ── Seed ─────────────────────────────────────────────────────────────────────
+# ── Migrate ──────────────────────────────────────────────────────────────────
 echo ""
-echo "==> Seeding ${CORE_APP}..."
+echo "==> Running migrations on ${CORE_APP}..."
 machine_id="$(fly machines list --app "${CORE_APP}" --json 2>/dev/null \
     | python3 -c "
 import json,sys
@@ -262,12 +262,21 @@ print(started[0]['id'] if started else '')
 
 if [[ -n "${machine_id}" ]]; then
     fly machine exec "${machine_id}" \
+        "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.migrate()'\"" \
+        --app "${CORE_APP}" --timeout 60 2>&1 \
+        || { echo "FAIL deploy: migrations failed"; exit 1; }
+    echo "PASS deploy: migrations applied"
+
+    # ── Seed ─────────────────────────────────────────────────────────────────
+    echo ""
+    echo "==> Seeding ${CORE_APP}..."
+    fly machine exec "${machine_id}" \
         "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
         --app "${CORE_APP}" --timeout 60 2>&1 \
         || { echo "FAIL deploy: seeds failed"; exit 1; }
     echo "PASS deploy: seeds applied"
 else
-    echo "WARN deploy: could not find running machine to run seeds"
+    echo "WARN deploy: could not find running machine to run migrations/seeds"
 fi
 
 # ── Output ───────────────────────────────────────────────────────────────────
