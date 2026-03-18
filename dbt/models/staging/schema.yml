@@ -3,21 +3,16 @@ version: 2
 models:
   - name: stg_books
     description: >
-      One row per book in the catalogue. Books enter the system only after ISBN
-      verification against Open Library or Google Books.
+      One row per work (logical book) in the catalogue. Edition-specific data
+      (ISBN, cover, page count) lives in stg_book_editions.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: isbn
-        description: Verified ISBN-13 (or ISBN-10 for legacy entries).
-        tests:
-          - not_null
-          - unique
       - name: title
-        description: Book title as returned by the ISBN resolver.
+        description: Work title (canonical, edition suffixes stripped).
         tests:
           - not_null
       - name: author_id
@@ -42,6 +37,30 @@ models:
         description: Author display name.
         tests:
           - not_null
+
+  - name: stg_book_editions
+    description: >
+      One row per edition (specific ISBN/format) of a work. Each edition belongs
+      to exactly one work (stg_books). The is_primary flag marks the default edition.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        description: FK to the parent work.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_books')
+                field: id
+      - name: isbn
+        description: Verified ISBN-13 (or ISBN-10 for legacy entries).
+        tests:
+          - not_null
+          - unique
 
   - name: stg_users
     description: >
