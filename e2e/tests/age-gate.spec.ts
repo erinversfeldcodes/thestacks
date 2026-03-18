@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
 test.describe("Age-gated content", () => {
-  test.use({ storageState: OWNER_AUTH_FILE });
+  test.use({ storageState: suiteAuthFile("age-gate") });
 
   test("age-gated book shows age gate for non-verified users", async ({
     page,

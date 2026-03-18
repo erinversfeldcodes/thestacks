@@ -1,7 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("book-interaction") });
+
+test.beforeEach(async ({ page }) => {
+  await ensureBookOnLibrary(page);
+});
 
 test.describe("Book interaction — Library page", () => {
   test("book exists on the shelf and is wrapped in a clickable button", async ({

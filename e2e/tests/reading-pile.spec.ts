@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("reading-pile") });
 
 test.describe("Reading Pile page", () => {
   test("page loads with dragon wallpaper theme", async ({ page }) => {

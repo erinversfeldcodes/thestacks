@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("editions") });
 
 /**
  * Helper: navigate to the app root first (needed for localStorage access),

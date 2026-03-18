@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("book-detail") });
 
 test.describe("Book Detail page — layout and structure", () => {
   test("Book detail page loads with parchment background", async ({

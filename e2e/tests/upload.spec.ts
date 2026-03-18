@@ -1,12 +1,12 @@
 import path from "path";
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
 // The vision pipeline runs classify + extract on VisionModel (A10G GPU) then
 // resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
 const PIPELINE_TIMEOUT = 300_000;
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("upload") });
 
 test.describe("Upload pipeline — barcode pre-pass", () => {
   test(

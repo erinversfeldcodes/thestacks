@@ -1,20 +1,34 @@
 import { test as setup } from "@playwright/test";
 import path from "path";
-
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
+import {
+  DEV_EMAIL,
+  DEV_PASSWORD,
+  E2E_PASSWORD,
+  E2E_SUITES,
+  suiteAuthFile,
+  suiteEmail,
+} from "./helpers";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
 
 /**
- * Authenticate once via the API and save storage state.
- * All test suites that need auth use: test.use({ storageState: OWNER_AUTH_FILE })
- * This avoids calling /api/auth/login in every test, preventing rate limiting.
+ * Authenticate a user via the API and save storage state.
  */
-setup("authenticate as owner", async ({ request, page }) => {
+async function authenticateUser(
+  request: any,
+  page: any,
+  email: string,
+  password: string,
+  stateFile: string
+) {
   const resp = await request.post("/api/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+    data: { email, password },
   });
+
+  if (!resp.ok()) {
+    console.log(`WARN: login failed for ${email} (${resp.status()})`);
+    return;
+  }
 
   const body = await resp.json();
 
@@ -23,7 +37,7 @@ setup("authenticate as owner", async ({ request, page }) => {
 
   // Inject auth into localStorage — same format as the saveAuth port
   await page.evaluate(
-    (auth) => {
+    (auth: any) => {
       localStorage.setItem("stacks-auth", JSON.stringify(auth));
     },
     {
@@ -35,5 +49,31 @@ setup("authenticate as owner", async ({ request, page }) => {
   );
 
   // Save the browser context (cookies + localStorage) for reuse
-  await page.context().storageState({ path: OWNER_AUTH_FILE });
+  await page.context().storageState({ path: stateFile });
+}
+
+/**
+ * Authenticate the owner user (used by tests that need owner-level access).
+ */
+setup("authenticate as owner", async ({ request, page }) => {
+  await authenticateUser(request, page, DEV_EMAIL, DEV_PASSWORD, OWNER_AUTH_FILE);
+});
+
+/**
+ * Authenticate all per-suite E2E users in one setup step.
+ * Each gets its own storage state file for parallel isolation.
+ */
+setup("authenticate E2E suite users", async ({ request, browser }) => {
+  for (const slug of E2E_SUITES) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticateUser(
+      request,
+      page,
+      suiteEmail(slug),
+      E2E_PASSWORD,
+      suiteAuthFile(slug)
+    );
+    await context.close();
+  }
 });

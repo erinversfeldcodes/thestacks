@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile } from "./helpers";
 
 test.describe("Navbar navigation — authenticated", () => {
-  test.use({ storageState: OWNER_AUTH_FILE });
+  test.use({ storageState: suiteAuthFile("navigation") });
 
   // Top-level nav items (visible as direct links)
   const topLevelItems = [

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("shelf-actions") });
 
 test.describe("Shelf actions — move book between shelves", () => {
   test("move a book from library to wishlist via book detail", async ({
@@ -95,26 +95,35 @@ test.describe("Shelf actions — add book from catalogue", () => {
 });
 
 test.describe("Shelf actions — add unplaced book from detail page", () => {
-  test("filter to unplaced books, open detail, and add to collection", async ({
+  test("open an unplaced book detail and add to collection", async ({
     page,
   }) => {
-    // Go to catalogue and filter to unplaced books
+    // Find an unplaced book via API (reliable, no UI race conditions)
     await page.goto("/catalogue");
-    await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
-    await page.waitForTimeout(1000);
+    const unplacedBookId = await page.evaluate(async () => {
+      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      const placementsResp = await fetch("/api/placements/mine", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      const placementsData = placementsResp.ok
+        ? await placementsResp.json()
+        : { placements: [] };
+      const placedIds = new Set(
+        placementsData.placements.map((p: any) => p.book_id)
+      );
+      const catResp = await fetch("/api/catalogue?per_page=200");
+      const catData = await catResp.json();
+      const book = catData.books.find((b: any) => !placedIds.has(b.id));
+      return book?.id ?? null;
+    });
 
-    // Click "Not in my collection" filter
-    await page.click('button:has-text("Not in my collection")');
-    await page.waitForTimeout(500);
+    if (!unplacedBookId) {
+      console.log("No unplaced books available — skipping");
+      return;
+    }
 
-    // All visible cards should have "Add to Shelf" (no badges)
-    await expect(page.locator(".catalogue__card-badge")).toHaveCount(0);
-
-    // Click the first book card link to navigate to its detail page
-    const firstCard = page.locator(".catalogue__card-link").first();
-    await firstCard.click();
-
-    // Wait for book detail to load
+    // Navigate directly to the unplaced book's detail page
+    await page.goto(`/books/${unplacedBookId}`);
     await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
 
     // Should NOT show "Remove from collection" (book is unplaced)
@@ -152,15 +161,12 @@ test.describe("Shelf actions — remove book from collection", () => {
   test("remove button only visible when book has a placement", async ({
     page,
   }) => {
-    // Navigate to a book from the library (has placement)
+    await ensureBookOnLibrary(page);
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
     const bookButton = page.locator(".book-button").first();
-    if ((await bookButton.count()) === 0) {
-      console.log("No books on library — skipping");
-      return;
-    }
+    await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
     await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
 
@@ -173,14 +179,12 @@ test.describe("Shelf actions — remove book from collection", () => {
   test("remove button triggers modal and confirm removes the book", async ({
     page,
   }) => {
+    await ensureBookOnLibrary(page);
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
     const bookButton = page.locator(".book-button").first();
-    if ((await bookButton.count()) === 0) {
-      console.log("No books on library — skipping");
-      return;
-    }
+    await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
     await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
 

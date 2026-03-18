@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { OWNER_AUTH_FILE } from "./helpers";
+import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
-test.use({ storageState: OWNER_AUTH_FILE });
+test.use({ storageState: suiteAuthFile("bookshelf") });
 
 test.describe("Bookshelf pages — visual themes", () => {
   test("Library page has shelf-library class and damask wallpaper", async ({
@@ -39,15 +39,11 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
   });
 
   test("Library books have role=listitem", async ({ page }) => {
+    await ensureBookOnLibrary(page);
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
     const bookButton = page.locator('.book-button[role="listitem"]');
-    const bookCount = await bookButton.count();
-    if (bookCount === 0) {
-      // No books seeded on library — skip gracefully
-      console.log("No books on library shelf, skipping listitem test");
-      return;
-    }
+    await expect(bookButton.first()).toBeVisible({ timeout: 10000 });
     await expect(bookButton.first()).toHaveAttribute("role", "listitem");
   });
 
@@ -114,6 +110,19 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   }) => {
     await page.goto("/reading-pile");
     await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
+    // Wait for loading to finish — either books appear or the empty message shows
+    await page.waitForFunction(
+      () => {
+        const loading = document.querySelector(".loading");
+        const loadingMsg = document.querySelector(".reading-pile__empty-msg");
+        const isLoading =
+          loading !== null ||
+          (loadingMsg !== null &&
+            loadingMsg.textContent?.includes("Loading"));
+        return !isLoading;
+      },
+      { timeout: 15000 }
+    );
     const emptyMsg = page.locator(".reading-pile__empty-msg");
     if ((await emptyMsg.count()) > 0) {
       await expect(emptyMsg).toContainText(
