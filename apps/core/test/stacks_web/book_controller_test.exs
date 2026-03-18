@@ -1,9 +1,6 @@
 defmodule StacksWeb.BookControllerTest do
   @moduledoc """
-  Tests for GET /api/books/:id and GET /api/books/isbn/:isbn.
-
-  Both routes are behind the :authenticated pipeline. Tests authenticate via
-  Guardian token. The AgeGate plug is also exercised here for age_gated books.
+  Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, and POST /api/books.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -17,21 +14,53 @@ defmodule StacksWeb.BookControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
+  defp insert_book_with_edition(attrs \\ []) do
+    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author]))
+
+    edition_attrs =
+      attrs
+      |> Keyword.take([:isbn])
+      |> Keyword.put(:book, book)
+      |> Keyword.put_new(:is_primary, true)
+
+    edition = insert(:book_edition, edition_attrs)
+    {book, edition}
+  end
+
   describe "GET /api/books/:id" do
     test "returns 200 with book JSON when book exists", %{conn: conn} do
       user = insert(:user)
-      book = insert(:book, title: "Middlemarch", visibility_tier: "public")
+      {book, edition} = insert_book_with_edition(title: "Middlemarch", visibility_tier: "public")
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/books/#{book.id}")
 
-      assert %{"book" => returned} = json_response(conn, 200)
+      assert %{"book" => returned, "placement" => nil} = json_response(conn, 200)
       assert returned["id"] == book.id
       assert returned["title"] == "Middlemarch"
-      assert returned["isbn"] == book.isbn
       assert returned["visibility_tier"] == "public"
+      assert returned["primary_edition"]["isbn"] == edition.isbn
+      assert is_list(returned["editions"])
+      assert returned["edition_count"] == 1
+    end
+
+    test "returns placement data when user has an active placement for the book", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(title: "Placed Book", visibility_tier: "public")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"book" => _, "placement" => placement} = json_response(conn, 200)
+      assert placement["bookshelf_name"] == "library"
+      assert is_binary(placement["id"])
+      assert is_list(placement["formats"])
     end
 
     test "returns 404 when book does not exist", %{conn: conn} do
@@ -45,15 +74,15 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
-    test "returns 401 when not authenticated", %{conn: conn} do
-      book = insert(:book)
+    test "returns 200 with null placement when not authenticated", %{conn: conn} do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       conn = get(conn, "/api/books/#{book.id}")
-      assert json_response(conn, 401)
+      assert %{"book" => _, "placement" => nil} = json_response(conn, 200)
     end
 
     test "returns 403 for age_gated book when user is not age_verified", %{conn: conn} do
       user = insert(:user, age_verified: false)
-      book = insert(:book, visibility_tier: "age_gated")
+      {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
 
       conn =
         conn
@@ -65,7 +94,7 @@ defmodule StacksWeb.BookControllerTest do
 
     test "returns 200 for age_gated book when user is age_verified", %{conn: conn} do
       user = insert(:user, age_verified: true)
-      book = insert(:book, visibility_tier: "age_gated")
+      {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
 
       conn =
         conn
@@ -80,18 +109,15 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 201 with book when ISBN resolves (mocked)", %{conn: conn} do
       user = insert(:user)
 
-      # create_from_isbn calls ISBNResolver which calls AI.Client (mocked in test env)
-      # and Open Library (real HTTP). To avoid live HTTP, pre-insert the book and
-      # test the duplicate-detection path, which exercises the controller end-to-end.
-      insert(:book, isbn: "9780743273565", title: "The Great Gatsby")
+      # Pre-insert the book+edition and test the duplicate-detection path
+      {_book, _edition} =
+        insert_book_with_edition(isbn: "9780743273565", title: "The Great Gatsby")
 
       conn =
         conn
         |> auth_conn(user)
         |> post("/api/books", %{"isbn" => "9780743273565"})
 
-      # create_from_isbn calls ISBNResolver; if it returns {:ok, _} book is found or created.
-      # If Open Library is unreachable in CI, the call returns {:error, :not_found} → 422.
       # Accept either outcome so the test is not fragile on network availability.
       assert conn.status in [201, 422]
     end
@@ -104,7 +130,6 @@ defmodule StacksWeb.BookControllerTest do
         |> auth_conn(user)
         |> post("/api/books", %{"isbn" => "9780743273560"})
 
-      # Invalid checksum: changeset will fail before any resolver call
       assert %{"error" => _} = json_response(conn, 422)
     end
 
@@ -117,7 +142,9 @@ defmodule StacksWeb.BookControllerTest do
   describe "GET /api/books/isbn/:isbn" do
     test "returns 200 when book with ISBN exists", %{conn: conn} do
       user = insert(:user)
-      book = insert(:book, isbn: "9780451524935", visibility_tier: "public")
+
+      {book, _edition} =
+        insert_book_with_edition(isbn: "9780451524935", visibility_tier: "public")
 
       conn =
         conn
@@ -125,7 +152,7 @@ defmodule StacksWeb.BookControllerTest do
         |> get("/api/books/isbn/9780451524935")
 
       assert %{"book" => returned} = json_response(conn, 200)
-      assert returned["isbn"] == "9780451524935"
+      assert returned["primary_edition"]["isbn"] == "9780451524935"
       assert returned["id"] == book.id
     end
 
@@ -147,7 +174,7 @@ defmodule StacksWeb.BookControllerTest do
 
     test "returns 403 for age_gated book when user is not age_verified", %{conn: conn} do
       user = insert(:user, age_verified: false)
-      insert(:book, isbn: "9780000000001", visibility_tier: "age_gated")
+      insert_book_with_edition(isbn: "9780000000001", visibility_tier: "age_gated")
 
       conn =
         conn

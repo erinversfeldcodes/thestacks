@@ -15,7 +15,8 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     image = insert(:uploaded_image)
     # Pre-insert the book the MockVisionClient returns so store_book finds it via
     # Books.find_existing/1 without needing to resolve metadata over HTTP.
-    book = insert(:book, isbn: "9780743273565")
+    book = insert(:book)
+    insert(:book_edition, book: book, isbn: "9780743273565")
     {:ok, user: user, image: image, book: book}
   end
 
