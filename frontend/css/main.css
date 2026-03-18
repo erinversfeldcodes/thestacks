@@ -1384,6 +1384,72 @@ h4 {
     border-top: 1px solid var(--parchment-border);
 }
 
+/* -- Rating -- */
+
+.book-detail__rating {
+    margin-top: 0.5rem;
+    font-size: var(--size-sm);
+    color: var(--parchment-ink, #3a2e1e);
+}
+
+.book-detail__rating--empty {
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+    font-style: italic;
+}
+
+/* -- Review section enrichment -- */
+
+.book-detail__review-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background-color: var(--parchment-border, #c4b69c);
+    flex-shrink: 0;
+}
+
+.book-detail__review-sentiment {
+    height: 0.5rem;
+    border-radius: 0.25rem;
+    background-color: var(--parchment-border, #c4b69c);
+    margin-top: 0.5rem;
+}
+
+/* -- Prices section -- */
+
+.book-detail__prices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.book-detail__prices-empty {
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+    font-style: italic;
+    font-size: var(--size-sm);
+}
+
+/* -- Author section links -- */
+
+.book-detail__author-link {
+    display: inline-block;
+    margin-top: 0.5rem;
+    color: var(--link-color, #6b4e2e);
+    text-decoration: underline;
+    font-size: var(--size-sm);
+}
+
+.book-detail__author-link:hover {
+    color: var(--link-hover, #4a351f);
+}
+
+/* -- Writing section -- */
+
+.book-detail__writing-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
 /* -- Stub notice (shared) -- */
 
 .stub-notice {
@@ -2336,6 +2402,14 @@ h4 {
     cursor: not-allowed;
 }
 
+/* -- Field validation -- */
+
+.login-card__field--valid .login-card__input { border-color: #6b7c3f; }
+.login-card__field--error .login-card__input { border-color: #9b6930; }
+.login-card__hint { font-size: 0.8rem; margin-top: 0.3rem; font-style: italic; }
+.login-card__hint--error { color: #9b6930; }
+.login-card__hint--valid { color: #6b7c3f; }
+
 /* -- Spinner inside submit -- */
 
 .login-card__submit .spinner--small {
@@ -2585,6 +2659,104 @@ h4 {
     }
 }
 
+/* -- Catalogue collection filter -- */
+
+.catalogue__collection-filter {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.catalogue__filter-btn {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--radius-sm, 0.25rem);
+    background: transparent;
+    color: var(--text-muted, #a09070);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.catalogue__filter-btn:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text, #e8dcc8);
+}
+
+.catalogue__filter-btn--active {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text, #e8dcc8);
+}
+
+/* -- Catalogue shelf actions -- */
+
+.catalogue__card-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    flex: 1;
+}
+
+.catalogue__card-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    margin: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    font-style: italic;
+    color: #6b4e2e;
+    background-color: #f5deb3;
+    border-radius: 0.25rem;
+}
+
+.catalogue__card-add {
+    display: block;
+    width: calc(100% - 1.5rem);
+    margin: 0.5rem 0.75rem;
+    padding: 0.35rem;
+    border: 1px dashed var(--parchment-border, #c4b69c);
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--text-muted, #a09070);
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.catalogue__card-add:hover,
+.catalogue__card-add:focus {
+    border-color: var(--link-color, #6b4e2e);
+    color: var(--link-color, #6b4e2e);
+    outline: 2px solid transparent;
+}
+
+.catalogue__card-picker {
+    padding: 0.5rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.catalogue__card-picker-option {
+    display: block;
+    width: 100%;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--parchment-border, #c4b69c);
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--parchment-ink, #3a2e1e);
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: left;
+    transition: background-color 0.15s;
+}
+
+.catalogue__card-picker-option:hover,
+.catalogue__card-picker-option:focus {
+    background-color: var(--parchment-border, #c4b69c);
+    outline: 2px solid transparent;
+}
+
 /* ===== Shelf Room (wraps label + bookcase on shelf pages) ===== */
 
 .page--shelf {
@@ -2674,6 +2846,9 @@ h4 {
 .shelf-row {
     position: relative;
     padding-bottom: calc(var(--plank-h) + var(--plank-lip));
+    /* Flatten 3D context so pulled-out books don't pierce into adjacent rows */
+    transform-style: flat;
+    isolation: isolate;
 }
 
 /* Dark recessed back with warm sconce reflection */
@@ -2716,7 +2891,9 @@ h4 {
     background: url('/textures/shelf-walnut-plank.png') repeat-x;
     background-size: auto 100%;
     filter: brightness(0.38) saturate(0.45);
-    z-index: 15;
+    /* Must sit above hovered books (z-index: 50) to prevent 3D pull-out
+       from visually clipping through the shelf below */
+    z-index: 60;
 }
 
 .shelf-row__plank::before {
@@ -2746,7 +2923,7 @@ h4 {
     background: url('/textures/shelf-walnut-plank.png') repeat-x;
     background-size: auto 100%;
     filter: brightness(0.25) saturate(0.4);
-    z-index: 15;
+    z-index: 60;
 }
 
 /* --- 3D BOOK --- */
