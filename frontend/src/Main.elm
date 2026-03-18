@@ -2,19 +2,21 @@ port module Main exposing (main)
 
 import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
+import Api
 import Browser
 import Browser.Navigation as Nav
-import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
+import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (class, href)
+import Html.Events exposing (onClick)
 import Json.Decode as Decode
+import Json.Encode
 import Navigation.Route as Route exposing (Route(..))
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
-import Page.Bookshelf.AntiLibrary as AntiLibrary
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
-import Page.Bookshelf.WishList as WishList
+import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
 import Page.Search as Search
@@ -28,7 +30,19 @@ import Url exposing (Url)
 port onSwipe : (Decode.Value -> msg) -> Sub msg
 
 
-main : Program () Model Msg
+port playLoginTransition : Json.Encode.Value -> Cmd msg
+
+
+port onLoginTransitionComplete : (Decode.Value -> msg) -> Sub msg
+
+
+port saveAuth : Json.Encode.Value -> Cmd msg
+
+
+port clearAuth : () -> Cmd msg
+
+
+main : Program Decode.Value Model Msg
 main =
     Browser.application
         { init = init
@@ -47,9 +61,7 @@ main =
 type Page
     = PageHome
     | PageLogin Login.Model
-    | PageLibrary Library.Model
-    | PageAntiLibrary AntiLibrary.Model
-    | PageWishList WishList.Model
+    | PageBookshelf Bookshelf.Model
     | PageReadingPile ReadingPile.Model
     | PageLookingForHome LookingForHome.Model
     | PageBookDetail BookDetail.Model
@@ -58,6 +70,7 @@ type Page
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
     | PageCostTransparency CostTransparency.Model
+    | PageCatalogue Catalogue.Model
     | PageNotFound
 
 
@@ -75,32 +88,107 @@ type alias Model =
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
+    , pendingAuthResponse : Maybe Api.AuthResponse
     }
 
 
-init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
-init _ url key =
+init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
     let
+        maybeAuth =
+            decodeFlags flags
+
         route =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage route Nothing Nothing
+            initPage route maybeAuth Nothing
     in
     ( { key = key
       , url = url
       , route = route
-      , auth = Nothing
+      , auth = maybeAuth
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
+      , pendingAuthResponse = Nothing
       }
     , cmd
     )
 
 
+decodeFlags : Decode.Value -> Maybe Auth
+decodeFlags flags =
+    let
+        authDecoder =
+            Decode.map4
+                (\token userId email displayName ->
+                    { user =
+                        { id = userId
+                        , email = email
+                        , displayName = displayName
+                        , role = "user"
+                        }
+                    , token = token
+                    }
+                )
+                (Decode.field "token" Decode.string)
+                (Decode.field "userId" Decode.string)
+                (Decode.field "email" Decode.string)
+                (Decode.field "displayName" Decode.string)
+    in
+    Decode.decodeValue authDecoder flags
+        |> Result.toMaybe
+
+
+requiresAuth : Route -> Bool
+requiresAuth route =
+    case route of
+        Home ->
+            False
+
+        Login ->
+            False
+
+        CostTransparency ->
+            False
+
+        Catalogue ->
+            False
+
+        BookDetail _ ->
+            False
+
+        NotFound ->
+            False
+
+        _ ->
+            True
+
+
 initPage : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
 initPage route maybeAuth maybePreviousRoute =
+    if requiresAuth route && maybeAuth == Nothing then
+        ( PageLogin Login.init, Cmd.none )
+
+    else
+        initPageAuthenticated route maybeAuth maybePreviousRoute
+
+
+initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
+initBookshelf config maybeAuth =
+    let
+        maybeToken =
+            Maybe.map .token maybeAuth
+
+        ( model, cmd ) =
+            Bookshelf.init config maybeToken
+    in
+    ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
+
+
+initPageAuthenticated : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
+initPageAuthenticated route maybeAuth maybePreviousRoute =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -113,25 +201,13 @@ initPage route maybeAuth maybePreviousRoute =
             ( PageLogin Login.init, Cmd.none )
 
         Library ->
-            let
-                ( model, cmd ) =
-                    Library.init maybeToken
-            in
-            ( PageLibrary model, Cmd.map LibraryMsg cmd )
+            initBookshelf Bookshelf.libraryConfig maybeAuth
 
         AntiLibrary ->
-            let
-                ( model, cmd ) =
-                    AntiLibrary.init maybeToken
-            in
-            ( PageAntiLibrary model, Cmd.map AntiLibraryMsg cmd )
+            initBookshelf Bookshelf.antiLibraryConfig maybeAuth
 
         WishList ->
-            let
-                ( model, cmd ) =
-                    WishList.init maybeToken
-            in
-            ( PageWishList model, Cmd.map WishListMsg cmd )
+            initBookshelf Bookshelf.wishListConfig maybeAuth
 
         ReadingPile ->
             let
@@ -142,10 +218,10 @@ initPage route maybeAuth maybePreviousRoute =
 
         LookingForHome ->
             let
-                ( model, cmd ) =
+                ( subModel, subCmd ) =
                     LookingForHome.init maybeToken
             in
-            ( PageLookingForHome model, Cmd.map LookingForHomeMsg cmd )
+            ( PageLookingForHome subModel, Cmd.map LookingForHomeMsg subCmd )
 
         BookDetail bookId ->
             let
@@ -173,8 +249,25 @@ initPage route maybeAuth maybePreviousRoute =
             in
             ( PageCostTransparency model, Cmd.map CostTransparencyMsg cmd )
 
+        Catalogue ->
+            let
+                ( model, cmd ) =
+                    Catalogue.init maybeToken
+            in
+            ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
+
         NotFound ->
             ( PageNotFound, Cmd.none )
+
+
+encodeAuth : Auth -> Json.Encode.Value
+encodeAuth auth =
+    Json.Encode.object
+        [ ( "token", Json.Encode.string auth.token )
+        , ( "userId", Json.Encode.string auth.user.id )
+        , ( "email", Json.Encode.string auth.user.email )
+        , ( "displayName", Json.Encode.string auth.user.displayName )
+        ]
 
 
 
@@ -185,9 +278,8 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | LoginMsg Login.Msg
-    | LibraryMsg Library.Msg
-    | AntiLibraryMsg AntiLibrary.Msg
-    | WishListMsg WishList.Msg
+    | LoginTransitionCompleted
+    | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
     | LookingForHomeMsg LookingForHome.Msg
     | BookDetailMsg BookDetail.Msg
@@ -196,6 +288,8 @@ type Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
     | CostTransparencyMsg CostTransparency.Msg
+    | CatalogueMsg Catalogue.Msg
+    | Logout
     | SwipeReceived String
     | SwipeIgnored
 
@@ -249,6 +343,17 @@ update msg model =
                         Login.NoOut ->
                             ( baseModel, baseCmd )
 
+                        Login.StartTransition authResponse ->
+                            ( { baseModel | pendingAuthResponse = Just authResponse }
+                            , Cmd.batch
+                                [ baseCmd
+                                , playLoginTransition
+                                    (Json.Encode.object
+                                        [ ( "duration", Json.Encode.int 4000 ) ]
+                                    )
+                                ]
+                            )
+
                         Login.LoggedIn authResponse ->
                             let
                                 auth =
@@ -261,87 +366,67 @@ update msg model =
                                     , token = authResponse.token
                                     }
                             in
-                            ( { baseModel | auth = Just auth }
-                            , Cmd.batch [ baseCmd, Nav.pushUrl model.key "/" ]
+                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
+                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
 
                 _ ->
                     ( model, Cmd.none )
 
-        LibraryMsg subMsg ->
-            case model.page of
-                PageLibrary subModel ->
+        LoginTransitionCompleted ->
+            case ( model.page, model.pendingAuthResponse ) of
+                ( PageLogin subModel, Just authResponse ) ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            Library.update subMsg subModel
+                            Login.update (Login.TransitionCompleted authResponse) subModel
 
                         baseModel =
-                            { model | page = PageLibrary newSubModel }
+                            { model | page = PageLogin newSubModel }
 
                         baseCmd =
-                            Cmd.map LibraryMsg subCmd
+                            Cmd.map LoginMsg subCmd
                     in
                     case outMsg of
-                        Library.NoOut ->
-                            ( baseModel, baseCmd )
-
-                        Library.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
+                        Login.LoggedIn ar ->
+                            let
+                                auth =
+                                    { user =
+                                        { id = ar.userId
+                                        , email = ar.email
+                                        , displayName = ar.displayName
+                                        , role = "user"
+                                        }
+                                    , token = ar.token
+                                    }
+                            in
+                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
+                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
+
+                        _ ->
+                            ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
 
-        AntiLibraryMsg subMsg ->
+        BookshelfMsg subMsg ->
             case model.page of
-                PageAntiLibrary subModel ->
+                PageBookshelf subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AntiLibrary.update subMsg subModel
+                            Bookshelf.update subMsg subModel
 
                         baseModel =
-                            { model | page = PageAntiLibrary newSubModel }
+                            { model | page = PageBookshelf newSubModel }
 
                         baseCmd =
-                            Cmd.map AntiLibraryMsg subCmd
+                            Cmd.map BookshelfMsg subCmd
                     in
                     case outMsg of
-                        AntiLibrary.NoOut ->
+                        Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
 
-                        AntiLibrary.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
-                            )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        WishListMsg subMsg ->
-            case model.page of
-                PageWishList subModel ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            WishList.update subMsg subModel
-
-                        baseModel =
-                            { model | page = PageWishList newSubModel }
-
-                        baseCmd =
-                            Cmd.map WishListMsg subCmd
-                    in
-                    case outMsg of
-                        WishList.NoOut ->
-                            ( baseModel, baseCmd )
-
-                        WishList.NavigateTo route ->
+                        Bookshelf.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
                                 [ baseCmd
@@ -521,6 +606,23 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        CatalogueMsg subMsg ->
+            case model.page of
+                PageCatalogue subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Catalogue.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageCatalogue newSubModel }
+                    , Cmd.map CatalogueMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         SwipeReceived direction ->
             let
                 maybeNext =
@@ -536,6 +638,11 @@ update msg model =
 
                 Nothing ->
                     ( model, Cmd.none )
+
+        Logout ->
+            ( { model | auth = Nothing, page = PageLogin Login.init }
+            , Cmd.batch [ clearAuth (), Nav.pushUrl model.key (Route.toPath Login) ]
+            )
 
         SwipeIgnored ->
             ( model, Cmd.none )
@@ -560,7 +667,10 @@ transitionClass from to =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    onSwipe decodeSwipe
+    Sub.batch
+        [ onSwipe decodeSwipe
+        , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        ]
 
 
 decodeSwipe : Decode.Value -> Msg
@@ -644,6 +754,9 @@ pageTitle route =
         CostTransparency ->
             "Cost Transparency — The Stacks"
 
+        Catalogue ->
+            "Catalogue — The Stacks"
+
         NotFound ->
             "Not Found — The Stacks"
 
@@ -651,27 +764,51 @@ pageTitle route =
 viewNav : Model -> Html Msg
 viewNav model =
     header [ class "app-header" ]
-        [ div [ class "app-header__brand" ]
-            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ] ]
+        [ div [ class "app-header__brand app-nav__dropdown" ]
+            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
+            , ul [ class "app-nav__dropdown-menu" ]
+                [ li []
+                    [ a [ href (Route.toPath CostTransparency), class "app-nav__dropdown-link" ]
+                        [ text "Costs" ]
+                    ]
+                ]
+            ]
         , nav [ class "app-nav" ]
             [ ul [ class "app-nav__list" ]
-                [ navItem model.route Library "Library"
-                , navItem model.route AntiLibrary "Antilibrary"
-                , navItem model.route WishList "Wish List"
-                , navItem model.route ReadingPile "Reading Pile"
-                , navItem model.route LookingForHome "Looking for a Home"
-                , navItem model.route Search "Search"
-                , navItem model.route Upload "Add Book"
-                , case model.auth of
+                (case model.auth of
                     Nothing ->
-                        navItem model.route Login "Sign In"
+                        [ navItem model.route Catalogue "Catalogue"
+                        , navItem model.route Login "Sign In"
+                        ]
 
                     Just auth ->
-                        Html.li [ class "app-nav__item" ]
-                            [ Html.span [ class "app-nav__user" ]
-                                [ text auth.user.displayName ]
+                        [ navItem model.route Library "Library"
+                        , navItem model.route AntiLibrary "Antilibrary"
+                        , navItem model.route WishList "Wish List"
+                        , navItem model.route ReadingPile "Reading Pile"
+                        , navItem model.route LookingForHome "Looking for a Home"
+                        , navDropdown model.route
+                            Catalogue
+                            "Catalogue"
+                            [ ( Search, "Search" )
+                            , ( Upload, "Add Book" )
                             ]
-                ]
+                        , li [ class "app-nav__item app-nav__dropdown" ]
+                            [ Html.span [ class "app-nav__link app-nav__user" ]
+                                [ text auth.user.displayName ]
+                            , ul [ class "app-nav__dropdown-menu" ]
+                                [ li []
+                                    [ a [ href (Route.toPath SettingsConsent), class "app-nav__dropdown-link" ]
+                                        [ text "Settings" ]
+                                    ]
+                                , li []
+                                    [ button [ class "app-nav__dropdown-link app-nav__logout", onClick Logout ]
+                                        [ text "Sign Out" ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                )
             ]
         ]
 
@@ -695,6 +832,36 @@ navItem currentRoute targetRoute label =
         ]
 
 
+navDropdown : Route -> Route -> String -> List ( Route, String ) -> Html Msg
+navDropdown currentRoute primaryRoute primaryLabel subItems =
+    let
+        isActive =
+            (currentRoute == primaryRoute)
+                || List.any (\( r, _ ) -> currentRoute == r) subItems
+
+        activeClass =
+            if isActive then
+                "app-nav__item app-nav__item--active app-nav__dropdown"
+
+            else
+                "app-nav__item app-nav__dropdown"
+    in
+    li [ class activeClass ]
+        [ a [ href (Route.toPath primaryRoute), class "app-nav__link" ]
+            [ text primaryLabel ]
+        , ul [ class "app-nav__dropdown-menu" ]
+            (List.map
+                (\( route, label ) ->
+                    li []
+                        [ a [ href (Route.toPath route), class "app-nav__dropdown-link" ]
+                            [ text label ]
+                        ]
+                )
+                subItems
+            )
+        ]
+
+
 viewPage : Model -> Html Msg
 viewPage model =
     case model.page of
@@ -704,14 +871,8 @@ viewPage model =
         PageLogin subModel ->
             Html.map LoginMsg (Login.view subModel)
 
-        PageLibrary subModel ->
-            Html.map LibraryMsg (Library.view subModel)
-
-        PageAntiLibrary subModel ->
-            Html.map AntiLibraryMsg (AntiLibrary.view subModel)
-
-        PageWishList subModel ->
-            Html.map WishListMsg (WishList.view subModel)
+        PageBookshelf subModel ->
+            Html.map BookshelfMsg (Bookshelf.view subModel)
 
         PageReadingPile subModel ->
             Html.map ReadingPileMsg (ReadingPile.view subModel)
@@ -737,6 +898,9 @@ viewPage model =
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
 
+        PageCatalogue subModel ->
+            Html.map CatalogueMsg (Catalogue.view subModel)
+
         PageNotFound ->
             viewNotFound
 
@@ -746,10 +910,10 @@ viewHome =
     div [ class "page page--home" ]
         [ h1 [ class "home__title" ] [ text "The Stacks" ]
         , p [ class "home__subtitle" ]
-            [ text "Your personal library, beautifully organised." ]
+            [ text "Your personal collection, beautifully organised." ]
         , div [ class "home__actions" ]
-            [ a [ href (Route.toPath Library), class "btn btn--primary" ]
-                [ text "View Library" ]
+            [ a [ href (Route.toPath AntiLibrary), class "btn btn--primary" ]
+                [ text "View Antilibrary" ]
             , a [ href (Route.toPath Upload), class "btn btn--secondary" ]
                 [ text "Add a Book" ]
             ]

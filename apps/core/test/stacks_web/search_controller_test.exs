@@ -12,10 +12,21 @@ defmodule StacksWeb.SearchControllerTest do
     %{conn: authed_conn}
   end
 
+  defp insert_book_with_edition(attrs) do
+    book = insert(:book, Keyword.take(attrs, [:title, :author]))
+
+    insert(
+      :book_edition,
+      Keyword.merge([book: book, is_primary: true], Keyword.take(attrs, [:isbn]))
+    )
+
+    book
+  end
+
   describe "GET /api/search" do
     test "returns matching books for query", %{conn: conn} do
-      insert(:book, title: "Elixir in Action", isbn: "9781617295027")
-      insert(:book, title: "Programming Phoenix", isbn: "9781680502268")
+      insert_book_with_edition(title: "Elixir in Action", isbn: "9781617295027")
+      insert_book_with_edition(title: "Programming Phoenix", isbn: "9781680502268")
 
       conn = get(conn, "/api/search", q: "Elixir")
       response = json_response(conn, 200)
@@ -40,7 +51,9 @@ defmodule StacksWeb.SearchControllerTest do
     end
 
     test "respects a valid limit parameter", %{conn: conn} do
-      for i <- 1..5, do: insert(:book, title: "Rustica#{i}", isbn: "978000000000#{i}")
+      for i <- 1..5 do
+        insert_book_with_edition(title: "Rustica#{i}", isbn: "978000000000#{i}")
+      end
 
       conn = get(conn, "/api/search", q: "Rustica", limit: "2")
       response = json_response(conn, 200)
@@ -55,7 +68,7 @@ defmodule StacksWeb.SearchControllerTest do
 
     test "returns author info when book has an associated author", %{conn: conn} do
       author = insert(:author, name: "Ursula K. Le Guin")
-      insert(:book, title: "Lefthandedness", isbn: "9780441478125", author: author)
+      insert_book_with_edition(title: "Lefthandedness", isbn: "9780441478125", author: author)
 
       conn = get(conn, "/api/search", q: "Lefthandedness")
       response = json_response(conn, 200)

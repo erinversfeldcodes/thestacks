@@ -9,11 +9,15 @@ module Page.Bookshelf.ReadingPile exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
-import Components.EmptyBookshelf exposing (emptyBookshelf)
-import Html exposing (Html, div, h1, p, text)
-import Html.Attributes exposing (class)
+import Components.Spine exposing (WearLevel(..))
+import Html exposing (Html, button, div, p, text)
+import Html.Attributes exposing (attribute, class, style)
+import Html.Events exposing (onClick, onMouseEnter, stopPropagationOn)
 import Http
+import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
+import Page.Bookshelf.Helpers exposing (pickTexture)
+import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -21,6 +25,7 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
+    , selectedBookId : Maybe String
     }
 
 
@@ -33,6 +38,9 @@ type Msg
     = BooksLoaded (Result Http.Error (List Placement))
     | VerifyAge
     | DismissAgeGate
+    | BookHovered String
+    | BookClicked Book
+    | Deselect
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -46,7 +54,7 @@ init maybeToken =
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, showAgeGate = False }, cmd )
+    ( { books = Loading, showAgeGate = False, selectedBookId = Nothing }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -69,57 +77,144 @@ update msg model =
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
+        BookHovered bookId ->
+            ( { model | selectedBookId = Just bookId }, Cmd.none, NoOut )
+
+        BookClicked bk ->
+            if model.selectedBookId == Just bk.id then
+                ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+
+            else
+                ( { model | selectedBookId = Just bk.id }, Cmd.none, NoOut )
+
+        Deselect ->
+            ( { model | selectedBookId = Nothing }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--shelf shelf-reading-pile" ]
-        [ h1 [ class "page__title" ] [ text "Reading Pile" ]
-        , if model.showAgeGate then
-            ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+    div
+        [ class "page page--shelf shelf-reading-pile"
+        , onClick Deselect
+        ]
+        [ div [ class "wallpaper wallpaper--dragons" ] []
+        , div [ class "lighting" ] []
+        , div [ class "reading-pile" ]
+            [ div [ class "reading-pile__label" ] [ text "Reading Pile" ]
+            , if model.showAgeGate then
+                ageGate
+                    { onVerify = VerifyAge
+                    , onDismiss = DismissAgeGate
+                    }
 
-          else
-            case model.books of
-                NotAsked ->
-                    text ""
+              else
+                div [ class "reading-pile__scene" ]
+                    [ div [ class "reading-pile__floor", attribute "aria-hidden" "true" ] []
+                    , div [ class "reading-pile__chair-area" ]
+                        [ case model.books of
+                            NotAsked ->
+                                text ""
 
-                Loading ->
-                    div [ class "loading" ] [ text "Loading your reading pile..." ]
+                            Loading ->
+                                div [ class "reading-pile__empty-msg" ]
+                                    [ text "Loading your reading pile..." ]
 
-                Failure _ ->
-                    p [ class "error" ]
-                        [ text "Could not load your reading pile. Please try again." ]
+                            Failure _ ->
+                                p [ class "error" ]
+                                    [ text "Could not load your reading pile. Please try again." ]
 
-                Success placements ->
-                    if List.isEmpty placements then
-                        emptyBookshelf
-                            { bookshelf = "reading_pile"
-                            , message =
-                                "Your reading pile is empty — time to pick something up."
-                            }
+                            Success placements ->
+                                if List.isEmpty placements then
+                                    div [ class "reading-pile__empty-msg" ]
+                                        [ text "Nothing on the pile right now. Move a book from your Antilibrary to start reading." ]
 
-                    else
-                        div [ class "pile-view" ]
-                            (List.map viewCover placements)
+                                else
+                                    viewBookPile model.selectedBookId placements
+                        , div [ class "armchair", attribute "aria-hidden" "true" ]
+                            [ div [ class "armchair__back" ] []
+                            , div [ class "armchair__seat" ] []
+                            , div [ class "armchair__arm armchair__arm--left" ] []
+                            , div [ class "armchair__arm armchair__arm--right" ] []
+                            , div [ class "armchair__leg armchair__leg--fl" ] []
+                            , div [ class "armchair__leg armchair__leg--fr" ] []
+                            , div [ class "armchair__leg armchair__leg--bl" ] []
+                            , div [ class "armchair__leg armchair__leg--br" ] []
+                            ]
+                        ]
+                    ]
+            ]
         ]
 
 
-viewCover : Placement -> Html Msg
-viewCover placement =
+viewBookPile : Maybe String -> List Placement -> Html Msg
+viewBookPile selectedBookId placements =
+    div [ class "book-pile", attribute "role" "list" ]
+        (List.indexedMap (viewPiledBook selectedBookId) (List.take 50 placements))
+
+
+viewPiledBook : Maybe String -> Int -> Placement -> Html Msg
+viewPiledBook selectedBookId index placement =
     let
-        ( title, author ) =
+        bookData =
             case placement.book of
-                Just book ->
-                    ( book.title, book.author.name )
+                Just bk ->
+                    bk
 
                 Nothing ->
-                    ( "Unknown Title", "Unknown Author" )
+                    { id = ""
+                    , title = "Unknown Title"
+                    , author = Nothing
+                    , description = Nothing
+                    , editions = []
+                    , primaryEdition = Nothing
+                    , editionCount = 0
+                    , subjects = []
+                    , visibilityTier = Types.Book.Public
+                    }
+
+        pageCount =
+            Maybe.withDefault 200 (bookPageCount bookData)
+
+        texture =
+            pickTexture bookData.title
+
+        spineW =
+            Components.Spine.spineWidth pageCount
+
+        spineH =
+            Components.Spine.spineHeight pageCount
+
+        offset =
+            (modBy 5 (index * 3 + 2) - 2) * 3
+
+        isSelected =
+            selectedBookId == Just bookData.id
+
+        bookClass =
+            if isSelected then
+                "book-pile__book book-pile__book--selected"
+
+            else
+                "book-pile__book"
     in
-    div [ class "pile-view__book" ]
-        [ div [ class "pile-view__cover" ]
-            [ p [ class "pile-view__title" ] [ text title ]
-            , p [ class "pile-view__author" ] [ text author ]
+    button
+        [ class bookClass
+        , attribute "role" "listitem"
+        , onMouseEnter (BookHovered bookData.id)
+        , stopPropagationOn "click"
+            (Decode.succeed ( BookClicked bookData, True ))
+        , style "width" (String.fromInt spineH ++ "px")
+        , style "height" (String.fromInt spineW ++ "px")
+        , style "margin-left" (String.fromInt offset ++ "px")
+        ]
+        [ div [ class "book-pile__rotated-book" ]
+            [ Components.Spine.book
+                { pageCount = pageCount
+                , wearLevel = Softened
+                , texture = texture
+                , title = bookData.title
+                , author = Types.Book.authorName bookData
+                , coverImageUrl = bookCoverImageUrl bookData
+                }
             ]
         ]

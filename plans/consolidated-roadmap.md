@@ -1,6 +1,6 @@
 # Plan: The Stacks — Consolidated Implementation Roadmap
 **Created**: 2026-03-05
-**Updated**: 2026-03-13
+**Updated**: 2026-03-17
 **Status**: Draft
 **Branch**: `main` (greenfield — no existing code)
 
@@ -8,9 +8,13 @@
 
 ## Context
 
-The Stacks is a greenfield, open-source, self-hosted book management and discovery platform. This plan sequences every deliverable from empty repository to feature-complete across 5 phases, with cross-cutting infrastructure woven in. The build sequence derives from the ordered dependency graph in `docs/implementation-mapping.md`.
+The Stacks is a greenfield book management and discovery platform. This plan sequences every deliverable from empty repository to a feature-complete Phase 1, with deferred features (Third Spaces, partner integration, groups, comments) in Phase 2. The build sequence derives from the ordered dependency graph in `docs/implementation-mapping.md`.
 
-**Target user**: A book-obsessive who self-hosts a beautiful private library that enriches their reading life with price tracking, review aggregation, author intelligence, local bookshop discovery, and community reading spaces. The platform is visibility-first: content defaults to owner-only and is selectively shared with close friends, curated groups, or the broader platform community. NOT a public social network. NOT a corporate tool.
+**Phase 1 is the full product** for individual and multi-user use: upload, shelve, browse, enrich (reviews, prices, author intel, events), simple fixed-price marketplace (Stitch Money + Pargo), blog with LLM book associations, visibility/privacy controls, metrics dashboard, RSS feeds, and accessibility. The only deferred features are Third Spaces discovery, partner push API, social groups, and comments.
+
+**Target user**: A book-obsessive whose reading life is enriched with price tracking, review aggregation, author intelligence, local bookshop discovery, and a marketplace for rehoming books. The platform is visibility-first: content defaults to owner-only and is selectively shared with the broader platform community. NOT a public social network. NOT a corporate tool.
+
+**Self-hosting**: The source is visible and forkable, but self-hosting is not a first-class use case. Forks can modify everything. The canonical deployment is the hosted platform with KYC age verification at registration.
 
 **Aesthetic**: Dark-academic-meets-cottage-core. Walnut shelves, botanical prints, parchment textures, hand-lettered flyers, cork boards.
 
@@ -22,12 +26,15 @@ The Stacks is a greenfield, open-source, self-hosted book management and discove
 - **Frontend**: Elm SPA (zero runtime exceptions, TEA architecture, RemoteData pattern)
 - **Vision service**: Python + FastAPI on Modal (Qwen2.5-VL-7B-Instruct on A10G GPU; HMAC-authenticated HTTPS; not co-located with core)
 - **Price scraper**: Rust microservice (TOML config per store, standalone OSS tool)
-- **Database**: PostgreSQL with 3 schemas (`op`, `wh`, `audit`), 3 DB roles
+- **Database**: PostgreSQL with 3 schemas (`op`, `wh`, `audit`), 3 DB roles. **Works/editions model**: `books` = work (logical book), `book_editions` = edition (ISBN, format, cover). Placements/reviews reference works; prices/partner inventory reference editions.
 - **Data transforms**: dbt (staging -> intermediate -> marts)
 - **Event bus**: Oban-backed EDA with `event_log` table (no Kafka, no RabbitMQ)
-- **Schema contracts**: Protobuf + buf (JSON on wire, `.proto` as source of truth)
+- **Schema contracts**: Protobuf + buf (JSON on wire, `.proto` as source of truth). Lands early — event envelope and core messages are proto-defined from day one.
 - **Infrastructure**: Fly.io (IAD region), Nix/Flox dev environment, Docker for deploys
-- **Partner integration**: One-directional (partner -> platform), API key auth (Argon2), Protobuf-validated payloads
+- **Visibility**: `resolve_visibility/2` as single gate for all content access. RLS designed from day one as safety net. Active marketplace listings punch through profile ceiling.
+- **KYC**: Age verification via Smile Identity / Yoti / Sumsub at registration. Config flag `REQUIRE_KYC` (false during dev, true before launch). Stitch Money handles FICA for marketplace payouts.
+- **Email**: Resend or Postmark for transactional email (registration confirmation, password reset, marketplace notifications, GDPR, notification preferences).
+- **Partner integration** (Phase 2): One-directional (partner -> platform), API key auth (Argon2), Protobuf-validated payloads
 
 ---
 
@@ -35,44 +42,41 @@ The Stacks is a greenfield, open-source, self-hosted book management and discove
 
 The orchestrator runs on **Sonnet 4.6** throughout. Subagents use the model indicated below.
 
-| Phase(s) | Model | Rationale |
-|----------|-------|-----------|
-| Phase 1A (DB + migrations) | **Sonnet 4.6** | Well-specified schema from docs; mechanical translation |
-| Phase 1B (Elixir contexts) | **Opus 4.6** | Architectural judgment — context boundaries, Ecto.Multi patterns, event emission design |
-| Phase 1C (Elm frontend) | **Sonnet 4.6** | TEA patterns are mechanical once types are defined |
-| Phase 1D (Python vision service on Modal) | **Sonnet 4.6** | Small, well-specified FastAPI service deployed to Modal |
-| Phase 1D.1 (Vision eval framework) | **Sonnet 4.6** | Framework harness is mechanical; corpus assembly and model decision are human |
-| Phase 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
-| Phase 1E (Platform + CI) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
-| Phase 2 (Enrichment) | **Opus 4.6** | External API integration, scraper architecture, LLM guardrails — judgment required |
-| Phase 3 (Partner + EDA) | **Opus 4.6** | Event bus design, Protobuf schema authoring, partner auth — security-critical |
-| Phase 4 (Polish) | **Sonnet 4.6** | Third Spaces, RSS feeds, metrics — well-specified features |
-| Phase 5 (Marketplace) | **Opus 4.6** | Payment integration, KYC, offer thread state machines — high stakes |
-| Phase 6 (Social Graph & Visibility) | **Opus 4.6** | Visibility architecture, block graph, groups — security-critical |
-| Phase 7 (Blog & Comments) | **Sonnet 4.6** | Blog posts, LLM association, comment threads — well-specified |
+| Sub-Phase | Model | Rationale |
+|-----------|-------|-----------|
+| 1A (DB + migrations + RLS design) | **Sonnet 4.6** | Well-specified schema from docs; mechanical translation |
+| 1B.1 (Foundation + Event Bus + Protobuf) | **Opus 4.6** | Event bus design, proto schema authoring, security plugs — architectural judgment |
+| 1B.2 (Core Book Management) | **Opus 4.6** | Works/editions model, two-step upload, multi-format merge — judgment required |
+| 1B.3 (Visibility + RLS) | **Opus 4.6** | Security-critical — resolve_visibility/2, block graph, ceiling rules, RLS policies |
+| 1C.1 (Rust Scraper) | **Sonnet 4.6** | Well-specified TOML-driven scraper; pattern-following |
+| 1C.2 (Enrichment Contexts) | **Opus 4.6** | External API integration, LLM guardrails, discovery agent — judgment required |
+| 1D (Python Vision Sidecar) | **Sonnet 4.6** | Small, well-specified FastAPI service |
+| 1D.1 (Vision eval framework) | **Sonnet 4.6** | Framework harness is mechanical; corpus assembly is human |
+| 1D.2 (Local OCR pre-pass) | **Sonnet 4.6** | Well-specified in-process library integration |
+| 1E.1 (Marketplace Backend) | **Opus 4.6** | Payment integration (Stitch Money), shipping (Pargo), listing state machine — high stakes |
+| 1E.2 (Blog Backend) | **Sonnet 4.6** | Blog CRUD, LLM association worker — well-specified once visibility exists |
+| 1E.3 (RSS + Metrics + Email) | **Sonnet 4.6** | Feed generation, dbt marts, email templates — pattern-following |
+| 1F (Elm Frontend — 4 waves) | **Sonnet 4.6** | TEA patterns are mechanical once API interfaces are defined |
+| 1G (Platform + Deployment) | **Sonnet 4.6** | Config files, Dockerfiles, GitHub Actions — pattern-following |
+| Phase 2 (Third Spaces, Partners, Groups) | **Opus 4.6** | Partner auth, Protobuf partner schemas, group semantics — judgment required |
 
 ---
 
 ## Pre-Flight: Credential & Account Provisioning (human task)
 
-Agents cannot create accounts. This must be done by a human before Phase 1E (first deployment). Code work in 1A–1D can proceed immediately without credentials.
+Agents cannot create accounts. This must be done by a human before Phase 1G (first deployment). Code work in 1A–1F can proceed with mocked services. **Long-lead items** (Stitch Money, KYC provider) should be provisioned early — they may involve contracts and approval processes.
 
 | Service | Required for | What to provision |
 |---------|-------------|-------------------|
-| Fly.io | Phase 1E deploy | Organisation created; 2 apps (`thestacks-core`, `thestacks-scraper`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
-| Neon PostgreSQL | Phase 1E DB | Serverless PostgreSQL; connection string with `?sslmode=require`; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
-| **Modal** | Phase 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret (`thestacks-vision`). Same secret set as Fly.io secret on `thestacks-core`. |
-| Brave Search | Phase 2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
-| Resend or Postmark | Phase 3 partner notifications | API key; `EMAIL_API_KEY` in `.env` |
-| Domain + DNS | Phase 1E | Domain pointed to Fly.io; TLS via Fly |
-
-**Optional (later phases):**
-
-| Service | Required for | What to provision |
-|---------|-------------|-------------------|
-| Smile Identity / Yoti / Sumsub | Phase 1 (late) age verification | API key; `KYC_API_KEY` |
-| Stitch Money | Phase 5 marketplace payments | API key; `STITCH_API_KEY`, webhook secret |
-| Pargo | Phase 5 marketplace shipping | API key; `PARGO_API_KEY` |
+| Fly.io | 1G deploy | Organisation created; 3 apps (`thestacks-core`, `thestacks-scraper`, `thestacks-searxng`); `FLY_API_TOKEN` in GitHub secrets. Vision runs on Modal, not Fly. |
+| Neon PostgreSQL | 1G DB | Serverless PostgreSQL; connection string with `?sslmode=require`; 3 DB roles (`stacks_app`, `stacks_dbt`, `stacks_readonly`) |
+| **Modal** | 1D vision calls | Account created; `modal deploy apps/vision/modal_app.py`; `VISION_HMAC_SECRET` set as Modal secret. |
+| Brave Search | 1C.2 discovery | API key; `BRAVE_SEARCH_API_KEY` in `.env` |
+| Resend or Postmark | 1E.3 email | API key; `EMAIL_API_KEY` in `.env`. Needed for registration confirmation, password reset, marketplace notifications, GDPR. |
+| Smile Identity / Yoti / Sumsub | 1E.1 KYC | API key; `KYC_API_KEY`. **Long lead** — may require vendor contract. Config flag `REQUIRE_KYC=false` allows development without it; switch to `true` before launch. |
+| Stitch Money | 1E.1 marketplace payments | API key; `STITCH_API_KEY`, webhook secret. **Long lead** — requires SA business registration + Stitch onboarding. Stitch handles FICA for seller payouts. |
+| Pargo | 1E.1 marketplace shipping | API key; `PARGO_API_KEY` |
+| Domain + DNS | 1G | Domain pointed to Fly.io; TLS via Fly |
 
 **Validate** by checking `.env.example` against `apps/core/config/runtime.exs` — every referenced env var must have a value before deployment.
 
@@ -142,45 +146,65 @@ thestacks/
 
 ---
 
-## GROUP 1: MVP (Phase 1)
+## Phase 1: The Full Product
 
-> The core loop: upload a photo, identify a book, place it on a shelf, browse and manage. Everything a single user needs to start using The Stacks.
+> The complete individual + multi-user experience: upload, shelve, browse, enrich (reviews, prices, author intel, events), simple fixed-price marketplace (Stitch Money + Pargo), blog with LLM book associations, visibility/privacy controls, metrics dashboard, RSS feeds, and accessibility. Deferred: Third Spaces, partner push API, groups, comments, closed bid marketplace.
 
 ### Phase 1A — Database Foundation (database-agent)
-**Objective**: All operational tables, indexes, and DB roles exist. Migrations pass. dbt can connect.
+**Objective**: ALL operational tables for the entire expanded scope, indexes, DB roles, and RLS policy designs exist. One migration wave — no revisits. dbt staging models for all tables.
 **Starts after**: Repository scaffolding committed.
 
 **Migrations to create** (in order):
 
 1. `create_schemas` — create `op`, `wh`, `audit` schemas; set `search_path`
-2. `create_users` — `op.users` with `profile_visibility`, `website_url`; role enum
+2. `create_users` — `op.users` with `profile_visibility`, `website_url`, `onboarding_completed`, notification preference booleans (`notify_wishlist_availability`, `notify_marketplace`, `notify_group_invitations`, `notify_event_matches`); role enum
 3. `create_authors` — `op.authors`
-4. `create_books` — `op.books` with ISBN unique index, GIN index on title tsvector
-5. `create_bookshelves` — `op.bookshelves` with `visibility`, `visibility_group_id`
-6. `create_bookshelf_placements` — `op.bookshelf_placements` with `visibility`, `listing_mode`, `listing_status`, `listing_price_cents`, `listing_min_price_cents`
-7. `create_bookshelf_placement_history` — `op.bookshelf_placement_history`
-8. `create_uploaded_images` — `op.uploaded_images`
-9. `create_audit_log` — `audit.audit_log` (append-only)
-10. `create_discovered_sources` — `op.discovered_sources`
-11. `create_review_snapshots` — `op.review_snapshots`
-12. `create_bookstores` — `op.bookstores`
-13. `create_price_snapshots` — `op.price_snapshots`
-14. `create_bookstore_events` — `op.bookstore_events`
-15. `create_third_spaces` — `op.third_spaces`
-16. `create_third_space_events` — `op.third_space_events`
-17. `create_event_log` — `op.event_log` with index on `(event_type, aggregate_id, occurred_at DESC)`
-18. `create_oban_tables` — Oban migration (`Oban.Migration`)
-19. `create_db_roles` — SQL migration for `stacks_app`, `stacks_dbt`, `stacks_readonly` roles with appropriate grants
+4. `create_books` — `op.books` as **works** (no ISBN on this table — ISBN lives on `book_editions`). GIN index on title tsvector. Contains: `title`, `author_id`, `description`, `subjects`, `bisac_codes`, `visibility_tier`, `open_library_work_id`.
+5. `create_book_editions` — `op.book_editions` with `isbn UNIQUE NOT NULL` (the hard gate), `book_id FK`, `format` enum, `is_primary BOOLEAN`, `cover_image_url`, `page_count`, `publisher`, `publication_year`, `language`, `open_library_edition_id`, `google_books_id`. Index on `book_id`.
+6. `create_bookshelves` — `op.bookshelves` with `visibility`, `visibility_group_id`
+7. `create_bookshelf_placements` — `op.bookshelf_placements` with `visibility`, `listing_mode` (`ENUM('fixed', 'offers')` — closed bid deferred), `listing_status`, `listing_price_cents`, `listing_min_price_cents`. **No `formats TEXT[]` column** — formats are derived from `book_editions`.
+8. `create_bookshelf_placement_history` — `op.bookshelf_placement_history`
+9. `create_uploaded_images` — `op.uploaded_images` (references `book_editions` via `edition_id`, not `books`)
+10. `create_audit_log` — `audit.audit_log` (append-only)
+11. `create_discovered_sources` — `op.discovered_sources` with status enum including `'excluded'`, `excluded_at`, `exclusion_email`
+12. `create_review_snapshots` — `op.review_snapshots` (references `books` works, not editions — reviews are about the work)
+13. `create_bookstores` — `op.bookstores`
+14. `create_price_snapshots` — `op.price_snapshots` (references `book_editions` via `edition_id` — prices are per edition)
+15. `create_bookstore_events` — `op.bookstore_events`
+16. `create_third_spaces` — `op.third_spaces` with `opted_out BOOLEAN`, `opted_out_at TIMESTAMPTZ`
+17. `create_third_space_events` — `op.third_space_events`
+18. `create_event_log` — `op.event_log` with index on `(event_type, aggregate_id, occurred_at DESC)`
+19. `create_user_blocks` — `op.user_blocks` with unique `(blocker_id, blocked_id)`
+20. `create_groups` — `op.groups` with type enum `(close_friends, broadcast, subscription)`
+21. `create_group_members` — `op.group_members`
+22. `create_group_invitations` — `op.group_invitations` with status enum
+23. `create_visibility_grants` — `op.visibility_grants` (polymorphic per-resource grants)
+24. `create_blog_posts` — `op.blog_posts` with visibility, `published_at TIMESTAMPTZ`
+25. `create_post_book_associations` — `op.post_book_associations` with confidence score, source enum
+26. `create_offer_threads` — `op.offer_threads` per `(placement_id, buyer_id)`, status enum
+27. `create_offer_messages` — `op.offer_messages` with type enum `(message, offer, counter, accept, decline)`
+28. `create_listings` — `op.listings` with pricing_mode `(fixed, offer)`, status, condition, photos
+29. `create_transactions` — `op.transactions` with payment/shipping status
+30. `create_oban_tables` — Oban migration (`Oban.Migration`)
+31. `create_db_roles` — SQL migration for `stacks_app`, `stacks_dbt`, `stacks_readonly` roles with appropriate grants
 
-> **Note**: `my_writing_links` table is not created — the feature is superseded by native `blog_posts` (Phase 7). `website_url` on `users` covers the external-link use case.
+> **Note**: `my_writing_links` table is not created — superseded by `blog_posts`. `website_url` on `users` covers the external-link use case.
+> **Note**: Group tables (20-23) are created now even though group features are deferred to Phase 2. The `visibility_grants` and `groups` tables are needed by the visibility infrastructure (1B.3) for the ceiling rule and shelf visibility options.
+
+**RLS policy design** (designed now, enforcement deferred until after core controllers are built):
+- `bookshelf_placements`: user can only read/write their own placements (except public marketplace listings)
+- `blog_posts`: user can only write their own; reads filtered by visibility
+- `offer_threads` / `offer_messages`: scoped to `(placement_id, buyer_id)` — only buyer and seller
+- Active marketplace listings (`listing_status = 'active'`) are exempt from profile ceiling — always visible to platform users
+- RLS policies documented in `docs/rls-design.md`; enforced via `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` after 1B.3 visibility contexts pass tests
 
 **dbt setup:**
 - `profiles.yml` pointing to `stacks_dbt` role
 - `dbt_project.yml` with `+materialized: view` for staging, `+schema` routing per schema
 - `macros/generate_schema_name.sql` — custom macro so seeds land in `op`/`audit` without target-schema prefix
 - `packages.yml` — pin `AxelThevenot/dbt-assertions` for row-level data quality assertions (see below); run `dbt deps` after creating
-- Staging models: `stg_books`, `stg_authors`, `stg_users`, `stg_bookshelves`, `stg_bookshelf_placements`, `stg_bookshelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`
-- Seed fixtures in `dbt/seeds/` for all 8 staging tables (small CSVs, internally-consistent UUIDs)
+- Staging models for ALL tables: `stg_books`, `stg_book_editions`, `stg_authors`, `stg_users`, `stg_bookshelves`, `stg_bookshelf_placements`, `stg_bookshelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`, `stg_discovered_sources`, `stg_review_snapshots`, `stg_bookstores`, `stg_price_snapshots`, `stg_bookstore_events`, `stg_third_spaces`, `stg_third_space_events`, `stg_event_log`, `stg_user_blocks`, `stg_groups`, `stg_group_members`, `stg_blog_posts`, `stg_post_book_associations`, `stg_offer_threads`, `stg_partners`, `stg_partner_inventory`, `stg_partner_events`, `stg_partner_spaces`, `stg_listings`, `stg_transactions`
+- Seed fixtures in `dbt/seeds/` for core tables (small CSVs, internally-consistent UUIDs) — books, editions, authors, users, bookshelves, placements, audit_log minimum
 - Empty intermediate and mart directories with `.gitkeep`
 
 **dbt-assertions** (`AxelThevenot/dbt-assertions`, pin to `1.8.3`): adds row-level assertions to model YAML files so failing rows are identified individually rather than the test just reporting a count. Wire into staging model schemas as follows:
@@ -197,20 +221,23 @@ packages:
 ```
 
 **Files created:**
-- `apps/core/priv/repo/migrations/` — 19 migration files
-- `dbt/models/staging/` — 8 staging model SQL files
-- `dbt/seeds/` — 8 CSV seed files
+- `apps/core/priv/repo/migrations/` — 31 migration files
+- `dbt/models/staging/` — ~28 staging model SQL files
+- `dbt/seeds/` — core seed CSV files
+- `docs/rls-design.md` — RLS policy documentation
 - `dbt/macros/generate_schema_name.sql`
 - `dbt/packages.yml`
 - `dbt/profiles.yml`, `dbt/dbt_project.yml`
 
 **Test command**: `just test-dbt`
 **DoD:**
-- [ ] All 19 migrations run without error
+- [ ] All 31 migrations run without error
 - [ ] `mix ecto.rollback --all` succeeds (migrations are reversible)
 - [ ] DB roles exist with correct grants
 - [ ] `dbt run --select staging` succeeds
 - [ ] GIN index exists on `books.title`
+- [ ] `book_editions.isbn` has UNIQUE constraint
+- [ ] `book_editions.book_id` has index
 - [ ] `audit_log` has INSERT-only grant for `stacks_app`
 - [ ] `event_log` index exists on `(event_type, aggregate_id, occurred_at DESC)`
 - [ ] `dbt deps` installs `dbt-assertions` without errors
@@ -218,18 +245,26 @@ packages:
 
 ---
 
-### Phase 1B — Elixir Core Contexts (elixir-agent)
-**Objective**: All Phoenix contexts, controllers, and Oban workers for MVP stories exist and pass tests. No frontend yet — API-only.
+### Phase 1B — Elixir Core (3 tracks)
+**Objective**: All Phoenix contexts, controllers, and Oban workers for the expanded scope. API-only — no frontend yet.
 **Starts after**: Phase 1A committed.
-**Parallel with**: Phase 1C (Elm) and Phase 1D (Python vision service) can start once context interfaces are defined (after day 1 of 1B).
+**Parallel with**: Phase 1C.1 (Rust scraper) and Phase 1D (Python vision) can start immediately. Phase 1F (Elm) can start once 1B.2 API interfaces are defined.
 
-#### 1B.1 — Foundation Contexts
+#### 1B.1 — Foundation + Event Bus + Protobuf (MUST be first)
 
-**`Stacks.Accounts`** — user registration, authentication, Guardian pipeline
+**`Stacks.Accounts`** — user registration, authentication, profile, settings, Guardian pipeline
 - `Stacks.Accounts.register/1`, `authenticate/2`, `get_user/1`
+- `Stacks.Accounts.complete_onboarding/1` — sets `onboarding_completed = true` (US-14.1.2)
+- `Stacks.Accounts.update_profile/2` — display name, email (requires password), website URL (US-17.2.1)
+- `Stacks.Accounts.update_location/2` — city, country_code; emits `user.location_updated` event (US-17.2.2)
+- `Stacks.Accounts.change_password/2` — verify current, hash new with Argon2 (US-17.2.3)
+- `Stacks.Accounts.update_notification_preferences/2` — toggle email notification booleans (US-17.3.1)
 - Guardian serializer, auth pipeline plug, error handler
 - `StacksWeb.AuthController` — `login/2`, `logout/2`, `register/2`
+- `StacksWeb.UserSettingsController` — `update_profile/2`, `change_password/2`, `update_notifications/2`
 - Owner bootstrap: first user to register becomes owner
+- Login redirects to `/antilibrary`; first-time registration triggers onboarding flow (US-14.1.2)
+- KYC integration: config flag `REQUIRE_KYC` (false during dev). When true, registration requires age verification via Smile Identity / Yoti / Sumsub before account is active.
 
 **`Stacks.Audit`** — append-only audit logging
 - `Stacks.Audit.log/3` (action, actor, metadata)
@@ -241,30 +276,57 @@ packages:
 - `grant_consent/2`, `revoke_consent/2`, `check_consent/2`
 - `StacksWeb.Plugs.ConsentCheck`
 
+**`Stacks.Events`** — event bus infrastructure (MOVED UP from old Phase 3B)
+- `Stacks.Events.emit/1` — insert into `event_log`, enqueue `EventSubscriberWorker` per registered subscriber
+- `Stacks.Events.replay/3` — replay events for a given aggregate
+- `Stacks.Events.Registry` — subscriber mapping (`event_type -> [handler_module]`)
+- `Stacks.Events.Upcaster` — pattern-matched version transforms
+- `Stacks.Events.SubscriberWorker` — Oban worker that dispatches to subscriber modules
+- Event payloads use Protobuf-defined `EventEnvelope` (see below)
+
+**Protobuf core schemas** (MOVED UP from old Phase 3A)
+- `proto/stacks/internal/event_bus.proto` — `EventEnvelope` (event_type, aggregate_type, aggregate_id, schema_version, payload, metadata, occurred_at)
+- `proto/stacks/common/book.proto` — Book, Edition, Author, ISBN messages
+- `proto/stacks/common/location.proto` — Country, City, Coordinates
+- `buf lint` + `buf generate` for Elixir and Elm (Elm decoders checked in)
+- Partner protos (inventory, events, spaces) deferred to Phase 2
+
 **Files:**
 - `apps/core/lib/core/accounts.ex`, `accounts/user.ex`
 - `apps/core/lib/core/audit.ex`, `audit/log_entry.ex`
 - `apps/core/lib/core/gdpr/consent.ex`
+- `apps/core/lib/core/events.ex`, `events/registry.ex`, `events/upcaster.ex`
+- `apps/core/lib/core/workers/event_subscriber_worker.ex`
 - `apps/core/lib/core_web/plugs/` — `auth_pipeline.ex`, `consent_check.ex`, `rate_limiter.ex`, `security_headers.ex`
-- `apps/core/lib/core_web/controllers/auth_controller.ex`
+- `apps/core/lib/core_web/controllers/auth_controller.ex`, `user_settings_controller.ex`
+- `proto/stacks/internal/event_bus.proto`, `proto/stacks/common/book.proto`, `proto/stacks/common/location.proto`
 
 #### 1B.2 — Book Management Contexts
 
-**`Stacks.Books`** — the core domain
-- `Books.upload_and_identify/2` — orchestrates vision call + ISBN resolution
-- `Books.create/1`, `Books.create_from_isbn/1` (US-1.1.5 manual entry)
-- `Books.find_existing/1` (US-1.1.6 duplicate detection)
-- `Books.get_book_detail/1` — aggregates book + author + reviews + prices + writing links
-- `Books.search_books/2` — full-text search with `pg_trgm`, dynamic sort/filter
-- `Books.update_placement_formats/2`
-- `Books.ISBNResolver` — Open Library primary, Google Books fallback
-- `StacksWeb.BookController`, `StacksWeb.UploadController`, `StacksWeb.SearchController`
+**`Stacks.Books`** — the core domain (works/editions model)
+- `Books.identify/2` — step 1: orchestrates vision call + ISBN resolution, returns candidate(s) without committing
+- `Books.confirm/2` — step 2: user confirms candidate + shelf → creates work + edition + placement
+- `Books.create_work_with_edition/2` — creates `books` work + first `book_editions` edition
+- `Books.create_from_isbn/1` (US-1.1.5 manual entry) — same two-step verify+confirm flow
+- `Books.find_existing/1` (US-1.1.6 duplicate detection) — checks `book_editions.isbn`
+- `Books.find_same_work/2` (US-1.1.8 multi-format merge) — fuzzy title+author match (Jaro-Winkler > 0.8)
+- `Books.merge_edition/2` (US-1.1.8) — adds new `book_editions` row under existing work
+- `Books.get_book_detail/1` — aggregates work + editions + author + reviews + prices (per edition) + writing links + community read count
+- `Books.search_books/2` — full-text search with `pg_trgm`, dynamic sort/filter (US-1.5.1)
+- `Books.search_platform/2` — platform-wide search: public shelves, marketplace, partner inventory (US-1.5.3)
+- `Books.community_read_count/1` — reads from `wh.mart_community_read_count` (US-18.1.1)
+- `Books.ISBNResolver` — Open Library primary, Google Books fallback; returns work + edition metadata
+- `StacksWeb.UploadController.identify/2` (`POST /api/upload/identify`)
+- `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`)
+- `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`)
+- `StacksWeb.SearchController` — includes `/api/search/platform` endpoint
 
 **`Stacks.Shelving`** — shelf operations
 - `Shelving.get_shelf_books/2`, `Shelving.move_book/3`, `Shelving.abandon_book/2`, `Shelving.reread_book/1`
 - `Shelving.remove_book/1` (US-1.6.4 — soft delete via `removed_at`)
-- `Shelving.spine_data/1` — computes wear level from history
+- `Shelving.spine_data/1` — computes wear level from history (personal wear for most shelves, community wear for Looking for a Home)
 - `StacksWeb.ShelfController`, `StacksWeb.ShelfPlacementController`
+- All five shelves are valid move targets from any source shelf; books can return from Looking for a Home
 
 **`Stacks.Moderation`** — content moderation pipeline
 - `Moderation.Pipeline` — classify_image -> resolve_isbn -> classify_subject -> store_with_tier
@@ -272,24 +334,26 @@ packages:
 - `StacksWeb.Plugs.AgeGate`
 
 **Oban workers (MVP):**
-- `Stacks.Workers.IdentifyBookJob` — vision call + ISBN resolution + moderation pipeline
-- `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books
+- `Stacks.Workers.IdentifyBookJob` — vision call + ISBN resolution + moderation pipeline; returns candidate(s) to frontend
+- `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books (work + edition level)
 - `Stacks.Workers.RecalculateWearJob` — wear level recalculation on shelf moves
 - `Stacks.Workers.ImageRetentionJob` — daily cleanup of images older than 30 days
+- `Stacks.Workers.EmailNotificationJob` — checks user preferences before sending (US-17.3.1)
+- `Stacks.Workers.WishListAvailabilityJob` — checks WishList ISBNs against new partner/marketplace availability
 
 **`Stacks.AI.BudgetTracker`** — GenServer for per-provider daily/monthly caps
 **`Stacks.AI.Client`** — HTTP client with Fuse circuit breaker wrapping Modal vision service calls
 
 **Files:**
-- `apps/core/lib/core/books.ex`, `books/book.ex`, `books/isbn_resolver.ex`
+- `apps/core/lib/core/books.ex`, `books/book.ex`, `books/edition.ex`, `books/isbn_resolver.ex`
 - `apps/core/lib/core/shelving.ex`, `shelving/shelf.ex`, `shelving/shelf_placement.ex`, `shelving/shelf_placement_history.ex`
 - `apps/core/lib/core/moderation.ex`, `moderation/pipeline.ex`
 - `apps/core/lib/core/ai/budget_tracker.ex`, `ai/client.ex`
-- `apps/core/lib/core/workers/` — 4 worker files
-- `apps/core/lib/core_web/controllers/` — `book_controller.ex`, `upload_controller.ex`, `search_controller.ex`, `shelf_controller.ex`, `shelf_placement_controller.ex`
+- `apps/core/lib/core/workers/` — 6 worker files (identify, enrich, recalculate_wear, image_retention, email_notification, wishlist_availability)
+- `apps/core/lib/core_web/controllers/` — `book_controller.ex`, `upload_controller.ex`, `search_controller.ex`, `shelf_controller.ex`, `shelf_placement_controller.ex`, `user_settings_controller.ex`, `opt_out_controller.ex`
 - `apps/core/lib/core_web/router.ex`
 
-#### 1B.3 — GDPR Contexts
+#### 1B.2.1 — GDPR Contexts (part of 1B.2)
 
 **`Stacks.GDPR.Export`** — `export_user_data/2` (JSON, CSV, OPDS)
 **`Stacks.GDPR.Deletion`** — `delete_user_data/1` with Ecto.Multi cascade
@@ -304,16 +368,21 @@ packages:
 - `apps/core/lib/core/workers/data_export_job.ex`, `account_deletion_job.ex`, `confirm_deletion_job.ex`
 - `apps/core/lib/core_web/controllers/gdpr_controller.ex`
 
-**Test command**: `mix test`
-**DoD:**
+**1B.2 Test command**: `mix test`
+**1B.2 DoD:**
 - [ ] All contexts have at least one happy-path and one error-path test
 - [ ] `mix compile --warnings-as-errors` passes
 - [ ] `mix credo --strict` passes
 - [ ] `mix sobelow --config` passes (no high-severity findings)
 - [ ] Guardian auth pipeline works: register -> login -> access protected route -> logout
-- [ ] Upload flow works end-to-end via API: upload image -> identify book -> place on shelf (with mocked vision service)
-- [ ] Shelf operations: move, abandon, re-read, remove all write correct history records
-- [ ] Search returns results with full-text matching
+- [ ] Two-step upload flow works end-to-end via API: identify (returns candidate) -> confirm (creates work + edition + placement) with mocked vision service
+- [ ] Multi-format merge: uploading a Kindle ISBN for an existing hardcover merges under same work
+- [ ] Shelf operations: move (all 5 shelves valid), abandon, re-read, remove all write correct history records
+- [ ] Search returns results with full-text matching; platform-wide search returns public shelf data
+- [ ] Settings: profile update, location change (emits event), password change, notification preferences toggle
+- [ ] Onboarding flag: `onboarding_completed` set after first registration flow
+- [ ] Event bus: `emit/1` writes to `event_log`; shelf operations emit events; subscribers receive correct events
+- [ ] Protobuf: `buf lint` passes; `EventEnvelope` compiles for Elixir and Elm
 - [ ] Audit log captures all significant actions
 - [ ] GDPR export produces valid JSON with all user data
 - [ ] Image retention job deletes files older than 30 days
@@ -321,35 +390,164 @@ packages:
 
 ---
 
-### Phase 1C — Elm Frontend (elm-agent)
-**Objective**: All MVP pages render and interact with the Phoenix API. Shelf views, book detail, upload, search, navigation, empty states.
-**Starts after**: Phase 1B context interfaces defined (can mock API responses initially).
+#### 1B.3 — Visibility Infrastructure (elixir-agent — SECURITY CRITICAL)
+**Objective**: `resolve_visibility/2` gate, block graph, ceiling rule enforcement, ViewAsPlug. Every content endpoint routes through visibility checks from day one. No retrofit.
+**Starts after**: 1B.1 committed. **Parallel with** 1B.2 (core book management).
+**Must complete before**: 1E.1 (Marketplace), 1E.2 (Blog), 1E.3 (RSS).
 
-#### Pages
+**`Stacks.Visibility`** context
+- `resolve_visibility/2` — single authoritative gate; viewer contexts: `:unauthenticated`, `{:platform_user, user_id}`, `{:group_member, group_id}`, `{:specific_user, user_id}`
+- Clauses: profile ceiling → block check → age gate → resource visibility. Returns `:hidden` on ambiguity (404, not 403).
+- `can_view?/2`, `viewable_shelves/2`, `viewable_placements/2`
+- Ceiling rule enforcement on write: `validate_visibility_ceiling/3`
+- **Marketplace exception**: active listings (`listing_status = 'active'`) on `looking_for_home` punch through profile ceiling — always visible to platform users. Users can still restrict individual listings for future closed-bid scenarios.
 
-**`Page.Upload`** — drop zone (single and bulk), processing progress, review/confirmation screen, result states
-- `UploadMsg`, `UploadModel`, `PhotoFile` types
-- Single-image flow: drop → process → confirm identity + select shelf → add (US-1.1.1)
+**`Stacks.Social`** context
+- `block_user/2`, `unblock_user/2`, `is_blocked?/2`, `blocked_by?/2`
+- Blocked users see 404 (not 403) for all blocked content — no information leakage
+
+**`StacksWeb.Plugs.ViewAsPlug`** — owner sets `?view_as=user_id` param; plug sets viewer context; 403 for non-owners
+
+**Retrofit**: All controllers from 1B.2 (book, shelf, search, upload, settings) must route through `resolve_visibility/2`. If 1B.3 is built in parallel with 1B.2, the visibility gate can be wired in as controllers are built rather than retrofitted.
+
+**RLS enforcement**: After visibility contexts pass tests, enable PostgreSQL RLS policies designed in 1A.
+
+**Property-based tests**: `resolve_visibility/2` has a large combinatorial input space (4 visibility levels x 4 viewer types x block/no-block x age-gated/not x ceiling violations). Use `StreamData` for property-based testing — generate random (resource, viewer) pairs and assert invariants:
+- A blocked viewer never sees `:visible`
+- A viewer cannot see content above the profile ceiling
+- An unauthenticated viewer never sees non-public content
+- An age-gated resource is always hidden from unverified viewers
+
+**Files:**
+- `apps/core/lib/core/visibility.ex`
+- `apps/core/lib/core/social.ex`, `social/block.ex`
+- `apps/core/lib/core_web/plugs/view_as_plug.ex`
+- `apps/core/test/core/visibility_property_test.exs`
+- `docs/rls-design.md` → `apps/core/priv/repo/migrations/enable_rls.sql`
+
+**Events emitted:**
+- `social.user_blocked`, `social.user_unblocked`
+
+**dbt models:**
+- `stg_user_blocks`
+- `int_visibility_resolution` (for audit/debugging)
+
+**1B.3 DoD:**
+- [ ] `resolve_visibility/2` passes all ceiling-rule and block-graph scenarios
+- [ ] Property-based tests pass with 1000+ generated cases
+- [ ] Blocked users see 404 (not 403)
+- [ ] `ViewAsPlug` correctly impersonates viewer context for owner only
+- [ ] Active marketplace listings visible regardless of profile visibility
+- [ ] All content endpoints in 1B.2 route through `resolve_visibility/2`
+- [ ] RLS policies enabled and tested
+- [ ] All shelf/placement writes enforce ceiling rule
+
+---
+
+### Phase 1C — Enrichment (2 parallel tracks)
+
+#### 1C.1 — Rust Scraper (rust-agent — independent, parallel)
+**Objective**: Bookshop price scraper works end-to-end with TOML configs for SA stores.
+**Starts after**: Phase 1A committed. No dependency on Elixir contexts — fully independent service.
+
+See current Phase 2A content below (unchanged — moved up from old Phase 2).
+
+#### 1C.2 — Enrichment Elixir Contexts (elixir-agent)
+**Objective**: Review aggregation, price tracking, author intelligence, bookstore events, source discovery (book-triggered + geographic sweep), business opt-out — all wired to Oban jobs and the event bus.
+**Starts after**: 1B.2 committed (books/shelving must exist). Event bus (1B.1) must be available.
+
+See current Phase 2B content below (updated — enrichment contexts + geographic sweep + opt-out).
+
+---
+
+### Phase 1D — Python Vision Sidecar (python-agent — independent, parallel)
+**Unchanged from current Phase 1D.** Starts after repository scaffolding. Add `/associate` endpoint stub (for blog LLM associations in 1E.2).
+
+---
+
+### Phase 1E — Marketplace, Blog, RSS, Metrics, Email (after visibility + enrichment)
+
+#### 1E.1 — Marketplace Backend (elixir-agent)
+**Objective**: Fixed-price listings, Stitch Money payment, Pargo shipping, post-sale lifecycle. No offers mode, no closed bid, no Q&A (deferred).
+**Starts after**: 1B.3 (visibility) + 1C.2 (enrichment — prices must exist for buyer context).
+
+See current Phase 5B content (simplified — fixed price only, no closed bid, post-sale lifecycle added).
+
+#### 1E.2 — Blog Backend (elixir-agent)
+**Objective**: Blog CRUD with visibility ceiling. LLM book associations via PostBookAssociationWorker. BookDetailCache (ETS, event-driven invalidation). No comments.
+**Starts after**: 1B.3 (visibility — blog posts have visibility controls).
+
+See current Phase 7B content (minus comments).
+
+#### 1E.3 — RSS, Metrics, Email Infrastructure (elixir-agent)
+**Objective**: Atom feeds per public shelf. Metrics dashboard with dbt marts. Email delivery infrastructure.
+**Starts after**: 1B.2 (core book management — feeds need shelf data), 1B.1 (event bus — feeds are event-driven).
+
+**RSS/OPDS**: See current Phase 4B content.
+**Metrics**: See current Phase 4C content.
+
+**Email infrastructure** (NEW — not previously scoped):
+- `Stacks.Email` context — template rendering, delivery via Resend/Postmark
+- `Stacks.Email.Mailer` — Swoosh adapter for Resend/Postmark
+- Templates: registration confirmation, password reset, marketplace sale notification, GDPR export ready, WishList availability alert, event match notification
+- `StacksWeb.EmailVerificationController` — confirm email address at registration
+- `Stacks.Workers.EmailDeliveryJob` — Oban worker for async email send with retry
+- All emails respect `users.notify_*` preferences (except ToS changes and registration confirmation)
+
+**dbt models for 1E.3:**
+- `mart_system_health`, `mart_job_stats`, `mart_data_freshness`, `mart_cost_tracking`, `mart_gdpr_compliance`
+- `mart_community_read_count` (for Looking for a Home wear — refreshes every 5 min)
+- `mart_platform_searchable` (for platform-wide search index — refreshes every 5 min)
+- `mart_marketplace_activity`, `mart_transaction_volume`
+- `mart_blog_activity`
+- **Data quality models** (see `docs/data-quality.md`): `int_source_health`, `mart_data_quality_trend`, `mart_enrichment_gaps`, `mart_llm_faithfulness`
+- Source health monitoring infrastructure: Issue #068 — per-source health recording, HTML structure change detection, RSS liveness, LLM faithfulness tracking
+
+---
+
+### Phase 1F — Elm Frontend (elm-agent — 4 waves)
+**Objective**: All Phase 1 pages render and interact with the Phoenix API. Built incrementally as backend APIs become available.
+**Starts after**: 1B.2 API interfaces are defined (can mock API responses initially).
+
+#### Wave 1 (after 1B.2 APIs): Core UX
+
+Auth, shelves, upload, spine rendering, book detail overlay, search, settings hub, navigation, empty states, accessibility.
+
+**`Page.Upload`** — multi-step upload with verification, drop zone (single and bulk), review/confirmation
+- `UploadStep` type: `Uploading → Verifying IdentifiedBook → ChoosingShelf → Complete`
+- Single-image flow: drop → process → **verify** ("We think this is…" with uploaded image + identified book side-by-side) → **choose shelf** (default WishList) → add → "Add another" / "View on shelf" (US-1.1.1)
 - Bulk flow: drop N images → processing progress → Review screen with card grid (US-1.1.7)
-  - `Components.BookReviewCard` — confirmed / ambiguous / rejected states, per-card shelf selector
+  - `Components.BookReviewCard` — confirmed / ambiguous / rejected states, per-card shelf selector (default WishList)
   - `Components.BulkProgress` — N images processing indicator
 - `IdentificationFailed` variant (US-1.1.2 ISBN Hard Gate)
 - `NotABook` variant (US-1.1.3) — in bulk, appears as rejected card; in single, full-screen rejection
-- `ManualISBNEntry` variant (US-1.1.5) with client-side ISBN checksum validation
-- `DuplicateDetected` variant (US-1.1.6) with view/move/close actions
-- Shelf selection happens at the review/confirmation step, not at upload time
+- `ManualISBNEntry` variant (US-1.1.5) with client-side ISBN checksum validation, same verify+shelf flow
+- `DuplicateDetected` variant (US-1.1.6) with view/move/close actions + multi-format merge prompt (US-1.1.8)
+- `FormatMerge` variant (US-1.1.8) — "You own [Title] as [format]. Add [new format]?"
 
 **`Page.Shelf.Library`** — dark walnut, green damask (`ShelfTheme { wood: DarkWalnut, backdrop: GreenDamask }`)
 **`Page.Shelf.AntiLibrary`** — light oak, botanical prints
 **`Page.Shelf.WishList`** — blue-grey, watercolour florals
 **`Page.Shelf.ReadingPile`** — vertical stack, armchair background (`PileView`)
 
-**`Page.BookDetail`** — cover image, metadata, review summary (stub), price info (stub), author card, writing links, shelf mover, format picker, remove action
+**Book Detail Overlay** (not a page/route — UI state in model)
+- `Maybe BookDetailOverlay` in model. Opens on spine click, search result click, etc.
+- Dismissable via X button, click-outside, or Escape. URL does not change.
+- Shows: cover image, editions list, metadata, review summary (stub), price info per edition (stub), author card (with "Report an issue" link), writing links, shelf mover (all 5 shelves), format picker (creates editions via US-1.1.8), remove action
+- Focus trapping within overlay for accessibility (US-19.1.1)
 
 **`Page.Search`** — debounced search bar, filter panel, sort selector
+- `SearchScope` type: `AllShelves | SpecificShelf ShelfId | WholePlatform`
+- Platform-wide results in separate "On the Platform" section (US-1.5.3)
 
-**`Page.Settings.Consent`** — toggle switches per consent category
-**`Page.Settings.AgeVerification`** — self-declaration toggle
+**`Page.Settings`** — settings hub with sidebar navigation (US-17.1.1)
+- Sub-pages: `Profile` (US-17.2.1), `Password` (US-17.2.3), `Consent` (US-8.3), `AgeVerification` (US-4.2), `Export` (US-8.1), `Delete` (US-8.2), `AuditLog` (US-8.5), `Notifications` (US-17.3.1)
+- Location fields (city/country) within Profile (US-17.2.2)
+- Notification toggles with auto-save (US-17.3.1)
+
+**`Components.OnboardingOverlay`** — 3-step first-time flow: Welcome → Upload → Shelve (US-14.1.2). Dismissable via "Skip".
+
+**`Components.UserMenu`** — display name dropdown with "Settings" and "Sign Out" (US-14.3.3)
 
 #### Shared Components
 
@@ -358,12 +556,14 @@ packages:
 - `Components.ShelfMover` — dropdown of target shelves
 - `Components.AbandonModal` — optional note textarea
 - `Components.RemoveBookModal` — confirmation with warning
-- `Components.FormatPicker` — multi-select checkboxes
+- `Components.FormatPicker` — shows owned editions; adding new format triggers ISBN input + merge flow (US-1.1.8)
 - `Components.AgeGate` — interstitial overlay
 - `Components.ISBNInput` — ISBN-10/13 checksum validation
 - `Components.DuplicateDetected` — existing book with actions
 - `Components.SearchBar`, `Components.FilterPanel`, `Components.SortSelector`
 - `Components.ConsentBanner` — first-visit consent collection
+- `Components.BookList` — sortable table view for list mode (US-19.2.1)
+- `Components.ViewModeToggle` — spine/list toggle icon in shelf header (US-19.2.1)
 
 #### Navigation
 
@@ -379,8 +579,8 @@ packages:
 
 **Files:**
 - `frontend/src/Main.elm`
-- `frontend/src/Page/` — `Upload.elm`, `Shelf/Library.elm`, `Shelf/AntiLibrary.elm`, `Shelf/WishList.elm`, `Shelf/ReadingPile.elm`, `BookDetail.elm`, `Search.elm`, `Settings/Consent.elm`, `Settings/AgeVerification.elm`
-- `frontend/src/Components/` — `Spine.elm`, `EmptyShelf.elm`, `ShelfMover.elm`, `AbandonModal.elm`, `RemoveBookModal.elm`, `FormatPicker.elm`, `AgeGate.elm`, `ISBNInput.elm`, `DuplicateDetected.elm`, `SearchBar.elm`, `FilterPanel.elm`, `SortSelector.elm`, `ConsentBanner.elm`
+- `frontend/src/Page/` — `Upload.elm`, `Shelf/Library.elm`, `Shelf/AntiLibrary.elm`, `Shelf/WishList.elm`, `Shelf/ReadingPile.elm`, `Shelf/LookingForHome.elm`, `Search.elm`, `Settings.elm` (hub), `Settings/Profile.elm`, `Settings/Password.elm`, `Settings/Consent.elm`, `Settings/AgeVerification.elm`, `Settings/Notifications.elm`
+- `frontend/src/Components/` — `Spine.elm`, `EmptyShelf.elm`, `ShelfMover.elm`, `AbandonModal.elm`, `RemoveBookModal.elm`, `FormatPicker.elm`, `AgeGate.elm`, `ISBNInput.elm`, `DuplicateDetected.elm`, `FormatMerge.elm`, `SearchBar.elm`, `FilterPanel.elm`, `SortSelector.elm`, `ConsentBanner.elm`, `BookDetailOverlay.elm`, `OnboardingOverlay.elm`, `UserMenu.elm`, `BookList.elm`, `ViewModeToggle.elm`
 - `frontend/src/Navigation/ShelfRouter.elm`
 - `frontend/src/Animation/` — `SlideTransition.elm`, `RoomTransition.elm`
 - `frontend/src/Api.elm` — HTTP client module
@@ -391,22 +591,87 @@ packages:
 **DoD:**
 - [ ] `elm make src/Main.elm --optimize` succeeds with zero warnings
 - [ ] `elm-format --validate src/` passes
-- [ ] All 5 shelf views render with correct themes
+- [ ] All 5 shelf views render with correct themes (including Looking for a Home with community wear)
 - [ ] Empty shelf states display per-shelf messages (US-1.6.5)
-- [ ] Upload flow: select photo -> progress -> result (or error variants)
-- [ ] Manual ISBN entry with client-side checksum validation
-- [ ] Duplicate detection shows existing book with actions
-- [ ] Book detail page renders all sections
+- [ ] Upload flow: select photo → verify ("We think this is…") → choose shelf (default WishList) → result (US-1.1.1)
+- [ ] Manual ISBN entry with client-side checksum validation + same verify flow
+- [ ] Duplicate detection shows existing book with actions + multi-format merge prompt (US-1.1.8)
+- [ ] Book detail **overlay** opens on spine click, dismissable via X/Escape/click-outside, URL unchanged
+- [ ] Detail overlay shows editions list with per-edition prices
 - [ ] Shelf navigation with slide/room transitions
-- [ ] Search with debounced input and filter/sort
+- [ ] Search with debounced input, filter/sort, and platform-wide scope option
 - [ ] Remove book modal with confirmation
 - [ ] All API calls use RemoteData pattern
+- [ ] Settings hub with sidebar navigation and all sub-pages
+- [ ] Onboarding overlay for first-time registration (dismissable)
+- [ ] User menu dropdown (Settings + Sign Out) on display name
+- [ ] List view toggle on all shelf pages (US-19.2.1)
+- [ ] ARIA labels on spines, shelves, overlay, upload progress (US-19.1.1)
+- [ ] Keyboard navigation: Tab, arrow keys, Enter, Escape (US-19.1.2)
+
+#### Wave 2 (after 1C.2 APIs): Enrichment Display
+
+- `Components.ReviewSummary` — sentiment bar, source cards with rating + link (no longer stubs)
+- `Components.PriceInfo` — current prices per edition by store, sparkline chart, lowest price highlight
+- `Components.AuthorCard` (expanded) — website, RSS posts, events, new releases, "Report an issue" link
+- `Page.Events` — event cards matched to user's books/authors
+- `Page.Admin.ScraperConfig` — TOML editor with validation
+- `Page.Admin.SourceApproval` — discovered sources queue with confidence scores
+
+**Wave 2 DoD:**
+- [ ] Book detail overlay shows real reviews, prices (per edition), author info when available
+- [ ] Price sparkline renders with SVG
+- [ ] Scraper config admin page saves valid TOML
+- [ ] Source approval page shows approve/reject actions
+
+#### Wave 3 (after 1E.1–1E.2 APIs): Marketplace + Blog + Privacy
+
+- `Page.Marketplace.CreateListing` — condition grader, fixed price only
+- `Page.Marketplace.ListingDetail` — listing with price, condition, "Buy" button
+- `Page.Marketplace.Checkout` — payment via Stitch Money, shipping via Pargo
+- `Page.Blog.New`, `Page.Blog.Edit` — rich text editor (markdown), visibility selector
+- `Page.Blog.Post` — post detail with book associations sidebar (no comments)
+- `Page.Blog.Archive` — reverse-chronological post list
+- `Page.Settings.Privacy` — profile visibility selector, per-shelf overrides, ceiling rule UI
+- `Components.ViewAsBar` — sticky banner when viewing as another user
+- `Components.VisibilityBadge` — lock icon with tooltip per visibility level
+- `Components.BookAssociations` — owner sees suggestions with confirm/dismiss
+- `Components.PartnerAvailability` stub on book detail (populated in Phase 2)
+
+**Wave 3 DoD:**
+- [ ] Marketplace listing creation and purchase flow works end-to-end
+- [ ] Blog post can be written, saved as draft, published with visibility control
+- [ ] LLM associations appear after publish and can be confirmed/dismissed
+- [ ] Privacy settings page saves and reflects current visibility per shelf
+- [ ] "View As" banner appears and correctly restricts visible content
+
+#### Wave 4 (after 1E.3 APIs): Metrics + RSS
+
+- `Page.Admin.Metrics` — metric cards, job status table, freshness gauge, cost tracker. Curator's desk aesthetic.
+- RSS icon/link on shelf pages (`Components.RSSLink`)
+
+**Wave 4 DoD:**
+- [ ] Metrics dashboard shows real system data (Oban jobs, data freshness, costs)
+- [ ] RSS icon on public shelves generates valid Atom feed URL
 
 ---
 
-### Phase 1D — Python Vision Sidecar (python-agent)
-**Objective**: FastAPI service with `/extract`, `/classify`, `/health` endpoints. Deployed as separate Fly machine.
-**Starts after**: Repository scaffolding.
+### Phase 1G — Platform & Deployment (platform-agent)
+**Objective**: First successful deployment. CI pipeline green. All services deployed.
+**Starts after**: All backend tracks (1B, 1C, 1D, 1E) and Elm waves committed.
+
+See current Phase 1E content (renamed to 1G — Fly.io config, CI pipeline, Nix/Flox, developer experience). Additionally:
+- Deploy Rust scraper as Fly Machine (private networking)
+- Deploy SearXNG instance on Fly.io (for source discovery fallback)
+- Ensure email delivery (Resend/Postmark) is configured
+- Ensure KYC provider is configured (set `REQUIRE_KYC=true` for production)
+- Ensure Stitch Money + Pargo are configured for marketplace
+
+---
+
+### Phase 1D — Python Vision Sidecar — DETAILED SPEC (python-agent)
+**Objective**: FastAPI service with `/extract`, `/classify`, `/health` endpoints, plus `/associate` stub. Deployed on Modal.
+**Starts after**: Repository scaffolding. Independent — runs in parallel with all Elixir work.
 
 **Endpoints:**
 
@@ -546,9 +811,9 @@ Ground truth locked in `corpus/annotations.csv` before any run. Append-only — 
 
 ---
 
-### Phase 1E — Platform & Deployment (platform-agent)
-**Objective**: First successful Fly.io deployment. CI pipeline green. Dev environment reproducible.
-**Starts after**: Phases 1A–1D committed.
+### Phase 1G — Platform & Deployment — DETAILED SPEC (platform-agent)
+**Objective**: First successful Fly.io deployment. CI pipeline green. Dev environment reproducible. All services deployed.
+**Starts after**: All backend tracks (1B, 1C, 1D, 1E) and Elm frontend committed.
 
 #### 1E.1 — Fly.io Configuration
 
@@ -581,6 +846,24 @@ Uses `dorny/paths-filter` for monorepo path-scoped jobs:
 - `docs/deployment/FLY_SETUP.md` — Fly.io app creation, secrets, scaling
 - `docs/deployment/DEV_SETUP.md` — local development with `nix develop`
 
+#### 1E.4 — Nix/Flox Reproducible Builds (Phase 1 priority)
+
+**Must be complete before Phase 1 ends.** The current build pipeline uses system-installed tools (Node.js, Elm, esbuild) which vary across developer machines and CI. By the end of Phase 1, all builds — local dev, CI, and Docker — must be reproducible via Nix/Flox.
+
+**What this means:**
+- `nix develop` provides the exact toolchain: Elixir, Erlang, Node.js, Elm, elm-format, elm-test, Rust, Python, buf, dbt, esbuild — all pinned versions
+- `nix build` produces the Docker image deterministically (no `apk add` with unpinned versions, no `npm ci` fetching latest)
+- CI runs inside the Nix shell (or uses a Nix-built Docker image), eliminating "works on my machine" class of bugs
+- The Docker multi-stage build can optionally be replaced with a Nix-built container (using `dockerTools.buildLayeredImage`) for fully reproducible, smaller images
+- `flake.lock` pins all inputs — Nixpkgs, Elm packages, Hex packages — so builds are identical regardless of when they run
+
+**Why this is Phase 1 priority:**
+- Alpine package version pinning in Dockerfiles is brittle (packages get removed from repos)
+- npm ci + esbuild-plugin-elm works but adds ~200MB to the builder layer
+- Nix caches aggressively — subsequent builds are near-instant
+- Fly.io supports deploying Nix-built images via `fly deploy --image`
+- Once real users are on the platform, build reproducibility is a reliability requirement, not a nice-to-have
+
 **Test command**: `just test && just lint`
 **DoD:**
 - [ ] `fly deploy -c deploy/fly.core.toml` succeeds
@@ -601,17 +884,202 @@ Uses `dorny/paths-filter` for monorepo path-scoped jobs:
 
 #### Phase 1 Integration Test
 After all tracks merge:
-- [ ] Register owner account via API
-- [ ] Upload a book photo -> vision service identifies it -> ISBN resolved -> book on shelf
-- [ ] Browse all 5 shelf views (4 show empty states, 1 shows the book)
-- [ ] Click spine -> book detail page renders
-- [ ] Move book between shelves -> history recorded
-- [ ] Search finds the book
+- [ ] Register owner account → onboarding flow appears (dismissable)
+- [ ] Upload a book photo → verify ("We think this is…") → choose shelf (default WishList) → book created as work + edition
+- [ ] Login redirects to `/antilibrary`
+- [ ] Browse all 5 shelf views (4 show empty states, 1 shows the book; Looking for a Home shows community wear)
+- [ ] Click spine → book detail **overlay** opens (URL unchanged); dismiss via Escape
+- [ ] Move book between all 5 shelves (including Looking for a Home and back) → history recorded
+- [ ] Search finds the book; platform-wide search scope available
+- [ ] Upload a Kindle edition of same book → multi-format merge prompt → editions listed on detail overlay
+- [ ] Settings hub accessible from display name dropdown; profile, location, password, notifications all work
+- [ ] List view toggle renders table view of shelf
+- [ ] ARIA labels present on spines and shelf container; keyboard navigation works
 - [ ] Full CI pipeline green on `main`
+- [ ] `docs/capacity-model.md` exists with Elm performance budget, API latency targets, cost model, and database growth projections
+- [ ] `docs/runbooks/` contains at least: `modal-outage.md`, `neon-outage.md`, `oban-queue-backlog.md`, `vision-hallucination.md`, `budget-exhaustion.md`
+- [ ] At least one Broadway pipeline (PricePipeline) ingests batched data with backpressure
+- [ ] API latency targets are measured via Telemetry and surfaced on metrics dashboard
 
 ---
 
-## GROUP 2: Enrichment (Phase 2)
+## Cross-cutting: Capacity Model & Performance Budget
+
+A staff-level deliverable: define, measure, and enforce performance constraints across the system. This is not a single sub-phase — it's a set of artefacts produced alongside each sub-phase and maintained as the system evolves.
+
+**Deliverable:** `docs/capacity-model.md` — a living document with the following sections:
+
+### Elm Frontend Performance Budget
+
+| Metric | Target | Measurement | Enforcement |
+|--------|--------|-------------|-------------|
+| Bookshelf render (500 books) | < 200ms | `elm-benchmark` or manual profiling | Test with fixture of 500 books in CI |
+| Bookshelf render (2,000 books) | < 500ms | Same | Documented as soft limit — consider pagination above 2K |
+| Book detail overlay open | < 100ms (cached), < 500ms (cold API) | `Performance.now()` in Elm port | Alert in metrics dashboard if P95 > 1s |
+| Search (local, all shelves) | < 50ms for 2,000 books | Elm-side timing | All book data in memory — test at scale |
+| Page load (initial, cold) | < 3s on 3G | Lighthouse CI | `--budget-path` in CI |
+
+**When to produce:** 1F Wave 1 (once shelves render). Revisit each wave.
+
+### API Latency Targets
+
+| Endpoint | P50 | P95 | P99 | Notes |
+|----------|-----|-----|-----|-------|
+| `GET /api/bookshelves/:name` | 30ms | 100ms | 200ms | Single user's shelf — indexed query |
+| `GET /api/books/:id` (detail) | 50ms | 150ms | 300ms | Joins work + editions + enrichment |
+| `POST /api/upload/identify` | 15-30s | 45s | 60s | Dominated by Modal cold start |
+| `POST /api/books/confirm` | 30ms | 100ms | 200ms | DB writes only |
+| `GET /api/search/platform` | 100ms | 500ms | 1s | Cross-user query — may need materialised index |
+| `POST /api/auth/login` | 100ms | 200ms | 500ms | Argon2 hashing is intentionally slow |
+
+**When to produce:** 1B.2 (after controllers exist). Enforce via `Telemetry.Metrics` + PromEx. Surface on metrics dashboard (1E.3).
+
+### Cost Model (per-user projection)
+
+| Scale | Books/user | Modal (vision) | Brave Search | Fly.io | Neon | Total/user/mo |
+|-------|-----------|----------------|--------------|--------|------|---------------|
+| 10 users | 200 avg | ~R10 (20 uploads/mo) | ~R0 (free tier) | R50 (shared) | R0 (free tier) | ~R6/user |
+| 100 users | 300 avg | ~R100 | ~R15 (paid tier) | R150 | R50 | ~R3.15/user |
+| 1,000 users | 300 avg | ~R500 | ~R150 | R500 | R200 | ~R1.35/user |
+| 10,000 users | 300 avg | ~R2,000 | ~R1,500 | R2,000 | R1,000 | ~R0.65/user |
+
+**Assumptions documented.** Modal: R0.50/identification, 2 uploads/user/month at scale. Brave: R0.003/query, ~50 queries/user/month. Fly.io: scales with machine count. Neon: scales with storage + compute.
+
+**Trigger points:**
+- At 100 users: evaluate Brave Search paid tier
+- At 500 users: evaluate Neon scaling tier, consider read replicas
+- At 1,000 users: evaluate DuckDB for `wh` schema analytical queries
+- At 5,000 users: evaluate Snowflake / ClickHouse for time-series data (price history)
+
+**When to produce:** 1E.3 (metrics dashboard provides the data to validate projections). Revisit quarterly.
+
+### Database Growth Model
+
+| Table | Growth rate | Size at 1K users | Partitioning trigger |
+|-------|-----------|-------------------|---------------------|
+| `price_snapshots` | ~2,500 rows/day (500 books x 5 stores) per user batch | ~5M rows/year | Partition by month at 10M rows |
+| `event_log` | ~50 events/user/day | ~18M rows/year | Partition by month at 5M rows |
+| `review_snapshots` | ~3 rows/book/quarter | ~900K rows/year | No partitioning needed |
+| `bookshelf_placement_history` | ~5 transitions/user/month | ~60K rows/year | No partitioning needed |
+
+**When to produce:** 1A (designed with migrations). Validate at 1G (first deployment with real data).
+
+---
+
+## Cross-cutting: Operational Runbooks
+
+**Deliverable:** `docs/runbooks/` directory with incident response playbooks. Produced alongside the sub-phase that introduces each operational dependency.
+
+### Runbooks to produce
+
+| Runbook | When | Content |
+|---------|------|---------|
+| `modal-outage.md` | 1D | Modal vision service down: symptoms (upload timeouts), impact (no new books can be added via photo — manual ISBN entry still works), response (check Modal status page, verify HMAC config, confirm circuit breaker has tripped, monitor Oban `vision` queue backlog). Recovery: Oban retries automatically when Modal returns. |
+| `neon-outage.md` | 1G | Neon Postgres down: symptoms (all API calls fail with 500), impact (total platform outage), response (check Neon status, verify connection string, check Fly.io logs for connection pool exhaustion). Recovery: Neon auto-recovers; Ecto pool reconnects. No cached read path in current architecture — document this as a known limitation. |
+| `oban-queue-backlog.md` | 1B.1 | Oban queue backs up: symptoms (jobs in `available` state growing, data freshness dropping on metrics dashboard), diagnosis (check per-queue depth via `Oban.Met` or `SELECT count(*) FROM oban_jobs WHERE state = 'available' GROUP BY queue`), response (check for failed workers, increase concurrency temporarily, check circuit breakers on external services). |
+| `vision-hallucination.md` | 1D | Vision model starts returning valid-but-wrong ISBNs: symptoms (identification success rate drops, users report wrong books), diagnosis (check `int_upload_rejection_rate` trend, sample recent `uploaded_images` resolutions), response (enable `REQUIRE_MANUAL_CONFIRM=true` flag to force user verification on every upload — already the default flow, but this makes it non-skippable for bulk). Escalation: run benchmark suite (1D.1) against recent corpus. |
+| `stitch-money-failure.md` | 1E.1 | Payment processing fails: symptoms (checkout returns error, `transactions.payment_status = 'failed'`), impact (marketplace sales blocked), response (check Stitch Money status, verify webhook secret, check Fly.io logs for webhook delivery). Recovery: buyer can retry. Seller's listing remains active. No money has moved. |
+| `budget-exhaustion.md` | 1B.2 | AI budget limit reached: symptoms (`BudgetTracker` snoozing all vision jobs, uploads return "try again later"), impact (no photo-based book additions — manual ISBN entry still works), response (check `BudgetTracker` state, verify daily/monthly limits are appropriate, check for runaway retry loops). Recovery: budget resets at midnight UTC (daily) or 1st of month (monthly). |
+| `email-delivery-failure.md` | 1E.3 | Resend/Postmark delivery fails: symptoms (registration confirmation emails not arriving, `EmailDeliveryJob` failures in Oban), impact (new users can't confirm email — if email confirmation is required, registration is blocked), response (check provider dashboard, verify API key, check domain SPF/DKIM). |
+
+### Runbook template
+
+```markdown
+# Runbook: [Service/Component] — [Failure Mode]
+
+## Symptoms
+- What the user sees
+- What the operator sees (logs, metrics, alerts)
+
+## Impact
+- What's broken
+- What still works (degraded mode)
+
+## Diagnosis
+- Commands to run
+- Metrics to check
+- Logs to inspect
+
+## Response
+- Immediate actions
+- Escalation criteria
+
+## Recovery
+- How the system self-heals (if applicable)
+- Manual recovery steps
+- Post-incident verification
+```
+
+---
+
+## Cross-cutting: Broadway Pipelines (enrichment ingestion)
+
+Broadway pipelines are described in `docs/technical-architecture.md` section 6 as the ingestion mechanism for enrichment data. They must be implemented — not just documented — as part of Phase 1C.2 (enrichment contexts).
+
+**Where Broadway is required:**
+
+| Pipeline | Sub-Phase | Purpose |
+|----------|-----------|---------|
+| `Stacks.Enrichment.ReviewPipeline` | 1C.2 | Ingest reviews from GoodReads, Reddit, Storygraph. Backpressure prevents overwhelming scraped sites. Batched DB writes. |
+| `Stacks.Enrichment.PricePipeline` | 1C.2 | Ingest price data from Rust scraper responses. Batch-insert into `price_snapshots`. Rate-limit signals back to scraper. |
+| `Stacks.Enrichment.AuthorPipeline` | 1C.2 | Ingest author data from Open Library, RSS feeds, Brave Search. Dedup across sources. |
+| `Stacks.Enrichment.EventPipeline` | 1C.2 | Ingest bookstore events. Match against user's book/author graph. |
+
+**Why Broadway, not just Oban workers:**
+- Oban workers are fire-and-forget individual jobs. Broadway provides **backpressure** (producers slow down when consumers are saturated), **batching** (group DB writes for efficiency), and **rate limiting** (respect external API quotas). For enrichment — where you're hitting dozens of external sites with hundreds of ISBNs — these properties matter.
+- The Oban workers (`FetchReviewsJob`, `TriggerPriceScrapeJob`, etc.) remain as the *triggers*. Broadway handles the *ingestion* after the external call returns data.
+
+**1C.2 DoD addition:**
+- [ ] At least one Broadway pipeline (PricePipeline) ingests batched data from the Rust scraper with backpressure
+- [ ] Broadway pipelines have `handle_failed/2` callbacks that log failures without crashing the pipeline
+- [ ] Rate limiting per external source is enforced at the Broadway producer level
+
+---
+
+## Phase 2: Deferred Features (Future)
+
+> Third Spaces, partner push API, groups, comments/Q&A, closed bid marketplace. Built after Phase 1 is stable and deployed.
+
+### Phase 2A — Third Spaces (elixir-agent + elm-agent)
+- `Stacks.ThirdSpaces` context with scraping support
+- `Page.ThirdSpaces` — cork board with `Components.CorkBoard`, `Components.SpaceCard`, `Components.LocationFilter`
+- SearXNG-driven discovery (infrastructure already deployed in 1G)
+- User-submitted third spaces
+- Depends on: source discovery agent (1C.2), geographic sweep (1C.2), location settings (1B.1)
+
+### Phase 2B — Partner Integration (protobuf-agent + elixir-agent + elm-agent)
+- Protobuf partner schemas: `inventory.proto`, `events.proto`, `spaces.proto`
+- `Stacks.Partners` — registration, approval, API key auth, inventory sync, events, spaces
+- Partner dashboard (Elm) — registration form, CSV import, event management, metrics
+- Reader-facing: `Components.PartnerAvailability` on book detail, green dot on spines
+- Owner-facing: partner approval queue, moderation, content management
+
+### Phase 2C — Groups (elixir-agent + elm-agent)
+- `Stacks.Social` extended — `create_group/2`, invite, accept, remove, leave, dissolve
+- Group content feed (US-11.1.5) — aggregated blog + shelf activity
+- `Page.Groups` — creation, member management, content feed
+- Depends on: visibility infrastructure (1B.3), blog (1E.2)
+
+### Phase 2D — Comments & Q&A (elixir-agent + elm-agent)
+- `Stacks.Comments` — threaded comments with block-filtered CTE
+- Blog comments (US-13.1.1, US-13.1.2)
+- Marketplace Q&A (US-13.2.1) — public questions on listings
+- Private offer threads (US-13.2.2) — buyer-seller negotiation
+- Depends on: visibility (1B.3), blog (1E.2), marketplace (1E.1)
+
+### Phase 2E — Marketplace Enhancements
+- Offers mode (open to offers with minimum price)
+- Closed bid mode (invited users, sealed offers)
+- Full refund/dispute/non-delivery flows
+- Depends on: basic marketplace (1E.1)
+
+---
+
+> **The following sections contain detailed content from the original phased roadmap. They are preserved as reference for the sub-phases above that reference them ("See current Phase 2A/2B/4B/4C/5B/7B content"). Once the Phase 1 sub-phases are implemented, these sections should be archived or removed.**
+
+---
+
+## REFERENCE: Original Phase 2 — Enrichment (now Phase 1C)
 
 > Layer intelligence on top of the book graph: reviews, prices, author info, events, and source discovery.
 
@@ -654,6 +1122,8 @@ After all tracks merge:
 - `Stacks.Enrichment.Authors` — `get_author_intel/1`, `FetchAuthorRSSJob`, `DiscoverAuthorSourcesJob`
 - `Stacks.Enrichment.Events` — `get_matched_events/1`, `DiscoverBookstoreEventsJob`
 - `Stacks.Discovery` — `Agent` (Oban-driven), `search_and_score/1`, `approve_source/1`, `reject_source/1`
+- `Stacks.Discovery.GeographicSweep` — location-based discovery of bookshops, reading groups, cafes (US-2.5.2). Triggered by `user.location_updated` event + quarterly cron.
+- `Stacks.Discovery.OptOut` — business opt-out flow: `request_removal/1`, `process_removal/1`, `add_to_exclusion_list/1` (US-2.5.3). Unauthenticated `POST /api/opt-out` endpoint.
 - `Stacks.Admin.ScraperConfig` — CRUD for bookstore scraper configs
 
 **Oban workers:**
@@ -664,6 +1134,8 @@ After all tracks merge:
 - `DiscoverBookstoreEventsJob` (daily)
 - `SourceDiscoveryJob` (daily)
 - `ScoreSourceJob` (on-demand, LLM scoring)
+- `GeographicDiscoveryJob` (event-driven + quarterly cron) (US-2.5.2)
+- `OptOutConfirmationJob` (on-demand — sends confirmation email) (US-2.5.3)
 
 **Controllers:**
 - `StacksWeb.Admin.ScraperConfigController`
@@ -681,7 +1153,9 @@ After all tracks merge:
 - [ ] Author intelligence discovers and stores author RSS feeds
 - [ ] Source discovery scores URLs with LLM confidence
 - [ ] Human approval flow works: discover -> score -> approve/reject
-- [ ] All enrichment data surfaces on book detail page API response
+- [ ] Geographic sweep discovers local spaces when location is set (US-2.5.2)
+- [ ] Business opt-out: `POST /api/opt-out` sets status to excluded, prevents re-discovery (US-2.5.3)
+- [ ] All enrichment data surfaces on book detail overlay API response
 - [ ] dbt staging + intermediate models pass `dbt test`
 
 ---
@@ -713,7 +1187,7 @@ After all tracks merge:
 
 ---
 
-## GROUP 3: Partner Integration & EDA (Phase 3)
+## REFERENCE: Original Phase 3 — Partner Integration & EDA (now split: EDA in 1B.1, partners deferred to Phase 2B)
 
 > Inbound partner API, dashboard, CSV import. Event-driven architecture lands as cross-cutting infrastructure.
 
@@ -877,7 +1351,7 @@ After all tracks merge:
 
 ---
 
-## GROUP 4: Polish (Phase 4)
+## REFERENCE: Original Phase 4 — Polish (now 1E.3 for RSS/Metrics, Third Spaces deferred to Phase 2A)
 
 > Community features, operational visibility, sharing.
 
@@ -931,7 +1405,7 @@ After all tracks merge:
 
 ---
 
-## GROUP 5: Marketplace (Phase 5, Future)
+## REFERENCE: Original Phase 5 — Marketplace (now 1E.1, simplified)
 
 > Listings, public Q&A, private offer threads, payments, shipping. Depop/Vinted interaction model. Deferred until core platform is stable.
 
@@ -939,13 +1413,14 @@ After all tracks merge:
 **Objective**: Marketplace tables exist. Listing columns already on `bookshelf_placements` (Phase 1A); these are the transaction and communication tables.
 
 Migrations:
-1. `create_offer_threads` — `listing_mode` context (open_bid | closed_bid); status: pending -> accepted -> declined -> withdrawn -> expired
+1. `create_offer_threads` — `listing_mode` context (fixed | offers; closed bid deferred); status: pending -> accepted -> declined -> withdrawn -> expired
 2. `create_offer_messages` — individual messages within an offer thread; `message_type`: offer | counter_offer | question | answer | system
 3. `create_transactions` — `payment_status`, `shipping_status`, FK to accepted `offer_thread_id`
 
 > **Listing state machine** (on `bookshelf_placements.listing_status`): draft → active → sold → removed → expired
 > **Offer state machine** (on `offer_threads.status`): pending → accepted / declined / withdrawn / expired
-> **Closed bid mode**: buyer submits private offer; no public Q&A; seller sees price only (not buyer identity until accepted)
+> **Closed bid mode**: deferred to a future phase.
+> **Post-sale lifecycle** (US-7.2): On sale completion, seller's placement is soft-deleted. `MarketplaceSaleWorker` checks buyer's WishList and prompts to add the book. If already on WishList, offers to move to Library/AntiLibrary.
 
 ---
 
@@ -954,10 +1429,10 @@ Migrations:
 
 - `Stacks.Marketplace` context — `create_listing/1`, `update_listing/2`, listing state machine
 - `Stacks.Marketplace.QnA` — `post_question/2`, `post_answer/2` (public; moderation applies)
-- `Stacks.Marketplace.Offers` — `create_offer_thread/2`, `send_message/2`, `accept_offer/1`, `decline_offer/1`, `withdraw_offer/1`; closed bid mode enforces price-only visibility
+- `Stacks.Marketplace.Offers` — `create_offer_thread/2`, `send_message/2`, `accept_offer/1`, `decline_offer/1`, `withdraw_offer/1`
 - `Stacks.Marketplace.Transactions` — `initiate_payment/1`, `confirm_payment/1`, `create_shipment/1`
 - `Stacks.Marketplace.SellerVerification` — KYC via Smile Identity / Yoti / Sumsub
-- Oban workers: `ListingExpiryJob`, `OfferExpiryJob`, `PaymentCallbackJob`, `ShipmentTrackingJob`
+- Oban workers: `ListingExpiryJob`, `OfferExpiryJob`, `PaymentCallbackJob`, `ShipmentTrackingJob`, `MarketplaceSaleWorker` (post-sale buyer prompt)
 - Webhook handlers for Stitch Money and Pargo callbacks
 
 **dbt models:**
@@ -970,7 +1445,7 @@ Migrations:
 ### Phase 5C — Marketplace Frontend (elm-agent)
 **Objective**: Listing creation, public Q&A, private offer threads, purchase flow, seller onboarding.
 
-- `Page.Marketplace.CreateListing` — condition grader, price, listing mode toggle (open/closed bid)
+- `Page.Marketplace.CreateListing` — condition grader, price, listing mode toggle (fixed/offers)
 - `Page.Marketplace.ListingDetail` — public Q&A thread, "Make an Offer" button
 - `Page.Marketplace.OfferThread` — private offer/counter-offer/accept/decline flow
 - `Page.Marketplace.Checkout` — payment via Stitch Money
@@ -978,14 +1453,14 @@ Migrations:
 - `Components.ConditionGrader`, `Components.OfferModal`, `Components.QnAThread`
 
 #### Phase 5 Integration Test
-- [ ] Seller KYC -> list book (open bid) -> buyer posts public question -> seller answers -> buyer makes offer -> seller accepts -> payment -> shipping
-- [ ] Closed bid: seller lists, buyer submits private offer, seller sees price only until accepted
+- [ ] Seller KYC -> list book (from any shelf) -> buyer posts question -> seller answers -> buyer makes offer -> seller accepts -> payment -> shipping
+- [ ] Post-sale: seller's book removed from Looking for a Home; buyer prompted to add (WishList detection works)
 - [ ] Listing expires automatically after configured period
 - [ ] Offer expires automatically if no response
 
 ---
 
-## GROUP 6: Social Graph & Visibility (Phase 6, Future)
+## REFERENCE: Original Phase 6 — Social Graph & Visibility (now 1B.3, groups deferred to Phase 2C)
 
 > Fine-grained visibility controls, groups, block graph. Prerequisite for public profiles and selective sharing.
 
@@ -1019,6 +1494,7 @@ Migrations:
   - `block_user/2`, `unblock_user/2`, `is_blocked?/2`, `blocked_by?/2`
   - `create_group/2`, `invite_member/3`, `accept_invitation/2`, `remove_member/2`, `leave_group/2`, `dissolve_group/1`
   - `visible_groups/1` — member-list never exposed outside interactive spaces
+- `Stacks.Groups.Feed` — `get_feed/2` (US-11.1.5): aggregated blog posts + shelf activity from group members, filtered by visibility + blocks. Behaviour varies by group type (close_friends: all members; broadcast/subscription: owner only).
 - `StacksWeb.Plugs.ViewAsPlug` — owner sets `?view_as=user_id` param; plug sets viewer context; 403 for non-owners
 - Retrofit: all existing content endpoints route through `resolve_visibility/2`
 
@@ -1045,7 +1521,7 @@ Migrations:
 
 - `Page.Settings.Privacy` — profile visibility selector, per-shelf overrides, ceiling rule UI hint
 - `Page.Settings.Groups` — create/manage groups, invite flow
-- `Page.Groups.Detail` — members (visible to owner only), content list
+- `Page.Groups.Detail` — members (visible to owner only), content feed (US-11.1.5: reverse-chronological blog posts + shelf activity from members)
 - `Components.VisibilityBadge` — lock icon with tooltip per visibility level
 - `Components.ViewAsBar` — sticky banner when viewing as another user
 
@@ -1056,7 +1532,7 @@ Migrations:
 
 ---
 
-## GROUP 7: Blog & Comments (Phase 7, Future)
+## REFERENCE: Original Phase 7 — Blog & Comments (now 1E.2 for blog, comments deferred to Phase 2D)
 
 > Native blog, LLM-powered book associations, comment threads with block-filtering.
 
@@ -1130,72 +1606,61 @@ Migrations:
 
 ---
 
-## Cross-cutting: Security Hardening (incremental across all phases)
+## Cross-cutting: Security Hardening (woven into every sub-phase)
 
-Security is not a separate phase — it's woven into every phase. The security-agent reviews each phase's PR before merge.
+Security is not a separate phase — it's woven into every sub-phase. The security-agent reviews each sub-phase's PR before merge.
 
-| Phase | Security work |
-|-------|--------------|
-| Phase 1B | Guardian auth, Argon2 passwords, HMAC service-to-service, security headers plug, rate limiting, CSP, image upload validation, EXIF stripping |
-| Phase 1E | Fly.io private networking, secrets management, CI security scanning (sobelow, mix_audit, cargo audit, pip audit) |
-| Phase 2B | Circuit breakers (Fuse) on all external calls, AI budget controls, LLM output validation |
-| Phase 3C | Partner API key auth (Argon2 hash), partner rate limiting (separate tier), Protobuf schema validation, text blocklist |
-| Phase 5B | PCI considerations for payment flow, KYC webhook verification |
-| Phase 6B | `resolve_visibility/2` gate on all content endpoints, block graph prevents information leakage, `ViewAsPlug` owner-only guard, `noindex`/`nofollow` meta on non-platform-visible content, `robots.txt` disallow for auth-walled routes |
-| Phase 7B | LLM output validation (never trust `/associate` without ISBN verification), comment moderation pipeline, blog content CSP |
+| Sub-Phase | Security work |
+|-----------|--------------|
+| 1B.1 | Guardian auth, Argon2 passwords, HMAC service-to-service, security headers plug, rate limiting, CSP, image upload validation, EXIF stripping, Protobuf schema validation for event envelope |
+| 1B.3 | `resolve_visibility/2` gate on ALL content endpoints (built in, not retrofitted), block graph prevents information leakage, `ViewAsPlug` owner-only guard, RLS policies, `noindex`/`nofollow` meta, `robots.txt` disallow for auth-walled routes |
+| 1C.1 | Rust scraper: HMAC auth, robots.txt compliance, per-domain rate limiting |
+| 1C.2 | Circuit breakers (Fuse) on all external calls, AI budget controls, LLM output validation, source exclusion list |
+| 1E.1 | KYC webhook verification, Stitch Money payment security, marketplace listing visibility exception audit |
+| 1E.2 | LLM output validation (never trust `/associate` without ISBN verification), blog content CSP |
+| 1E.3 | Email: verify sender domain, rate-limit email sends, no PII in email subject lines |
+| 1G | Fly.io private networking, secrets management, CI security scanning (sobelow, mix_audit, cargo audit, pip audit), `REQUIRE_KYC=true` for production |
 
 ---
 
-## Cross-cutting: Testing Enhancements (incremental across phases)
+## Cross-cutting: Testing Enhancements (woven into sub-phases)
 
-Testing infrastructure grows alongside features. The testing standards (`docs/agents/standards/testing.md`) define when each type of test is required; this section sequences the introduction of additional testing frameworks.
+Testing infrastructure grows alongside features. The testing standards (`docs/agents/standards/testing.md`) define when each type of test is required.
 
-### Phase 1 (MVP)
-
-| Enhancement | What | Where it fits |
-|-------------|------|---------------|
-| **Accessibility testing** | Add `@axe-core/playwright` alongside existing Playwright E2E tests. Every E2E test run also checks WCAG compliance (contrast, ARIA, alt text). Near-zero effort — axe-core injects into existing Playwright test hooks. | Layer 10 (Playwright E2E). Add to `frontend/e2e/` setup. CI runs it with every Playwright pass. |
-| **Migration rollback testing** | After `mix ecto.migrate`, run `mix ecto.rollback --all` then `mix ecto.migrate` again in CI. Proves every migration is reversible and re-runnable. | CI pipeline (`scripts/ci.sh` elixir group). Add as a step after the existing migration check. |
-| **API fuzz testing (Schemathesis)** | Auto-generate adversarial HTTP payloads from Protobuf-generated JSON schemas and fire them at Phoenix endpoints. Catches input validation gaps that hand-written tests miss. Pairs with the property-based testing philosophy. | Layer 12 (Security Testing). Add `schemathesis` to Python dev dependencies. CI runs it against a local Phoenix instance after unit tests pass. |
-
-### Phase 2+ (Enrichment and beyond)
-
-| Enhancement | What | Where it fits |
-|-------------|------|---------------|
-| **Mutation testing** | Muzak (Elixir) and cargo-mutants (Rust) validate that tests actually catch bugs, not just that they pass. Slow and expensive — run as a periodic audit (monthly or per-milestone), not as a CI gate. | Periodic audit. Results inform whether test quality is keeping pace with code complexity. |
-| **RSS/Atom feed validation** | Once US-6.1 (shelf RSS feeds) ships, add a small integration test that validates feed output: parses as valid Atom, entries have required fields (title, updated, id, link), content matches expected book data. | Layer 2 (Integration Tests). A handful of assertions in an existing test file, not a separate framework. |
+| Enhancement | When | What |
+|-------------|------|------|
+| **Property-based tests (StreamData)** | 1B.3 (visibility) | `resolve_visibility/2` has a large combinatorial input space. Generate random `(resource, viewer)` pairs and assert invariants. Extend to ISBN validation, price parsing, and any function with a large input domain. |
+| **Accessibility testing (axe-core)** | 1F Wave 1 | Add `@axe-core/playwright` alongside Playwright E2E tests. Every E2E run checks WCAG compliance. |
+| **Migration rollback testing** | 1A | `mix ecto.rollback --all && mix ecto.migrate` in CI. Proves every migration is reversible. |
+| **API fuzz testing (Schemathesis)** | 1B.1 (after Protobuf) | Auto-generate adversarial payloads from proto-generated JSON schemas. Catches input validation gaps. |
+| **Mutation testing** | Post-Phase 1 | Muzak (Elixir) and cargo-mutants (Rust). Periodic audit, not CI gate. |
+| **RSS/Atom feed validation** | 1E.3 | Integration test: parse as valid Atom, entries have required fields. |
+| **dbt data quality** | 1A onwards | `dbt-assertions` package for row-level assertions on staging models. Expand with each new mart. |
 
 ---
 
 ## Quick Reference: Agent Assignments
 
-| Phase | Primary Agent(s) | Review Agent |
-|-------|-----------------|--------------|
+| Sub-Phase | Primary Agent(s) | Review Agent |
+|-----------|-----------------|--------------|
 | Scaffolding | platform-agent | -- |
-| 1A | database-agent | principle-engineer-agent |
-| 1B | elixir-agent | security-agent |
-| 1C | elm-agent | elixir-agent (API contract) |
-| 1D | python-agent | security-agent |
-| 1E | platform-agent | principle-engineer-agent |
-| 2A | rust-agent | security-agent |
-| 2B | elixir-agent | testing-coordinator |
-| 2C | elm-agent | elixir-agent |
-| 3A | protobuf-agent | principle-engineer-agent |
-| 3B | elixir-agent | principle-engineer-agent |
-| 3C | partner-agent + elixir-agent | security-agent |
-| 3D | elm-agent | partner-agent |
-| 4A | elixir-agent + elm-agent | testing-coordinator |
-| 4B | elixir-agent | -- |
-| 4C | elixir-agent + elm-agent | -- |
-| 5A | database-agent | principle-engineer-agent |
-| 5B | elixir-agent | security-agent |
-| 5C | elm-agent | elixir-agent |
-| 6A | database-agent | principle-engineer-agent |
-| 6B | elixir-agent | security-agent |
-| 6C | elm-agent | elixir-agent |
-| 7A | database-agent | principle-engineer-agent |
-| 7B | elixir-agent + python-agent | security-agent |
-| 7C | elm-agent | elixir-agent |
+| 1A (DB) | database-agent | principle-engineer-agent |
+| 1B.1 (Foundation + Event Bus + Proto) | elixir-agent + protobuf-agent | security-agent + principle-engineer-agent |
+| 1B.2 (Core Book Management) | elixir-agent | security-agent |
+| 1B.3 (Visibility + RLS) | elixir-agent | security-agent + principle-engineer-agent |
+| 1C.1 (Rust Scraper) | rust-agent | security-agent |
+| 1C.2 (Enrichment) | elixir-agent | testing-coordinator |
+| 1D (Vision Sidecar) | python-agent | security-agent |
+| 1E.1 (Marketplace) | elixir-agent | security-agent + principle-engineer-agent |
+| 1E.2 (Blog) | elixir-agent + python-agent | security-agent |
+| 1E.3 (RSS + Metrics + Email) | elixir-agent | -- |
+| 1F Waves 1-4 (Elm) | elm-agent | elixir-agent (API contract) |
+| 1G (Platform + Deploy) | platform-agent | principle-engineer-agent |
+| Phase 2A (Third Spaces) | elixir-agent + elm-agent | -- |
+| Phase 2B (Partners) | partner-agent + elixir-agent | security-agent |
+| Phase 2C (Groups) | elixir-agent + elm-agent | -- |
+| Phase 2D (Comments) | elixir-agent + elm-agent | security-agent |
+| Phase 2E (Marketplace Enhancements) | elixir-agent | security-agent |
 
 ---
 
@@ -1226,3 +1691,18 @@ All agents updating this file during implementation must use:
 - Note: my_writing_links table not created in Phase 1A (superseded by blog_posts); website_url on users covers external-link use case
 - Note: /associate Python endpoint deferred from Phase 1D to Phase 7B
 - In Progress: Phase 1B–1E implementation not yet started
+
+[2026-03-17] - Claude Code - User story gap analysis + cross-document sync
+- Completed: User stories gap analysis — identified 17 gaps, filled with 12 new stories + 15 amended stories
+- Completed: Works/editions data model decision — `books` = work, `book_editions` = edition (ISBN, format)
+- Completed: technical-architecture.md updated to v1.5 — works/editions schema, new Oban queues, new Elm types, new API endpoints, community wear mart
+- Completed: implementation-mapping.md updated — 15 new story mappings, 8 amended stories, all quick reference tables updated
+- Completed: consolidated-roadmap.md updated — works/editions in Phase 1A, two-step upload in 1B, overlay+settings+accessibility in 1C, geographic sweep+opt-out in 2B, post-sale in Phase 5, group feed in Phase 6
+- Key decisions: book detail is overlay (not route), upload defaults to WishList, Looking for a Home has community-driven wear, closed bid deferred, email notifications quiet by default, list view toggle for accessibility
+
+[2026-03-17] - Claude Code - Phase 1 scope expansion + roadmap restructure
+- Completed: Expanded Phase 1 to include ALL features except Third Spaces, partners, groups, comments
+- Completed: Principal engineer review of sub-phase ordering — event bus moved to 1B.1, visibility to 1B.3, Protobuf early
+- Completed: Roadmap restructured — old Phases 2-7 absorbed into Phase 1 sub-phases; remaining deferred to Phase 2
+- Key decisions: KYC config flag (REQUIRE_KYC), RLS designed now, Protobuf as contract from day one, marketplace listings punch through profile ceiling, email infrastructure explicitly scoped, property-based tests for visibility, dbt data engineering tracks per sub-phase
+- Deferred to Phase 2: Third Spaces (2A), Partner Integration (2B), Groups (2C), Comments/Q&A (2D), Marketplace Enhancements (2E)

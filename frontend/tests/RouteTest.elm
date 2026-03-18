@@ -71,6 +71,10 @@ suite =
                 \_ ->
                     fromPath "/settings/age-verification"
                         |> Expect.equal SettingsAgeVerification
+            , test "Catalogue" <|
+                \_ ->
+                    fromPath "/catalogue"
+                        |> Expect.equal Catalogue
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -121,5 +125,9 @@ suite =
                 \_ ->
                     Route.toPath SettingsAgeVerification
                         |> Expect.equal "/settings/age-verification"
+            , test "Catalogue path" <|
+                \_ ->
+                    Route.toPath Catalogue
+                        |> Expect.equal "/catalogue"
             ]
         ]

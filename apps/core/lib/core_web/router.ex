@@ -10,6 +10,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.AuthPipeline
   end
 
+  pipeline :optional_auth do
+    plug StacksWeb.Plugs.OptionalAuthPipeline
+  end
+
   pipeline :rate_limit_auth do
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
   end
@@ -27,6 +31,13 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through :api
     get "/costs", CostController, :index
+    get "/catalogue", CatalogueController, :index
+  end
+
+  # Public with optional auth — returns extra data when authenticated
+  scope "/api", StacksWeb do
+    pipe_through [:api, :optional_auth]
+    get "/books/:id", BookController, :show
   end
 
   scope "/api", StacksWeb do
@@ -49,13 +60,14 @@ defmodule CoreWeb.Router do
     get "/upload/:image_id/status", UploadController, :status
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn
-    resources "/books", BookController, only: [:show, :create]
+    resources "/books", BookController, only: [:create]
 
     get "/search", SearchController, :index
 
     get "/bookshelves/:bookshelf_name", BookshelfController, :show
 
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
+    get "/placements/mine", BookshelfPlacementController, :mine
     put "/placements/:id/move", BookshelfPlacementController, :move
     put "/placements/:id/formats", BookshelfPlacementController, :update_formats
     delete "/placements/:id", BookshelfPlacementController, :delete

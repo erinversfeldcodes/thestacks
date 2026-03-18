@@ -4,7 +4,7 @@ defmodule Stacks.Books.UploadedImage do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Stacks.Books.Book
+  alias Stacks.Books.{Book, BookEdition}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -23,6 +23,7 @@ defmodule Stacks.Books.UploadedImage do
     field :book_ids, {:array, :binary_id}, default: []
 
     belongs_to :book, Book
+    belongs_to :book_edition, BookEdition
 
     timestamps(type: :utc_datetime_usec, inserted_at: :created_at)
   end
@@ -36,6 +37,7 @@ defmodule Stacks.Books.UploadedImage do
       :uploaded_at,
       :expires_at,
       :book_id,
+      :book_edition_id,
       :book_ids
     ])
     |> validate_required([:status, :uploaded_at, :expires_at])

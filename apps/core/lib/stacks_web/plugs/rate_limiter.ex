@@ -130,6 +130,15 @@ defmodule StacksWeb.Plugs.RateLimiter do
     @impl GenServer
     def init(:ok) do
       :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+
+      # runtime.exs runs before Fly.io secrets are injected into the process
+      # environment, so Application.get_env(:core, :rate_limit_auth) is not set
+      # by the time the plug reads it. Apply the override here, where secrets
+      # are guaranteed to be present.
+      if limit = System.get_env("RATE_LIMIT_AUTH") do
+        Application.put_env(:core, :rate_limit_auth, String.to_integer(limit))
+      end
+
       schedule_cleanup()
       {:ok, %{}}
     end

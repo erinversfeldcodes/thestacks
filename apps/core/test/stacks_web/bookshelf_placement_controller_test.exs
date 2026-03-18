@@ -18,6 +18,64 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
   end
 
   # ---------------------------------------------------------------------------
+  # GET /api/placements/mine
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/placements/mine — mine" do
+    test "returns empty list when user has no placements", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/placements/mine")
+
+      assert %{"placements" => []} = json_response(conn, 200)
+    end
+
+    test "returns summary of user's active placements", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book1 = insert(:book)
+      book2 = insert(:book)
+      insert(:placement, bookshelf: bookshelf, book: book1)
+      insert(:placement, bookshelf: bookshelf, book: book2)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/placements/mine")
+
+      assert %{"placements" => placements} = json_response(conn, 200)
+      assert length(placements) == 2
+      assert Enum.all?(placements, &(&1["bookshelf_name"] == "library"))
+
+      book_ids = Enum.map(placements, & &1["book_id"])
+      assert book1.id in book_ids
+      assert book2.id in book_ids
+    end
+
+    test "excludes removed placements", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      insert(:placement, bookshelf: bookshelf, book: book, removed_at: DateTime.utc_now())
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/placements/mine")
+
+      assert %{"placements" => []} = json_response(conn, 200)
+    end
+
+    test "returns 401 when not authenticated", %{conn: conn} do
+      conn = get(conn, "/api/placements/mine")
+      assert json_response(conn, 401)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # POST /api/bookshelves/:bookshelf_name/placements
   # ---------------------------------------------------------------------------
 

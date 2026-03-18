@@ -4,7 +4,7 @@ import Expect
 import Http
 import Navigation.Route exposing (Route(..))
 import Page.BookDetail as BookDetail
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import Test exposing (Test, describe, test)
 import Types.Book exposing (Author, Book, VisibilityTier(..))
 import Types.RemoteData exposing (RemoteData(..))
@@ -14,11 +14,11 @@ import Types.RemoteData exposing (RemoteData(..))
 -- Helpers
 
 
-libraryInit : Library.Model
+libraryInit : Bookshelf.Model
 libraryInit =
     { books = Loading
-    , selectedBook = Nothing
     , showAgeGate = False
+    , config = Bookshelf.libraryConfig
     }
 
 
@@ -29,11 +29,16 @@ bookDetailInit =
     , bookshelfMoverOpen = False
     , removeModalOpen = False
     , formatPickerOpen = False
-    , selectedBookshelf = "library"
+    , currentBookshelf = ""
+    , selectedBookshelf = "antilibrary"
     , selectedFormats = []
+    , moveState = NotAsked
     , removeState = NotAsked
+    , selectedEdition = Nothing
     , previousRoute = Nothing
     , showAgeGate = False
+    , entryAnimationActive = False
+    , isAuthenticated = True
     }
 
 
@@ -42,20 +47,19 @@ sampleAuthor =
     { id = "author-1"
     , name = "Test Author"
     , bio = Nothing
+    , website = Nothing
     }
 
 
 sampleBook : Book
 sampleBook =
     { id = "book-1"
-    , isbn = "9780000000000"
     , title = "Test Book"
-    , author = sampleAuthor
+    , author = Just sampleAuthor
     , description = Nothing
-    , coverImageUrl = Nothing
-    , pageCount = Nothing
-    , publisher = Nothing
-    , publicationYear = Nothing
+    , editions = []
+    , primaryEdition = Nothing
+    , editionCount = 0
     , subjects = []
     , visibilityTier = Public
     }
@@ -73,8 +77,8 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Library.update
-                                (Library.BooksLoaded (Err (Http.BadStatus 403)))
+                            Bookshelf.update
+                                (Bookshelf.BooksLoaded (Err (Http.BadStatus 403)))
                                 libraryInit
                     in
                     Expect.all
@@ -86,8 +90,8 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Library.update
-                                (Library.BooksLoaded (Err Http.NetworkError))
+                            Bookshelf.update
+                                (Bookshelf.BooksLoaded (Err Http.NetworkError))
                                 libraryInit
                     in
                     Expect.all
@@ -99,8 +103,8 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Library.update
-                                (Library.BooksLoaded (Ok []))
+                            Bookshelf.update
+                                (Bookshelf.BooksLoaded (Ok []))
                                 libraryInit
                     in
                     Expect.all
@@ -112,9 +116,9 @@ suite =
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Library.update Library.VerifyAge libraryInit
+                            Bookshelf.update Bookshelf.VerifyAge libraryInit
                     in
-                    Expect.equal (Library.NavigateTo SettingsAgeVerification) outMsg
+                    Expect.equal (Bookshelf.NavigateTo SettingsAgeVerification) outMsg
             , test "DismissAgeGate sets showAgeGate = False" <|
                 \_ ->
                     let
@@ -122,7 +126,7 @@ suite =
                             { libraryInit | showAgeGate = True }
 
                         ( model, _, _ ) =
-                            Library.update Library.DismissAgeGate modelWithGate
+                            Bookshelf.update Bookshelf.DismissAgeGate modelWithGate
                     in
                     Expect.equal False model.showAgeGate
             ]
@@ -160,7 +164,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok sampleBook))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing }))
                                 bookDetailInit
                                 Nothing
                     in

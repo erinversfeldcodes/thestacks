@@ -1,7 +1,7 @@
 module Components.FormatPicker exposing (formatPicker)
 
-import Html exposing (Html, button, div, text)
-import Html.Attributes exposing (class)
+import Html exposing (Html, button, div, span, text)
+import Html.Attributes exposing (attribute, class, title)
 import Html.Events exposing (onClick)
 import Types.Placement exposing (Format(..))
 
@@ -25,12 +25,25 @@ formatPicker config =
 
                         else
                             ""
+
+                    ariaPressedValue =
+                        if isSelected then
+                            "true"
+
+                        else
+                            "false"
                 in
                 button
                     [ class ("format-picker__btn " ++ selectedClass)
                     , onClick (config.onToggle format)
+                    , title (formatLabel format)
+                    , attribute "aria-pressed" ariaPressedValue
                     ]
-                    [ text (formatLabel format) ]
+                    [ span [ class "format-picker__icon" ]
+                        [ text (formatIcon isSelected format) ]
+                    , span [ class "format-picker__label" ]
+                        [ text (formatLabel format) ]
+                    ]
             )
             [ Physical, EBook, Audiobook ]
         )
@@ -47,3 +60,25 @@ formatLabel format =
 
         Audiobook ->
             "Audiobook"
+
+
+formatIcon : Bool -> Format -> String
+formatIcon owned format =
+    case ( format, owned ) of
+        ( Physical, True ) ->
+            "[■]"
+
+        ( Physical, False ) ->
+            "[ ]"
+
+        ( EBook, True ) ->
+            "{■}"
+
+        ( EBook, False ) ->
+            "{ }"
+
+        ( Audiobook, True ) ->
+            "(■)"
+
+        ( Audiobook, False ) ->
+            "( )"

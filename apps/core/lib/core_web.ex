@@ -3,7 +3,7 @@ defmodule CoreWeb do
   The entrypoint for defining the web interface for The Stacks.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  def static_paths, do: ~w(assets textures favicon.ico robots.txt)
 
   def router do
     quote do

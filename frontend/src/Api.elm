@@ -1,11 +1,17 @@
 module Api exposing
     ( AuthResponse
+    , BookDetailResponse
+    , CatalogueResponse
+    , PlacementSummary
     , PollResponse
     , PollStatus(..)
     , getBook
     , getBookshelf
+    , getCatalogue
+    , getUserPlacements
     , login
     , moveBook
+    , placeBook
     , pollUploadStatus
     , register
     , removeBook
@@ -175,18 +181,54 @@ pollUploadStatus imageId token toMsg =
         }
 
 
+{-| Response from GET /api/books/:id — book with optional placement data.
+-}
+type alias BookDetailResponse =
+    { book : Book
+    , placement : Maybe Placement
+    }
+
+
+bookDetailResponseDecoder : Decoder BookDetailResponse
+bookDetailResponseDecoder =
+    Decode.map2 BookDetailResponse
+        (Decode.field "book" bookDecoder)
+        (Decode.maybe (Decode.field "placement" placementDecoder))
+
+
+{-| Lightweight placement summary for duplicate detection.
+-}
+type alias PlacementSummary =
+    { bookId : String
+    , bookshelfName : String
+    }
+
+
+placementSummaryDecoder : Decoder PlacementSummary
+placementSummaryDecoder =
+    Decode.map2 PlacementSummary
+        (Decode.field "book_id" Decode.string)
+        (Decode.field "bookshelf_name" Decode.string)
+
+
 getBook :
     String
-    -> String
-    -> (Result Http.Error Book -> msg)
+    -> Maybe String
+    -> (Result Http.Error BookDetailResponse -> msg)
     -> Cmd msg
-getBook bookId token toMsg =
+getBook bookId maybeToken toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
         , url = baseUrl ++ "/api/books/" ++ bookId
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "book" bookDecoder)
+        , expect = Http.expectJson toMsg bookDetailResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -298,6 +340,98 @@ updateAgeVerification verified token toMsg =
         , url = baseUrl ++ "/api/settings/age_verification"
         , body = Http.jsonBody (Encode.object [ ( "age_verified", Encode.bool verified ) ])
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Response from GET /api/catalogue — paginated book list.
+-}
+type alias CatalogueResponse =
+    { books : List Book
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+catalogueResponseDecoder : Decoder CatalogueResponse
+catalogueResponseDecoder =
+    Decode.map4 CatalogueResponse
+        (Decode.field "books" (Decode.list bookDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.field "per_page" Decode.int)
+
+
+{-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
+-}
+placeBook :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error Placement -> msg)
+    -> Cmd msg
+placeBook bookshelfName bookId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/placements"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "book_id", Encode.string bookId ) ]
+                )
+        , expect = Http.expectJson toMsg (Decode.field "placement" placementDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/placements/mine — fetch summary of user's active placements.
+-}
+getUserPlacements :
+    String
+    -> (Result Http.Error (List PlacementSummary) -> msg)
+    -> Cmd msg
+getUserPlacements token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/mine"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/catalogue — fetch paginated book catalogue.
+-}
+getCatalogue :
+    { search : Maybe String
+    , subject : Maybe String
+    , sort : String
+    , page : Int
+    }
+    -> (Result Http.Error CatalogueResponse -> msg)
+    -> Cmd msg
+getCatalogue params toMsg =
+    let
+        queryParams =
+            [ Just (Url.Builder.string "sort" params.sort)
+            , Just (Url.Builder.int "page" params.page)
+            , params.search |> Maybe.map (Url.Builder.string "search")
+            , params.subject |> Maybe.map (Url.Builder.string "subject")
+            ]
+                |> List.filterMap identity
+    in
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg catalogueResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

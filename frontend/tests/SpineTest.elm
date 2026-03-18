@@ -7,37 +7,37 @@ import Test exposing (Test, describe, test)
 
 suite : Test
 suite =
-    describe "Spine width calculation"
-        [ test "minimum width is 8px for 0 pages" <|
+    describe "Spine width calculation (mockup formula: max(35, min(55, round(pages/12))))"
+        [ test "minimum width is 35px for 0 pages" <|
             \_ ->
                 spineWidth 0
-                    |> Expect.equal 8
-        , test "minimum width is 8px for 79 pages" <|
-            \_ ->
-                spineWidth 79
-                    |> Expect.equal 8
-        , test "100 pages gives 10px" <|
-            \_ ->
-                spineWidth 100
-                    |> Expect.equal 10
-        , test "200 pages gives 20px" <|
+                    |> Expect.equal 35
+        , test "minimum width is 35px for small books" <|
             \_ ->
                 spineWidth 200
-                    |> Expect.equal 20
-        , test "300 pages gives 30px" <|
+                    |> Expect.equal 35
+        , test "360 pages gives 35px (below minimum)" <|
             \_ ->
-                spineWidth 300
-                    |> Expect.equal 30
-        , test "400 pages gives 40px" <|
+                spineWidth 360
+                    |> Expect.equal 35
+        , test "420 pages gives 35px (boundary)" <|
             \_ ->
-                spineWidth 400
-                    |> Expect.equal 40
-        , test "maximum width is 40px for 1000 pages" <|
+                spineWidth 420
+                    |> Expect.equal 35
+        , test "500 pages gives 42px" <|
             \_ ->
-                spineWidth 1000
-                    |> Expect.equal 40
-        , test "maximum width is 40px for very large page count" <|
+                spineWidth 500
+                    |> Expect.equal 42
+        , test "600 pages gives 50px" <|
+            \_ ->
+                spineWidth 600
+                    |> Expect.equal 50
+        , test "maximum width is 55px for large books" <|
+            \_ ->
+                spineWidth 700
+                    |> Expect.equal 55
+        , test "maximum width is 55px for very large page count" <|
             \_ ->
                 spineWidth 9999
-                    |> Expect.equal 40
+                    |> Expect.equal 55
         ]

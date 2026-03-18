@@ -7,7 +7,7 @@ module Page.Upload exposing
     , view
     )
 
-import Api exposing (PollResponse, PollStatus(..))
+import Api exposing (BookDetailResponse, PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
@@ -19,7 +19,7 @@ import Json.Decode as Decode
 import Navigation.Route as Route
 import Process
 import Task
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, authorName)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -59,15 +59,15 @@ type alias Model =
 
 
 type Msg
-    = GotFiles File (List File)
+    = GotFile File
     | DragOver
     | DragLeave
     | FilepickerRequested
     | UploadAccepted (Result Http.Error String)
     | CheckStatus
     | StatusReceived (Result Http.Error PollResponse)
-    | GotIdentifiedBook String (Result Http.Error Book)
-    | GotDuplicateBook (Result Http.Error Book)
+    | GotIdentifiedBook String (Result Http.Error BookDetailResponse)
+    | GotDuplicateBook (Result Http.Error BookDetailResponse)
     | ManualIsbnChanged String
     | SubmitManualIsbn
     | EnterManualMode
@@ -101,7 +101,7 @@ sleepThenPoll =
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
 update msg model maybeToken =
     case msg of
-        GotFiles file _ ->
+        GotFile file ->
             case maybeToken of
                 Nothing ->
                     -- Not authenticated — send to login rather than silently hanging.
@@ -126,7 +126,7 @@ update msg model maybeToken =
             ( { model | isDragging = False }, Cmd.none )
 
         FilepickerRequested ->
-            ( model, Select.files [ "image/*" ] GotFiles )
+            ( model, Select.files [ "image/*" ] (\f _ -> GotFile f) )
 
         UploadAccepted result ->
             case result of
@@ -187,7 +187,7 @@ update msg model maybeToken =
                                                 GotIdentifiedBook singleId
                                     in
                                     ( { model | pendingBookIds = [], collectedBooks = [] }
-                                    , Api.getBook singleId token callback
+                                    , Api.getBook singleId (Just token) callback
                                     )
 
                                 ( multiIds, Just token ) ->
@@ -198,7 +198,7 @@ update msg model maybeToken =
                                       }
                                     , Cmd.batch
                                         (List.map
-                                            (\bid -> Api.getBook bid token (GotIdentifiedBook bid))
+                                            (\bid -> Api.getBook bid (Just token) (GotIdentifiedBook bid))
                                             multiIds
                                         )
                                     )
@@ -217,8 +217,11 @@ update msg model maybeToken =
 
         GotIdentifiedBook bookId result ->
             case result of
-                Ok book ->
+                Ok response ->
                     let
+                        book =
+                            response.book
+
                         newCollected =
                             model.collectedBooks ++ [ book ]
 
@@ -269,8 +272,8 @@ update msg model maybeToken =
 
         GotDuplicateBook result ->
             case result of
-                Ok book ->
-                    ( { model | result = DuplicateDetected book }, Cmd.none )
+                Ok response ->
+                    ( { model | result = DuplicateDetected response.book }, Cmd.none )
 
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none )
@@ -363,9 +366,8 @@ viewUploadArea model =
 
         onDropDecoder =
             Decode.at [ "dataTransfer", "files" ]
-                (Decode.map2 GotFiles
+                (Decode.map GotFile
                     (Decode.index 0 File.decoder)
-                    (Decode.succeed [])
                 )
 
         onDrop_ =
@@ -455,7 +457,7 @@ viewIdentifiedBook : Book -> Html Msg
 viewIdentifiedBook book =
     li [ class "upload-result__book-item" ]
         [ p [ class "upload-result__book-title" ] [ text book.title ]
-        , p [ class "upload-result__book-author" ] [ text book.author.name ]
+        , p [ class "upload-result__book-author" ] [ text (authorName book) ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
             , class "btn btn--primary"

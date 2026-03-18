@@ -1,0 +1,200 @@
+defmodule StacksWeb.CatalogueControllerTest do
+  @moduledoc """
+  Tests for GET /api/catalogue — the public book catalogue endpoint.
+
+  Verifies pagination, search, subject filtering, sort, and most
+  importantly that no ownership data is ever exposed.
+  """
+
+  use CoreWeb.ConnCase, async: true
+
+  import Stacks.Factory
+
+  alias Stacks.Accounts.Guardian
+
+  defp auth_conn(conn, user) do
+    {:ok, token, _} = Guardian.encode_and_sign(user)
+    put_req_header(conn, "authorization", "Bearer #{token}")
+  end
+
+  defp insert_book_with_edition(attrs \\ []) do
+    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author, :subjects]))
+
+    edition_attrs =
+      attrs
+      |> Keyword.take([:isbn])
+      |> Keyword.put(:book, book)
+      |> Keyword.put_new(:is_primary, true)
+
+    edition = insert(:book_edition, edition_attrs)
+    {book, edition}
+  end
+
+  describe "GET /api/catalogue" do
+    test "returns 200 when not authenticated (public endpoint)", %{conn: conn} do
+      conn = get(conn, "/api/catalogue")
+      assert %{"books" => _, "total" => _} = json_response(conn, 200)
+    end
+
+    test "returns paginated books with no ownership data", %{conn: conn} do
+      user = insert(:user)
+      author = insert(:author, name: "George Eliot")
+
+      insert_book_with_edition(
+        title: "Middlemarch",
+        author: author,
+        visibility_tier: "public"
+      )
+
+      insert_book_with_edition(
+        title: "Silas Marner",
+        author: author,
+        visibility_tier: "public"
+      )
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue")
+
+      assert %{"books" => books, "total" => total, "page" => 1, "per_page" => 24} =
+               json_response(conn, 200)
+
+      assert total == 2
+      assert length(books) == 2
+
+      # Verify no ownership data is present
+      for book <- books do
+        refute Map.has_key?(book, "user_id")
+        refute Map.has_key?(book, "owner")
+        refute Map.has_key?(book, "shelf")
+        refute Map.has_key?(book, "placement")
+        refute Map.has_key?(book, "owner_count")
+        assert Map.has_key?(book, "id")
+        assert Map.has_key?(book, "title")
+        assert Map.has_key?(book, "editions")
+        assert Map.has_key?(book, "primary_edition")
+      end
+    end
+
+    test "sorts by title ascending by default", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(title: "Zebra Book")
+      insert_book_with_edition(title: "Aardvark Book")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue")
+
+      %{"books" => books} = json_response(conn, 200)
+      titles = Enum.map(books, & &1["title"])
+      assert titles == ["Aardvark Book", "Zebra Book"]
+    end
+
+    test "sorts by recent when requested", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(title: "Old Book")
+      insert_book_with_edition(title: "New Book")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue", %{"sort" => "recent"})
+
+      %{"books" => books} = json_response(conn, 200)
+      assert List.first(books)["title"] == "New Book"
+    end
+
+    test "filters by subject", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(title: "Fiction Book", subjects: ["fiction", "drama"])
+      insert_book_with_edition(title: "Science Book", subjects: ["science"])
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue", %{"subject" => "fiction"})
+
+      %{"books" => books, "total" => total} = json_response(conn, 200)
+      assert total == 1
+      assert List.first(books)["title"] == "Fiction Book"
+    end
+
+    test "paginates correctly", %{conn: conn} do
+      user = insert(:user)
+
+      for i <- 1..5 do
+        insert_book_with_edition(title: "Book #{String.pad_leading(to_string(i), 2, "0")}")
+      end
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue", %{"page" => "1", "per_page" => "2"})
+
+      %{"books" => books, "total" => 5, "page" => 1, "per_page" => 2} =
+        json_response(conn, 200)
+
+      assert length(books) == 2
+    end
+
+    test "includes age_gated books in catalogue listing", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(title: "Normal Book", visibility_tier: "public")
+      insert_book_with_edition(title: "Age Gated Book", visibility_tier: "age_gated")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue")
+
+      %{"books" => books, "total" => total} = json_response(conn, 200)
+      assert total == 2
+      titles = Enum.map(books, & &1["title"]) |> Enum.sort()
+      assert "Age Gated Book" in titles
+    end
+
+    test "returns author data when present", %{conn: conn} do
+      user = insert(:user)
+      author = insert(:author, name: "Jane Austen")
+      insert_book_with_edition(title: "Pride and Prejudice", author: author)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue")
+
+      %{"books" => [book]} = json_response(conn, 200)
+      assert book["author"]["name"] == "Jane Austen"
+    end
+
+    test "multi-word search returns results without crashing", %{conn: conn} do
+      user = insert(:user)
+      author = insert(:author, name: "F. Scott Fitzgerald")
+      insert_book_with_edition(title: "The Great Gatsby", author: author)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue", %{"search" => "great gatsby"})
+
+      response = json_response(conn, 200)
+      assert is_list(response["books"])
+    end
+
+    test "returns null author for books without an author", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(title: "Anonymous Book")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/catalogue")
+
+      %{"books" => [book]} = json_response(conn, 200)
+      assert book["title"] == "Anonymous Book"
+      assert is_nil(book["author"])
+    end
+  end
+end

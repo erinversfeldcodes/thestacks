@@ -46,7 +46,7 @@ defmodule Stacks.Shelving do
     )
     |> where([p], is_nil(p.removed_at))
     |> order_by([p], [p.position, p.placed_at])
-    |> preload(:book)
+    |> preload(book: [:author, :editions])
     |> Repo.all()
   end
 
@@ -272,7 +272,7 @@ defmodule Stacks.Shelving do
   """
   @spec spine_data(binary()) :: map() | nil
   def spine_data(placement_id) do
-    placement = Repo.get(Placement, placement_id) |> Repo.preload(:book)
+    placement = Repo.get(Placement, placement_id) |> Repo.preload(book: :editions)
 
     case placement do
       nil ->
@@ -288,7 +288,9 @@ defmodule Stacks.Shelving do
 
         %{
           placement_id: placement_id,
-          page_count: p.book && p.book.page_count,
+          page_count:
+            p.book && Stacks.Books.primary_edition(p.book) &&
+              Stacks.Books.primary_edition(p.book).page_count,
           move_count: move_count,
           wear_level: wear_level
         }
@@ -299,6 +301,32 @@ defmodule Stacks.Shelving do
   defp compute_wear_level(n) when n <= 2, do: :light
   defp compute_wear_level(n) when n <= 5, do: :moderate
   defp compute_wear_level(_), do: :heavy
+
+  @doc """
+  Returns the user's active (non-removed) placement for a specific book,
+  with the bookshelf preloaded. Returns `nil` if no such placement exists.
+  """
+  @spec get_placement_for_book(binary(), binary()) :: Placement.t() | nil
+  def get_placement_for_book(user_id, book_id) do
+    Placement
+    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
+    |> where([p], p.book_id == ^book_id and is_nil(p.removed_at))
+    |> preload(:bookshelf)
+    |> Repo.one()
+  end
+
+  @doc """
+  Returns a lightweight summary of all active placements for a user:
+  each entry contains the book_id and the bookshelf name.
+  """
+  @spec get_user_placements_summary(binary()) :: [map()]
+  def get_user_placements_summary(user_id) do
+    Placement
+    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
+    |> where([p], is_nil(p.removed_at))
+    |> select([p, bs], %{book_id: p.book_id, bookshelf_name: bs.name})
+    |> Repo.all()
+  end
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do
