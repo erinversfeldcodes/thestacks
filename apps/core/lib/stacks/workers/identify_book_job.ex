@@ -33,7 +33,8 @@ defmodule Stacks.Workers.IdentifyBookJob do
     case Moderation.run_pipeline(context) do
       {:ok, books} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
-        isbns = Enum.map_join(books, ", ", & &1.isbn)
+        isbns = Enum.map_join(books, ", ", &primary_isbn/1)
+
         Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{isbns}")
         mark_resolved(image_id, book_ids)
         :ok
@@ -60,6 +61,9 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
       {:error, exception}
   end
+
+  defp primary_isbn(%{editions: [edition | _]}), do: edition.isbn
+  defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
     {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
