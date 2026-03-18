@@ -8,12 +8,20 @@ simulated HTTP responses and user interactions.
 -}
 
 import Dict
+import Html.Attributes
 import Http
 import Page.BookDetail as BookDetail
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (bookDetailProgram, simulateBookDetailResponse, testBook)
+import TestHelpers
+    exposing
+        ( bookDetailProgram
+        , simulateBookDetailResponse
+        , simulateBookDetailResponseWithPlacement
+        , testBook
+        , testPlacement
+        )
 
 
 {-| Helper to start a book detail program with an auth token.
@@ -33,6 +41,10 @@ suite =
         , formatToggleUpdatesSelected
         , shelfMoverOpenSelectConfirmFlow
         , removeModalOpenConfirmFlow
+        , sectionContentDetails
+        , placementLoadedShowsCurrentBookshelf
+        , ariaRegionsPresent
+        , ratingDisplayWithoutPlacement
         ]
 
 
@@ -52,7 +64,7 @@ successRendersAllSections =
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
-                    (simulateBookDetailResponse "book-test-001" testBook)
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "book-detail__hero" ]
                 |> ProgramTest.ensureViewHas
@@ -119,7 +131,7 @@ formatToggleUpdatesSelected =
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
-                    (simulateBookDetailResponse "book-test-001" testBook)
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
                 |> ProgramTest.clickButton "Physical"
                 |> ProgramTest.expectViewHas
                     [ Selector.class "format-picker__btn--selected" ]
@@ -132,7 +144,7 @@ shelfMoverOpenSelectConfirmFlow =
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
-                    (simulateBookDetailResponse "book-test-001" testBook)
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
                 |> ProgramTest.clickButton "Choose Bookshelf"
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "shelf-mover" ]
@@ -148,8 +160,8 @@ removeModalOpenConfirmFlow =
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
-                    (simulateBookDetailResponse "book-test-001" testBook)
-                |> ProgramTest.clickButton "Remove from Bookshelf"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Remove from collection"
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "modal-overlay" ]
                 |> ProgramTest.ensureViewHas
@@ -157,3 +169,68 @@ removeModalOpenConfirmFlow =
                 |> ProgramTest.clickButton "Keep It"
                 |> ProgramTest.expectViewHasNot
                     [ Selector.class "modal-overlay" ]
+
+
+sectionContentDetails : Test
+sectionContentDetails =
+    test "section_content: reviews show source names, prices show empty message, author name visible" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponse "book-test-001" testBook)
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "GoodReads" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Storygraph" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Reddit" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "No bookshop listings yet" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Charles Duhigg" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Not yet rated" ]
+
+
+placementLoadedShowsCurrentBookshelf : Test
+placementLoadedShowsCurrentBookshelf =
+    test "placement_loaded: when placement is returned, shelf actions show correct current bookshelf" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Choose Bookshelf"
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "shelf-mover" ]
+
+
+ariaRegionsPresent : Test
+ariaRegionsPresent =
+    test "aria_regions: sections have proper role=region attributes" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponse "book-test-001" testBook)
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "role" "region")
+                    , Selector.id "section-about"
+                    ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "role" "region")
+                    , Selector.id "section-reviews"
+                    ]
+
+
+ratingDisplayWithoutPlacement : Test
+ratingDisplayWithoutPlacement =
+    test "rating_display: without placement shows 'Not yet rated'" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponse "book-test-001" testBook)
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "book-detail__rating--empty" ]

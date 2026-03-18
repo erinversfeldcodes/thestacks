@@ -7,7 +7,7 @@ simulated user interactions and HTTP responses.
 
 -}
 
-import Api exposing (CatalogueResponse)
+import Api exposing (CatalogueResponse, PlacementSummary)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -20,6 +20,7 @@ import SimulatedEffect.Task
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
 import Types.Book exposing (bookDecoder)
+import Types.Placement exposing (placementDecoder)
 
 
 suite : Test
@@ -32,6 +33,9 @@ suite =
         , searchTriggersDebounce
         , sortChangeFetchesNewData
         , rendersAgeGatedBooksWithNullAuthor
+        , showsShelfBadgeForPlacedBooks
+        , addToShelfOpensPickerAndPlaces
+        , placementErrorShowsButton
         ]
 
 
@@ -66,18 +70,36 @@ catalogueInitEffects : Maybe String -> SimulatedEffect Catalogue.Msg
 catalogueInitEffects maybeToken =
     case maybeToken of
         Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/catalogue?sort=title&page=1"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived catalogueResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            SimulatedEffect.Cmd.batch
+                [ SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/catalogue?sort=title&page=1"
+                    , body = SimulatedEffect.Http.emptyBody
+                    , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived catalogueResponseDecoder
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                , SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/placements/mine"
+                    , body = SimulatedEffect.Http.emptyBody
+                    , expect = SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded (Decode.field "placements" (Decode.list placementSummaryDecoder))
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                ]
 
         Nothing ->
             SimulatedEffect.Cmd.none
+
+
+placementSummaryDecoder : Decode.Decoder PlacementSummary
+placementSummaryDecoder =
+    Decode.map2 PlacementSummary
+        (Decode.field "book_id" Decode.string)
+        (Decode.field "bookshelf_name" Decode.string)
 
 
 catalogueEffects : Catalogue.Msg -> Catalogue.Model -> Maybe String -> SimulatedEffect Catalogue.Msg
@@ -111,6 +133,24 @@ catalogueEffects msg model maybeToken =
 
         Catalogue.PageChanged newPage ->
             fetchSimulated { model | page = newPage } maybeToken
+
+        Catalogue.PlaceOnShelf shelfName bookId ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/bookshelves/" ++ shelfName ++ "/placements"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object [ ( "book_id", Encode.string bookId ) ])
+                        , expect = SimulatedEffect.Http.expectJson (Catalogue.PlaceBookCompleted shelfName bookId) (Decode.field "placement" placementDecoder)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
 
         _ ->
             SimulatedEffect.Cmd.none
@@ -192,6 +232,47 @@ emptyCatalogueJson =
         )
 
 
+placementsJson : String
+placementsJson =
+    Encode.encode 0
+        (Encode.object
+            [ ( "placements"
+              , Encode.list identity
+                    [ Encode.object
+                        [ ( "book_id", Encode.string "book-1" )
+                        , ( "bookshelf_name", Encode.string "library" )
+                        ]
+                    ]
+              )
+            ]
+        )
+
+
+emptyPlacementsJson : String
+emptyPlacementsJson =
+    Encode.encode 0
+        (Encode.object
+            [ ( "placements", Encode.list identity [] ) ]
+        )
+
+
+placementCreatedJson : String
+placementCreatedJson =
+    Encode.encode 0
+        (Encode.object
+            [ ( "placement"
+              , Encode.object
+                    [ ( "id", Encode.string "new-placement-1" )
+                    , ( "position", Encode.int 1 )
+                    , ( "placed_at", Encode.string "2026-03-18T00:00:00Z" )
+                    , ( "book_id", Encode.string "book-2" )
+                    , ( "bookshelf_id", Encode.string "bookshelf-1" )
+                    ]
+              )
+            ]
+        )
+
+
 bookJson : String -> String -> String -> List String -> Encode.Value
 bookJson id title authorName subjects =
     Encode.object
@@ -219,6 +300,9 @@ loadAndDisplayBooks =
         \() ->
             startCatalogue
                 |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
+                |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1"
                     sampleCatalogueJson
                 |> ProgramTest.ensureViewHas
@@ -241,6 +325,9 @@ showsErrorState =
     test "error_state: shows error message on HTTP failure" <|
         \() ->
             startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/catalogue?sort=title&page=1"
                     Http.NetworkError_
@@ -254,6 +341,9 @@ showsEmptyState =
         \() ->
             startCatalogue
                 |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
+                |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1"
                     emptyCatalogueJson
                 |> ProgramTest.expectViewHas
@@ -265,6 +355,9 @@ searchTriggersDebounce =
     test "search_debounce: type query -> advance past debounce -> new results fetched" <|
         \() ->
             startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1"
                     sampleCatalogueJson
@@ -284,6 +377,9 @@ sortChangeFetchesNewData =
     test "sort_change: changing sort fetches new data" <|
         \() ->
             startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1"
                     sampleCatalogueJson
@@ -320,12 +416,73 @@ rendersAgeGatedBooksWithNullAuthor =
             in
             startCatalogue
                 |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
+                |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1"
                     catalogueWithAgeGatedAndNullAuthor
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Age Gated Book" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Authorless Book" ]
+
+
+showsShelfBadgeForPlacedBooks : Test
+showsShelfBadgeForPlacedBooks =
+    test "shelf_badge: books with existing placements show 'In your Library' badge" <|
+        \() ->
+            startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    placementsJson
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/catalogue?sort=title&page=1"
+                    sampleCatalogueJson
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "In your Library" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Add to Shelf" ]
+
+
+addToShelfOpensPickerAndPlaces : Test
+addToShelfOpensPickerAndPlaces =
+    test "add_to_shelf: clicking Add to Shelf opens picker, selecting shelf fires POST" <|
+        \() ->
+            startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/catalogue?sort=title&page=1"
+                    sampleCatalogueJson
+                |> ProgramTest.update (OpenShelfPicker "book-1")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Library" ]
+                |> ProgramTest.update (PlaceOnShelf "library" "book-1")
+                |> ProgramTest.simulateHttpOk "POST"
+                    "/api/bookshelves/library/placements"
+                    placementCreatedJson
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "In your Library" ]
+
+
+placementErrorShowsButton : Test
+placementErrorShowsButton =
+    test "placement_error: failed placement keeps Add to Shelf available" <|
+        \() ->
+            startCatalogue
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/placements/mine"
+                    emptyPlacementsJson
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/catalogue?sort=title&page=1"
+                    sampleCatalogueJson
+                |> ProgramTest.update (PlaceOnShelf "library" "book-1")
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/bookshelves/library/placements"
+                    Http.NetworkError_
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Add to Shelf" ]
 
 
 ageGatedBookJson : Encode.Value

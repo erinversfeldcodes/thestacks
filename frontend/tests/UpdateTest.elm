@@ -34,9 +34,11 @@ bookDetailInit =
     , selectedFormats = []
     , moveState = NotAsked
     , removeState = NotAsked
+    , selectedEdition = Nothing
     , previousRoute = Nothing
     , showAgeGate = False
     , entryAnimationActive = False
+    , isAuthenticated = True
     }
 
 
@@ -45,20 +47,19 @@ sampleAuthor =
     { id = "author-1"
     , name = "Test Author"
     , bio = Nothing
+    , website = Nothing
     }
 
 
 sampleBook : Book
 sampleBook =
     { id = "book-1"
-    , isbn = "9780000000000"
     , title = "Test Book"
     , author = Just sampleAuthor
     , description = Nothing
-    , coverImageUrl = Nothing
-    , pageCount = Nothing
-    , publisher = Nothing
-    , publicationYear = Nothing
+    , editions = []
+    , primaryEdition = Nothing
+    , editionCount = 0
     , subjects = []
     , visibilityTier = Public
     }
@@ -163,7 +164,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok sampleBook))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing }))
                                 bookDetailInit
                                 Nothing
                     in

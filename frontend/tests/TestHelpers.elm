@@ -6,6 +6,7 @@ module TestHelpers exposing
     , simulateAuthErrorResponse
     , simulateAuthResponse
     , simulateBookDetailResponse
+    , simulateBookDetailResponseWithPlacement
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
@@ -22,7 +23,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, PollResponse, PollStatus(..))
+import Api exposing (AuthResponse, BookDetailResponse, PollResponse, PollStatus(..))
 import Dict
 import Http
 import Json.Decode as Decode
@@ -37,7 +38,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import SimulatedEffect.Process
 import SimulatedEffect.Task
-import Types.Book exposing (Book, VisibilityTier(..), bookDecoder)
+import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -46,19 +47,32 @@ import Types.RemoteData exposing (RemoteData(..))
 -- TEST DATA BUILDERS
 
 
+{-| A default edition for tests.
+-}
+testEdition : Edition
+testEdition =
+    { id = "edition-test-001"
+    , isbn = "9780141988511"
+    , formatLabel = Just "Paperback"
+    , coverImageUrl = Just "https://example.com/covers/habit.jpg"
+    , pageCount = Just 371
+    , publisher = Just "Random House"
+    , publicationYear = Just 2012
+    , isPrimary = True
+    }
+
+
 {-| A default book with all fields populated, suitable for use in any test.
 -}
 testBook : Book
 testBook =
     { id = "book-test-001"
-    , isbn = "9780141988511"
     , title = "The Power of Habit"
-    , author = Just { id = "author-test-001", name = "Charles Duhigg", bio = Nothing }
+    , author = Just { id = "author-test-001", name = "Charles Duhigg", bio = Nothing, website = Nothing }
     , description = Just "A fascinating exploration of habit formation."
-    , coverImageUrl = Just "https://example.com/covers/habit.jpg"
-    , pageCount = Just 371
-    , publisher = Just "Random House"
-    , publicationYear = Just 2012
+    , editions = [ testEdition ]
+    , primaryEdition = Just testEdition
+    , editionCount = 1
     , subjects = [ "Psychology", "Self-Help" ]
     , visibilityTier = Public
     }
@@ -70,11 +84,12 @@ testPlacement : Placement
 testPlacement =
     { id = "placement-test-001"
     , book = Just testBook
-    , position = 1
-    , placedAt = "2025-01-15T10:30:00Z"
+    , position = Just 1
+    , placedAt = Just "2025-01-15T10:30:00Z"
     , formats = []
     , personalRating = Nothing
     , notes = Nothing
+    , bookshelfName = Just "library"
     }
 
 
@@ -82,11 +97,25 @@ testPlacement =
 -- JSON ENCODING HELPERS
 
 
+encodeEdition : Edition -> Encode.Value
+encodeEdition edition =
+    Encode.object
+        ([ ( "id", Encode.string edition.id )
+         , ( "isbn", Encode.string edition.isbn )
+         , ( "is_primary", Encode.bool edition.isPrimary )
+         ]
+            ++ encodeMaybe "format_label" Encode.string edition.formatLabel
+            ++ encodeMaybe "cover_image_url" Encode.string edition.coverImageUrl
+            ++ encodeMaybe "page_count" Encode.int edition.pageCount
+            ++ encodeMaybe "publisher" Encode.string edition.publisher
+            ++ encodeMaybe "publication_year" Encode.int edition.publicationYear
+        )
+
+
 encodeBook : Book -> Encode.Value
 encodeBook book =
     Encode.object
         ([ ( "id", Encode.string book.id )
-         , ( "isbn", Encode.string book.isbn )
          , ( "title", Encode.string book.title )
          , ( "author"
            , case book.author of
@@ -102,19 +131,31 @@ encodeBook book =
                                     Nothing ->
                                         []
                                )
+                            ++ (case author.website of
+                                    Just url ->
+                                        [ ( "website", Encode.string url ) ]
+
+                                    Nothing ->
+                                        []
+                               )
                         )
 
                 Nothing ->
                     Encode.null
            )
+         , ( "editions", Encode.list encodeEdition book.editions )
+         , ( "edition_count", Encode.int book.editionCount )
          , ( "subjects", Encode.list Encode.string book.subjects )
          , ( "visibility_tier", encodeVisibilityTier book.visibilityTier )
          ]
             ++ encodeMaybe "description" Encode.string book.description
-            ++ encodeMaybe "cover_image_url" Encode.string book.coverImageUrl
-            ++ encodeMaybe "page_count" Encode.int book.pageCount
-            ++ encodeMaybe "publisher" Encode.string book.publisher
-            ++ encodeMaybe "publication_year" Encode.int book.publicationYear
+            ++ (case book.primaryEdition of
+                    Just ed ->
+                        [ ( "primary_edition", encodeEdition ed ) ]
+
+                    Nothing ->
+                        []
+               )
         )
 
 
@@ -148,10 +189,9 @@ encodeMaybe key encoder maybeVal =
 encodePlacement : Placement -> Encode.Value
 encodePlacement placement =
     Encode.object
-        ([ ( "id", Encode.string placement.id )
-         , ( "position", Encode.int placement.position )
-         , ( "placed_at", Encode.string placement.placedAt )
-         ]
+        ([ ( "id", Encode.string placement.id ) ]
+            ++ encodeMaybe "position" Encode.int placement.position
+            ++ encodeMaybe "placed_at" Encode.string placement.placedAt
             ++ (case placement.book of
                     Just book ->
                         [ ( "book", encodeBook book ) ]
@@ -192,7 +232,6 @@ simulateBookResponse bookId title authorName =
                     [ ( "book"
                       , Encode.object
                             [ ( "id", Encode.string bookId )
-                            , ( "isbn", Encode.string "9780000000000" )
                             , ( "title", Encode.string title )
                             , ( "author"
                               , Encode.object
@@ -200,10 +239,13 @@ simulateBookResponse bookId title authorName =
                                     , ( "name", Encode.string authorName )
                                     ]
                               )
+                            , ( "editions", Encode.list identity [] )
+                            , ( "edition_count", Encode.int 0 )
                             , ( "subjects", Encode.list Encode.string [] )
                             , ( "visibility_tier", Encode.string "public" )
                             ]
                       )
+                    , ( "placement", Encode.null )
                     ]
                 )
     in
@@ -338,7 +380,7 @@ simulateAuthErrorResponse statusCode =
         ""
 
 
-{-| Create an HTTP response containing a book detail JSON payload.
+{-| Create an HTTP response containing a book detail JSON payload with no placement.
 Uses encodeBook to create a proper response wrapping a Book value.
 -}
 simulateBookDetailResponse : String -> Book -> Http.Response String
@@ -347,7 +389,61 @@ simulateBookDetailResponse bookId book =
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "book", encodeBook book ) ]
+                    [ ( "book", encodeBook book )
+                    , ( "placement", Encode.null )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| Create an HTTP response containing a book detail JSON payload with a placement.
+-}
+simulateBookDetailResponseWithPlacement : String -> Book -> Placement -> Http.Response String
+simulateBookDetailResponseWithPlacement bookId book placement =
+    let
+        placementJson =
+            Encode.object
+                ([ ( "id", Encode.string placement.id )
+                 , ( "formats", Encode.list Encode.string [] )
+                 ]
+                    ++ encodeMaybe "position" Encode.int placement.position
+                    ++ encodeMaybe "placed_at" Encode.string placement.placedAt
+                    ++ (case placement.bookshelfName of
+                            Just name ->
+                                [ ( "bookshelf_name", Encode.string name ) ]
+
+                            Nothing ->
+                                []
+                       )
+                    ++ (case placement.personalRating of
+                            Just rating ->
+                                [ ( "personal_rating", Encode.int rating ) ]
+
+                            Nothing ->
+                                []
+                       )
+                    ++ (case placement.notes of
+                            Just notes ->
+                                [ ( "notes", Encode.string notes ) ]
+
+                            Nothing ->
+                                []
+                       )
+                )
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", placementJson )
+                    ]
                 )
     in
     Http.GoodStatus_
@@ -406,13 +502,6 @@ decodePollResponse =
 
 
 {-| Translate Upload page Cmds into SimulatedEffects.
-
-The Upload page uses:
-
-  - Http.request (upload, poll, getBook, moveBook)
-  - File.Select.files (cannot be simulated -- user-initiated)
-  - Process.sleep via Task.perform
-
 -}
 uploadEffects : Upload.Msg -> Upload.Model -> Maybe String -> SimulatedEffect Upload.Msg
 uploadEffects msg model maybeToken =
@@ -472,7 +561,7 @@ uploadEffects msg model maybeToken =
                                             , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                                             , url = "/api/books/" ++ singleId
                                             , body = SimulatedEffect.Http.emptyBody
-                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook (Decode.field "book" bookDecoder)
+                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook decodeBookDetailResponse
                                             , timeout = Nothing
                                             , tracker = Nothing
                                             }
@@ -489,7 +578,7 @@ uploadEffects msg model maybeToken =
                                                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                                                 , url = "/api/books/" ++ bid
                                                 , body = SimulatedEffect.Http.emptyBody
-                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) (Decode.field "book" bookDecoder)
+                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) decodeBookDetailResponse
                                                 , timeout = Nothing
                                                 , tracker = Nothing
                                                 }
@@ -607,11 +696,6 @@ searchEffects msg model maybeToken =
 
 
 {-| Translate BookDetail page Cmds into SimulatedEffects.
-
-The BookDetail page uses:
-
-  - Http.request (getBook, moveBook, removeBook)
-
 -}
 bookDetailEffects : BookDetail.Msg -> BookDetail.Model -> Maybe String -> SimulatedEffect BookDetail.Msg
 bookDetailEffects msg model maybeToken =
@@ -650,8 +734,35 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
+        BookDetail.ConfirmPlace ->
+            case ( model.book, maybeToken ) of
+                ( Types.RemoteData.Success book, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/bookshelves/" ++ model.selectedBookshelf ++ "/placements"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object [ ( "book_id", Encode.string book.id ) ])
+                        , expect = SimulatedEffect.Http.expectJson (BookDetail.PlaceCompleted model.selectedBookshelf) (Decode.field "placement" placementDecoder)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         _ ->
             SimulatedEffect.Cmd.none
+
+
+{-| Decode a BookDetailResponse. Mirrors Api.bookDetailResponseDecoder which is not exposed.
+-}
+decodeBookDetailResponse : Decode.Decoder BookDetailResponse
+decodeBookDetailResponse =
+    Decode.map2 BookDetailResponse
+        (Decode.field "book" bookDecoder)
+        (Decode.maybe (Decode.field "placement" placementDecoder))
 
 
 {-| Translate BookDetail init Cmds into SimulatedEffects.
@@ -665,7 +776,7 @@ bookDetailInitEffects bookId maybeToken =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                 , url = "/api/books/" ++ bookId
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded (Decode.field "book" bookDecoder)
+                , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded decodeBookDetailResponse
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -679,14 +790,6 @@ bookDetailInitEffects bookId maybeToken =
 
 
 {-| Create a ProgramTest harness for the Upload page.
-
-The auth token is baked in at harness creation time because Upload.update
-takes it as a third argument.
-
-Usage:
-
-    ProgramTest.start () (uploadProgram (Just "test-token"))
-
 -}
 uploadProgram : Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgram maybeToken =
@@ -705,17 +808,6 @@ uploadProgram maybeToken =
 
 
 {-| Create a ProgramTest harness for the Bookshelf page.
-
-The auth token is baked in at harness creation time because Bookshelf.init
-requires it to fire the initial HTTP request.
-
-The OutMsg from Bookshelf.update is discarded in this harness. Tests that
-need to assert on OutMsg should use the raw update function directly.
-
-Usage:
-
-    ProgramTest.start () (libraryProgram (Just "test-token"))
-
 -}
 libraryProgram : Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 libraryProgram maybeToken =
@@ -740,14 +832,6 @@ libraryProgram maybeToken =
 
 
 {-| Create a ProgramTest harness for the Search page.
-
-The auth token is baked in at harness creation time because Search.update
-takes it as a third argument.
-
-Usage:
-
-    ProgramTest.start () (searchProgram (Just "test-token"))
-
 -}
 searchProgram : Maybe String -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
 searchProgram maybeToken =
@@ -777,12 +861,6 @@ decodeAuthResponse =
 
 
 {-| Translate Login page Cmds into SimulatedEffects.
-
-The Login page uses:
-
-  - Http.post (login, register)
-  - Process.sleep via Task.perform (door animation delays)
-
 -}
 loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
 loginEffects msg model =
@@ -829,14 +907,6 @@ loginEffects msg model =
 
 
 {-| Create a ProgramTest harness for the Login page.
-
-The OutMsg from Login.update is discarded in this harness. Tests that
-need to assert on OutMsg should use the raw update function directly.
-
-Usage:
-
-    ProgramTest.start () loginProgram
-
 -}
 loginProgram : ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgram =
@@ -855,16 +925,6 @@ loginProgram =
 
 
 {-| Create a ProgramTest harness for the BookDetail page.
-
-The auth token and bookId are baked in at harness creation time because
-BookDetail.init requires them to fire the initial HTTP request.
-
-The OutMsg from BookDetail.update is discarded in this harness.
-
-Usage:
-
-    ProgramTest.start () (bookDetailProgram "book-1" (Just "test-token"))
-
 -}
 bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgram bookId maybeToken =

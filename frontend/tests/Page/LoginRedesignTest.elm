@@ -10,7 +10,7 @@ validation, ARIA attributes, and transition state using TransitionState.
 
 import Html.Attributes
 import Http
-import Page.Login as Login exposing (Mode(..), TransitionState(..))
+import Page.Login as Login exposing (FieldValidation(..), Mode(..), TransitionState(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -153,7 +153,7 @@ formValidationTests =
             \() ->
                 startLogin
                     |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
-                    |> ProgramTest.fillIn "password" "Password" "wrong"
+                    |> ProgramTest.fillIn "password" "Password" "wrongpass"
                     |> ProgramTest.clickButton "Enter the Stacks"
                     |> ProgramTest.simulateHttpResponse "POST"
                         "/api/auth/login"
@@ -170,6 +170,9 @@ formValidationTests =
                         , mode = RegisterMode
                         , submitState = Failure (Http.BadStatus 409)
                         , transitionState = Idle
+                        , emailValidation = Pristine
+                        , passwordValidation = Pristine
+                        , displayNameValidation = Pristine
                         }
 
                     html =
@@ -198,6 +201,9 @@ formValidationTests =
                         , mode = LoginMode
                         , submitState = Failure (Http.BadStatus 401)
                         , transitionState = Idle
+                        , emailValidation = Pristine
+                        , passwordValidation = Pristine
+                        , displayNameValidation = Pristine
                         }
 
                     html =

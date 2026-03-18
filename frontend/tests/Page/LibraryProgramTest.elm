@@ -107,7 +107,7 @@ emptyShelfMessage =
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [])
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "empty-shelf" ]
+                    [ Selector.class "shelf-row--empty" ]
 
 
 {-| Clicking a book spine navigates to the book detail page.

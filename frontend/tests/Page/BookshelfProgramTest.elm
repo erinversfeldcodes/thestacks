@@ -68,7 +68,7 @@ bookshelfEmptyState =
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.class "empty-shelf" ]
+                    [ Selector.class "shelf-row--empty" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Your library is waiting" ]
 
