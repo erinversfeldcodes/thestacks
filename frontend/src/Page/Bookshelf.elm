@@ -6,7 +6,6 @@ module Page.Bookshelf exposing
     , antiLibraryConfig
     , init
     , libraryConfig
-    , lookingForHomeConfig
     , update
     , view
     , wishListConfig
@@ -76,17 +75,6 @@ wishListConfig =
     , wallpaperClass = "wallpaper--floral"
     , wearLevel = Pristine
     , emptyMessage = "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN."
-    }
-
-
-lookingForHomeConfig : Config
-lookingForHomeConfig =
-    { apiName = "looking_for_home"
-    , label = "Looking for a Home"
-    , themeClass = "shelf-looking-for-home"
-    , wallpaperClass = "wallpaper--forest"
-    , wearLevel = Softened
-    , emptyMessage = "Nothing here yet — these are books looking for a new home."
     }
 
 
