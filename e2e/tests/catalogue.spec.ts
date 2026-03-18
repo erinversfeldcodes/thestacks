@@ -146,8 +146,8 @@ test.describe("Catalogue — authenticated", () => {
   test("placed books show badge text", async ({ page }) => {
     await page.goto("/catalogue");
     await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
-    // Wait for placements to load
-    await page.waitForTimeout(1000);
+    // Wait for at least one placement badge to appear (placements load async after catalogue)
+    await page.waitForSelector(".catalogue__card-badge", { timeout: 10000 });
 
     const badges = await page.locator(".catalogue__card-badge").count();
     expect(badges).toBeGreaterThan(0);

@@ -142,6 +142,17 @@ fi
 # ── Playwright E2E ────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running Playwright E2E against ${CORE_URL}..."
+
+# Fly.io runs two machines with auto_stop_machines=true. The deploy health check
+# warms one machine; the second may still be cold. Send a burst of concurrent
+# requests to wake all instances before the test suite starts.
+echo "==> Warming Fly.io machines..."
+for i in {1..30}; do
+    curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
+done
+wait
+sleep 2
+
 (while true; do
     curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 || true
     sleep 10
