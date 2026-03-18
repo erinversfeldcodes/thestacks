@@ -10,6 +10,13 @@ defmodule StacksWeb.BookshelfPlacementController do
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
+  @doc "GET /api/placements/mine — lightweight summary of user's active placements."
+  def mine(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+    placements = Shelving.get_user_placements_summary(user.id)
+    json(conn, %{placements: placements})
+  end
+
   @doc "POST /api/bookshelves/:bookshelf_name/placements — place a book on a bookshelf."
   def create(conn, %{"bookshelf_name" => bookshelf_name, "book_id" => book_id}) do
     if bookshelf_name in @valid_bookshelves do

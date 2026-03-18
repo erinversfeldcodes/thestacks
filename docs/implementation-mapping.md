@@ -2,9 +2,11 @@
 
 > **Purpose:** Map every user story to the specific technical components required to implement it. This document is the bridge between _what the user experiences_ and _how the system delivers it_.
 >
-> **Last updated:** 2026-03-14
+> **Last updated:** 2026-03-17
 >
 > **Note on story numbering:** This document uses a sub-numbered scheme (e.g., US-1.3.2 for Book Detail, US-1.4.1 for Search, US-1.5.x for shelf movements, US-8.1.x for GDPR) that was established before the user stories document (`docs/user-stories.md`) was reorganised. The user stories doc now uses US-1.4.1 for Book Detail, US-1.5.x for Search, US-1.6.x for the reading journey, and US-8.x (without the `.1` sub-level) for GDPR. Both documents refer to the same features; the mapping here is authoritative for implementation details.
+>
+> **Data model note (v1.5):** As of 2026-03-17, the `books` table represents **works** (logical books), not editions. A new `book_editions` table holds ISBNs, formats, and edition-specific metadata. The ISBN hard gate is enforced at `book_editions.isbn`. Shelf placements, reviews, and blog associations reference works; price snapshots and partner inventory reference editions. See `docs/technical-architecture.md` section 7 for the full schema.
 
 ---
 
@@ -32,6 +34,7 @@
    - [16. Error Handling](#16-error-handling)
    - [17. Settings](#17-settings)
    - [18. Looking for a Home Shelf](#18-looking-for-a-home-shelf)
+   - [19. Accessibility](#19-accessibility)
 
 ---
 
@@ -39,14 +42,14 @@
 
 | Phase | Name | Stories | Rationale |
 |-------|------|---------|-----------|
-| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.4, US-1.6.5 | The core loop: upload photo(s), identify book(s), review and confirm, place on shelf, browse and manage. Everything a single user needs to start using The Stacks. |
-| **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, and source discovery. |
+| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.4, US-1.6.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8). Everything a single user needs to start using The Stacks. |
+| **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, US-5.1.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (Metrics), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. Depop/Vinted model: public Q&A + private offer threads. Closed bid mode. |
-| **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups. Requires `resolve_visibility/2` context and `ViewAsPlug`. |
+| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. Depop/Vinted model: public Q&A + private offer threads. Post-sale buyer prompt. Closed bid deferred. |
+| **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-13.1.1, US-13.1.2 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering. Requires Phase 6 visibility infrastructure. |
-| **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.2.1, US-14.3.1, US-14.3.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-18.1.1 | Authentication, home page, global navigation, error handling, settings access, and the fifth bookshelf (Looking for a Home). These are foundational UX stories that ship with Phase 1 MVP. |
+| **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), and accessibility (US-19.x). |
 | **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `offer_threads`, `groups`, `user_blocks`. |
 
 ---
@@ -57,25 +60,26 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 
 | Story | Elm | Phoenix | Vision Service | Rust Scraper | PostgreSQL | dbt | External APIs |
 |-------|-----|---------|----------------|--------------|------------|-----|---------------|
-| US-1.1.1 | W (upload form, confirm) | RW (intake, pre-process, create) | RW (vision) | -- | W (books, images) | -- | Modal vision service, Open Library, Google Books |
+| US-1.1.1 | W (upload form, verify, shelf picker) | RW (two-step: identify then confirm) | RW (vision) | -- | W (books, book_editions, images) | -- | Modal vision service, Open Library, Google Books |
 | US-1.1.2 | R (error display) | R (validation) | -- | -- | R (books) | -- | Open Library, Google Books |
 | US-1.1.3 | R (error display) | R (validation) | R (classification) | -- | W (audit_log) | -- | Modal (Qwen2.5-VL-7B-Instruct) |
 | US-1.1.7 | RW (bulk drop zone, review screen, shelf selector) | RW (batch intake, pre-process, grouping, batch jobs) | RW (classify + extract per image) | -- | W (books, images, batch_id, group_id) | -- | Modal vision service, Open Library, Google Books |
 | US-1.1.4 | R (gate UI) | RW (flag + gate) | -- | -- | RW (books, audit_log) | R (BISAC view) | -- |
 | US-1.1.5 | RW (ISBN form) | RW (validate + create) | -- | -- | W (books, bookshelf_placements) | -- | Open Library, Google Books |
-| US-1.1.6 | RW (duplicate UI) | R (dedup check) | -- | -- | R (books) | -- | -- |
+| US-1.1.6 | RW (duplicate UI + merge prompt) | R (dedup check + fuzzy match) | -- | -- | R (books, book_editions) | -- | -- |
+| US-1.1.8 | RW (merge confirmation) | RW (create edition under existing work) | -- | -- | RW (book_editions) | -- | -- |
 | US-1.2.1 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-1.2.2 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-1.2.3 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-1.2.4 | RW (pile view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-1.2.5 | RW (navigation) | -- | -- | -- | -- | -- | -- |
 | US-1.3.1 | RW (spine render) | R (book data) | -- | -- | R (books, bookshelf_placements) | -- | -- |
-| US-1.3.2 | RW (detail page) | R (book + related) | -- | -- | R (books, authors, review_snapshots, price_snapshots) | -- | -- |
+| US-1.3.2 | RW (detail overlay) | R (book + editions + related) | -- | -- | R (books, book_editions, authors, review_snapshots, price_snapshots) | R (community_read_count) | -- |
 | US-1.4.1 | RW (search UI) | R (search query) | -- | -- | R (books, authors, bookshelves) | -- | -- |
 | US-1.5.1 | RW (move action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
 | US-1.5.2 | RW (abandon action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
 | US-1.5.3 | RW (re-read action) | RW (placement) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history, books) | -- | -- |
-| US-1.5.4 | RW (format picker) | RW (format) | -- | -- | RW (bookshelf_placements) | -- | -- |
+| US-1.5.4 | RW (format picker) | RW (edition creation) | -- | -- | RW (book_editions) | -- | Open Library, Google Books (resolve new ISBN) |
 | US-1.6.4 | RW (remove action) | RW (soft delete) | -- | -- | RW (bookshelf_placements, bookshelf_placement_history) | -- | -- |
 | US-1.6.5 | R (empty states) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements) | -- | -- |
 | US-2.1.1 | R (review display) | RW (aggregation) | -- | -- | RW (review_snapshots) | R (sentiment view) | GoodReads, Reddit, Storygraph |
@@ -84,6 +88,8 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-2.3.1 | R (author panel) | RW (author intel) | -- | -- | RW (authors, discovered_sources) | R (author view) | Brave Search, RSS feeds |
 | US-2.4.1 | R (events display) | RW (event matching) | -- | -- | RW (bookstore_events, bookstores) | R (event view) | Brave Search, SearXNG |
 | US-2.5.1 | R (approval UI) | RW (discovery + approval) | -- | -- | RW (discovered_sources, audit_log) | -- | Brave Search, SearXNG |
+| US-2.5.2 | R (Third Spaces loading) | RW (geographic sweep) | -- | -- | RW (discovered_sources, third_spaces) | -- | Brave Search, SearXNG |
+| US-2.5.3 | RW (opt-out form) | RW (exclusion) | -- | -- | RW (discovered_sources, third_spaces) | -- | Resend / Postmark (confirmation email) |
 | US-3.1.1 | RW (cork board) | RW (spaces) | -- | -- | RW (third_spaces, third_space_events) | -- | Brave Search, SearXNG |
 | US-4.1.1 | R (status display) | RW (pipeline) | RW (classification) | -- | RW (books, audit_log) | -- | Modal vision service, Open Library, Google Books |
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
@@ -128,20 +134,30 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-9.6.2 | -- | RW (validation pipeline) | -- | -- | R (partners) | -- | -- |
 | US-9.7.1 | RW (status page) | R (partner status) | -- | -- | R (partners) | -- | Resend / Postmark (confirmation email) |
 | US-9.7.2 | RW (profile form) | RW (partner update) | -- | -- | RW (partners, audit_log) | -- | -- |
-| US-9.8.1 | R (availability display) | R (partner inventory) | -- | -- | R (partner_inventory, books) | -- | -- |
+| US-9.8.1 | R (availability display) | R (partner inventory) | -- | -- | R (partner_inventory, book_editions) | -- | -- |
+| US-11.1.5 | R (group feed) | R (aggregated content) | -- | -- | R (blog_posts, bookshelf_placements, groups, group_members, user_blocks) | -- | -- |
 | US-14.1.1 | RW (registration form) | RW (account creation) | -- | -- | W (users, audit_log) | -- | -- |
+| US-14.1.2 | RW (onboarding overlay) | RW (upload + confirm + onboarding flag) | RW (vision) | -- | RW (users, books, book_editions, bookshelf_placements) | -- | Modal, Open Library, Google Books |
 | US-14.2.1 | RW (login form) | RW (authentication) | -- | -- | R (users), W (audit_log) | -- | -- |
 | US-14.3.1 | R (nav state) | R (current user) | -- | -- | R (users) | -- | -- |
 | US-14.3.2 | R (token refresh) | RW (token lifecycle) | -- | -- | R (users) | -- | -- |
-| US-15.1.1 | RW (home page) | R (summaries) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
-| US-15.2.1 | RW (navigation) | -- | -- | -- | -- | -- | -- |
+| US-14.3.3 | RW (dropdown menu + sign out) | RW (token revocation) | -- | -- | W (audit_log) | -- | -- |
+| US-15.1.1 | R (landing page or redirect) | R (auth check) | -- | -- | R (users) | -- | -- |
+| US-15.2.1 | RW (navigation + user dropdown) | -- | -- | -- | -- | -- | -- |
 | US-15.2.2 | RW (swipe nav) | -- | -- | -- | -- | -- | -- |
 | US-15.3.1 | R (footer) | -- | -- | -- | -- | -- | -- |
 | US-16.1.1 | R (404 page) | R (error response) | -- | -- | -- | -- | -- |
 | US-16.2.1 | R (error display) | R (error responses) | -- | -- | -- | -- | -- |
 | US-16.3.1 | R (auth redirect) | R (401 response) | -- | -- | -- | -- | -- |
-| US-17.1.1 | RW (settings pages) | R (user data) | -- | -- | R (users) | -- | -- |
-| US-18.1.1 | RW (shelf view) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
+| US-17.1.1 | RW (settings hub + sidebar) | R (user data) | -- | -- | R (users) | -- | -- |
+| US-17.2.1 | RW (profile form) | RW (profile update) | -- | -- | RW (users) | -- | -- |
+| US-17.2.2 | RW (location form) | RW (location + trigger sweep) | -- | -- | RW (users) | -- | Brave Search, SearXNG (via geographic sweep) |
+| US-17.2.3 | RW (password form) | RW (password change) | -- | -- | RW (users, audit_log) | -- | -- |
+| US-17.3.1 | RW (notification toggles) | RW (preferences) | -- | -- | RW (users) | -- | -- |
+| US-18.1.1 | RW (shelf view) | R (shelf data + community stats) | -- | -- | R (bookshelves, bookshelf_placements, books) | R (mart_community_read_count) | -- |
+| US-19.1.1 | RW (ARIA labels) | R (spine + shelf metadata) | -- | -- | R (books, book_editions, bookshelves) | -- | -- |
+| US-19.1.2 | RW (keyboard handlers) | -- | -- | -- | -- | -- | -- |
+| US-19.2.1 | RW (list/spine toggle) | R (shelf data) | -- | -- | R (bookshelves, bookshelf_placements, books, book_editions) | -- | -- |
 
 ---
 
@@ -150,13 +166,15 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 ```
 Legend:  A --> B  means "A must be built before B"
 
-US-1.1.1 (Upload + Identify)
+US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
   |
   +--> US-1.1.2 (ISBN Hard Gate)           -- validation within upload
   |      |
   |      +--> US-1.1.5 (Manual ISBN Entry) -- fallback when vision fails
   +--> US-1.1.3 (Non-Book Rejection)       -- classification within upload
   +--> US-1.1.6 (Duplicate Detection)      -- dedup check within upload
+  |      |
+  |      +--> US-1.1.8 (Multi-Format Merge) -- triggered when ISBN matches different edition of existing work
   +--> US-4.1.1 (Moderation Pipeline)      -- runs as part of upload
   |      |
   |      +--> US-1.1.4 (Age-Gated Content) -- needs BISAC classification from moderation
@@ -198,10 +216,14 @@ US-1.1.1 (Upload + Identify)
         +--> US-2.3.1 (Author Intelligence)
         +--> US-2.4.1 (Bookstore Events) -- depends on US-2.2.2 (bookstores exist)
         +--> US-2.5.1 (Source Discovery Agent) -- feeds 2.1.1, 2.3.1, 2.4.1
+              |
+              +--> US-2.5.2 (Geographic Discovery Sweep) -- location-triggered, same infra
+              +--> US-2.5.3 (Business Opt-Out) -- exclusion list for discovered sources
 
 --- Phase 3 branches independently ---
 
   US-2.5.1 --> US-3.1.1 (Third Spaces) -- uses same discovery infra
+  US-17.2.2 --> US-2.5.2 (Location set triggers geographic sweep)
   US-1.2.x --> US-6.1.1 (RSS Feeds) -- needs shelf data
   US-8.1.5 --> US-5.1.1 (Metrics Dashboard) -- needs audit log
 
@@ -234,10 +256,14 @@ US-1.1.1 (Upload + Identify)
 
 --- Phase 5: Marketplace ---
 
-  US-1.3.2 --> US-7.1.1 (List for Sale)
-  US-7.1.1 --> US-7.2.1 (Buy a Book)
+  US-1.3.2 --> US-7.1.1 (List for Sale — from any shelf)
+  US-7.1.1 --> US-7.2.1 (Buy a Book + post-sale lifecycle)
   US-4.1.2 --> US-7.3.1 (Seller Verification)
   US-7.3.1 --> US-7.1.1 (must be verified to list)
+
+--- Phase 6 additions ---
+
+  US-11.1.1 --> US-11.1.5 (Group Content Feed — aggregated blog + shelf activity)
 
 --- Cross-cutting (incremental) ---
 
@@ -254,7 +280,7 @@ US-1.1.1 (Upload + Identify)
 
 1. **US-8.1.5** Audit Logging (foundation -- everything logs to it)
 2. **US-8.1.3** Consent Management (must exist before user data is collected)
-3. **US-1.1.1** Upload Photos to Add a Book
+3. **US-1.1.1** Upload Photos to Add a Book (two-step: identify then confirm, default WishList)
 4. **US-1.1.2** ISBN Hard Gate (part of upload)
 5. **US-1.1.3** Non-Book Image Rejection (part of upload)
 6. **US-4.1.1** Content Moderation Pipeline (part of upload)
@@ -263,14 +289,17 @@ US-1.1.1 (Upload + Identify)
 9. **US-1.6.5** Empty Shelf States (ships with shelves)
 10. **US-1.2.5** Shelf navigation
 11. **US-1.3.1** Spine rendering
-12. **US-1.3.2** Book detail page
+12. **US-1.3.2** Book detail overlay (not a route — overlay on top of current page)
 13. **US-1.4.1** Search and sort
-14. **US-1.5.1 -- US-1.5.4** Shelf movement, abandon, re-read, format tracking
-15. **US-1.6.4** Remove a Book from Collection
-16. **US-1.1.5** Manual ISBN Entry (fallback for failed vision)
-17. **US-1.1.6** Duplicate Book Detection
-18. **US-1.1.4** Age-gated content
-19. **US-4.1.2** Age verification
+13a. **US-1.5.3** Platform-wide discovery search (after basic search works)
+14. **US-1.5.1 -- US-1.5.3** Shelf movement (all 5 shelves as valid targets), abandon, re-read
+15. **US-1.5.4** Format tracking (now creates `book_editions` rows, not a TEXT[])
+15a. **US-1.1.8** Multi-Format Book Merging (after format tracking)
+16. **US-1.6.4** Remove a Book from Collection
+17. **US-1.1.5** Manual ISBN Entry (fallback for failed vision)
+18. **US-1.1.6** Duplicate Book Detection (includes multi-format merge prompt)
+19. **US-1.1.4** Age-gated content
+20. **US-4.1.2** Age verification
 20. **US-2.5.1** Source Discovery Agent
 21. **US-2.1.1** Review Aggregation
 22. **US-2.2.2** Bookshop Scraper Config
@@ -300,7 +329,26 @@ US-1.1.1 (Upload + Identify)
 46. **US-5.1.1** Metrics Dashboard
 47. **US-7.3.1** Seller Verification
 48. **US-7.1.1** List a Book for Sale
-49. **US-7.2.1** Buy a Book
+49. **US-7.2.1** Buy a Book (+ post-sale buyer prompt)
+
+**Phase 1 (extended) — new stories:**
+50. **US-14.1.2** First-Time Onboarding Flow (after registration)
+51. **US-14.3.3** Log Out (display name dropdown with Settings + Sign Out)
+52. **US-17.1.1** Settings Index Page (hub with sidebar navigation)
+53. **US-17.2.1** Profile Management (display name, email, website)
+54. **US-17.2.2** Location Settings (city/country, triggers geographic sweep)
+55. **US-17.2.3** Change Password
+56. **US-17.3.1** Email Notification Preferences
+57. **US-19.1.1** ARIA Labels for Visual Elements
+58. **US-19.1.2** Keyboard Navigation
+59. **US-19.2.1** List View Toggle
+
+**Phase 2 — new stories:**
+60. **US-2.5.2** Geographic Discovery Sweep (after US-17.2.2 and US-2.5.1)
+61. **US-2.5.3** Business Opt-Out (after US-2.5.1)
+
+**Phase 6 — new stories:**
+62. **US-11.1.5** Group Content Feed (after groups infrastructure)
 
 ---
 
@@ -314,18 +362,18 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | User uploads 1-3 photos; vision model extracts book identity; ISBN resolved; book created on shelf. |
+| **Summary** | Two-step flow: (1) upload image → system identifies candidate → returns for user verification ("We think this is…"); (2) user confirms + chooses shelf (default WishList) → book created. Works/editions model: creates a `books` work + `book_editions` edition. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Upload` module -- drag-and-drop / camera capture, upload progress bar, result confirmation. Types: `UploadMsg`, `UploadModel`, `PhotoFile`. Ports for file-input interop. |
-| **Backend (Phoenix)** | `Stacks.Books` context -- `Books.store_upload/2` reads the Plug temp file and base64-encodes the bytes; enqueues `IdentifyBookJob` with the image in Oban job args. `Books.create/1`, `Books.find_or_create_author/1`. `StacksWeb.UploadController` (REST). Image is never written to permanent storage. |
-| **Database** | **Write:** `op.books`, `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.books` (dedup check by ISBN). Oban job args hold the base64 image in Postgres until the worker processes them. |
-| **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` -- sends base64 image to Modal vision service over HMAC-authenticated HTTPS. `Stacks.Workers.EnrichBookJob` -- fetch metadata from Open Library / Google Books after ISBN resolved. |
-| **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup. Google Books API as fallback. |
-| **dbt Models** | None directly; feeds `stg_books`, `stg_uploaded_images` staging models. |
-| **Infrastructure** | Modal hosts the Python vision service (separate from Fly.io). No object storage for uploads -- image bytes live in Oban job args (Postgres) for the duration of processing. |
+| **Frontend (Elm)** | `Page.Upload` module — multi-step state machine: `Uploading` → `Verifying IdentifiedBook` → `ChoosingShelf IdentifiedBook` → `Complete`. Drag-and-drop / file picker. Verification step shows uploaded image alongside identified book ("We think this is…"). Shelf picker defaults to WishList. Post-success: "Add another" / "View on shelf". Types: `UploadStep`, `IdentifiedBook`, `ShelfPicker`. Ports for file-input interop. |
+| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.identify/2` (`POST /api/upload/identify`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
+| **Database** | **Write:** `op.books` (work), `op.book_editions` (edition with ISBN, format, cover), `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.book_editions` (dedup check by ISBN), `op.books` (fuzzy match for multi-format merge). |
+| **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` — sends base64 image to Modal vision service over HMAC-authenticated HTTPS. Returns candidates to caller. `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books after ISBN resolved. |
+| **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup + work/edition metadata. Google Books API as fallback. |
+| **dbt Models** | None directly; feeds `stg_books`, `stg_book_editions`, `stg_uploaded_images` staging models. |
+| **Infrastructure** | Modal hosts the Python vision service (separate from Fly.io). No object storage for uploads — image bytes live in Oban job args (Postgres) for the duration of processing. |
 | **Dependencies** | US-8.1.5 (audit logging), US-8.1.3 (consent). |
 
 ---
@@ -414,19 +462,39 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | When a resolved ISBN already exists in the user's collection, show the existing book with options: view it, move it to another shelf, or close and continue. |
+| **Summary** | When a resolved ISBN already exists in the user's collection, show the existing book with options: view it, move it to another shelf, or close. When the ISBN is different but the title+author match an existing work, offer multi-format merge (US-1.1.8). |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.DuplicateDetected` -- shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. |
-| **Backend (Phoenix)** | `Stacks.Books.find_existing/1` -- ISBN dedup check (already implicit in US-1.1.1, now surfaced to user). Returns existing book data if found. |
-| **Database** | **Read:** `op.books` (ISBN lookup), `op.bookshelf_placements` (current shelf). |
+| **Frontend (Elm)** | `Components.DuplicateDetected` — shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. For multi-format: shows both editions side-by-side with "Yes, same book" (merge) and "No, it's different" (create new). |
+| **Backend (Phoenix)** | `Stacks.Books.find_existing/1` — ISBN dedup check against `book_editions.isbn`. `Stacks.Books.find_same_work/2` — fuzzy match on title+author (Jaro-Winkler > 0.8) against existing `books` works. Returns existing book data or merge candidate. |
+| **Database** | **Read:** `op.book_editions` (ISBN lookup), `op.books` (fuzzy title+author match), `op.bookshelf_placements` (current shelf). |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | `int_duplicate_detection_rate`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1 (part of upload flow). |
+
+---
+
+#### US-1.1.8 -- Multi-Format Book Merging
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | When a user adds a different format of a book they already own (e.g., Kindle edition of existing hardcover), the system offers to merge it as a new edition under the same work rather than creating a duplicate. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Components.FormatMerge` — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
+| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row under the existing `books` work. Links the new ISBN. Sets `is_primary = false` (existing edition remains primary). No new shelf placement created. `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`). |
+| **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.books` (existing work), `op.book_editions` (existing editions). |
+| **Jobs (Oban)** | `EnrichBookJob` — fetch edition-specific metadata (page count, cover) for the new edition. `TriggerPriceScrapeJob` — scrape prices for the new ISBN. |
+| **External Services** | Open Library, Google Books (edition-specific metadata). |
+| **dbt Models** | `stg_book_editions`, `int_format_distribution`. |
+| **Infrastructure** | None additional. |
+| **Dependencies** | US-1.1.6 (triggered during duplicate detection). |
 
 ---
 
@@ -570,22 +638,22 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
-#### US-1.3.2 -- Book Detail Page
+#### US-1.3.2 -- Book Detail Overlay
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Click spine to open: cover image, metadata, reviews, prices, author info, writing links, move-to-shelf action. |
+| **Summary** | Click spine to open an **overlay** (not a route) showing: cover image, editions, metadata, reviews, prices per edition, author info, writing links, move-to-shelf action, search-surfaced enrichment. Dismissable via X, click-outside, or Escape. URL does not change. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.BookDetail` module. Sub-components: `Components.CoverImage`, `Components.BookMeta`, `Components.ReviewSummary` (stub in Phase 1), `Components.PriceInfo` (stub in Phase 1), `Components.AuthorCard`, `Components.WritingLinks`, `Components.ShelfMover`, `Components.PartnerAvailability` (Phase 3+, "Available at [Shop] for R149"). Messages: `MoveToShelf ShelfType`, `OpenExternalLink Url`. |
-| **Backend (Phoenix)** | `Stacks.Books.get_book_detail/1` -- aggregates book + author + reviews + prices + writing links + partner availability (Phase 3+). `StacksWeb.BookController.show/2`. |
-| **Database** | **Read:** `op.books`, `op.authors`, `op.review_snapshots`, `op.price_snapshots`, `op.bookshelf_placements`. Phase 3+: `op.partner_inventory`, `op.partner_events` (for ISBN-linked events), `op.blog_posts`, `op.post_book_associations`. |
+| **Frontend (Elm)** | `BookDetailOverlay` type in model (`Maybe BookDetailOverlay`). Not a route — the overlay is UI state managed in the parent page's model. Sub-components: `Components.CoverImage`, `Components.BookMeta`, `Components.EditionList` (shows all formats with per-edition prices), `Components.ReviewSummary` (stub in Phase 1), `Components.PriceInfo` (grouped by edition), `Components.AuthorCard`, `Components.WritingLinks`, `Components.ShelfMover` (all 5 shelves), `Components.PartnerAvailability` (Phase 3+). Messages: `OpenBookDetail BookId`, `CloseBookDetail`, `MoveToShelf ShelfType`, `OpenExternalLink Url`. Focus trapping within overlay for accessibility (US-19.1.1). |
+| **Backend (Phoenix)** | `Stacks.Books.get_book_detail/1` — aggregates work + editions + author + reviews + prices (per edition) + writing links + partner availability (Phase 3+) + community read count (for Looking for a Home). `StacksWeb.BookController.show/2`. |
+| **Database** | **Read:** `op.books` (work), `op.book_editions` (all editions), `op.authors`, `op.review_snapshots` (per work), `op.price_snapshots` (per edition), `op.bookshelf_placements`. Phase 3+: `op.partner_inventory` (per edition via ISBN), `op.partner_events` (ISBN-linked), `op.blog_posts`, `op.post_book_associations`. `wh.mart_community_read_count` (for community wear on Looking for a Home). |
 | **Jobs (Oban)** | None directly (data populated by enrichment jobs). |
 | **External Services** | None at render time. |
-| **dbt Models** | `int_book_detail_view` (pre-joined view for performance). |
-| **Infrastructure** | SSR rendering for public book pages (Phoenix templates). |
+| **dbt Models** | `int_book_detail_view` (pre-joined view for performance), `mart_community_read_count`. |
+| **Infrastructure** | SSR rendering for public book pages (Phoenix templates) remains at `/public/book/:isbn`. The Elm overlay is the interactive path. |
 | **Dependencies** | US-1.3.1 (spine must be clickable), US-1.1.1 (books exist). |
 
 ---
@@ -607,6 +675,26 @@ US-1.1.1 (Upload + Identify)
 | **dbt Models** | None directly. |
 | **Infrastructure** | PostgreSQL GIN / GiST indexes for full-text search. |
 | **Dependencies** | US-1.1.1, US-1.2.1 -- US-1.2.4. |
+
+---
+
+#### US-1.5.3 (new) -- Platform-Wide Discovery Search
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Searches beyond the user's own collection: other users' public shelves, marketplace listings, partner inventory, and Third Spaces events. Results surfaced in the search dropdown and enriched within the book detail overlay. |
+| **Phase** | Phase 1 (late MVP) / Phase 3 (partner results) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `SearchScope` type gains `WholePlatform` variant. Search dropdown splits into "Your Collection" (instant local) and "On the Platform" (async API). External results show contextual labels ("Listed by [user] for R120", "In stock at [partner]", "On [user]'s shelf"). Shimmer placeholders while loading. |
+| **Backend (Phoenix)** | `Stacks.Books.search_platform/2` (`GET /api/search/platform`) — queries across `bookshelf_placements` (public visibility), `listings` (active), `partner_inventory` (approved partners), `partner_events` (related ISBNs). Applies `resolve_visibility/2` filtering and block filtering. Results grouped by type. |
+| **Database** | **Read:** `op.books`, `op.book_editions`, `op.bookshelf_placements` (where visibility = 'platform'), `op.listings`, `op.partner_inventory`, `op.partner_events`, `op.user_blocks`. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None directly. |
+| **Infrastructure** | PostgreSQL full-text indexes on `books.title`, `authors.name`. Rate limit: 30/min. |
+| **Dependencies** | US-1.4.1 (basic search), US-10.1.1 (visibility model for filtering). |
 
 ---
 
@@ -674,19 +762,19 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Track which formats the user owns per book: hardcover, softcover, kindle, e-book, audiobook. |
+| **Summary** | Track which formats the user owns per book. Formats are now derived from `book_editions` — each owned format is a row in `book_editions` under the same work. Adding a format means creating a new edition (with its own ISBN) or toggling `is_primary`. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.FormatPicker` -- multi-select checkboxes on Book Detail. Icons for each format. |
-| **Backend (Phoenix)** | `Stacks.Shelving.update_placement_formats/3`. Formats stored as `TEXT[]` on `bookshelf_placements`. |
-| **Database** | **Write:** `op.bookshelf_placements` (formats array). |
-| **Jobs (Oban)** | None. |
-| **External Services** | None. |
-| **dbt Models** | `int_format_distribution`. |
+| **Frontend (Elm)** | `Components.FormatPicker` on Book Detail overlay. Shows all known editions as filled icons (owned) plus outlined icons for formats not yet owned. Clicking an un-owned format prompts: "Enter the ISBN for the [format] edition" (inline ISBN input), which triggers the multi-format merge flow (US-1.1.8). |
+| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row. No `update_placement_formats` — formats are no longer a column on placements. |
+| **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.book_editions` (existing editions for the work). |
+| **Jobs (Oban)** | `EnrichBookJob` (fetch edition-specific metadata). |
+| **External Services** | Open Library, Google Books (ISBN resolution for new format). |
+| **dbt Models** | `stg_book_editions`, `int_format_distribution`. |
 | **Infrastructure** | None additional. |
-| **Dependencies** | US-1.3.2 (format picker lives on detail page). |
+| **Dependencies** | US-1.3.2 (format picker lives on detail overlay), US-1.1.8 (merge flow). |
 
 ---
 
@@ -851,6 +939,46 @@ US-1.1.1 (Upload + Identify)
 | **dbt Models** | `stg_discovered_sources`, `int_source_approval_rate`. |
 | **Infrastructure** | SearXNG instance on Fly.io. Rate limiting for Brave Search API. |
 | **Dependencies** | US-1.1.1 (books/authors must exist to search for). |
+
+---
+
+#### US-2.5.2 (new) -- Geographic Discovery Sweep
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Location-triggered discovery of local bookshops, reading groups, cafes, and literary events. Fires when user sets location (US-17.2.2) and on a quarterly cron. Populates Third Spaces independently of book-specific triggers. |
+| **Phase** | Phase 2 (Enrichment) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Third Spaces page shows "Discovering spaces near [City]…" loading state after location set. Results appear as cards on the cork board. |
+| **Backend (Phoenix)** | `Stacks.Discovery.GeographicSweep` — generates location-based search queries (`"bookshop {city}"`, `"reading group {city}"`, etc.), evaluates results with LLM scoring, checks exclusion list before suggesting. `Discovery.geographic_sweep/2` accepts `{city, country_code}`. |
+| **Database** | **Write:** `op.discovered_sources` (with `discovered_via = 'geographic_sweep'`), `op.third_spaces`. **Read:** `op.discovered_sources` (exclusion list — `status = 'excluded'`), `op.users` (location). |
+| **Jobs (Oban)** | `Stacks.Workers.GeographicDiscoveryJob` — triggered by `user.location_updated` event and by quarterly Oban.Cron schedule. Queue: `geographic_discovery`, concurrency: 2. |
+| **External Services** | Brave Search API, SearXNG. |
+| **dbt Models** | Reuses `stg_discovered_sources`, `stg_third_spaces`. |
+| **Infrastructure** | None additional (reuses discovery infrastructure). |
+| **Dependencies** | US-2.5.1 (same scoring infrastructure), US-17.2.2 (location must be set). |
+
+---
+
+#### US-2.5.3 (new) -- Business Opt-Out from Platform Listings
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Businesses discovered and listed without their consent can request removal. "Is this your business?" link on every discovered listing. Exclusion list prevents re-discovery. |
+| **Phase** | Phase 2 (Enrichment) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Subtle "Is this your business?" link on `Components.SpaceCard` and `Components.PriceInfo` for discovered (non-partner) sources. Links to a simple form: business name, contact email, choice between "Remove my listing" and "Become a partner". |
+| **Backend (Phoenix)** | `StacksWeb.OptOutController.create/2` (`POST /api/opt-out`) — unauthenticated endpoint. Creates an opt-out request. Platform owner is notified. For removal: sets `discovered_sources.status = 'excluded'` and/or `third_spaces.opted_out = true`. For partnership interest: routes to US-9.1.1 flow. `Stacks.Discovery.OptOut` context — `request_removal/1`, `process_removal/1`, `add_to_exclusion_list/1`. |
+| **Database** | **Write:** `op.discovered_sources` (status = 'excluded', excluded_at, exclusion_email). `op.third_spaces` (opted_out = true, opted_out_at). `op.audit_log`. |
+| **Jobs (Oban)** | `Stacks.Workers.OptOutConfirmationJob` — sends confirmation email to the business. |
+| **External Services** | Resend / Postmark (confirmation email). |
+| **dbt Models** | `int_opt_out_rate`. |
+| **Infrastructure** | Rate limit: 5/min on `/api/opt-out` (unauthenticated). |
+| **Dependencies** | US-2.5.1 or US-2.5.2 (discovered sources must exist). |
 
 ---
 
@@ -1422,6 +1550,30 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
+### 11. Groups (new additions)
+
+---
+
+#### US-11.1.5 (new) -- Group Content Feed
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Group pages show a reverse-chronological feed of blog posts and shelf activity from group members. Content respects visibility rules. Feed behaviour varies by group type (close_friends: all members contribute; broadcast/subscription: owner only). |
+| **Phase** | Phase 6 (Social Graph & Visibility) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Group.Feed` module — card-based feed. `Components.FeedCard.BlogPost` (title, author, first two lines, date). `Components.FeedCard.ShelfActivity` ("[Name] added [Title] to Reading Pile" with spine thumbnail). Strict chronological order, no algorithmic ranking. Pagination at 20 items. |
+| **Backend (Phoenix)** | `Stacks.Groups.Feed` context — `get_feed/2` (group_id, pagination). Queries `blog_posts` and `bookshelf_placement_history` for group members, filtered by visibility ceiling + block filtering. For broadcast/subscription groups, filters to owner's content only. `StacksWeb.GroupController.feed/2` (`GET /api/groups/:id/feed`). |
+| **Database** | **Read:** `op.groups`, `op.group_members`, `op.blog_posts` (where visibility allows), `op.bookshelf_placements`, `op.bookshelf_placement_history`, `op.books`, `op.user_blocks`. |
+| **Jobs (Oban)** | None (query-time aggregation). |
+| **External Services** | None. |
+| **dbt Models** | `int_group_activity`. |
+| **Infrastructure** | None additional. |
+| **Dependencies** | US-11.1.1 (groups exist), US-10.1.1 (visibility infrastructure), US-12.1.1 (blog posts). |
+
+---
+
 ### 14. Authentication
 
 ---
@@ -1458,6 +1610,26 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
+#### US-14.1.2 (new) -- First-Time Onboarding Flow
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | 3-step guided flow after first registration: Welcome → Upload first book → Choose shelf. Dismissable. Sets `onboarding_completed` flag on completion or skip. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Components.OnboardingOverlay` — fullscreen overlay with progress dots. `OnboardingStep` type: `Welcome | UploadFirst | PlaceFirst`. Step 2 embeds the standard upload flow inline. "Skip" link always visible. Cinematic aesthetic: slow zoom into empty shelf that fills with first book. |
+| **Backend (Phoenix)** | Reuses `StacksWeb.UploadController.identify/2` and `StacksWeb.BookController.confirm/2` for the inline upload. `Stacks.Accounts.complete_onboarding/1` — sets `users.onboarding_completed = true`. `StacksWeb.AuthController.register/2` returns `onboarding_completed: false` to trigger the flow. |
+| **Database** | **Write:** `op.users` (onboarding_completed). Plus all writes from US-1.1.1 if the user uploads a book. |
+| **Jobs (Oban)** | Same as US-1.1.1 if a book is uploaded. |
+| **External Services** | Same as US-1.1.1 if a book is uploaded. |
+| **dbt Models** | `int_onboarding_completion_rate`. |
+| **Infrastructure** | None additional. |
+| **Dependencies** | US-14.1.1 (registration), US-1.1.1 (upload flow for step 2). |
+
+---
+
 #### US-14.3.1 -- Authenticated Navigation State
 
 | Dimension | Detail |
@@ -1490,6 +1662,22 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
+#### US-14.3.3 (new) -- Log Out
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Display name in nav is a dropdown with "Settings" and "Sign Out". Sign out clears JWT, resets Elm state, redirects to sign-in page. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Components.UserMenu` — dropdown toggled by clicking display name. Two items: "Settings" (navigates to `/settings`) and "Sign Out" (clears JWT via `clearAuth` port, resets model, redirects). `userMenuOpen : Bool` in model. |
+| **Backend (Phoenix)** | None additional (sign out is client-side JWT removal). |
+| **Database** | **Write:** `op.audit_log` (logout event). |
+| **Dependencies** | US-14.3.1 (authenticated state), US-17.1.1 (settings page must exist). |
+
+---
+
 ### 15. Home & Navigation
 
 ---
@@ -1498,15 +1686,15 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Landing page with bookshelf summary, recent activity, and quick actions. |
+| **Summary** | Authenticated users are immediately redirected to `/antilibrary`. Unauthenticated users see a static landing page with "Sign In" CTA. The home page is not a dashboard — it's a portal for unauthenticated visitors only. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Home page module (or redirect to default bookshelf). |
-| **Backend (Phoenix)** | Aggregate queries for bookshelf summaries. |
-| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`. |
-| **Dependencies** | US-14.3.1 (authenticated state). |
+| **Frontend (Elm)** | Route handler checks auth state: if authenticated, redirect to `/antilibrary`; if not, render static landing with title, subtitle, and "Sign In" button. |
+| **Backend (Phoenix)** | None additional (routing is client-side). |
+| **Database** | None. |
+| **Dependencies** | US-14.3.1 (auth state determines redirect). |
 
 ---
 
@@ -1514,15 +1702,15 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Persistent top navigation bar with links to bookshelves, search, upload, settings. |
+| **Summary** | Persistent top navigation. Authenticated: Library, AntiLibrary, WishList, Reading Pile, Looking for a Home, Search, Add Book, plus display name dropdown (Settings + Sign Out). Unauthenticated: Costs, Sign In. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Navigation.Route` module. Main.elm handles URL routing via `Browser.application`. |
+| **Frontend (Elm)** | `Navigation.Route` module. Main.elm handles URL routing via `Browser.application`. `Components.UserMenu` dropdown on display name (US-14.3.3). Nav items conditionally rendered based on `Maybe User` in model. |
 | **Backend (Phoenix)** | `CoreWeb.Router` catch-all route serves Elm SPA for all non-API paths. |
 | **Database** | None. |
-| **Dependencies** | US-14.3.1 (navigation state depends on auth). |
+| **Dependencies** | US-14.3.1 (auth state determines nav items), US-14.3.3 (user menu dropdown). |
 
 ---
 
@@ -1614,19 +1802,87 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
-#### US-17.1.1 -- Access Settings Pages
+#### US-17.1.1 -- Settings Index Page
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Settings hub linking to age verification, consent management, and future profile settings. |
+| **Summary** | Central settings hub at `/settings` with sidebar navigation linking to all sub-pages: Profile, Password, Privacy & Consent, Age Verification, Data Export, Delete Account, Audit Log, Notifications. Accessible from display name dropdown. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Settings.AgeVerification`, `Page.Settings.Consent`. Settings navigation. |
-| **Backend (Phoenix)** | `StacksWeb.UserSettingsController`. |
+| **Frontend (Elm)** | `Page.Settings` module with sidebar navigation. Sub-pages: `Page.Settings.Profile` (US-17.2.1), `Page.Settings.Password` (US-17.2.3), `Page.Settings.Consent` (US-8.3), `Page.Settings.AgeVerification` (US-4.2), `Page.Settings.Export` (US-8.1), `Page.Settings.Delete` (US-8.2), `Page.Settings.AuditLog` (US-8.5), `Page.Settings.Notifications` (US-17.3.1). Sidebar highlights active sub-page. On mobile, sidebar collapses to dropdown. |
+| **Backend (Phoenix)** | `StacksWeb.UserSettingsController` with routes for each sub-page. |
 | **Database** | **Read:** `op.users`. |
-| **Dependencies** | US-14.3.1 (must be authenticated). |
+| **Dependencies** | US-14.3.1 (authenticated), US-14.3.3 (accessible from user menu dropdown). |
+
+---
+
+#### US-17.2.1 (new) -- View and Edit Profile
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | User edits display name, email, and website URL. Email changes require password confirmation. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Settings.Profile` — form with Display Name, Email, Website URL fields. Inline validation. Save button with confirmation toast. |
+| **Backend (Phoenix)** | `Stacks.Accounts.update_profile/2`. Email changes require `current_password` param. `StacksWeb.UserSettingsController.update_profile/2` (`PUT /api/settings/profile`). |
+| **Database** | **Write:** `op.users` (display_name, email, website_url), `op.audit_log`. |
+| **Dependencies** | US-17.1.1 (settings hub). |
+
+---
+
+#### US-17.2.2 (new) -- Set Location
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | User sets country and city for Third Spaces, partner inventory, and event filtering. Explicit setting, not device geolocation. Saving triggers geographic discovery sweep. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Location section within `Page.Settings.Profile` — Country dropdown (ZA at top), City text input with autocomplete. Explanation: "We use your location to show nearby bookshops, events, and reading spaces." Post-save note: "We'll start looking for spaces near [City]." |
+| **Backend (Phoenix)** | `Stacks.Accounts.update_location/2`. Emits `user.location_updated` event on change, triggering `GeographicDiscoveryJob` (US-2.5.2). `StacksWeb.UserSettingsController.update_profile/2` (same endpoint as US-17.2.1). |
+| **Database** | **Write:** `op.users` (country_code, city), `op.event_log` (user.location_updated). |
+| **Jobs (Oban)** | `GeographicDiscoveryJob` triggered by event. |
+| **Dependencies** | US-17.1.1 (settings hub), US-2.5.2 (geographic sweep). |
+
+---
+
+#### US-17.2.3 (new) -- Change Password
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Current password + new password (twice) form. Argon2 hashing. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Settings.Password` — three fields: Current Password, New Password, Confirm. Strength indicator. |
+| **Backend (Phoenix)** | `Stacks.Accounts.change_password/2`. Verifies current password before applying. `StacksWeb.UserSettingsController.change_password/2` (`PUT /api/settings/password`). Rate limit: 3/min. |
+| **Database** | **Write:** `op.users` (password_hash), `op.audit_log`. |
+| **Dependencies** | US-17.1.1 (settings hub). |
+
+---
+
+#### US-17.3.1 (new) -- Email Notification Preferences
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Toggle email notifications per category. Quiet by default. ToS changes always sent (non-toggleable). |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Settings.Notifications` — list of notification categories with toggles. ToS toggle is locked (always on). Auto-save on toggle change. Philosophy note in italic serif. |
+| **Backend (Phoenix)** | `Stacks.Accounts.update_notification_preferences/2`. `StacksWeb.UserSettingsController.update_notifications/2` (`PUT /api/settings/notifications`). |
+| **Database** | **Write:** `op.users` (notify_wishlist_availability, notify_marketplace, notify_group_invitations, notify_event_matches). |
+| **Jobs (Oban)** | `Stacks.Workers.EmailNotificationJob` — checks user preferences before sending any email. Queue: `notifications`, concurrency: 3. `Stacks.Workers.WishListAvailabilityJob` — triggered by partner inventory ingestion or marketplace listing creation. Checks WishList ISBNs against new availability. |
+| **External Services** | Resend / Postmark (transactional email). |
+| **dbt Models** | `int_notification_delivery_rate`. |
+| **Dependencies** | US-17.1.1 (settings hub). |
 
 ---
 
@@ -1638,15 +1894,70 @@ US-1.1.1 (Upload + Identify)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Fifth bookshelf for books the user wants to rehome. Marketplace-ready in future phases. |
+| **Summary** | Fifth bookshelf with community-driven wear state. Spine wear reflects how many users across the platform have read each book (aggregate `Library` shelf placement count), not the individual user's engagement. Books can arrive from any shelf or directly from upload. Marketplace-ready in future phases. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Bookshelf.LookingForHome` module. Same shelf rendering components as other bookshelves. |
-| **Backend (Phoenix)** | `Stacks.Shelving` context, bookshelf_name `:looking_for_home`. `StacksWeb.BookshelfController.show/2`. |
-| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`. |
+| **Frontend (Elm)** | `Page.Bookshelf.LookingForHome` module. Uses `CommunityWear` type (not `SpineWear`) for spine rendering. Warm, transitional aesthetic (window ledge / market stall). |
+| **Backend (Phoenix)** | `Stacks.Shelving` context, bookshelf_name `:looking_for_home`. `Stacks.Books.community_read_count/1` — reads from `wh.mart_community_read_count` to determine community wear level. `StacksWeb.BookshelfController.show/2`. |
+| **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`, `op.book_editions`. **Read:** `wh.mart_community_read_count` (aggregate read stats). |
+| **Jobs (Oban)** | None directly. `mart_community_read_count` is refreshed by dbt on schedule. |
+| **dbt Models** | `mart_community_read_count` — `SELECT book_id, COUNT(DISTINCT user_id) AS read_count FROM bookshelf_placements bp JOIN bookshelves b ON bp.bookshelf_id = b.id WHERE b.name = 'library' AND bp.removed_at IS NULL GROUP BY book_id`. |
+| **Infrastructure** | None additional. |
 | **Dependencies** | US-1.1.1 (books exist), US-1.2.1 (shelf infrastructure). |
+
+---
+
+### 19. Accessibility
+
+---
+
+#### US-19.1.1 (new) -- ARIA Labels for Visual Elements
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Every spine, shelf, overlay, and interactive element gets meaningful ARIA labels. Upload states announced via `aria-live` regions. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | Attributes added to existing components: `Components.Spine` gets `aria-label` ("Book: [Title] by [Author], [Pages] pages, [wear state]"). `Components.Shelf` gets `role="list"`, `aria-label` ("[Shelf Name] — N books"). Book detail overlay gets `role="dialog"` with focus trapping. Upload states use `aria-live="polite"` for progress announcements. `Components.UserMenu` dropdown labelled "User menu". |
+| **Backend (Phoenix)** | API responses must include all data needed for labels: shelf name, book count per shelf, wear state as text, page count. No new endpoints — data already present in existing responses. |
+| **Database** | None additional. |
+| **Dependencies** | US-1.2.1–4 (shelves), US-1.3.1 (spines), US-1.3.2 (detail overlay). |
+
+---
+
+#### US-19.1.2 (new) -- Keyboard Navigation
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Full keyboard navigation: Tab between nav items → shelf content → spines. Arrow keys within shelf grid. Enter opens detail overlay. Escape closes. Skip links for main content. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Navigation.Keyboard` module — keyboard event subscriptions. `tabindex` attributes on all interactive spine elements. Arrow key handlers for shelf grid navigation. Focus management: return focus to triggering spine when overlay closes. Skip link: hidden "Skip to main content" link before navigation. Visible focus indicators styled with platform aesthetic. |
+| **Backend (Phoenix)** | None (purely client-side). |
+| **Database** | None. |
+| **Dependencies** | US-1.2.1–4 (shelves), US-1.3.2 (detail overlay), US-19.1.1 (ARIA labels). |
+
+---
+
+#### US-19.2.1 (new) -- List View Toggle
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Toggle between spine view (visual bookshelf) and list view (sortable table of books with metadata). Preference persisted in localStorage. Better for accessibility, small screens, and information-dense browsing. |
+| **Phase** | Phase 1 (MVP) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `ShelfViewMode` type: `SpineView | ListView`. Toggle icon in shelf header. `Components.BookList` — table with columns: cover thumbnail, title, author, page count, date added, shelf, format indicators, wear state (text label). Sortable columns (click header). Clicking a row opens book detail overlay. Preference stored via `setViewMode` port → `localStorage`. |
+| **Backend (Phoenix)** | None additional (same API data, different rendering). |
+| **Database** | None (preference in localStorage). |
+| **Dependencies** | US-1.2.1–4 (shelves), US-1.3.2 (detail overlay). |
 
 ---
 
@@ -1674,38 +1985,54 @@ US-1.1.1 (Upload + Identify)
 
 ---
 
+### Cross-cutting: Data Quality Framework
+
+| Layer | Components |
+|-------|------------|
+| **Summary** | Continuous quality monitoring per data product. Source health tracking, LLM faithfulness metrics, quality trend analysis. See `docs/data-quality.md` for the full framework. |
+| **Affects stories** | US-5.1 (metrics dashboard — data quality section), US-2.1.1–2.4.1 (enrichment — source health), US-12.1.2 (blog — LLM faithfulness) |
+| **Backend (Phoenix)** | `Stacks.Enrichment.SourceHealth` — `record_success/2`, `record_failure/3`. Instrumented in all enrichment workers. `Stacks.Workers.RSSLivenessJob` — weekly feed health check. |
+| **Database** | `op.source_health_checks` — per-source operational health with consecutive failure tracking and computed status (healthy/degraded/broken). |
+| **dbt Models** | `stg_source_health_checks`, `int_source_health` (per-source status), `mart_data_quality_trend` (12-week rollup), `mart_enrichment_gaps` (missing data by cause), `mart_llm_faithfulness` (LLM output quality). |
+| **Rust Scraper** | Returns `selector_match_rate` in scrape response — percentage of CSS selectors that found matches. Low rate indicates HTML structure change. |
+| **Elm** | Metrics dashboard: quality trend sparklines, source health table, enrichment gap cards, LLM faithfulness indicators. |
+
+---
+
 ## Quick Reference: Table-to-Story Mapping
 
 Which user stories touch each database table:
 
 | Table | Stories |
 |-------|---------|
-| `books` | US-1.1.1, US-1.1.2, US-1.1.4, US-1.1.5, US-1.1.6, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--4, US-2.1.1, US-2.2.1, US-2.3.1, US-2.4.1, US-4.1.1, US-7.1.1, US-7.2.1, US-8.1.1 |
+| `books` (works) | US-1.1.1, US-1.1.2, US-1.1.4, US-1.1.5, US-1.1.6, US-1.1.8, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--3, US-1.5.3, US-2.1.1, US-2.3.1, US-2.4.1, US-4.1.1, US-7.1.1, US-7.2.1, US-8.1.1, US-11.1.5, US-18.1.1, US-19.2.1 |
+| `book_editions` | US-1.1.1, US-1.1.5, US-1.1.6, US-1.1.8, US-1.3.2, US-1.5.4, US-2.2.1, US-9.2.1, US-9.8.1, US-14.1.2, US-19.1.1, US-19.2.1 |
 | `authors` | US-1.1.1, US-1.2.1--4, US-1.3.2, US-1.4.1, US-2.3.1, US-2.4.1, US-6.1.1, US-8.1.1 |
 | `bookshelves` | US-1.2.1--5, US-1.4.1, US-1.5.1, US-6.1.1, US-8.1.1 |
 | `bookshelf_placements` | US-1.1.5, US-1.2.1--4, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1--3, US-1.6.4, US-1.6.5, US-2.4.1, US-6.1.1, US-8.1.1 |
 | `bookshelf_placement_history` | US-1.3.1, US-1.5.1--3, US-1.6.4, US-8.1.1 |
 | `review_snapshots` | US-1.3.2, US-2.1.1 |
-| `price_snapshots` | US-1.3.2, US-1.4.1, US-2.2.1 |
+| `price_snapshots` | US-1.3.2, US-1.4.1, US-1.5.3, US-2.2.1 (references `book_editions`, not `books`) |
 | `bookstores` | US-2.2.1, US-2.2.2, US-2.4.1 |
 | `bookstore_events` | US-2.4.1 |
-| `third_spaces` | US-3.1.1 |
-| `third_space_events` | US-3.1.1 |
+| `third_spaces` | US-3.1.1, US-2.5.2, US-2.5.3 |
+| `third_space_events` | US-3.1.1, US-2.5.2 |
 | `blog_posts` | US-12.1.1, US-12.1.2, US-12.1.3, US-10.2.3, US-8.1.1 |
 | `post_book_associations` | US-12.1.2 |
 | `comments` | US-13.1.1, US-13.1.2, US-13.2.1 |
 | `user_blocks` | US-10.1.2, US-13.1.2 |
-| `groups` | US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-10.2.1 |
-| `group_members` | US-11.1.2, US-11.1.3, US-11.1.4 |
+| `groups` | US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5, US-10.2.1 |
+| `group_members` | US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 |
 | `group_invitations` | US-11.1.2, US-11.1.4 |
 | `visibility_grants` | US-10.2.2 |
 | `uploaded_images` | US-1.1.1, US-7.1.1, US-8.1.4 |
 | `audit_log` | US-1.1.3, US-1.1.4, US-2.5.1, US-4.1.1, US-4.1.2, US-5.1.1, US-7.2.1, US-7.3.1, US-8.1.1, US-8.1.2, US-8.1.3, US-8.1.5 |
-| `discovered_sources` | US-2.3.1, US-2.5.1 |
+| `discovered_sources` | US-2.3.1, US-2.5.1, US-2.5.2, US-2.5.3 |
 | `partners` | US-9.1.1, US-9.1.2, US-9.6.1, US-9.7.1, US-9.7.2, US-9.8.1 |
-| `partner_inventory` | US-9.2.1, US-9.2.2, US-9.5.1, US-9.8.1 |
+| `partner_inventory` | US-9.2.1, US-9.2.2, US-9.5.1, US-9.8.1 (references `book_editions`, not `books`) |
 | `partner_events` | US-9.3.1, US-9.3.2, US-9.5.1, US-9.6.1 |
 | `partner_spaces` | US-9.4.1, US-9.5.1, US-9.6.1 |
+| `source_health_checks` | US-2.1.1, US-2.2.1, US-2.3.1, US-2.4.1, US-5.1 (quality dashboard) |
 | `event_log` | US-9.2.1, US-9.3.1, US-9.4.1, US-9.5.1 (+ all stories via EDA) |
 | `listings` | US-7.1.1, US-7.2.1 |
 | `offers` | US-7.2.1 |
@@ -1743,6 +2070,11 @@ Which user stories touch each database table:
 | `PartnerISBNResolveJob` | US-9.2.1, US-9.2.2 | Event-driven (unknown ISBN in partner inventory) |
 | `ArchivePartnerEventsJob` | US-9.3.1 | Scheduled (daily) |
 | `PartnerMetricsSnapshotJob` | US-9.5.1 | Scheduled (daily) |
+| `GeographicDiscoveryJob` | US-2.5.2 | Event-driven (user.location_updated) + quarterly Oban.Cron |
+| `OptOutConfirmationJob` | US-2.5.3 | On-demand (opt-out request) |
+| `MarketplaceSaleWorker` | US-7.2 | Event-driven (book.sold — checks buyer WishList, prompts) |
+| `WishListAvailabilityJob` | US-17.3.1 | Event-driven (partner inventory ingested, marketplace listing created) |
+| `EmailNotificationJob` | US-17.3.1 | On-demand (checks preferences before sending) |
 | `EventSubscriberWorker` | EDA (cross-cutting) | Event-driven (dispatches to subscriber modules) |
 
 ---
@@ -1754,15 +2086,15 @@ Which user stories touch each database table:
 | Modal | US-1.1.1, US-1.1.3, US-4.1.1 | Vision model (book identification, classification via Qwen2.5-VL-7B) |
 | Open Library | US-1.1.1, US-1.1.2, US-4.1.1 | ISBN resolution, book metadata |
 | Google Books | US-1.1.1, US-1.1.2, US-4.1.1 | ISBN resolution fallback, metadata |
-| Brave Search | US-2.3.1, US-2.4.1, US-2.5.1, US-3.1.1 | Source discovery, author search, event search |
-| SearXNG (self-hosted) | US-2.4.1, US-2.5.1, US-3.1.1 | Meta-search for discovery |
+| Brave Search | US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-3.1.1 | Source discovery, author search, event search, geographic sweep |
+| SearXNG (self-hosted) | US-2.4.1, US-2.5.1, US-2.5.2, US-3.1.1 | Meta-search for discovery and geographic sweep |
 | GoodReads | US-2.1.1 | Review aggregation |
 | Reddit API | US-2.1.1 | Review aggregation |
 | Storygraph | US-2.1.1 | Review aggregation |
 | Smile Identity / Yoti / Sumsub | US-4.1.2, US-7.3.1 | KYC / age verification |
 | Stitch Money | US-7.2.1 | Payment processing |
 | Pargo | US-7.2.1 | Shipping / logistics |
-| Resend / Postmark | US-8.1.2, US-9.1.1, US-9.7.1 | Transactional email (GDPR confirmation, partner notifications, status updates) |
+| Resend / Postmark | US-2.5.3, US-8.1.2, US-9.1.1, US-9.7.1, US-17.3.1 | Transactional email (business opt-out confirmation, GDPR confirmation, partner notifications, status updates, WishList availability, event match, group invitation emails) |
 
 ---
 
@@ -1771,6 +2103,7 @@ Which user stories touch each database table:
 | Model | Type | Fed By Stories | Consumed By Stories |
 |-------|------|---------------|-------------------|
 | `stg_books` | Staging | US-1.1.1 | Many |
+| `stg_book_editions` | Staging | US-1.1.1, US-1.1.8 | US-1.3.2, US-1.5.4, US-2.2.1 |
 | `stg_uploaded_images` | Staging | US-1.1.1 | US-8.1.4 |
 | `stg_bookshelf_placements` | Staging | US-1.5.1--3 | US-1.2.1--4 |
 | `stg_bookshelf_placement_history` | Staging | US-1.5.1--3 | US-1.3.1 |
@@ -1844,3 +2177,12 @@ Which user stories touch each database table:
 | `mart_social_graph_health` | Mart | US-11.x | US-5.1.1 |
 | `mart_blog_activity` | Mart | US-12.x | US-5.1.1 |
 | `mart_marketplace_offers` | Mart | US-7.1.1, US-13.2.2 | US-5.1.1 |
+| `mart_community_read_count` | Mart | US-1.2.1 (Library placements) | US-18.1.1 (Looking for a Home wear) |
+| `int_onboarding_completion_rate` | Intermediate | US-14.1.2 | US-5.1.1 |
+| `int_notification_delivery_rate` | Intermediate | US-17.3.1 | US-5.1.1 |
+| `int_opt_out_rate` | Intermediate | US-2.5.3 | US-5.1.1 |
+| `stg_source_health_checks` | Staging | US-2.1.1–2.4.1 (enrichment workers) | US-5.1.1 |
+| `int_source_health` | Intermediate | US-2.1.1–2.4.1 | US-5.1.1 (source health table) |
+| `mart_data_quality_trend` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (quality trend sparklines) |
+| `mart_enrichment_gaps` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (gap drill-down) |
+| `mart_llm_faithfulness` | Mart | US-12.1.2, US-2.1.1 | US-5.1.1 (LLM quality metrics) |

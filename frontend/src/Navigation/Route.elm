@@ -22,6 +22,7 @@ type Route
     | SettingsConsent
     | SettingsAgeVerification
     | CostTransparency
+    | Catalogue
     | NotFound
 
 
@@ -41,6 +42,7 @@ parser =
         , Parser.map SettingsConsent (s "settings" </> s "consent")
         , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
         , Parser.map CostTransparency (s "costs")
+        , Parser.map Catalogue (s "catalogue")
         ]
 
 
@@ -91,6 +93,9 @@ toPath route =
 
         CostTransparency ->
             "/costs"
+
+        Catalogue ->
+            "/catalogue"
 
         NotFound ->
             "/not-found"

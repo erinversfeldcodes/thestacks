@@ -2,9 +2,11 @@ defmodule Stacks.Books do
   @moduledoc """
   Books context — book creation, discovery, and ISBN resolution.
 
-  All books must have a verified ISBN. The ISBN hard gate is enforced here:
-  `create/1` requires an `:isbn` field. `create_from_isbn/1` resolves metadata
-  from Open Library / Google Books before inserting.
+  In the works/editions model:
+  - A **book** (work) is the logical entity: "Circe" by Madeline Miller
+  - A **book_edition** is a specific ISBN/format: "Circe, Bloomsbury paperback, 9780316556347"
+
+  The ISBN hard gate is enforced here: every edition must have a verified ISBN.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -16,63 +18,110 @@ defmodule Stacks.Books do
 
   alias Core.Repo
   alias Ecto.Multi
-  alias Stacks.Books.{Author, Book, UploadedImage}
+  alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
   alias Stacks.Workers.IdentifyBookJob
 
   @doc """
-  Returns a book by ID with the author preloaded.
+  Returns a book (work) by ID with the author and editions preloaded.
   """
   @spec get_book_detail(binary()) :: Book.t() | nil
   def get_book_detail(id) do
     Book
     |> where([b], b.id == ^id)
-    |> preload(:author)
+    |> preload([:author, :editions])
     |> Repo.one()
   end
 
   @doc """
-  Finds an existing book by ISBN.
+  Returns the primary edition for a book, or the first edition as fallback.
   """
-  @spec find_existing(String.t()) :: Book.t() | nil
-  def find_existing(isbn) do
-    Repo.get_by(Book, isbn: isbn)
+  @spec primary_edition(Book.t()) :: BookEdition.t() | nil
+  def primary_edition(%Book{editions: editions}) when is_list(editions) do
+    Enum.find(editions, & &1.is_primary) || List.first(editions)
+  end
+
+  def primary_edition(%Book{id: book_id}) do
+    BookEdition
+    |> where([e], e.book_id == ^book_id)
+    |> order_by([e], desc: e.is_primary)
+    |> limit(1)
+    |> Repo.one()
   end
 
   @doc """
-  Creates a book from attributes. Requires `:isbn` and `:title`.
+  Finds an existing book (work) by ISBN — looks up the edition, returns the parent work.
+  """
+  @spec find_existing(String.t()) :: Book.t() | nil
+  def find_existing(isbn) do
+    BookEdition
+    |> where([e], e.isbn == ^isbn)
+    |> preload(book: [:author, :editions])
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      edition -> edition.book
+    end
+  end
+
+  @doc """
+  Creates a book (work) with its first edition from attributes.
+  Requires `:isbn` and `:title`.
   """
   @spec create(map()) :: {:ok, Book.t()} | {:error, Ecto.Changeset.t()}
   def create(attrs) do
-    changeset =
+    book_changeset =
       %Book{}
       |> Book.changeset(attrs)
       |> maybe_create_author(attrs)
 
     Multi.new()
-    |> Multi.insert(:book, changeset)
-    |> Multi.run(:emit_event, fn _repo, %{book: book} ->
+    |> Multi.insert(:book, book_changeset)
+    |> Multi.insert(:edition, fn %{book: book} ->
+      %BookEdition{}
+      |> BookEdition.changeset(%{
+        "isbn" => attrs["isbn"],
+        "book_id" => book.id,
+        "format_label" => attrs["format_label"],
+        "cover_image_url" => attrs["cover_image_url"],
+        "page_count" => attrs["page_count"],
+        "publisher" => attrs["publisher"],
+        "publication_year" => attrs["publication_year"],
+        "open_library_id" => attrs["open_library_id"],
+        "google_books_id" => attrs["google_books_id"],
+        "is_primary" => true
+      })
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
       Events.emit_safe(%{
         event_type: "book.created",
         aggregate_type: "book",
         aggregate_id: book.id,
-        payload: %{isbn: book.isbn, title: book.title}
+        payload: %{isbn: edition.isbn, title: book.title}
       })
 
       {:ok, book}
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{book: book}} -> {:ok, book}
-      {:error, :book, changeset, _} -> {:error, changeset}
-      {:error, _, reason, _} -> {:error, reason}
+      {:ok, %{book: book, edition: edition}} ->
+        {:ok, %{book | editions: [edition]}}
+
+      {:error, :book, changeset, _} ->
+        {:error, changeset}
+
+      {:error, :edition, changeset, _} ->
+        {:error, changeset}
+
+      {:error, _, reason, _} ->
+        {:error, reason}
     end
   end
 
   @doc """
   Resolves book metadata from an ISBN via Open Library / Google Books,
-  then creates the book and author records.
+  then creates the book (work) and edition records.
   """
   @spec create_from_isbn(String.t()) ::
           {:ok, Book.t()} | {:error, :not_found | Ecto.Changeset.t()}
@@ -85,10 +134,11 @@ defmodule Stacks.Books do
   end
 
   defp validate_isbn_format(isbn) do
-    cs = Book.changeset(%Book{}, %{"isbn" => isbn, "title" => "placeholder"})
+    cs =
+      BookEdition.changeset(%BookEdition{}, %{"isbn" => isbn, "book_id" => Ecto.UUID.generate()})
 
     if Keyword.has_key?(cs.errors, :isbn) do
-      {:error, Book.changeset(%Book{}, %{"isbn" => isbn})}
+      {:error, cs}
     else
       :ok
     end
@@ -163,23 +213,102 @@ defmodule Stacks.Books do
   end
 
   @doc """
+  Returns a paginated list of all books (works) with optional search, subject filter,
+  and sort order. No ownership data is included — this powers the public
+  catalogue endpoint.
+
+  ## Options
+
+    * `:search` — free-text search against `title_tsv` (optional)
+    * `:subject` — filter to books containing this subject (optional)
+    * `:sort` — one of `"title"`, `"author"`, `"recent"` (default `"title"`)
+    * `:page` — 1-based page number (default 1)
+    * `:per_page` — items per page (default 24, max 100)
+
+  Returns `{books, total_count}`.
+  """
+  @spec list_catalogue(keyword()) :: {[Book.t()], non_neg_integer()}
+  def list_catalogue(opts \\ []) do
+    search = Keyword.get(opts, :search)
+    subject = Keyword.get(opts, :subject)
+    sort = Keyword.get(opts, :sort, "title")
+    page = max(Keyword.get(opts, :page, 1), 1)
+    per_page = min(max(Keyword.get(opts, :per_page, 24), 1), 100)
+    offset = (page - 1) * per_page
+
+    base =
+      Book
+      |> preload([:author, :editions])
+
+    filtered =
+      base
+      |> maybe_search(search)
+      |> maybe_filter_subject(subject)
+
+    total = Repo.aggregate(filtered, :count)
+
+    books =
+      filtered
+      |> apply_sort(sort)
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+
+    {books, total}
+  end
+
+  defp maybe_search(query, nil), do: query
+  defp maybe_search(query, ""), do: query
+
+  defp maybe_search(query, search) do
+    safe_query = String.replace(search, ~r/[^\w\s]/, "")
+
+    where(
+      query,
+      [b],
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^safe_query)
+    )
+  end
+
+  defp maybe_filter_subject(query, nil), do: query
+  defp maybe_filter_subject(query, ""), do: query
+
+  defp maybe_filter_subject(query, subject) do
+    where(query, [b], ^subject in b.subjects)
+  end
+
+  defp apply_sort(query, "author") do
+    query
+    |> join(:left, [b], a in assoc(b, :author), as: :author_sort)
+    |> order_by([b, author_sort: a], asc_nulls_last: a.name, asc: b.title)
+  end
+
+  defp apply_sort(query, "recent") do
+    order_by(query, [b], desc: b.created_at)
+  end
+
+  defp apply_sort(query, _title) do
+    order_by(query, [b], asc: b.title)
+  end
+
+  @doc """
   Full-text search on book titles using the stored `title_tsv` tsvector column.
   Returns up to `limit` results (default 20).
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
-    safe_query = String.replace(query, ~r/[^\w\s]/, "") <> ":*"
+    safe_query = String.replace(query, ~r/[^\w\s]/, "")
 
     Book
     |> where(
       [b],
       fragment(
-        "title_tsv @@ to_tsquery('english', ?)",
+        "title_tsv @@ plainto_tsquery('english', ?)",
         ^safe_query
       )
     )
-    |> preload(:author)
+    |> preload([:author, :editions])
     |> limit(^limit)
     |> Repo.all()
   end

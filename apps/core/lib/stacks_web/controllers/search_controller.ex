@@ -40,14 +40,38 @@ defmodule StacksWeb.SearchController do
         author -> %{id: author.id, name: author.name}
       end
 
+    primary = Stacks.Books.primary_edition(book)
+
+    editions =
+      case book.editions do
+        list when is_list(list) -> Enum.map(list, &format_edition/1)
+        _ -> []
+      end
+
     %{
       id: book.id,
-      isbn: book.isbn,
       title: book.title,
-      cover_image_url: book.cover_image_url,
-      publication_year: book.publication_year,
       visibility_tier: book.visibility_tier,
-      author: author
+      author: author,
+      editions: editions,
+      edition_count: length(editions),
+      primary_edition: format_edition_or_nil(primary)
     }
   end
+
+  defp format_edition(edition) do
+    %{
+      id: edition.id,
+      isbn: edition.isbn,
+      format_label: edition.format_label,
+      cover_image_url: edition.cover_image_url,
+      page_count: edition.page_count,
+      publisher: edition.publisher,
+      publication_year: edition.publication_year,
+      is_primary: edition.is_primary
+    }
+  end
+
+  defp format_edition_or_nil(nil), do: nil
+  defp format_edition_or_nil(edition), do: format_edition(edition)
 end

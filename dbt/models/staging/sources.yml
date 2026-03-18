@@ -10,6 +10,7 @@ sources:
       error_after: {count: 48, period: hour}
     tables:
       - name: books
+      - name: book_editions
       - name: authors
       - name: bookshelves
       - name: bookshelf_placements

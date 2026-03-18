@@ -940,6 +940,76 @@ def run_e2e_gate(issue_number: int) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Image generation (Replicate Flux)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def generate_image(
+    prompt: str,
+    output_filename: str = "generated.png",
+    width: int = 1024,
+    height: int = 1024,
+) -> str:
+    """Generate an image using Flux Schnell on Replicate.
+
+    Args:
+        prompt: Text description of the image to generate.
+        output_filename: Filename to save in the project root (e.g. "door-concept-1.png").
+        width: Image width in pixels (default 1024).
+        height: Image height in pixels (default 1024).
+
+    Returns:
+        Absolute path to the saved image file.
+    """
+    import requests as http_requests
+
+    token = os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_TOKEN")
+    if not token:
+        return "Error: REPLICATE_API_TOKEN or REPLICATE_TOKEN not set in environment"
+
+    try:
+        import replicate
+
+        client = replicate.Client(api_token=token)
+        output = client.run(
+            "black-forest-labs/flux-schnell",
+            input={
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "num_outputs": 1,
+                "output_format": "png",
+            },
+        )
+
+        # output is a list of FileOutput objects or URLs
+        image_url = None
+        if isinstance(output, list) and len(output) > 0:
+            item = output[0]
+            if hasattr(item, "url"):
+                image_url = item.url
+            elif isinstance(item, str):
+                image_url = item
+        elif isinstance(output, str):
+            image_url = output
+
+        if not image_url:
+            return f"Error: Unexpected output format from Replicate: {type(output)}"
+
+        # Download and save (using requests, not urllib, for security)
+        out_path = REPO_ROOT / output_filename
+        resp = http_requests.get(image_url, timeout=60)
+        resp.raise_for_status()
+        out_path.write_bytes(resp.content)
+
+        return f"Image saved to {out_path}"
+
+    except Exception as e:
+        return f"Error generating image: {e}"
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

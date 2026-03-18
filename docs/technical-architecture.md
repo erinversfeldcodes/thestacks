@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.4
-> **Last updated:** 2026-03-14
+> **Version:** 1.5
+> **Last updated:** 2026-03-17
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -38,6 +38,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 26. [Potential OSS Contributions](#potential-oss-contributions)
 27. [Visibility & Privacy Architecture](#visibility--privacy-architecture)
 28. [Blog & LLM Associations](#blog--llm-associations)
+29. [Data Quality Framework](#data-quality-framework)
 
 ---
 
@@ -133,16 +134,18 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 
 **Data flow summary:**
 
-1. User uploads a photo or enters an ISBN via the Elm frontend.
+1. User uploads a photo or enters an ISBN via the Elm frontend (`POST /api/upload/identify`).
 2. Phoenix receives the multipart upload, reads the temp file, base64-encodes the bytes, inserts an `uploaded_images` record, and enqueues an `IdentifyBookJob` with the base64 image in the Oban job args. The temp file is discarded — the image is never written to permanent storage.
 3. The Oban worker sends the base64-encoded image to the Modal vision service (Qwen2.5-VL-7B-Instruct on A10G) over HMAC-authenticated HTTPS. Modal classifies the image, then extracts book titles/authors/ISBNs.
-4. ISBN is resolved via Open Library (primary) or Google Books (fallback).
-5. Enrichment jobs fan out: prices via the Rust scraper, reviews via web scraping, author info via Open Library + web.
-6. All raw data lands in the `op` schema (operational).
-7. dbt transforms raw data into clean models in the `wh` schema (warehouse).
-8. The Elm frontend queries Phoenix, which reads from both schemas as appropriate.
-9. Partners push inventory, events, and space listings via the Partner API.
-10. All significant state changes emit events to the event_log table, which trigger downstream subscribers (enrichment, moderation, notifications).
+4. ISBN is resolved via Open Library (primary) or Google Books (fallback). The system returns the identified candidate(s) to the frontend for user verification ("We think this is…").
+5. The user confirms the identification and chooses a shelf. The frontend calls `POST /api/books/confirm` with the confirmed ISBN + target shelf.
+6. The system checks whether a `book_editions` record with this ISBN already exists. If yes, it checks for a same-work merge opportunity (US-1.1.8). If no, it creates a new work (`books`) and first edition (`book_editions`), then creates the shelf placement.
+7. Enrichment jobs fan out: prices per edition via the Rust scraper, reviews per work via web scraping, author info via Open Library + web.
+8. All raw data lands in the `op` schema (operational).
+9. dbt transforms raw data into clean models in the `wh` schema (warehouse), including `mart_community_read_count` for aggregate read stats.
+10. The Elm frontend queries Phoenix, which reads from both schemas as appropriate.
+11. Partners push inventory, events, and space listings via the Partner API. Partner inventory links to `book_editions` via ISBN.
+12. All significant state changes emit events to the event_log table, which trigger downstream subscribers (enrichment, moderation, notifications).
 
 ---
 
@@ -296,8 +299,14 @@ GenServer-based sliding window rate limiter, inspired by Fliekflow's multi-tier 
 
 | Endpoint | Limit | Rationale |
 |----------|-------|-----------|
-| `POST /api/upload` (image upload) | 10/min | Expensive — triggers vision model |
+| `POST /api/upload/identify` (image upload + identification) | 10/min | Expensive — triggers vision model |
+| `POST /api/books/confirm` (confirm + shelve) | 20/min | Lightweight — DB writes only |
+| `POST /api/books/:id/merge-format` (multi-format merge) | 10/min | DB write |
 | `POST /api/auth/login` | 5/min | Brute-force prevention |
+| `POST /api/auth/register` | 3/min | Abuse prevention |
+| `PUT /api/settings/password` | 3/min | Brute-force prevention |
+| `GET /api/search/platform` | 30/min | Heavier than local search — queries across users |
+| `POST /api/opt-out` | 5/min | Unauthenticated — abuse risk |
 | `GET /api/metrics` | 60/min | Public but cacheable |
 | `GET /feed/*` | 60/min | RSS readers can be aggressive |
 
@@ -570,6 +579,8 @@ Oban provides a PostgreSQL-backed job queue, eliminating the need for additional
 | `review_scrape` | 3 | Polite rate limiting for review sites |
 | `author_scrape` | 2 | Infrequent enrichment |
 | `source_discovery` | 2 | Search API budget management |
+| `geographic_discovery` | 2 | Location-triggered and quarterly geographic sweeps (US-2.5.2) |
+| `notifications` | 3 | Email notifications (WishList availability, marketplace, etc.) |
 | `dbt_refresh` | 1 | Sequential — one dbt run at a time |
 
 **Features used:**
@@ -593,6 +604,8 @@ Rather than fixed cron schedules, staleness adapts to context. Each record carri
 | Author with no activity in 6 months | Monthly |
 | New book added | Immediate source discovery |
 | All books | Monthly re-discovery (new stores), quarterly (new source types) |
+| User has location set | Quarterly geographic discovery sweep (US-2.5.2) |
+| WishList book available from partner/marketplace | Immediate email notification if opted in (US-17.3.1) |
 
 This approach conserves API budgets and scraper resources while keeping the most relevant data fresh.
 
@@ -619,7 +632,8 @@ models/
     ├── mart_bookshelf.sql            # Shelf assignment, reading status
     ├── mart_price_alerts.sql         # Books below price threshold
     ├── mart_author_activity.sql      # Recent author events and releases
-    └── mart_content_moderation.sql   # Visibility tiers, flags
+    ├── mart_content_moderation.sql   # Visibility tiers, flags
+    └── mart_community_read_count.sql # Aggregate read count per work (US-18.1.1)
 ```
 
 dbt runs as a subprocess triggered by Oban after scrape cycles complete:
@@ -678,6 +692,11 @@ The user account. Single-user initially, multi-user ready.
 | `consent_analytics_at` | `TIMESTAMPTZ` | `NULL` |
 | `profile_visibility` | `ENUM('owner', 'platform')` | Default `'owner'`. Controls profile discoverability. |
 | `website_url` | `TEXT` | `NULL` — single external blog/portfolio URL, shown on profile. |
+| `onboarding_completed` | `BOOLEAN` | Default `false`. Set to `true` after first-time onboarding flow (US-14.1.2). |
+| `notify_wishlist_availability` | `BOOLEAN` | Default `false`. Email when a WishList book becomes available. |
+| `notify_marketplace` | `BOOLEAN` | Default `true`. Marketplace activity emails (future). |
+| `notify_group_invitations` | `BOOLEAN` | Default `true`. Email on group invitation. |
+| `notify_event_matches` | `BOOLEAN` | Default `false`. Email when a matched event is discovered. |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
@@ -686,16 +705,17 @@ The user account. Single-user initially, multi-user ready.
 - Location (country, city) is user-configured, not device-derived.
 - Consent fields track GDPR consent per use with timestamps.
 - `profile_visibility = 'owner'` is ghost mode — the profile is completely invisible to other platform users.
+- Notification preferences are individual boolean columns, not JSONB, because the set is small, fixed, and benefits from DB-level validation. Terms-of-service change notifications are always sent (not a preference — legal requirement).
 
 ### Entity Relationship Overview
 
 ```
-users 1──* bookshelves 1──* bookshelf_placements *──1 books *──1 authors
+users 1──* bookshelves 1──* bookshelf_placements *──1 books (works) *──1 authors
       │                         │    │                │          │
       │          bookshelf_placement_history          │          │
       │                         │                │          │
       │              ┌──────────┘     review_snapshots      │
-      │              │                price_snapshots──*bookstores
+      │              │                     │                │
       │        offer_threads──* offer_messages               │
       │                                        uploaded_images
       │                                                       │
@@ -710,7 +730,12 @@ users 1──* bookshelves 1──* bookshelf_placements *──1 books *──1
       │
       └──* visibility_grants (polymorphic — bookshelves, placements, posts)
 
-partners 1──* partner_inventory *──? books (via ISBN)
+books (works) 1──* book_editions (isbn, format, page_count, cover)
+                                    │
+                        price_snapshots──*bookstores (per edition)
+                        partner_inventory (linked via ISBN on edition)
+
+partners 1──* partner_inventory *──? book_editions (via ISBN)
          1──* partner_events
          1──* partner_spaces
 
@@ -722,34 +747,64 @@ event_log (standalone — references aggregates by type + ID)
 audit_log (standalone — references resources by type + ID)
 ```
 
-### `books`
+### `books` (Works)
 
-The core entity. ISBN is the hard gate — no book without one.
+The core entity represents a **work** — the logical book that a reader thinks of as "Dune" or "The Secret History." A work may have multiple editions (hardcover, Kindle, audiobook), each with its own ISBN. The ISBN hard gate is enforced at the edition level — no work exists without at least one verified edition.
+
+Ecto schema: `Stacks.Books.Book`, table: `op.books`.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `isbn` | `TEXT` | `UNIQUE NOT NULL` — the hard gate |
 | `title` | `TEXT` | `NOT NULL` |
 | `author_id` | `UUID` | Foreign key to `authors` |
 | `description` | `TEXT` | |
-| `cover_image_url` | `TEXT` | |
-| `page_count` | `INTEGER` | `NULL` — from Open Library / Google Books. Drives spine thickness. |
-| `publisher` | `TEXT` | `NULL` — from Open Library |
-| `publication_year` | `INTEGER` | `NULL` — from Open Library |
-| `language` | `TEXT` | `NULL` — ISO 639-1 code, from Open Library |
-| `subjects` | `TEXT[]` | Open Library subject classifications |
+| `subjects` | `TEXT[]` | Open Library subject classifications (work-level, shared across editions) |
 | `bisac_codes` | `TEXT[]` | `NULL` — BISAC codes for age-gating, derived from subjects |
-| `visibility_tier` | `ENUM('public', 'age_gated')` | Content moderation result |
-| `open_library_id` | `TEXT` | `NULL` — for linking back to Open Library |
-| `google_books_id` | `TEXT` | `NULL` — for linking back to Google Books |
+| `visibility_tier` | `ENUM('public', 'age_gated')` | Content moderation result (work-level — if any edition triggers age-gating, the work is gated) |
+| `open_library_work_id` | `TEXT` | `NULL` — Open Library work key (e.g., `/works/OL27448W`) |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
 **Notes:**
-- `page_count`, `publisher`, `publication_year`, `language` are fetched during ISBN enrichment from Open Library / Google Books.
-- `read_count` is intentionally NOT stored — it's derived from `bookshelf_placement_history` (count of `to_bookshelf` transitions to the reading pile bookshelf). No denormalised counter.
+- `read_count` is intentionally NOT stored — it's derived from `bookshelf_placement_history`. No denormalised counter.
 - `bisac_codes` are derived from `subjects` during the content moderation pipeline, stored for fast age-gate checks.
+- `description` and `subjects` are work-level — they describe the book regardless of format.
+- Shelf placements, review snapshots, blog post associations, and reading journey history all reference the work (`books.id`), not individual editions.
+- A work must always have at least one edition. Deleting the last edition of a work is not permitted.
+
+### `book_editions`
+
+An edition of a work — a specific physical or digital format with its own ISBN. The ISBN hard gate is enforced here.
+
+Ecto schema: `Stacks.Books.Edition`, table: `op.book_editions`.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `UUID` | Primary key |
+| `book_id` | `UUID` | `NOT NULL` — Foreign key to `books` (the work) |
+| `isbn` | `TEXT` | `UNIQUE NOT NULL` — the hard gate. One ISBN per edition, globally unique. |
+| `format` | `ENUM('hardcover', 'softcover', 'kindle', 'ebook', 'audiobook', 'other')` | `NOT NULL` |
+| `is_primary` | `BOOLEAN` | Default `false`. Exactly one edition per work should be primary — used for default cover image and spine rendering. Set to `true` for the first edition added. |
+| `cover_image_url` | `TEXT` | `NULL` — cover art may differ between editions |
+| `page_count` | `INTEGER` | `NULL` — varies by format (hardcover vs. softcover page counts may differ). Drives spine thickness using the primary edition's page count. |
+| `publisher` | `TEXT` | `NULL` — from Open Library / Google Books |
+| `publication_year` | `INTEGER` | `NULL` — from Open Library / Google Books |
+| `language` | `TEXT` | `NULL` — ISO 639-1 code |
+| `open_library_edition_id` | `TEXT` | `NULL` — Open Library edition key |
+| `google_books_id` | `TEXT` | `NULL` — Google Books volume ID |
+| `created_at` | `TIMESTAMPTZ` | |
+| `updated_at` | `TIMESTAMPTZ` | |
+
+**Unique constraint:** `UNIQUE(isbn)` — no two editions share an ISBN.
+
+**Index:** `CREATE INDEX idx_book_editions_book_id ON book_editions (book_id)` for efficient work → editions lookups.
+
+**Notes:**
+- `is_primary` determines which edition's cover and page count are used for shelf rendering. When a work has only one edition, it is automatically primary.
+- Price snapshots and partner inventory reference editions (via `edition_id` or ISBN), not works. Prices are format-specific.
+- When the user uploads a new format of an existing work (US-1.1.8), a new `book_editions` row is created under the same `books` work. No new shelf placement is created.
+- The ISBN hard gate check during upload: `book_editions.isbn` must resolve via Open Library or Google Books. If it resolves, check whether a `books` work already exists for this title+author (fuzzy match, Jaro-Winkler > 0.8). If yes, offer to merge as a new edition. If no, create a new work + first edition.
 
 ### `authors`
 
@@ -792,12 +847,11 @@ A book's placement on a bookshelf, with metadata. Soft-delete via `removed_at` p
 | `position` | `INTEGER` | Order on shelf |
 | `placed_at` | `TIMESTAMPTZ` | |
 | `removed_at` | `TIMESTAMPTZ` | `NULL` — soft remove for history |
-| `formats` | `TEXT[]` | e.g. `['hardcover', 'kindle', 'audiobook']` |
 | `personal_rating` | `INTEGER` | `NULL` — optional |
 | `notes` | `TEXT` | `NULL`, encrypted (Tier 2) |
 | `visibility` | `ENUM('owner', 'group', 'platform')` | `NULL` — inherits bookshelf visibility when NULL. Can only be equal to or more restrictive than the bookshelf's visibility. |
 | `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when placement `visibility = 'group'`. |
-| `listing_mode` | `ENUM('open', 'offers', 'closed_bid')` | `NULL` — only set for `looking_for_home` placements. |
+| `listing_mode` | `ENUM('fixed', 'offers')` | `NULL` — only set for `looking_for_home` placements. Closed bid deferred to a future phase. |
 | `listing_status` | `ENUM('active', 'pending', 'sold')` | `NULL` — only set for `looking_for_home` placements. |
 | `listing_price_cents` | `INTEGER` | `NULL` — fixed price in smallest currency unit. |
 | `listing_min_price_cents` | `INTEGER` | `NULL` — minimum acceptable offer for `offers` mode. |
@@ -835,18 +889,20 @@ Point-in-time captures of reviews from external sources.
 
 ### `price_snapshots`
 
-Point-in-time price captures per book per store.
+Point-in-time price captures per edition per store. Prices are edition-specific because different formats (hardcover vs. Kindle) have different prices at different stores.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `book_id` | `UUID` | Foreign key to `books` |
+| `edition_id` | `UUID` | Foreign key to `book_editions` |
 | `store_id` | `UUID` | Foreign key to `bookstores` |
 | `price_cents` | `INTEGER` | Price in smallest currency unit |
 | `currency` | `TEXT` | Default `'ZAR'` |
 | `in_stock` | `BOOLEAN` | |
 | `url` | `TEXT` | Direct link to product page |
 | `scraped_at` | `TIMESTAMPTZ` | |
+
+**Note:** The book detail overlay shows prices grouped by format. The join path is `books` → `book_editions` → `price_snapshots`. This is a single query with a join, not N+1.
 
 ### `bookstores`
 
@@ -894,6 +950,8 @@ Community spaces: reading groups, cafes, bookshops, festivals, markets.
 | `description` | `TEXT` | |
 | `discovered_via` | `TEXT` | |
 | `verified` | `BOOLEAN` | Default `false` |
+| `opted_out` | `BOOLEAN` | Default `false` — set when the business requests removal (US-2.5.3) |
+| `opted_out_at` | `TIMESTAMPTZ` | `NULL` |
 | `last_active_at` | `TIMESTAMPTZ` | |
 
 ### `third_space_events`
@@ -1112,8 +1170,8 @@ Tracks the lifecycle of user-uploaded book photos. Ecto schema: `Stacks.Books.Up
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
-| `book_id` | `UUID` | Foreign key to `books`, `NULL` until resolved |
-| `book_ids` | `UUID[]` | All books identified (resolved images may match >1 spine) |
+| `edition_id` | `UUID` | Foreign key to `book_editions`, `NULL` until resolved |
+| `edition_ids` | `UUID[]` | All editions identified (resolved images may match >1 spine) |
 | `storage_path` | `TEXT` | `NULL` — storage path (nullable; image bytes may be held in Oban job args rather than persisted to storage) |
 | `status` | `ENUM('pending', 'resolved', 'rejected')` | |
 | `rejection_reason` | `TEXT` | `NULL` |
@@ -1148,9 +1206,13 @@ The source discovery agent's findings, pending human review.
 | `confidence` | `FLOAT` | |
 | `discovered_via` | `TEXT` | |
 | `discovered_at` | `TIMESTAMPTZ` | |
-| `status` | `ENUM('pending_review', 'approved', 'dismissed')` | |
+| `status` | `ENUM('pending_review', 'approved', 'dismissed', 'excluded')` | |
 | `approved_at` | `TIMESTAMPTZ` | `NULL` |
+| `excluded_at` | `TIMESTAMPTZ` | `NULL` — set when business requests opt-out (US-2.5.3) |
+| `exclusion_email` | `TEXT` | `NULL` — contact who requested removal |
 | `config_generated` | `JSONB` | `NULL` — suggested TOML config |
+
+**Note:** `status = 'excluded'` means the business has requested removal. The geographic discovery sweep (US-2.5.2) checks `status != 'excluded'` and also checks the URL domain against all excluded entries to prevent re-discovery.
 
 ### `partners`
 
@@ -1182,13 +1244,13 @@ Registered businesses and community groups that push data to the platform.
 
 ### `partner_inventory`
 
-Books that partners have in stock, linked by ISBN.
+Books that partners have in stock, linked by ISBN to editions.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `UUID` | Primary key |
 | `partner_id` | `UUID` | Foreign key to `partners` |
-| `book_id` | `UUID` | Foreign key to `books`, `NULL` until ISBN resolves |
+| `edition_id` | `UUID` | Foreign key to `book_editions`, `NULL` until ISBN resolves |
 | `isbn` | `TEXT` | `NOT NULL` — the ISBN as submitted by the partner |
 | `price_cents` | `INTEGER` | `NOT NULL`, positive |
 | `currency` | `TEXT` | Default `'ZAR'` |
@@ -1196,7 +1258,9 @@ Books that partners have in stock, linked by ISBN.
 | `quantity` | `INTEGER` | Default `1` |
 | `synced_at` | `TIMESTAMPTZ` | When this record was last pushed |
 
-**Unique constraint:** `UNIQUE(partner_id, isbn)` — one record per book per partner, upserted on sync.
+**Unique constraint:** `UNIQUE(partner_id, isbn)` — one record per edition per partner, upserted on sync.
+
+**Note:** Partner inventory links to `book_editions` via ISBN. When a partner submits an ISBN, the system looks it up in `book_editions`. If the ISBN is unknown, it enters the standard ISBN resolution pipeline, which may create a new edition under an existing work or create a new work entirely.
 
 ### `partner_events`
 
@@ -1586,8 +1650,9 @@ The source discovery agent automatically finds new bookshops, review sites, comm
 
 ### Trigger Conditions
 
-- **Automatic:** when a new book is added to any shelf
-- **Scheduled:** periodic runs via Oban.Cron (monthly for new stores, quarterly for new source types)
+- **Automatic (book-triggered):** when a new book is added to any shelf
+- **Automatic (location-triggered):** when a user sets or changes their location (US-2.5.2, US-17.2.2)
+- **Scheduled:** periodic runs via Oban.Cron (monthly for new stores, quarterly for new source types, quarterly for geographic sweep)
 
 ### Search Strategy
 
@@ -1604,6 +1669,10 @@ The source discovery agent automatically finds new bookshops, review sites, comm
 | Find communities | `"{title} book club instagram"` |
 | Find third spaces | `"reading group {city} site:instagram.com"` |
 | Find cafes | `"cosy cafe books {city}"` |
+| Geographic: bookshops | `"bookshop {city} {country}"` |
+| Geographic: reading groups | `"book club {city}"`, `"reading group {city}"` |
+| Geographic: literary events | `"literary festival {city} {year}"` |
+| Geographic: book cafes | `"book cafe {city}"`, `"reading cafe {city}"` |
 
 ### Confidence Scoring
 
@@ -1675,9 +1744,20 @@ type SpineWear
     | WellLoved
 
 
+-- Community-driven wear for the Looking for a Home shelf (US-18.1.1).
+-- Derived from aggregate platform read counts, not individual user history.
+type CommunityWear
+    = CommunityPristine    -- Few readers platform-wide
+    | CommunitySoftened     -- Some readers
+    | CommunityCracking     -- Moderate readership
+    | CommunityWellRead     -- Popular
+    | CommunityWellLoved    -- Widely read across the platform
+
+
 type SearchScope
     = AllShelves
     | SpecificShelf ShelfId
+    | WholePlatform    -- US-1.5.3: search public shelves, marketplace, partners, events
 
 
 type SortBy
@@ -1694,6 +1774,40 @@ type Format
     | Kindle
     | EBook
     | Audiobook
+    | Other
+
+
+-- Book detail is an overlay (US-1.4.1), not a route.
+-- The overlay state lives in the model, not the URL.
+type alias BookDetailOverlay =
+    { book : Book
+    , editions : List Edition
+    , reviews : RemoteData (List ReviewSnapshot)
+    , prices : RemoteData (List PriceByEdition)
+    , authorInfo : RemoteData AuthorInfo
+    , myWriting : RemoteData (List PostAssociation)
+    }
+
+
+-- Shelf view mode toggle (US-19.2.1)
+type ShelfViewMode
+    = SpineView
+    | ListView
+
+
+-- Onboarding state (US-14.1.2)
+type OnboardingStep
+    = Welcome
+    | UploadFirst
+    | PlaceFirst
+
+
+-- Upload verification flow (US-1.1.1)
+type UploadStep
+    = Uploading
+    | Verifying IdentifiedBook    -- "We think this is..."
+    | ChoosingShelf IdentifiedBook
+    | Complete Book ShelfName
 ```
 
 ### Shelf Transitions
@@ -5185,7 +5299,7 @@ A Depop/Vinted-style marketplace for secondhand books, initially ZA-only.
 | Aspect | Decision |
 |--------|----------|
 | Interaction model | **Depop/Vinted**: public Q&A on listings (visible to all platform users) + private offer threads (buyer + seller only) |
-| Pricing modes | Fixed price, open-to-offers (with optional minimum), or closed bid (invited users only, sealed offers, no public Q&A) |
+| Pricing modes | Fixed price or open-to-offers (with optional minimum). Closed bid deferred to a future phase. |
 | Listings | Photos required + condition grading (new / good / fair / poor) |
 | Payments | Stitch Money for payment initiation and payouts |
 | Shipping | Pargo for calculated shipping at checkout |
@@ -5201,12 +5315,7 @@ A Depop/Vinted-style marketplace for secondhand books, initially ZA-only.
 - Offer thread supports: plain messages, formal offer amounts, counter-offers, accept, and decline.
 - On offer acceptance: `listing_status` transitions to `'pending'`, listing is locked from new offers, checkout is initiated.
 
-**Closed bid listings:**
-- `listing_mode = 'closed_bid'` on the `shelf_placements` row.
-- No public Q&A rendered.
-- Visibility scoped to individually invited users via `visibility_grants`.
-- Offers submitted blindly (buyers cannot see competing offer amounts).
-- Seller accepts one offer; all others are declined automatically.
+**Closed bid listings:** Deferred to a future phase. See user stories for rationale.
 
 ### State Machine
 
@@ -5215,7 +5324,20 @@ looking_for_home placement:
   active ──(offer accepted)──► pending ──(payment complete)──► sold
   active ──(seller removes)──► [removed_at set, placement soft-deleted]
   pending ──(payment fails / expires)──► active
+  sold ──(event emitted)──► buyer prompted to add to their collection
 ```
+
+### Post-Sale Lifecycle (US-7.2)
+
+When a sale completes (`listing_status` transitions to `'sold'`):
+1. The seller's placement is soft-deleted (`removed_at` set). The book leaves their "Looking for a Home" shelf.
+2. A `book.sold` event is emitted to the event log.
+3. An Oban worker (`MarketplaceSaleWorker`) checks if the buyer has the book's work on their WishList.
+4. If yes: the system prompts the buyer to move it from WishList to Library or AntiLibrary (via email if opted in, and via an in-platform prompt on next visit).
+5. If no: the buyer is prompted to add the work to one of their shelves.
+6. Adding is optional — the buyer may dismiss the prompt. The book can always be added later via the standard upload flow.
+
+**Refund, dispute, and non-delivery flows:** TBD — to be specified when the marketplace is closer to implementation.
 
 ---
 
@@ -5355,10 +5477,12 @@ Posts are standalone — they are not required to reference a book. The connecti
 ### Book Detail Read Path & Caching
 
 `Books.get_book_detail/1` assembles a per-user book view by joining:
-- The canonical `books` row (title, ISBN, author, cover, metadata)
-- Enrichment data: `price_snapshots`, `review_snapshots`, `discovered_sources`
-- The user's `bookshelf_placements` row (shelf, formats, wear level)
-- The user's `post_book_associations` (links to their blog posts about this book)
+- The canonical `books` row (title, author, subjects, visibility tier) — the work
+- The work's `book_editions` (ISBN, format, cover, page count per edition)
+- Enrichment data: `price_snapshots` (per edition), `review_snapshots` (per work), `discovered_sources`
+- The user's `bookshelf_placements` row (shelf, wear level)
+- The user's `post_book_associations` (links to their blog posts about this work)
+- Community read count from `wh.mart_community_read_count` (for Looking for a Home wear state)
 
 **In Phases 1–6**, the join set is small enough that query-time assembly is the correct approach. The enrichment data is canonical (scraped once per ISBN, not per user), and the user-specific joins are a single `placements` row.
 
@@ -5432,6 +5556,43 @@ The LLM is instructed to return only books from the provided catalogue (no hallu
 `post_book_associations` are derived data generated from the post body. On right-to-erasure:
 - The source `blog_post` row is deleted (or body scrubbed if referenced in audit log).
 - All associated `post_book_associations` rows are deleted — they are derived and have no independent value without the post.
+
+---
+
+## Data Quality Framework
+
+Data quality is measured per data product relative to its consumer, not as a platform-wide score. See `docs/data-quality.md` for the full framework.
+
+### Key principles
+
+- **"Quality for what?"** — Prices being 3 days stale is fine for browsing, not for buying. Quality dimensions and SLAs vary by data product and consumer.
+- **Nutrition labels, not scores.** — Each data product publishes a quality profile (completeness, freshness, distributions, gaps). The metrics dashboard exposes profiles, not just green/amber/red gauges.
+- **Continuous monitoring with trends.** — `mart_data_quality_trend` tracks weekly quality rollups per category. Alert on 10+ percentage point week-over-week drops, not just current thresholds.
+- **Source health monitoring.** — Per scraper config, per review source, per RSS feed: track last success, error rate, and HTML structure change detection. `int_source_health` dbt model.
+- **LLM faithfulness tracking.** — Review summaries and blog associations have faithfulness metrics: confirm/dismiss ratios, confidence distributions, periodic human spot-checks. `mart_llm_faithfulness` dbt model.
+
+### dbt models for quality
+
+| Model | Purpose |
+|-------|---------|
+| `int_source_health` | Operational health per external source: last success, consecutive failures, selector match rate, status |
+| `mart_data_quality_trend` | Weekly rollup per enrichment category — freshness %, completeness %, trending over 12 weeks |
+| `mart_enrichment_gaps` | Books/authors with missing enrichment data, grouped by cause (no config, source broken, never scraped) |
+| `mart_llm_faithfulness` | LLM output quality: review summary agreement rate, blog association confirm/dismiss ratio, confidence distributions |
+
+### Source health detection
+
+- **HTML structure change detection:** Hash CSS selector paths per scraper config. If a selector that previously matched no longer matches, flag the config as `degraded`. After 7 consecutive failures, flag as `broken`.
+- **RSS feed liveness:** Weekly HEAD request. 2+ weeks of 404/410 → mark dead, clear from author, re-discover.
+- **Scraper config validity:** No results in 14 days → flag on metrics dashboard.
+
+### Metrics dashboard integration
+
+The data freshness section of the metrics dashboard (US-5.1) shows:
+- Quality trend sparklines (12-week history per category)
+- Source health table (per source: name, last success, status, failure count)
+- Enrichment gap counts with drill-down (books with no prices, authors with no RSS)
+- LLM faithfulness metrics (spot-check agreement rate, confirm/dismiss ratio)
 
 ---
 

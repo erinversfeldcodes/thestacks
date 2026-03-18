@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Stacks — Login</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+
+  :root {
+    --font-heading: 'Cormorant Garamond', 'EB Garamond', Georgia, serif;
+    --font-body: 'EB Garamond', Georgia, serif;
+    --parchment: #f5eed6;
+    --parchment-dark: #e8dcc0;
+    --ink: #2c1f0e;
+    --text: #e8dcc8;
+    --text-muted: #a09070;
+    --gold: #c8a050;
+    --dur: 4000;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: #0a0806;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ===========================================
+     GPU-ONLY ANIMATION LAYERS
+     Only transform + opacity are animated.
+     All layers have will-change + translateZ(0)
+     for GPU compositing.
+     =========================================== */
+
+  /* --- Parchment arrival (bottom) --- */
+  .layer-arrival {
+    position: fixed; inset: 0; z-index: 0;
+    background: var(--parchment);
+    will-change: opacity;
+    transform: translateZ(0);
+  }
+
+  /* --- Passage image --- */
+  .layer-passage {
+    position: fixed; inset: -10%; z-index: 1;
+    background: url('passage-beyond.png') center/cover no-repeat;
+    will-change: transform, opacity;
+    transform: translateZ(0) scale(1.05);
+    opacity: 0;
+  }
+
+  /* --- Warm light overlay (fakes brightness on passage) --- */
+  .layer-passage-bright {
+    position: fixed; inset: 0; z-index: 2;
+    background: radial-gradient(ellipse at 50% 50%,
+      rgba(255, 230, 170, 0.5) 0%,
+      rgba(255, 210, 130, 0.2) 50%,
+      transparent 80%);
+    will-change: opacity;
+    transform: translateZ(0);
+    opacity: 0;
+  }
+
+  /* --- Bookshelf image --- */
+  .layer-bookshelf {
+    position: fixed; inset: -5%; z-index: 3;
+    background: url('bookshelf-wide-panoramic.png') center/cover no-repeat;
+    will-change: transform, opacity;
+    transform: translateZ(0) scale(1);
+    transform-origin: 50% 45%;
+  }
+
+  /* --- Dark overlay on bookshelf (fakes the dimming) --- */
+  .layer-bookshelf-dim {
+    position: fixed; inset: 0; z-index: 4;
+    background: rgba(10, 8, 6, 0.45);
+    will-change: opacity;
+    transform: translateZ(0);
+  }
+
+  /* --- Vignette on bookshelf --- */
+  .layer-vignette {
+    position: fixed; inset: 0; z-index: 5;
+    background: radial-gradient(ellipse at 50% 50%, transparent 20%, rgba(10,8,6,0.5) 100%);
+    will-change: opacity;
+    transform: translateZ(0);
+  }
+
+  /* --- Final warm wash (top scene layer) --- */
+  .layer-wash {
+    position: fixed; inset: 0; z-index: 6;
+    background: var(--parchment);
+    will-change: opacity;
+    transform: translateZ(0);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ===========================================
+     LOGIN CARD
+     =========================================== */
+  .login-overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform, opacity;
+    transform: translateZ(0);
+  }
+
+  .login-card {
+    max-width: 380px;
+    width: 90%;
+    background: linear-gradient(145deg, var(--parchment), var(--parchment-dark));
+    border-radius: 4px;
+    padding: 2.5rem 2rem 2rem;
+    color: var(--ink);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3),
+                inset 0 1px 0 rgba(255,255,255,0.3);
+    position: relative;
+  }
+
+  .login-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #8b4513, #a0522d, #8b4513);
+    border-radius: 4px 4px 0 0;
+  }
+
+  .login-card__title {
+    font-family: var(--font-heading); font-size: 1.8rem; font-weight: 600;
+    text-align: center; margin-bottom: 0.25rem; letter-spacing: 0.06em;
+  }
+  .login-card__subtitle {
+    font-family: var(--font-heading); font-style: italic; font-size: 0.95rem;
+    color: #6b5a45; text-align: center; margin-bottom: 1.75rem;
+  }
+  .login-card__tabs {
+    display: flex; border-bottom: 1px solid #c8b89a; margin-bottom: 1.25rem;
+  }
+  .login-card__tab {
+    flex: 1; padding: 0.5rem; border: none; background: transparent;
+    color: #8b7a65; font-family: var(--font-heading); font-size: 1rem;
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.3s;
+  }
+  .login-card__tab:hover { color: var(--ink); }
+  .login-card__tab--active { color: #5c3a1e; border-bottom-color: #8b4513; }
+  .login-card__field { margin-bottom: 1.25rem; }
+  .login-card__label {
+    display: block; font-family: var(--font-heading); font-size: 0.8rem;
+    color: #6b5a45; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem;
+  }
+  .login-card__input {
+    width: 100%; padding: 0.7rem 0.75rem;
+    background: rgba(255,255,255,0.5); border: 1px solid #c8b89a; border-radius: 3px;
+    color: var(--ink); font-family: var(--font-body); font-size: 1rem;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .login-card__input::placeholder { color: #a09580; font-style: italic; }
+  .login-card__input:focus { outline: none; border-color: #8b4513; box-shadow: 0 0 0 2px rgba(139,69,19,0.15); }
+  .login-card__submit {
+    width: 100%; padding: 0.75rem; margin-top: 0.5rem;
+    border: 1px solid #5c3a1e; border-radius: 3px;
+    background: linear-gradient(135deg, #5c3a1e, #3d2610);
+    color: var(--parchment); font-family: var(--font-heading); font-size: 1.05rem;
+    letter-spacing: 0.06em; cursor: pointer; transition: all 0.3s;
+  }
+  .login-card__submit:hover {
+    background: linear-gradient(135deg, #6b4525, #4a2e15);
+    box-shadow: 0 2px 12px rgba(92,58,30,0.3);
+  }
+
+  /* ===========================================
+     CONTROLS
+     =========================================== */
+  .controls {
+    position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 100;
+    display: flex; gap: 0.5rem; align-items: center;
+    background: rgba(10,8,6,0.9); padding: 0.5rem 1rem; border-radius: 20px;
+    border: 1px solid rgba(200,160,80,0.2);
+  }
+  .controls button, .controls select {
+    font-family: var(--font-heading); font-size: 0.8rem; padding: 0.3rem 0.75rem;
+    border: 1px solid rgba(200,160,80,0.3); border-radius: 4px;
+    background: transparent; color: var(--text-muted); cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--gold); color: var(--text); }
+  .controls select { background: rgba(26,18,8,0.8); color: var(--text-muted); }
+  .controls .label { font-family: var(--font-heading); font-size: 0.75rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="layer-arrival"></div>
+<div class="layer-passage" id="passage"></div>
+<div class="layer-passage-bright" id="passageBright"></div>
+<div class="layer-bookshelf" id="bookshelf"></div>
+<div class="layer-bookshelf-dim" id="bookshelfDim"></div>
+<div class="layer-vignette" id="vignette"></div>
+<div class="layer-wash" id="wash"></div>
+
+<div class="login-overlay" id="overlay">
+  <div class="login-card">
+    <h1 class="login-card__title">The Stacks</h1>
+    <p class="login-card__subtitle">Present your credentials to enter</p>
+    <div class="login-card__tabs">
+      <button class="login-card__tab login-card__tab--active" onclick="switchTab(this,'login')">Sign In</button>
+      <button class="login-card__tab" onclick="switchTab(this,'register')">Register</button>
+    </div>
+    <div id="nameField" style="display:none">
+      <div class="login-card__field">
+        <label class="login-card__label">Display Name</label>
+        <input class="login-card__input" type="text" placeholder="Your name">
+      </div>
+    </div>
+    <div class="login-card__field">
+      <label class="login-card__label">Email</label>
+      <input class="login-card__input" type="email" placeholder="you@example.com">
+    </div>
+    <div class="login-card__field">
+      <label class="login-card__label">Password</label>
+      <input class="login-card__input" type="password" placeholder="Enter your password">
+    </div>
+    <button class="login-card__submit" onclick="go()">Enter the Stacks</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button onclick="go()">▶ Play</button>
+  <button onclick="reset()">⟲ Reset</button>
+  <span class="label">Duration:</span>
+  <select id="durSelect">
+    <option value="6000">6s cinematic</option>
+    <option value="4000" selected>4s normal</option>
+    <option value="3000">3s brisk</option>
+    <option value="2000">2s snappy</option>
+  </select>
+</div>
+
+<script>
+// Web Animations API — butter-smooth, GPU-composited, single timeline
+// Only animates transform + opacity. No filter. No repaints.
+
+function switchTab(btn, mode) {
+  document.querySelectorAll('.login-card__tab').forEach(t => t.classList.remove('login-card__tab--active'));
+  btn.classList.add('login-card__tab--active');
+  document.getElementById('nameField').style.display = mode === 'register' ? 'block' : 'none';
+}
+
+let animations = [];
+
+function go() {
+  reset();
+  const dur = parseInt(document.getElementById('durSelect').value);
+  const ease = 'cubic-bezier(0.4, 0, 0.15, 1)';
+
+  // 1. Card fades out (first 30% of timeline)
+  animations.push(
+    document.getElementById('overlay').animate([
+      { opacity: 1, transform: 'translateZ(0) translateY(0) scale(1)' },
+      { opacity: 0, transform: 'translateZ(0) translateY(30px) scale(0.96)' }
+    ], { duration: dur * 0.3, easing: ease, fill: 'forwards' })
+  );
+
+  // 2. Bookshelf zooms forward and fades (full timeline)
+  animations.push(
+    document.getElementById('bookshelf').animate([
+      { transform: 'translateZ(0) scale(1)',   opacity: 1 },
+      { transform: 'translateZ(0) scale(1.15)', opacity: 1,   offset: 0.2 },
+      { transform: 'translateZ(0) scale(1.5)',  opacity: 0.7, offset: 0.45 },
+      { transform: 'translateZ(0) scale(2.0)',  opacity: 0.2, offset: 0.65 },
+      { transform: 'translateZ(0) scale(2.8)',  opacity: 0 }
+    ], { duration: dur * 0.75, easing: ease, fill: 'forwards' })
+  );
+
+  // 3. Bookshelf dim layer lifts (brightens the shelf as we approach)
+  animations.push(
+    document.getElementById('bookshelfDim').animate([
+      { opacity: 1 },
+      { opacity: 0.6, offset: 0.3 },
+      { opacity: 0 }
+    ], { duration: dur * 0.6, easing: ease, fill: 'forwards' })
+  );
+
+  // 4. Vignette fades
+  animations.push(
+    document.getElementById('vignette').animate([
+      { opacity: 1 },
+      { opacity: 0 }
+    ], { duration: dur * 0.5, easing: ease, fill: 'forwards' })
+  );
+
+  // 5. Passage appears (delayed start, fades in as bookshelf thins)
+  animations.push(
+    document.getElementById('passage').animate([
+      { transform: 'translateZ(0) scale(1.15)', opacity: 0 },
+      { transform: 'translateZ(0) scale(1.05)', opacity: 1, offset: 0.4 },
+      { transform: 'translateZ(0) scale(1.0)',  opacity: 1, offset: 0.65 },
+      { transform: 'translateZ(0) scale(1.3)',  opacity: 0.8, offset: 0.85 },
+      { transform: 'translateZ(0) scale(1.8)',  opacity: 0 }
+    ], { duration: dur * 0.85, delay: dur * 0.25, easing: ease, fill: 'forwards' })
+  );
+
+  // 6. Warm glow builds on passage
+  animations.push(
+    document.getElementById('passageBright').animate([
+      { opacity: 0 },
+      { opacity: 0, offset: 0.3 },
+      { opacity: 0.4, offset: 0.7 },
+      { opacity: 0.8 }
+    ], { duration: dur * 0.85, delay: dur * 0.25, easing: ease, fill: 'forwards' })
+  );
+
+  // 7. Final warm wash to parchment
+  animations.push(
+    document.getElementById('wash').animate([
+      { opacity: 0 },
+      { opacity: 0, offset: 0.5 },
+      { opacity: 1 }
+    ], { duration: dur * 0.4, delay: dur * 0.75, easing: 'ease-in', fill: 'forwards' })
+  );
+}
+
+function reset() {
+  animations.forEach(a => { a.cancel(); });
+  animations = [];
+}
+</script>
+
+</body>
+</html>

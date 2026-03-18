@@ -7,7 +7,7 @@ defmodule Stacks.Factory do
   use ExMachina.Ecto, repo: Core.Repo
 
   alias Stacks.Accounts.User
-  alias Stacks.Books.{Author, Book, UploadedImage}
+  alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   def user_factory do
@@ -35,12 +35,8 @@ defmodule Stacks.Factory do
 
   def book_factory do
     %Book{
-      isbn: sequence(:isbn, &"978074327#{String.pad_leading(to_string(&1), 4, "0")}"),
       title: sequence(:title, &"Book Title #{&1}"),
       description: "A great book.",
-      page_count: 300,
-      publisher: "Test Publisher",
-      publication_year: 2020,
       language: "en",
       subjects: ["fiction"],
       bisac_codes: ["FIC000000"],
@@ -50,6 +46,18 @@ defmodule Stacks.Factory do
 
   def book_with_author_factory do
     %{book_factory() | author: build(:author)}
+  end
+
+  def book_edition_factory do
+    %BookEdition{
+      isbn: sequence(:isbn, &"978074327#{String.pad_leading(to_string(&1), 4, "0")}"),
+      format_label: "Paperback",
+      page_count: 300,
+      publisher: "Test Publisher",
+      publication_year: 2020,
+      is_primary: true,
+      book: build(:book)
+    }
   end
 
   def bookshelf_factory do

@@ -40,6 +40,8 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 |---|---|---|
 | elixir-reviewer | docs/agents/reviewers/elixir-reviewer.md | elixir-agent, partner-agent (Elixir portions) |
 | elm-reviewer | docs/agents/reviewers/elm-reviewer.md | elm-agent |
+| ux-reviewer | docs/agents/reviewers/ux-reviewer.md | elm-agent (user experience, not code quality) |
+| contract-reviewer | docs/agents/reviewers/contract-reviewer.md | elixir-agent, elm-agent, protobuf-agent (cross-boundary data shapes) |
 | rust-reviewer | docs/agents/reviewers/rust-reviewer.md | rust-agent |
 | python-reviewer | docs/agents/reviewers/python-reviewer.md | python-agent |
 | database-reviewer | docs/agents/reviewers/database-reviewer.md | database-agent |
@@ -58,14 +60,14 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 
 | Implementation Agent | Reviewer(s) |
 |---|---|
-| elixir-agent | elixir-reviewer |
-| elm-agent | elm-reviewer |
-| rust-agent | rust-reviewer |
-| python-agent | python-reviewer |
+| elixir-agent | elixir-reviewer + contract-reviewer (when touching API endpoints or events) |
+| elm-agent | elm-reviewer + ux-reviewer + contract-reviewer (when touching decoders or API calls) |
+| rust-agent | rust-reviewer + contract-reviewer (scraper API contract) |
+| python-agent | python-reviewer + contract-reviewer (vision service contract) |
 | database-agent | database-reviewer |
 | platform-agent | platform-reviewer |
-| protobuf-agent | protobuf-reviewer |
-| partner-agent | elixir-reviewer + protobuf-reviewer (depending on files touched) |
+| protobuf-agent | protobuf-reviewer + contract-reviewer |
+| partner-agent | elixir-reviewer + protobuf-reviewer + contract-reviewer |
 
 ## Domain Routing Table
 
@@ -82,6 +84,8 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 | GDPR, security, auth, Guardian, JWT, AI safety, rate limiting, scanning | security-agent |
 | code quality, architecture review, tech debt, standards compliance | principle-engineer |
 | testing, E2E, Playwright, elm-program-test, chaos, load, k6 | testing-coordinator |
+| UX, usability, mobile, responsive, accessibility experience, delight, tone, copy | ux-reviewer |
+| API shape, event payload, decoder, contract, breaking change, JSON shape, inter-service | contract-reviewer |
 
 ## Shared Standards
 - Code quality: docs/agents/standards/code-quality.md

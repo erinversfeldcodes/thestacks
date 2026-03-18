@@ -31,7 +31,8 @@ defmodule Stacks.ModerationTest do
       }
 
       assert {:ok, [book]} = Moderation.run_pipeline(context)
-      assert book.isbn == "9780743273565"
+      assert [edition | _] = book.editions
+      assert edition.isbn == "9780743273565"
       assert book.visibility_tier in ["public", "age_gated"]
     end
 
@@ -46,7 +47,8 @@ defmodule Stacks.ModerationTest do
     end
 
     test "returns existing book when ISBN already in database" do
-      existing = insert(:book, isbn: "9780743273565")
+      existing = insert(:book)
+      insert(:book_edition, book: existing, isbn: "9780743273565")
 
       context = %{
         image_b64: @test_image_b64,
@@ -106,7 +108,8 @@ defmodule Stacks.ModerationTest do
   describe "run_pipeline/1 — compound title expansion" do
     test "splits 'Title A OR Title B' into two candidates and resolves both" do
       # Pre-insert so store_book finds the book without needing HTTP metadata.
-      insert(:book, isbn: "9780743273565")
+      compound_book = insert(:book)
+      insert(:book_edition, book: compound_book, isbn: "9780743273565")
       original = Application.get_env(:core, :vision_client)
 
       try do

@@ -1,38 +1,12 @@
 import path from "path";
 import { test, expect } from "@playwright/test";
-
-const DEV_EMAIL = "owner@thestacks.app";
-const DEV_PASSWORD = "dev-password-123";
+import { suiteAuthFile } from "./helpers";
 
 // The vision pipeline runs classify + extract on VisionModel (A10G GPU) then
 // resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
 const PIPELINE_TIMEOUT = 300_000;
 
-async function signIn(page: import("@playwright/test").Page) {
-  // Retry login up to 3 times — rate limiting or transient errors can cause
-  // 401/429 on preview deploys with many sequential tests.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    await page.goto("/login");
-    await page.fill('input[id="email"]', DEV_EMAIL);
-    await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click("button.login-form__submit");
-    try {
-      await page.waitForURL("/", { timeout: 15_000 });
-      return; // success
-    } catch {
-      if (attempt < 3) {
-        // Wait for rate limit window to clear before retrying
-        await page.waitForTimeout(10_000);
-      }
-    }
-  }
-  // Final attempt without catch — let it throw on failure
-  await page.goto("/login");
-  await page.fill('input[id="email"]', DEV_EMAIL);
-  await page.fill('input[id="password"]', DEV_PASSWORD);
-  await page.click("button.login-form__submit");
-  await page.waitForURL("/", { timeout: 60_000 });
-}
+test.use({ storageState: suiteAuthFile("upload") });
 
 test.describe("Upload pipeline — barcode pre-pass", () => {
   test(
@@ -43,10 +17,7 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
       // is Open Library lookup + Elm polling.
       test.setTimeout(60_000);
 
-      await signIn(page);
-
-      await page.click('a[href="/upload"]');
-      await page.waitForURL("/upload");
+      await page.goto("/upload");
 
       const fileChooserPromise = page.waitForEvent("filechooser");
       await page.click("button.btn--primary");
@@ -82,10 +53,7 @@ test.describe("Upload pipeline", () => {
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
-      await signIn(page);
-
-      await page.click('a[href="/upload"]');
-      await page.waitForURL("/upload");
+      await page.goto("/upload");
 
       const fileChooserPromise = page.waitForEvent("filechooser");
       await page.click("button.btn--primary");
@@ -126,10 +94,7 @@ test.describe("Upload pipeline", () => {
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
-      await signIn(page);
-
-      await page.click('a[href="/upload"]');
-      await page.waitForURL("/upload");
+      await page.goto("/upload");
 
       const fileChooserPromise = page.waitForEvent("filechooser");
       await page.click("button.btn--primary");
@@ -164,10 +129,7 @@ test.describe("Upload pipeline", () => {
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
-      await signIn(page);
-
-      await page.click('a[href="/upload"]');
-      await page.waitForURL("/upload");
+      await page.goto("/upload");
 
       const fileChooserPromise = page.waitForEvent("filechooser");
       await page.click("button.btn--primary");
@@ -202,11 +164,7 @@ test.describe("Upload pipeline", () => {
     async ({ page }) => {
       test.setTimeout(PIPELINE_TIMEOUT);
 
-      await signIn(page);
-
-      // Navigate via the SPA link to keep Elm's in-memory auth state.
-      await page.click('a[href="/upload"]');
-      await page.waitForURL("/upload");
+      await page.goto("/upload");
 
       // Trigger the file chooser via the "Choose Photo" button.
       const fileChooserPromise = page.waitForEvent("filechooser");

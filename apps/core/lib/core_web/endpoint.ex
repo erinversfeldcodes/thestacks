@@ -14,12 +14,12 @@ defmodule CoreWeb.Endpoint do
     at: "/",
     from: {:core, "priv/static"},
     gzip: false,
-    only: ~w(css elm.js public favicon.ico robots.txt uploads)
+    only: ~w(assets textures favicon.ico robots.txt uploads)
 
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug CORSPlug,
-    origin: ["http://localhost:4001"],
+    origin: ["http://localhost:4000"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     headers: ["Authorization", "Content-Type"],
     max_age: 86_400

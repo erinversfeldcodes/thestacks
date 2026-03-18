@@ -15,7 +15,7 @@ Together these prove that navigating to a URL renders the right page.
 
 import Expect
 import Navigation.Route as Route exposing (Route(..))
-import Page.Bookshelf.Library as Library
+import Page.Bookshelf as Bookshelf
 import Page.Search as Search
 import Page.Upload as Upload
 import Test exposing (Test, describe, test)
@@ -82,10 +82,10 @@ navigateToLibrary =
                     fromPath "/library"
 
                 ( model, _ ) =
-                    Library.init Nothing
+                    Bookshelf.init Bookshelf.libraryConfig Nothing
 
                 view =
-                    Library.view model
+                    Bookshelf.view model
             in
             Expect.all
                 [ \_ -> route |> Expect.equal Library

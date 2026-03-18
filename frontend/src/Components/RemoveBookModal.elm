@@ -19,7 +19,7 @@ removeBookModal config =
                 [ text
                     ("Are you sure you want to remove \""
                         ++ config.bookTitle
-                        ++ "\" from your shelf? This cannot be undone."
+                        ++ "\" from your collection? This cannot be undone."
                     )
                 ]
             , div [ class "modal__actions" ]

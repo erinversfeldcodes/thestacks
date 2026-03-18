@@ -138,6 +138,18 @@ Use the Agent tool:
     7. DoD items satisfied — with file:line evidence for each
 ```
 
+### Worktree Path Isolation (Issue #040)
+
+When delegating to agents with `isolation: "worktree"`, all file paths in the prompt **must** be relative to the repository root, not absolute. Absolute paths (e.g., `/Users/.../thestacks/docs/...`) resolve to the main tree regardless of the agent's worktree CWD, defeating isolation.
+
+**Rules for worktree-isolated agents:**
+1. Use relative paths in all prompt file references (e.g., `docs/agents/elm-agent.md` not `/Users/.../docs/agents/elm-agent.md`)
+2. In the `LOAD THESE FILES BEFORE STARTING` section, prefix with `./` to make relative intent explicit
+3. Never pass `$CLAUDE_PROJECT_DIR` or hardcoded absolute paths to worktree agents — the agent's CWD is already set to the worktree root
+4. For `mcp__project-tools__*` calls, issue numbers and plan slugs work as-is (they resolve internally)
+
+**Non-worktree agents** (the default) may continue using absolute paths since they operate in the main tree.
+
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
 
 ### Parallel Phases via Agent Teams
@@ -453,6 +465,32 @@ verify the current branch has no uncommitted changes from previous phases. Uncom
 will be lost on branch switch. Run `git status` and alert the human if the working tree is dirty.
 
 After the human confirms the commit, proceed to the next plan phase.
+
+---
+
+## Phase 2F: Principal Engineer Gate
+
+After the reviewer approves the **final phase** of the plan (or after every phase for high-risk work), invoke the Principal Engineer for a system-level assessment before proceeding to commit.
+
+### Steps
+
+1. **Delegate to the Principal Engineer** via Agent tool:
+   - Embed full content of `docs/agents/principle-engineer-agent.md`
+   - Include: the full diff (`git diff main...HEAD`), the issue file, and the plan file
+   - The PE produces a prioritised report: P0–P3 issues, completion assessment, architecture alignment, and hard questions
+
+2. **Present the PE report to the human. MANDATORY STOP.**
+   - The human reviews the PE's findings and decides:
+     - **Approve**: proceed to commit (Phase 3)
+     - **Flag issues**: cycle back to the relevant specialist agent for targeted fixes (counts as a revision cycle)
+   - P0 findings are **always** blockers — do not proceed to commit with unresolved P0s
+
+3. **State update:** Record `pe_review: "APPROVED"` or `pe_review: "FLAGGED"` in the phase's state file entry.
+
+**When to invoke the PE gate:**
+- Always: after the final phase of any multi-phase plan
+- Optionally: after any phase that touches security, data models, event schemas, or partner integration
+- Skip: for single-phase documentation-only changes
 
 ---
 

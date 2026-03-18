@@ -16,20 +16,22 @@
 **What the user wants to accomplish:** Get a book into their collection by photographing it or sharing a screenshot — cover, spine, back cover, mirrored selfie-mode shot, or a screenshot from TikTok, Instagram, a reading list, or anywhere a book title or author appears as text.
 
 **How they accomplish it:**
-1. The user navigates to any bookshelf page and clicks the "Add a Book" button.
-2. A drop zone appears. Drag-and-drop and file picker are both supported. Accepted inputs include photos of covers, spines, back covers, mirrored or rotated photos, and screenshots containing book titles or recommendations.
+1. The user navigates to the Upload page (`/upload`) via the "Add a Book" link in the top navigation.
+2. A drop zone is displayed. Drag-and-drop and file picker are both supported. Accepted inputs include photos of covers, spines, back covers, mirrored or rotated photos, and screenshots containing book titles or recommendations.
 3. The user drops or selects one image. (For bulk upload of multiple images, see US-1.1.7.)
 4. The system pre-processes the image before sending it to the vision model: orientation is corrected using EXIF data, horizontal mirroring is detected and corrected, and the image is re-encoded to a canonical format with EXIF stripped.
 5. The system sends the pre-processed image to an open-source vision model (Qwen2.5-VL-7B-Instruct hosted on Modal) to extract visible text — title, author, ISBN barcode, publisher information. If the image contains multiple identifiable books, all are extracted.
 6. The extracted text is used to query the Open Library API and Google Books API to resolve an ISBN.
-7. If an ISBN is found, the system presents the identified book for confirmation (title, author, cover image). The user selects which shelf to place it on (defaulting to AntiLibrary) and confirms.
-8. The book is created with full metadata and its spine slides into place on the chosen shelf with a soft thud animation.
+7. **Verification step:** The system presents a side-by-side view showing the uploaded image on the left and the identified book on the right (cover image, title, author, ISBN). The message reads: "We think this is…" followed by the book details. The user confirms or rejects the identification.
+8. **Shelf placement step:** On confirmation, the user is prompted to choose which shelf to place the book on. The default is WishList. A shelf picker displays all five bookshelves (Library, AntiLibrary, WishList, Reading Pile, Looking for a Home) as labelled options.
+9. The book is created with full metadata and its spine slides into place on the chosen shelf with a soft thud animation. The user is shown a brief success state before being offered "Add another" or "View on shelf".
 
 **What they see on the page:**
-- The upload area has a warm parchment background with a dotted border reading "Drop a photo here" in a serif typeface.
+- The upload page (`/upload`) has a warm parchment background with a dotted border reading "Drop a photo here" in a serif typeface.
 - While processing, a gentle turning-page animation shows progress with status text: "Reading the cover...", "Looking up the ISBN...", "Fetching details..."
-- On identification, the user sees a confirmation card with the book cover, title, author, and a shelf selector before committing.
-- On success, the modal closes and the new book spine slides into place.
+- **Verification:** A split-view card shows the original uploaded image alongside the system's best match. The heading reads "We think this is…" in serif typeface. Below: "Is this the right book?" with "Yes, that's it" (primary) and "No, try again" (secondary) buttons. If the image contained multiple identifiable books, each is presented as a separate verification card.
+- **Shelf placement:** After verification, the card transitions to a shelf picker. Each shelf is shown as a small labelled icon. WishList is pre-selected. The user taps a shelf and clicks "Add to shelf".
+- On success, the card shows a brief confirmation: "[Title] added to your [Shelf Name]" with the book spine appearing in a small inline preview. Two buttons: "Add another book" (resets the upload) and "View on shelf" (navigates to the shelf page).
 
 ---
 
@@ -86,11 +88,11 @@
 2. The system retrieves the book's subjects and categories (BISAC codes, Open Library subjects).
 3. The subjects are checked against a sensitive content list (nudity, anatomy, sexuality — including children's body-education books).
 4. If flagged, the book is marked as age-gated (18+ only).
-5. The book is still added to the shelf but requires age verification to view its detail page.
+5. The book is still added to the shelf but requires age verification to view its detail overlay.
 
 **What they see on the page:**
 - The book spine appears on the shelf with a small, discreet frosted-glass overlay and a lock icon.
-- Clicking the spine prompts age verification before the detail page opens.
+- Clicking the spine prompts age verification before the detail overlay opens.
 - A notice in the upload success state reads: "This book has been marked as age-gated based on its subject matter. Age verification is required to view its details."
 
 ---
@@ -107,14 +109,37 @@
 3. The user types a 10- or 13-digit ISBN.
 4. The system validates the ISBN checksum client-side.
 5. On submission, the system queries Open Library and Google Books for the ISBN.
-6. If found, the book is created with full metadata and placed on the chosen shelf, exactly as in US-1.1.1.
+6. If found, the system presents the same verification step as US-1.1.1 ("We think this is…") followed by the shelf placement prompt (defaulting to WishList).
 7. If not found in either service, the system rejects the entry with the same message as US-1.1.2.
 
 **What they see on the page:**
 - A text input field styled as a library catalogue card, with a placeholder: "Enter ISBN-10 or ISBN-13".
 - Real-time validation: the field border turns green when the checksum is valid, red with a hint ("Check your digits — ISBN checksums must match") when invalid.
-- On successful lookup, the same slide-in animation as US-1.1.1.
+- On successful lookup, the same verification and shelf placement flow as US-1.1.1.
 - On failure, the same amber rejection state as US-1.1.2.
+
+---
+
+#### US-1.1.8 Multi-Format Book Merging
+
+**As a** user, **I want** different editions and formats of the same book to be recognised as a single work **so that** my shelves don't fill up with duplicates just because I own the hardcover and the Kindle edition.
+
+**What the user wants to accomplish:** Maintain a single, unified entry per work in their collection, with each format (hardcover, softcover, Kindle, e-book, audiobook) tracked as a variant under that entry. Each format may have its own ISBN, but the shelf placement and reading journey are shared.
+
+**How they accomplish it:**
+1. The user uploads a photo or enters an ISBN for a book format they don't yet own.
+2. The ISBN resolves successfully. The system checks for an exact ISBN match first (standard duplicate detection, US-1.1.6).
+3. If no exact ISBN match is found, the system checks for an existing book in the user's collection with the same title and author (fuzzy match, normalised for subtitle variations and author name ordering).
+4. If a potential match is found, the system presents a merge prompt: "You own [Title] as a [existing format]. Is this the same book in [new format]?"
+5. The user confirms: the new ISBN is linked to the existing book record. The corresponding format indicator is toggled on. No new shelf placement is created.
+6. The user declines: the book is treated as a new entry and follows the standard upload flow (US-1.1.1 steps 8–9).
+
+**What they see on the page:**
+- The merge prompt appears as a warm blue card (consistent with the duplicate detection state) showing both editions side by side: the existing book's cover and the new format's cover (if available).
+- The message reads: "You own [Title] as a [existing format]. Add the [new format] edition to the same entry?"
+- Two buttons: "Yes, same book" (merges) and "No, it's different" (creates new entry).
+- After merging, the book detail overlay (US-1.4.1) shows all linked ISBNs. The "Where to Buy" section displays availability and pricing per format/ISBN, so the user can see where each edition is sold.
+- Format indicators on the detail overlay update to show the newly added format as filled.
 
 ---
 
@@ -128,13 +153,16 @@
 1. The user uploads photos or enters an ISBN (US-1.1.1 or US-1.1.5).
 2. The ISBN resolves successfully, but a book with that ISBN already exists in the user's collection.
 3. The system displays the existing book and its current shelf location.
-4. The user can: (a) move the existing book to a different shelf, (b) do nothing and close the modal, or (c) view the book's detail page.
+4. The user can: (a) move the existing book to a different shelf, (b) do nothing and close the modal, or (c) view the book's detail overlay.
+
+**Multi-format handling:** If the uploaded book resolves to a different ISBN than the existing record but represents the same underlying work (e.g., a Kindle edition of a book already owned as hardcover), the system detects this by matching on title + author. Instead of creating a duplicate, the system offers to merge: "You already own the hardcover. Would you like to add the Kindle edition to the same entry?" On confirmation, the new ISBN is linked to the existing book record and the corresponding format indicator is toggled on. The "Where to Buy" section on the detail overlay shows availability per ISBN/format. See US-1.1.8 for full multi-format merge details.
 
 **What they see on the page:**
-- The upload modal shifts to a warm blue state with the existing book's cover displayed.
+- The upload area shifts to a warm blue state with the existing book's cover displayed.
 - The message reads: "You already have this book! It's currently on your [Shelf Name]."
-- Three buttons: "Move to a different shelf" (opens shelf picker), "View book" (navigates to detail page), "Close" (dismisses modal).
-- No new book or shelf placement is created.
+- Three buttons: "Move to a different shelf" (opens shelf picker), "View book" (opens detail overlay), "Close" (dismisses).
+- For multi-format matches: the message reads: "You own [Title] as a [existing format]. Add the [new format] edition?" with "Add format" (primary) and "No thanks" (secondary) buttons. Adding the format updates the book's format indicators and links the new ISBN without creating a new shelf placement.
+- No new book or shelf placement is created in either case.
 
 ---
 
@@ -154,7 +182,7 @@
    - **Ambiguous** (amber border): System found something but isn't confident. Shows best guess; user can confirm, enter ISBN manually, or dismiss.
    - **Multiple books from one image**: an expandable card showing one sub-card per detected book — the user confirms or dismisses each independently.
    - **Rejected** (grey, separate bucket): images with no detectable book content. User can dismiss or retry with a different photo.
-6. The user reviews, dismisses any misidentifications, and selects which shelf each confirmed book should land on (defaulting to AntiLibrary, settable per card).
+6. The user reviews, dismisses any misidentifications, and selects which shelf each confirmed book should land on (defaulting to WishList, settable per card).
 7. The user taps "Add N Books to Shelves". Each confirmed book goes through the standard ISBN resolution and duplicate detection pipeline (US-1.1.2, US-1.1.6). Any that fail at this stage surface inline on the review screen without blocking the others.
 8. Successfully added books appear on their chosen shelves.
 
@@ -314,12 +342,15 @@ This is automatic — wear state is determined by the book's shelf and reading h
 **What the user wants to accomplish:** Access all enriched data about a specific book — metadata, reviews, prices, author info, and personal notes.
 
 **How they accomplish it:**
-1. The user clicks on a book spine on any shelf (or in the Reading Pile).
-2. The book "slides out" from the shelf — an animation where the spine tilts forward and the full cover is revealed, expanding into a detail view.
-3. The detail page loads with all enriched sections.
+1. The user clicks on a book spine on any shelf (or in the Reading Pile), or on a book result from search, a blog post's book association, or any other surface where a book spine or title appears.
+2. The book "slides out" from the shelf — an animation where the spine tilts forward and the full cover is revealed, expanding into a detail overlay.
+3. The detail overlay loads on top of the current page with all enriched sections.
+4. The underlying page remains visible as a blurred background behind the overlay, preserving the user's spatial context.
+5. The user dismisses the overlay by clicking the X button, clicking outside the overlay area, or pressing Escape. The shelf or page behind is exactly as they left it.
+6. The browser URL does not change — the overlay is a UI state, not a route. This ensures the back button returns the user to the previous page, not to the shelf behind the overlay.
 
 **What they see on the page:**
-The detail page has a parchment-toned background with the shelf's wallpaper visible as a blurred border. The layout is a single scrollable page divided into clearly labelled sections:
+The detail overlay has a parchment-toned background with the shelf's wallpaper visible as a blurred border behind it. A subtle shadow separates the overlay from the background. An X button sits in the top-right corner. The layout is a single scrollable panel divided into clearly labelled sections:
 
 - **Header:** Cover image (large, left-aligned), title in serif typeface, author name, ISBN, and format indicators (small icons for hardcover, softcover, Kindle, e-book, audiobook — filled icons for formats the user owns, outlined for others). An aggregate rating displayed as a single number with a subtle star, averaged across sources.
 
@@ -342,9 +373,11 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 
 - **My Writing:** A section showing the user's own blog posts that the platform's LLM has associated with this book, plus any posts the user has manually linked. Displayed as a list of post titles, dates, and a one-line excerpt. An "Add post" button allows the user to manually associate a native blog post. External writing links are not supported here — a single website/blog URL lives on the user's profile.
 
-- **Move to Shelf:** A dropdown styled as a wooden shelf label. The user can move the book to any shelf (Library, AntiLibrary, WishList, Reading Pile). The transition is recorded in the book's history.
+- **Move to Shelf:** A dropdown styled as a wooden shelf label. The user can move the book to any shelf (Library, AntiLibrary, WishList, Reading Pile, Looking for a Home). The transition is recorded in the book's history.
 
-- **Format Indicators:** A row of icons (hardcover, softcover, Kindle, e-book, audiobook). The user clicks to toggle which formats they own. Filled icon = owned, outlined = not owned.
+- **Format Indicators:** A row of icons (hardcover, softcover, Kindle, e-book, audiobook). The user clicks to toggle which formats they own. Filled icon = owned, outlined = not owned. When multiple ISBNs are linked (see US-1.1.8), each format shows its own availability and pricing in the "Where to Buy" section.
+
+- **Search-Surfaced Enrichment:** When the user's search query (US-1.5.3) matches external data — other users' public shelves, marketplace listings, partner inventory, or Third Spaces events related to this book — the relevant results are surfaced inline within the appropriate sections of the detail overlay. For example, a marketplace listing appears in a new "Available Second-Hand" section; partner inventory in the "Available Locally" section; related events in "The Author" section. This enrichment is contextual to the book, not a separate search results page.
 
 ---
 
@@ -362,7 +395,7 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 3. The user types a query (title, author, or keyword).
 4. Results appear instantly as the user types — Elm has all book data in memory for a single user (typically hundreds of books), so local filtering is immediate.
 5. Each result shows the book's spine thumbnail, title, author, and which shelf it's on.
-6. Clicking a result navigates to that shelf with the book highlighted, or opens the detail page directly.
+6. Clicking a result opens the book detail overlay (US-1.4.1) on top of the current page.
 
 **What they see on the page:**
 - The search bar has a warm cream background with a serif placeholder: "Search your collection..."
@@ -390,25 +423,50 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 
 ---
 
+#### US-1.5.3 Platform-Wide Discovery Search
+
+**As a** user, **I want** my searches to surface results beyond my own collection **so that** I can discover books available from other users, local partners, and the wider platform without leaving the search flow.
+
+**What the user wants to accomplish:** When searching for a book, see not just their own shelves but also marketplace listings, partner inventory, other users' public shelves, and related Third Spaces events — all in one place.
+
+**How they accomplish it:**
+1. The user types a query in the search bar (US-1.5.1).
+2. Local results from the user's collection appear instantly (as before).
+3. Concurrently, the system queries the backend for platform-wide matches: other users' public shelf placements, active marketplace listings, partner inventory, and Third Spaces events whose related ISBNs or descriptions match the query.
+4. Platform-wide results appear in a separate section below the user's collection results, after a brief loading indicator.
+5. Clicking any result opens the book detail overlay (US-1.4.1). External results that match a book the user already owns open that book's detail overlay enriched with the matched external data (e.g., a marketplace listing appears in the "Available Second-Hand" section). External results for books the user doesn't own open a lightweight detail overlay showing available metadata, with an "Add to my collection" action.
+
+**What they see on the page:**
+- The search dropdown is divided into two sections: "Your Collection" (instant local results) and "On the Platform" (API-fetched external results).
+- External results show: book title, author, and a contextual label — "Listed by [username] for R120" (marketplace), "In stock at [partner name]" (partner inventory), "On [username]'s shelf" (public shelf), or "Event: [event name] at [venue]" (Third Spaces).
+- External results load asynchronously — a subtle shimmer placeholder appears while fetching.
+- Results respect visibility rules: only books on public shelves appear. Blocked users' content is filtered out.
+- The scope toggle from US-1.5.1 gains a third option: "All shelves" / "[Specific shelf]" / "Whole platform".
+
+---
+
 ### 1.6 The Reading Journey
 
 #### US-1.6.1 Move a Book Between Shelves
 
 **As a** user, **I want to** move a book from one shelf to another **so that** I can track my reading journey as a book progresses from wish to read.
 
-**What the user wants to accomplish:** Record the natural journey of a book: WishList to AntiLibrary to Reading Pile to Library.
+**What the user wants to accomplish:** Record the natural journey of a book: WishList to AntiLibrary to Reading Pile to Library — and optionally onward to Looking for a Home when they're ready to part with it.
 
 **How they accomplish it:**
-1. On the book detail page, the user clicks the "Move to Shelf" dropdown.
-2. They select the target shelf.
+1. On the book detail overlay, the user clicks the "Move to Shelf" dropdown.
+2. They select the target shelf. All five bookshelves are available as targets from any source shelf: Library, AntiLibrary, WishList, Reading Pile, and Looking for a Home.
 3. The book's spine animates off the current shelf (sliding out) and the system confirms the move.
 4. Navigating to the target shelf reveals the book in its new position.
 5. The transition is recorded in the book's history with a timestamp.
+6. Books can also be moved *back* from Looking for a Home to any other shelf if the user changes their mind about parting with the book.
 
 **What they see on the page:**
-- The dropdown is styled as a set of small wooden shelf labels.
+- The dropdown is styled as a set of small wooden shelf labels. All five shelves are listed.
 - On selection, a brief confirmation: "Moved to Reading Pile" with a subtle animation of the book sliding to the right.
 - The book's wear state updates to match the new shelf context over time.
+- Moving to Looking for a Home shows a warm confirmation: "Ready to find a new home? We'll show this on the marketplace when you're ready to list it."
+- Moving *back* from Looking for a Home shows: "Changed your mind? [Title] is back on your [Shelf Name]."
 
 ---
 
@@ -419,7 +477,7 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 **What the user wants to accomplish:** Gracefully abandon a book without judgement — it returns to the unread shelf.
 
 **How they accomplish it:**
-1. On the book detail page (while the book is in the Reading Pile), the user selects "AntiLibrary" from the Move to Shelf dropdown.
+1. On the book detail overlay (while the book is in the Reading Pile), the user selects "AntiLibrary" from the Move to Shelf dropdown.
 2. The system records the transition, including that it was an abandonment (moved backwards in the journey).
 
 **What they see on the page:**
@@ -440,7 +498,7 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 3. The spine wear progresses from "well-read" to "well-loved" after multiple reads.
 
 **What they see on the page:**
-- On the book detail page, a small "Read 3 times" indicator appears below the title.
+- On the book detail overlay, a small "Read 3 times" indicator appears below the title.
 - The spine on the Library shelf shows increasingly heavy wear — deeper creases, more fading, more character.
 
 ---
@@ -452,7 +510,7 @@ The detail page has a parchment-toned background with the shelf's wallpaper visi
 **What the user wants to accomplish:** Get rid of a book that was added by mistake, or that they no longer want to track. This is different from moving between shelves — this is removal.
 
 **How they accomplish it:**
-1. On the book detail page, the user clicks "Remove from collection" (in a less prominent position than shelf actions — this is intentionally not the primary action).
+1. On the book detail overlay, the user clicks "Remove from collection" (in a less prominent position than shelf actions — this is intentionally not the primary action).
 2. A confirmation modal appears explaining what will happen: "This will remove [Title] from your [Shelf Name]. Your shelf history and any linked writing will be preserved in your records but the book won't appear on any shelf."
 3. The user confirms.
 4. The book's shelf placement is soft-deleted (`removed_at` set). The book record itself remains in the database (other users or marketplace listings may reference it).
@@ -496,7 +554,7 @@ This is automatic — no user action. The system renders an empty state when a s
 **What the user wants to accomplish:** Quickly understand the sentiment around a book from GoodReads, Reddit, and Storygraph, with links to dive deeper.
 
 **How they accomplish it:**
-1. The user opens a book detail page.
+1. The user opens a book detail overlay.
 2. The "What People Think" section is already populated with sentiment data.
 3. The user reads the per-source summaries and clicks through to original threads.
 
@@ -517,7 +575,7 @@ This is automatic — no user action. The system renders an empty state when a s
 **What the user wants to accomplish:** Compare prices at Exclusive Books, Takealot, Bob's Books, Bargain Books, Clarke's Bookshop, and any other configured stores.
 
 **How they accomplish it:**
-1. The user opens a book detail page.
+1. The user opens a book detail overlay.
 2. The "Where to Buy (ZAR)" section lists all configured stores with current prices.
 
 **What they see on the page:**
@@ -540,7 +598,7 @@ This is automatic — no user action. The system renders an empty state when a s
 3. The Rust scraping microservice reads these configs and begins scraping on the next scheduled run.
 
 **What they see on the page:**
-- After adding a new store config, the store appears in the "Where to Buy" section on book detail pages once prices have been fetched.
+- After adding a new store config, the store appears in the "Where to Buy" section on book detail overlays once prices have been fetched.
 - The Metrics Dashboard (see Section 6) shows the new source in its "Configured Sources" count.
 
 ---
@@ -554,14 +612,18 @@ This is automatic — no user action. The system renders an empty state when a s
 **What the user wants to accomplish:** Discover new content and events from favourite authors without leaving The Stacks.
 
 **How they accomplish it:**
-1. The user opens a book detail page.
-2. The "The Author" section displays author information.
+1. The user opens a book detail overlay.
+2. The "The Author" section displays author information, auto-discovered by the system.
+
+**Data provenance:** Author information is auto-discovered during book addition. When a book's ISBN is resolved via Open Library or Google Books, the system extracts the author's name, website URL (if available in metadata), and searches for their RSS feed and social presence using the Source Discovery Agent (Brave Search / SearXNG). The system stores a confidence score for each piece of discovered data. In the current phase, author data is system-managed — users cannot directly edit it. Users can submit corrections via a "Report an issue" link (see below), which flags the data for manual review by the platform owner.
 
 **What they see on the page:**
 - Author name in serif typeface.
 - A link to their website (opens in new tab).
 - The latest post from their RSS feed displayed as a small card: post title, publication date, the first sentence, and a "Read more" link.
 - If upcoming events or new releases are known, they appear as highlighted notices: "New release: [Title], expected [Date]" or "Signing at [Venue], [Date]."
+- A small "Report an issue" link below the author section, styled in muted text. Clicking opens a simple form: "What's wrong?" with options like "Wrong website", "Missing RSS feed", "Wrong author for this book", and a free-text field. Submissions are sent to the platform owner for review. No account creation or external service is required.
+- A subtle "Auto-discovered" label indicates the data source. In future phases, this may evolve into a Wikipedia-style collaborative editing system.
 
 ---
 
@@ -576,7 +638,7 @@ This is automatic — no user action. The system renders an empty state when a s
 **How they accomplish it:**
 1. The system scrapes bookstores with physical locations for upcoming events (signings, readings, launches, book clubs).
 2. Events are matched against the user's collection — if the user owns books by the featured author, the event is surfaced.
-3. Events appear on the book detail page (under "The Author") and on the Third Spaces page.
+3. Events appear on the book detail overlay (under "The Author") and on the Third Spaces page.
 
 **What they see on the page:**
 - A highlighted event card: "Exclusive Books Rosebank: Damon Galgut signing, March 15 — you own 2 of his books."
@@ -594,17 +656,62 @@ This is automatic — no user action. The system renders an empty state when a s
 **What the user wants to accomplish:** Have the system proactively expand its source network by discovering new places to find prices, reviews, and literary communities.
 
 **How they accomplish it:**
-1. When a new book is added, the Source Discovery Agent is triggered automatically (not user-initiated).
-2. The agent uses the Brave Search API (primary) and self-hosted SearXNG (fallback) to search for new sources relevant to the book.
+1. When a new book is added, the Source Discovery Agent is triggered automatically (not user-initiated) to find sources relevant to that specific book.
+2. The agent uses the Brave Search API (primary) and self-hosted SearXNG (fallback) to search for new sources.
 3. An LLM evaluates each discovered source, assigning a confidence score based on relevance, reliability, and content quality.
 4. High-confidence suggestions are queued for user approval.
 5. Periodic broad sweeps (quarterly) search for entirely new source types.
+6. **Geographic discovery sweep:** When the user first sets their location (US-17.2.2), and periodically thereafter (quarterly), the agent runs a location-based sweep searching for bookshops, reading groups, cafes, and literary communities in the user's configured city and country. This populates the Third Spaces page independently of any book-specific trigger. See US-2.5.2 for details.
 
 **What they see on the page:**
 - A notification badge appears on the Metrics Dashboard or in the top navigation: "3 new sources discovered."
 - Clicking through shows a list of suggested sources, each with: source name, URL, type (bookshop, review site, community), confidence score, and a sample of what was found.
 - The user can "Approve" (adds the source to TOML scraper configs) or "Dismiss" each suggestion.
 - Approved sources begin appearing in enrichment data on subsequent scraping runs.
+
+---
+
+#### US-2.5.2 Geographic Discovery Sweep
+
+**As a** user, **I want** the system to discover bookshops, reading groups, and literary spaces in my area based on my location **so that** my Third Spaces page is populated with relevant local results even before I add books.
+
+**What the user wants to accomplish:** Have the Third Spaces cork board (US-3.1) populated with local discoveries based on where they live, not only based on which books they own.
+
+**How they accomplish it:**
+1. The user sets their location in their profile (US-17.2.2).
+2. The system immediately triggers a geographic discovery sweep for the configured city and country.
+3. The agent searches for: "bookshop {city}", "reading group {city}", "book club {city}", "literary festival {city}", "book cafe {city}", and similar queries using Brave Search and SearXNG.
+4. Discovered spaces and events are evaluated by the LLM and queued for the platform owner's approval (or auto-approved if the owner has configured auto-approval for geographic discoveries).
+5. The sweep repeats quarterly to capture new openings, events, and seasonal changes.
+6. Results from the geographic sweep merge with results from book-specific source discovery (US-2.5.1) on the Third Spaces page.
+
+**What they see on the page:**
+- After setting their location, a subtle message on the Third Spaces page: "Discovering spaces near [City]..." with a gentle loading state.
+- Within minutes to hours (depending on approval flow), discovered spaces begin appearing on the cork board.
+- Each card indicates its source: "Discovered via local search" for geographic sweep results vs. "Related to [Book Title]" for book-triggered results.
+
+---
+
+#### US-2.5.3 Business Opt-Out from Platform Listings
+
+**As a** business owner whose venue or shop has been discovered and listed on a Stacks instance, **I want to** request removal of my listing **so that** I have control over whether my business appears on the platform.
+
+**What the business wants to accomplish:** Exercise their right to not be listed on a platform they didn't opt into, while being aware of the opportunity to become a verified partner instead.
+
+**How they accomplish it:**
+1. Every discovered (non-partner) listing on the Third Spaces page and in "Where to Buy" sections includes a small, discreet link at the bottom of the card: "Is this your business?"
+2. Clicking the link opens a simple form: business name, contact email, and a choice between "Remove my listing" and "I'd like to become a partner instead."
+3. For removal requests: the platform owner is notified and the listing is taken down promptly. The business's URL is added to an exclusion list so future discovery sweeps do not re-add it.
+4. For partnership interest: the request is routed to the partner onboarding flow (US-9.1.1) with the business details pre-filled.
+
+**What they see on the page:**
+- The "Is this your business?" link is styled subtly — small text, muted colour, positioned below the card content. It does not detract from the reader experience.
+- The form is simple and does not require account creation. A confirmation email is sent to verify the request.
+- After removal, the listing disappears from all reader-facing pages within 24 hours.
+
+**What the platform owner sees:**
+- Removal requests appear in the Metrics Dashboard alongside partner requests, styled as a distinct card type: "Removal request from [Business Name]."
+- The owner can process the removal with one click. A log entry is created in the audit trail.
 
 ---
 
@@ -653,7 +760,7 @@ The moderation pipeline runs automatically on every upload:
 
 **What they see on the page:**
 - For rejected images: a clear, specific rejection message explaining which step failed and why.
-- For age-gated books: the book is added but with a frosted overlay on the spine and a lock icon. The detail page requires age verification to access.
+- For age-gated books: the book is added but with a frosted overlay on the spine and a lock icon. The detail overlay requires age verification to access.
 - The pipeline is invisible when everything passes — the user simply sees their book appear on the shelf.
 
 ---
@@ -702,6 +809,11 @@ The moderation pipeline runs automatically on every upload:
   - Total monthly cost
   - Cost per book (total cost divided by number of books in collection)
   - Each line item is displayed as a row in a ledger-style table with a running total.
+- **Data Quality** (see `docs/data-quality.md`): Quality profiles per data product, not just pass/fail gauges:
+  - **Quality Trends:** Sparkline per enrichment category (prices, reviews, author, events) showing 12-week freshness/completeness trend — is quality improving or degrading?
+  - **Source Health:** A table of external data sources (scraper configs, review sites, RSS feeds) with per-source status: name, type, last successful fetch, consecutive failures, status (green = healthy, amber = degraded, red = broken). Broken sources are highlighted.
+  - **Enrichment Gaps:** Counts of books/authors with missing data: "47 books with no prices", "12 authors with no RSS feed". Clickable to drill into the affected list. Gaps are grouped by cause (no scraper config, config broken, source doesn't stock it, never scraped).
+  - **LLM Faithfulness:** Review summary spot-check agreement rate, blog association confirm/dismiss ratio, confidence distributions. A subtle indicator of whether AI-generated content is trustworthy.
 - **GDPR & Data:** Images pending deletion (those past the 30-day retention window), audit log entry count, encryption status, data export availability.
 - **Philosophy:** A note at the bottom in italic serif: "Every number here is real, unfiltered, and automated. If The Stacks ever becomes a paid service, you'll see exactly what it costs to run."
 
@@ -737,12 +849,12 @@ The moderation pipeline runs automatically on every upload:
 **What the user wants to accomplish:** Sell a physical book from their collection to another reader in South Africa, with proper condition documentation and fair pricing.
 
 **How they accomplish it:**
-1. From the Library shelf, the user moves a book to the "Looking for a New Home" shelf via the Move to Shelf dropdown.
+1. From any shelf, the user moves a book to the "Looking for a Home" shelf via the Move to Shelf dropdown on the book detail overlay.
 2. A listing flow begins:
    - The user uploads 1–3 photos of the actual physical copy (showing condition — cover, spine, any damage).
    - The user selects a condition grade: New, Good, Fair, or Poor.
-   - The user chooses a pricing model: fixed price (entered in ZAR), open to offers (with an optional minimum price, or fully seller-declinable), OR closed bid (invited users only, sealed offers, no public Q&A).
-3. The listing is published. Open and fixed-price listings are visible to all platform users by default. Closed bid listings are visible only to users the seller explicitly invites.
+   - The user chooses a pricing model: fixed price (entered in ZAR) or open to offers (with an optional minimum price, or fully seller-declinable). (Closed bid is deferred to a future phase.)
+3. The listing is published. Open and fixed-price listings are visible to all platform users by default.
 
 **What they see on the page:**
 - The "Looking for a New Home" shelf has its own distinct aesthetic (to be designed — perhaps a window ledge with books propped up, or a market stall).
@@ -776,6 +888,20 @@ The moderation pipeline runs automatically on every upload:
 - Private offer thread is accessible via "Make an offer" — opens a message-style panel visible only to the two parties.
 - Checkout flow: delivery address, Pargo shipping options and costs, payment via Stitch Money.
 - Order confirmation with tracking information.
+
+**Post-sale lifecycle:**
+1. When payment is confirmed, the book is removed from the seller's "Looking for a Home" shelf. The listing is marked as "Sold" and no longer appears in marketplace search results.
+2. The buyer receives a confirmation email (if notifications are enabled) and a prompt within the platform: "You've purchased [Title] by [Author]. Would you like to add it to one of your shelves?"
+3. If the book was already on the buyer's WishList, the system detects this and offers: "This book is on your WishList. Move it to your Library or AntiLibrary?" The WishList placement is updated rather than duplicated.
+4. If the book is not in the buyer's collection, they are prompted with a shelf picker (defaulting to AntiLibrary). Adding it is optional — the buyer may choose to dismiss the prompt.
+5. The seller's placement history records the sale event: "Sold via marketplace on [date]" alongside the standard shelf transition history.
+
+**What the buyer sees after purchase:**
+- A warm confirmation card: "It's on its way! [Title] has found a new home." with estimated delivery date.
+- Below the confirmation: "Add to your shelves?" with a shelf picker. If the book is on their WishList: "This was on your WishList! Move it to…" with Library and AntiLibrary as prominent options.
+- Dismissing the prompt is fine — the book can be added later via the standard upload or ISBN entry flow.
+
+**Refund, dispute, and non-delivery flows:** TBD — to be specified in a future phase when the marketplace is closer to implementation. The current stories define the happy path only.
 
 ---
 
@@ -1136,7 +1262,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 
 **What they see on the page:**
 - A form with current values pre-filled, styled consistently with the partner dashboard.
-- A live preview panel showing the partner card as it appears on the Third Spaces map and book detail pages.
+- A live preview panel showing the partner card as it appears on the Third Spaces map and book detail overlays.
 - A "Pending Approval" badge next to fields that require owner sign-off, with the previously approved value still shown publicly until the new value is approved.
 
 ---
@@ -1148,7 +1274,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 **As a** reader, **I want to** see which local partners have a book available **so that** I can buy it from a nearby bookshop instead of ordering online.
 
 **How they accomplish it:**
-1. On any book's detail page, if partner inventory data exists for that ISBN, an "Available Locally" section appears below the book metadata.
+1. On any book's detail overlay, if partner inventory data exists for that ISBN, an "Available Locally" section appears below the book metadata.
 2. Each available partner is shown as a card: partner name, price (if provided), condition, and a "Visit" link to the partner's profile or website.
 3. Partners are sorted by proximity if the reader has set a location preference (US-4.x), otherwise alphabetically.
 4. If no partners carry the book, the section doesn't appear (no empty state — the absence is silent).
@@ -1221,7 +1347,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
    - **Specific people** — visible only to a named list of users.
 3. The shelf's visibility is bounded by the profile ceiling. If the profile is set to "Only me", shelf-level settings have no effect.
 
-**Age-gating note:** age-gated books (US-1.1.4) always require age verification before their detail pages are accessible — regardless of the shelf's visibility level. Shelf visibility controls *discoverability*; age verification controls *access to content*. These are independent gates and apply equally to marketplace listings, partner availability data, and review aggregation for age-gated titles.
+**Age-gating note:** age-gated books (US-1.1.4) always require age verification before their detail overlays are accessible — regardless of the shelf's visibility level. Shelf visibility controls *discoverability*; age verification controls *access to content*. These are independent gates and apply equally to marketplace listings, partner availability data, and review aggregation for age-gated titles.
 
 **What they see on the page:**
 - A shelf settings drawer slides in from the right. The visibility section is labelled "Who can see this shelf?"
@@ -1238,7 +1364,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 **What the user wants to accomplish:** The shelf is visible to close friends, but one book on it is too personal to share — hide just that book without hiding the whole shelf.
 
 **How they accomplish it:**
-1. On any book spine or detail page, the user opens the book's context menu and selects "Visibility for this copy".
+1. On any book spine or detail overlay, the user opens the book's context menu and selects "Visibility for this copy".
 2. They choose a visibility level that is equal to or more restrictive than the shelf's current setting.
 3. The book remains on the shelf but is hidden from anyone outside the chosen visibility level.
 
@@ -1376,6 +1502,39 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 - A member list with display names and join dates.
 - A "Remove" option on each member row, styled as a small ghost button — present but not prominent.
 - For subscription groups, a "Follow requests" tab showing pending requests with Accept/Ignore actions.
+
+---
+
+#### US-11.1.5 Group Content Feed
+
+**As a** group member, **I want to** see an aggregated feed of blog posts and reading activity from other group members **so that** I can discover what people in my reading circle are writing and reading.
+
+**What the user wants to accomplish:** Stay connected with their reading community without individually visiting each member's profile. The group page becomes a shared reading room.
+
+**How they accomplish it:**
+1. The user navigates to a group page (from their Groups list in their profile).
+2. The group page shows a reverse-chronological feed of visible content from group members.
+3. Feed items include: blog posts published with visibility set to this group (or broader), and shelf activity (books added, moved, or completed) from members whose shelves are visible to the group.
+
+**What they see on the page:**
+- The group page header shows: group name, type badge (close friends / broadcast / subscription), member count (for close friends groups), and an "Invite" button (for the owner).
+- Below the header, a content feed styled as a stack of parchment cards:
+  - **Blog posts** show: author display name, post title, first two lines, date, and a "Read" link that opens the full post.
+  - **Shelf activity** shows: "[Name] added [Title] to their Reading Pile" or "[Name] moved [Title] to Library" — displayed as small, compact cards with the book spine thumbnail.
+- For **broadcast** groups: only the owner's content appears (members are recipients, not contributors).
+- For **close friends** groups: all members' content appears, creating a shared conversation.
+- For **subscription** groups: the owner's content appears; members can see the feed but do not contribute to it.
+- Content respects all visibility rules: a post set to "Only me" never appears, even in a close friends feed. A shelf set to "Only me" is excluded. The visibility ceiling (US-10.1.1) always applies.
+- The feed does not use algorithmic ranking — it is strictly chronological. No infinite scroll; pagination at 20 items with a "Load more" link.
+
+**Acceptance criteria:**
+- [ ] Group pages display a reverse-chronological feed of member content
+- [ ] Blog posts and shelf activity are included in the feed
+- [ ] Content visibility rules are enforced per-item
+- [ ] Broadcast groups show only the owner's content
+- [ ] Close friends groups show all members' content
+- [ ] Subscription groups show the owner's content
+- [ ] Block filtering applies within group feeds
 
 ---
 
@@ -1536,18 +1695,50 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 - The Display Name field has a placeholder: "Your name". The Email field has a placeholder: "you@example.com". The Password field shows masked dots.
 - While submitting, the button displays a small turning-page spinner and is disabled to prevent double submission.
 - On error (e.g., email already in use), a warm-toned error message appears below the form fields: "Registration failed. Email may already be in use."
-- On success, the page transitions to the home view with the user's display name visible in the navigation.
+- On success for returning users, the page transitions to the AntiLibrary with the user's display name visible in the navigation.
+- On success for first-time users, the onboarding flow begins (see US-14.1.2).
 
 **Acceptance criteria:**
 - [ ] Registration form collects display name, email, and password
 - [ ] Switching between Sign In and Register tabs preserves entered email and password
 - [ ] Successful registration returns a JWT and authenticates the user immediately
-- [ ] The user is redirected to the home page after successful registration
+- [ ] First-time registration triggers the onboarding flow (US-14.1.2)
+- [ ] Subsequent logins redirect to the AntiLibrary (`/antilibrary`)
 - [ ] Duplicate email addresses produce a clear, non-technical error message
 - [ ] The submit button is disabled during the API request to prevent double submission
 - [ ] Rate limiting is applied to the registration endpoint to prevent abuse
 
 **Technical note:** In the single-user (self-hosted) phase, the first user to register becomes the platform owner. No public registration beyond the owner is available until the multi-user phase.
+
+---
+
+#### US-14.1.2 First-Time Onboarding Flow
+
+**As a** new user who has just registered, **I want** a brief guided introduction to adding my first book **so that** I understand how The Stacks works without feeling overwhelmed or lost.
+
+**What the user wants to accomplish:** Get oriented on the platform and add their first book, experiencing the core upload-verify-shelve flow in a supported way.
+
+**How they accomplish it:**
+1. After successful registration (US-14.1.1), instead of redirecting to the AntiLibrary, the system launches a lightweight onboarding overlay.
+2. The overlay is a single-path flow with 3 steps:
+   - **Step 1 — Welcome:** "Welcome to The Stacks. Let's add your first book." A warm illustration of an empty bookshelf. A "Let's go" button proceeds. A "Skip" link dismisses the entire flow and redirects to the AntiLibrary.
+   - **Step 2 — Upload:** The standard upload drop zone (US-1.1.1) appears inline within the overlay. The user uploads a photo or enters an ISBN. The verification step ("We think this is…") plays out as normal.
+   - **Step 3 — Shelf placement:** The user chooses a shelf for their first book (defaulting to WishList). On confirmation, the book is created and the overlay shows a brief celebration: the book spine sliding into place with a soft thud.
+3. After the final step, the user is redirected to the shelf they chose, where their first book is visible.
+
+**What they see on the page:**
+- The onboarding overlay has a warm parchment background with a subtle vignette. The aesthetic is cinematic — a slow zoom into an empty shelf that fills with the first book.
+- Each step has a clear, single-sentence instruction. No walls of text. The tone is warm and encouraging: "Drop a photo of a book you love", "Is this the right one?", "Where should it live?"
+- A progress indicator shows 3 dots at the top of the overlay.
+- The "Skip" link is always visible but unobtrusive — no guilt framing.
+- After the last step, a message: "Your collection has begun." Then the shelf loads behind the fading overlay.
+
+**Acceptance criteria:**
+- [ ] Onboarding launches after first registration only (not on subsequent logins)
+- [ ] The flow is fully dismissable at any step via the "Skip" link
+- [ ] Skipping redirects to `/antilibrary`
+- [ ] Completing the flow places the first book on the chosen shelf and redirects there
+- [ ] The onboarding state is stored (e.g., `onboarding_completed` flag) so it never re-triggers
 
 ---
 
@@ -1565,7 +1756,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 3. The user enters their email and password.
 4. The user clicks "Sign In".
 5. The system validates the credentials against the stored Argon2-hashed password.
-6. On success, the system issues a JWT token (24h access, 7d refresh) and redirects the user to the home page.
+6. On success, the system issues a JWT token (24h access, 7d refresh) and redirects the user to the AntiLibrary (`/antilibrary`).
 7. The top navigation updates to show the user's display name in place of the "Sign In" link.
 
 **What they see on the page:**
@@ -1574,12 +1765,12 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 - A "Sign In" button styled as a primary action in the platform's dark-academic palette.
 - While submitting, the button shows a small spinner and is disabled.
 - On invalid credentials, a single error message appears: "Invalid email or password." The message is intentionally vague to prevent email enumeration.
-- On success, a smooth transition to the home page.
+- On success, a smooth transition to the AntiLibrary.
 
 **Acceptance criteria:**
 - [ ] Login form collects email and password
 - [ ] Successful login returns a JWT and stores it for subsequent API requests
-- [ ] The user is redirected to the home page after successful login
+- [ ] The user is redirected to the AntiLibrary (`/antilibrary`) after successful login
 - [ ] Invalid credentials produce a generic error message (no email enumeration)
 - [ ] The submit button is disabled during the API request
 - [ ] Rate limiting is applied to the login endpoint to prevent brute-force attacks
@@ -1630,7 +1821,35 @@ This is automatic. When the user is authenticated, the top navigation updates.
 - [ ] Access tokens expire after 24 hours
 - [ ] Refresh tokens are valid for 7 days and can silently renew access tokens
 - [ ] Expired sessions result in a redirect to the sign-in page, not an error screen
-- [ ] Re-authentication redirects the user to the home page
+- [ ] Re-authentication redirects the user to the AntiLibrary
+
+---
+
+#### US-14.3.3 Log Out
+
+**As an** authenticated user, **I want to** sign out of The Stacks **so that** my session is ended and my personal data is no longer accessible from this browser.
+
+**What the user wants to accomplish:** End their session explicitly — especially important on shared or public devices, or when switching accounts.
+
+**How they accomplish it:**
+1. The user clicks their display name in the navigation bar, which reveals a dropdown menu.
+2. The dropdown contains: "Settings" (navigates to the settings index page, US-17.1.1) and "Sign Out".
+3. Clicking "Sign Out" clears the stored JWT from the browser, resets the Elm application state, and redirects to the sign-in page.
+
+**What they see on the page:**
+- The display name in the navigation becomes a clickable element. On click, a dropdown appears with two items: "Settings" and "Sign Out".
+- "Settings" navigates to the settings index page (`/settings`).
+- After signing out, the user sees the sign-in page. The navigation reverts to the unauthenticated state (only "Costs" and "Sign In" visible).
+- No confirmation dialog — sign-out is immediate and reversible (they can just sign in again).
+
+**Acceptance criteria:**
+- [ ] The display name dropdown contains "Settings" and "Sign Out"
+- [ ] "Settings" navigates to `/settings`
+- [ ] Clicking "Sign Out" removes the JWT from localStorage via the `clearAuth` port
+- [ ] The Elm model's `auth` field is set to `Nothing`, clearing all personal data from application state
+- [ ] The user is redirected to the sign-in page after signing out
+- [ ] After signing out, navigating to a protected page redirects to sign-in
+- [ ] The sign-out action works in both normal and private browsing sessions
 
 ---
 
@@ -1642,25 +1861,26 @@ This is automatic. When the user is authenticated, the top navigation updates.
 
 **As a** user, **I want to** see a welcoming landing page when I visit The Stacks **so that** I understand what the platform is and can navigate to my collection or add a book.
 
-**What the user wants to accomplish:** Orient themselves on arrival — whether they are a first-time visitor or a returning user — and quickly reach their primary actions.
+**What the user wants to accomplish:** Orient themselves on arrival and quickly reach their collection or sign in.
 
 **How they accomplish it:**
 1. The user navigates to the root URL of The Stacks instance.
-2. The home page loads with the platform title, a subtitle, and primary action links.
+2. **If authenticated:** The user is immediately redirected to the AntiLibrary (`/antilibrary`). The home page is not shown — authenticated users land directly in their collection.
+3. **If unauthenticated:** The home page loads with the platform title, a subtitle, and primary action links.
 
-**What they see on the page:**
+**What they see on the page (unauthenticated only):**
 - A centred layout with "The Stacks" as the main heading in the platform's serif typeface.
-- A subtitle: "Your personal library, beautifully organised." — warm, inviting, understated.
-- Two primary action buttons: "View Library" (navigates to the Library bookshelf) and "Add a Book" (navigates to the upload page). Both are styled in the platform's dark-academic palette — the first as a primary button, the second as a secondary button.
+- A subtitle: "Your personal collection, beautifully organised." — warm, inviting, understated.
+- A single primary action button: "Sign In" (navigates to the authentication page). A secondary link: "Learn more" or "What is this?" that scrolls to a brief, elegant explanation below.
 - The overall aesthetic is restrained and elegant — no hero images, no marketing copy, no onboarding carousel. The page trusts the user to know what they want.
-- The global navigation is visible at the top, and the footer is visible at the bottom.
+- The global navigation is visible at the top (with limited items for unauthenticated users), and the footer is visible at the bottom.
 
 **Acceptance criteria:**
-- [ ] The home page renders at the root URL
+- [ ] The home page renders at the root URL for unauthenticated users
+- [ ] Authenticated users visiting `/` are redirected to `/antilibrary`
 - [ ] The page displays the platform title and subtitle
-- [ ] "View Library" navigates to `/library`
-- [ ] "Add a Book" navigates to `/upload`
-- [ ] The page is accessible to both authenticated and unauthenticated users
+- [ ] "Sign In" navigates to the authentication page
+- [ ] The page is only shown to unauthenticated users
 
 ---
 
@@ -1678,17 +1898,20 @@ This is automatic. When the user is authenticated, the top navigation updates.
 
 **What they see on the page:**
 - A header bar containing the platform logo ("The Stacks", linking to the home page) and a horizontal navigation list.
-- Navigation items: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home, Search, Add Book.
+- **Authenticated navigation items:** Library, AntiLibrary, WishList, Reading Pile, Looking for a Home, Search, Add Book (links to `/upload`).
+- **Unauthenticated navigation items:** Costs (links to the public cost transparency page), Sign In.
 - The currently active page's navigation item is visually highlighted with an active state (e.g., a subtle underline or brighter text).
-- When authenticated, the user's display name appears as the last item in the navigation. When unauthenticated, "Sign In" appears instead, linking to the login page.
+- When authenticated, the user's display name appears as the rightmost item in the navigation. Clicking it reveals a dropdown with two items: "Settings" (links to `/settings`) and "Sign Out" (see US-14.3.3). When unauthenticated, "Sign In" appears instead, linking to the login page.
 - The navigation uses the platform's serif typeface and dark-academic colour palette. Items are styled as clean text links within a warm header bar.
 
 **Acceptance criteria:**
 - [ ] The navigation bar appears on every page
+- [ ] Authenticated users see the full navigation (bookshelves, search, add book, display name)
+- [ ] Unauthenticated users see only Costs and Sign In
 - [ ] All navigation items link to the correct routes
 - [ ] The active page is visually indicated in the navigation
-- [ ] The navigation shows "Sign In" when unauthenticated and the user's display name when authenticated
-- [ ] The platform logo links back to the home page
+- [ ] The display name dropdown contains "Settings" and "Sign Out"
+- [ ] The platform logo links to `/` (redirects to `/antilibrary` for authenticated users)
 
 ---
 
@@ -1812,41 +2035,162 @@ This is automatic — the Elm frontend uses the `RemoteData` pattern for all API
 
 **What they see on the page:**
 - The sign-in page loads normally. No error banner or warning — the redirect itself communicates the need to authenticate.
-- After signing in, the user is redirected to the home page.
+- After signing in, the user is redirected to the AntiLibrary (`/antilibrary`).
 
 **Acceptance criteria:**
 - [ ] Unauthenticated API requests to protected endpoints return 401
 - [ ] The frontend handles 401 responses by redirecting to the sign-in page
 - [ ] The sign-in page loads cleanly after the redirect
+- [ ] After authentication, the user is redirected to `/antilibrary`
 - [ ] After authentication, the user is redirected to the home page
 
 ---
 
 ## 17. Settings & Preferences
 
-### 17.1 Settings Navigation
+### 17.1 Settings Hub
 
-#### US-17.1.1 Access Settings Pages
+#### US-17.1.1 Settings Index Page
 
-**As a** user, **I want to** access my privacy and account settings **so that** I can manage consent preferences, age verification, data exports, and audit logs.
+**As a** user, **I want** a central settings page that links to all my account, privacy, and profile settings **so that** I can find and manage everything about my account in one place.
 
-**What the user wants to accomplish:** Find and navigate to the various settings pages that control their account's privacy, data, and content preferences.
+**What the user wants to accomplish:** Discover and navigate to all settings sub-pages without memorising URLs or hunting through menus.
 
 **How they accomplish it:**
-1. Settings pages are accessible via direct URL routes: `/settings/consent` for privacy consent management, and `/settings/age-verification` for the age verification self-declaration.
-2. Additionally, settings are referenced from user stories in the GDPR section (US-8.1 through US-8.5) which describe data export, account deletion, consent management, image retention, and audit log features.
+1. The user clicks their display name in the top navigation bar and selects "Settings" from the dropdown (US-14.3.3).
+2. The settings index page loads at `/settings`.
 
 **What they see on the page:**
-- **Consent Settings** (`/settings/consent`): A page titled "Privacy Settings" showing toggleable consent items with timestamps, as described in US-8.3. Each consent category has a clear description, an on/off toggle, and a record of when consent was last changed.
-- **Age Verification** (`/settings/age-verification`): A page titled "Age Verification" with the self-declaration toggle described in US-4.2. In the single-user phase, this is a simple "I confirm I am 18+" checkbox.
-- Both pages use the platform's parchment background and serif typography, consistent with the warm, trustworthy tone appropriate for privacy-related settings.
+- A page titled "Settings" in the platform's serif typeface, on a warm parchment background.
+- A left sidebar lists all settings categories as navigation links. The main content area displays the selected sub-page.
+- Settings categories:
+  - **Profile** (`/settings/profile`) — display name, email, location, and website/blog URL (US-17.2.1)
+  - **Password** (`/settings/password`) — change password (US-17.2.3)
+  - **Privacy & Consent** (`/settings/consent`) — consent toggles with timestamps (US-8.3)
+  - **Age Verification** (`/settings/age-verification`) — self-declaration toggle (US-4.2)
+  - **Data Export** (`/settings/export`) — export personal data (US-8.1)
+  - **Delete Account** (`/settings/delete`) — right to erasure (US-8.2)
+  - **Audit Log** (`/settings/audit`) — data access event log (US-8.5)
+  - **Notifications** (`/settings/notifications`) — email notification preferences (US-17.3.1)
+- The sidebar highlights the currently active sub-page. On mobile, the sidebar collapses to a dropdown selector.
 
 **Acceptance criteria:**
-- [ ] `/settings/consent` renders the consent management page
-- [ ] `/settings/age-verification` renders the age verification page
-- [ ] Both pages are only accessible to authenticated users
-- [ ] Both pages are visually consistent with the platform aesthetic
-- [ ] Settings changes are persisted via API calls and reflected immediately
+- [ ] `/settings` renders the settings index page with sidebar navigation
+- [ ] Clicking each sidebar link loads the corresponding sub-page
+- [ ] The settings page is accessible from the display name dropdown in the top navigation
+- [ ] All sub-pages are only accessible to authenticated users
+- [ ] The sidebar highlights the active sub-page
+- [ ] All sub-pages use the platform's parchment background and serif typography
+
+---
+
+### 17.2 Profile Management
+
+#### US-17.2.1 View and Edit Profile
+
+**As a** user, **I want to** manage my display name, email, and personal website **so that** my public identity on the platform is accurate.
+
+**What the user wants to accomplish:** Update their basic account information — the name others see, their email for account recovery, and an optional link to their personal website or blog.
+
+**How they accomplish it:**
+1. The user navigates to Settings > Profile (`/settings/profile`).
+2. They see their current display name, email, and website URL (if set).
+3. They edit any field and click "Save".
+
+**What they see on the page:**
+- A simple form with three fields: Display Name, Email, and Website/Blog URL (optional).
+- The display name field shows a preview: "This is how you appear to other users."
+- The email field includes a note: "Used for account recovery and notifications. Not visible to other users."
+- The website field is described: "A link to your personal blog or website. Shown on your public profile."
+- A "Save" button. Changes take effect immediately. A subtle confirmation: "Profile updated."
+
+**Acceptance criteria:**
+- [ ] `/settings/profile` renders the profile editing form
+- [ ] Display name changes are reflected in the navigation bar immediately
+- [ ] Email changes require the current password for confirmation
+- [ ] All fields validate before saving (email format, URL format)
+
+---
+
+#### US-17.2.2 Set Location
+
+**As a** user, **I want to** set my city and country **so that** Third Spaces, partner inventory, and events are filtered to my area.
+
+**What the user wants to accomplish:** Tell the platform where they are so that local content (bookshops, reading groups, events, cafes) is relevant. This is an explicit setting, not device-based geolocation.
+
+**How they accomplish it:**
+1. The user navigates to Settings > Profile (`/settings/profile`).
+2. Below the basic profile fields, a "Location" section shows two fields: Country (dropdown) and City (text input with autocomplete).
+3. The user selects their country and types their city.
+4. On save, the system triggers a geographic discovery sweep (US-2.5.2) for the new location.
+
+**What they see on the page:**
+- A "Location" section with a brief explanation: "We use your location to show nearby bookshops, events, and reading spaces. We don't use device location — you set it here."
+- Country is a dropdown (prepopulated with South Africa at the top, then alphabetical). City is a text input with autocomplete suggestions.
+- After saving, a note: "We'll start looking for bookshops and reading spaces near [City]. Check Third Spaces soon."
+- If the user changes their location, a new geographic sweep is triggered and old location-specific results that are no longer relevant are deprioritised (but not deleted — the user may travel).
+
+**Acceptance criteria:**
+- [ ] Location fields appear on the profile settings page
+- [ ] Saving a location triggers the geographic discovery sweep (US-2.5.2)
+- [ ] Third Spaces, partner inventory, and event results are filtered by the user's configured location
+- [ ] No device geolocation APIs are used
+- [ ] Location is optional — the platform functions without it, but Third Spaces will be empty
+
+---
+
+#### US-17.2.3 Change Password
+
+**As a** user, **I want to** change my password **so that** I can maintain account security.
+
+**How they accomplish it:**
+1. The user navigates to Settings > Password (`/settings/password`).
+2. They enter their current password and a new password (twice, for confirmation).
+3. On submission, the system validates the current password and updates to the new one.
+
+**What they see on the page:**
+- Three fields: Current Password, New Password, Confirm New Password.
+- Password strength indicator on the new password field.
+- On success: "Password updated." On failure: "Current password is incorrect."
+- No password requirements are displayed beyond a minimum length — the platform trusts the user.
+
+**Acceptance criteria:**
+- [ ] `/settings/password` renders the password change form
+- [ ] The current password must be verified before the change is applied
+- [ ] Password is hashed with Argon2 before storage
+- [ ] Success/failure messages are clear and immediate
+
+---
+
+### 17.3 Notifications
+
+#### US-17.3.1 Email Notification Preferences
+
+**As a** user, **I want to** control which emails The Stacks sends me **so that** I only receive messages I care about — the platform should be quiet by default.
+
+**What the user wants to accomplish:** Opt in or out of specific email notifications. The Stacks is intentionally a low-noise platform — email is reserved for important, infrequent communications.
+
+**How they accomplish it:**
+1. The user navigates to Settings > Notifications (`/settings/notifications`).
+2. They see a list of email notification categories, each with a toggle.
+
+**What they see on the page:**
+- A page titled "Notifications" with a brief philosophy note in italic serif: "The Stacks aims to be a quiet place. We only email you when it matters."
+- Notification categories:
+  - **Terms of service changes** — always on, cannot be disabled (legal requirement). Shown as a locked toggle with a note: "Required — we'll let you know if our terms change."
+  - **WishList availability** — "Get notified when a book on your WishList becomes available from a local partner or on the marketplace." Default: off.
+  - **Marketplace activity** (future) — "Updates on your listings: offers received, sales confirmed, shipping updates." Default: on (when marketplace is active).
+  - **Group invitations** — "When someone invites you to a group." Default: on.
+  - **Event matches** — "When an event related to a book in your collection is discovered nearby." Default: off.
+- Each category has a clear description and a toggle. Changes save automatically.
+- No in-app notification center, no bell icon, no push notifications. Email only, and sparingly.
+
+**Acceptance criteria:**
+- [ ] `/settings/notifications` renders the notification preferences page
+- [ ] Terms of service notifications cannot be disabled
+- [ ] All other categories are toggleable
+- [ ] Changes save automatically without a submit button
+- [ ] Default states match the specification (most off by default)
 
 ---
 
@@ -1870,7 +2214,8 @@ This is automatic — the Elm frontend uses the `RemoteData` pattern for all API
 - **Shelving:** Lighter, more open than the permanent shelves. The books are not tightly packed — there is breathing room between spines, suggesting they are ready to leave.
 - **Lighting:** Bright, optimistic light — morning sun through a window or the open air of a market. A visual contrast with the Library's lamplight, signalling that these books are moving outward.
 - **Shelf label:** "Looking for a Home" styled in the same serif typeface and brass plate convention as other shelves.
-- **Books:** Spines are well-read (these books have been through the collection) but presented attractively — the visual equivalent of a book cleaned up for resale.
+- **Books:** Spine wear on this shelf is **community-driven**, not based on the individual user's reading history. If many users across the platform have read this book (high placement count in Library shelves platform-wide), the spine shows heavy wear — well-loved and well-travelled. If the book is a recent publication with few readers, the spine is pristine and shiny. This creates a visual signal: worn spines are proven books with many readers, pristine spines are hidden gems waiting to be discovered. The community wear state is calculated from anonymised, aggregate platform data — no individual user's reading history is exposed.
+- Books can arrive on this shelf from **any** other shelf, including directly from the upload flow (US-1.1.1) if the user is uploading a book specifically to sell or give away. There is no requirement that a book pass through Library or Reading Pile first.
 - **Relationship to the marketplace:** This shelf is the staging area for the marketplace feature described in Section 7 (US-7.1, US-7.2). Books placed here may or may not have active listings. In the pre-marketplace phase, this shelf simply holds books the user intends to sell or give away.
 - **Default visibility:** Unlike other shelves which default to "Only me", the Looking for a Home shelf defaults to "Platform users" visibility when the profile is set to discoverable — because the intent is for other users to see these books are available.
 
@@ -1881,6 +2226,94 @@ This is automatic — the Elm frontend uses the `RemoteData` pattern for all API
 - [ ] The shelf supports the same interactions as other bookshelves (click spine to view detail, move between shelves)
 - [ ] The empty state displays an encouraging message about finding books new homes
 - [ ] Swipe navigation includes this shelf in the bookshelf sequence
+
+---
+
+## 19. Accessibility
+
+### 19.1 Screen Reader & Keyboard Support
+
+#### US-19.1.1 ARIA Labels for Visual Elements
+
+**As a** user who relies on a screen reader, **I want** the visual bookshelf, spine, and detail overlay elements to have meaningful ARIA labels **so that** I can navigate and understand my collection without relying on visual cues.
+
+**What the user wants to accomplish:** Access all platform functionality through a screen reader, with meaningful descriptions of the visual metaphors that sighted users experience.
+
+**How the system handles it:**
+1. Every book spine element has an `aria-label` describing the book: "Book: [Title] by [Author], [Page Count] pages, on your [Shelf Name]".
+2. The bookshelf container has a `role="list"` with an `aria-label`: "[Shelf Name] — [N] books".
+3. Shelf rows within the bookcase have `role="listitem"` groupings.
+4. The book detail overlay has `role="dialog"` with `aria-label`: "Book details: [Title] by [Author]". Focus is trapped within the overlay while it's open. Pressing Escape dismisses it.
+5. Navigation items have clear labels. The display name dropdown is labelled "User menu" with items announced as "Settings" and "Sign Out".
+6. Upload states (processing, verification, shelf placement) announce progress via `aria-live` regions: "Processing image...", "Book identified: [Title] by [Author]", "Added to [Shelf Name]."
+7. The shelf transition animations are decorative — screen readers skip them. The destination content is announced immediately.
+8. Wear state information (pristine, softened, cracking, well-read, well-loved) is included in the spine's ARIA label as a parenthetical: "(well-loved, read 3 times)".
+
+**What they hear:**
+- Navigating to a shelf: "[Shelf Name] — 12 books. List of 12 items."
+- Landing on a spine: "Book: The Secret History by Donna Tartt, 559 pages, well-read."
+- Opening a detail overlay: "Dialog: Book details — The Secret History by Donna Tartt."
+- Upload verification: "Book identified: Piranesi by Susanna Clarke. Confirm or reject."
+
+**Acceptance criteria:**
+- [ ] All book spines have descriptive `aria-label` attributes
+- [ ] Bookshelf containers use `role="list"` with shelf name and book count
+- [ ] The book detail overlay uses `role="dialog"` with focus trapping
+- [ ] Upload flow progress is announced via `aria-live` regions
+- [ ] All interactive elements are keyboard-focusable and operable
+
+---
+
+#### US-19.1.2 Keyboard Navigation
+
+**As a** keyboard-only user, **I want to** navigate between shelves, browse books, and open detail overlays using only the keyboard **so that** I can use the platform without a mouse.
+
+**How they accomplish it:**
+1. **Tab** moves focus between navigation items, then into the shelf content, then to individual book spines.
+2. **Arrow keys** move between spines on a shelf (left/right within a row, up/down between rows).
+3. **Enter** on a focused spine opens the book detail overlay.
+4. **Escape** closes the detail overlay, returning focus to the spine that opened it.
+5. Within the detail overlay, **Tab** moves between interactive elements (shelf picker, format toggles, links).
+6. **Tab** from the last navigation item wraps to the first shelf content element, following standard focus order.
+
+**Acceptance criteria:**
+- [ ] All interactive elements are reachable via Tab
+- [ ] Arrow key navigation works within the bookshelf grid
+- [ ] Focus returns to the triggering element when an overlay is closed
+- [ ] Skip links are provided to jump past navigation to main content
+- [ ] Focus indicators are visible and styled consistently with the platform aesthetic
+
+---
+
+### 19.2 Alternative Views
+
+#### US-19.2.1 List View Toggle
+
+**As a** user, **I want** an alternative list view for my bookshelves **so that** I can browse my collection in a format that is more accessible, more information-dense, or better suited to certain screen sizes.
+
+**What the user wants to accomplish:** Switch from the visual spine/shelf metaphor to a structured list that shows more metadata at a glance. This is valuable for screen reader users, users on very small screens, users with visual impairments, and anyone who prefers a data-oriented view.
+
+**How they accomplish it:**
+1. On any bookshelf page, the user clicks a "List view" toggle icon in the shelf header (next to the shelf label).
+2. The view switches from the visual bookshelf to a structured list.
+3. The toggle persists across page navigation (stored as a user preference). Once toggled, all shelves render in list view until the user switches back.
+
+**What they see on the page:**
+- The list view replaces the visual shelf with a clean table/list:
+  - Each row shows: book cover thumbnail (small), title, author, page count, date added, shelf, format indicators, and wear state as a text label.
+  - Rows are sortable by any column (click column header to sort).
+  - Clicking a row opens the book detail overlay.
+- The shelf's wallpaper, lighting, and spatial metaphor are not rendered in list view. The background is a clean parchment tone.
+- The toggle icon is a simple grid/list icon pair, styled subtly in the shelf header. The active view is indicated.
+- In list view, the "Add a Book" link remains accessible in the same position.
+
+**Acceptance criteria:**
+- [ ] A list/grid toggle is visible on all bookshelf pages
+- [ ] List view displays books as sortable rows with key metadata
+- [ ] The view preference persists across page navigation and sessions
+- [ ] Clicking a row opens the book detail overlay
+- [ ] The toggle is keyboard-accessible
+- [ ] List view is the default for screen reader users (detected via `prefers-reduced-motion` or a user setting)
 
 ---
 

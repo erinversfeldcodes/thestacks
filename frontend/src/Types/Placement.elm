@@ -37,21 +37,22 @@ formatDecoder =
 type alias Placement =
     { id : String
     , book : Maybe Book
-    , position : Int
-    , placedAt : String
+    , position : Maybe Int
+    , placedAt : Maybe String
     , formats : List Format
     , personalRating : Maybe Int
     , notes : Maybe String
+    , bookshelfName : Maybe String
     }
 
 
 placementDecoder : Decoder Placement
 placementDecoder =
-    Decode.map7 Placement
+    Decode.map8 Placement
         (Decode.field "id" Decode.string)
         (Decode.maybe (Decode.field "book" bookDecoder))
-        (Decode.field "position" Decode.int)
-        (Decode.field "placed_at" Decode.string)
+        (Decode.maybe (Decode.field "position" Decode.int))
+        (Decode.maybe (Decode.field "placed_at" Decode.string))
         (Decode.oneOf
             [ Decode.field "formats" (Decode.list formatDecoder)
             , Decode.succeed []
@@ -59,3 +60,4 @@ placementDecoder =
         )
         (Decode.maybe (Decode.field "personal_rating" Decode.int))
         (Decode.maybe (Decode.field "notes" Decode.string))
+        (Decode.maybe (Decode.field "bookshelf_name" Decode.string))
