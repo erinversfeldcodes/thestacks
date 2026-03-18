@@ -13,7 +13,7 @@ import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
 import Html exposing (Html, button, div, p, span, text)
 import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
 
 
@@ -55,7 +55,7 @@ groupIntoRowsHelp maxWidth currentWidth currentRow remaining =
                 pageCount =
                     case p.book of
                         Just bk ->
-                            Maybe.withDefault 200 bk.pageCount
+                            Maybe.withDefault 200 (bookPageCount bk)
 
                         Nothing ->
                             200
@@ -115,8 +115,8 @@ viewSpine wearLevel placement =
                 Just bk ->
                     { title = bk.title
                     , author = Types.Book.authorName bk
-                    , pageCount = Maybe.withDefault 200 bk.pageCount
-                    , coverUrl = bk.coverImageUrl
+                    , pageCount = Maybe.withDefault 200 (bookPageCount bk)
+                    , coverUrl = bookCoverImageUrl bk
                     }
 
                 Nothing ->
@@ -205,14 +205,12 @@ viewClickableSpine wearLevel onBookClicked placement =
 
                 Nothing ->
                     { id = ""
-                    , isbn = ""
                     , title = "Unknown Title"
                     , author = Nothing
                     , description = Nothing
-                    , coverImageUrl = Nothing
-                    , pageCount = Just 200
-                    , publisher = Nothing
-                    , publicationYear = Nothing
+                    , editions = []
+                    , primaryEdition = Nothing
+                    , editionCount = 0
                     , subjects = []
                     , visibilityTier = Types.Book.Public
                     }
@@ -226,11 +224,11 @@ viewClickableSpine wearLevel onBookClicked placement =
         , onClick (onBookClicked bookData)
         ]
         [ Components.Spine.book
-            { pageCount = Maybe.withDefault 200 bookData.pageCount
+            { pageCount = Maybe.withDefault 200 (bookPageCount bookData)
             , wearLevel = wearLevel
             , texture = texture
             , title = bookData.title
             , author = Types.Book.authorName bookData
-            , coverImageUrl = bookData.coverImageUrl
+            , coverImageUrl = bookCoverImageUrl bookData
             }
         ]

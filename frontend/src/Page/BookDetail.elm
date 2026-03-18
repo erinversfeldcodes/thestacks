@@ -12,12 +12,12 @@ import Components.AgeGate exposing (ageGate)
 import Components.FormatPicker exposing (formatPicker)
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
-import Html exposing (Html, button, div, h1, h2, h3, img, p, section, span, text)
-import Html.Attributes exposing (alt, class, src)
-import Html.Events exposing (onClick)
+import Html exposing (Html, a, button, div, h1, h2, h3, img, option, p, section, select, span, text)
+import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, target, value)
+import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route exposing (Route)
-import Types.Book exposing (Book, authorName)
+import Types.Book exposing (Book, Edition, authorName)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -28,14 +28,16 @@ type alias Model =
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
-    , currentBookshelf : String -- The bookshelf the book is currently on (from placement or route context)
-    , selectedBookshelf : String -- The target bookshelf selected in the mover dropdown
+    , currentBookshelf : String
+    , selectedBookshelf : String
     , selectedFormats : List Format
     , moveState : RemoteData Http.Error ()
     , removeState : RemoteData Http.Error ()
+    , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
     , showAgeGate : Bool
     , entryAnimationActive : Bool
+    , isAuthenticated : Bool
     }
 
 
@@ -45,17 +47,20 @@ type OutMsg
 
 
 type Msg
-    = BookLoaded (Result Http.Error Book)
+    = BookLoaded (Result Http.Error Api.BookDetailResponse)
     | OpenBookshelfMover
     | CloseBookshelfMover
     | SelectBookshelf String
     | ConfirmMove
     | MoveCompleted (Result Http.Error ())
+    | ConfirmPlace
+    | PlaceCompleted String (Result Http.Error Placement)
     | OpenRemoveModal
     | CloseRemoveModal
     | ConfirmRemove
     | RemoveCompleted (Result Http.Error ())
     | ToggleFormat Format
+    | EditionSelected String
     | VerifyAge
     | DismissAgeGate
 
@@ -64,12 +69,7 @@ init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
 init bookId maybeToken maybePreviousRoute =
     let
         cmd =
-            case maybeToken of
-                Just token ->
-                    Api.getBook bookId token BookLoaded
-
-                Nothing ->
-                    Cmd.none
+            Api.getBook bookId maybeToken BookLoaded
     in
     ( { book = Loading
       , placement = Nothing
@@ -81,16 +81,16 @@ init bookId maybeToken maybePreviousRoute =
       , selectedFormats = []
       , moveState = NotAsked
       , removeState = NotAsked
+      , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
       , showAgeGate = False
       , entryAnimationActive = True
+      , isAuthenticated = maybeToken /= Nothing
       }
     , cmd
     )
 
 
-{-| Derive the current bookshelf name from the route the user came from.
--}
 routeToBookshelf : Maybe Route -> String
 routeToBookshelf maybeRoute =
     case maybeRoute of
@@ -113,8 +113,6 @@ routeToBookshelf maybeRoute =
             ""
 
 
-{-| Select the first bookshelf that isn't the current one as default target.
--}
 firstAvailableBookshelf : String -> String
 firstAvailableBookshelf current =
     let
@@ -131,8 +129,29 @@ update msg model maybeToken =
     case msg of
         BookLoaded result ->
             case result of
-                Ok book ->
-                    ( { model | book = Success book }, Cmd.none, NoOut )
+                Ok response ->
+                    let
+                        bookshelf =
+                            response.placement
+                                |> Maybe.andThen .bookshelfName
+                                |> Maybe.withDefault (routeToBookshelf model.previousRoute)
+
+                        formats =
+                            response.placement
+                                |> Maybe.map .formats
+                                |> Maybe.withDefault []
+                    in
+                    ( { model
+                        | book = Success response.book
+                        , placement = response.placement
+                        , currentBookshelf = bookshelf
+                        , selectedBookshelf = firstAvailableBookshelf bookshelf
+                        , selectedFormats = formats
+                        , selectedEdition = response.book.primaryEdition
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err (Http.BadStatus 403) ->
                     ( { model | book = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
@@ -155,6 +174,19 @@ update msg model maybeToken =
         SelectBookshelf bookshelf ->
             ( { model | selectedBookshelf = bookshelf }, Cmd.none, NoOut )
 
+        EditionSelected editionId ->
+            case model.book of
+                Success book ->
+                    let
+                        found =
+                            List.filter (\e -> e.id == editionId) book.editions
+                                |> List.head
+                    in
+                    ( { model | selectedEdition = found }, Cmd.none, NoOut )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
         ConfirmMove ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
@@ -169,7 +201,52 @@ update msg model maybeToken =
         MoveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | moveState = Success () }, Cmd.none, NoOut )
+                    let
+                        newBookshelf =
+                            model.selectedBookshelf
+
+                        updatedPlacement =
+                            model.placement
+                                |> Maybe.map (\p -> { p | bookshelfName = Just newBookshelf })
+                    in
+                    ( { model
+                        | moveState = Success ()
+                        , currentBookshelf = newBookshelf
+                        , selectedBookshelf = firstAvailableBookshelf newBookshelf
+                        , placement = updatedPlacement
+                        , bookshelfMoverOpen = False
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    ( { model | moveState = Failure err }, Cmd.none, NoOut )
+
+        ConfirmPlace ->
+            case ( model.book, maybeToken ) of
+                ( Success book, Just token ) ->
+                    ( { model | bookshelfMoverOpen = False, moveState = Loading }
+                    , Api.placeBook model.selectedBookshelf book.id token (PlaceCompleted model.selectedBookshelf)
+                    , NoOut
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        PlaceCompleted shelfName result ->
+            case result of
+                Ok placement ->
+                    ( { model
+                        | moveState = Success ()
+                        , placement = Just placement
+                        , currentBookshelf = shelfName
+                        , selectedBookshelf = firstAvailableBookshelf shelfName
+                        , bookshelfMoverOpen = False
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     ( { model | moveState = Failure err }, Cmd.none, NoOut )
@@ -203,9 +280,6 @@ update msg model maybeToken =
                     ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
         ToggleFormat format ->
-            -- DEFERRED: Format toggles are display-only for now. Backend persistence
-            -- via PUT /api/placements/:id/formats will be added when the placement
-            -- format API is wired up. See Issue #030 review feedback item #5.
             let
                 newFormats =
                     if List.member format model.selectedFormats then
@@ -269,23 +343,52 @@ view model =
 viewBook : Model -> Book -> Html Msg
 viewBook model book =
     div [ class "book-detail" ]
-        [ viewHero model book
-        , viewAboutSection book
-        , viewReviewsSection
-        , viewPricesSection
-        , viewAuthorSection book
-        , viewWritingSection
-        , viewShelfActions model
-        , viewDangerZone model
-        ]
+        ([ viewHero model book
+         , viewAboutSection book
+         , viewReviewsSection
+         , viewPricesSection
+         , viewAuthorSection book
+         , viewWritingSection
+         ]
+            ++ (case ( model.placement, model.isAuthenticated ) of
+                    ( Just _, _ ) ->
+                        [ viewFormatsOnShelf model
+                        , viewShelfActions model
+                        , viewDangerZone model
+                        ]
+
+                    ( Nothing, True ) ->
+                        [ viewAddToCollection model ]
+
+                    ( Nothing, False ) ->
+                        [ viewSignupPrompt ]
+               )
+        )
+
+
+{-| Get the edition to display in the hero — either the user-selected edition
+or the primary edition.
+-}
+displayEdition : Model -> Book -> Maybe Edition
+displayEdition model book =
+    case model.selectedEdition of
+        Just ed ->
+            Just ed
+
+        Nothing ->
+            book.primaryEdition
 
 
 viewHero : Model -> Book -> Html Msg
 viewHero model book =
-    section [ class "book-detail__hero" ]
+    let
+        edition =
+            displayEdition model book
+    in
+    section [ class "book-detail__hero", attribute "role" "region", attribute "aria-labelledby" "section-hero" ]
         [ div [ class "book-detail__cover-frame" ]
             [ div [ class "book-detail__cover" ]
-                [ case book.coverImageUrl of
+                [ case Maybe.andThen .coverImageUrl edition of
                     Just url ->
                         img
                             [ src url
@@ -302,41 +405,120 @@ viewHero model book =
                 ]
             ]
         , div [ class "book-detail__meta" ]
-            [ h1 [ class "book-detail__title" ] [ text book.title ]
+            [ h1 [ class "book-detail__title", id "section-hero" ] [ text book.title ]
             , h2 [ class "book-detail__author" ] [ text (authorName book) ]
-            , div [ class "book-detail__meta-details" ]
-                [ case book.publicationYear of
-                    Just year ->
-                        span [ class "book-detail__meta-item" ]
-                            [ text (String.fromInt year) ]
-
-                    Nothing ->
-                        text ""
-                , case book.publisher of
-                    Just publisher ->
-                        span [ class "book-detail__meta-item" ]
-                            [ text publisher ]
-
-                    Nothing ->
-                        text ""
-                , case book.pageCount of
-                    Just pages ->
-                        span [ class "book-detail__meta-item" ]
-                            [ text (String.fromInt pages ++ " pages") ]
-
-                    Nothing ->
-                        text ""
-                ]
-            , p [ class "book-detail__isbn" ] [ text ("ISBN " ++ book.isbn) ]
-            , viewFormats model
+            , viewEditionSelector book model.selectedEdition
+            , viewEditionDetails edition
+            , viewRating model
             ]
         ]
 
 
-viewFormats : Model -> Html Msg
-viewFormats model =
-    div [ class "book-detail__formats" ]
-        [ formatPicker
+viewRating : Model -> Html Msg
+viewRating model =
+    case model.placement of
+        Just placement ->
+            case placement.personalRating of
+                Just n ->
+                    div [ class "book-detail__rating" ]
+                        [ text ("Your rating: " ++ String.fromInt n ++ "/5") ]
+
+                Nothing ->
+                    div [ class "book-detail__rating book-detail__rating--empty" ]
+                        [ text "Not yet rated" ]
+
+        Nothing ->
+            div [ class "book-detail__rating book-detail__rating--empty" ]
+                [ text "Not yet rated" ]
+
+
+{-| Edition selector dropdown — appears below the author name.
+Only renders if there are multiple editions.
+-}
+viewEditionSelector : Book -> Maybe Edition -> Html Msg
+viewEditionSelector book selectedEdition =
+    if List.length book.editions <= 1 then
+        text ""
+
+    else
+        div [ class "book-detail__edition-selector" ]
+            [ select
+                [ class "book-detail__edition-select"
+                , onInput EditionSelected
+                ]
+                (List.map
+                    (\ed ->
+                        let
+                            label =
+                                case ed.formatLabel of
+                                    Just fl ->
+                                        fl ++ " — " ++ ed.isbn
+
+                                    Nothing ->
+                                        ed.isbn
+                        in
+                        option
+                            [ value ed.id
+                            , selected (selectedEdition == Just ed)
+                            ]
+                            [ text label ]
+                    )
+                    book.editions
+                )
+            ]
+
+
+{-| Edition-specific details: year, publisher, page count / narration length, ISBN.
+Updates when the user selects a different edition from the dropdown.
+-}
+viewEditionDetails : Maybe Edition -> Html Msg
+viewEditionDetails edition =
+    div [ class "book-detail__meta-details" ]
+        [ case Maybe.andThen .formatLabel edition of
+            Just fl ->
+                span [ class "book-detail__meta-item book-detail__meta-item--format" ]
+                    [ text fl ]
+
+            Nothing ->
+                text ""
+        , case Maybe.andThen .publicationYear edition of
+            Just year ->
+                span [ class "book-detail__meta-item" ]
+                    [ text (String.fromInt year) ]
+
+            Nothing ->
+                text ""
+        , case Maybe.andThen .publisher edition of
+            Just publisher ->
+                span [ class "book-detail__meta-item" ]
+                    [ text publisher ]
+
+            Nothing ->
+                text ""
+        , case Maybe.andThen .pageCount edition of
+            Just pages ->
+                span [ class "book-detail__meta-item" ]
+                    [ text (String.fromInt pages ++ " pages") ]
+
+            Nothing ->
+                text ""
+        , p [ class "book-detail__isbn" ]
+            [ text
+                ("ISBN "
+                    ++ (edition |> Maybe.map .isbn |> Maybe.withDefault "—")
+                )
+            ]
+        ]
+
+
+{-| "Formats on my shelf" — only shown when the user has a placement.
+Lets them toggle which formats (Physical, eBook, Audiobook) they own.
+-}
+viewFormatsOnShelf : Model -> Html Msg
+viewFormatsOnShelf model =
+    section [ class "book-detail__section book-detail__shelf-formats", attribute "role" "region", attribute "aria-labelledby" "section-formats" ]
+        [ h3 [ class "book-detail__section-title", id "section-formats" ] [ text "Formats on My Shelf" ]
+        , formatPicker
             { selected = model.selectedFormats
             , onToggle = ToggleFormat
             }
@@ -345,8 +527,8 @@ viewFormats model =
 
 viewAboutSection : Book -> Html Msg
 viewAboutSection book =
-    section [ class "book-detail__section book-detail__about" ]
-        [ h3 [ class "book-detail__section-title" ] [ text "About" ]
+    section [ class "book-detail__section book-detail__about", attribute "role" "region", attribute "aria-labelledby" "section-about" ]
+        [ h3 [ class "book-detail__section-title", id "section-about" ] [ text "About" ]
         , div [ class "book-detail__about-body" ]
             [ case book.description of
                 Just desc ->
@@ -361,8 +543,8 @@ viewAboutSection book =
 
 viewReviewsSection : Html Msg
 viewReviewsSection =
-    section [ class "book-detail__section book-detail__reviews" ]
-        [ h3 [ class "book-detail__section-title" ] [ text "What People Think" ]
+    section [ class "book-detail__section book-detail__reviews", attribute "role" "region", attribute "aria-labelledby" "section-reviews" ]
+        [ h3 [ class "book-detail__section-title", id "section-reviews" ] [ text "What People Think" ]
         , div [ class "book-detail__reviews-grid" ]
             [ viewReviewSource "GoodReads" "goodreads"
             , viewReviewSource "Storygraph" "storygraph"
@@ -375,22 +557,23 @@ viewReviewSource : String -> String -> Html Msg
 viewReviewSource sourceName sourceClass =
     div [ class ("book-detail__review-card book-detail__review-card--" ++ sourceClass) ]
         [ div [ class "book-detail__review-header" ]
-            [ span [ class "book-detail__review-source" ] [ text sourceName ]
+            [ div [ class "book-detail__review-icon" ] []
+            , span [ class "book-detail__review-source" ] [ text sourceName ]
             ]
         , div [ class "book-detail__review-body" ]
-            [ p [ class "stub-notice" ] [ text "Sentiment data coming soon" ]
+            [ div [ class "book-detail__review-sentiment", attribute "aria-label" "Sentiment data not yet available" ] []
+            , p [ class "stub-notice" ] [ text "Sentiment data coming soon" ]
             ]
         ]
 
 
 viewPricesSection : Html Msg
 viewPricesSection =
-    section [ class "book-detail__section book-detail__prices" ]
-        [ h3 [ class "book-detail__section-title" ] [ text "Where to Buy (ZAR)" ]
-        , div [ class "book-detail__prices-grid" ]
-            [ p [ class "stub-notice" ]
-                [ text "Bookshop price comparison coming soon" ]
-            ]
+    section [ class "book-detail__section book-detail__prices", attribute "role" "region", attribute "aria-labelledby" "section-prices" ]
+        [ h3 [ class "book-detail__section-title", id "section-prices" ] [ text "Where to Buy (ZAR)" ]
+        , div [ class "book-detail__prices-list" ] []
+        , p [ class "book-detail__prices-empty" ]
+            [ text "No bookshop listings yet" ]
         ]
 
 
@@ -398,8 +581,8 @@ viewAuthorSection : Book -> Html Msg
 viewAuthorSection book =
     case book.author of
         Just author ->
-            section [ class "book-detail__section book-detail__author-card" ]
-                [ h3 [ class "book-detail__section-title" ] [ text "The Author" ]
+            section [ class "book-detail__section book-detail__author-card", attribute "role" "region", attribute "aria-labelledby" "section-author" ]
+                [ h3 [ class "book-detail__section-title", id "section-author" ] [ text "The Author" ]
                 , div [ class "book-detail__author-info" ]
                     [ div [ class "book-detail__author-avatar" ]
                         [ span [ class "book-detail__author-initial" ]
@@ -413,6 +596,15 @@ viewAuthorSection book =
 
                             Nothing ->
                                 text ""
+                        , case author.website of
+                            Just url ->
+                                a [ class "book-detail__author-link", href url, target "_blank" ]
+                                    [ text "Website" ]
+
+                            Nothing ->
+                                text ""
+                        , div [ class "book-detail__author-rss stub-notice" ] [ text "RSS feed coming soon" ]
+                        , div [ class "book-detail__author-events stub-notice" ] [ text "Events coming soon" ]
                         ]
                     ]
                 ]
@@ -423,21 +615,67 @@ viewAuthorSection book =
 
 viewWritingSection : Html Msg
 viewWritingSection =
-    section [ class "book-detail__section book-detail__writing" ]
-        [ h3 [ class "book-detail__section-title" ] [ text "My Writing" ]
+    section [ class "book-detail__section book-detail__writing", attribute "role" "region", attribute "aria-labelledby" "section-writing" ]
+        [ h3 [ class "book-detail__section-title", id "section-writing" ] [ text "My Writing" ]
         , div [ class "book-detail__writing-body" ]
-            [ p [ class "stub-notice" ]
+            [ div [ class "book-detail__writing-list" ] []
+            , p [ class "stub-notice" ]
                 [ text "Link your blog posts about this book" ]
-            , button [ class "btn btn--secondary btn--sm" ]
+            , button [ class "btn btn--secondary btn--sm", attribute "aria-label" "Add a blog post about this book" ]
                 [ text "Add Post" ]
             ]
         ]
 
 
+viewSignupPrompt : Html Msg
+viewSignupPrompt =
+    section [ class "book-detail__section book-detail__signup-prompt" ]
+        [ h3 [ class "book-detail__section-title" ]
+            [ text "Create an account to start organising your collection" ]
+        , a [ href "/login", class "btn btn--secondary" ]
+            [ text "Sign In or Register" ]
+        ]
+
+
+viewAddToCollection : Model -> Html Msg
+viewAddToCollection model =
+    section [ class "book-detail__section book-detail__shelf-actions", attribute "role" "region", attribute "aria-labelledby" "section-add-to-collection" ]
+        [ h3 [ class "book-detail__section-title", id "section-add-to-collection" ]
+            [ text "Add to Collection" ]
+        , if model.bookshelfMoverOpen then
+            div []
+                [ shelfMover
+                    { currentBookshelf = ""
+                    , selectedBookshelf = model.selectedBookshelf
+                    , onSelectBookshelf = SelectBookshelf
+                    , onMove = ConfirmPlace
+                    }
+                , button
+                    [ class "btn btn--ghost btn--sm"
+                    , onClick CloseBookshelfMover
+                    ]
+                    [ text "Cancel" ]
+                ]
+
+          else
+            button [ class "btn btn--secondary", onClick OpenBookshelfMover ]
+                [ text "Choose Bookshelf" ]
+        , viewMoveState model.moveState
+        ]
+
+
 viewShelfActions : Model -> Html Msg
 viewShelfActions model =
-    section [ class "book-detail__section book-detail__shelf-actions" ]
-        [ h3 [ class "book-detail__section-title" ] [ text "Move to Shelf" ]
+    section [ class "book-detail__section book-detail__shelf-actions", attribute "role" "region", attribute "aria-labelledby" "section-shelf-actions" ]
+        [ h3 [ class "book-detail__section-title", id "section-shelf-actions" ]
+            [ text
+                (if String.isEmpty model.currentBookshelf then
+                    "Move to Shelf"
+
+                 else
+                    "Move to Shelf from " ++ bookshelfLabel model.currentBookshelf
+                )
+            ]
         , if model.bookshelfMoverOpen then
             div []
                 [ shelfMover
@@ -483,7 +721,7 @@ viewDangerZone : Model -> Html Msg
 viewDangerZone model =
     section [ class "book-detail__section book-detail__danger-zone" ]
         [ button [ class "btn btn--danger btn--sm", onClick OpenRemoveModal ]
-            [ text "Remove from Bookshelf" ]
+            [ text "Remove from collection" ]
         , viewRemoveState model.removeState
         ]
 
@@ -504,3 +742,25 @@ viewRemoveState state =
         Failure _ ->
             div [ class "book-detail__status book-detail__status--error" ]
                 [ text "Failed to remove book. Please try again." ]
+
+
+bookshelfLabel : String -> String
+bookshelfLabel name =
+    case name of
+        "library" ->
+            "Library"
+
+        "antilibrary" ->
+            "Antilibrary"
+
+        "wishlist" ->
+            "Wish List"
+
+        "reading_pile" ->
+            "Reading Pile"
+
+        "looking_for_home" ->
+            "Looking for a Home"
+
+        other ->
+            other

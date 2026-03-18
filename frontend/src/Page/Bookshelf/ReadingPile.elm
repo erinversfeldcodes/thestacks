@@ -1,6 +1,6 @@
 module Page.Bookshelf.ReadingPile exposing
     ( Model
-    , Msg(..)
+    , Msg
     , OutMsg(..)
     , init
     , update
@@ -17,7 +17,7 @@ import Http
 import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers exposing (pickTexture)
-import Types.Book exposing (Book)
+import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -162,20 +162,18 @@ viewPiledBook selectedBookId index placement =
 
                 Nothing ->
                     { id = ""
-                    , isbn = ""
                     , title = "Unknown Title"
                     , author = Nothing
                     , description = Nothing
-                    , coverImageUrl = Nothing
-                    , pageCount = Just 200
-                    , publisher = Nothing
-                    , publicationYear = Nothing
+                    , editions = []
+                    , primaryEdition = Nothing
+                    , editionCount = 0
                     , subjects = []
                     , visibilityTier = Types.Book.Public
                     }
 
         pageCount =
-            Maybe.withDefault 200 bookData.pageCount
+            Maybe.withDefault 200 (bookPageCount bookData)
 
         texture =
             pickTexture bookData.title
@@ -216,7 +214,7 @@ viewPiledBook selectedBookId index placement =
                 , texture = texture
                 , title = bookData.title
                 , author = Types.Book.authorName bookData
-                , coverImageUrl = bookData.coverImageUrl
+                , coverImageUrl = bookCoverImageUrl bookData
                 }
             ]
         ]
