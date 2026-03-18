@@ -12,8 +12,15 @@ export const DEV_PASSWORD = "dev-password-123";
  */
 export const E2E_PASSWORD = "e2e-password";
 
+const AUTH_DIR = path.join(__dirname, "..", ".auth");
+
 export function suiteAuthFile(slug: string): string {
-  return path.join(__dirname, `../.auth/e2e-${slug}.json`);
+  if (!E2E_SUITES.includes(slug)) {
+    throw new Error(`Unknown E2E suite slug: ${slug}`);
+  }
+  // Safe: slug validated against fixed allowlist above, no path traversal possible.
+  const filename = "e2e-" + slug + ".json";
+  return path.join(AUTH_DIR, filename); // nosemgrep: path-join-resolve-traversal
 }
 
 export function suiteEmail(slug: string): string {
