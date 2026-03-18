@@ -17,17 +17,40 @@ defmodule StacksWeb.CatalogueControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
+  defp insert_book_with_edition(attrs \\ []) do
+    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author, :subjects]))
+
+    edition_attrs =
+      attrs
+      |> Keyword.take([:isbn])
+      |> Keyword.put(:book, book)
+      |> Keyword.put_new(:is_primary, true)
+
+    edition = insert(:book_edition, edition_attrs)
+    {book, edition}
+  end
+
   describe "GET /api/catalogue" do
-    test "returns 401 when not authenticated", %{conn: conn} do
+    test "returns 200 when not authenticated (public endpoint)", %{conn: conn} do
       conn = get(conn, "/api/catalogue")
-      assert json_response(conn, 401)
+      assert %{"books" => _, "total" => _} = json_response(conn, 200)
     end
 
     test "returns paginated books with no ownership data", %{conn: conn} do
       user = insert(:user)
       author = insert(:author, name: "George Eliot")
-      insert(:book, title: "Middlemarch", author: author, visibility_tier: "public")
-      insert(:book, title: "Silas Marner", author: author, visibility_tier: "public")
+
+      insert_book_with_edition(
+        title: "Middlemarch",
+        author: author,
+        visibility_tier: "public"
+      )
+
+      insert_book_with_edition(
+        title: "Silas Marner",
+        author: author,
+        visibility_tier: "public"
+      )
 
       conn =
         conn
@@ -49,14 +72,15 @@ defmodule StacksWeb.CatalogueControllerTest do
         refute Map.has_key?(book, "owner_count")
         assert Map.has_key?(book, "id")
         assert Map.has_key?(book, "title")
-        assert Map.has_key?(book, "isbn")
+        assert Map.has_key?(book, "editions")
+        assert Map.has_key?(book, "primary_edition")
       end
     end
 
     test "sorts by title ascending by default", %{conn: conn} do
       user = insert(:user)
-      insert(:book, title: "Zebra Book")
-      insert(:book, title: "Aardvark Book")
+      insert_book_with_edition(title: "Zebra Book")
+      insert_book_with_edition(title: "Aardvark Book")
 
       conn =
         conn
@@ -70,8 +94,8 @@ defmodule StacksWeb.CatalogueControllerTest do
 
     test "sorts by recent when requested", %{conn: conn} do
       user = insert(:user)
-      insert(:book, title: "Old Book")
-      insert(:book, title: "New Book")
+      insert_book_with_edition(title: "Old Book")
+      insert_book_with_edition(title: "New Book")
 
       conn =
         conn
@@ -79,14 +103,13 @@ defmodule StacksWeb.CatalogueControllerTest do
         |> get("/api/catalogue", %{"sort" => "recent"})
 
       %{"books" => books} = json_response(conn, 200)
-      # Most recent first — "New Book" was inserted last
       assert List.first(books)["title"] == "New Book"
     end
 
     test "filters by subject", %{conn: conn} do
       user = insert(:user)
-      insert(:book, title: "Fiction Book", subjects: ["fiction", "drama"])
-      insert(:book, title: "Science Book", subjects: ["science"])
+      insert_book_with_edition(title: "Fiction Book", subjects: ["fiction", "drama"])
+      insert_book_with_edition(title: "Science Book", subjects: ["science"])
 
       conn =
         conn
@@ -102,7 +125,7 @@ defmodule StacksWeb.CatalogueControllerTest do
       user = insert(:user)
 
       for i <- 1..5 do
-        insert(:book, title: "Book #{String.pad_leading(to_string(i), 2, "0")}")
+        insert_book_with_edition(title: "Book #{String.pad_leading(to_string(i), 2, "0")}")
       end
 
       conn =
@@ -118,8 +141,8 @@ defmodule StacksWeb.CatalogueControllerTest do
 
     test "includes age_gated books in catalogue listing", %{conn: conn} do
       user = insert(:user)
-      insert(:book, title: "Normal Book", visibility_tier: "public")
-      insert(:book, title: "Age Gated Book", visibility_tier: "age_gated")
+      insert_book_with_edition(title: "Normal Book", visibility_tier: "public")
+      insert_book_with_edition(title: "Age Gated Book", visibility_tier: "age_gated")
 
       conn =
         conn
@@ -135,7 +158,7 @@ defmodule StacksWeb.CatalogueControllerTest do
     test "returns author data when present", %{conn: conn} do
       user = insert(:user)
       author = insert(:author, name: "Jane Austen")
-      insert(:book, title: "Pride and Prejudice", author: author)
+      insert_book_with_edition(title: "Pride and Prejudice", author: author)
 
       conn =
         conn
@@ -149,7 +172,7 @@ defmodule StacksWeb.CatalogueControllerTest do
     test "multi-word search returns results without crashing", %{conn: conn} do
       user = insert(:user)
       author = insert(:author, name: "F. Scott Fitzgerald")
-      insert(:book, title: "The Great Gatsby", author: author)
+      insert_book_with_edition(title: "The Great Gatsby", author: author)
 
       conn =
         conn
@@ -162,7 +185,7 @@ defmodule StacksWeb.CatalogueControllerTest do
 
     test "returns null author for books without an author", %{conn: conn} do
       user = insert(:user)
-      insert(:book, title: "Anonymous Book")
+      insert_book_with_edition(title: "Anonymous Book")
 
       conn =
         conn
