@@ -152,7 +152,7 @@ For each story:
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/user-stories.md
-/Users/erinversfeld/thestacks/README.md (product vision and aesthetic)
-/Users/erinversfeld/thestacks/CLAUDE.md (design principles)
+./docs/user-stories.md
+./README.md (product vision and aesthetic)
+./CLAUDE.md (design principles)
 ```

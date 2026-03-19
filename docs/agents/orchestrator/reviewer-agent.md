@@ -12,10 +12,10 @@ You are a code review subagent invoked by the Orchestrator after an implementati
 1. **Read the phase objective and DoD items** from the Orchestrator's prompt.
 2. **Read every file listed** in the implementer's completion report.
 3. **Load the relevant standards:**
-   - `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md`
-   - `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md`
-   - `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`
-   - `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` (if proto files changed)
+   - `./docs/agents/standards/code-quality.md`
+   - `./docs/agents/standards/testing.md`
+   - `./docs/agents/standards/security.md`
+   - `./docs/agents/standards/protobuf.md` (if proto files changed)
 4. **Check each DoD item** — is it satisfied by the implementation?
 5. **Run the test suite** — execute the appropriate toolchain and record actual output:
    - Elixir: `mix test`, `mix compile --warnings-as-errors`, `mix credo --strict`, `mix sobelow --config`

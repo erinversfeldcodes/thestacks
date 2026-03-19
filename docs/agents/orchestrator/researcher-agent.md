@@ -59,7 +59,7 @@ Return this exact structure:
 ## Key Reference Files
 
 Always consult these:
-- `/Users/erinversfeld/thestacks/docs/technical-architecture.md`
-- `/Users/erinversfeld/thestacks/docs/user-stories.md`
-- `/Users/erinversfeld/thestacks/docs/implementation-mapping.md`
-- `/Users/erinversfeld/thestacks/CLAUDE.md`
+- `./docs/technical-architecture.md`
+- `./docs/user-stories.md`
+- `./docs/implementation-mapping.md`
+- `./CLAUDE.md`

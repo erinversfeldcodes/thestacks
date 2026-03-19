@@ -168,30 +168,30 @@ All of the above, plus:
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/CLAUDE.md
-/Users/erinversfeld/thestacks/AGENTS.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md
-/Users/erinversfeld/thestacks/docs/user-stories.md
-/Users/erinversfeld/thestacks/docs/implementation-mapping.md
-/Users/erinversfeld/thestacks/plans/consolidated-roadmap.md
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/testing.md
-/Users/erinversfeld/thestacks/docs/agents/standards/security.md
-/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md
+./CLAUDE.md
+./AGENTS.md
+./docs/technical-architecture.md
+./docs/user-stories.md
+./docs/implementation-mapping.md
+./plans/consolidated-roadmap.md
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/testing.md
+./docs/agents/standards/security.md
+./docs/agents/standards/protobuf.md
 ```
 
 **For deep-dive reviews, also load:**
 ```
-/Users/erinversfeld/thestacks/docs/agents/reviewers/ux-reviewer.md
-/Users/erinversfeld/thestacks/docs/agents/reviewers/contract-reviewer.md
-/Users/erinversfeld/thestacks/docs/agents/reviewers/elixir-reviewer.md
-/Users/erinversfeld/thestacks/docs/agents/reviewers/elm-reviewer.md
-/Users/erinversfeld/thestacks/docs/agents/reviewers/database-reviewer.md
-/Users/erinversfeld/thestacks/docs/agents/reviewers/platform-reviewer.md
-/Users/erinversfeld/thestacks/plans/*-retro.md (all retrospective files)
-/Users/erinversfeld/thestacks/docs/capacity-model.md (if exists)
-/Users/erinversfeld/thestacks/docs/runbooks/ (all runbooks)
-/Users/erinversfeld/thestacks/docs/decisions/ (all ADRs)
+./docs/agents/reviewers/ux-reviewer.md
+./docs/agents/reviewers/contract-reviewer.md
+./docs/agents/reviewers/elixir-reviewer.md
+./docs/agents/reviewers/elm-reviewer.md
+./docs/agents/reviewers/database-reviewer.md
+./docs/agents/reviewers/platform-reviewer.md
+./plans/*-retro.md (all retrospective files)
+./docs/capacity-model.md (if exists)
+./docs/runbooks/ (all runbooks)
+./docs/decisions/ (all ADRs)
 ```
 
 ## Pre-approved Commands
