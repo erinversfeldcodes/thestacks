@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.84-alpine AS builder
+FROM rust:1.87-alpine AS builder
 
 RUN apk add --no-cache musl-dev=1.2.5-r9 && rustup target add x86_64-unknown-linux-musl
 
