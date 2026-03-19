@@ -42,8 +42,10 @@ README.md
 # Scripts (not needed inside container)
 scripts
 
-# Proto (compiled outputs committed; raw protos not needed)
-proto
+# Proto — raw schemas not needed, but proto/gen/elm/ has committed Elm decoders required for build
+proto/stacks
+proto/buf.yaml
+proto/buf.gen.yaml
 
 # Test fixtures / images (only e2e needs them, not runtime)
 e2e

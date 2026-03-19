@@ -1,7 +1,8 @@
 version: v2
 lint:
   use:
-    - DEFAULT
+    - STANDARD
+  enum_zero_value_suffix: _UNSPECIFIED
 breaking:
   use:
-    - FILE
+    - WIRE

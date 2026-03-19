@@ -1,0 +1,111 @@
+// book.proto — Shared book, edition, author, and ISBN types used across domains.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "BookProto";
+option java_multiple_files = true;
+
+// ISBNFormat distinguishes the two standard ISBN formats.
+enum ISBNFormat {
+  ISBN_FORMAT_UNSPECIFIED = 0;
+  ISBN_FORMAT_ISBN_10 = 1;
+  ISBN_FORMAT_ISBN_13 = 2;
+}
+
+// EditionFormat represents the physical or digital form of a book edition.
+enum EditionFormat {
+  EDITION_FORMAT_UNSPECIFIED = 0;
+  EDITION_FORMAT_HARDCOVER = 1;
+  EDITION_FORMAT_PAPERBACK = 2;
+  EDITION_FORMAT_EBOOK = 3;
+  EDITION_FORMAT_AUDIOBOOK = 4;
+  EDITION_FORMAT_LARGE_PRINT = 5;
+}
+
+// VisibilityTier controls who can see a book or placement.
+enum VisibilityTier {
+  VISIBILITY_TIER_UNSPECIFIED = 0;
+  VISIBILITY_TIER_PUBLIC = 1;
+  VISIBILITY_TIER_UNLISTED = 2;
+  VISIBILITY_TIER_PRIVATE = 3;
+}
+
+// ISBN is a verified book identifier. The hard gate: no book enters the system
+// without a verified ISBN from Open Library or Google Books.
+message ISBN {
+  // The raw ISBN value (digits only, no hyphens).
+  string value = 1 [json_name = "value"];
+
+  // Whether this is an ISBN-10 or ISBN-13.
+  ISBNFormat format = 2 [json_name = "format"];
+}
+
+// Author represents a person who wrote or contributed to a book (work-level).
+message Author {
+  // UUID of the author record.
+  string id = 1 [json_name = "id"];
+
+  // Full display name of the author.
+  string name = 2 [json_name = "name"];
+
+  // Optional author website URL.
+  string website_url = 3 [json_name = "website_url"];
+
+  // Optional RSS/Atom feed URL for the author's blog or newsletter.
+  string rss_feed_url = 4 [json_name = "rss_feed_url"];
+}
+
+// Book represents a work (the abstract creative work, not a specific edition).
+// A work may have many editions (different ISBNs, formats, publishers).
+message Book {
+  // UUID of the book (work) record.
+  string id = 1 [json_name = "id"];
+
+  // Title of the work.
+  string title = 2 [json_name = "title"];
+
+  // UUID of the primary author.
+  string author_id = 3 [json_name = "author_id"];
+
+  // Short description or blurb for the work.
+  string description = 4 [json_name = "description"];
+
+  // Subject/genre tags (e.g. "fiction", "philosophy").
+  repeated string subjects = 5 [json_name = "subjects"];
+
+  // Who can see this book on the platform.
+  VisibilityTier visibility_tier = 6 [json_name = "visibility_tier"];
+}
+
+// Edition represents a specific ISBN/format/publisher combination of a Book work.
+message Edition {
+  // UUID of the edition record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the parent Book (work).
+  string book_id = 2 [json_name = "book_id"];
+
+  // Verified ISBN for this edition. Required — the ISBN hard gate applies.
+  ISBN isbn = 3 [json_name = "isbn"];
+
+  // Physical or digital format of this edition.
+  EditionFormat format = 4 [json_name = "format"];
+
+  // Whether this is the canonical/preferred edition for the work.
+  bool is_primary = 5 [json_name = "is_primary"];
+
+  // URL of the cover image (may be empty if not yet fetched).
+  string cover_image_url = 6 [json_name = "cover_image_url"];
+
+  // Total page count for print editions (0 if unknown or not applicable).
+  int32 page_count = 7 [json_name = "page_count"];
+
+  // Publisher name.
+  string publisher = 8 [json_name = "publisher"];
+
+  // Year of publication for this edition (4-digit year, e.g. 2024).
+  int32 publication_year = 9 [json_name = "publication_year"];
+}
