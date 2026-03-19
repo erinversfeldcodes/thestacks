@@ -32,6 +32,10 @@ defmodule Stacks.AI.MockClient do
      }}
   end
 
+  def call_vision("associate", %{isbn: isbn, edition_id: edition_id}) do
+    {:ok, %{"job_id" => "mock-job-#{isbn}-#{edition_id}"}}
+  end
+
   def call_vision("classify_subjects", _payload) do
     {:ok, %{"subjects" => ["fiction", "classic"], "bisac_codes" => ["FIC000000"]}}
   end

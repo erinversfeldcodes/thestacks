@@ -151,4 +151,19 @@ defmodule Stacks.BooksTest do
       assert [] == Books.search_books("ZZZNoMatchZZZ")
     end
   end
+
+  describe "confirm_cover_association/2" do
+    test "updates cover_image_url on a known edition" do
+      edition = insert(:book_edition)
+      cover_url = "https://example.com/cover.jpg"
+
+      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
+      assert updated.cover_image_url == cover_url
+    end
+
+    test "returns {:error, :not_found} for an unknown edition_id" do
+      assert {:error, :not_found} =
+               Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
+    end
+  end
 end

@@ -21,6 +21,10 @@ pub struct PriceResult {
     /// Direct URL to the product page, if extractable.
     pub url: Option<String>,
     pub title: Option<String>,
+    /// Fraction of CSS selectors defined in the store config that matched at
+    /// least one element in the scraped HTML. Used for source health monitoring.
+    /// Always `Some` (price is always defined, so denominator ≥ 1). Range [0.0, 1.0].
+    pub selector_match_rate: Option<f64>,
 }
 
 /// The scrape engine. Handles HTTP fetching, robots.txt, and rate limiting.
@@ -151,6 +155,34 @@ impl Engine {
             Some(page_url.to_string())
         };
 
+        // Compute selector match rate: fraction of defined selectors that
+        // matched at least one element in the scraped HTML.
+        let mut total: u32 = 1; // price is always defined
+        let mut matched: u32 = if selector_matches_any(html, &config.selectors.price) {
+            1
+        } else {
+            0
+        };
+        if let Some(sel) = &config.selectors.title {
+            total += 1;
+            if selector_matches_any(html, sel) {
+                matched += 1;
+            }
+        }
+        if let Some(sel) = &config.selectors.in_stock {
+            total += 1;
+            if selector_matches_any(html, sel) {
+                matched += 1;
+            }
+        }
+        if let Some(sel) = &config.selectors.product_url {
+            total += 1;
+            if selector_matches_any(html, sel) {
+                matched += 1;
+            }
+        }
+        let selector_match_rate = Some(matched as f64 / total as f64);
+
         Ok(PriceResult {
             isbn: isbn.to_string(),
             store: store_id.to_string(),
@@ -159,6 +191,7 @@ impl Engine {
             in_stock,
             url,
             title,
+            selector_match_rate,
         })
     }
 }
@@ -167,6 +200,17 @@ impl Default for Engine {
     fn default() -> Self {
         Self::new().expect("failed to build scrape engine")
     }
+}
+
+/// Returns true if `selector_str` parses as a valid CSS selector and matches
+/// at least one element in `html`. Returns false for unparseable selectors
+/// rather than panicking.
+fn selector_matches_any(html: &str, selector_str: &str) -> bool {
+    let Ok(sel) = scraper::Selector::parse(selector_str) else {
+        return false;
+    };
+    let document = scraper::Html::parse_document(html);
+    document.select(&sel).next().is_some()
 }
 
 fn extract_domain(url: &str) -> Option<String> {
@@ -327,6 +371,216 @@ respect_robots_txt = false
             .unwrap();
 
         assert_eq!(result.price_cents, None);
+    }
+
+    // ------------------------------------------------------------------
+    // selector_match_rate tests
+    // ------------------------------------------------------------------
+
+    /// Helper: build a config with only the price selector.
+    fn price_only_config() -> ScraperConfig {
+        ScraperConfig::from_toml_str(
+            r#"
+[source]
+name = "Match Rate Test Store"
+country = "ZA"
+url = "https://matchrate.example.com"
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+
+[selectors]
+price = ".price"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 60
+respect_robots_txt = false
+"#,
+        )
+        .unwrap()
+    }
+
+    /// Helper: build a config with price + title selectors.
+    fn price_and_title_config() -> ScraperConfig {
+        ScraperConfig::from_toml_str(
+            r#"
+[source]
+name = "Match Rate Test Store"
+country = "ZA"
+url = "https://matchrate.example.com"
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+
+[selectors]
+price = ".price"
+title = ".title"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 60
+respect_robots_txt = false
+"#,
+        )
+        .unwrap()
+    }
+
+    /// Helper: build a config with all four selectors defined.
+    fn all_selectors_config() -> ScraperConfig {
+        ScraperConfig::from_toml_str(
+            r#"
+[source]
+name = "Match Rate Test Store"
+country = "ZA"
+url = "https://matchrate.example.com"
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+
+[selectors]
+price = ".price"
+title = ".title"
+in_stock = ".in-stock"
+product_url = ".product-url"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 60
+respect_robots_txt = false
+"#,
+        )
+        .unwrap()
+    }
+
+    /// Test case 1: all selectors defined and all match → rate = 1.0
+    #[tokio::test]
+    async fn test_selector_match_rate_all_defined_all_match() {
+        let html = r#"<html><body>
+            <span class="price">R 100.00</span>
+            <h1 class="title">A Book</h1>
+            <span class="in-stock">In Stock</span>
+            <a class="product-url" href="/book/123">View</a>
+        </body></html>"#;
+
+        let mut fixtures = HashMap::new();
+        fixtures.insert("test/all_selectors".to_string(), html.to_string());
+
+        let engine = Engine::new_mock(fixtures);
+        let config = all_selectors_config();
+        let result = engine
+            .scrape("9780679410232", "test/all_selectors", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.selector_match_rate,
+            Some(1.0),
+            "all 4 selectors defined and matched → rate should be 1.0"
+        );
+    }
+
+    /// Test case 2: price + title defined, price matches, title does not → rate = 0.5
+    #[tokio::test]
+    async fn test_selector_match_rate_two_defined_one_matches() {
+        let html = r#"<html><body>
+            <span class="price">R 100.00</span>
+        </body></html>"#;
+
+        let mut fixtures = HashMap::new();
+        fixtures.insert("test/price_title".to_string(), html.to_string());
+
+        let engine = Engine::new_mock(fixtures);
+        let config = price_and_title_config();
+        let result = engine
+            .scrape("9780679410232", "test/price_title", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.selector_match_rate,
+            Some(0.5),
+            "2 selectors defined (price matched, title not) → rate should be 0.5"
+        );
+    }
+
+    /// Test case 3: only price selector defined, price matches → rate = 1.0
+    #[tokio::test]
+    async fn test_selector_match_rate_only_price_matches() {
+        let html = r#"<html><body>
+            <span class="price">R 100.00</span>
+        </body></html>"#;
+
+        let mut fixtures = HashMap::new();
+        fixtures.insert("test/price_only".to_string(), html.to_string());
+
+        let engine = Engine::new_mock(fixtures);
+        let config = price_only_config();
+        let result = engine
+            .scrape("9780679410232", "test/price_only", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.selector_match_rate,
+            Some(1.0),
+            "only price selector defined and it matched → rate should be 1.0"
+        );
+    }
+
+    /// Test case 4: only price selector defined, price does NOT match → rate = 0.0
+    #[tokio::test]
+    async fn test_selector_match_rate_only_price_no_match() {
+        let html = r#"<html><body>
+            <span class="other-price">R 100.00</span>
+        </body></html>"#;
+
+        let mut fixtures = HashMap::new();
+        fixtures.insert("test/price_miss".to_string(), html.to_string());
+
+        let engine = Engine::new_mock(fixtures);
+        let config = price_only_config();
+        let result = engine
+            .scrape("9780679410232", "test/price_miss", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.selector_match_rate,
+            Some(0.0),
+            "only price selector defined but it did not match → rate should be 0.0"
+        );
+    }
+
+    /// Test case 5: all 4 selectors defined, 2 match → rate = 0.5
+    #[tokio::test]
+    async fn test_selector_match_rate_four_defined_two_match() {
+        let html = r#"<html><body>
+            <span class="price">R 100.00</span>
+            <h1 class="title">A Book</h1>
+        </body></html>"#;
+
+        let mut fixtures = HashMap::new();
+        fixtures.insert("test/four_two_match".to_string(), html.to_string());
+
+        let engine = Engine::new_mock(fixtures);
+        let config = all_selectors_config();
+        let result = engine
+            .scrape("9780679410232", "test/four_two_match", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.selector_match_rate,
+            Some(0.5),
+            "4 selectors defined, 2 matched → rate should be 0.5"
+        );
     }
 
     #[tokio::test]
