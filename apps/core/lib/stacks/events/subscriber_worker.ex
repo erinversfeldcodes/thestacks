@@ -27,6 +27,7 @@ defmodule Stacks.Events.SubscriberWorker do
       {:ok, event} ->
         event = Upcaster.upcast(event)
         dispatch(event)
+        mark_published(event.id)
         :ok
 
       {:error, :not_found} ->
@@ -57,6 +58,14 @@ defmodule Stacks.Events.SubscriberWorker do
       nil -> {:error, :not_found}
       event -> {:ok, event}
     end
+  end
+
+  defp mark_published(id_bin) do
+    Repo.update_all(
+      from(e in "event_log", where: e.id == ^id_bin),
+      [set: [published_at: DateTime.utc_now()]],
+      prefix: "op"
+    )
   end
 
   defp dispatch(event) do

@@ -1,6 +1,8 @@
 defmodule Stacks.Events.SubscriberWorkerTest do
   use Core.DataCase, async: true
 
+  import Ecto.Query
+
   alias Stacks.Events
   alias Stacks.Events.SubscriberWorker
 
@@ -19,6 +21,46 @@ defmodule Stacks.Events.SubscriberWorkerTest do
   end
 
   describe "perform/1" do
+    test "sets published_at on the event_log row after successful dispatch" do
+      {:ok, params} =
+        Events.emit(%{
+          event_type: "test.published_at",
+          aggregate_type: "test",
+          aggregate_id: Ecto.UUID.generate()
+        })
+
+      event_id = Ecto.UUID.cast!(params.id)
+      event_id_bin = Ecto.UUID.dump!(event_id)
+
+      # published_at is null before dispatch
+      before =
+        Core.Repo.one(
+          from(e in "event_log",
+            where: e.id == ^event_id_bin,
+            select: %{published_at: e.published_at}
+          ),
+          prefix: "op"
+        )
+
+      assert is_nil(before.published_at)
+
+      job = %Oban.Job{args: %{"event_id" => event_id}}
+      assert :ok = SubscriberWorker.perform(job)
+
+      # published_at is set after dispatch
+      after_dispatch =
+        Core.Repo.one(
+          from(e in "event_log",
+            where: e.id == ^event_id_bin,
+            select: %{published_at: e.published_at}
+          ),
+          prefix: "op"
+        )
+
+      # Schemaless Ecto queries return utc_datetime_usec as NaiveDateTime.
+      assert %NaiveDateTime{} = after_dispatch.published_at
+    end
+
     test "returns :ok when event exists and has no registered handlers" do
       {:ok, params} =
         Events.emit(%{
