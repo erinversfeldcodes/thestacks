@@ -7,8 +7,12 @@ defmodule Stacks.Factory do
   use ExMachina.Ecto, repo: Core.Repo
 
   alias Stacks.Accounts.User
+  alias Stacks.Blog.{Post, PostBookAssociation}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+  alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
+  alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   def user_factory do
     %User{
@@ -93,6 +97,138 @@ defmodule Stacks.Factory do
       from_bookshelf: Ecto.UUID.generate(),
       to_bookshelf: Ecto.UUID.generate(),
       moved_at: DateTime.utc_now()
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Social
+  # ---------------------------------------------------------------------------
+
+  def user_block_factory do
+    %UserBlock{
+      blocker: build(:user),
+      blocked: build(:user)
+    }
+  end
+
+  def group_factory do
+    %Group{
+      owner: build(:user),
+      name: sequence(:group_name, &"Group #{&1}"),
+      type: "close_friends",
+      visibility: "invite_only"
+    }
+  end
+
+  def group_member_factory do
+    %GroupMember{
+      group: build(:group),
+      user: build(:user),
+      role: "member"
+    }
+  end
+
+  def group_invitation_factory do
+    %GroupInvitation{
+      group: build(:group),
+      invited_by_user: build(:user),
+      invited_user: build(:user),
+      status: "pending"
+    }
+  end
+
+  def visibility_grant_factory do
+    %VisibilityGrant{
+      resource_type: "bookshelf",
+      resource_id: Ecto.UUID.generate(),
+      granted_to: build(:user),
+      granted_by: build(:user)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Blog
+  # ---------------------------------------------------------------------------
+
+  def post_factory do
+    %Post{
+      user: build(:user),
+      title: sequence(:post_title, &"Post #{&1}"),
+      body: "Some markdown body.",
+      visibility: "owner"
+    }
+  end
+
+  def post_book_association_factory do
+    %PostBookAssociation{
+      post: build(:post),
+      book: build(:book),
+      confidence: 0.9,
+      reasoning: "Thematic overlap.",
+      source: "llm",
+      visible: true
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Marketplace
+  # ---------------------------------------------------------------------------
+
+  def offer_thread_factory do
+    %OfferThread{
+      placement: build(:placement),
+      buyer: build(:user),
+      status: "open"
+    }
+  end
+
+  def offer_message_factory do
+    %OfferMessage{
+      thread: build(:offer_thread),
+      sender: build(:user),
+      type: "message",
+      body: "Is this still available?",
+      amount_cents: nil
+    }
+  end
+
+  def listing_factory do
+    %Listing{
+      book: build(:book),
+      seller: build(:user),
+      status: "draft",
+      pricing_mode: "fixed",
+      price_cents: 15_000,
+      currency: "ZAR",
+      condition: "good",
+      description: "Good condition."
+    }
+  end
+
+  def transaction_factory do
+    %Transaction{
+      listing: build(:listing),
+      buyer: build(:user),
+      seller: build(:user),
+      amount_cents: 15_000,
+      currency: "ZAR",
+      payment_provider_ref: sequence(:payment_ref, &"stitch-#{&1}"),
+      payment_status: "pending"
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Monitoring
+  # ---------------------------------------------------------------------------
+
+  def source_health_check_factory do
+    %SourceHealthCheck{
+      source_name: sequence(:source_name, &"source-#{&1}"),
+      source_type: "scraper_config",
+      status: "healthy",
+      consecutive_failures: 0,
+      total_successes: 10,
+      total_failures: 0
     }
   end
 end
