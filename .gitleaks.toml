@@ -14,7 +14,7 @@ paths = [
 [[allowlists]]
 description = "Ignore local dev env files (gitignored, never committed)"
 paths = [
-    '''^\.env$''',
-    '''^\.env\.local$''',
-    '''^\.env\..+\.local$''',
+    '''(^|/)\.env$''',
+    '''(^|/)\.env\.local$''',
+    '''(^|/)\.env\..+\.local$''',
 ]

@@ -1,0 +1,12 @@
+# Paths excluded from trufflehog filesystem scans.
+# Newline-separated regexes matched against file paths.
+
+# Local dev secret files — gitignored, legitimate storage for credentials
+\.env$
+\.env\..*
+
+# Compiled Rust artifacts — large binaries, no source secrets
+apps/scraper/target/
+
+# Python venv — third-party libraries, no project secrets
+apps/vision/\.venv/
