@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # pre-push hook — runs before every `git push`.
 #
-# On first push of a branch:
+# On first push of a branch named after an issue (issues/<branch>.md exists):
 #   1. Creates a GitHub issue from issues/<branch>.md
 #   2. Opens a draft PR linked to the issue
 #
-# On every push (including first):
+# On every push (including first), if a PR exists:
 #   3. Runs `just ci` and updates the PR description with a CI summary table
+#
+# For branches not named after an issue:
+#   - If an open PR exists → still runs CI and updates the PR description
+#   - If no PR exists → skips (print a hint to create an issue file)
 #
 # Skip everything: git push --no-verify
 #   The PR description will retain whatever it last showed (or "not yet run"

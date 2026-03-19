@@ -1,4 +1,6 @@
 version: v2
+inputs:
+  - directory: stacks
 plugins:
   - remote: buf.build/protocolbuffers/elixir
     out: ../apps/core/lib/proto/gen

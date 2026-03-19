@@ -96,6 +96,54 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
+  describe "POST /api/auth/forgot-password" do
+    test "returns 200 for a registered email", %{conn: conn} do
+      insert(:user, email: "forgotme@example.com")
+      conn = post(conn, "/api/auth/forgot-password", %{email: "forgotme@example.com"})
+
+      assert %{"message" => _} = json_response(conn, 200)
+    end
+
+    test "returns 200 for an unregistered email (no enumeration)", %{conn: conn} do
+      conn = post(conn, "/api/auth/forgot-password", %{email: "nobody@example.com"})
+
+      assert %{"message" => _} = json_response(conn, 200)
+    end
+
+    test "returns 422 when email param is missing", %{conn: conn} do
+      conn = post(conn, "/api/auth/forgot-password", %{})
+
+      assert json_response(conn, 422)
+    end
+  end
+
+  describe "POST /api/auth/reset-password" do
+    test "returns 200 with a valid reset token", %{conn: conn} do
+      user = insert(:user)
+      Stacks.Email.send_password_reset(user.email)
+      updated_user = Core.Repo.reload!(user)
+      token = updated_user.password_reset_token
+
+      conn =
+        post(conn, "/api/auth/reset-password", %{token: token, password: "newpassword123"})
+
+      assert %{"message" => _} = json_response(conn, 200)
+    end
+
+    test "returns 400 with an invalid token", %{conn: conn} do
+      conn =
+        post(conn, "/api/auth/reset-password", %{token: "bad-token", password: "newpassword123"})
+
+      assert json_response(conn, 400)
+    end
+
+    test "returns 422 when params are missing", %{conn: conn} do
+      conn = post(conn, "/api/auth/reset-password", %{})
+
+      assert json_response(conn, 422)
+    end
+  end
+
   describe "integration: register → login → access protected route → logout" do
     test "full auth flow works end to end", %{conn: conn} do
       # Register

@@ -13,9 +13,15 @@ if ! find proto/ -name "*.proto" -print -quit 2>/dev/null | grep -q .; then
     exit 0
 fi
 
-buf lint proto/
+# buf v2 requires running from inside the module directory (where buf.yaml lives).
+(cd proto && buf lint)
 
-# Backward-compatibility check (only meaningful when there's a prior committed state)
+# Backward-compatibility check — only run if origin/main already has .proto files.
+# Skipped on first-commit of proto schemas (no baseline to compare against).
 if git rev-parse --verify origin/main &>/dev/null 2>&1; then
-    buf breaking proto/ --against '.git#branch=origin/main'
+    if git ls-tree -r origin/main --name-only 2>/dev/null | grep -q '\.proto$'; then
+        (cd proto && buf breaking --against '../.git#branch=origin/main,subdir=proto')
+    else
+        echo "No .proto files on origin/main — skipping buf breaking check."
+    fi
 fi

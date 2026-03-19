@@ -1,0 +1,38 @@
+// location.proto — Country, City, and Coordinates types used for partner spaces and physical locations.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "LocationProto";
+option java_multiple_files = true;
+
+// Country represents a nation identified by its ISO 3166-1 alpha-2 code.
+message Country {
+  // ISO 3166-1 alpha-2 country code (e.g. "ZA", "GB", "US").
+  string code = 1 [json_name = "code"];
+
+  // Human-readable country name (e.g. "South Africa").
+  string name = 2 [json_name = "name"];
+}
+
+// City represents a city within a country.
+message City {
+  // City name (e.g. "Cape Town").
+  string name = 1 [json_name = "name"];
+
+  // ISO 3166-1 alpha-2 code of the country this city is in.
+  string country_code = 2 [json_name = "country_code"];
+}
+
+// Coordinates represents a geographic point on the Earth's surface.
+message Coordinates {
+  // Latitude in decimal degrees (positive = north, negative = south).
+  // Range: -90.0 to 90.0.
+  double latitude = 1 [json_name = "latitude"];
+
+  // Longitude in decimal degrees (positive = east, negative = west).
+  // Range: -180.0 to 180.0.
+  double longitude = 2 [json_name = "longitude"];
+}

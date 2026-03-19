@@ -13,6 +13,7 @@ kill_timeout = "5s"
   PHX_HOST = "thestacks.fly.dev"
   PORT = "4000"
   ECTO_IPV6 = "true"
+  SEARXNG_URL = "http://thestacks-searxng.internal:8080"
 
 [http_service]
   internal_port = 4000

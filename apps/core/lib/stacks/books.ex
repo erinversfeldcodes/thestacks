@@ -313,6 +313,39 @@ defmodule Stacks.Books do
     |> Repo.all()
   end
 
+  @doc """
+  Update cover_image_url on a book edition after the vision sidecar confirms the association.
+  Emits a book.cover_confirmed event.
+  Returns {:ok, edition} or {:error, reason}.
+  """
+  @spec confirm_cover_association(String.t(), String.t()) ::
+          {:ok, BookEdition.t()} | {:error, :not_found} | {:error, Ecto.Changeset.t()}
+  def confirm_cover_association(edition_id, cover_url) do
+    case Repo.get(BookEdition, edition_id) do
+      nil ->
+        {:error, :not_found}
+
+      edition ->
+        changeset = BookEdition.changeset(edition, %{cover_image_url: cover_url})
+
+        case Repo.update(changeset) do
+          {:ok, updated} ->
+            Events.emit(%{
+              event_type: "book.cover_confirmed",
+              aggregate_type: "book_edition",
+              aggregate_id: updated.id,
+              payload: %{cover_image_url: cover_url},
+              metadata: %{actor: "vision_sidecar"}
+            })
+
+            {:ok, updated}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
   defp maybe_create_author(changeset, %{"author" => name}) when is_binary(name) and name != "" do
     case find_or_create_author(name) do
       {:ok, author} -> Ecto.Changeset.put_change(changeset, :author_id, author.id)

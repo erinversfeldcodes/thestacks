@@ -1,7 +1,10 @@
 version: v2
 lint:
   use:
-    - DEFAULT
+    - STANDARD
+    - COMMENTS
+  enum_zero_value_suffix: _UNSPECIFIED
+  disallow_comment_ignores: true
 breaking:
   use:
     - FILE

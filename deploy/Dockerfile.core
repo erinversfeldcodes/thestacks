@@ -36,9 +36,12 @@ WORKDIR /app
 COPY apps/core/assets/build.js apps/core/assets/build.js
 COPY apps/core/assets/js apps/core/assets/js
 
-# Copy frontend sources directly into the paths build.js expects
+# Copy frontend sources directly into the paths build.js expects.
+# elm.json source-directories includes "../proto/gen/elm" which resolves
+# to apps/core/assets/proto/gen/elm when Elm compiles from the elm/ CWD.
 COPY frontend/src apps/core/assets/elm/src
 COPY frontend/elm.json apps/core/assets/elm/elm.json
+COPY proto/gen/elm apps/core/assets/proto/gen/elm
 COPY frontend/css apps/core/assets/css
 COPY frontend/public apps/core/assets/static
 

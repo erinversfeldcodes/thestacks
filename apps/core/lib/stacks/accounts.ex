@@ -57,9 +57,15 @@ defmodule Stacks.Accounts do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{user: user}} -> {:ok, user}
-      {:error, :user, changeset, _} -> {:error, changeset}
-      {:error, _, reason, _} -> {:error, reason}
+      {:ok, %{user: user}} ->
+        maybe_send_confirmation(user)
+        {:ok, user}
+
+      {:error, :user, changeset, _} ->
+        {:error, changeset}
+
+      {:error, _, reason, _} ->
+        {:error, reason}
     end
   end
 
@@ -97,6 +103,12 @@ defmodule Stacks.Accounts do
     |> get_user!()
     |> User.settings_changeset(%{age_verified: age_verified})
     |> Repo.update()
+  end
+
+  defp maybe_send_confirmation(user) do
+    if Application.get_env(:core, :require_email_confirmation, false) do
+      Stacks.Email.send_registration_confirmation(user)
+    end
   end
 
   defp maybe_assign_owner_role(attrs) do

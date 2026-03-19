@@ -14,8 +14,17 @@ create_issue_and_pr() {
     issue_file="$(find_issue_file "$branch")"
 
     if [[ -z "$issue_file" ]]; then
-        echo "[hook] No issue file found for branch '$branch' — skipping issue/PR creation." >&2
-        echo "[hook] Create issues/${branch}.md from issues/TEMPLATE.md to enable auto-creation." >&2
+        # Branch not named after an issue. Look for any open PR and post the CI
+        # report to it rather than skipping entirely.
+        local branch_pr_num
+        branch_pr_num="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number' 2>/dev/null)"
+        if [[ -n "$branch_pr_num" && "$branch_pr_num" != "null" ]]; then
+            echo "[hook] No issue file for '$branch', but found PR #${branch_pr_num} — running CI update." >&2
+            update_pr_ci_summary "$branch" "$branch_pr_num"
+        else
+            echo "[hook] No issue file found for branch '$branch' — skipping issue/PR creation." >&2
+            echo "[hook] Create issues/${branch}.md from issues/TEMPLATE.md to enable auto-creation." >&2
+        fi
         return 0
     fi
 

@@ -33,6 +33,11 @@ if config_env() == :prod do
 
   config :core, :vision_service_url, vision_service_url
 
+  searxng_url =
+    System.get_env("SEARXNG_URL") || "http://thestacks-searxng.internal:8080"
+
+  config :core, :searxng_url, searxng_url
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -68,4 +73,10 @@ if config_env() == :prod do
   # Use an absolute writable path for uploads in production.
   # The relative default ("priv/static/uploads") is not writable in a Fly.io release.
   config :core, upload_dir: "/tmp/uploads"
+
+  if System.get_env("EMAIL_PROVIDER") == "resend" do
+    config :core, Stacks.Email.Mailer,
+      adapter: Swoosh.Adapters.Resend,
+      api_key: System.fetch_env!("RESEND_API_KEY")
+  end
 end

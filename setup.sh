@@ -7,13 +7,13 @@
 # What this script does:
 #   1. Install Homebrew (if missing)
 #   2. brew bundle (installs Brewfile: mise, postgresql@16, buf, just, colima, …)
-#   3. Install runtimes via mise (Elixir 1.18.1, Erlang 27, Node 22, Python 3.12, Rust 1.84)
+#   3. Install runtimes via mise (Elixir 1.18.1, Erlang 27, Node 22, Python 3.12, Rust 1.87)
 #   4. Install Elixir tooling (hex, rebar, deps)
 #   5. Install Elm tooling (npm deps in frontend/)
 #   6. Create Python 3.12 virtualenv for apps/vision and install pip deps
 #   6b. Create Python 3.13+ virtualenv for scripts/mcp (project tools MCP server)
-#   7. Install pip-based global tools (dbt-postgres, sqlfluff, semgrep, checkov)
-#   8. Install Rust components (rustfmt, clippy) and cargo-audit
+#   7. Install pip-based global tools (dbt-postgres, sqlfluff, checkov, dbt-checkpoint)
+#   8. Install Rust components (rustfmt, clippy, llvm-tools-preview), cargo-audit, cargo-llvm-cov
 #   9. Ensure PostgreSQL is running and create the dev database + run migrations
 #  10. Load seed fixtures into the dev database
 #  11. Print a summary of what is ready
@@ -53,6 +53,18 @@ if ! command -v brew &>/dev/null; then
     fi
 else
     success "Homebrew $(brew --version | head -1 | awk '{print $2}') already installed"
+fi
+
+# ── 1b. Git LFS — pull large binary assets (textures, images) ─────────────────
+# Without this, texture files in frontend/public/textures/ are 132-byte LFS
+# pointer stubs, causing blank bookshelves and missing wallpapers in the UI.
+step "Git LFS"
+if command -v git-lfs &>/dev/null || git lfs version &>/dev/null 2>&1; then
+    info "Pulling LFS objects (textures, concept images)..."
+    git lfs pull
+    success "LFS objects up to date"
+else
+    warn "git-lfs not installed — texture images will be stubs. Install via: brew install git-lfs"
 fi
 
 # ── 2. Brewfile ────────────────────────────────────────────────────────────────
@@ -171,7 +183,18 @@ install_pip_tool "dbt-postgres" "dbt"
 install_pip_tool "sqlfluff" "sqlfluff"
 install_pip_tool "sqlfluff-templater-dbt" "sqlfluff"   # no separate binary — installed alongside
 install_pip_tool "checkov" "checkov"
-install_pip_tool "dbt-checkpoint" "dbt-checkpoint"
+
+# dbt-checkpoint is not on PyPI — install directly from GitHub.
+# It installs individual check commands (check-model-has-description, etc.),
+# not a single 'dbt-checkpoint' binary.
+if ! command -v check-model-has-description &>/dev/null; then
+    info "Installing dbt-checkpoint from GitHub..."
+    "$PIP_BIN" install --user --quiet \
+        "git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8"
+    success "dbt-checkpoint installed"
+else
+    success "dbt-checkpoint already available"
+fi
 
 # jwt_tool has no Python package — clone the repo and create a wrapper script.
 JWT_TOOL_DIR="$HOME/.local/share/jwt_tool"
@@ -200,7 +223,7 @@ done
 success "Global pip tools installed"
 
 # ── 8. Rust toolchain components ──────────────────────────────────────────────
-step "Rust (rustfmt, clippy, cargo-audit)"
+step "Rust (rustfmt, clippy, cargo-audit, cargo-llvm-cov)"
 
 # Ensure mise-managed cargo is on PATH
 CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
@@ -209,11 +232,21 @@ export PATH="$CARGO_HOME/bin:$PATH"
 info "Adding rustfmt and clippy components..."
 rustup component add rustfmt clippy 2>/dev/null || warn "rustup not managing this Rust install — components may already be present"
 
+info "Adding llvm-tools-preview component (required by cargo-llvm-cov)..."
+rustup component add llvm-tools-preview 2>/dev/null || warn "llvm-tools-preview may already be present"
+
 if ! cargo audit --version &>/dev/null; then
     info "Installing cargo-audit..."
     cargo install cargo-audit --locked
 else
     success "cargo-audit $(cargo audit --version | head -1) already installed"
+fi
+
+if ! cargo-llvm-cov --version &>/dev/null; then
+    info "Installing cargo-llvm-cov..."
+    cargo install cargo-llvm-cov --locked
+else
+    success "cargo-llvm-cov $(cargo-llvm-cov --version | head -1) already installed"
 fi
 
 success "Rust toolchain ready"
@@ -297,7 +330,7 @@ command -v trufflehog     &>/dev/null || MISSING+=("trufflehog (brew install tru
 command -v syft           &>/dev/null || MISSING+=("syft (brew install syft)")
 command -v grype          &>/dev/null || MISSING+=("grype (brew install grype)")
 command -v dockle         &>/dev/null || MISSING+=("dockle (brew install goodwithtech/r/dockle)")
-command -v dbt-checkpoint &>/dev/null || MISSING+=("dbt-checkpoint (pip install dbt-checkpoint)")
+command -v check-model-has-description &>/dev/null || MISSING+=("dbt-checkpoint (pip install git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8)")
 command -v jwt_tool       &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then

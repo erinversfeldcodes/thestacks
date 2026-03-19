@@ -53,11 +53,11 @@ test.describe("Reading Pile page", () => {
     await expect(page.locator(".shelf-reading-pile")).toBeVisible({
       timeout: 10000,
     });
-    // If empty, should show empty message
-    const emptyMsg = page.locator(".book-pile--empty, .shelf-row__empty-text");
-    const bookPile = page.locator(".book-pile");
+    // Should show either empty message or the scene with books
+    const emptyMsg = page.locator(".reading-pile__empty-msg");
+    const scene = page.locator(".reading-pile__scene");
     const hasContent =
-      (await emptyMsg.count()) > 0 || (await bookPile.count()) > 0;
+      (await emptyMsg.count()) > 0 || (await scene.count()) > 0;
     expect(hasContent).toBeTruthy();
   });
 });

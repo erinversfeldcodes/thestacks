@@ -1,0 +1,97 @@
+# ADR 007: Protobuf as Cross-Language Schema Contract
+
+**Status:** Accepted
+**Date:** 2026-03-05
+**Deciders:** Platform owner
+**Technical area:** Schema contracts, API design, inter-service communication
+
+---
+
+## Context
+
+The Stacks is a polyglot system: Elixir (Phoenix core), Elm (frontend), Rust (scraper), Python (vision service). Data flows across these language boundaries in several directions:
+
+- Partner API push: JSON from external bookshops/cafes → Phoenix
+- Vision service: JSON from Phoenix → Python FastAPI (and response back)
+- Rust scraper: JSON from scraper → Phoenix
+- Event bus: JSONB payloads in `event_log` → subscribers
+- (Future) Elm decoders: JSON responses from Phoenix → Elm
+
+Without a schema contract, these JSON interfaces drift. A field is renamed in the Phoenix controller response; the Elm decoder silently returns `Nothing` for every value; books stop rendering. A field is added to the Rust scraper response; the Elixir parser ignores it; price data is lost. A partner sends an inventory push with a missing required field; the Phoenix API accepts it with a 200 (because the struct has defaults) and silent data corruption occurs.
+
+**Options evaluated:**
+
+| Approach | Cross-language | Breaking change detection | Wire format | Tooling |
+|----------|---------------|--------------------------|-------------|---------|
+| **Informal JSON conventions** | Manual, by convention | None — drift is silent | JSON | None |
+| **OpenAPI / JSON Schema** | Good code-gen for some languages | Partial — additive changes allowed | JSON | `openapi-generator`, `swagger` |
+| **Protobuf + buf** | Excellent — code-gen for all our languages | Enforced — `buf breaking` fails on incompatible changes | JSON on wire (not binary) | `buf`, `protoc` |
+| **GraphQL** | Good | Partial | JSON | `absinthe`, `elm-graphql` |
+
+**Key requirements:**
+- Breaking change detection must be automated and run in CI. Silent drift is not acceptable.
+- Must support all four languages without manual synchronisation.
+- Wire format must be JSON (not binary Protobuf) — the platform's JSON API must remain human-debuggable. This rules out binary Protobuf encoding on the wire.
+- Elm has no runtime code generation — decoders must be generated at build time and checked in.
+
+---
+
+## Decision
+
+**Use Protobuf (`.proto` files) as the single source of truth for structured data schemas. Use `buf` for linting, generation, and breaking change detection. Use JSON on the wire — Protobuf is the *schema*, not the serialisation format.**
+
+**Directory structure:**
+```
+proto/
+  buf.yaml          # buf config + breaking change rules
+  buf.gen.yaml      # Code generation targets
+  stacks/
+    partner/
+      inventory.proto  # Partner inventory push schema
+      events.proto     # Partner events push schema
+      spaces.proto     # Partner spaces push schema
+    internal/
+      event_bus.proto  # Event envelope (event_log payload schema)
+      enrichment.proto # Enrichment job schemas
+    common/
+      book.proto       # Shared book/edition types
+      location.proto   # Shared location types
+  gen/
+    elixir/    # Generated Elixir structs (gitignored)
+    elm/       # Generated Elm decoders (CHECKED IN — Elm has no runtime codegen)
+    rust/      # Generated Rust types (gitignored)
+    python/    # Generated Python Pydantic models (gitignored)
+```
+
+**Why JSON on the wire:**
+The HTTP API is JSON. Debug tools (curl, browser dev tools, Fly.io logs) all show JSON. Binary Protobuf would require a separate decode step to read logs. The Protobuf schemas define the *field names, types, and required/optional status* — the JSON serialisation is derived from those definitions at code-generation time.
+
+**Elm decoders are checked in:** Elm's `elm make` step has no runtime code generation capability. Generated decoders in `proto/gen/elm/` are committed to the repository. The `buf generate` step must be run when `.proto` files change, and the generated Elm files must be committed alongside the proto changes. CI enforces this: if `buf generate` produces a diff against the checked-in files, the build fails.
+
+**Breaking change detection:** `buf breaking proto/ --against '.git#branch=main'` runs in CI on every PR. Breaking changes (field number reuse, field removal, type changes) cause a build failure. Additive changes (new optional fields) are allowed. Field numbers are permanent — once assigned, they cannot be reused.
+
+**Field number rule:** Field numbers 1–15 are reserved for frequently used fields (1-byte encoding in binary Protobuf, though we use JSON). Never reuse a field number, even after deprecation. Deprecated fields are annotated with `[deprecated = true]` and preserved as reserved comments.
+
+---
+
+## Consequences
+
+**Positive:**
+- A partner sends an unknown field → ignored gracefully (unknown field behaviour in generated parsers).
+- A partner removes a required field → `buf breaking` catches the change before it ships.
+- Adding a new field to the Phoenix response doesn't crash the Elm decoder — unknown fields in JSON are ignored by generated decoders (as long as they're not `required`).
+- Breaking changes to inter-service contracts are caught in CI, before merge, not discovered in production.
+- All four languages generate their own idiomatic types from the same `.proto` source — no manual synchronisation.
+
+**Negative:**
+- `.proto` files must be maintained alongside code changes — adding a field requires editing both the `.proto` and the implementing code.
+- Elm decoders must be regenerated and committed when `.proto` files change — a PR that changes a schema must also regenerate and commit the Elm output.
+- `buf` adds a toolchain dependency (managed via Nix/Flox — pinned in `flake.nix`).
+- Not all data flows through Protobuf-defined schemas. The Phoenix JSON API responses (for internal Elm consumption) are not fully Protobuf-governed in Phase 1 — this is a known gap. The partner API and event bus payloads are the primary scope for Phase 1.
+
+**Conventions enforced:**
+- `buf lint` runs in CI — all `.proto` files must pass lint rules.
+- `buf breaking` runs in CI — breaking changes block merge.
+- Field numbers are assigned in order and never reused.
+- Deprecated fields are preserved with `reserved` comments.
+- New message types are added in new files where they don't logically fit existing files.

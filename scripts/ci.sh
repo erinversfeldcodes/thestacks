@@ -98,7 +98,10 @@ fi
 # ── Python ────────────────────────────────────────────────────────────────────
 if has_group python; then
     echo -e "\n${CYAN}${BOLD}=== python: deps ===${RESET}"
-    (cd apps/vision && pip install -r requirements.txt -r requirements-dev.txt)
+    # Use the venv pip — the system pip3 is too old to resolve modern package versions.
+    VENV_PIP="$REPO_ROOT/apps/vision/.venv/bin/pip"
+    PIP="${VENV_PIP:-$(command -v pip3 || command -v pip)}"
+    (cd apps/vision && "$PIP" install -r requirements.txt -r requirements-dev.txt)
 
     if ! run_group "python: lint" bash scripts/lint-python.sh; then FAILED+=(python-lint); fi
     if ! run_group "python: test" bash scripts/test-python.sh; then FAILED+=(python-test); fi
@@ -115,7 +118,8 @@ fi
 # SQLFLUFF_TEMPLATER=dbt in your environment if you want full macro resolution.
 if has_group dbt; then
     echo -e "\n${CYAN}${BOLD}=== dbt: deps ===${RESET}"
-    pip install dbt-postgres sqlfluff sqlfluff-templater-dbt
+    PIP="$(command -v pip3 || command -v pip)"
+    "$PIP" install dbt-postgres sqlfluff sqlfluff-templater-dbt
 
     if ! run_group "dbt: lint sql" bash scripts/lint-sql.sh; then FAILED+=(dbt-lint-sql); fi
     if ! run_group "dbt: run + test" bash scripts/test-dbt.sh; then FAILED+=(dbt-test); fi
@@ -156,8 +160,10 @@ else
     for f in "${FAILED[@]}"; do echo "  - $f"; done
 fi
 
-# ── Deploy preview (runs only if all local checks passed) ─────────────────────
-if [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
+# ── Deploy preview (runs only when full default suite passes) ─────────────────
+# Only triggers when all groups are run (no args), all pass, and FLY_API_TOKEN
+# is set. Skipped when running a targeted subset (e.g. ci.sh elixir rust).
+if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     echo ""
     echo -e "${CYAN}${BOLD}=== deploy: preview + E2E ===${RESET}"
     bash scripts/deploy-preview.sh || true

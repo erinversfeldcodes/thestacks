@@ -16,6 +16,11 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+[[tool.mypy.overrides]]
+# pyzbar has no type stubs and no py.typed marker — ignore missing imports.
+module = "pyzbar.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
