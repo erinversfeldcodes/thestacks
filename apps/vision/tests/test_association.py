@@ -2,14 +2,18 @@
 
 import hashlib
 import hmac
+import json
 import time
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.main import _associate_jobs, app
+from app.main import _associate_jobs, _run_associate, _sign_callback, app
+from app.models.association import AssociateRequest
 
 
 def _make_header(path: str = "/associate") -> dict[str, str]:
@@ -28,7 +32,7 @@ _VALID_BODY = {
 
 
 @pytest.fixture(autouse=True)
-def clear_idempotency_cache() -> None:
+def clear_idempotency_cache() -> Generator[None, None, None]:
     """Reset the in-process idempotency dict between tests."""
     _associate_jobs.clear()
     yield
@@ -102,10 +106,7 @@ def test_associate_rejects_invalid_cover_url() -> None:
 
 async def test_run_associate_confirmed_path() -> None:
     """_run_associate sends confirmed callback when classify returns book."""
-    from app.main import _run_associate
-    from app.models.association import AssociateRequest
-
-    body = AssociateRequest(**_VALID_BODY)
+    body = AssociateRequest.model_validate(_VALID_BODY)
     fake_image = b"fake-cover-bytes"
 
     mock_classify = AsyncMock(return_value={"classification": "book", "confidence": 0.95})
@@ -127,8 +128,6 @@ async def test_run_associate_confirmed_path() -> None:
 
     mock_classify.assert_awaited_once()
     post_call = mock_httpx.return_value.post.call_args
-    import json
-
     payload = json.loads(post_call.kwargs.get("content") or post_call.args[1])
     assert payload["status"] == "confirmed"
     assert payload["isbn"] == body.isbn
@@ -137,10 +136,7 @@ async def test_run_associate_confirmed_path() -> None:
 
 async def test_run_associate_rejected_path() -> None:
     """_run_associate sends rejected callback when classify returns not_book."""
-    from app.main import _run_associate
-    from app.models.association import AssociateRequest
-
-    body = AssociateRequest(**_VALID_BODY)
+    body = AssociateRequest.model_validate(_VALID_BODY)
     fake_image = b"fake-cover-bytes"
 
     mock_classify = AsyncMock(return_value={"classification": "not_book", "confidence": 0.9})
@@ -161,8 +157,6 @@ async def test_run_associate_rejected_path() -> None:
         await _run_associate("test-job-id", body, mock_client)
 
     post_call = mock_httpx.return_value.post.call_args
-    import json
-
     payload = json.loads(post_call.kwargs.get("content") or post_call.args[1])
     assert payload["status"] == "rejected"
     assert payload["reason"] == "not_a_book_cover"
@@ -170,12 +164,7 @@ async def test_run_associate_rejected_path() -> None:
 
 async def test_run_associate_download_failure_sends_rejected() -> None:
     """_run_associate sends rejected callback when cover download fails."""
-    from fastapi import HTTPException
-
-    from app.main import _run_associate
-    from app.models.association import AssociateRequest
-
-    body = AssociateRequest(**_VALID_BODY)
+    body = AssociateRequest.model_validate(_VALID_BODY)
     mock_client = AsyncMock()
 
     mock_http_response = MagicMock()
@@ -196,8 +185,6 @@ async def test_run_associate_download_failure_sends_rejected() -> None:
         await _run_associate("test-job-id", body, mock_client)
 
     post_call = mock_httpx.return_value.post.call_args
-    import json
-
     payload = json.loads(post_call.kwargs.get("content") or post_call.args[1])
     assert payload["status"] == "rejected"
     mock_client.classify.assert_not_awaited()
@@ -205,8 +192,6 @@ async def test_run_associate_download_failure_sends_rejected() -> None:
 
 def test_associate_callback_signature_present() -> None:
     """Callback POST includes X-Vision-Signature header."""
-    from app.main import _sign_callback
-
     payload = b'{"status":"confirmed"}'
     sig = _sign_callback(payload)
     assert len(sig) == 64  # hex SHA256
