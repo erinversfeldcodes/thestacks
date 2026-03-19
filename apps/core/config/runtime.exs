@@ -33,6 +33,11 @@ if config_env() == :prod do
 
   config :core, :vision_service_url, vision_service_url
 
+  searxng_url =
+    System.get_env("SEARXNG_URL") || "http://thestacks-searxng.internal:8080"
+
+  config :core, :searxng_url, searxng_url
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
