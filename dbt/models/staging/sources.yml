@@ -33,8 +33,31 @@ sources:
       - name: third_space_events
         freshness: null
       - name: event_log
+        loaded_at_field: occurred_at
       - name: my_writing_links
         freshness: null
+      # Social tables (Issue #043)
+      - name: user_blocks
+        freshness: null
+      - name: groups
+      - name: group_members
+        freshness: null
+      - name: group_invitations
+        freshness: null
+      - name: visibility_grants
+        freshness: null
+      # Blog tables (Issue #043)
+      - name: blog_posts
+      - name: post_book_associations
+      # Marketplace tables (Issue #043)
+      - name: offer_threads
+      - name: offer_messages
+        freshness: null
+      - name: listings
+      - name: transactions
+        freshness: null
+      # Monitoring table (Issue #043)
+      - name: source_health_checks
 
   - name: audit
     schema: audit
