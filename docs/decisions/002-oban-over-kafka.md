@@ -43,16 +43,20 @@ All significant state changes emit events via `Stacks.Events.emit/1`, which:
 
 **Oban queue configuration** (`apps/core/lib/stacks/jobs/`):
 
+> **Note:** The table below reflects the target queue configuration for Phase 1. As of Wave A, the queues configured in `apps/core/config/config.exs` are `default`, `events`, `vision`, and `scraper`. Remaining queues will be added as their respective features are implemented.
+
 | Queue | Concurrency | Purpose |
 |-------|------------|---------|
+| `default` | 10 | General-purpose fallback |
+| `events` | 20 | Event fan-out to registered subscribers |
 | `vision` | 2 | GPU calls to Modal — expensive, rate-limited |
-| `price_scrape` | 5 | Per-bookshop price fetches |
-| `review_scrape` | 3 | Review site fetches |
-| `author_scrape` | 2 | Author enrichment |
-| `source_discovery` | 2 | Brave Search queries |
-| `geographic_discovery` | 2 | Location-triggered sweeps |
-| `notifications` | 3 | Email delivery |
-| `dbt_refresh` | 1 | Sequential dbt runs |
+| `scraper` | 5 | Per-bookshop price fetches |
+| `review_scrape` | 3 | Review site fetches (planned) |
+| `author_scrape` | 2 | Author enrichment (planned) |
+| `source_discovery` | 2 | Brave Search queries (planned) |
+| `geographic_discovery` | 2 | Location-triggered sweeps (planned) |
+| `notifications` | 3 | Email delivery (planned) |
+| `dbt_refresh` | 1 | Sequential dbt runs (planned) |
 
 **Event subscriber registration:** Subscribers register centrally via `Stacks.Events.Registry`. See ADR 006 for the rationale behind centralised registration over decentralised.
 

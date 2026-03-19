@@ -43,8 +43,10 @@ The split is driven by latency requirements:
 
 - **Summarisation (Together AI):** Review summarisation is a background Oban job. There is no user waiting for the result — freshness is measured in hours, not seconds. The 2–3 minute cold start is irrelevant here, and Together AI's per-token pricing is cost-effective for text-only inference.
 
-**Configuration location:** `apps/core/config/config.exs`
+**Configuration location:** `apps/core/config/config.exs`. Individual AI settings are stored under their respective service keys rather than a single `:ai` namespace. The following snippet is illustrative of the intent; refer to `config.exs` for the canonical form:
+
 ```elixir
+# Illustrative — see apps/core/config/config.exs for actual keys
 config :the_stacks, :ai,
   vision_model: "Qwen/Qwen2.5-VL-7B-Instruct",
   vision_provider: :modal,
