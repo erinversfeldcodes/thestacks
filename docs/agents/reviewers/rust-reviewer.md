@@ -49,7 +49,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Allocation patterns**: Are large intermediate buffers allocated unnecessarily? Is there streaming where a buffered approach would exhaust memory on large pages?
 
 ### 5. Security (mechanical — specialist self-checks)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **HMAC auth**: Requests from Phoenix to the scraper must be authenticated with HMAC. The scraper must reject unsigned requests.
 - **Rate limiting per domain**: The scraper must not hammer a bookshop site. Verify there is per-domain rate limiting with configurable delays.
 - **robots.txt compliance**: The scraper must respect `robots.txt` for any domain it scrapes. Verify this is checked before scraping.
@@ -71,9 +71,9 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
-- `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `cargo test` for unit + integration, `proptest` for price parsing and ISBN validation, `cargo-fuzz` targets for TOML and HTML parsing
-- `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — HMAC auth, rate limiting, robots.txt compliance, timeout enforcement
+- `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
+- `./docs/agents/standards/testing.md` — `cargo test` for unit + integration, `proptest` for price parsing and ISBN validation, `cargo-fuzz` targets for TOML and HTML parsing
+- `./docs/agents/standards/security.md` — HMAC auth, rate limiting, robots.txt compliance, timeout enforcement
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

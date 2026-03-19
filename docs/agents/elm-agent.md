@@ -78,10 +78,10 @@ Elm's type safety is the main value proposition. Ports break it. File uploads us
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/testing.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (section 14 — Frontend Architecture)
-/Users/erinversfeld/thestacks/docs/user-stories.md (for UI descriptions)
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/testing.md
+./docs/technical-architecture.md (section 14 — Frontend Architecture)
+./docs/user-stories.md (for UI descriptions)
 ```
 
 ## Integration Handoffs

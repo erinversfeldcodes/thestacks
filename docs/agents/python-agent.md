@@ -47,9 +47,9 @@ The vision service returns raw extracted dicts. It does NOT validate ISBNs or ma
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/security.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 5, 10)
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/security.md
+./docs/technical-architecture.md (sections 5, 10)
 ```
 
 ## Integration Handoffs

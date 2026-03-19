@@ -48,7 +48,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Connection pool sizing**: Is the `httpx.AsyncClient` configured with appropriate `max_connections` and `max_keepalive_connections` for the expected request volume?
 
 ### 5. Security (mechanical — specialist self-checks)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **HMAC auth**: Every non-health endpoint validates the `X-Internal-Token` header using constant-time comparison (`hmac.compare_digest`). Missing or invalid tokens return 401.
 - **Never trust model output**: The vision service returns raw extractions only. It must not attempt ISBN validation, book lookup, or any decision-making based on model output. That is Phoenix's responsibility.
 - **Model version pinning**: Model identifiers must come from `config.py`, not be hardcoded in service calls. No `latest` aliases.
@@ -71,8 +71,8 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
-- `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `pytest` with fixtures, Atheris for fuzzing image input parsing, no live external calls in tests
+- `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
+- `./docs/agents/standards/testing.md` — `pytest` with fixtures, Atheris for fuzzing image input parsing, no live external calls in tests
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

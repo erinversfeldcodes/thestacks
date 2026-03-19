@@ -95,8 +95,8 @@ Each version bump is an explicit, testable function clause. Same pattern as Comm
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (section 22)
+./docs/agents/standards/protobuf.md
+./docs/technical-architecture.md (section 22)
 ```
 
 ## Integration Handoffs

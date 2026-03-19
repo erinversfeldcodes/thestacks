@@ -67,9 +67,9 @@ No UPDATE or DELETE on event_log (except GDPR erasure of PII in payloads). Parti
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (section 7 — Database Schema)
-/Users/erinversfeld/thestacks/docs/implementation-mapping.md (Quick Reference tables)
+./docs/agents/standards/code-quality.md
+./docs/technical-architecture.md (section 7 — Database Schema)
+./docs/implementation-mapping.md (Quick Reference tables)
 ```
 
 ## Integration Handoffs

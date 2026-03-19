@@ -72,8 +72,8 @@ Fly.io handles rolling deploys. Health checks gate rollout. Rollback via `flyctl
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 17, 19)
+./docs/agents/standards/code-quality.md
+./docs/technical-architecture.md (sections 17, 19)
 ```
 
 ## Integration Handoffs

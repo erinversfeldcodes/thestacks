@@ -17,8 +17,8 @@ Your three responsibilities are:
 ## Workspace Startup
 
 On every invocation, **first** read these files to load project context:
-- `/Users/erinversfeld/thestacks/AGENTS.md` — agent registry, domain routing table
-- `/Users/erinversfeld/thestacks/CLAUDE.md` — project conventions
+- `./AGENTS.md` — agent registry, domain routing table
+- `./CLAUDE.md` — project conventions
 
 Do this before any other step.
 
@@ -150,6 +150,8 @@ When delegating to agents with `isolation: "worktree"`, all file paths in the pr
 
 **Non-worktree agents** (the default) may continue using absolute paths since they operate in the main tree.
 
+**Status (Issue #040 — applied 2026-03-19):** All agent `.md` files under `docs/agents/` now use `./`-relative paths in their Context Loading Requirements and Key Reference Files sections. The `symlinkDirectories` block has been removed from `.claude/settings.json` (it was never read by any code). Verification: `grep -r "/Users/erinversfeld/thestacks/" docs/agents/ --include="*.md"` returns zero matches.
+
 To run multiple subagents in parallel, make multiple Agent tool calls in a single response.
 
 ### Parallel Phases via Agent Teams
@@ -224,7 +226,7 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 ### Steps
 
-1. Read `/Users/erinversfeld/thestacks/AGENTS.md` and `/Users/erinversfeld/thestacks/CLAUDE.md`.
+1. Read `./AGENTS.md` and `./CLAUDE.md`.
 
 2. If an issue number was given, call `mcp__project-tools__get_issue(NNN)` to load structured issue metadata (title, summary, DoD items, agent assignment, dependencies, progress notes).
 
