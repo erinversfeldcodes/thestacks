@@ -36,6 +36,7 @@ SEARXNG_REGION="${SEARXNG_REGION:-iad}"
 CONFIG_TOML="${REPO_ROOT}/deploy/fly.searxng.toml"
 SETTINGS_TEMPLATE="${REPO_ROOT}/deploy/searxng/settings.yml"
 SETTINGS_TMP="$(mktemp /tmp/searxng-settings-XXXXXX.yml)"
+trap 'rm -f "${SETTINGS_TMP}"' EXIT
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 
