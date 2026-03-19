@@ -1,0 +1,31 @@
+app = "thestacks-searxng"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "5s"
+
+# Internal-only service: no [[services]] block and no [http_service] block.
+# The core app reaches SearXNG over Fly's private network at
+# http://thestacks-searxng.internal:8080 — no public IP is allocated.
+
+[build]
+  image = "searxng/searxng:2024.11.10-5f089c7c0"
+
+[env]
+  SEARXNG_SETTINGS_PATH = "/etc/searxng/settings.yml"
+
+[mounts]
+  source = "searxng_settings"
+  destination = "/etc/searxng"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[[checks]]
+  name = "alive"
+  type = "http"
+  port = 8080
+  path = "/"
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "30s"

@@ -1,0 +1,83 @@
+# SearXNG settings for The Stacks — book discovery metasearch backend.
+# This file is a checked-in template. __SEARXNG_SECRET_KEY__ is replaced
+# at deploy time by scripts/deploy-searxng.sh before the file is uploaded.
+#
+# Engine curation rationale:
+#   Enabled:  general fallbacks (Google, DuckDuckGo, Bing) and book-specific
+#             sources (Open Library, Google Books).
+#   Disabled: social media, news aggregators, torrent/file-sharing, video,
+#             maps, shopping, and any engine not relevant to book discovery.
+
+use_default_settings:
+  engines:
+    keep_only:
+      - google
+      - duckduckgo
+      - bing
+      - open_library
+      - google_books
+
+server:
+  secret_key: "__SEARXNG_SECRET_KEY__"  # checkov:skip=CKV_SECRET_6: deploy-time template placeholder, replaced by deploy-searxng.sh
+  bind_address: "0.0.0.0"
+  port: 8080
+  # Disable the public-facing UI — this instance is API-only.
+  public_instance: false
+
+search:
+  # JSON is the only format the core API consumes.
+  formats:
+    - json
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+
+ui:
+  infinite_scroll: false
+  default_theme: simple
+  # No browser-facing UI needed; suppress theme assets.
+  static_use_hash: true
+
+outgoing:
+  # Respect upstream rate limits — one request at a time per query.
+  pool_connections: 10
+  pool_maxsize: 10
+  request_timeout: 8.0
+  max_request_timeout: 15.0
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+    categories:
+      - general
+      - books
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+    categories:
+      - general
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+    categories:
+      - general
+
+  - name: open_library
+    engine: open_library
+    shortcut: ol
+    disabled: false
+    categories:
+      - books
+
+  - name: google_books
+    engine: google_books
+    shortcut: gb
+    disabled: false
+    categories:
+      - books
