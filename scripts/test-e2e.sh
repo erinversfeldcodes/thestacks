@@ -30,6 +30,18 @@ if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
+# ── Modal app name resolution ─────────────────────────────────────────────────
+# The local vision service calls a Modal deployment for GPU inference.
+# MODAL_APP_NAME must point at a live Modal deployment — typically the ephemeral
+# preview app that matches the current branch. If not set, derive it from the
+# current git branch using the same sanitization logic as deploy-stack.sh.
+if [[ -z "${MODAL_APP_NAME:-}" ]]; then
+    _BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
+    _SANITISED="$(echo "$_BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\{2,\}/-/g' | cut -c1-28)"
+    export MODAL_APP_NAME="thestacks-vision-${_SANITISED}"
+    echo "  MODAL_APP_NAME not set — derived from branch: ${MODAL_APP_NAME}"
+fi
+
 # shellcheck source=scripts/lib/postgres.sh
 source "$REPO_ROOT/scripts/lib/postgres.sh"
 
@@ -101,18 +113,21 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     fi
 
     # Vision service on :8000 (optional — local dev only; in CI/production this is Modal)
+    # Always kill any existing process on :8000 before starting — a stale process may be
+    # running with a different VISION_HMAC_SECRET and would cause every upload to 401.
     if [[ -f "$REPO_ROOT/apps/vision/app/main.py" ]]; then
         if port_open 8000; then
-            echo "  Vision service already running on :8000 — skipping start"
-        else
-            echo "==> Starting vision service on :8000..."
-            (
-                cd "$REPO_ROOT/apps/vision"
-                .venv/bin/uvicorn app.main:app --port 8000
-            ) &>/tmp/stacks-vision.log &
-            STARTED_PIDS+=($!)
-            SERVICES_STARTED+=(vision)
+            echo "  Killing stale process on :8000 before starting fresh vision service..."
+            lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+            sleep 1
         fi
+        echo "==> Starting vision service on :8000..."
+        (
+            cd "$REPO_ROOT/apps/vision"
+            .venv/bin/uvicorn app.main:app --port 8000
+        ) &>/tmp/stacks-vision.log &
+        STARTED_PIDS+=($!)
+        SERVICES_STARTED+=(vision)
     fi
 fi
 
@@ -142,6 +157,16 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
         wait_for_health "http://localhost:8000/health" "Vision" 30
     fi
 fi
+
+# ── Clear stale auth storage state ───────────────────────────────────────────
+# Auth storage state files (.auth/*.json) are keyed to the origin (base URL).
+# If a previous run targeted a different URL (e.g. fly.dev preview), the stale
+# files will have the wrong origin and all authenticated tests will fail.
+# Always delete them so auth.setup.ts generates fresh files for the current URL.
+echo ""
+echo "==> Clearing stale auth storage state..."
+rm -rf "$REPO_ROOT/e2e/.auth/"
+mkdir -p "$REPO_ROOT/e2e/.auth"
 
 # ── Run Playwright ────────────────────────────────────────────────────────────
 echo ""
