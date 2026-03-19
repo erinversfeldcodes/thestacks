@@ -27,12 +27,23 @@ defmodule Stacks.Events do
   - `:aggregate_id` (required) — UUID of the aggregate
   - `:payload` (optional) — map of event data (stored as jsonb)
   - `:metadata` (optional) — map of metadata (stored as jsonb)
+  - `:schema_version` (optional) — integer schema version (defaults to 1)
 
   Returns `{:error, :emit_failed}` if the row was not inserted.
   The Oban enqueue is best-effort: if it fails, the event is still persisted
   and a warning is logged.
+
+  See `proto/stacks/internal/v1/event_bus.proto` (`EventEnvelope`) for the
+  canonical field contract.
   """
-  @spec emit(map()) :: {:ok, map()} | {:error, term()}
+  @spec emit(%{
+          required(:event_type) => String.t(),
+          required(:aggregate_type) => String.t(),
+          required(:aggregate_id) => String.t() | Ecto.UUID.t(),
+          optional(:schema_version) => pos_integer(),
+          optional(:payload) => map(),
+          optional(:metadata) => map()
+        }) :: {:ok, map()} | {:error, term()}
   def emit(%{event_type: _, aggregate_type: _, aggregate_id: _} = event) do
     now = DateTime.utc_now()
     event_id = Ecto.UUID.generate()
@@ -44,6 +55,7 @@ defmodule Stacks.Events do
       aggregate_id: encode_uuid(to_string(event.aggregate_id)),
       payload: Map.get(event, :payload, %{}),
       metadata: Map.get(event, :metadata, %{}),
+      schema_version: Map.get(event, :schema_version, 1),
       occurred_at: now
     }
 
@@ -170,7 +182,8 @@ defmodule Stacks.Events do
         schema_version: e.schema_version,
         payload: e.payload,
         metadata: e.metadata,
-        occurred_at: e.occurred_at
+        occurred_at: e.occurred_at,
+        published_at: e.published_at
       }
     )
     |> Repo.all(prefix: "op")

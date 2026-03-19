@@ -10,26 +10,39 @@ option java_multiple_files = true;
 
 // ISBNFormat distinguishes the two standard ISBN formats.
 enum ISBNFormat {
+  // Default unspecified value; should not be used in practice.
   ISBN_FORMAT_UNSPECIFIED = 0;
+  // The 10-digit ISBN format (older standard, pre-2007).
   ISBN_FORMAT_ISBN_10 = 1;
+  // The 13-digit ISBN format (current standard, EAN-13 compatible).
   ISBN_FORMAT_ISBN_13 = 2;
 }
 
 // EditionFormat represents the physical or digital form of a book edition.
 enum EditionFormat {
+  // Default unspecified value; should not be used in practice.
   EDITION_FORMAT_UNSPECIFIED = 0;
+  // A hardcover (case-bound) physical edition.
   EDITION_FORMAT_HARDCOVER = 1;
+  // A paperback (perfect-bound or saddle-stitched) physical edition.
   EDITION_FORMAT_PAPERBACK = 2;
+  // A digital e-book edition (e.g. EPUB, MOBI, PDF).
   EDITION_FORMAT_EBOOK = 3;
+  // An audio recording of the book.
   EDITION_FORMAT_AUDIOBOOK = 4;
+  // A large-print physical edition for accessibility.
   EDITION_FORMAT_LARGE_PRINT = 5;
 }
 
 // VisibilityTier controls who can see a book or placement.
 enum VisibilityTier {
+  // Default unspecified value; should not be used in practice.
   VISIBILITY_TIER_UNSPECIFIED = 0;
+  // Visible to all users and search engines.
   VISIBILITY_TIER_PUBLIC = 1;
+  // Accessible via direct link but not listed in public discovery.
   VISIBILITY_TIER_UNLISTED = 2;
+  // Visible only to the owning user.
   VISIBILITY_TIER_PRIVATE = 3;
 }
 

@@ -2,6 +2,8 @@ defmodule Stacks.EventsTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
+
   alias Stacks.Events
 
   describe "emit/1" do
@@ -53,6 +55,53 @@ defmodule Stacks.EventsTest do
       # Verify a job was enqueued with the correct event_id.
       event_id = Ecto.UUID.cast!(params.id)
       assert_enqueued(worker: Stacks.Events.SubscriberWorker, args: %{event_id: event_id})
+    end
+  end
+
+  describe "emit/1 schema_version" do
+    test "emitted event has schema_version 1 by default" do
+      agg_id = Ecto.UUID.generate()
+
+      assert {:ok, _params} =
+               Events.emit(%{
+                 event_type: "schema.default",
+                 aggregate_type: "test",
+                 aggregate_id: agg_id
+               })
+
+      row =
+        Core.Repo.one(
+          from(e in "event_log",
+            where: e.event_type == "schema.default",
+            select: %{schema_version: e.schema_version}
+          ),
+          prefix: "op"
+        )
+
+      assert row.schema_version == 1
+    end
+
+    test "schema_version can be overridden by caller" do
+      agg_id = Ecto.UUID.generate()
+
+      assert {:ok, _params} =
+               Events.emit(%{
+                 event_type: "schema.override",
+                 aggregate_type: "test",
+                 aggregate_id: agg_id,
+                 schema_version: 2
+               })
+
+      row =
+        Core.Repo.one(
+          from(e in "event_log",
+            where: e.event_type == "schema.override",
+            select: %{schema_version: e.schema_version}
+          ),
+          prefix: "op"
+        )
+
+      assert row.schema_version == 2
     end
   end
 

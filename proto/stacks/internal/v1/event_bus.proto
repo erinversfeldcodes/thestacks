@@ -37,4 +37,9 @@ message EventEnvelope {
 
   // Wall-clock time when the event occurred (UTC).
   google.protobuf.Timestamp occurred_at = 7 [json_name = "occurred_at"];
+
+  // Wall-clock time when the event was dispatched to subscribers by SubscriberWorker (UTC).
+  // Absent until the delivery job runs. Use this alongside occurred_at to measure delivery lag
+  // and to audit whether all events were eventually delivered.
+  optional google.protobuf.Timestamp published_at = 8 [json_name = "published_at"];
 }

@@ -2,7 +2,9 @@ version: v2
 lint:
   use:
     - STANDARD
+    - COMMENTS
   enum_zero_value_suffix: _UNSPECIFIED
+  disallow_comment_ignores: true
 breaking:
   use:
-    - WIRE
+    - FILE
