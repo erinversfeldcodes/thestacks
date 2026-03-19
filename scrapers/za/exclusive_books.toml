@@ -1,0 +1,23 @@
+[source]
+name = "Exclusive Books"
+type = "bookshop"
+country = "ZA"
+url = "https://www.exclusivebooks.co.za"
+has_physical_location = true
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+query_template = "{isbn}"
+
+[selectors]
+price = ".product-price"
+title = ".product-title"
+in_stock = ".stock-status"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 10
+retry_after_seconds = 60
+respect_robots_txt = true

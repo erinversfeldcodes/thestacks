@@ -44,9 +44,8 @@ dbt/target/
 dbt/dbt_packages/
 dbt/logs/
 
-# Protobuf generated (except Elm decoders which are checked in)
-proto/gen/
-!proto/gen/elm/
+# Protobuf generated — Elm decoders in proto/gen/elm/ are checked in (no runtime codegen).
+# Other language outputs go into each app's own directory and are ignored there.
 
 # Node
 node_modules/

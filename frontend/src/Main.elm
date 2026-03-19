@@ -10,7 +10,7 @@ import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (Route(..))
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
@@ -71,6 +71,7 @@ type Page
     | PageSettingsAgeVerification AgeVerification.Model
     | PageCostTransparency CostTransparency.Model
     | PageCatalogue Catalogue.Model
+    | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
 
@@ -157,6 +158,9 @@ requiresAuth route =
             False
 
         BookDetail _ ->
+            False
+
+        ConfirmEmail _ ->
             False
 
         NotFound ->
@@ -255,6 +259,9 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                     Catalogue.init maybeToken
             in
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
+
+        ConfirmEmail status ->
+            ( PageConfirmEmail status, Cmd.none )
 
         NotFound ->
             ( PageNotFound, Cmd.none )
@@ -757,6 +764,12 @@ pageTitle route =
         Catalogue ->
             "Catalogue — The Stacks"
 
+        ConfirmEmail EmailConfirmed ->
+            "Email Confirmed — The Stacks"
+
+        ConfirmEmail EmailConfirmFailed ->
+            "Confirmation Failed — The Stacks"
+
         NotFound ->
             "Not Found — The Stacks"
 
@@ -901,6 +914,9 @@ viewPage model =
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)
 
+        PageConfirmEmail status ->
+            viewConfirmEmail status
+
         PageNotFound ->
             viewNotFound
 
@@ -918,6 +934,24 @@ viewHome =
                 [ text "Add a Book" ]
             ]
         ]
+
+
+viewConfirmEmail : ConfirmStatus -> Html Msg
+viewConfirmEmail status =
+    case status of
+        EmailConfirmed ->
+            div [ class "page page--confirm-email" ]
+                [ h1 [] [ text "Email confirmed" ]
+                , p [] [ text "Your email address has been verified. You can now use The Stacks." ]
+                , a [ href (Route.toPath Login), class "btn btn--primary" ] [ text "Sign in" ]
+                ]
+
+        EmailConfirmFailed ->
+            div [ class "page page--confirm-email page--confirm-email--error" ]
+                [ h1 [] [ text "Confirmation failed" ]
+                , p [] [ text "This link has expired or is no longer valid. Please register again to receive a new confirmation email." ]
+                , a [ href "/", class "btn btn--primary" ] [ text "Go home" ]
+                ]
 
 
 viewNotFound : Html Msg

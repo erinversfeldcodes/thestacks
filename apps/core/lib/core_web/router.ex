@@ -44,6 +44,13 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :rate_limit_auth]
     post "/auth/register", AuthController, :register
     post "/auth/login", AuthController, :login
+    post "/auth/forgot-password", AuthController, :forgot_password
+    post "/auth/reset-password", AuthController, :reset_password
+  end
+
+  scope "/api", StacksWeb do
+    pipe_through :api
+    get "/auth/confirm/:token", EmailVerificationController, :confirm
   end
 
   scope "/api", StacksWeb do
@@ -77,6 +84,12 @@ defmodule CoreWeb.Router do
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
+  end
+
+  # Internal service-to-service callbacks — HMAC authenticated, no user auth
+  scope "/api/internal", StacksWeb do
+    pipe_through :api
+    post "/vision/associate", InternalController, :vision_associate
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)

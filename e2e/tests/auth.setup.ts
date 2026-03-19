@@ -26,8 +26,10 @@ async function authenticateUser(
   });
 
   if (!resp.ok()) {
-    console.log(`WARN: login failed for ${email} (${resp.status()})`);
-    return;
+    throw new Error(
+      `Auth setup: login failed for ${email} (HTTP ${resp.status()}). ` +
+        `Check that the dev server is running and seeds are loaded.`
+    );
   }
 
   const body = await resp.json();

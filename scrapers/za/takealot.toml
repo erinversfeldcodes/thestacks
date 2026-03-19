@@ -1,0 +1,23 @@
+[source]
+name = "Takealot"
+type = "retailer"
+country = "ZA"
+url = "https://www.takealot.com"
+has_physical_location = false
+
+[search]
+method = "GET"
+path = "/all"
+query_param = "qsearch"
+query_template = "{isbn}"
+
+[selectors]
+price = ".currency.plus"
+title = ".pdp-title"
+in_stock = ".add-to-cart-button"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 10
+retry_after_seconds = 60
+respect_robots_txt = true

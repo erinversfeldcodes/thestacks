@@ -58,7 +58,7 @@ def local_isbn_scan(image_bytes: bytes) -> str | None:
     """
     try:
         from PIL import Image
-        from pyzbar.pyzbar import decode  # type: ignore[import-untyped]
+        from pyzbar.pyzbar import decode
 
         image = Image.open(io.BytesIO(image_bytes))
         barcodes = decode(image)

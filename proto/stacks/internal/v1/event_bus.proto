@@ -1,0 +1,45 @@
+// event_bus.proto — Internal event envelope for Stacks.Events.emit/1.
+// All significant state changes emit an EventEnvelope into the op.event_log table.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.internal.v1";
+option java_outer_classname = "EventBusProto";
+option java_multiple_files = true;
+
+// EventEnvelope is the canonical contract for events written to op.event_log.
+// Stacks.Events.emit/1 structures payloads conforming to this schema.
+// Validation enforcement planned for a future issue.
+message EventEnvelope {
+  // Dot-namespaced event type, e.g. "user.registered", "book.created".
+  string event_type = 1 [json_name = "event_type"];
+
+  // The domain aggregate this event belongs to, e.g. "user", "book".
+  string aggregate_type = 2 [json_name = "aggregate_type"];
+
+  // UUID of the aggregate instance.
+  string aggregate_id = 3 [json_name = "aggregate_id"];
+
+  // Monotonically increasing schema version for upcasting old events.
+  // Start at 1; increment when the payload shape changes in a breaking way.
+  int32 schema_version = 4 [json_name = "schema_version"];
+
+  // Arbitrary event-specific data. Stored as JSONB in op.event_log.
+  google.protobuf.Struct payload = 5 [json_name = "payload"];
+
+  // Correlation, causation, actor, and other cross-cutting concerns.
+  google.protobuf.Struct metadata = 6 [json_name = "metadata"];
+
+  // Wall-clock time when the event occurred (UTC).
+  google.protobuf.Timestamp occurred_at = 7 [json_name = "occurred_at"];
+
+  // Wall-clock time when the event was dispatched to subscribers by SubscriberWorker (UTC).
+  // Absent until the delivery job runs. Use this alongside occurred_at to measure delivery lag
+  // and to audit whether all events were eventually delivered.
+  optional google.protobuf.Timestamp published_at = 8 [json_name = "published_at"];
+}

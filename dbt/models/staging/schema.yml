@@ -232,3 +232,503 @@ models:
         description: Timestamp when the event occurred.
         tests:
           - not_null
+
+  - name: stg_event_log
+    description: >
+      Outbox table for all domain events emitted via Stacks.Events.emit/1.
+      Oban delivers events to registered subscribers. Immutable except for
+      GDPR erasure of PII within the payload.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: event_type
+        description: Fully-qualified event type identifier (e.g. book.placed).
+        tests:
+          - not_null
+      - name: aggregate_type
+        description: The domain entity type this event applies to.
+        tests:
+          - not_null
+      - name: aggregate_id
+        description: UUID of the domain entity this event applies to.
+        tests:
+          - not_null
+      - name: occurred_at
+        description: Timestamp when the event was emitted.
+        tests:
+          - not_null
+
+  # -------------------------------------------------------------------------
+  # Social models (Issue #043)
+  # -------------------------------------------------------------------------
+
+  - name: stg_user_blocks
+    description: >
+      Records where one user has blocked another. Blocking is unidirectional:
+      the blocker cannot see the blocked user's content and vice versa.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: blocker_id
+        description: FK to the user who initiated the block.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: blocked_id
+        description: FK to the user who was blocked.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: created_at
+        description: Timestamp when the block was created.
+        tests:
+          - not_null
+
+  - name: stg_groups
+    description: >
+      Named user groups that control content visibility. Groups can be
+      close-friends circles, broadcast lists, or subscription channels.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: owner_id
+        description: FK to the user who owns/administers the group.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: name
+        description: Display name for the group.
+        tests:
+          - not_null
+      - name: type
+        description: Group category controlling membership and interaction model.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['close_friends', 'broadcast', 'subscription']
+      - name: visibility
+        description: Who can discover and request to join this group.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['invite_only', 'platform']
+
+  - name: stg_group_members
+    description: >
+      Membership records linking users to groups. Role determines what
+      moderation actions the member may perform within the group.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: group_id
+        description: FK to the parent group.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_groups')
+                field: id
+      - name: user_id
+        description: FK to the group member.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: role
+        description: Member's role within the group.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['member', 'moderator']
+      - name: joined_at
+        description: Timestamp when the user joined the group.
+        tests:
+          - not_null
+
+  - name: stg_group_invitations
+    description: >
+      Pending and historical invitations to join a group. Once responded_at
+      is set, the invitation is terminal (accepted or declined).
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: group_id
+        description: FK to the group the invitation is for.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_groups')
+                field: id
+      - name: invited_by_id
+        description: FK to the user who sent the invitation.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: invited_user_id
+        description: FK to the user who was invited.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: status
+        description: Current state of the invitation.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['pending', 'accepted', 'declined']
+
+  - name: stg_visibility_grants
+    description: >
+      Fine-grained visibility overrides granting a specific user access to a
+      specific resource regardless of that resource's default visibility tier.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: resource_type
+        description: The entity type the grant applies to (e.g. bookshelf, blog_post).
+        tests:
+          - not_null
+      - name: resource_id
+        description: UUID of the specific resource being granted.
+        tests:
+          - not_null
+      - name: granted_to_id
+        description: FK to the user receiving access.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: granted_by_id
+        description: FK to the resource owner granting access.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+
+  # -------------------------------------------------------------------------
+  # Blog models (Issue #043)
+  # -------------------------------------------------------------------------
+
+  - name: stg_blog_posts
+    description: >
+      Long-form posts authored by users. Visibility controls who can read
+      the post; visibility_group_id is required when visibility = 'group'.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: FK to the post author.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: title
+        description: Post title.
+        tests:
+          - not_null
+      - name: visibility
+        description: Who can read this post.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['owner', 'group', 'platform']
+      - name: visibility_group_id
+        description: FK to the group that can view this post when visibility = 'group'.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_groups')
+                field: id
+
+  - name: stg_post_book_associations
+    description: >
+      Links blog posts to books mentioned or reviewed within them. The
+      confidence and source columns record how the association was derived
+      (manual entry, AI extraction, etc.).
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: post_id
+        description: FK to the parent blog post.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_blog_posts')
+                field: id
+      - name: book_id
+        description: FK to the associated book.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_books')
+                field: id
+      - name: visible
+        description: Whether this association is displayed publicly.
+        tests:
+          - not_null
+
+  # -------------------------------------------------------------------------
+  # Marketplace models (Issue #043)
+  # -------------------------------------------------------------------------
+
+  - name: stg_offer_threads
+    description: >
+      A conversation thread between a buyer and the listing owner to
+      negotiate a sale. One thread per (placement, buyer) pair.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: placement_id
+        description: FK to the bookshelf placement being negotiated.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_bookshelf_placements')
+                field: id
+      - name: buyer_id
+        description: FK to the user interested in buying.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: status
+        description: Current state of the offer thread.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['open', 'accepted', 'declined', 'expired']
+
+  - name: stg_offer_messages
+    description: >
+      Individual messages and offer bids within an offer thread. Monetary
+      offer types (offer, counter) carry an amount_cents value.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: thread_id
+        description: FK to the parent offer thread.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_offer_threads')
+                field: id
+      - name: sender_id
+        description: FK to the user who sent this message.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: type
+        description: Message category.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['message', 'offer', 'counter', 'accept', 'decline']
+
+  - name: stg_listings
+    description: >
+      Formal marketplace listings created by sellers. A listing references a
+      book (not a placement) and may receive bids via offer_threads.
+      price_cents must be positive for fixed-price listings.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        description: FK to the book being listed.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_books')
+                field: id
+      - name: seller_id
+        description: FK to the user selling the book.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: status
+        description: Current listing lifecycle state.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['draft', 'active', 'sold', 'removed', 'expired']
+      - name: pricing_mode
+        description: Whether the price is fixed or open to offers.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['fixed', 'offer']
+      - name: condition
+        description: Physical condition of the listed book.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['new', 'like_new', 'good', 'fair', 'poor']
+      - name: price_cents
+        description: Asking price in cents (must be positive for fixed-price listings).
+        tests:
+          - expression_is_true:
+              arguments:
+                expression: "price_cents > 0 or price_cents is null"
+
+  - name: stg_transactions
+    description: >
+      Completed or in-progress payment transactions. Records both payment
+      and shipping lifecycle state for each fulfilled listing.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: listing_id
+        description: FK to the listing that was transacted.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_listings')
+                field: id
+      - name: buyer_id
+        description: FK to the purchasing user.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: seller_id
+        description: FK to the selling user.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: id
+      - name: amount_cents
+        description: Final agreed transaction amount in cents.
+        tests:
+          - not_null
+      - name: payment_status
+        description: Payment processing state.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['pending', 'paid', 'failed', 'refunded']
+
+  # -------------------------------------------------------------------------
+  # Monitoring models (Issue #043)
+  # -------------------------------------------------------------------------
+
+  - name: stg_source_health_checks
+    description: >
+      Rolling health state for each external data source (scrapers, review
+      feeds, LLM outputs, etc.). Updated by the monitoring worker after each
+      probe cycle.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: source_name
+        description: Human-readable identifier for the external source.
+        tests:
+          - not_null
+          - unique
+      - name: source_type
+        description: Category of the external data source.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['scraper_config', 'review_source', 'rss_feed', 'event_source', 'llm_output']
+      - name: consecutive_failures
+        description: Number of consecutive probe failures since last success.
+        tests:
+          - not_null
+      - name: status
+        description: Aggregated health status derived from recent probe results.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['healthy', 'degraded', 'broken']

@@ -8,7 +8,7 @@ elixir  = "1.18.1-otp-27"
 erlang  = "27.2.1"
 node    = "22"
 python  = "3.12"
-rust    = "1.84"
+rust    = "1.87"
 
 [env]
 # Point Mix to the correct build dir and prevent Hex prompts in CI

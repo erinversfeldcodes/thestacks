@@ -21,6 +21,8 @@ jobs:
       licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -74,6 +76,8 @@ jobs:
       MIX_ENV: test
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
@@ -101,6 +105,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -121,6 +127,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -143,6 +151,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -159,6 +169,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: bufbuild/buf-setup-action@v1.47.2
       - run: scripts/lint-proto.sh
 
@@ -183,6 +195,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
@@ -225,6 +239,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: true
+        with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
         env:
@@ -235,6 +251,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile.core
@@ -252,6 +270,8 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - run: semgrep scan --config auto --error
 
   checkov:
@@ -259,6 +279,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: bridgecrewio/checkov-action@v12
         with:
           directory: deploy/
@@ -268,6 +290,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
@@ -295,6 +319,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
@@ -351,6 +377,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: true
+        with:
           fetch-depth: 0
       - name: Install squawk
         run: npm install -g squawk-cli
@@ -364,6 +392,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
@@ -382,6 +412,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: true
+        with:
           fetch-depth: 0
       - uses: trufflesecurity/trufflehog@main
         with:
@@ -395,6 +427,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: anchore/sbom-action@v0
         with:
           path: '.'
@@ -411,6 +445,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Build images for CIS benchmark
         run: |
           docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
@@ -439,6 +475,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Deploy preview and run E2E
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

@@ -368,3 +368,104 @@ class TestExtractLocalOCRPrePass:
         assert data["model_used"] == settings.model_name
         mock_scan.assert_not_called()
         mock_vlm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# image_url path
+# ---------------------------------------------------------------------------
+
+
+def test_extract_image_url_happy_path() -> None:
+    """image_url is downloaded and extraction runs successfully."""
+    fake_bytes = b"fake-image-bytes"
+    mock_vlm_output = {"books": [{"potential_isbns": ["9780679410232"], "confidence": 0.9}]}
+    with (
+        patch("app.main._download_image", new_callable=AsyncMock, return_value=fake_bytes),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=mock_vlm_output,
+        ),
+        patch("app.main.settings.local_ocr_enabled", False),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"image_url": "https://example.com/cover.jpg"},
+            headers=_make_header(),
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["books"]) == 1
+
+
+def test_extract_both_images_and_url_returns_422() -> None:
+    """Providing both images and image_url is rejected."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={"images": [_VALID_IMAGE], "image_url": "https://example.com/cover.jpg"},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_extract_neither_images_nor_url_returns_422() -> None:
+    """Providing neither images nor image_url is rejected."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_extract_image_url_size_exceeded_returns_422() -> None:
+    """image_url that exceeds the size limit is rejected with 422."""
+    from fastapi import HTTPException
+
+    with (
+        patch(
+            "app.main._download_image",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=422, detail="Image URL exceeds max size"),
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"image_url": "https://example.com/huge.jpg"},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_extract_image_url_download_timeout_returns_422() -> None:
+    """image_url that times out is rejected with 422."""
+    from fastapi import HTTPException
+
+    with (
+        patch(
+            "app.main._download_image",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=422, detail="Failed to download image"),
+        ),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/extract",
+            json={"image_url": "https://example.com/slow.jpg"},
+            headers=_make_header(),
+        )
+    assert response.status_code == 422
+
+
+def test_extract_image_url_requires_auth() -> None:
+    """image_url path without auth token is rejected with 401."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract",
+            json={"image_url": "https://example.com/cover.jpg"},
+        )
+    assert response.status_code == 401

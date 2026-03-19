@@ -55,6 +55,71 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
+  describe "associate_isbn/4 — mock client" do
+    setup do
+      original = Application.get_env(:core, :vision_client)
+      Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
+      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+      :ok
+    end
+
+    test "returns {:ok, job_id} containing isbn and edition_id" do
+      assert {:ok, job_id} =
+               Client.associate_isbn(
+                 "9780743273565",
+                 "book-1",
+                 "edition-1",
+                 "https://example.com/cover.jpg"
+               )
+
+      assert is_binary(job_id)
+      assert String.contains?(job_id, "9780743273565")
+      assert String.contains?(job_id, "edition-1")
+    end
+  end
+
+  describe "extract_from_url/1 — mock client" do
+    setup do
+      original = Application.get_env(:core, :vision_client)
+      Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
+      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+      :ok
+    end
+
+    test "returns {:ok, result} with a books key" do
+      assert {:ok, result} = Client.extract_from_url("https://example.com/cover.jpg")
+      assert is_map(result)
+      assert Map.has_key?(result, "books")
+    end
+  end
+
+  describe "associate_isbn/4 — unexpected response shape" do
+    setup do
+      original = Application.get_env(:core, :vision_client)
+
+      defmodule Stacks.AI.BadShapeClient do
+        @behaviour Stacks.AI.ClientBehaviour
+        @impl true
+        def call_vision("associate", _payload), do: {:ok, %{"unexpected_key" => "value"}}
+        def call_vision(_endpoint, _payload), do: {:ok, %{}}
+      end
+
+      Application.put_env(:core, :vision_client, Stacks.AI.BadShapeClient)
+      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+      :ok
+    end
+
+    test "returns {:error, {:unexpected_response, _}} when job_id is missing" do
+      assert {:error, {:unexpected_response, _}} =
+               Client.associate_isbn(
+                 "9780743273565",
+                 "book-1",
+                 "edition-1",
+                 "https://example.com/cover.jpg"
+               )
+    end
+  end
+
   describe "call_vision/2 — real HTTP client path" do
     # These tests temporarily configure the real HTTP client (instead of MockClient).
     # The Modal vision service is not running in unit tests, so Finch returns a

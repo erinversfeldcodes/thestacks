@@ -1,11 +1,17 @@
 module Navigation.Route exposing
-    ( Route(..)
+    ( ConfirmStatus(..)
+    , Route(..)
     , fromUrl
     , toPath
     )
 
 import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser, s, string)
+
+
+type ConfirmStatus
+    = EmailConfirmed
+    | EmailConfirmFailed
 
 
 type Route
@@ -23,6 +29,7 @@ type Route
     | SettingsAgeVerification
     | CostTransparency
     | Catalogue
+    | ConfirmEmail ConfirmStatus
     | NotFound
 
 
@@ -43,6 +50,8 @@ parser =
         , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Catalogue (s "catalogue")
+        , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
+        , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         ]
 
 
@@ -96,6 +105,12 @@ toPath route =
 
         Catalogue ->
             "/catalogue"
+
+        ConfirmEmail EmailConfirmed ->
+            "/confirm-email/success"
+
+        ConfirmEmail EmailConfirmFailed ->
+            "/confirm-email/error"
 
         NotFound ->
             "/not-found"

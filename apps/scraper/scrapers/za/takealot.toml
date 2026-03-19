@@ -1,0 +1,24 @@
+[source]
+name = "Takealot"
+type = "bookshop"
+country = "ZA"
+url = "https://www.takealot.com"
+has_physical_location = false
+currency = "ZAR"
+
+[search]
+method = "GET"
+path = "/all"
+query_param = "qsearch"
+query_template = "{isbn}"
+
+[selectors]
+price = "[data-ref=buybox-selling-price], .currency"
+title = "h1.product-title"
+in_stock = "[data-ref=add-to-cart-button]"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 6
+retry_after_seconds = 60
+respect_robots_txt = true
