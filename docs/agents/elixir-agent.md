@@ -82,11 +82,11 @@ end
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/testing.md
-/Users/erinversfeld/thestacks/docs/agents/standards/security.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 1-7, 10, 18, 21, 23)
-/Users/erinversfeld/thestacks/docs/implementation-mapping.md
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/testing.md
+./docs/agents/standards/security.md
+./docs/technical-architecture.md (sections 1-7, 10, 18, 21, 23)
+./docs/implementation-mapping.md
 ```
 
 ## Integration Handoffs

@@ -77,7 +77,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Migration execution time**: For migrations on existing tables with data, estimate the lock duration. Long-running migrations block the application. Flag migrations that will be slow on a populated table.
 
 ### 5. Security (mechanical — specialist self-checks)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **Role isolation**: `stacks_app` cannot read `wh` schema beyond SELECT. `stacks_dbt` cannot write to `op`. `stacks_readonly` cannot write anywhere. Verify grants are additive and no over-provisioning exists.
 - **Append-only audit**: `audit_log` must have `REVOKE UPDATE, DELETE ON audit.audit_log FROM stacks_app` explicitly. The application layer alone is not sufficient.
 - **Column-level encryption**: Fields classified as `sensitive` or `personal` per the GDPR classification must use Cloak-encrypted types in the Ecto schema.
@@ -99,9 +99,9 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, no over-engineering
-- `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — migration rollback tests, dbt schema tests, changeset tests
-- `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — role isolation, column encryption, append-only audit, event log PII
+- `./docs/agents/standards/code-quality.md` — consistency, no over-engineering
+- `./docs/agents/standards/testing.md` — migration rollback tests, dbt schema tests, changeset tests
+- `./docs/agents/standards/security.md` — role isolation, column encryption, append-only audit, event log PII
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

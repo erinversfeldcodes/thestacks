@@ -49,7 +49,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Bundle size**: No unnecessary dependencies. Each `elm.json` dependency should be justified.
 
 ### 5. Security (mixed — specialist checks XSS patterns; reviewer assesses threat model)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **XSS**: Elm's virtual DOM prevents most XSS, but check any `Html.Attributes.attribute` or port usage that passes raw strings to JS — these are the attack surface.
 - **Auth token handling**: JWT or session tokens must not be stored in `localStorage` without understanding the XSS tradeoff. Prefer `HttpOnly` cookies managed by Phoenix if possible. Flag how tokens are stored.
 - **Sensitive data in model**: Is PII (email, shelf contents) kept in model state longer than necessary? Does a logout `Msg` clear personal state?
@@ -71,9 +71,9 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
-- `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — `elm-program-test` for pages, unit tests for decoders and components, Playwright only where a real browser is required
-- `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — Elm decoders checked in at `proto/gen/elm/`, consistent with proto definitions
+- `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
+- `./docs/agents/standards/testing.md` — `elm-program-test` for pages, unit tests for decoders and components, Playwright only where a real browser is required
+- `./docs/agents/standards/protobuf.md` — Elm decoders checked in at `proto/gen/elm/`, consistent with proto definitions
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

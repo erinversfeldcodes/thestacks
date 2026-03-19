@@ -83,9 +83,9 @@ Prices come in many formats. Property-based tests (proptest) ensure the parser h
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/testing.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 11, 20)
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/testing.md
+./docs/technical-architecture.md (sections 11, 20)
 ```
 
 ## Integration Handoffs

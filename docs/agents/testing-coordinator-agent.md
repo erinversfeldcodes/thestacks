@@ -71,10 +71,10 @@ Reference: `docs/implementation-mapping.md` maps each story to its technical com
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/testing.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (section 16)
-/Users/erinversfeld/thestacks/docs/user-stories.md
-/Users/erinversfeld/thestacks/docs/implementation-mapping.md
+./docs/agents/standards/testing.md
+./docs/technical-architecture.md (section 16)
+./docs/user-stories.md
+./docs/implementation-mapping.md
 ```
 
 ## Integration Handoffs
