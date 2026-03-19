@@ -91,6 +91,7 @@ struct ScrapeResponse {
     in_stock: Option<bool>,
     url: Option<String>,
     title: Option<String>,
+    selector_match_rate: Option<f64>,
 }
 
 async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest>) -> Response {
@@ -114,6 +115,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
             in_stock: result.in_stock,
             url: result.url,
             title: result.title,
+            selector_match_rate: result.selector_match_rate,
         })
         .into_response(),
         Err(e) => {
