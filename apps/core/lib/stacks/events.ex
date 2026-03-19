@@ -1,16 +1,25 @@
 defmodule Stacks.Events do
   @moduledoc """
-  Event emission module. Inserts events into the `op.event_log` table.
+  Event emission module. Inserts events into the `op.event_log` table and
+  dispatches them to registered handlers via `Stacks.Events.SubscriberWorker`.
+
   The event_log is append-only — records are never updated or deleted (except
   GDPR erasure, which zeroes out payloads for deleted-user events).
   """
 
   require Logger
 
+  import Ecto.Query
+
   alias Core.Repo
+  alias Stacks.Events.SubscriberWorker
+  alias Stacks.Events.Upcaster
+
+  @replay_batch_size 500
 
   @doc """
-  Emits an event by inserting a record into the event_log table.
+  Emits an event by inserting a record into the event_log table and enqueuing
+  a `SubscriberWorker` job to dispatch the event to registered handlers.
 
   Accepts a map with the following keys:
   - `:event_type` (required) — e.g. "user.registered", "book.created"
@@ -20,13 +29,16 @@ defmodule Stacks.Events do
   - `:metadata` (optional) — map of metadata (stored as jsonb)
 
   Returns `{:error, :emit_failed}` if the row was not inserted.
+  The Oban enqueue is best-effort: if it fails, the event is still persisted
+  and a warning is logged.
   """
   @spec emit(map()) :: {:ok, map()} | {:error, term()}
   def emit(%{event_type: _, aggregate_type: _, aggregate_id: _} = event) do
     now = DateTime.utc_now()
+    event_id = Ecto.UUID.generate()
 
     params = %{
-      id: Ecto.UUID.dump!(Ecto.UUID.generate()),
+      id: Ecto.UUID.dump!(event_id),
       event_type: event.event_type,
       aggregate_type: event.aggregate_type,
       aggregate_id: encode_uuid(to_string(event.aggregate_id)),
@@ -36,11 +48,36 @@ defmodule Stacks.Events do
     }
 
     case Repo.insert_all("event_log", [params], prefix: "op") do
-      {1, _} -> {:ok, params}
-      {0, _} -> {:error, :emit_failed}
+      {1, _} ->
+        enqueue_subscriber(event_id)
+        {:ok, params}
+
+      {0, _} ->
+        {:error, :emit_failed}
     end
   rescue
     error -> {:error, error}
+  end
+
+  defp enqueue_subscriber(event_id) do
+    case Oban.insert(SubscriberWorker.new(%{event_id: event_id})) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Failed to enqueue SubscriberWorker for event #{event_id}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  rescue
+    exception ->
+      Logger.warning(
+        "Failed to enqueue SubscriberWorker for event #{event_id}: #{inspect(exception)}"
+      )
+
+      :ok
   end
 
   defp encode_uuid(uuid) when is_binary(uuid) do
@@ -68,5 +105,74 @@ defmodule Stacks.Events do
 
         {:ok, event}
     end
+  end
+
+  @doc """
+  Replays historical events of the given type to a single handler module.
+
+  Fetches events from `op.event_log` matching `event_type` and occurring at or
+  after `from_datetime`, applies `Stacks.Events.Upcaster.upcast/1` to each,
+  and dispatches to `handler_module.handle_event/1`.
+
+  Events are processed in batches of #{@replay_batch_size} to prevent memory
+  blowout on large event logs.
+
+  ## Use cases
+  - Backfilling a newly registered handler
+  - Recovering from handler failures
+  - Audit replay
+
+  Returns `{:ok, count}` where `count` is the total number of events replayed.
+  """
+  @spec replay(String.t(), DateTime.t(), module()) :: {:ok, non_neg_integer()}
+  def replay(event_type, %DateTime{} = from_datetime, handler_module)
+      when is_binary(event_type) and is_atom(handler_module) do
+    count = do_replay(event_type, from_datetime, handler_module, 0, 0)
+    {:ok, count}
+  end
+
+  defp do_replay(event_type, from_datetime, handler_module, offset, acc) do
+    events = fetch_batch(event_type, from_datetime, offset)
+
+    case events do
+      [] ->
+        acc
+
+      batch ->
+        Enum.each(batch, fn event ->
+          event
+          |> Upcaster.upcast()
+          |> handler_module.handle_event()
+        end)
+
+        do_replay(
+          event_type,
+          from_datetime,
+          handler_module,
+          offset + length(batch),
+          acc + length(batch)
+        )
+    end
+  end
+
+  defp fetch_batch(event_type, from_datetime, offset) do
+    from(e in "event_log",
+      where: e.event_type == ^event_type,
+      where: e.occurred_at >= ^from_datetime,
+      order_by: [asc: e.occurred_at, asc: e.id],
+      offset: ^offset,
+      limit: ^@replay_batch_size,
+      select: %{
+        id: e.id,
+        event_type: e.event_type,
+        aggregate_type: e.aggregate_type,
+        aggregate_id: e.aggregate_id,
+        schema_version: e.schema_version,
+        payload: e.payload,
+        metadata: e.metadata,
+        occurred_at: e.occurred_at
+      }
+    )
+    |> Repo.all(prefix: "op")
   end
 end

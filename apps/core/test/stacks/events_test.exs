@@ -1,5 +1,6 @@
 defmodule Stacks.EventsTest do
   use Core.DataCase, async: true
+  use Oban.Testing, repo: Core.Repo
 
   alias Stacks.Events
 
@@ -39,6 +40,20 @@ defmodule Stacks.EventsTest do
                  aggregate_id: "not-a-uuid"
                })
     end
+
+    test "enqueues a SubscriberWorker job after persisting event" do
+      assert {:ok, params} =
+               Events.emit(%{
+                 event_type: "test.enqueue",
+                 aggregate_type: "test",
+                 aggregate_id: Ecto.UUID.generate()
+               })
+
+      # With Oban testing: :manual, jobs are inserted but not executed.
+      # Verify a job was enqueued with the correct event_id.
+      event_id = Ecto.UUID.cast!(params.id)
+      assert_enqueued(worker: Stacks.Events.SubscriberWorker, args: %{event_id: event_id})
+    end
   end
 
   describe "emit_safe/1" do
@@ -60,6 +75,52 @@ defmodule Stacks.EventsTest do
 
       # emit would return {:error, _}; emit_safe swallows it
       assert {:ok, ^event} = Events.emit_safe(event)
+    end
+  end
+
+  describe "replay/3" do
+    defmodule TestHandler do
+      @behaviour Stacks.Events.Handler
+
+      @impl true
+      def handle_event(event) do
+        send(self(), {:replayed, event.event_type})
+        :ok
+      end
+    end
+
+    test "replays events of the given type to a handler" do
+      agg_id = Ecto.UUID.generate()
+
+      for i <- 1..3 do
+        Events.emit(%{
+          event_type: "replay.target",
+          aggregate_type: "test",
+          aggregate_id: agg_id,
+          payload: %{index: i}
+        })
+      end
+
+      # Emit a different event type that should NOT be replayed
+      Events.emit(%{
+        event_type: "replay.other",
+        aggregate_type: "test",
+        aggregate_id: agg_id
+      })
+
+      from = DateTime.add(DateTime.utc_now(), -60, :second)
+      assert {:ok, 3} = Events.replay("replay.target", from, TestHandler)
+
+      # Verify each event was dispatched
+      assert_received {:replayed, "replay.target"}
+      assert_received {:replayed, "replay.target"}
+      assert_received {:replayed, "replay.target"}
+      refute_received {:replayed, "replay.other"}
+    end
+
+    test "returns {:ok, 0} when no events match" do
+      from = DateTime.utc_now()
+      assert {:ok, 0} = Events.replay("nonexistent.type", from, TestHandler)
     end
   end
 end
