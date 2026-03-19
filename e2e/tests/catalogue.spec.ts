@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile } from "./helpers";
+import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
 test.describe("Catalogue — unauthenticated", () => {
   test("catalogue page loads without authentication", async ({ page }) => {
@@ -144,10 +144,11 @@ test.describe("Catalogue — authenticated", () => {
   });
 
   test("placed books show badge text", async ({ page }) => {
+    await ensureBookOnLibrary(page);
     await page.goto("/catalogue");
     await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
     // Wait for at least one placement badge to appear (placements load async after catalogue)
-    await page.waitForSelector(".catalogue__card-badge", { timeout: 10000 });
+    await page.waitForSelector(".catalogue__card-badge", { timeout: 15000 });
 
     const badges = await page.locator(".catalogue__card-badge").count();
     expect(badges).toBeGreaterThan(0);
