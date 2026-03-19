@@ -35,6 +35,24 @@ The upload flow is two-step: `POST /api/upload/identify` returns candidates, `PO
 - Return both work-level and edition-level metadata from Open Library / Google Books
 - Open Library work key → `books.open_library_work_id`; edition key → `book_editions.open_library_edition_id`
 
+**`Stacks.Books.confirm_cover_association/2` (closes #072 Elixir deferred work):**
+- Called by `StacksWeb.InternalController` when the vision sidecar confirms a cover image
+- Updates `book_editions.cover_image_url` for the given `edition_id`
+- Emits `book.cover_confirmed` event
+
+**`Stacks.AI.Client` updates (closes #072 Elixir deferred work):**
+- Add `"associate"` → `/associate` mapping in `endpoint_path/1`
+- Add `associate_isbn/4`: `associate_isbn(isbn, book_id, edition_id, cover_url)` — POST to vision `/associate`, returns `{:ok, job_id}` or `{:error, reason}`
+- Add `extract_from_url/1`: POST to `/extract` with `image_url` JSON body instead of file upload
+
+**`StacksWeb.InternalController` (closes #072 Elixir deferred work):**
+- `POST /api/internal/vision/associate` — receives async callback from vision sidecar after cover image classification
+- Validates `X-Vision-Signature` HMAC header
+- On `status: "confirmed"`: calls `Books.confirm_cover_association/2`
+- On `status: "rejected"`: logs warning, no state change
+- Returns 200 regardless (vision sidecar must not retry on app errors)
+- Route excluded from public rate limiting (internal only)
+
 ## Definition of Done
 - [ ] `POST /api/upload/identify` returns identified candidates (with mocked vision)
 - [ ] `POST /api/books/confirm` creates work + edition + placement
@@ -45,9 +63,13 @@ The upload flow is two-step: `POST /api/upload/identify` returns candidates, `PO
 - [ ] All existing tests updated and passing
 - [ ] `mix credo --strict` and `mix sobelow` pass
 - [ ] All shelf operations emit events via `Stacks.Events.emit/1`
+- [ ] `associate_isbn/4` and `extract_from_url/1` added to `Stacks.AI.Client`
+- [ ] `StacksWeb.InternalController` validates HMAC and calls `confirm_cover_association/2`
+- [ ] `Books.confirm_cover_association/2` updates edition cover and emits event
+- [ ] Elixir tests: mocked HTTP for client functions; HMAC validation (valid + tampered) for controller
 
 ## Dependencies
-Issue #042 (works/editions schema must exist)
+Issue #042 (works/editions schema must exist), Issue #072 (Python `/associate` endpoint must be live — delivers the cover classification service this issue's Elixir layer calls into)
 
 ## Agent Assignment
 elixir-agent (Opus — architectural judgment for works/editions model)
