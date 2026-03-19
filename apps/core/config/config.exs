@@ -17,7 +17,7 @@ config :core, Oban,
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob}
      ]}
   ],
-  queues: [default: 10, events: 20, vision: 5, scraper: 5]
+  queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3]
 
 config :core, CoreWeb.Endpoint,
   url: [host: "localhost"],
@@ -46,6 +46,10 @@ config :core, Stacks.Vault,
       iv_length: 12
     }
   ]
+
+config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
+
+config :swoosh, :api_client, Swoosh.ApiClient.Req
 
 config :core, :ai_budget,
   daily_limit_cents: 500,

@@ -73,4 +73,10 @@ if config_env() == :prod do
   # Use an absolute writable path for uploads in production.
   # The relative default ("priv/static/uploads") is not writable in a Fly.io release.
   config :core, upload_dir: "/tmp/uploads"
+
+  if System.get_env("EMAIL_PROVIDER") == "resend" do
+    config :core, Stacks.Email.Mailer,
+      adapter: Swoosh.Adapters.Resend,
+      api_key: System.fetch_env!("RESEND_API_KEY")
+  end
 end
