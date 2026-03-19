@@ -65,3 +65,5 @@ Issue #043 (users table columns — notification preferences)
 elixir-agent
 
 ## Progress Notes
+
+2026-03-19: Implementation complete. Migration adds 4 columns to op.users. Email context, EmailDeliveryJob worker, 6 HEEx templates, controller redirect, Elm confirm-email page. 7 reviewer non-blocking items all resolved. 414 tests, 0 failures. Moved to complete.

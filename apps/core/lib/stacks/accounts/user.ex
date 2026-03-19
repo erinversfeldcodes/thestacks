@@ -35,6 +35,16 @@ defmodule Stacks.Accounts.User do
     field :age_verified, :boolean, default: false
     field :consent_analytics, :boolean, default: false
     field :consent_analytics_at, :utc_datetime_usec
+    field :onboarding_completed, :boolean, default: false
+    field :notify_wishlist_availability, :boolean, default: false
+    field :notify_marketplace, :boolean, default: true
+    field :notify_group_invitations, :boolean, default: true
+    field :notify_event_matches, :boolean, default: false
+
+    field :email_confirmed, :boolean, default: false
+    field :email_confirmation_token, :string
+    field :password_reset_token, :string
+    field :password_reset_sent_at, :utc_datetime_usec
 
     timestamps(type: :utc_datetime_usec, inserted_at: :created_at)
   end
@@ -65,6 +75,27 @@ defmodule Stacks.Accounts.User do
   def settings_changeset(user, attrs) do
     user
     |> cast(attrs, [:age_verified])
+  end
+
+  @doc "Changeset for email confirmation token storage."
+  def email_confirmation_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email_confirmation_token, :email_confirmed])
+  end
+
+  @doc "Changeset for password reset token storage."
+  def password_reset_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password_reset_token, :password_reset_sent_at])
+  end
+
+  @doc "Changeset for completing a password reset. Validates the new plaintext password before hashing."
+  def password_update_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password, :password_reset_token, :password_reset_sent_at])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> hash_password()
   end
 
   defp hash_password(%Ecto.Changeset{valid?: true, changes: %{password: password}} = changeset) do

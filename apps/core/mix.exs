@@ -63,6 +63,8 @@ defmodule Core.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:swoosh, "~> 1.16"},
+      {:req, "~> 0.5"},
       {:finch, "~> 0.19"},
       {:ex_machina, "~> 2.8", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]}
