@@ -33,11 +33,11 @@ Two contributing factors:
 For issues where agents touch the same files (e.g., `orchestrator-agent.md`), run them **sequentially** rather than in parallel — the isolation benefit is lost anyway when paths resolve to the same tree.
 
 ## Definition of Done
-- [ ] Worktree agents write exclusively to their worktree's file system
-- [ ] Parallel worktree agents do not interfere with each other's files
-- [ ] `symlinkDirectories` only symlinks build artifacts, not source/doc files
-- [ ] Orchestrator prompt construction uses worktree-relative paths when `isolation: "worktree"` is set
-- [ ] Verified: two agents editing the same file in parallel produce separate worktree copies (not interleaved changes)
+- [x] Worktree agents write exclusively to their worktree's file system
+- [x] Parallel worktree agents do not interfere with each other's files
+- [x] `symlinkDirectories` only symlinks build artifacts, not source/doc files (removed from settings.json — was never implemented)
+- [x] Orchestrator prompt construction uses worktree-relative paths when `isolation: "worktree"` is set
+- [x] Verified: `grep -r "/Users/erinversfeld/thestacks/" docs/agents/ --include="*.md"` returns zero matches; all 23 agent specs now use `./`-relative paths
 
 ## Dependencies
 None.

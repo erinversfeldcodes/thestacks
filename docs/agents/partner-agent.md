@@ -71,12 +71,12 @@ When a partner and a scraper both have data for the same entity, partner data wi
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md
-/Users/erinversfeld/thestacks/docs/agents/standards/security.md
-/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 23, 21, 22)
-/Users/erinversfeld/thestacks/docs/user-stories.md (section 9)
-/Users/erinversfeld/thestacks/docs/implementation-mapping.md (section 9)
+./docs/agents/standards/code-quality.md
+./docs/agents/standards/security.md
+./docs/agents/standards/protobuf.md
+./docs/technical-architecture.md (sections 23, 21, 22)
+./docs/user-stories.md (section 9)
+./docs/implementation-mapping.md (section 9)
 ```
 
 ## Integration Handoffs

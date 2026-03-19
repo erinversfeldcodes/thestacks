@@ -65,7 +65,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **`oneof` vs nullable**: `oneof` is more efficient than multiple optional fields where only one is ever set — verify it's used where applicable.
 
 ### 5. Security (mechanical — specialist self-checks)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` and `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md`.
+Load and verify against `./docs/agents/standards/security.md` and `./docs/agents/standards/protobuf.md`.
 - **Partner data isolation**: Partner-facing schemas in `proto/stacks/partner/` must never include fields for user data. Partners push inventory/events in; they never see user shelves, reading history, or personal data.
 - **Input validation at the boundary**: Protobuf deserialization does not validate business rules — verify that all Protobuf-validated payloads are also validated in application code (ISBN format, price ranges, enum membership).
 - **No PII in partner schemas**: Partner schemas are externally visible contracts. Verify no field carries user PII.
@@ -86,8 +86,8 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/protobuf.md` — file organisation, schema evolution rules, code generation, event upcasting, Elm decoder exception
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, clarity, comments as documentation
+- `./docs/agents/standards/protobuf.md` — file organisation, schema evolution rules, code generation, event upcasting, Elm decoder exception
+- `./docs/agents/standards/code-quality.md` — consistency, clarity, comments as documentation
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

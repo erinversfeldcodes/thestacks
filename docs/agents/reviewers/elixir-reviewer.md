@@ -49,7 +49,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Ecto query construction**: Are queries built with indexed columns in the leading position? Are large result sets paginated?
 
 ### 5. Security (mixed — specialist checks auth and HMAC; reviewer assesses threat model)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **Authentication**: Guardian pipeline applied correctly. Protected routes reject unauthenticated requests with 401, not 404.
 - **Authorisation**: User can only act on their own resources. No horizontal privilege escalation.
 - **Input validation**: All external input validated at the API boundary. Ecto changesets enforce this — check that no raw params reach the DB.
@@ -73,8 +73,8 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering, comments describe "why" not "what"
-- `/Users/erinversfeld/thestacks/docs/agents/standards/testing.md` — new feature → acceptance + unit tests; new endpoint → contract + integration test; new worker → unit + chaos test
+- `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering, comments describe "why" not "what"
+- `./docs/agents/standards/testing.md` — new feature → acceptance + unit tests; new endpoint → contract + integration test; new worker → unit + chaos test
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

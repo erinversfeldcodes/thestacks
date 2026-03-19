@@ -72,7 +72,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Build time**: Are Elixir releases built with `MIX_ENV=prod`? Are Rust builds in `--release` mode? Debug builds in production are significantly slower.
 
 ### 5. Security (mechanical — specialist self-checks)
-Load and verify against `/Users/erinversfeld/thestacks/docs/agents/standards/security.md`.
+Load and verify against `./docs/agents/standards/security.md`.
 - **Private networking**: Rust scraper must not be publicly reachable on Fly — verify `internal_port` only, no public `services` block. Vision service is on Modal with HMAC auth on a public HTTPS endpoint — verify `VISION_HMAC_SECRET` is set as both a Fly secret (core) and a Modal secret (vision).
 - **Secrets management**: All secrets in Fly via `fly secrets set`. No secrets in TOML, Dockerfiles, workflow files, or `.env.example`.
 - **Container scanning**: Trivy or equivalent configured in CI to scan final images for CVEs.
@@ -96,8 +96,8 @@ This section is mandatory. The human will decide what to act on.
 
 ### 7. Project Coding Standards (mechanical — specialist self-checks)
 Load and check against:
-- `/Users/erinversfeld/thestacks/docs/agents/standards/code-quality.md` — consistency, no over-engineering
-- `/Users/erinversfeld/thestacks/docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
+- `./docs/agents/standards/code-quality.md` — consistency, no over-engineering
+- `./docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

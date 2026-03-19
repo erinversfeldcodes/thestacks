@@ -152,9 +152,9 @@ For each boundary:
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (schema, API shapes, service contracts)
-/Users/erinversfeld/thestacks/CLAUDE.md (naming conventions, do-nots)
-/Users/erinversfeld/thestacks/proto/ (all .proto files)
-/Users/erinversfeld/thestacks/frontend/src/Api.elm (Elm HTTP client)
-/Users/erinversfeld/thestacks/frontend/src/Types/ (Elm domain types)
+./docs/technical-architecture.md (schema, API shapes, service contracts)
+./CLAUDE.md (naming conventions, do-nots)
+./proto/ (all .proto files)
+./frontend/src/Api.elm (Elm HTTP client)
+./frontend/src/Types/ (Elm domain types)
 ```

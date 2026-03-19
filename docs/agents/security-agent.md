@@ -83,8 +83,8 @@ Elm does NOT require `unsafe-eval`. This is a security advantage.
 
 ## Context Loading Requirements
 ```
-/Users/erinversfeld/thestacks/docs/technical-architecture.md (sections 4, 5, 9, 10)
-/Users/erinversfeld/thestacks/docs/agents/standards/security.md
+./docs/technical-architecture.md (sections 4, 5, 9, 10)
+./docs/agents/standards/security.md
 ```
 
 ## Integration Handoffs
