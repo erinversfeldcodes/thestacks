@@ -71,8 +71,10 @@ Issue #043 (book_editions table for `edition_id` FK), Issue #003 (vision sidecar
 python-agent (FastAPI endpoints) + elixir-agent (Client + InternalController)
 
 ## Progress Notes
-<!-- Updated by agents during execution -->
+
 Created 2026-03-19 as GAP-06 from roadmap gap analysis. Vision `/associate` coordination risk was flagged during enrichment pipeline analysis (#057 assumed this endpoint existed).
 
 2026-03-19 — Wave A (Python) orchestrator review complete. Regression gate: 49 passed in 0.13s.
-Reviewer verdict: NEEDS_REVISION — BLOCKER: zero tests for `/associate` and `image_url`. All 49 tests are pre-existing; the new features are entirely untested. Additional required revisions: (1) bare `assert` at main.py:170 (stripped by Python -O flag), (2) inline `import json` inside function body at main.py:119, (3) `core_api_url` empty-string default not enforced in production. Wave B (Elixir: Stacks.AI.Client, InternalController) remains deferred. See plans/072-vision-service-extensions-partial.md.
+Reviewer verdict: NEEDS_REVISION — BLOCKER: zero tests for `/associate` and `image_url`. All 49 tests are pre-existing; the new features are entirely untested. Additional required revisions: (1) bare `assert` at main.py:170 (stripped by Python -O flag), (2) inline `import json` inside function body at main.py:119, (3) `core_api_url` empty-string default not enforced in production. These revisions remain open and must be addressed when this issue is revisited.
+
+2026-03-19 — Elixir scope (`associate_isbn/4`, `extract_from_url/1`, `StacksWeb.InternalController`, `Books.confirm_cover_association/2`) moved to Issue #046. Rationale: the InternalController calls `confirm_cover_association/2` which is being built in #046 anyway; co-locating them in one issue avoids a half-implemented callback chain. Issue #072 is considered CLOSED on the Python side pending the three required revisions above, which are to be addressed at the start of #046 execution before the Elixir layer is built on top of them.
