@@ -1,1 +1,10 @@
-// Stacks scraper library module.
+// Stacks scraper library — public module exports.
+
+pub mod auth;
+pub mod config;
+pub mod error;
+pub mod price;
+pub mod rate_limiter;
+pub mod robots;
+pub mod scraper;
+pub mod stores;

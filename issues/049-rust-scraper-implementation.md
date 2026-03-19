@@ -61,3 +61,21 @@ None — fully independent service. Can start in parallel with any Elixir task.
 rust-agent
 
 ## Progress Notes
+
+### 2026-03-19 — Orchestrator post-implementation review complete
+
+**Regression Gate:** PASS — cargo test 43/43, cargo clippy clean, cargo fmt clean.
+
+**Reviewer Verdict: NEEDS_REVISION**
+
+Library layer (config, price, rate_limiter, robots, auth, stores) is high quality and well-tested. Three blocking gaps identified:
+
+1. **`/scrape` and `/config/reload` endpoints not wired into Axum** — `main.rs` exposes `/health` only. The HMAC auth module exists but is not applied as middleware. This is a P0 integration gap.
+2. **TOML store configs missing from disk** — `scrapers/za/exclusive_books.toml` and `scrapers/za/takealot.toml` required by the issue do not exist in the repo.
+3. **No HTTP request timeout on reqwest::Client** — unresponsive sites can hang threads indefinitely.
+
+Additional non-blocking: no proptest for price parsing (project standard), no `selector_match_rate` in PriceResult (required by Issue #068 downstream).
+
+**PE Gate:** YELLOW — library internals are clean; integration layer is incomplete. Follow-up issues are required before Issue #050 can integrate against a real scraper endpoint.
+
+See `plans/049-rust-scraper-mvp-complete.md` for full detail and follow-up issue list.
