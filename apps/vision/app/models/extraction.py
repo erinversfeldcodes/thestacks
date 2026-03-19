@@ -1,8 +1,31 @@
-from pydantic import BaseModel, Field
+from typing import Self
+
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class ExtractionRequest(BaseModel):
-    images: list[str] = Field(..., min_length=1, max_length=3, description="Base64-encoded images")
+    images: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=3,
+        description="Base64-encoded images (mutually exclusive with image_url)",
+    )
+    image_url: HttpUrl | None = Field(
+        default=None,
+        description=(
+            "URL of a remote image to download and extract (mutually exclusive with images)"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_input_source(self) -> Self:
+        has_images = self.images is not None
+        has_url = self.image_url is not None
+        if has_images and has_url:
+            raise ValueError("Provide either 'images' or 'image_url', not both")
+        if not has_images and not has_url:
+            raise ValueError("Either 'images' or 'image_url' must be provided")
+        return self
 
 
 class ExtractedBook(BaseModel):
