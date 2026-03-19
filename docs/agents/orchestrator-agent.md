@@ -419,6 +419,18 @@ The reviewer gains an additional advisory check when E2E results are present:
 
 This is advisory, not a blocker — the reviewer flags E2E coverage gaps as suggestions, not NEEDS_REVISION.
 
+The reviewer always performs a user story alignment check:
+
+> **User Story Alignment**
+> 1. Look up the user story this issue claims to support (check the issue's `user_stories` field or
+>    the `docs/user-stories.md` entry referenced in the issue).
+> 2. Reflect: does the work completed in this phase meaningfully advance that user story? Is a real
+>    user closer to completing the journey described?
+> 3. Identify any additional work that falls within the issue's stated scope and would further the
+>    user story — work that was not done but reasonably should have been.
+
+This is advisory, not a blocker — the reviewer surfaces alignment gaps and scope suggestions, not NEEDS_REVISION. The human decides whether to address them now or track them as follow-on issues.
+
 ### 2D — Act on Review Result
 
 **If APPROVED:**
