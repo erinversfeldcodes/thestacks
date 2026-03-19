@@ -20,6 +20,9 @@ _INSECURE_DEFAULTS = {"change_me_in_dev", "change_me", "secret", ""}
 class Settings(BaseSettings):
     environment: str = "development"
     core_url: str = "http://core.internal:4000"
+    # VISION_CORE_API_URL — base URL of the Phoenix core (no trailing slash).
+    # Required in production; defaults to core_url for backwards compatibility.
+    core_api_url: str = ""
     log_level: str = "info"
     hmac_secret: str = "change_me_in_dev"
     model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
@@ -28,6 +31,11 @@ class Settings(BaseSettings):
     max_image_size_bytes: int = 10_485_760  # 10 MB
     local_ocr_enabled: bool = True
     local_ocr_confidence_threshold: float = 0.9
+
+    @property
+    def effective_core_api_url(self) -> str:
+        """Return VISION_CORE_API_URL if set, else fall back to VISION_CORE_URL."""
+        return self.core_api_url if self.core_api_url else self.core_url
 
     model_config = SettingsConfigDict(
         env_prefix="VISION_",
