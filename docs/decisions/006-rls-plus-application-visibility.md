@@ -60,7 +60,7 @@ RLS policies are designed in Phase 1A alongside the migrations and enforced afte
 | `blog_posts` | `stacks_app` role can only write rows where `user_id = current_user_id`. Read access filtered by visibility column |
 | `offer_threads` / `offer_messages` | Scoped to `(placement_id, buyer_id)` — only the buyer and the listing owner can read |
 
-RLS policies are documented in `docs/rls-design.md`.
+RLS policies will be documented in `docs/rls-design.md` (file to be created when policies are activated in Phase 1B).
 
 **Database roles:**
 - `stacks_app` — CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`. This is the role the Phoenix app uses.
