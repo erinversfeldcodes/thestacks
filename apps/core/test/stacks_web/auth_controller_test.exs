@@ -1,5 +1,5 @@
 defmodule StacksWeb.AuthControllerTest do
-  use CoreWeb.ConnCase, async: true
+  use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
 
@@ -54,6 +54,25 @@ defmodule StacksWeb.AuthControllerTest do
       conn = post(conn, "/api/auth/login", params)
 
       assert json_response(conn, 401)
+    end
+
+    test "returns 403 when email is unconfirmed and flag is on", %{conn: conn} do
+      insert(:user,
+        email: "unconfirmed@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: false
+      )
+
+      Application.put_env(:core, :require_email_confirmation, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :require_email_confirmation, false)
+      end)
+
+      params = %{email: "unconfirmed@example.com", password: "secret123"}
+      conn = post(conn, "/api/auth/login", params)
+
+      assert %{"error" => "email_unconfirmed"} = json_response(conn, 403)
     end
   end
 

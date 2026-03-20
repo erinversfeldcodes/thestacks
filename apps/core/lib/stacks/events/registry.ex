@@ -22,6 +22,9 @@ defmodule Stacks.Events.Registry do
     ],
     "user.location_updated" => [
       Stacks.Discovery.Handlers.LocationUpdatedHandler
+    ],
+    "user.registered" => [
+      Stacks.Notifications.EmailConfirmationHandler
     ]
   }
 
