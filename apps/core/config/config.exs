@@ -5,7 +5,8 @@ config :core,
   generators: [binary_id: true, timestamp_type: :utc_datetime_usec]
 
 config :core, Core.Repo,
-  migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at]
+  migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at],
+  types: Core.PostgrexTypes
 
 config :core, Oban,
   repo: Core.Repo,

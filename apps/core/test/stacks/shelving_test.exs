@@ -1,6 +1,7 @@
 defmodule Stacks.ShelvingTest do
   use Core.DataCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
   alias Core.Repo
@@ -36,6 +37,31 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  describe "place_book/3" do
+    test "creates a placement and returns {:ok, placement}" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      assert placement.book_id == book.id
+    end
+
+    test "creates the bookshelf if it does not exist" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
+    end
+
+    test "emits placement.created event" do
+      user = insert(:user)
+      book = insert(:book)
+      before_count = event_count("placement.created")
+
+      Shelving.place_book(user.id, book.id, "library")
+
+      assert event_count("placement.created") == before_count + 1
+    end
+  end
+
   describe "move_book/3" do
     setup :setup_user_bookshelf_book
 
@@ -67,6 +93,14 @@ defmodule Stacks.ShelvingTest do
 
       assert history != nil
     end
+
+    test "emits placement.moved event", %{user: user, placement: placement} do
+      before_count = event_count("placement.moved")
+
+      Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert event_count("placement.moved") == before_count + 1
+    end
   end
 
   describe "remove_book/2" do
@@ -85,6 +119,14 @@ defmodule Stacks.ShelvingTest do
       placements = Shelving.get_bookshelf_books(user.id, "library")
       ids = Enum.map(placements, & &1.id)
       refute placement.id in ids
+    end
+
+    test "emits placement.removed event", %{user: user, placement: placement} do
+      before_count = event_count("placement.removed")
+
+      Shelving.remove_book(placement.id, user.id)
+
+      assert event_count("placement.removed") == before_count + 1
     end
   end
 
@@ -129,6 +171,14 @@ defmodule Stacks.ShelvingTest do
 
       assert history != nil
     end
+
+    test "emits placement.reread event", %{placement: placement} do
+      before_count = event_count("placement.reread")
+
+      Shelving.reread_book(placement.id)
+
+      assert event_count("placement.reread") == before_count + 1
+    end
   end
 
   describe "abandon_book/2" do
@@ -156,21 +206,6 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
-  describe "place_book/3" do
-    test "creates a placement and returns {:ok, placement}" do
-      user = insert(:user)
-      book = insert(:book)
-      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
-      assert placement.book_id == book.id
-    end
-
-    test "creates the bookshelf if it does not exist" do
-      user = insert(:user)
-      book = insert(:book)
-      assert {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
-    end
-  end
-
   describe "spine_data/1" do
     setup :setup_user_bookshelf_book
 
@@ -185,5 +220,207 @@ defmodule Stacks.ShelvingTest do
     test "returns nil for unknown placement" do
       assert nil == Shelving.spine_data(Ecto.UUID.generate())
     end
+  end
+
+  describe "spine_data/1 — formats from editions" do
+    test "returns formats list derived from book editions" do
+      book = insert(:book)
+      _edition = insert(:book_edition, book: book, format_label: "Paperback", is_primary: true)
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert is_list(data.formats)
+      assert "Paperback" in data.formats
+    end
+
+    test "formats list includes all edition format labels" do
+      book = insert(:book)
+      _primary = insert(:book_edition, book: book, format_label: "Hardcover", is_primary: true)
+      _secondary = insert(:book_edition, book: book, format_label: "Ebook", is_primary: false)
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert length(data.formats) == 2
+      assert "Hardcover" in data.formats
+      assert "Ebook" in data.formats
+    end
+
+    test "page_count comes from the primary edition" do
+      book = insert(:book)
+
+      _primary =
+        insert(:book_edition,
+          book: book,
+          format_label: "Hardcover",
+          page_count: 450,
+          is_primary: true
+        )
+
+      _secondary =
+        insert(:book_edition,
+          book: book,
+          format_label: "Ebook",
+          page_count: 400,
+          is_primary: false
+        )
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert data.page_count == 450
+    end
+
+    test "page_count falls back to first edition when no primary" do
+      book = insert(:book)
+
+      _only =
+        insert(:book_edition,
+          book: book,
+          format_label: "Paperback",
+          page_count: 320,
+          is_primary: false
+        )
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert data.page_count == 320
+    end
+
+    test "formats is empty list when book has no editions" do
+      book = insert(:book)
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert data.formats == []
+    end
+  end
+
+  describe "update_bookshelf_visibility/3" do
+    setup :setup_user_bookshelf_book
+
+    test "owner can update bookshelf visibility", %{user: user, bookshelf: bookshelf} do
+      assert {:ok, updated} =
+               Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "platform")
+
+      assert updated.visibility == "platform"
+    end
+
+    test "DB record is updated", %{user: user, bookshelf: bookshelf} do
+      Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "platform")
+      reloaded = Repo.get!(Bookshelf, bookshelf.id)
+      assert reloaded.visibility == "platform"
+    end
+
+    test "returns :unauthorized when user does not own the bookshelf", %{bookshelf: bookshelf} do
+      other = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.update_bookshelf_visibility(bookshelf.id, other.id, "platform")
+    end
+
+    test "returns :not_found for nonexistent bookshelf id" do
+      user = insert(:user)
+
+      assert {:error, :not_found} =
+               Shelving.update_bookshelf_visibility(Ecto.UUID.generate(), user.id, "platform")
+    end
+
+    test "returns changeset error for invalid visibility value", %{
+      user: user,
+      bookshelf: bookshelf
+    } do
+      assert {:error, changeset} =
+               Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "secret")
+
+      assert %{visibility: [_]} = errors_on(changeset)
+    end
+  end
+
+  describe "update_placement_visibility/3" do
+    setup do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, visibility: "owner")
+      %{user: user, bookshelf: bookshelf, book: book, placement: placement}
+    end
+
+    test "owner can set placement visibility within the bookshelf ceiling", %{
+      user: user,
+      placement: placement
+    } do
+      # bookshelf is "platform" (rank 1), "platform" placement (rank 1) is valid
+      assert {:ok, updated} =
+               Shelving.update_placement_visibility(placement.id, user.id, "platform")
+
+      assert updated.visibility == "platform"
+    end
+
+    test "DB record is updated", %{user: user, placement: placement} do
+      Shelving.update_placement_visibility(placement.id, user.id, "platform")
+      reloaded = Repo.get!(Placement, placement.id)
+      assert reloaded.visibility == "platform"
+    end
+
+    test "rejects visibility less restrictive than bookshelf ceiling", %{user: user} do
+      # bookshelf is "owner" (rank 2); placement "platform" (rank 1) violates ceiling
+      owner_bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "owner")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: owner_bookshelf, book: book, visibility: "owner")
+
+      assert {:error, reason} =
+               Shelving.update_placement_visibility(placement.id, user.id, "platform")
+
+      assert is_binary(reason)
+    end
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.update_placement_visibility(placement.id, other.id, "owner")
+    end
+
+    test "returns :not_found for nonexistent placement id" do
+      user = insert(:user)
+
+      assert {:error, :not_found} =
+               Shelving.update_placement_visibility(Ecto.UUID.generate(), user.id, "owner")
+    end
+
+    test "setting placement to 'owner' always passes ceiling (most restrictive)", %{
+      user: user,
+      bookshelf: bookshelf
+    } do
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, visibility: "platform")
+      assert {:ok, updated} = Shelving.update_placement_visibility(placement.id, user.id, "owner")
+      assert updated.visibility == "owner"
+    end
+  end
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 end

@@ -123,6 +123,7 @@ if has_group dbt; then
 
     if ! run_group "dbt: lint sql" bash scripts/lint-sql.sh; then FAILED+=(dbt-lint-sql); fi
     if ! run_group "dbt: run + test" bash scripts/test-dbt.sh; then FAILED+=(dbt-test); fi
+    if ! run_group "dbt: checkpoint" bash scripts/lint-dbt.sh; then FAILED+=(dbt-checkpoint); fi
 fi
 
 # ── Security ──────────────────────────────────────────────────────────────────

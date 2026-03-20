@@ -53,6 +53,11 @@ class Settings(BaseSettings):
                 "VISION_HMAC_SECRET is set to an insecure default value. "
                 "Set it to a strong random secret before starting the service."
             )
+        if self.environment == "production" and self.core_api_url in _INSECURE_DEFAULTS:
+            raise ValueError(
+                "VISION_CORE_API_URL must be set to the base URL of the Phoenix core "
+                "service (no trailing slash). Example: https://thestacks.fly.dev"
+            )
         # Modal credentials (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET) are validated by
         # the Modal client at call time, not here — they live outside the VISION_ prefix.
         return self

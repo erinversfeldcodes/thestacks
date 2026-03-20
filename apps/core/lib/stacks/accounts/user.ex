@@ -32,6 +32,9 @@ defmodule Stacks.Accounts.User do
     field :display_name, :string
     field :role, :string, default: "user"
     field :profile_visibility, :string, default: "owner"
+    field :website_url, :string
+    field :country_code, :string, default: "ZA"
+    field :city, :string
     field :age_verified, :boolean, default: false
     field :consent_analytics, :boolean, default: false
     field :consent_analytics_at, :utc_datetime_usec
@@ -75,6 +78,57 @@ defmodule Stacks.Accounts.User do
   def settings_changeset(user, attrs) do
     user
     |> cast(attrs, [:age_verified])
+  end
+
+  @doc "Changeset for profile update (display_name, website_url)."
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name, :website_url])
+    |> validate_length(:website_url, max: 500)
+  end
+
+  @doc "Changeset for email update. Requires current_password to be verified externally."
+  def email_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email])
+    |> validate_required([:email])
+    |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
+    |> unique_constraint(:email)
+  end
+
+  @doc "Changeset for location update (country_code, city)."
+  def location_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:country_code, :city])
+    |> validate_length(:country_code, is: 2)
+    |> validate_length(:city, max: 200)
+  end
+
+  @doc "Changeset for password change (new_password). Caller must verify current password externally."
+  def password_change_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> hash_password()
+  end
+
+  @doc "Changeset for notification preferences."
+  def notifications_changeset(user, attrs) do
+    user
+    |> cast(attrs, [
+      :notify_wishlist_availability,
+      :notify_marketplace,
+      :notify_group_invitations,
+      :notify_event_matches
+    ])
+  end
+
+  @doc "Changeset for profile visibility setting."
+  def profile_visibility_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:profile_visibility])
+    |> validate_inclusion(:profile_visibility, ["platform", "owner"])
   end
 
   @doc "Changeset for email confirmation token storage."

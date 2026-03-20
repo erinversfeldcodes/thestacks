@@ -99,6 +99,32 @@ defmodule StacksWeb.BookshelfPlacementController do
     |> json(%{error: "formats parameter is required and must be an array"})
   end
 
+  @doc "PUT /api/placements/:id/visibility — update the visibility of a placement (ceiling rule enforced)."
+  def update_visibility(conn, %{"id" => placement_id, "visibility" => visibility}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.update_placement_visibility(placement_id, user.id, visibility) do
+      {:ok, placement} ->
+        json(conn, %{id: placement.id, visibility: placement.visibility})
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      {:error, :unauthorized} ->
+        conn |> put_status(403) |> json(%{error: "forbidden"})
+
+      {:error, reason} when is_binary(reason) ->
+        conn |> put_status(422) |> json(%{error: reason})
+
+      {:error, changeset} ->
+        conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def update_visibility(conn, _params) do
+    conn |> put_status(422) |> json(%{error: "visibility is required"})
+  end
+
   @doc "DELETE /api/placements/:id — soft-delete (remove) a placement."
   def delete(conn, %{"id" => placement_id}) do
     user = Guardian.Plug.current_resource(conn)

@@ -1961,15 +1961,29 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 ---
 
+### Cross-cutting: Data Architecture — Contract-First Derived Data (ADR 010)
+
+| Layer | Components |
+|-------|------------|
+| **Summary** | The data pipeline follows a **contract-first derived data** pattern (ADR 010, drawing from DDIA Ch. 4, 11, 12). Protobuf contracts enforce shape at the write boundary; the event log provides ordered history; all downstream views are purpose-built derivations that can be rebuilt from the systems of record (`op.*`, `audit.*`). This is neither star schema nor medallion — it is "one log, many derivations" with contract-enforced input. |
+| **Systems of record** | `op.*` tables (OLTP, Ecto writes), `op.event_log` (append-only domain events), `audit.audit_log` (immutable, encrypted). |
+| **Derived data** | `wh.stg_*` (structural projections, PII-excluded), `wh.int_*` (semantic aggregates — domain joins), `wh.mart_*` (consumer-optimised read models), ETS caches (`BookDetailCache`), search indexes (`mart_platform_searchable`), Atom feeds. |
+| **Key invariant** | Every layer after `op.*` is derived and rebuildable. If the `wh` schema is dropped, `dbt run` reconstructs it. |
+| **Materialisation** | Staging: `VIEW`. Intermediate: `VIEW` or `incremental`. Marts: `incremental` for hot-path (5-min), `VIEW`/`table` for cold-path (daily). Hot-path marts may use `MATERIALIZED VIEW` with `REFRESH CONCURRENTLY`. |
+| **Refresh trigger** | Event-triggered selective dbt runs (event → specific model set) with daily cron as catch-all. Mapping in `Stacks.Workers.DbtRefreshJob`. |
+| **Design rules** | (1) No mart without a named consumer. (2) No `SELECT *` in staging — explicit column lists. (3) Tier 3/4 data never enters `wh`. (4) Incremental models for unboundedly growing sources. |
+| **References** | ADR 010, ADR 009 (proto codegen), ADR 007 (proto contracts), `docs/data-quality.md`. |
+
 ### Cross-cutting: Event-Driven Architecture
 
 | Layer | Components |
 |-------|------------|
-| **Summary** | Oban-backed event bus. All significant state changes emit events to `event_log` table. Subscribers are registered at startup and notified via Oban jobs. |
+| **Summary** | Oban-backed event bus. All significant state changes emit events to `event_log` table. Subscribers are registered at startup and notified via Oban jobs. The event log is both a system of record (immutable history) and the integration point that connects subsystems — enrichment workers, feed regeneration, dbt refresh, and caches are all event-driven (ADR 010). |
 | **Affects stories** | All stories benefit. Primary consumers: US-9.2.1 (inventory events), US-9.3.1 (event events), US-9.5.1 (metrics from events), US-1.5.1 (shelf movement events), US-2.1.1–2.4.1 (enrichment fan-out). |
 | **Backend (Phoenix)** | `Stacks.Events` -- `emit/1`, `replay/3`. `Stacks.Events.Registry` -- subscriber mapping. `Stacks.Events.Upcaster` -- schema version migration. `Stacks.Events.SubscriberWorker` -- Oban worker that dispatches to subscriber modules. |
 | **Database** | `event_log` table (event_type, aggregate_type, aggregate_id, schema_version, payload JSONB, metadata JSONB, occurred_at, published_at). Index on (event_type, aggregate_id, occurred_at DESC). |
 | **dbt Models** | `stg_event_log`, `int_event_throughput`, `mart_event_bus_health`. |
+| **dbt Integration** | Events trigger selective dbt runs via `DbtRefreshJob` (e.g., `shelf.book_placed` → `mart_community_read_count`). See ADR 010 for the full event-to-model mapping. |
 | **Infrastructure** | Oban queue `:events` with concurrency tuned to subscriber count. |
 
 ### Cross-cutting: Schema Contracts (Protobuf)
@@ -1980,7 +1994,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Affects stories** | All partner stories (US-9.x), internal event bus, service-to-service contracts. |
 | **Proto files** | `proto/stacks/partner/` (inventory, events, spaces), `proto/stacks/internal/` (event_bus, enrichment), `proto/stacks/common/` (book, location). |
 | **Code generation** | Elixir, Rust, Python: generated at build time, gitignored. Elm: generated JSON decoders checked in (no runtime codegen). |
-| **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` in every PR. |
+| **Schema codegen (Issue #080)** | `mix proto.sync` generates Ecto migrations, Ecto schemas, and dbt staging models from `.proto` messages tagged with `(stacks.persisted) = true`. `mix proto.sync --check` in CI catches drift. Covers raw ingestion tables only — domain tables remain hand-written. This is the "contract-enforced input" pillar of ADR 010 — the proto defines the shape, and the staging model is mechanically derived from that contract. See ADR 009. |
+| **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` + `mix proto.sync --check` in every PR. |
 | **Event upcasting** | `Stacks.Events.Upcaster` -- pattern-matched version transforms for old events. Same pattern as Commanded (Elixir CQRS). |
 
 ---

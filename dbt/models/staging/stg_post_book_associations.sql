@@ -10,6 +10,5 @@ select
     reasoning,
     source,
     visible,
-    created_at,
-    updated_at
+    created_at
 from {{ source('op', 'post_book_associations') }}

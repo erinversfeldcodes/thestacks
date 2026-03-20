@@ -92,4 +92,138 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert %{"count" => 0, "placements" => []} = json_response(conn, 200)
     end
   end
+
+  describe "GET /api/bookshelves/:bookshelf_name — third-party viewer" do
+    test "returns 404 when requesting another user's owner-visibility bookshelf", %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      insert(:bookshelf, user: owner, name: "library", visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> get("/api/bookshelves/library")
+
+      # Other user gets an empty response (their own non-existent library), not the owner's
+      assert %{"count" => 0, "placements" => []} = json_response(conn, 200)
+    end
+  end
+
+  describe "GET /api/bookshelves/:bookshelf_name — visibility gates" do
+    test "filters out owner-visibility placements from platform-visibility bookshelf", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book_visible = insert(:book)
+      book_hidden = insert(:book)
+
+      insert(:placement, bookshelf: bookshelf, book: book_visible, visibility: "platform")
+      insert(:placement, bookshelf: bookshelf, book: book_hidden, visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      # Owner can see all their own placements (owner bypass in visibility module)
+      assert %{"count" => count} = json_response(conn, 200)
+      assert count == 2
+    end
+
+    test "owner sees their own bookshelf even with owner visibility", %{conn: conn} do
+      user = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      book = insert(:book)
+      insert(:placement, bookshelf: bookshelf, book: book, visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      assert %{"count" => 1} = json_response(conn, 200)
+    end
+
+    test "returns empty placements list when bookshelf does not exist yet", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/antilibrary")
+
+      assert %{"bookshelf" => "antilibrary", "count" => 0, "placements" => []} =
+               json_response(conn, 200)
+    end
+  end
+
+  describe "PUT /api/bookshelves/:id/visibility" do
+    test "updates bookshelf visibility", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+
+      assert %{"id" => _, "visibility" => "platform"} = json_response(conn, 200)
+    end
+
+    test "returns 403 when user does not own the bookshelf", %{conn: conn} do
+      user = insert(:user)
+      other_user = insert(:user)
+      bookshelf = insert(:bookshelf, user: other_user, name: "library")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+
+    test "returns 404 for nonexistent bookshelf", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/00000000-0000-0000-0000-000000000000/visibility", %{
+          visibility: "platform"
+        })
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 422 for invalid visibility value", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "secret"})
+
+      assert %{"errors" => %{"visibility" => [_]}} = json_response(conn, 422)
+    end
+
+    test "returns 422 when visibility parameter is missing", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{})
+
+      assert %{"error" => "visibility is required"} = json_response(conn, 422)
+    end
+
+    test "returns 401 when not authenticated", %{conn: conn} do
+      conn = put(conn, "/api/bookshelves/some-id/visibility", %{visibility: "platform"})
+      assert json_response(conn, 401)
+    end
+  end
 end

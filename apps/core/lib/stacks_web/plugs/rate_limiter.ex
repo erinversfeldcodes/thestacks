@@ -5,6 +5,8 @@ defmodule StacksWeb.Plugs.RateLimiter do
   - Global endpoints: 1000 requests / 60 seconds per IP
   - Auth endpoints (`:auth` bucket): 5 requests / 60 seconds per IP
   - Upload endpoints (`:upload` bucket): 10 requests / 60 seconds per authenticated user
+  - Social endpoints (`:social` bucket): 20 requests / 60 seconds per authenticated user
+  - Password change (`:password_change` bucket): 3 requests / 60 seconds per IP
 
   The ETS table is managed by `StacksWeb.Plugs.RateLimiter.Server` which
   must be started in the supervision tree before this plug runs.
@@ -13,6 +15,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
     plug StacksWeb.Plugs.RateLimiter
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
     plug StacksWeb.Plugs.RateLimiter, bucket: :upload
+    plug StacksWeb.Plugs.RateLimiter, bucket: :social
   """
 
   require Logger
@@ -25,6 +28,8 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @global_limit 1_000
   @auth_limit 5
   @upload_limit 10
+  @password_change_limit 3
+  @social_limit 20
 
   def init(opts), do: opts
 
@@ -63,10 +68,12 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:auth), do: Application.get_env(:core, :rate_limit_auth, @auth_limit)
   defp get_limit(:upload), do: @upload_limit
+  defp get_limit(:password_change), do: @password_change_limit
+  defp get_limit(:social), do: @social_limit
   defp get_limit(_), do: @global_limit
 
-  # Upload bucket keys on user ID so the limit is per-user, not per-IP.
-  defp get_key(conn, :upload) do
+  # Upload and social buckets key on user ID so the limit is per-user, not per-IP.
+  defp get_key(conn, bucket) when bucket in [:upload, :social] do
     case conn.assigns[:guardian_default_resource] do
       nil -> get_ip(conn)
       user -> "user:#{user.id}"

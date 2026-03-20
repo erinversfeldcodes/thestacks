@@ -46,6 +46,8 @@ dbt/logs/
 
 # Protobuf generated — Elm decoders in proto/gen/elm/ are checked in (no runtime codegen).
 # Other language outputs go into each app's own directory and are ignored there.
+# Ecto schemas in lib/stacks/gen/ are checked in as bootstrap but regenerated
+# by mix proto.sync at build time. CI validates with --check.
 
 # Node
 node_modules/

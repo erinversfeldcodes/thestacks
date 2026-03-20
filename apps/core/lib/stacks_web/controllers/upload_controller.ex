@@ -10,6 +10,45 @@ defmodule StacksWeb.UploadController do
   alias Stacks.Books
   alias Stacks.Shelving
 
+  @doc """
+  POST /api/upload/identify — synchronously identifies candidate books from an image.
+
+  Accepts a JSON body with either `image_b64` (base64-encoded image bytes) or
+  `image_url` (publicly accessible image URL). Calls the vision client inline and
+  returns a list of candidate maps immediately — no Oban job is enqueued.
+
+  Returns 200 `{status: "identified", candidates: [...]}` on success.
+  Returns 422 when neither `image_b64` nor `image_url` is provided.
+  """
+  @spec identify(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def identify(conn, %{"image_b64" => image_b64}) when is_binary(image_b64) do
+    user = Guardian.Plug.current_resource(conn)
+    run_identify(conn, user.id, {:b64, image_b64})
+  end
+
+  def identify(conn, %{"image_url" => image_url}) when is_binary(image_url) do
+    user = Guardian.Plug.current_resource(conn)
+    run_identify(conn, user.id, {:url, image_url})
+  end
+
+  def identify(conn, _params) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "image_b64 or image_url is required"})
+  end
+
+  defp run_identify(conn, user_id, image_input) do
+    case Books.identify(user_id, image_input) do
+      {:ok, candidates} ->
+        json(conn, %{status: "identified", candidates: candidates})
+
+      {:error, _reason} ->
+        conn
+        |> put_status(500)
+        |> json(%{error: "identification_failed"})
+    end
+  end
+
   @doc "POST /api/upload — accepts a multipart image upload and enqueues IdentifyBookJob."
   def create(conn, %{"image" => %Plug.Upload{} = upload}) do
     user = Guardian.Plug.current_resource(conn)
@@ -20,10 +59,10 @@ defmodule StacksWeb.UploadController do
       |> put_status(202)
       |> json(%{status: "accepted", image_id: image.id})
     else
-      {:error, reason} ->
+      {:error, _reason} ->
         conn
         |> put_status(500)
-        |> json(%{error: inspect(reason)})
+        |> json(%{error: "upload_failed"})
     end
   end
 

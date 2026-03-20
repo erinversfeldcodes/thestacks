@@ -1,7 +1,7 @@
 # Issue #052: dbt Intermediate + Mart Models
 
 ## Summary
-Create all dbt intermediate and mart models for enrichment data, community read count, platform search index, marketplace analytics, blog activity, and system health metrics.
+Create all dbt intermediate and mart models following the **contract-first derived data** pattern (ADR 010). Each model has a named consumer, a refresh strategy (event-triggered or daily cron catch-all), and an explicit materialisation choice (view, incremental, or materialized_view).
 
 ## User Stories
 US-2.1.1 (reviews), US-2.2.1 (prices), US-5.1 (metrics), US-18.1.1 (community wear), US-1.5.3 (platform search)
@@ -43,10 +43,35 @@ The `wh` schema contains pre-computed views for all analytical and aggregation q
 - `mart_enrichment_gaps.sql` — books with zero prices (grouped by cause: no config, config broken, store doesn't stock), books with zero reviews, authors with no RSS/website. Exposed on metrics dashboard with drill-down.
 - `mart_llm_faithfulness.sql` — review summary: URL validation pass rate, confidence distribution. Blog associations: confirm/dismiss ratio per week, mean confidence. Source discovery: approval rate for high-confidence suggestions.
 
-**dbt scheduling (Oban integration):**
-- `Stacks.Workers.DbtRefreshJob` — configurable dbt run triggered by Oban.Cron
-- Frequency config: `mart_community_read_count` and `mart_platform_searchable` every 5 min; all others daily
-- `dbt_refresh` Oban queue: concurrency 1 (sequential dbt runs)
+**`DbtRefreshJob` — event-triggered selective refresh (ADR 010):**
+
+`Stacks.Workers.DbtRefreshJob` is an Oban worker on the `dbt_refresh` queue (concurrency 1) that supports two trigger modes:
+
+1. **Event-triggered selective rebuild.** Register in `Events.Registry` for enrichment completion events. On receipt, run `dbt run --select <model_list>` for only the affected models:
+
+   | Event | Emitted by | Models rebuilt |
+   |-------|-----------|---------------|
+   | `shelf.book_placed`, `shelf.book_moved` | Shelving context (#046) | `mart_community_read_count`, `mart_platform_searchable` |
+   | `enrichment.prices_scraped` | `PricePipeline` (#050) | `int_price_history`, `mart_book_prices` |
+   | `enrichment.reviews_scraped` | `FetchReviewsJob` (#050) | `int_review_sentiment`, `mart_book_reviews` |
+   | `enrichment.author_updated` | `FetchAuthorRSSJob` (#051) | `int_author_activity` |
+   | `enrichment.events_discovered` | `DiscoverBookstoreEventsJob` (#051) | `int_event_matches` |
+   | `source_health.recorded` | `SourceHealth` (#068) | `int_source_health`, `mart_data_quality_trend` |
+   | `post.published`, `post.updated` | Blog context (#053) | `int_blog_engagement`, `mart_blog_activity` |
+
+2. **Daily cron catch-all.** Oban.Cron triggers a full `dbt run` once daily to ensure eventual consistency. Catches any models not covered by event triggers.
+
+- Event-to-model mapping centralised in a `@model_mapping` module attribute inside `DbtRefreshJob` — not scattered across event handlers
+- Job uniqueness: use `Oban.Job` unique constraint on `(event_type, period: 300)` to coalesce rapid-fire events into a single dbt run per 5-minute window
+- Hot-path marts (`mart_community_read_count`, `mart_platform_searchable`) target ≤ 5 min latency
+- `dbt_refresh` Oban queue: concurrency 1 (sequential dbt runs — no parallel dbt execution)
+
+**Materialisation strategy (ADR 010):**
+- Staging: `VIEW` (already complete)
+- `int_price_history`: `incremental` (unbounded growth: editions × stores × days)
+- `mart_community_read_count`, `mart_platform_searchable`: `incremental` or `materialized_view` with `REFRESH CONCURRENTLY` (5-min refresh, non-locking)
+- `mart_data_quality_trend`: `incremental` (12-week rolling window — append new, drop oldest)
+- All others: `VIEW` or daily `table` depending on query complexity
 
 **Schema tests:**
 - `schema.yml` for all intermediate and mart models with column descriptions
@@ -57,8 +82,15 @@ The `wh` schema contains pre-computed views for all analytical and aggregation q
 - [ ] `dbt test` passes with schema + row-level assertions
 - [ ] `mart_community_read_count` returns correct counts (verified against test data)
 - [ ] `mart_platform_searchable` contains expected public content
-- [ ] `DbtRefreshJob` Oban worker runs on schedule
+- [ ] `DbtRefreshJob` Oban worker registered in `Events.Registry` for all enrichment events
+- [ ] Event-to-model mapping in `@model_mapping` covers all event types from table above
+- [ ] Event-triggered selective refresh: emitting `enrichment.prices_scraped` triggers only `int_price_history` + `mart_book_prices` (not a full run)
+- [ ] Job uniqueness coalesces rapid-fire events within 5-minute window
+- [ ] Daily cron catch-all runs full `dbt run` and succeeds
 - [ ] 5-minute refresh configured for hot-path marts
+- [ ] Incremental models (`int_price_history`, `mart_data_quality_trend`): test that new data appends correctly without full rebuild
+- [ ] Incremental models: `dbt run --full-refresh` works as escape hatch
+- [ ] Hot-path marts: verify non-locking refresh (either dbt incremental or `REFRESH CONCURRENTLY`)
 - [ ] All models documented in `schema.yml`
 - [ ] `int_source_health` correctly identifies broken scraper configs (test with a config that has 7+ consecutive failures)
 - [ ] `mart_data_quality_trend` shows 12-week rolling history

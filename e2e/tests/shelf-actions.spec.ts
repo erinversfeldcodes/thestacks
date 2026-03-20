@@ -12,16 +12,15 @@ test.describe("Shelf actions — move book between shelves", () => {
   test("move a book from library to wishlist via book detail", async ({
     page,
   }) => {
+    await ensureBookOnLibrary(page);
+
     // Go to the library shelf
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
     // Click the first book to open detail
     const bookButton = page.locator(".book-button").first();
-    if ((await bookButton.count()) === 0) {
-      console.log("No books on library — skipping");
-      return;
-    }
+    await expect(bookButton).toBeAttached({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
     // Wait for book detail to load

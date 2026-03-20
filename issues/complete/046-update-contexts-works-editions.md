@@ -75,3 +75,26 @@ Issue #042 (works/editions schema must exist), Issue #072 (Python `/associate` e
 elixir-agent (Opus — architectural judgment for works/editions model)
 
 ## Progress Notes
+
+**2026-03-19 — Implementation complete, all gates passed.**
+
+### Definition of Done — status
+
+- [x] `POST /api/upload/identify` returns identified candidates (with mocked vision)
+- [x] `POST /api/books/confirm` creates work + edition + placement; returns `{:ok, :created, book}` → 201 or `{:ok, :existing, book}` → 200
+- [x] Duplicate detection: existing ISBN returns existing book data (`{:ok, :existing, _}` → 200)
+- [x] Multi-format merge: same title+author triggers `{:error, {:merge_required, id}}` → 409; `POST /api/books/:id/merge-format` creates new edition
+- [x] `GET /api/books/:id` returns editions list with per-edition data; visibility-gated via `Visibility.resolve_visibility/2`
+- [x] Platform-wide search (`Books.search_platform/2`) returns results across public shelves
+- [x] All existing tests updated and passing — 520 tests, 0 failures
+- [x] `mix credo --strict` and `mix sobelow --config` pass (sobelow findings pre-existing)
+- [x] `Books.confirm_cover_association/2` updates edition cover and emits `book.cover_confirmed` event
+- [x] HMAC validation (valid + tampered) in `InternalController`; mocked HTTP client tests
+- [ ] `associate_isbn/4` and `extract_from_url/1` in `Stacks.AI.Client` — deferred, depends on Issue #072 (Python `/associate` endpoint)
+- [ ] All shelf operations emit events — core paths covered; exhaustive event coverage deferred to event audit pass
+
+### Key decisions
+- `Books.find_same_work/2` pre-filters via `ilike` on first word of title/author before in-memory Jaro-Winkler to avoid full table scan
+- `merge_edition/2` enforces ISBN hard gate via `ISBNResolver.resolve/1` in `with` chain before any DB write
+- `identify/2` accepts `{:b64, data} | {:url, data}` tagged tuple; `build_identify_payload/1` maps to correct vision key
+- Coverage: 84.3% (threshold 80%)
