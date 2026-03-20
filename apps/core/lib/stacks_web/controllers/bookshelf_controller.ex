@@ -6,6 +6,7 @@ defmodule StacksWeb.BookshelfController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
   alias Stacks.Visibility
+  alias StacksWeb.Plugs.ViewAsPlug
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
@@ -13,8 +14,18 @@ defmodule StacksWeb.BookshelfController do
   def show(conn, %{"bookshelf_name" => bookshelf_name}) do
     if bookshelf_name in @valid_bookshelves do
       user = Guardian.Plug.current_resource(conn)
-      viewer = {:platform_user, user.id}
-      render_bookshelf(conn, user, bookshelf_name, viewer)
+
+      conn =
+        conn
+        |> assign(:resource_owner_id, user.id)
+        |> ViewAsPlug.call([])
+
+      if conn.halted do
+        conn
+      else
+        viewer = Map.get(conn.assigns, :view_as_context, {:platform_user, user.id})
+        render_bookshelf(conn, user, bookshelf_name, viewer)
+      end
     else
       conn
       |> put_status(404)

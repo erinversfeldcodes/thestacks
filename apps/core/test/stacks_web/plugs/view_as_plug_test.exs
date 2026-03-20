@@ -6,7 +6,9 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
   `conn.assigns[:view_as_context]` so downstream controllers can render
   the caller's content from the named viewer's perspective.
 
-  Only the resource owner may use ViewAs — non-owners receive 403.
+  Platform owners may use any perspective. Regular users may use
+  "unauthenticated" and "platform" on resources they own (controller must
+  set `conn.assigns[:resource_owner_id]`). Non-owners receive 403.
   Invalid perspective values receive 422.
   """
 
@@ -93,10 +95,10 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Non-owner using ViewAs
+  # Non-owner without resource_owner_id — always 403
   # ---------------------------------------------------------------------------
 
-  describe "ViewAsPlug — non-owner using ViewAs" do
+  describe "ViewAsPlug — non-owner without resource_owner_id" do
     test "authenticated non-owner using view_as=unauthenticated receives 403", %{conn: conn} do
       regular_user = insert(:user, role: "user")
       conn = with_current_user(conn, regular_user)
@@ -137,6 +139,76 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Regular user with matching resource_owner_id
+  # ---------------------------------------------------------------------------
+
+  describe "ViewAsPlug — resource owner using ViewAs" do
+    test "resource owner with view_as=unauthenticated sets :unauthenticated context", %{
+      conn: conn
+    } do
+      user = insert(:user, role: "user")
+
+      conn =
+        conn
+        |> with_current_user(user)
+        |> Plug.Conn.assign(:resource_owner_id, user.id)
+
+      result = call_plug(conn, %{"view_as" => "unauthenticated"})
+
+      refute result.halted
+      assert result.assigns[:view_as_context] == :unauthenticated
+    end
+
+    test "resource owner with view_as=platform sets {:platform_user, user_id} context", %{
+      conn: conn
+    } do
+      user = insert(:user, role: "user")
+
+      conn =
+        conn
+        |> with_current_user(user)
+        |> Plug.Conn.assign(:resource_owner_id, user.id)
+
+      result = call_plug(conn, %{"view_as" => "platform"})
+
+      refute result.halted
+      assert result.assigns[:view_as_context] == {:platform_user, user.id}
+    end
+
+    test "resource owner using view_as=user:<id> receives 403 (owner-only perspective)", %{
+      conn: conn
+    } do
+      user = insert(:user, role: "user")
+      target = insert(:user)
+
+      conn =
+        conn
+        |> with_current_user(user)
+        |> Plug.Conn.assign(:resource_owner_id, user.id)
+
+      result = call_plug(conn, %{"view_as" => "user:#{target.id}"})
+
+      assert result.halted
+      assert result.status == 403
+    end
+
+    test "non-matching resource_owner_id receives 403", %{conn: conn} do
+      user = insert(:user, role: "user")
+      other_user = insert(:user)
+
+      conn =
+        conn
+        |> with_current_user(user)
+        |> Plug.Conn.assign(:resource_owner_id, other_user.id)
+
+      result = call_plug(conn, %{"view_as" => "unauthenticated"})
+
+      assert result.halted
+      assert result.status == 403
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Invalid perspective
   # ---------------------------------------------------------------------------
 
@@ -159,6 +231,26 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
       conn = with_current_user(conn, owner)
 
       result = call_plug(conn, %{"view_as" => "user:"})
+
+      assert result.halted
+      assert result.status == 422
+    end
+
+    test "view_as=group:<id> receives 422 not_implemented", %{conn: conn} do
+      owner = insert(:user, role: "owner")
+      conn = with_current_user(conn, owner)
+
+      result = call_plug(conn, %{"view_as" => "group:some-uuid"})
+
+      assert result.halted
+      assert result.status == 422
+    end
+
+    test "view_as=group: (missing group id) receives 422", %{conn: conn} do
+      owner = insert(:user, role: "owner")
+      conn = with_current_user(conn, owner)
+
+      result = call_plug(conn, %{"view_as" => "group:"})
 
       assert result.halted
       assert result.status == 422
