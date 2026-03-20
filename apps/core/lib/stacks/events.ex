@@ -12,6 +12,7 @@ defmodule Stacks.Events do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Events.EventLog
   alias Stacks.Events.SubscriberWorker
   alias Stacks.Events.Upcaster
 
@@ -168,7 +169,7 @@ defmodule Stacks.Events do
   end
 
   defp fetch_batch(event_type, from_datetime, offset) do
-    from(e in "event_log",
+    from(e in EventLog,
       where: e.event_type == ^event_type,
       where: e.occurred_at >= ^from_datetime,
       order_by: [asc: e.occurred_at, asc: e.id],
@@ -186,6 +187,6 @@ defmodule Stacks.Events do
         published_at: e.published_at
       }
     )
-    |> Repo.all(prefix: "op")
+    |> Repo.all()
   end
 end
