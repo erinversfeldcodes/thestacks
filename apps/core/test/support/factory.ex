@@ -33,7 +33,8 @@ defmodule Stacks.Factory do
       role: "user",
       profile_visibility: "owner",
       age_verified: false,
-      consent_analytics: false
+      consent_analytics: false,
+      email_confirmed: true
     }
   end
 
