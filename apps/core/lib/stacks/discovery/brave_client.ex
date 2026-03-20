@@ -86,8 +86,8 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # Simple daily budget tracking via persistent_term.
-  # Resets when the date changes.
+  # Daily budget tracking via :counters (atomic, no global GC).
+  # The counter resets when the date changes.
   defp check_daily_budget do
     today = Date.utc_today()
     {date, count} = get_counter()
@@ -101,17 +101,24 @@ defmodule Stacks.Discovery.BraveClient do
 
   defp increment_daily_counter do
     today = Date.utc_today()
-    {date, count} = get_counter()
+    {stored_date, _count} = get_counter()
 
-    if date == today do
-      :persistent_term.put({__MODULE__, :daily_counter}, {today, count + 1})
+    if stored_date != today do
+      # Date changed — reset the counter
+      counter = :counters.new(1, [:atomics])
+      :counters.add(counter, 1, 1)
+      :persistent_term.put({__MODULE__, :daily_counter}, {today, counter})
     else
-      :persistent_term.put({__MODULE__, :daily_counter}, {today, 1})
+      {_date, counter} = :persistent_term.get({__MODULE__, :daily_counter})
+      :counters.add(counter, 1, 1)
     end
   end
 
   defp get_counter do
-    :persistent_term.get({__MODULE__, :daily_counter}, {Date.utc_today(), 0})
+    case :persistent_term.get({__MODULE__, :daily_counter}, nil) do
+      nil -> {Date.utc_today(), 0}
+      {date, counter} -> {date, :counters.get(counter, 1)}
+    end
   rescue
     ArgumentError -> {Date.utc_today(), 0}
   end
