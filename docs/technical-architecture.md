@@ -5031,9 +5031,11 @@ proto/
 │   │   ├── inventory.proto           # InventoryItem, InventorySync
 │   │   ├── events.proto              # PartnerEvent, EventType enum
 │   │   └── spaces.proto              # Space, SpaceType, Amenity enums
-│   └── internal/
-│       ├── event_bus.proto           # EventEnvelope, Metadata
-│       └── enrichment.proto          # EnrichmentRequest, EnrichmentResult
+│   ├── internal/
+│   │   ├── event_bus.proto           # EventEnvelope, Metadata
+│   │   └── enrichment.proto          # EnrichmentRequest, EnrichmentResult
+│   └── monitoring/
+│       └── source_health_check.proto # SourceHealthCheck, HealthStatus, SourceType
 ```
 
 ### Example: Partner Inventory Schema
@@ -5119,6 +5121,48 @@ Rules enforced by `buf breaking`:
 - No changing field types
 - No removing enum values
 - Additive changes (new fields, new enum values) are always safe
+
+### Proto-to-Schema Codegen (`mix proto.sync`)
+
+For tables at the **raw ingestion boundary** — where the stored schema IS the wire format, just persisted — the proto message is the single source of truth. `mix proto.sync` generates Ecto schemas, dbt staging models, and migrations from the proto descriptor, eliminating drift between layers.
+
+See ADR 009 (`docs/decisions/009-proto-to-schema-codegen.md`) for the full decision record.
+
+**How it works:**
+
+1. `proto/persisted.exs` — an Elixir manifest mapping proto messages to database tables, with field overrides for NOT NULL, defaults, indexes, and grants
+2. `buf build --as-file-descriptor-set` produces a JSON FileDescriptorSet with full type info
+3. The Mix task parses the descriptor, maps types, and generates three artifacts per table
+
+**Type mapping (proto → Ecto schema → migration):**
+
+| Proto type | Ecto schema type | Migration type |
+|-----------|-----------------|----------------|
+| `string` | `:string` | `:text` |
+| `int32`, `uint32`, `sint32`, `fixed32`, `sfixed32` | `:integer` | `:integer` |
+| `int64`, `uint64`, `sint64`, `fixed64`, `sfixed64` | `:integer` | `:bigint` |
+| `float`, `double` | `:float` | `:float` |
+| `bool` | `:boolean` | `:boolean` |
+| `bytes` | `:binary` | `:binary` |
+| `google.protobuf.Timestamp` | `:utc_datetime_usec` | `:utc_datetime_usec` |
+| `google.protobuf.Struct` | `:map` | `:map` |
+| enum | `:string` | `:text` |
+| repeated | `{:array, <inner>}` | `{:array, <inner>}` |
+
+Field overrides in `persisted.exs` take precedence (e.g., `aggregate_id` overridden from `:string` to `:binary_id`).
+
+**Adding a new proto-backed table:**
+
+1. Write the `.proto` message in `proto/stacks/<domain>/v1/`
+2. Add an entry to `proto/persisted.exs` with table name, prefix, module, field overrides, indexes
+3. Run `mix proto.sync` — generates Ecto schema, dbt staging model, and CREATE TABLE migration
+4. Commit all generated files (schemas are checked in for bootstrap — see ADR 009)
+
+**CI enforcement:**
+
+`mix proto.sync --check` runs in `scripts/lint-proto.sh` alongside `buf lint` and `buf breaking`. It exits non-zero if any generated file has drifted from the proto definition, preventing stale schemas from reaching main.
+
+**Scope:** Raw/ingestion tables only (`event_log`, `source_health_checks`, future partner inventory). Domain tables (`bookshelves`, `users`, etc.) remain hand-written because their shape is driven by business logic, not wire format.
 
 ### Event Upcasting
 
