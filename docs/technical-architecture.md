@@ -5206,7 +5206,10 @@ Field overrides in `persisted.exs` take precedence (e.g., `aggregate_id` overrid
 1. Write the `.proto` message in `proto/stacks/<domain>/v1/`
 2. Add an entry to `proto/persisted.exs` with table name, prefix, module, field overrides, indexes
 3. Run `mix proto.sync` — generates Ecto schema, dbt staging model, and CREATE TABLE migration
-4. Commit all generated files (schemas are checked in for bootstrap — see ADR 009)
+4. Add columns to `dbt/models/staging/schema.yml` with descriptions and tests
+5. Add the table and columns to `dbt/models/staging/sources.yml`
+6. Commit all generated and updated files (schemas are checked in for bootstrap — see ADR 009)
+7. Run `just verify` to confirm all gates pass (including dbt-checkpoint column checks)
 
 **CI enforcement:**
 

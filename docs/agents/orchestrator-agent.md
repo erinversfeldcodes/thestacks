@@ -254,7 +254,13 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 9. On approval: write `plans/<NNN>-<slug>-plan.md` with the full plan content.
 
-10. Create the initial state file at `plans/<NNN>-<slug>-state.json` with all phases set to `pending`. See the **State File** section below for the schema.
+10. **Scope lock.** Once the plan is approved, its scope is frozen. If new requirements are
+    discovered during implementation (e.g., "we should also generate migrations"), those become
+    a **new issue** — not scope creep on the current one. The only exception is bug fixes within
+    the already-approved scope. This prevents the "debate → implement → re-review" cycle that
+    adds review rounds without delivering new value.
+
+11. Create the initial state file at `plans/<NNN>-<slug>-state.json` with all phases set to `pending`. See the **State File** section below for the schema.
 
 ---
 
@@ -349,6 +355,24 @@ Before delegating to the reviewer, **you** must verify the agent's Spec Coverage
 This gate exists because the reviewer audits code quality; coverage completeness is your
 responsibility as Orchestrator.
 
+### 2B-iia — Fresh Database Verification Gate (conditional)
+
+**Trigger:** Run this gate if the diff includes migration files, Ecto schema changes, dbt model
+changes, or modifications to `proto/persisted.exs`.
+
+**Skip** if the phase has no database-touching changes.
+
+Steps:
+1. `mix ecto.drop` — drop the development database
+2. `mix ecto.create` — create a blank database
+3. `mix ecto.migrate` — run all migrations from scratch
+4. `mix run apps/core/priv/repo/seeds.exs` — load seed data
+5. `mix test` — verify all tests pass against the fresh database
+6. `scripts/test-dbt.sh` — verify dbt run + test passes
+7. `scripts/lint-dbt.sh` — verify dbt-checkpoint quality gates pass
+
+If any step fails, the migration or schema change has a problem. Fix before proceeding to review.
+
 ### 2B-iii — Deploy Preview + E2E Gate (optional)
 
 **Skip this step** if the phase is documentation-only, touches only agent prompts or plan files,
@@ -408,6 +432,10 @@ reviewer(s). If a phase touches multiple stacks, invoke multiple reviewers in pa
 - Embed full content of the relevant reviewer `.md` file from `docs/agents/reviewers/`
 - Include: phase objective, files modified, DoD items, standards paths, and the agent's
   Spec Coverage Matrix (so the reviewer can run their independent Step 0 audit against it)
+- **Include CI output** in the reviewer prompt: `just verify` results (test count, credo, dialyzer,
+  proto sync check, dbt checkpoint). This prevents reviewers from flagging issues already caught by CI.
+- **Include reviewer context** from the issue's "Reviewer Context" section — non-obvious project
+  conventions, global config overrides, or unusual patterns relevant to the code being reviewed.
 - **If E2E gate was run:** include the E2E test results and the preview URL in the reviewer prompt
 
 The reviewer gains an additional advisory check when E2E results are present:
@@ -465,6 +493,14 @@ the working tree.
   **Status:** open
   ```
   Not every NEEDS_REVISION triggers a feedback entry — only findings that reveal systematic prompt gaps.
+- **Cross-reviewer triage:** When multiple reviewers flag the same finding, resolve it once.
+  On re-review, notify affected reviewers that the finding was triaged ("Finding X resolved —
+  see commit/diff") rather than re-launching a full review. This prevents the round-trip cost
+  of re-reviewing already-fixed issues.
+- **Batch fixes before re-review:** Fix ALL findings from ALL reviewers, run `just verify` to
+  confirm the fixes are clean, then launch re-reviews. Do not launch re-reviews while fixes
+  are still in progress — a reviewer may find a "new" issue that was already fixed between
+  launch and completion.
 - Return to 2A with the human-approved revision requirements
 - Limit to 2 revision cycles. If still failing, stop and consult human.
 

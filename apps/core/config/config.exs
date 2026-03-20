@@ -1,5 +1,23 @@
 import Config
 
+# ── Overridden framework defaults ──────────────────────────────────────────────
+# These settings change Ecto/Phoenix defaults globally. Reviewers and agents
+# should be aware of them — they affect generated code and query behaviour.
+#
+#   generators:
+#     binary_id: true        → all generated schemas use UUID primary keys
+#     timestamp_type          → :utc_datetime_usec (microsecond precision)
+#
+#   migration_timestamps:
+#     type: :utc_datetime_usec → all timestamps() calls use microsecond precision
+#     inserted_at: :created_at → ALL timestamps() calls produce a column named
+#                                "created_at", NOT the Ecto default "inserted_at".
+#                                This applies to every migration in the project.
+#
+#   migration_primary_key (in Repo.init/2):
+#     type: :binary_id       → all migrations default to UUID primary keys
+# ──────────────────────────────────────────────────────────────────────────────
+
 config :core,
   ecto_repos: [Core.Repo],
   generators: [binary_id: true, timestamp_type: :utc_datetime_usec]

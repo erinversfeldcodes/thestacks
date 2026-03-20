@@ -70,10 +70,7 @@ test.describe("Shelf actions — add book from catalogue", () => {
 
     // Find an "Add to Shelf" button (only appears on unplaced books)
     const addButton = page.locator(".catalogue__card-add").first();
-    if ((await addButton.count()) === 0) {
-      console.log("No unplaced books visible — skipping");
-      return;
-    }
+    test.skip((await addButton.count()) === 0, "No unplaced books visible in catalogue");
 
     // Click "Add to Shelf" to open the picker
     await addButton.click();
@@ -121,10 +118,7 @@ test.describe("Shelf actions — add unplaced book from detail page", () => {
       return book?.id ?? null;
     });
 
-    if (!unplacedBookId) {
-      console.log("No unplaced books available — skipping");
-      return;
-    }
+    test.skip(!unplacedBookId, "No unplaced books available in catalogue");
 
     // Navigate directly to the unplaced book's detail page
     await page.goto(`/books/${unplacedBookId}`);
