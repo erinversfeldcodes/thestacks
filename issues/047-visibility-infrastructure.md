@@ -62,3 +62,24 @@ Issues #042, #043 (user_blocks, groups, visibility_grants tables must exist)
 elixir-agent (Opus — SECURITY CRITICAL)
 
 ## Progress Notes
+
+**2026-03-19 — Implementation complete, all gates passed.**
+
+### Definition of Done — status
+
+- [x] `resolve_visibility/2` implemented with all 4 clauses (profile ceiling → block → age gate → resource visibility); returns `:hidden` on all ambiguous/error cases
+- [x] Marketplace ceiling exception: `looking_for_home` + `listing_status: "active"` bypasses profile ceiling for `{:platform_user, _}`
+- [x] `block_user/2`, `unblock_user/2`, `blocked?/2` (bidirectional), `blocked_by?/2` implemented; blocked viewers receive 404
+- [x] `ViewAsPlug` sets `conn.assigns[:view_as_context]`; 403 for non-owners; 422 for invalid perspectives; `"user:<uuid>"` maps to `{:platform_user, id}`
+- [x] Property-based tests: 6 invariants × 200 runs = 1200 generated cases; all pass
+- [x] Anti-scraping: `robots.txt` disallows `/api/`, `/u/`, `/shelf/`, `/post/`, `/listing/`
+- [x] `mix credo --strict` and `mix sobelow --config` pass
+- [x] `mix test` passes — 520 tests, 0 failures
+- [ ] `social.user_blocked` / `social.user_unblocked` events — `block_user/2` and `unblock_user/2` exist but event emission deferred to event audit pass
+- [ ] Anti-scraping `<meta name="robots">` tags on user-generated pages — deferred to Elm frontend (Issue #002)
+
+### Key decisions
+- Viewer types: only `:unauthenticated` and `{:platform_user, user_id}` — `{:specific_user, id}` removed (ViewAsPlug `"user:<uuid>"` maps to `{:platform_user, id}`)
+- `Social.is_blocked?/2` renamed to `blocked?/2` to satisfy Credo predicate naming rule
+- Property tests use `max_runs: 200` (1200 total); block invariants in unit tests (DB insert required)
+- `ViewAsPlug` not yet in router — wired when owner-preview feature is exposed to UI

@@ -1,5 +1,7 @@
 defmodule StacksWeb.UploadControllerTest do
-  use CoreWeb.ConnCase, async: true
+  # async: false because identify tests swap Application.put_env(:core, :vision_client),
+  # which is global state.
+  use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Stacks.Factory
@@ -46,6 +48,53 @@ defmodule StacksWeb.UploadControllerTest do
     test "returns 401 without auth token" do
       conn = build_conn()
       conn = post(conn, "/api/upload", %{"image" => "not_a_file"})
+      assert json_response(conn, 401)
+    end
+  end
+
+  describe "POST /api/upload/identify" do
+    test "returns 200 with identified candidates when image_b64 provided", %{conn: conn} do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
+
+        conn =
+          post(conn, "/api/upload/identify", %{"image_b64" => Base.encode64("fake image bytes")})
+
+        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
+        assert is_list(candidates)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "returns 200 with identified candidates when image_url provided", %{conn: conn} do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
+
+        conn =
+          post(conn, "/api/upload/identify", %{
+            "image_url" => "https://example.com/cover.jpg"
+          })
+
+        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
+        assert is_list(candidates)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "returns 422 when neither image_b64 nor image_url is provided", %{conn: conn} do
+      conn = post(conn, "/api/upload/identify", %{})
+      assert %{"error" => _} = json_response(conn, 422)
+    end
+
+    test "returns 401 without auth token" do
+      conn = build_conn()
+      conn = post(conn, "/api/upload/identify", %{"image_b64" => "abc"})
       assert json_response(conn, 401)
     end
   end
