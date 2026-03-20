@@ -1,18 +1,27 @@
 defmodule StacksWeb.Plugs.ViewAsPlug do
   @moduledoc """
-  Allows the platform owner to preview content as different viewer types.
+  Allows users to preview content as different viewer types.
 
   Reads the `?view_as=<perspective>` query parameter and, if present, validates
-  that the current user is the platform owner (role: "owner"), then assigns
-  `conn.assigns[:view_as_context]` for use by downstream controllers.
+  that the current user is permitted, then assigns `conn.assigns[:view_as_context]`
+  for use by downstream controllers.
 
-  Supported perspective values:
+  ## Who may use ViewAs
+
+  - **Platform owner** (`role: "owner"`): may use any perspective on any resource.
+  - **Regular users**: may use `"unauthenticated"` and `"platform"` perspectives,
+    but only on resources they own. The controller must set
+    `conn.assigns[:resource_owner_id]` to the resource owner's user ID before
+    calling this plug.
+
+  ## Supported perspective values
+
   - `"unauthenticated"` — simulate an anonymous visitor
-  - `"platform"` — simulate a generic authenticated platform user (current owner's id)
-  - `"user:<uuid>"` — simulate a specific user by id
-  - `"group:<uuid>"` — simulate a group member by group id
+  - `"platform"` — simulate a generic authenticated platform user
+  - `"user:<uuid>"` — simulate a specific user by id (owner-only)
+  - `"group:<uuid>"` — not yet implemented; returns 422
 
-  Non-owner users receive 403. Invalid perspective values receive 422.
+  Non-permitted users receive 403. Invalid perspective values receive 422.
   If no `?view_as` param is present the conn passes through unchanged.
   """
 
@@ -44,20 +53,33 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   defp handle_view_as(conn, perspective) do
     user = Guardian.Plug.current_resource(conn)
 
-    if owner?(user) do
-      apply_perspective(conn, perspective, user)
-    else
-      conn
-      |> put_status(403)
-      |> json(%{error: "forbidden"})
-      |> halt()
+    cond do
+      platform_owner?(user) ->
+        apply_perspective(conn, perspective, user)
+
+      resource_owner?(user, conn) ->
+        apply_perspective_for_resource_owner(conn, perspective, user)
+
+      true ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "forbidden"})
+        |> halt()
     end
   end
 
-  @spec owner?(map() | nil) :: boolean()
-  defp owner?(%{role: "owner"}), do: true
-  defp owner?(_), do: false
+  @spec platform_owner?(map() | nil) :: boolean()
+  defp platform_owner?(%{role: "owner"}), do: true
+  defp platform_owner?(_), do: false
 
+  @spec resource_owner?(map() | nil, Plug.Conn.t()) :: boolean()
+  defp resource_owner?(%{id: user_id}, %{assigns: %{resource_owner_id: owner_id}}) do
+    user_id == owner_id
+  end
+
+  defp resource_owner?(_, _), do: false
+
+  # Platform owners may use any perspective.
   @spec apply_perspective(Plug.Conn.t(), String.t(), map()) :: Plug.Conn.t()
   defp apply_perspective(conn, "unauthenticated", _user) do
     assign(conn, :view_as_context, :unauthenticated)
@@ -79,7 +101,10 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   defp apply_perspective(conn, "group:" <> id, _user) when byte_size(id) > 0 do
-    assign(conn, :view_as_context, {:group, id})
+    conn
+    |> put_status(422)
+    |> json(%{error: "not_implemented", detail: "group perspective is not yet supported"})
+    |> halt()
   end
 
   defp apply_perspective(conn, "group:", _user) do
@@ -93,6 +118,24 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     conn
     |> put_status(422)
     |> json(%{error: "invalid_perspective"})
+    |> halt()
+  end
+
+  # Regular resource owners may only preview as unauthenticated or platform —
+  # not as arbitrary specific users.
+  @spec apply_perspective_for_resource_owner(Plug.Conn.t(), String.t(), map()) :: Plug.Conn.t()
+  defp apply_perspective_for_resource_owner(conn, "unauthenticated", _user) do
+    assign(conn, :view_as_context, :unauthenticated)
+  end
+
+  defp apply_perspective_for_resource_owner(conn, "platform", user) do
+    assign(conn, :view_as_context, {:platform_user, user.id})
+  end
+
+  defp apply_perspective_for_resource_owner(conn, _perspective, _user) do
+    conn
+    |> put_status(403)
+    |> json(%{error: "forbidden", detail: "only platform owners may use this perspective"})
     |> halt()
   end
 end
