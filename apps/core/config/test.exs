@@ -30,6 +30,7 @@ config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"
 config :core, :brave_client, Stacks.Discovery.MockBraveClient
 config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
 config :core, :together_client, Stacks.AI.MockTogetherClient
+config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
 
 config :core, Stacks.Vault,
   ciphers: [

@@ -35,7 +35,8 @@ config :core, Oban,
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
-       {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob}
+       {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
+       {"0 3 * * 0", Stacks.Workers.RSSLivenessJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3]
@@ -63,6 +64,8 @@ config :core, :together_client, Stacks.AI.TogetherClient
 config :core, :searxng_client, Stacks.Discovery.SearxngClient
 config :core, :searxng_url, "http://localhost:8888"
 config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
+config :core, :rss_fetcher, Stacks.Enrichment.RssFetcher
+config :core, :require_email_confirmation, false
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
 # The key below is for development only. In production, set CLOAK_KEY.
