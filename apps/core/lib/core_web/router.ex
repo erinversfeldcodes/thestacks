@@ -26,6 +26,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :password_change
   end
 
+  pipeline :rate_limit_social do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :social
+  end
+
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
@@ -96,9 +100,6 @@ defmodule CoreWeb.Router do
     put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
 
-    post "/users/:id/block", SocialController, :block
-    delete "/users/:id/block", SocialController, :unblock
-
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
@@ -108,6 +109,13 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_password_change]
     put "/settings/password", UserSettingsController, :update_password
+  end
+
+  # Social actions — authenticated + per-user rate limit (20/min)
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_social]
+    post "/users/:id/block", SocialController, :block
+    delete "/users/:id/block", SocialController, :unblock
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth
