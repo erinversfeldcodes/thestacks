@@ -28,6 +28,8 @@ config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
 config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"
 config :core, :brave_client, Stacks.Discovery.MockBraveClient
+config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
+config :core, :together_client, Stacks.AI.MockTogetherClient
 
 config :core, Stacks.Vault,
   ciphers: [
