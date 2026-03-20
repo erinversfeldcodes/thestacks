@@ -106,7 +106,7 @@ fuzz-vision *ARGS:
     cd apps/vision && PYTHONPATH=. VISION_ENVIRONMENT=test .venv/bin/python tests/fuzz_image_input.py {{ARGS}}
 
 # Run all linters (check only — no modifications)
-lint: lint-elixir lint-elm lint-rust lint-python lint-proto lint-sql
+lint: lint-elixir lint-elm lint-rust lint-python lint-proto lint-sql lint-dbt
 
 # Elixir lint
 lint-elixir:
@@ -131,6 +131,10 @@ lint-proto:
 # SQL lint
 lint-sql:
     scripts/lint-sql.sh
+
+# dbt-checkpoint quality gates (requires dbt/target/manifest.json)
+lint-dbt:
+    scripts/lint-dbt.sh
 
 # Auto-fix all fixable lint and formatting issues
 format:
