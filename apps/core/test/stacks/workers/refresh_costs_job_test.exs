@@ -4,6 +4,9 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
+
+  alias Core.Repo
   alias Stacks.Workers.RefreshCostsJob
 
   describe "perform/1" do
@@ -28,5 +31,20 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       costs = Stacks.Costs.current_period_costs()
       assert length(costs) == 5
     end
+
+    test "emits costs.refreshed event" do
+      before_count = event_count("costs.refreshed")
+
+      perform_job(RefreshCostsJob, %{})
+
+      assert event_count("costs.refreshed") == before_count + 1
+    end
+  end
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 end

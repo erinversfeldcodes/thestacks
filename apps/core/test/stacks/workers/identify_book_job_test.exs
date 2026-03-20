@@ -4,8 +4,10 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Workers.IdentifyBookJob
 
   @image_b64 Base.encode64("fake image bytes for testing")
@@ -32,6 +34,18 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
                  "image_b64" => @image_b64
                })
     end
+
+    test "emits image.resolved event", %{user: user, image: image} do
+      before_count = event_count("image.resolved")
+
+      perform_job(IdentifyBookJob, %{
+        "user_id" => user.id,
+        "image_id" => image.id,
+        "image_b64" => @image_b64
+      })
+
+      assert event_count("image.resolved") == before_count + 1
+    end
   end
 
   describe "perform/1 — not_a_book path" do
@@ -53,6 +67,25 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       after
         Application.put_env(:core, :vision_client, original)
       end
+    end
+
+    test "emits image.rejected event", %{user: user, image: image} do
+      original = Application.get_env(:core, :vision_client)
+      before_count = event_count("image.rejected")
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
+
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => @image_b64
+        })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+
+      assert event_count("image.rejected") == before_count + 1
     end
   end
 
@@ -129,6 +162,17 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         Application.put_env(:core, :vision_client, original)
       end
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Helpers
+  # ---------------------------------------------------------------------------
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 
   # ---------------------------------------------------------------------------
