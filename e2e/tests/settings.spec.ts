@@ -127,7 +127,7 @@ test.describe("Settings — Profile & Account API", () => {
       { country_code: "GB", city: "London" }
     );
     expect(status).toBe(200);
-    expect((data as any).user).toBeDefined();
+    expect((data as any).country_code).toBeDefined();
   });
 
   test("PUT /api/settings/location rejects invalid country_code", async ({
@@ -200,7 +200,7 @@ test.describe("Settings — Profile & Account API", () => {
       page,
       "PUT",
       "/api/settings/profile_visibility",
-      { visibility: "platform" }
+      { profile_visibility: "platform" }
     );
     expect(status).toBe(200);
   });
