@@ -3,12 +3,13 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
   import Stacks.Factory
 
+  alias Stacks.Monitoring
   alias Stacks.Monitoring.SourceHealthCheck
 
-  describe "changeset/2" do
+  describe "change_source_health_check/2" do
     test "is valid with source_name, source_type, and status" do
       changeset =
-        SourceHealthCheck.changeset(%SourceHealthCheck{}, %{
+        Monitoring.change_source_health_check(%SourceHealthCheck{}, %{
           source_name: "my-scraper",
           source_type: "scraper_config",
           status: "healthy",
@@ -22,7 +23,7 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
     test "is invalid without source_name" do
       changeset =
-        SourceHealthCheck.changeset(%SourceHealthCheck{}, %{
+        Monitoring.change_source_health_check(%SourceHealthCheck{}, %{
           source_type: "scraper_config",
           status: "healthy"
         })
@@ -33,7 +34,7 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
     test "is invalid with an unknown source_type" do
       changeset =
-        SourceHealthCheck.changeset(%SourceHealthCheck{}, %{
+        Monitoring.change_source_health_check(%SourceHealthCheck{}, %{
           source_name: "my-scraper",
           source_type: "carrier_pigeon",
           status: "healthy"
@@ -45,7 +46,7 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
     test "is invalid with an unknown status" do
       changeset =
-        SourceHealthCheck.changeset(%SourceHealthCheck{}, %{
+        Monitoring.change_source_health_check(%SourceHealthCheck{}, %{
           source_name: "my-scraper",
           source_type: "scraper_config",
           status: "vibing"
@@ -68,7 +69,7 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
       assert {:error, changeset} =
                %SourceHealthCheck{}
-               |> SourceHealthCheck.changeset(%{
+               |> Monitoring.change_source_health_check(%{
                  source_name: "my-scraper",
                  source_type: "scraper_config",
                  status: "healthy"
