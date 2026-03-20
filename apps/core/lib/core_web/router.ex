@@ -30,6 +30,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :social
   end
 
+  pipeline :view_as do
+    plug StacksWeb.Plugs.ViewAsPlug
+  end
+
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
@@ -82,8 +86,6 @@ defmodule CoreWeb.Router do
 
     get "/search", SearchController, :index
 
-    get "/bookshelves/:bookshelf_name", BookshelfController, :show
-
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
     get "/placements/mine", BookshelfPlacementController, :mine
     put "/placements/:id/move", BookshelfPlacementController, :move
@@ -103,6 +105,12 @@ defmodule CoreWeb.Router do
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
+  end
+
+  # Content display routes — support ?view_as=<perspective> for preview
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :view_as]
+    get "/bookshelves/:bookshelf_name", BookshelfController, :show
   end
 
   # Password change — authenticated + stricter rate limit (3/min)
