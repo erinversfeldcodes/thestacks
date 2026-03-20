@@ -75,9 +75,7 @@ run_check "script-ref-and-source" \
     bash -c 'cd dbt && check-script-ref-and-source models/staging/stg_*.sql'
 
 # Every column in the SQL must be listed in schema.yml (catches drift).
-# Warn-only: pre-existing gaps in schema.yml column definitions.
-# TODO: promote to run_check once all models have full column coverage.
-run_warn "model-has-all-columns" \
+run_check "model-has-all-columns" \
     bash -c 'cd dbt && check-model-has-all-columns models/staging/schema.yml -- models/staging/stg_*.sql'
 
 # --- Source checks ---
@@ -87,9 +85,7 @@ run_check "source-has-freshness" \
     bash -c 'cd dbt && check-source-has-freshness --freshness warn_after error_after -- models/staging/sources.yml'
 
 # Every column in the source table must be listed in sources.yml.
-# Warn-only: sources.yml currently has table-level entries without column lists.
-# TODO: promote to run_check once all sources have full column coverage.
-run_warn "source-has-all-columns" \
+run_check "source-has-all-columns" \
     bash -c 'cd dbt && check-source-has-all-columns models/staging/sources.yml'
 
 # --- Summary ---
