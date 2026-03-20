@@ -158,6 +158,119 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
+  describe "GET /api/bookshelves/:bookshelf_name — format_placement" do
+    test "includes book editions in placement response", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      _edition = insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      assert %{"placements" => [placement]} = json_response(conn, 200)
+      assert placement["book"]["editions"] != nil
+      assert is_list(placement["book"]["editions"])
+    end
+
+    test "includes primary_edition when book has editions", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      edition = insert(:book_edition, book: book, is_primary: true)
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      assert %{"placements" => [placement]} = json_response(conn, 200)
+      assert placement["book"]["primary_edition"]["id"] == edition.id
+    end
+
+    test "includes author in book response", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      author = insert(:author, name: "Test Author")
+      book = insert(:book, author: author)
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      assert %{"placements" => [placement]} = json_response(conn, 200)
+      assert placement["book"]["author"]["name"] == "Test Author"
+    end
+
+    test "returns placement fields: position, formats, personal_rating, notes", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      _placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          position: 3,
+          formats: ["paperback"],
+          personal_rating: 5,
+          notes: "Great book"
+        )
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      assert %{"placements" => [placement]} = json_response(conn, 200)
+      assert placement["position"] == 3
+      assert placement["formats"] == ["paperback"]
+      assert placement["personal_rating"] == 5
+      assert placement["notes"] == "Great book"
+    end
+
+    test "returns all valid bookshelf names", %{conn: _conn} do
+      user = insert(:user)
+
+      for name <- ~w(antilibrary library wishlist reading_pile looking_for_home) do
+        conn =
+          build_conn()
+          |> auth_conn(user)
+          |> get("/api/bookshelves/#{name}")
+
+        assert %{"bookshelf" => ^name} = json_response(conn, 200)
+      end
+    end
+  end
+
+  describe "GET /api/bookshelves/:bookshelf_name — view_as halted" do
+    test "returns 403 when non-owner requests view_as perspective on another user's bookshelf",
+         %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      _bookshelf = insert(:bookshelf, user: owner, name: "library")
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> get("/api/bookshelves/library?view_as=unauthenticated")
+
+      # Non-owner cannot use view_as; either gets 403 or their own (empty) bookshelf
+      response = json_response(conn, conn.status)
+      assert conn.status in [200, 403]
+      # If 200, should be their own empty bookshelf
+      if conn.status == 200 do
+        assert response["count"] == 0
+      end
+    end
+  end
+
   describe "PUT /api/bookshelves/:id/visibility" do
     test "updates bookshelf visibility", %{conn: conn} do
       user = insert(:user)

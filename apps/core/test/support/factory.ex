@@ -9,6 +9,17 @@ defmodule Stacks.Factory do
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+
+  alias Stacks.Enrichment.{
+    Bookstore,
+    BookstoreEvent,
+    DiscoveredSource,
+    PriceSnapshot,
+    ReviewSnapshot,
+    ThirdSpace,
+    ThirdSpaceEvent
+  }
+
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -22,7 +33,8 @@ defmodule Stacks.Factory do
       role: "user",
       profile_visibility: "owner",
       age_verified: false,
-      consent_analytics: false
+      consent_analytics: false,
+      email_confirmed: true
     }
   end
 
@@ -33,7 +45,10 @@ defmodule Stacks.Factory do
   def author_factory do
     %Author{
       name: sequence(:author_name, &"Author #{&1}"),
-      bio: "A talented writer."
+      bio: "A talented writer.",
+      website_url: nil,
+      rss_feed_url: nil,
+      open_library_id: nil
     }
   end
 
@@ -229,6 +244,94 @@ defmodule Stacks.Factory do
       consecutive_failures: 0,
       total_successes: 10,
       total_failures: 0
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Enrichment
+  # ---------------------------------------------------------------------------
+
+  def bookstore_factory do
+    %Bookstore{
+      name: sequence(:store_name, &"Bookstore #{&1}"),
+      website_url: "https://example.com",
+      scraper_module: sequence(:scraper_module, &"za/store_#{&1}"),
+      has_physical: true,
+      country_code: "ZA"
+    }
+  end
+
+  def bookstore_event_factory do
+    %BookstoreEvent{
+      title: sequence(:event_title, &"Book Event #{&1}"),
+      description: "An exciting literary event.",
+      event_date: DateTime.add(DateTime.utc_now(), 7, :day),
+      location: "In-store",
+      url: "https://example.com/events",
+      scraped_at: DateTime.utc_now(),
+      store: build(:bookstore)
+    }
+  end
+
+  def third_space_factory do
+    %ThirdSpace{
+      name: sequence(:space_name, &"Third Space #{&1}"),
+      type: :cafe,
+      city: "Cape Town",
+      country_code: "ZA",
+      website_url: "https://example.com",
+      verified: false
+    }
+  end
+
+  def third_space_event_factory do
+    %ThirdSpaceEvent{
+      title: sequence(:space_event_title, &"Space Event #{&1}"),
+      description: "A community gathering.",
+      event_date: DateTime.add(DateTime.utc_now(), 7, :day),
+      recurrence: nil,
+      related_authors: [],
+      source_url: "https://example.com/events",
+      scraped_at: DateTime.utc_now(),
+      space: build(:third_space)
+    }
+  end
+
+  def discovered_source_factory do
+    %DiscoveredSource{
+      name: sequence(:source_name, &"Discovered Source #{&1}"),
+      type: :bookshop,
+      url: sequence(:source_url, &"https://source-#{&1}.example.com"),
+      confidence: nil,
+      discovered_via: "search:bookshops",
+      discovered_at: DateTime.utc_now(),
+      status: :pending_review
+    }
+  end
+
+  def price_snapshot_factory do
+    %PriceSnapshot{
+      price_cents: 29_900,
+      currency: "ZAR",
+      in_stock: true,
+      url: "https://example.com/book",
+      scraped_at: DateTime.utc_now(),
+      book: build(:book),
+      store: build(:bookstore)
+    }
+  end
+
+  def review_snapshot_factory do
+    %ReviewSnapshot{
+      source: :goodreads,
+      source_url: "https://goodreads.com/book/show/12345",
+      sentiment_score: 0.78,
+      summary: "Readers enjoyed this book.",
+      rating: 4.2,
+      rating_count: 1250,
+      scraped_at: DateTime.utc_now(),
+      stale_after: DateTime.add(DateTime.utc_now(), 30, :day),
+      book: build(:book)
     }
   end
 end

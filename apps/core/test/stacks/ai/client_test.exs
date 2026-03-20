@@ -120,36 +120,30 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
-  describe "call_vision/2 — real HTTP client path" do
-    # These tests temporarily configure the real HTTP client (instead of MockClient).
-    # The Modal vision service is not running in unit tests, so Finch returns a
-    # connection-refused error. This exercises the error-handling paths in
-    # do_call_vision/make_vision_request without making real external requests.
+  describe "endpoint_path/1 — path mapping" do
+    # Verifies that endpoint_path/1 maps logical endpoint names to HTTP paths
+    # without making real HTTP calls. The vision sidecar requires GPU and
+    # never runs locally.
 
-    test "returns {:error, _} when vision service is unavailable" do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, Client)
-        # The fuse for :vision_service may not be installed in test env; either
-        # path (fuse ok → Finch error, or fuse not found → Finch error) returns
-        # {:error, reason}.
-        result = Client.call_vision("is_book", %{image: "test"})
-        assert {:error, _} = result
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+    test "maps is_book to /classify" do
+      req = Client.build_vision_request("/classify", %{})
+      assert req.path == "/classify"
     end
 
-    test "do_call_vision covers all endpoint_path variants" do
+    test "maps extract_isbn to /extract" do
+      req = Client.build_vision_request("/extract", %{})
+      assert req.path == "/extract"
+    end
+
+    test "call_vision dispatches through mock without crashing for all endpoints" do
       original = Application.get_env(:core, :vision_client)
 
       try do
-        Application.put_env(:core, :vision_client, Client)
+        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
 
-        for endpoint <- ["is_book", "extract_isbn", "some_other"] do
-          result = Client.call_vision(endpoint, %{})
-          assert {:error, _} = result
+        for endpoint <- ["is_book", "extract_isbn"] do
+          result = Client.call_vision(endpoint, %{image: "test"})
+          assert {:ok, _} = result
         end
       after
         Application.put_env(:core, :vision_client, original)

@@ -20,11 +20,17 @@ defmodule StacksWeb.AuthController do
           ip: get_ip(conn)
         )
 
-        {:ok, token, _claims} = Guardian.encode_and_sign(user)
+        if require_email_confirmation?() do
+          conn
+          |> put_status(201)
+          |> json(%{message: "confirmation_email_sent"})
+        else
+          {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
-        conn
-        |> put_status(201)
-        |> json(%{token: token, user: format_user(user)})
+          conn
+          |> put_status(201)
+          |> json(%{token: token, user: format_user(user)})
+        end
 
       {:error, changeset} ->
         conn
@@ -46,6 +52,11 @@ defmodule StacksWeb.AuthController do
         {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
         json(conn, %{token: token, user: format_user(user)})
+
+      {:error, :email_unconfirmed} ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "email_unconfirmed"})
 
       {:error, :invalid_credentials} ->
         conn
@@ -139,6 +150,10 @@ defmodule StacksWeb.AuthController do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
+  end
+
+  defp require_email_confirmation? do
+    Application.get_env(:core, :require_email_confirmation, false)
   end
 
   defp get_ip(conn) do

@@ -19,11 +19,18 @@ config :core, CoreWeb.Endpoint,
   server: false
 
 config :core, Oban, testing: :manual
+config :core, :env, :test
 
 config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
 config :core, :vision_hmac_secret, "test-hmac-secret"
+config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
+config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"
+config :core, :brave_client, Stacks.Discovery.MockBraveClient
+config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
+config :core, :together_client, Stacks.AI.MockTogetherClient
+config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
 
 config :core, Stacks.Vault,
   ciphers: [

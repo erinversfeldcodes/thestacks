@@ -30,6 +30,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :social
   end
 
+  pipeline :rate_limit_public do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :public
+  end
+
   pipeline :view_as do
     plug StacksWeb.Plugs.ViewAsPlug
   end
@@ -41,8 +45,9 @@ defmodule CoreWeb.Router do
 
   # Public endpoints — no authentication required
   scope "/api", StacksWeb do
-    pipe_through :api
+    pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
+    post "/opt-out", OptOutController, :create
   end
 
   # Public with optional auth — returns extra data when authenticated

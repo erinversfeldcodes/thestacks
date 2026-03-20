@@ -16,10 +16,17 @@ defmodule Stacks.Events.Registry do
   """
 
   @registry %{
-              # Example (uncomment when a real handler exists):
-              # "book.created" => [Stacks.Enrichment.BookCreatedHandler],
-              # "user.registered" => [Stacks.Notifications.WelcomeHandler],
-            }
+    "book.created" => [
+      Stacks.Enrichment.Handlers.BookCreatedHandler,
+      Stacks.Enrichment.Handlers.AuthorDiscoveryHandler
+    ],
+    "user.location_updated" => [
+      Stacks.Discovery.Handlers.LocationUpdatedHandler
+    ],
+    "user.registered" => [
+      Stacks.Notifications.EmailConfirmationHandler
+    ]
+  }
 
   @doc """
   Returns the list of handler modules registered for the given event type.
