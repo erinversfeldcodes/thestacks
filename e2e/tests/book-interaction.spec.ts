@@ -15,13 +15,7 @@ test.describe("Book interaction — Library page", () => {
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const books = page.locator(".book");
-    const bookCount = await books.count();
-
-    if (bookCount === 0) {
-      // No books on shelf — skip but don't fail
-      console.log("No books on library shelf, skipping click test");
-      return;
-    }
+    await expect(books.first()).toBeAttached({ timeout: 10000 });
 
     // The book should be wrapped in a button for accessibility
     const bookButton = page.locator("button.book-button, .book-button").first();
@@ -37,12 +31,7 @@ test.describe("Book interaction — Library page", () => {
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const bookButton = page.locator("button.book-button, .book-button").first();
-    const bookCount = await bookButton.count();
-
-    if (bookCount === 0) {
-      console.log("No books on library shelf, skipping click test");
-      return;
-    }
+    await expect(bookButton).toBeAttached({ timeout: 10000 });
 
     // Use evaluate to click because Playwright can't target elements
     // inside a CSS perspective/3D context (reports "outside viewport")
@@ -66,12 +55,7 @@ test.describe("Book interaction — Library page", () => {
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const book = page.locator(".book").first();
-    const bookCount = await book.count();
-
-    if (bookCount === 0) {
-      console.log("No books on library shelf, skipping hover test");
-      return;
-    }
+    await expect(book).toBeAttached({ timeout: 10000 });
 
     // The hover animation uses @keyframes book-pull-out.
     // Verify the keyframe animation rule exists in the stylesheet.
@@ -114,12 +98,7 @@ test.describe("Book interaction — Library page", () => {
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const spine = page.locator(".book__spine").first();
-    const spineCount = await spine.count();
-
-    if (spineCount === 0) {
-      console.log("No book spines found, skipping texture test");
-      return;
-    }
+    await expect(spine).toBeAttached({ timeout: 10000 });
 
     const bgImage = await spine.evaluate(
       (el) => getComputedStyle(el).backgroundImage
@@ -142,12 +121,7 @@ test.describe("Book interaction — Library page", () => {
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
     const book = page.locator(".book").first();
-    const bookCount = await book.count();
-
-    if (bookCount === 0) {
-      console.log("No books found, skipping structure test");
-      return;
-    }
+    await expect(book).toBeAttached({ timeout: 10000 });
 
     // Book should have preserve-3d
     const transformStyle = await book.evaluate(
