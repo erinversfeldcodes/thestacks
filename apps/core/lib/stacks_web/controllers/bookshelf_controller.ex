@@ -14,11 +14,7 @@ defmodule StacksWeb.BookshelfController do
   def show(conn, %{"bookshelf_name" => bookshelf_name}) do
     if bookshelf_name in @valid_bookshelves do
       user = Guardian.Plug.current_resource(conn)
-
-      conn =
-        conn
-        |> assign(:resource_owner_id, user.id)
-        |> ViewAsPlug.call([])
+      conn = ViewAsPlug.authorize_view_as(conn, user.id)
 
       if conn.halted do
         conn
