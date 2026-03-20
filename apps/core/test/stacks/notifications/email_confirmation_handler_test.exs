@@ -50,5 +50,24 @@ defmodule Stacks.Notifications.EmailConfirmationHandlerTest do
                  aggregate_id: Ecto.UUID.generate()
                })
     end
+
+    test "returns ok when user not found and confirmation is required" do
+      non_existent_id = Ecto.UUID.generate()
+
+      Application.put_env(:core, :require_email_confirmation, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :require_email_confirmation, false)
+      end)
+
+      assert :ok =
+               EmailConfirmationHandler.handle_event(%{
+                 event_type: "user.registered",
+                 aggregate_id: non_existent_id,
+                 payload: %{role: "user"}
+               })
+
+      refute_enqueued(worker: Stacks.Workers.EmailDeliveryJob)
+    end
   end
 end

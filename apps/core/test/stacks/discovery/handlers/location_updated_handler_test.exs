@@ -43,5 +43,45 @@ defmodule Stacks.Discovery.Handlers.LocationUpdatedHandlerTest do
 
       refute_enqueued(worker: GeographicDiscoveryJob)
     end
+
+    test "ignores location_updated event with missing city" do
+      assert :ok =
+               LocationUpdatedHandler.handle_event(%{
+                 event_type: "user.location_updated",
+                 payload: %{country_code: "ZA"}
+               })
+
+      refute_enqueued(worker: GeographicDiscoveryJob)
+    end
+
+    test "ignores location_updated event with missing country_code" do
+      assert :ok =
+               LocationUpdatedHandler.handle_event(%{
+                 event_type: "user.location_updated",
+                 payload: %{city: "Cape Town"}
+               })
+
+      refute_enqueued(worker: GeographicDiscoveryJob)
+    end
+
+    test "ignores location_updated event with non-string city" do
+      assert :ok =
+               LocationUpdatedHandler.handle_event(%{
+                 event_type: "user.location_updated",
+                 payload: %{city: 123, country_code: "ZA"}
+               })
+
+      refute_enqueued(worker: GeographicDiscoveryJob)
+    end
+
+    test "ignores location_updated event with empty payload" do
+      assert :ok =
+               LocationUpdatedHandler.handle_event(%{
+                 event_type: "user.location_updated",
+                 payload: %{}
+               })
+
+      refute_enqueued(worker: GeographicDiscoveryJob)
+    end
   end
 end

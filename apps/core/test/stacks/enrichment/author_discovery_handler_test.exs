@@ -48,5 +48,27 @@ defmodule Stacks.Enrichment.Handlers.AuthorDiscoveryHandlerTest do
                  aggregate_id: book.id
                })
     end
+
+    test "ignores unrelated events (catch-all clause)" do
+      assert :ok =
+               AuthorDiscoveryHandler.handle_event(%{
+                 event_type: "user.registered",
+                 aggregate_id: Ecto.UUID.generate()
+               })
+
+      refute_enqueued(worker: DiscoverAuthorSourcesJob)
+    end
+
+    test "returns ok when book does not exist in the database" do
+      non_existent_id = Ecto.UUID.generate()
+
+      assert :ok =
+               AuthorDiscoveryHandler.handle_event(%{
+                 event_type: "book.created",
+                 aggregate_id: non_existent_id
+               })
+
+      refute_enqueued(worker: DiscoverAuthorSourcesJob)
+    end
   end
 end

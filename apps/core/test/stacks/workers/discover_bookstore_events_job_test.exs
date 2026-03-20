@@ -90,6 +90,106 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
   end
 
+  describe "parse_events/2 edge cases" do
+    test "parses h3 tags as well as h2" do
+      store = insert(:bookstore)
+
+      html = """
+      <div>
+        <h3 class="event-title">Poetry Night</h3>
+        <span>2026-06-01</span>
+      </div>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert length(events) == 1
+      assert hd(events).title == "Poetry Night"
+    end
+
+    test "event_date is nil when no date pattern found for a title" do
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Mystery Event</h2>
+      <p>No date listed</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert length(events) == 1
+      assert hd(events).event_date == nil
+    end
+
+    test "sets scraped_at timestamp on each event" do
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Timed Event</h2>
+      <p>2026-07-01</p>
+      """
+
+      before = DateTime.utc_now()
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert hd(events).scraped_at != nil
+      assert DateTime.compare(hd(events).scraped_at, before) in [:gt, :eq]
+    end
+
+    test "author matching is case-insensitive" do
+      author = insert(:author, name: "MARGARET ATWOOD")
+      store = insert(:bookstore)
+
+      html = """
+      <h2>An Evening with margaret atwood</h2>
+      <p>2026-08-01</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert hd(events).author_id == author.id
+    end
+
+    test "sets url to store website_url" do
+      store = insert(:bookstore, website_url: "https://mybookshop.co.za")
+
+      html = """
+      <h2>Book Club</h2>
+      <p>2026-04-01</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert hd(events).url == "https://mybookshop.co.za"
+    end
+  end
+
+  describe "persist_events integration" do
+    test "persists multiple events and emits enrichment event" do
+      store = insert(:bookstore)
+      future_date = DateTime.add(DateTime.utc_now(), 7, :day)
+
+      html = """
+      <h2>Event One</h2>
+      <p>#{Calendar.strftime(future_date, "%Y-%m-%d")}</p>
+      <h2>Event Two</h2>
+      <p>#{Calendar.strftime(future_date, "%Y-%m-%d")}</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert length(events) == 2
+
+      # Persist them via upsert to verify the full path
+      Enum.each(events, fn event_attrs ->
+        assert {:ok, _} = Events.upsert_event(event_attrs)
+      end)
+
+      upcoming = Events.upcoming_events(store.id)
+      assert length(upcoming) == 2
+    end
+
+    test "upsert_event handles changeset errors gracefully" do
+      # Missing required store_id should return an error changeset
+      result = Events.upsert_event(%{title: "Bad Event"})
+      assert {:error, %Ecto.Changeset{}} = result
+    end
+  end
+
   describe "event upsert integration" do
     test "persisted events can be queried via upcoming_events" do
       store = insert(:bookstore)

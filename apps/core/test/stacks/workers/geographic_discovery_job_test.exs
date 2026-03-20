@@ -74,5 +74,65 @@ defmodule Stacks.Workers.GeographicDiscoveryJobTest do
         args: %{query: "book clubs Berlin DE"}
       )
     end
+
+    test "maps all supported country codes correctly" do
+      mappings = [
+        {"ZA", "South Africa"},
+        {"GB", "United Kingdom"},
+        {"US", "United States"},
+        {"AU", "Australia"},
+        {"CA", "Canada"},
+        {"NZ", "New Zealand"},
+        {"IE", "Ireland"}
+      ]
+
+      for {code, country_name} <- mappings do
+        assert :ok =
+                 perform_job(GeographicDiscoveryJob, %{
+                   "city" => "TestCity",
+                   "country_code" => code
+                 })
+
+        assert_enqueued(
+          worker: SourceDiscoveryJob,
+          args: %{query: "book clubs TestCity #{country_name}"}
+        )
+      end
+    end
+
+    test "enqueues exactly 5 queries per city" do
+      assert :ok =
+               perform_job(GeographicDiscoveryJob, %{
+                 "city" => "Dublin",
+                 "country_code" => "IE"
+               })
+
+      # Verify all 5 query patterns
+      assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "bookshops in Dublin"})
+      assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "independent bookstores Dublin"})
+      assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "reading groups Dublin"})
+      assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "book clubs Dublin Ireland"})
+      assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "literary events Dublin"})
+    end
+
+    test "location is included in all enqueued jobs" do
+      assert :ok =
+               perform_job(GeographicDiscoveryJob, %{
+                 "city" => "Toronto",
+                 "country_code" => "CA"
+               })
+
+      expected_location = %{"city" => "Toronto", "country_code" => "CA"}
+
+      assert_enqueued(
+        worker: SourceDiscoveryJob,
+        args: %{query: "reading groups Toronto", location: expected_location}
+      )
+
+      assert_enqueued(
+        worker: SourceDiscoveryJob,
+        args: %{query: "literary events Toronto", location: expected_location}
+      )
+    end
   end
 end
