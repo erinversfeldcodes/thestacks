@@ -9,6 +9,7 @@ defmodule Stacks.Events.EventLog do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   @schema_prefix "op"
+  @type t :: %__MODULE__{}
 
   schema "event_log" do
     field :event_type, :string

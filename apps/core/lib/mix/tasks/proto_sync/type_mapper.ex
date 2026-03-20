@@ -111,9 +111,7 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         :map
 
       other ->
-        Mix.raise(
-          "Unknown message type: .#{other}. Add a field_override or update the type mapper."
-        )
+        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
     end
   end
 
@@ -121,7 +119,7 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   defp map_proto_type("TYPE_ENUM", _), do: :string
 
   defp map_proto_type(type, type_name) do
-    Mix.raise(
+    raise(
       "Unmapped proto type: #{type} (typeName: #{inspect(type_name)}). Add a field_override or update the type mapper."
     )
   end
@@ -153,14 +151,12 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         :map
 
       other ->
-        Mix.raise(
-          "Unknown message type: .#{other}. Add a field_override or update the type mapper."
-        )
+        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
     end
   end
 
   defp map_migration_type(type, type_name) do
-    Mix.raise(
+    raise(
       "Unmapped proto type: #{type} (typeName: #{inspect(type_name)}). Add a field_override or update the type mapper."
     )
   end

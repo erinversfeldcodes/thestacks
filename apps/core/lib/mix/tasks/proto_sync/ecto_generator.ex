@@ -29,6 +29,7 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
       @primary_key {:id, :binary_id, autogenerate: true}
       @foreign_key_type :binary_id
       @schema_prefix "#{table.schema_prefix}"
+      @type t :: %__MODULE__{}
 
       schema "#{table.table_name}" do
     #{field_lines}#{timestamps_line}
