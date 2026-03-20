@@ -722,24 +722,23 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
     test "run([\"--check\"]) raises when ecto schema has drifted" do
       original_cwd = File.cwd!()
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [table | _] = manifest.tables
+      ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
+      original_content = File.read!(ecto_path)
 
       try do
         File.cd!(@repo_root)
-        manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
-        [table | _] = manifest.tables
-        ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
 
         # Corrupt the file temporarily
-        original_content = File.read!(ecto_path)
         File.write!(ecto_path, original_content <> "\n# drift marker\n")
 
         assert_raise RuntimeError, ~r/Proto sync drift detected/, fn ->
           ProtoSync.run(["--check"])
         end
-
-        # Restore
-        File.write!(ecto_path, original_content)
       after
+        # Always restore the file and CWD, even if the test fails
+        File.write!(ecto_path, original_content)
         File.cd!(original_cwd)
       end
     end
