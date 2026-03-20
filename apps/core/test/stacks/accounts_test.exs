@@ -1,8 +1,10 @@
 defmodule Stacks.AccountsTest do
   use Core.DataCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Accounts
 
   describe "register/1" do
@@ -103,5 +105,172 @@ defmodule Stacks.AccountsTest do
     test "returns nil for unknown email" do
       assert nil == Accounts.get_user_by_email("nobody@example.com")
     end
+  end
+
+  describe "update_profile/2" do
+    test "updates display_name and website_url" do
+      user = insert(:user, display_name: "Old Name")
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{
+                 "display_name" => "New Name",
+                 "website_url" => "https://example.com"
+               })
+
+      assert updated.display_name == "New Name"
+      assert updated.website_url == "https://example.com"
+    end
+
+    test "returns error when website_url exceeds 500 characters" do
+      user = insert(:user)
+      long_url = String.duplicate("a", 501)
+      assert {:error, changeset} = Accounts.update_profile(user, %{"website_url" => long_url})
+      assert %{website_url: [_]} = errors_on(changeset)
+    end
+
+    test "updates email when current_password is correct" do
+      user =
+        insert(:user, email: "old@example.com", password_hash: Argon2.hash_pwd_salt("pass123"))
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{
+                 "email" => "new@example.com",
+                 "current_password" => "pass123"
+               })
+
+      assert updated.email == "new@example.com"
+    end
+
+    test "returns :invalid_password when current_password is wrong for email change" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("correct"))
+
+      assert {:error, :invalid_password} =
+               Accounts.update_profile(user, %{
+                 "email" => "new@example.com",
+                 "current_password" => "wrong"
+               })
+    end
+
+    test "returns :invalid_password when current_password is missing for email change" do
+      user = insert(:user)
+
+      assert {:error, :invalid_password} =
+               Accounts.update_profile(user, %{"email" => "new@example.com"})
+    end
+
+    test "returns error on duplicate email" do
+      existing = insert(:user, email: "taken@example.com")
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("pass123"))
+
+      assert {:error, _} =
+               Accounts.update_profile(user, %{
+                 "email" => existing.email,
+                 "current_password" => "pass123"
+               })
+    end
+
+    test "emits user.profile_updated event on success" do
+      user = insert(:user)
+      before_count = event_count("user.profile_updated")
+
+      Accounts.update_profile(user, %{"display_name" => "New Name"})
+
+      assert event_count("user.profile_updated") == before_count + 1
+    end
+  end
+
+  describe "update_location/2" do
+    test "updates country_code and city" do
+      user = insert(:user)
+
+      assert {:ok, updated} =
+               Accounts.update_location(user, %{"country_code" => "GB", "city" => "London"})
+
+      assert updated.country_code == "GB"
+      assert updated.city == "London"
+    end
+
+    test "returns error when country_code is not exactly 2 characters" do
+      user = insert(:user)
+      assert {:error, changeset} = Accounts.update_location(user, %{"country_code" => "GBR"})
+      assert %{country_code: [_]} = errors_on(changeset)
+    end
+
+    test "returns error when city exceeds 200 characters" do
+      user = insert(:user)
+      long_city = String.duplicate("x", 201)
+      assert {:error, changeset} = Accounts.update_location(user, %{"city" => long_city})
+      assert %{city: [_]} = errors_on(changeset)
+    end
+
+    test "emits user.location_updated event with correct payload" do
+      user = insert(:user)
+      before_count = event_count("user.location_updated")
+
+      Accounts.update_location(user, %{"country_code" => "ZA", "city" => "Cape Town"})
+
+      assert event_count("user.location_updated") == before_count + 1
+    end
+  end
+
+  describe "change_password/3" do
+    test "changes password when current_password is correct" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("oldpass123"))
+      assert {:ok, _updated} = Accounts.change_password(user, "oldpass123", "newpass456")
+    end
+
+    test "old password no longer authenticates after change" do
+      user = insert(:user, email: "pw@example.com", password_hash: Argon2.hash_pwd_salt("old123"))
+      {:ok, _} = Accounts.change_password(user, "old123", "new456789")
+      assert {:error, :invalid_credentials} = Accounts.authenticate("pw@example.com", "old123")
+    end
+
+    test "returns :invalid_password when current_password is wrong" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("correct"))
+      assert {:error, :invalid_password} = Accounts.change_password(user, "wrong", "newpass123")
+    end
+
+    test "returns changeset error when new_password is too short" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("pass123"))
+      assert {:error, changeset} = Accounts.change_password(user, "pass123", "short")
+      assert %{password: [_]} = errors_on(changeset)
+    end
+  end
+
+  describe "update_notifications/2" do
+    test "toggles all four notification fields" do
+      user =
+        insert(:user,
+          notify_wishlist_availability: false,
+          notify_marketplace: false,
+          notify_group_invitations: false,
+          notify_event_matches: false
+        )
+
+      assert {:ok, updated} =
+               Accounts.update_notifications(user, %{
+                 "notify_wishlist_availability" => true,
+                 "notify_marketplace" => true,
+                 "notify_group_invitations" => true,
+                 "notify_event_matches" => true
+               })
+
+      assert updated.notify_wishlist_availability == true
+      assert updated.notify_marketplace == true
+      assert updated.notify_group_invitations == true
+      assert updated.notify_event_matches == true
+    end
+
+    test "unknown keys are silently ignored" do
+      user = insert(:user)
+      assert {:ok, _} = Accounts.update_notifications(user, %{"unknown_pref" => true})
+    end
+  end
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 end

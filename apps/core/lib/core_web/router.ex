@@ -22,6 +22,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :upload
   end
 
+  pipeline :rate_limit_password_change do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :password_change
+  end
+
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
@@ -31,13 +35,13 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through :api
     get "/costs", CostController, :index
-    get "/catalogue", CatalogueController, :index
   end
 
   # Public with optional auth — returns extra data when authenticated
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth]
     get "/books/:id", BookController, :show
+    get "/catalogue", CatalogueController, :index
   end
 
   scope "/api", StacksWeb do
@@ -56,6 +60,7 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_upload]
     post "/upload", UploadController, :create
+    post "/upload/identify", UploadController, :identify
   end
 
   scope "/api", StacksWeb do
@@ -67,6 +72,8 @@ defmodule CoreWeb.Router do
     get "/upload/:image_id/status", UploadController, :status
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn
+    post "/books/confirm", BookController, :confirm
+    post "/books/:id/merge-format", BookController, :merge_format
     resources "/books", BookController, only: [:create]
 
     get "/search", SearchController, :index
@@ -80,10 +87,27 @@ defmodule CoreWeb.Router do
     delete "/placements/:id", BookshelfPlacementController, :delete
 
     put "/settings/age_verification", UserSettingsController, :update_age_verification
+    put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility
+    put "/settings/profile", UserSettingsController, :update_profile
+    put "/settings/location", UserSettingsController, :update_location
+    put "/settings/notifications", UserSettingsController, :update_notifications
+    get "/settings/blocked-users", SocialController, :blocked_users
+
+    put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
+    put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
+
+    post "/users/:id/block", SocialController, :block
+    delete "/users/:id/block", SocialController, :unblock
 
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
+  end
+
+  # Password change — authenticated + stricter rate limit (3/min)
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_password_change]
+    put "/settings/password", UserSettingsController, :update_password
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

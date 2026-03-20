@@ -9,6 +9,7 @@ defmodule StacksWeb.CatalogueController do
 
   use CoreWeb, :controller
 
+  alias Stacks.Accounts.Guardian
   alias Stacks.Books
 
   @doc """
@@ -31,7 +32,13 @@ defmodule StacksWeb.CatalogueController do
       per_page: parse_int(params["per_page"], 24)
     ]
 
-    {books, total} = Books.list_catalogue(opts)
+    viewer =
+      case Guardian.Plug.current_resource(conn) do
+        nil -> :unauthenticated
+        user -> {:platform_user, user.id}
+      end
+
+    {books, total} = Books.list_catalogue([{:viewer, viewer} | opts])
 
     json(conn, %{
       books: Enum.map(books, &format_catalogue_book/1),

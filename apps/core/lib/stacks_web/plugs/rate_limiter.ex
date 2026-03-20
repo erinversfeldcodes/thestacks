@@ -25,6 +25,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @global_limit 1_000
   @auth_limit 5
   @upload_limit 10
+  @password_change_limit 3
 
   def init(opts), do: opts
 
@@ -63,6 +64,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:auth), do: Application.get_env(:core, :rate_limit_auth, @auth_limit)
   defp get_limit(:upload), do: @upload_limit
+  defp get_limit(:password_change), do: @password_change_limit
   defp get_limit(_), do: @global_limit
 
   # Upload bucket keys on user ID so the limit is per-user, not per-IP.
