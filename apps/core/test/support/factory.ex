@@ -9,6 +9,7 @@ defmodule Stacks.Factory do
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+  alias Stacks.Enrichment.{Bookstore, PriceSnapshot}
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -33,7 +34,10 @@ defmodule Stacks.Factory do
   def author_factory do
     %Author{
       name: sequence(:author_name, &"Author #{&1}"),
-      bio: "A talented writer."
+      bio: "A talented writer.",
+      website_url: nil,
+      rss_feed_url: nil,
+      open_library_id: nil
     }
   end
 
@@ -229,6 +233,32 @@ defmodule Stacks.Factory do
       consecutive_failures: 0,
       total_successes: 10,
       total_failures: 0
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Enrichment
+  # ---------------------------------------------------------------------------
+
+  def bookstore_factory do
+    %Bookstore{
+      name: sequence(:store_name, &"Bookstore #{&1}"),
+      website_url: "https://example.com",
+      scraper_module: sequence(:scraper_module, &"za/store_#{&1}"),
+      has_physical: true,
+      country_code: "ZA"
+    }
+  end
+
+  def price_snapshot_factory do
+    %PriceSnapshot{
+      price_cents: 29_900,
+      currency: "ZAR",
+      in_stock: true,
+      url: "https://example.com/book",
+      scraped_at: DateTime.utc_now(),
+      book: build(:book),
+      store: build(:bookstore)
     }
   end
 end
