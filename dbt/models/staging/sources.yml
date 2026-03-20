@@ -6,8 +6,8 @@ sources:
     # Freshness is checked against updated_at; warn if data is >24 h old, error if >48 h.
     loaded_at_field: updated_at
     freshness:
-      warn_after: {count: 24, period: hour}
-      error_after: {count: 48, period: hour}
+      warn_after: { count: 24, period: hour }
+      error_after: { count: 48, period: hour }
     tables:
       # ── Core tables ──────────────────────────────────────────────────
       - name: books
@@ -733,8 +733,8 @@ sources:
     schema: audit
     loaded_at_field: occurred_at
     freshness:
-      warn_after: {count: 24, period: hour}
-      error_after: {count: 48, period: hour}
+      warn_after: { count: 24, period: hour }
+      error_after: { count: 48, period: hour }
     tables:
       - name: audit_log
         description: Immutable audit trail of user actions for compliance and debugging.
