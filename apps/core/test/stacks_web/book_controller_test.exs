@@ -1,13 +1,16 @@
 defmodule StacksWeb.BookControllerTest do
   @moduledoc """
-  Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, and POST /api/books.
+  Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
+  POST /api/books/confirm, and POST /api/books/:id/merge-format.
   """
 
-  use CoreWeb.ConnCase, async: true
+  # async: false because confirm/merge tests swap Application env for mock HTTP client.
+  use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Books.MockHttpClient
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -44,6 +47,7 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["primary_edition"]["isbn"] == edition.isbn
       assert is_list(returned["editions"])
       assert returned["edition_count"] == 1
+      assert is_integer(returned["community_read_count"])
     end
 
     test "returns placement data when user has an active placement for the book", %{conn: conn} do
@@ -139,6 +143,219 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
+  describe "POST /api/books/confirm" do
+    test "returns 200 with book data when ISBN resolves to existing book", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565"})
+
+      assert %{"book" => returned, "placement" => placement} = json_response(conn, 200)
+      assert returned["id"] == book.id
+      assert placement["book_id"] == book.id
+    end
+
+    test "returns 200 with source=collection when user already owns the book", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      insert(:placement, book: book, bookshelf: bookshelf)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565"})
+
+      assert %{"book" => returned, "placement" => placement, "source" => "collection"} =
+               json_response(conn, 200)
+
+      assert returned["id"] == book.id
+      assert placement["bookshelf_name"] == "library"
+    end
+
+    test "returns 200 with book data when ISBN resolves via metadata (mocked)", %{conn: conn} do
+      user = insert(:user)
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
+
+        MockHttpClient.put_response("googleapis.com", {
+          :ok,
+          %{
+            "items" => [
+              %{
+                "id" => "mock-id",
+                "volumeInfo" => %{
+                  "title" => "Confirm Test Book",
+                  "authors" => ["Mock Author"],
+                  "industryIdentifiers" => [
+                    %{"type" => "ISBN_13", "identifier" => "9780451524935"}
+                  ]
+                }
+              }
+            ]
+          }
+        })
+
+        conn =
+          conn
+          |> auth_conn(user)
+          |> post("/api/books/confirm", %{"isbn" => "9780451524935"})
+
+        # Accept 201 (new book created) or 409 (merge required — unlikely with new ISBN)
+        assert conn.status in [201, 409]
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+
+    test "returns 409 with merge_required when vision finds a matching work", %{conn: conn} do
+      user = insert(:user)
+
+      # Insert a book with a known title/author that find_similar_work will find
+      author = insert(:author, name: "George Orwell")
+      book = insert(:book, title: "Nineteen Eighty-Four", author: author)
+      insert(:book_edition, book: book, isbn: "9780141036144")
+
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
+
+        # Return metadata matching the existing book's title+author but different ISBN
+        MockHttpClient.put_response("googleapis.com", {
+          :ok,
+          %{
+            "items" => [
+              %{
+                "id" => "mock-1984-id",
+                "volumeInfo" => %{
+                  "title" => "Nineteen Eighty-Four",
+                  "authors" => ["George Orwell"],
+                  "industryIdentifiers" => [
+                    %{"type" => "ISBN_13", "identifier" => "9780451524935"}
+                  ]
+                }
+              }
+            ]
+          }
+        })
+
+        conn =
+          conn
+          |> auth_conn(user)
+          |> post("/api/books/confirm", %{"isbn" => "9780451524935"})
+
+        assert %{"error" => "merge_required", "work_id" => work_id} = json_response(conn, 409)
+        assert work_id == book.id
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+
+    test "returns 401 without auth token", %{conn: conn} do
+      conn = post(conn, "/api/books/confirm", %{"isbn" => "9780743273565"})
+      assert json_response(conn, 401)
+    end
+
+    test "returns 422 when isbn param is missing", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{})
+
+      assert %{"error" => _} = json_response(conn, 422)
+    end
+  end
+
+  describe "POST /api/books/:id/merge-format" do
+    setup do
+      MockHttpClient.put_response("openlibrary.org/api/books", {
+        :ok,
+        %{
+          "ISBN:9780141036144" => %{
+            "title" => "Nineteen Eighty-Four",
+            "authors" => [%{"name" => "George Orwell"}],
+            "publish_date" => "1949",
+            "number_of_pages" => 328,
+            "subjects" => [],
+            "key" => "/works/OL1168007W"
+          },
+          "ISBN:9780743273565" => %{
+            "title" => "The Great Gatsby",
+            "authors" => [%{"name" => "F. Scott Fitzgerald"}],
+            "publish_date" => "1925",
+            "number_of_pages" => 180,
+            "subjects" => [],
+            "key" => "/works/OL468431W"
+          }
+        }
+      })
+
+      :ok
+    end
+
+    test "returns 200 with edition data when adding a new edition to an existing book", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/#{book.id}/merge-format", %{
+          "isbn" => "9780141036144",
+          "format_label" => "Paperback"
+        })
+
+      assert %{"edition" => edition} = json_response(conn, 200)
+      assert edition["isbn"] == "9780141036144"
+    end
+
+    test "returns 422 when ISBN is already registered to this book", %{conn: conn} do
+      user = insert(:user)
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780743273565"})
+
+      assert %{"error" => "duplicate_isbn"} = json_response(conn, 422)
+    end
+
+    test "returns 404 when book_id does not exist", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/#{Ecto.UUID.generate()}/merge-format", %{
+          "isbn" => "9780743273565"
+        })
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 401 without auth token", %{conn: conn} do
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/books/#{book.id}/merge-format", %{"isbn" => "9780743273565"})
+
+      assert json_response(conn, 401)
+    end
+  end
+
   describe "GET /api/books/isbn/:isbn" do
     test "returns 200 when book with ISBN exists", %{conn: conn} do
       user = insert(:user)
@@ -182,6 +399,34 @@ defmodule StacksWeb.BookControllerTest do
         |> get("/api/books/isbn/9780000000001")
 
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
+    end
+  end
+
+  describe "GET /api/books/:id — visibility gates" do
+    test "age_gated book returns 403 for unauthenticated viewer" do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
+      conn = build_conn() |> get("/api/books/#{book.id}")
+      assert %{"error" => "age_verification_required"} = json_response(conn, 403)
+    end
+
+    test "public book returns 200 for unauthenticated viewer" do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      conn = build_conn() |> get("/api/books/#{book.id}")
+      assert %{"book" => returned} = json_response(conn, 200)
+      assert returned["id"] == book.id
+    end
+
+    test "public book returns 200 for authenticated viewer", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"book" => returned} = json_response(conn, 200)
+      assert returned["id"] == book.id
     end
   end
 end

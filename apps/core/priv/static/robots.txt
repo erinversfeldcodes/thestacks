@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /api/
+Disallow: /u/
+Disallow: /shelf/
+Disallow: /post/
+Disallow: /listing/

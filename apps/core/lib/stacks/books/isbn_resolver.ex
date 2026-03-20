@@ -328,6 +328,28 @@ defmodule Stacks.Books.ISBNResolver do
           |> Map.get("authors", [])
           |> Enum.map_join(", ", & &1["name"])
 
+        ol_key = book_data["key"]
+
+        work_key =
+          Map.get(book_data, "works", [])
+          |> List.first()
+          |> then(fn
+            %{"key" => k} -> k
+            _ -> nil
+          end)
+
+        open_library_work_id =
+          cond do
+            is_binary(work_key) ->
+              work_key |> String.split("/") |> List.last()
+
+            is_binary(ol_key) and String.contains?(ol_key, "/works/") ->
+              ol_key |> String.split("/") |> List.last()
+
+            true ->
+              nil
+          end
+
         {:ok,
          %{
            title: book_data["title"],
@@ -342,7 +364,8 @@ defmodule Stacks.Books.ISBNResolver do
            publication_year: parse_year(book_data["publish_date"]),
            page_count: book_data["number_of_pages"],
            subjects: extract_subjects(book_data["subjects"]),
-           open_library_id: book_data["key"],
+           open_library_id: ol_key,
+           open_library_work_id: open_library_work_id,
            source: :open_library
          }}
     end
