@@ -66,6 +66,7 @@ config :core, :searxng_url, "http://localhost:8888"
 config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
 config :core, :rss_fetcher, Stacks.Enrichment.RssFetcher
 config :core, :require_email_confirmation, false
+config :core, :storage, Stacks.Storage.Local
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
 # The key below is for development only. In production, set CLOAK_KEY.

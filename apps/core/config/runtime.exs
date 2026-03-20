@@ -45,6 +45,22 @@ if System.get_env("REQUIRE_EMAIL_CONFIRMATION") == "true" do
   config :core, :require_email_confirmation, true
 end
 
+if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
+  config :core, :storage, Stacks.Storage.R2
+
+  config :ex_aws,
+    access_key_id: System.fetch_env!("R2_ACCESS_KEY_ID"),
+    secret_access_key: System.fetch_env!("R2_SECRET_ACCESS_KEY"),
+    region: "auto"
+
+  config :ex_aws, :s3,
+    scheme: "https://",
+    host: "#{r2_account_id}.r2.cloudflarestorage.com",
+    region: "auto"
+
+  config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
+end
+
 if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
   config :core, :rate_limit_auth, String.to_integer(auth_limit)
 end

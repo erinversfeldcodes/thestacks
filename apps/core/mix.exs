@@ -68,6 +68,8 @@ defmodule Core.MixProject do
       {:finch, "~> 0.19"},
       {:broadway, "~> 1.1"},
       {:elixir_feed_parser, "~> 2.1"},
+      {:ex_aws, "~> 2.5"},
+      {:ex_aws_s3, "~> 2.5"},
       {:ex_machina, "~> 2.8", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]}
     ]
