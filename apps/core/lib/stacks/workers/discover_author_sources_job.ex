@@ -145,7 +145,9 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
         {:error, :not_found}
     end
   rescue
-    _ -> {:error, :request_failed}
+    e ->
+      Logger.warning("DiscoverAuthorSourcesJob: RSS feed check failed: #{Exception.message(e)}")
+      {:error, :request_failed}
   end
 
   defp maybe_put(attrs, key, value, existing) do
