@@ -33,7 +33,9 @@ config :core, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
-       {"0 6 * * *", Stacks.Workers.RefreshCostsJob}
+       {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
+       {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
+       {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3]
@@ -53,6 +55,10 @@ config :core, :vision_client, Stacks.AI.Client
 config :core, :isbn_http_client, Stacks.Books.HttpClient
 config :core, :vision_service_url, "http://localhost:8000"
 config :core, :vision_hmac_secret, "dev-only-hmac-secret-change-in-production"
+config :core, :scraper_client, Stacks.Enrichment.ScraperClient
+config :core, :scraper_service_url, "http://localhost:8080"
+config :core, :scraper_hmac_secret, "dev-only-scraper-hmac-secret-change-in-production"
+config :core, :brave_client, Stacks.Discovery.BraveClient
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
 # The key below is for development only. In production, set CLOAK_KEY.

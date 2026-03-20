@@ -22,6 +22,21 @@ end
 
 config :core, :vision_hmac_secret, vision_hmac_secret
 
+if brave_key = System.get_env("BRAVE_SEARCH_API_KEY") do
+  config :core, :brave_search_api_key, brave_key
+end
+
+# In dev/test, optional overrides; in prod, required (enforced below).
+if config_env() != :prod do
+  if scraper_hmac = System.get_env("SCRAPER_HMAC_SECRET") do
+    config :core, :scraper_hmac_secret, scraper_hmac
+  end
+
+  if scraper_url = System.get_env("SCRAPER_SERVICE_URL") do
+    config :core, :scraper_service_url, scraper_url
+  end
+end
+
 if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
   config :core, :rate_limit_auth, String.to_integer(auth_limit)
 end
@@ -32,6 +47,18 @@ if config_env() == :prod do
       raise "environment variable VISION_SERVICE_URL is missing."
 
   config :core, :vision_service_url, vision_service_url
+
+  scraper_hmac_secret =
+    System.get_env("SCRAPER_HMAC_SECRET") ||
+      raise "environment variable SCRAPER_HMAC_SECRET is missing."
+
+  config :core, :scraper_hmac_secret, scraper_hmac_secret
+
+  scraper_service_url =
+    System.get_env("SCRAPER_SERVICE_URL") ||
+      raise "environment variable SCRAPER_SERVICE_URL is missing."
+
+  config :core, :scraper_service_url, scraper_service_url
 
   searxng_url =
     System.get_env("SEARXNG_URL") || "http://thestacks-searxng.internal:8080"
