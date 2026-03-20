@@ -16,6 +16,12 @@ select
     city,
     consent_analytics,
     consent_analytics_at,
+    onboarding_completed,
+    notify_wishlist_availability,
+    notify_marketplace,
+    notify_group_invitations,
+    notify_event_matches,
+    email_confirmed,
     created_at,
     updated_at
 from {{ source('op', 'users') }}

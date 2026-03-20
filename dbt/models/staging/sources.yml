@@ -9,55 +9,725 @@ sources:
       warn_after: {count: 24, period: hour}
       error_after: {count: 48, period: hour}
     tables:
+      # ── Core tables ──────────────────────────────────────────────────
       - name: books
+        description: Works in the catalogue; each book may have multiple editions.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: title
+            description: Canonical title of the work.
+          - name: author_id
+            description: FK to authors table.
+          - name: description
+            description: Free-text blurb or synopsis.
+          - name: language
+            description: BCP-47 language code (e.g. "en").
+          - name: subjects
+            description: Array of subject/genre tags.
+          - name: bisac_codes
+            description: Array of BISAC classification codes.
+          - name: visibility_tier
+            description: Content-gate tier (public, unlisted, private).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+          - name: title_tsv
+            description: Generated tsvector column for full-text search on title.
+
       - name: book_editions
+        description: Physical/digital editions of a work, each carrying a unique ISBN.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books (the parent work).
+          - name: isbn
+            description: ISBN-13 (hard-gated, verified against Open Library / Google Books).
+          - name: format_label
+            description: Edition format (hardcover, paperback, ebook, audiobook).
+          - name: cover_image_url
+            description: URL of the cover image for this edition.
+          - name: page_count
+            description: Number of pages (null for audiobooks).
+          - name: publisher
+            description: Publisher name.
+          - name: publication_year
+            description: Year of publication.
+          - name: open_library_id
+            description: Open Library edition key.
+          - name: google_books_id
+            description: Google Books volume ID.
+          - name: is_primary
+            description: Whether this is the primary/default edition of the work.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: authors
+        description: Author records linked to books.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Display name of the author.
+          - name: website_url
+            description: Author personal website URL.
+          - name: rss_feed_url
+            description: RSS feed URL for author updates.
+          - name: open_library_id
+            description: Open Library author key.
+          - name: bio
+            description: Short biographical text.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: bookshelves
+        description: Named virtual collections of books per user (library, antilibrary, wishlist, reading_pile, looking_for_home).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to users (owner of the bookshelf).
+          - name: name
+            description: Bookshelf category name (library, antilibrary, wishlist, reading_pile, looking_for_home).
+          - name: visibility
+            description: Who can see this bookshelf (public, followers, private, group).
+          - name: visibility_group_id
+            description: FK to groups; non-null when visibility is "group".
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: bookshelf_placements
+        description: Junction between books and bookshelves, with per-placement metadata.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books.
+          - name: bookshelf_id
+            description: FK to bookshelves.
+          - name: position
+            description: Sort position within the bookshelf.
+          - name: placed_at
+            description: Timestamp when the book was placed on this bookshelf.
+          - name: removed_at
+            description: Timestamp when the book was removed (null if still placed).
+          - name: formats
+            description: Array of format labels the user owns for this book.
+          - name: personal_rating
+            description: User's personal rating for the book.
+          - name: notes
+            description: User's private notes about this placement.
+          - name: visibility
+            description: Per-placement visibility override.
+          - name: listing_mode
+            description: Marketplace listing mode (none, fixed, negotiable).
+          - name: listing_status
+            description: Current listing status (active, sold, withdrawn).
+          - name: listing_price_cents
+            description: Asking price in cents.
+          - name: listing_min_price_cents
+            description: Minimum acceptable price in cents.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: bookshelf_placement_history
+        description: Immutable log of book movements between bookshelves.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books.
+          - name: from_bookshelf
+            description: Source bookshelf name.
+          - name: to_bookshelf
+            description: Destination bookshelf name.
+          - name: moved_at
+            description: Timestamp of the movement.
+
       - name: uploaded_images
+        description: User-uploaded images (book covers, spine photos) with 30-day GDPR retention.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: Legacy FK to books (single-book uploads).
+          - name: storage_path
+            description: Object storage path for the image file.
+          - name: status
+            description: Processing status (pending, classified, rejected, expired).
+          - name: rejection_reason
+            description: Reason the image was rejected by the vision model.
+          - name: uploaded_at
+            description: Timestamp when the user uploaded the image.
+          - name: expires_at
+            description: GDPR retention expiry (uploaded_at + 30 days).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+          - name: book_ids
+            description: Array of book IDs when multiple books detected in one image.
+          - name: book_edition_id
+            description: FK to book_editions (links image to a specific edition).
+
       - name: users
+        description: Registered user accounts with GDPR consent tracking.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: email
+            description: User email address (personal data, GDPR-protected).
+          - name: password_hash
+            description: Argon2 password hash (sensitive data, never exposed).
+          - name: display_name
+            description: Public display name.
+          - name: role
+            description: User role (user, partner, admin).
+          - name: profile_visibility
+            description: Profile visibility level (public, followers, private).
+          - name: website_url
+            description: User personal website URL.
+          - name: age_verified
+            description: Whether the user has passed age verification.
+          - name: age_verified_at
+            description: Timestamp of age verification.
+          - name: age_verification_provider
+            description: Provider used for age verification.
+          - name: country_code
+            description: ISO 3166-1 alpha-2 country code.
+          - name: city
+            description: User city (personal data).
+          - name: consent_analytics
+            description: Whether the user consented to analytics.
+          - name: consent_analytics_at
+            description: Timestamp of analytics consent decision.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+          - name: onboarding_completed
+            description: Whether the user completed onboarding flow.
+          - name: notify_wishlist_availability
+            description: Opt-in for wishlist availability notifications.
+          - name: notify_marketplace
+            description: Opt-in for marketplace activity notifications.
+          - name: notify_group_invitations
+            description: Opt-in for group invitation notifications.
+          - name: notify_event_matches
+            description: Opt-in for matching event notifications.
+          - name: email_confirmed
+            description: Whether the email address has been confirmed.
+          - name: email_confirmation_token
+            description: Token for email confirmation flow.
+          - name: password_reset_token
+            description: Token for password reset flow.
+          - name: password_reset_sent_at
+            description: Timestamp when password reset email was sent.
+
       - name: bookstores
-        # No freshness check — populated by scraper (Phase 2A), may be empty in dev
+        description: Partner bookstores whose prices are scraped.
+        # No freshness check -- populated by scraper (Phase 2A), may be empty in dev
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Bookstore name.
+          - name: website_url
+            description: Bookstore website URL.
+          - name: search_template
+            description: URL template for ISBN search (contains {isbn} placeholder).
+          - name: has_physical
+            description: Whether the store has a physical location.
+          - name: country_code
+            description: ISO 3166-1 alpha-2 country code.
+          - name: scraper_module
+            description: Rust scraper module name for this store.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: price_snapshots
+        description: Point-in-time price observations from bookstore scrapers.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books.
+          - name: store_id
+            description: FK to bookstores.
+          - name: price_cents
+            description: Price in minor currency units (cents).
+          - name: currency
+            description: ISO 4217 currency code.
+          - name: in_stock
+            description: Whether the book was in stock at scrape time.
+          - name: url
+            description: Direct URL to the book on the store's website.
+          - name: scraped_at
+            description: Timestamp when the price was observed.
+
       - name: review_snapshots
+        description: Aggregated review data scraped from external sources.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books.
+          - name: source
+            description: Review source name (e.g. Goodreads, StoryGraph).
+          - name: source_url
+            description: URL of the review page.
+          - name: sentiment_score
+            description: Computed sentiment score (-1.0 to 1.0).
+          - name: summary
+            description: AI-generated review summary.
+          - name: rating
+            description: Average rating from the source.
+          - name: rating_count
+            description: Number of ratings on the source.
+          - name: scraped_at
+            description: Timestamp when the review data was scraped.
+          - name: stale_after
+            description: Timestamp after which the snapshot should be re-scraped.
+
       - name: discovered_sources
+        description: Automatically discovered bookstores and third spaces pending approval.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Discovered source name.
+          - name: type
+            description: Source type (bookstore, third_space).
+          - name: url
+            description: Source website URL.
+          - name: confidence
+            description: Discovery confidence score (0.0 to 1.0).
+          - name: discovered_via
+            description: Method of discovery (scraper, user_suggestion, web_crawl).
+          - name: discovered_at
+            description: Timestamp when the source was first discovered.
+          - name: status
+            description: Approval status (pending, approved, rejected, excluded).
+          - name: approved_at
+            description: Timestamp when the source was approved by platform owner.
+          - name: config_generated
+            description: Whether a scraper config was auto-generated.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+          - name: excluded_at
+            description: Timestamp when the source was excluded.
+          - name: exclusion_email
+            description: Email address that requested exclusion (GDPR).
+
       - name: bookstore_events
+        description: Events hosted by partner bookstores (author signings, readings).
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: store_id
+            description: FK to bookstores.
+          - name: author_id
+            description: FK to authors (if a known author is involved).
+          - name: title
+            description: Event title.
+          - name: description
+            description: Event description.
+          - name: event_date
+            description: Scheduled date/time of the event.
+          - name: location
+            description: Event venue or address.
+          - name: url
+            description: URL with event details.
+          - name: scraped_at
+            description: Timestamp when the event was scraped.
+
       - name: third_spaces
+        description: Community spaces (cafes, reading rooms) relevant to book culture.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Space name.
+          - name: type
+            description: Space type (cafe, reading_room, library, coworking).
+          - name: city
+            description: City where the space is located.
+          - name: country_code
+            description: ISO 3166-1 alpha-2 country code.
+          - name: instagram_url
+            description: Instagram profile URL.
+          - name: website_url
+            description: Space website URL.
+          - name: description
+            description: Free-text description of the space.
+          - name: discovered_via
+            description: How the space was discovered.
+          - name: verified
+            description: Whether the space has been verified by the platform.
+          - name: last_active_at
+            description: Timestamp of last known activity.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+          - name: opted_out
+            description: Whether the space has opted out of being listed.
+          - name: opted_out_at
+            description: Timestamp when the space opted out.
+
       - name: third_space_events
+        description: Events hosted by third spaces (book clubs, readings, open mics).
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: space_id
+            description: FK to third_spaces.
+          - name: title
+            description: Event title.
+          - name: description
+            description: Event description.
+          - name: event_date
+            description: Scheduled date/time of the event.
+          - name: recurrence
+            description: Recurrence rule (e.g. weekly, monthly, null for one-off).
+          - name: related_authors
+            description: Array of author names or IDs related to the event.
+          - name: source_url
+            description: URL where the event was found.
+          - name: scraped_at
+            description: Timestamp when the event was scraped.
+
       - name: event_log
+        description: Immutable append-only event log for all significant state changes.
         loaded_at_field: occurred_at
-      - name: my_writing_links
-        freshness: null
-      # Social tables (Issue #043)
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: event_type
+            description: Dot-namespaced event type (e.g. book.created, placement.moved).
+          - name: aggregate_type
+            description: Domain aggregate that emitted the event (e.g. book, user).
+          - name: aggregate_id
+            description: UUID of the aggregate instance.
+          - name: schema_version
+            description: Event payload schema version for forward compatibility.
+          - name: payload
+            description: JSONB event payload (PII fields subject to GDPR erasure).
+          - name: metadata
+            description: JSONB metadata (actor_id, request_id, source).
+          - name: occurred_at
+            description: Timestamp when the event occurred (used for freshness).
+          - name: published_at
+            description: Timestamp when the event was published to subscribers.
+
+      # my_writing_links: deprecated (superseded by blog_posts + users.website_url).
+      # See docs/technical-architecture.md — table was never created.
+
+      # ── Social tables (Issue #043) ───────────────────────────────────
       - name: user_blocks
+        description: User-to-user block relationships.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: blocker_id
+            description: FK to users (the user who initiated the block).
+          - name: blocked_id
+            description: FK to users (the blocked user).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: groups
+        description: User-created groups (book clubs, reading circles).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: owner_id
+            description: FK to users (group creator/owner).
+          - name: name
+            description: Group display name.
+          - name: type
+            description: Group type (book_club, reading_circle, custom).
+          - name: visibility
+            description: Group visibility (public, private, invite_only).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: group_members
+        description: Membership records linking users to groups.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: group_id
+            description: FK to groups.
+          - name: user_id
+            description: FK to users.
+          - name: role
+            description: Member role within the group (owner, admin, member).
+          - name: joined_at
+            description: Timestamp when the user joined the group.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: group_invitations
+        description: Pending and responded group invitations.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: group_id
+            description: FK to groups.
+          - name: invited_by_id
+            description: FK to users (the inviter).
+          - name: invited_user_id
+            description: FK to users (the invitee).
+          - name: status
+            description: Invitation status (pending, accepted, declined).
+          - name: responded_at
+            description: Timestamp when the invitee responded.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: visibility_grants
+        description: Explicit visibility grants for resources to specific users.
         freshness: null
-      # Blog tables (Issue #043)
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: resource_type
+            description: Type of resource being granted visibility (bookshelf, blog_post).
+          - name: resource_id
+            description: UUID of the resource.
+          - name: granted_to_id
+            description: FK to users (recipient of the grant).
+          - name: granted_by_id
+            description: FK to users (owner who granted access).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
+      # ── Blog tables (Issue #043) ─────────────────────────────────────
       - name: blog_posts
+        description: User blog posts with per-post visibility controls.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to users (post author).
+          - name: title
+            description: Post title.
+          - name: body
+            description: Post body content (Markdown).
+          - name: visibility
+            description: Post visibility (public, followers, private, group).
+          - name: visibility_group_id
+            description: FK to groups; non-null when visibility is "group".
+          - name: published_at
+            description: Timestamp when the post was published (null if draft).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: post_book_associations
-      # Marketplace tables (Issue #043)
+        description: AI-detected or manual associations between blog posts and books.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: post_id
+            description: FK to blog_posts.
+          - name: book_id
+            description: FK to books.
+          - name: confidence
+            description: Association confidence score (0.0 to 1.0).
+          - name: reasoning
+            description: Explanation of why the association was made.
+          - name: source
+            description: How the association was created (ai, manual).
+          - name: visible
+            description: Whether the association is shown to readers.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
+      # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads
+        description: Conversation threads between buyer and seller for a placement listing.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: placement_id
+            description: FK to bookshelf_placements (the listed book).
+          - name: buyer_id
+            description: FK to users (the prospective buyer).
+          - name: status
+            description: Thread status (open, accepted, declined, expired).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: offer_messages
+        description: Individual messages within an offer thread.
         freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: thread_id
+            description: FK to offer_threads.
+          - name: sender_id
+            description: FK to users (message author).
+          - name: type
+            description: Message type (text, offer, counter, accept, decline).
+          - name: body
+            description: Message body text.
+          - name: amount_cents
+            description: Offer/counter amount in cents (null for text messages).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: listings
+        description: Standalone book listings in the marketplace.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: book_id
+            description: FK to books.
+          - name: seller_id
+            description: FK to users (the seller).
+          - name: status
+            description: Listing status (active, sold, withdrawn, expired).
+          - name: pricing_mode
+            description: Pricing mode (fixed, negotiable).
+          - name: price_cents
+            description: Asking price in minor currency units.
+          - name: currency
+            description: ISO 4217 currency code.
+          - name: condition
+            description: Book condition (new, like_new, good, acceptable).
+          - name: description
+            description: Seller description of the book's condition.
+          - name: photo_urls
+            description: Array of photo URLs for the listed book.
+          - name: listed_at
+            description: Timestamp when the listing went live.
+          - name: expires_at
+            description: Timestamp when the listing expires.
+          - name: sold_at
+            description: Timestamp when the book was sold (null if unsold).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
       - name: transactions
+        description: Completed marketplace transactions between buyer and seller.
         freshness: null
-      # Monitoring table (Issue #043)
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: listing_id
+            description: FK to listings.
+          - name: offer_id
+            description: FK to offer_threads (null for direct purchases).
+          - name: buyer_id
+            description: FK to users (the buyer).
+          - name: seller_id
+            description: FK to users (the seller).
+          - name: amount_cents
+            description: Final transaction amount in minor currency units.
+          - name: currency
+            description: ISO 4217 currency code.
+          - name: payment_provider_ref
+            description: External payment provider reference ID.
+          - name: payment_status
+            description: Payment status (pending, completed, refunded, failed).
+          - name: shipping_provider_ref
+            description: External shipping provider reference ID.
+          - name: shipping_status
+            description: Shipping status (pending, shipped, delivered, returned).
+          - name: shipping_cost_cents
+            description: Shipping cost in minor currency units.
+          - name: completed_at
+            description: Timestamp when the transaction was fully completed.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
+      # ── Monitoring tables (Issue #043) ───────────────────────────────
       - name: source_health_checks
+        description: Health-check status for external data sources (bookstores, APIs).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: source_name
+            description: Human-readable source identifier.
+          - name: source_type
+            description: Source type (bookstore, api, scraper).
+          - name: last_success_at
+            description: Timestamp of last successful health check.
+          - name: last_failure_at
+            description: Timestamp of last failed health check.
+          - name: last_failure_reason
+            description: Error message from the last failure.
+          - name: consecutive_failures
+            description: Count of consecutive failures (resets on success).
+          - name: total_successes
+            description: Lifetime count of successful checks.
+          - name: total_failures
+            description: Lifetime count of failed checks.
+          - name: status
+            description: Current status (healthy, degraded, down).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
+      - name: platform_costs
+        description: Operational costs tracked per service and billing period, shown to users for transparency.
+        freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: category
+            description: Cost category (infrastructure, api, storage, compute).
+          - name: service
+            description: Service name (e.g. fly.io, neon, together_ai).
+          - name: description
+            description: Human-readable description of the cost line item.
+          - name: amount_cents
+            description: Cost amount in minor currency units.
+          - name: currency
+            description: ISO 4217 currency code.
+          - name: period_start
+            description: Start of the billing period.
+          - name: period_end
+            description: End of the billing period.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
 
   - name: audit
     schema: audit
@@ -67,3 +737,21 @@ sources:
       error_after: {count: 48, period: hour}
     tables:
       - name: audit_log
+        description: Immutable audit trail of user actions for compliance and debugging.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to op.users (the actor).
+          - name: action
+            description: Action performed (create, update, delete, login, export).
+          - name: resource_type
+            description: Type of resource acted upon.
+          - name: resource_id
+            description: UUID of the resource acted upon.
+          - name: metadata
+            description: JSONB with action-specific details.
+          - name: ip_address
+            description: Client IP address at time of action.
+          - name: occurred_at
+            description: Timestamp when the action occurred (used for freshness).
