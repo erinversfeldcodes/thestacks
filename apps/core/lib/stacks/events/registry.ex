@@ -19,6 +19,9 @@ defmodule Stacks.Events.Registry do
     "book.created" => [
       Stacks.Enrichment.Handlers.BookCreatedHandler,
       Stacks.Enrichment.Handlers.AuthorDiscoveryHandler
+    ],
+    "user.location_updated" => [
+      Stacks.Discovery.Handlers.LocationUpdatedHandler
     ]
   }
 

@@ -26,6 +26,10 @@ if brave_key = System.get_env("BRAVE_SEARCH_API_KEY") do
   config :core, :brave_search_api_key, brave_key
 end
 
+if together_key = System.get_env("VISION_TOGETHER_API_KEY") do
+  config :core, :vision_together_api_key, together_key
+end
+
 # In dev/test, optional overrides; in prod, required (enforced below).
 if config_env() != :prod do
   if scraper_hmac = System.get_env("SCRAPER_HMAC_SECRET") do
@@ -59,6 +63,12 @@ if config_env() == :prod do
       raise "environment variable SCRAPER_SERVICE_URL is missing."
 
   config :core, :scraper_service_url, scraper_service_url
+
+  vision_together_api_key =
+    System.get_env("VISION_TOGETHER_API_KEY") ||
+      raise "environment variable VISION_TOGETHER_API_KEY is missing."
+
+  config :core, :vision_together_api_key, vision_together_api_key
 
   searxng_url =
     System.get_env("SEARXNG_URL") || "http://thestacks-searxng.internal:8080"
