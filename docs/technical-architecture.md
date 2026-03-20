@@ -5154,6 +5154,43 @@ end
 
 This is the same pattern used by Commanded (Elixir CQRS library). Each version bump is an explicit, testable function clause.
 
+### Proto-to-Schema Codegen (Issue #080, ADR 009)
+
+For **raw ingestion tables** — tables whose schema is the wire format persisted — the `.proto` message is the single source of truth. A `mix proto.sync` task generates three artifacts from each tagged message:
+
+1. **Ecto migration** (Postgres DDL)
+2. **Ecto schema module** (struct + changeset)
+3. **dbt staging model** (SQL view)
+
+Messages opt in via a custom proto option:
+
+```protobuf
+import "stacks/options.proto";
+
+message EventEnvelope {
+  option (stacks.persisted) = true;
+  option (stacks.table_name) = "event_log";
+  option (stacks.schema_prefix) = "op";
+  // fields...
+}
+```
+
+**Type mapping:**
+
+| Proto type | Postgres type |
+|-----------|---------------|
+| `string` | `text` |
+| `int32` / `int64` | `integer` / `bigint` |
+| `float` / `double` | `double precision` |
+| `bool` | `boolean` |
+| `bytes` | `bytea` |
+| `google.protobuf.Timestamp` | `timestamptz` |
+| `map<string, string>` | `jsonb` |
+
+**CI:** `mix proto.sync --check` runs alongside `buf lint` and `buf breaking`. Exits non-zero if any generated file drifts from the proto source.
+
+**Scope:** Only raw/ingestion tables (where table schema = wire format). Domain tables (`bookshelves`, `users`, `post_book_associations`, etc.) remain hand-written.
+
 ---
 
 ## Partner Integration

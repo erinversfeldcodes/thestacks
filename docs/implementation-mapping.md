@@ -1980,7 +1980,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Affects stories** | All partner stories (US-9.x), internal event bus, service-to-service contracts. |
 | **Proto files** | `proto/stacks/partner/` (inventory, events, spaces), `proto/stacks/internal/` (event_bus, enrichment), `proto/stacks/common/` (book, location). |
 | **Code generation** | Elixir, Rust, Python: generated at build time, gitignored. Elm: generated JSON decoders checked in (no runtime codegen). |
-| **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` in every PR. |
+| **Schema codegen (Issue #080)** | `mix proto.sync` generates Ecto migrations, Ecto schemas, and dbt staging models from `.proto` messages tagged with `(stacks.persisted) = true`. `mix proto.sync --check` in CI catches drift. Covers raw ingestion tables only — domain tables remain hand-written. See ADR 009. |
+| **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` + `mix proto.sync --check` in every PR. |
 | **Event upcasting** | `Stacks.Events.Upcaster` -- pattern-matched version transforms for old events. Same pattern as Commanded (Elixir CQRS). |
 
 ---

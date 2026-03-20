@@ -291,6 +291,14 @@ packages:
 - `buf lint` + `buf generate` for Elixir and Elm (Elm decoders checked in)
 - Partner protos (inventory, events, spaces) deferred to Phase 2
 
+**Proto-to-Schema Codegen (Issue #080, ADR 009)** — implement before #052 (dbt buildout)
+- `mix proto.sync` — generates Ecto migrations, Ecto schemas, and dbt staging models from `.proto` messages tagged with `(stacks.persisted) = true`
+- `mix proto.sync --check` — CI drift detection, runs alongside `buf lint` and `buf breaking`
+- `proto/stacks/options.proto` — defines custom options (`stacks.persisted`, `stacks.table_name`, `stacks.schema_prefix`)
+- Covers raw ingestion tables only; domain tables (`bookshelves`, `users`, etc.) remain hand-written
+- Retrofit at least one existing raw table as proof-of-concept (e.g., `event_log`)
+- Type mapping documented in ADR 009 and `docs/technical-architecture.md` section 22
+
 **Files:**
 - `apps/core/lib/core/accounts.ex`, `accounts/user.ex`
 - `apps/core/lib/core/audit.ex`, `audit/log_entry.ex`
