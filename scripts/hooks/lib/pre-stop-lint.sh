@@ -203,6 +203,14 @@ if [[ $HAS_PROTO -eq 1 ]]; then
     "buf lint proto/" \
     "cd ${REPO_ROOT} && buf lint proto/" \
     bash -c "cd '${REPO_ROOT}' && buf lint proto/"
+
+  # Proto-to-schema drift check — catches stale generated schemas/dbt models.
+  if [[ $FAIL -eq 0 && -f "${REPO_ROOT}/proto/persisted.exs" ]]; then
+    run_check \
+      "mix proto.sync --check" \
+      "cd ${REPO_ROOT}/apps/core && mix proto.sync" \
+      bash -c "cd '${REPO_ROOT}/apps/core' && mix proto.sync --check"
+  fi
 fi
 
 # --- Dockerfile ---
