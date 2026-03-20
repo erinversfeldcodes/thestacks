@@ -18,6 +18,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
   alias Stacks.Enrichment.PricePipeline
   alias Stacks.Enrichment.Prices
+  alias Stacks.Monitoring
 
   @fuse_name :scraper_fuse
 
@@ -102,6 +103,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
       case client.scrape(isbn, store_name) do
         {:ok, response} ->
+          Monitoring.record_success(store_name, "scraper_config")
+
           {:ok,
            %{
              "book_id" => book_id,
@@ -114,6 +117,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
         {:error, reason} ->
           :fuse.melt(@fuse_name)
+          Monitoring.record_failure(store_name, "scraper_config", inspect(reason))
 
           Logger.warning(
             "TriggerPriceScrapeJob: scrape failed isbn=#{isbn} store=#{store_name}: #{inspect(reason)}"
