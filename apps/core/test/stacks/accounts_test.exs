@@ -1,5 +1,6 @@
 defmodule Stacks.AccountsTest do
   use Core.DataCase, async: true
+  use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
   import Stacks.Factory
@@ -46,6 +47,13 @@ defmodule Stacks.AccountsTest do
       attrs = %{"email" => "short@example.com", "password" => "short"}
       assert {:error, changeset} = Accounts.register(attrs)
       assert %{password: [_]} = errors_on(changeset)
+    end
+
+    test "emits user.registered event on success" do
+      before_count = event_count("user.registered")
+      attrs = %{"email" => "registered_event@example.com", "password" => "password123"}
+      Accounts.register(attrs)
+      assert event_count("user.registered") == before_count + 1
     end
 
     test "register/1 emits event payload without PII fields" do
@@ -235,6 +243,24 @@ defmodule Stacks.AccountsTest do
       assert {:error, changeset} = Accounts.change_password(user, "pass123", "short")
       assert %{password: [_]} = errors_on(changeset)
     end
+
+    test "emits user.password_changed event on success" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("oldpass123"))
+      before_count = event_count("user.password_changed")
+
+      Accounts.change_password(user, "oldpass123", "newpass456")
+
+      assert event_count("user.password_changed") == before_count + 1
+    end
+
+    test "does not emit event when current_password is wrong" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt("correct"))
+      before_count = event_count("user.password_changed")
+
+      Accounts.change_password(user, "wrong", "newpass456")
+
+      assert event_count("user.password_changed") == before_count
+    end
   end
 
   describe "update_notifications/2" do
@@ -264,6 +290,51 @@ defmodule Stacks.AccountsTest do
     test "unknown keys are silently ignored" do
       user = insert(:user)
       assert {:ok, _} = Accounts.update_notifications(user, %{"unknown_pref" => true})
+    end
+
+    test "emits user.notifications_updated event with current preference values" do
+      user = insert(:user, notify_wishlist_availability: false, notify_marketplace: false)
+      before_count = event_count("user.notifications_updated")
+
+      Accounts.update_notifications(user, %{
+        "notify_wishlist_availability" => true,
+        "notify_marketplace" => true
+      })
+
+      assert event_count("user.notifications_updated") == before_count + 1
+    end
+  end
+
+  describe "update_profile_visibility/2" do
+    test "updates profile_visibility to platform" do
+      user = insert(:user)
+      assert {:ok, updated} = Accounts.update_profile_visibility(user.id, "platform")
+      assert updated.profile_visibility == "platform"
+    end
+
+    test "emits user.profile_visibility_changed event" do
+      user = insert(:user)
+      before_count = event_count("user.profile_visibility_changed")
+
+      Accounts.update_profile_visibility(user.id, "owner")
+
+      assert event_count("user.profile_visibility_changed") == before_count + 1
+    end
+
+    test "enqueues VisibilityRecapJob after visibility change" do
+      user = insert(:user)
+      Accounts.update_profile_visibility(user.id, "owner")
+
+      assert_enqueued(
+        worker: Stacks.Workers.VisibilityRecapJob,
+        args: %{"user_id" => user.id, "new_visibility" => "owner"}
+      )
+    end
+
+    test "returns changeset error for invalid visibility value" do
+      user = insert(:user)
+      assert {:error, changeset} = Accounts.update_profile_visibility(user.id, "public")
+      assert %{profile_visibility: [_]} = errors_on(changeset)
     end
   end
 

@@ -362,7 +362,7 @@ defmodule Stacks.Books do
 
         case Repo.update(changeset) do
           {:ok, updated} ->
-            Events.emit(%{
+            Events.emit_safe(%{
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,

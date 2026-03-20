@@ -1,6 +1,7 @@
 defmodule Stacks.ShelvingTest do
   use Core.DataCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
   alias Core.Repo
@@ -36,6 +37,31 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  describe "place_book/3" do
+    test "creates a placement and returns {:ok, placement}" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      assert placement.book_id == book.id
+    end
+
+    test "creates the bookshelf if it does not exist" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
+    end
+
+    test "emits placement.created event" do
+      user = insert(:user)
+      book = insert(:book)
+      before_count = event_count("placement.created")
+
+      Shelving.place_book(user.id, book.id, "library")
+
+      assert event_count("placement.created") == before_count + 1
+    end
+  end
+
   describe "move_book/3" do
     setup :setup_user_bookshelf_book
 
@@ -67,6 +93,14 @@ defmodule Stacks.ShelvingTest do
 
       assert history != nil
     end
+
+    test "emits placement.moved event", %{user: user, placement: placement} do
+      before_count = event_count("placement.moved")
+
+      Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert event_count("placement.moved") == before_count + 1
+    end
   end
 
   describe "remove_book/2" do
@@ -85,6 +119,14 @@ defmodule Stacks.ShelvingTest do
       placements = Shelving.get_bookshelf_books(user.id, "library")
       ids = Enum.map(placements, & &1.id)
       refute placement.id in ids
+    end
+
+    test "emits placement.removed event", %{user: user, placement: placement} do
+      before_count = event_count("placement.removed")
+
+      Shelving.remove_book(placement.id, user.id)
+
+      assert event_count("placement.removed") == before_count + 1
     end
   end
 
@@ -129,6 +171,14 @@ defmodule Stacks.ShelvingTest do
 
       assert history != nil
     end
+
+    test "emits placement.reread event", %{placement: placement} do
+      before_count = event_count("placement.reread")
+
+      Shelving.reread_book(placement.id)
+
+      assert event_count("placement.reread") == before_count + 1
+    end
   end
 
   describe "abandon_book/2" do
@@ -153,21 +203,6 @@ defmodule Stacks.ShelvingTest do
     test "returns :unauthorized when user does not own the placement", %{placement: placement} do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.remove_book(placement.id, other_user.id)
-    end
-  end
-
-  describe "place_book/3" do
-    test "creates a placement and returns {:ok, placement}" do
-      user = insert(:user)
-      book = insert(:book)
-      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
-      assert placement.book_id == book.id
-    end
-
-    test "creates the bookshelf if it does not exist" do
-      user = insert(:user)
-      book = insert(:book)
-      assert {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
     end
   end
 
@@ -380,5 +415,12 @@ defmodule Stacks.ShelvingTest do
       assert {:ok, updated} = Shelving.update_placement_visibility(placement.id, user.id, "owner")
       assert updated.visibility == "owner"
     end
+  end
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 end
