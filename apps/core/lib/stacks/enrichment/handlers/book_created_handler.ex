@@ -19,11 +19,19 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
     if isbn do
       Logger.info("BookCreatedHandler: enqueuing price scrape for isbn=#{isbn} book=#{book_id}")
 
-      %{isbn: isbn, book_id: book_id}
-      |> TriggerPriceScrapeJob.new()
-      |> Oban.insert()
+      case %{isbn: isbn, book_id: book_id}
+           |> TriggerPriceScrapeJob.new()
+           |> Oban.insert() do
+        {:ok, _job} ->
+          :ok
 
-      :ok
+        {:error, reason} ->
+          Logger.warning(
+            "BookCreatedHandler: failed to enqueue price scrape for isbn=#{isbn}: #{inspect(reason)}"
+          )
+
+          :ok
+      end
     else
       Logger.debug("BookCreatedHandler: no ISBN in book.created payload, skipping")
       :ok
