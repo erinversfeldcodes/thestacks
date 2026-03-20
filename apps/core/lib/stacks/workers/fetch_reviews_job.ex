@@ -48,9 +48,8 @@ defmodule Stacks.Workers.FetchReviewsJob do
   end
 
   defp fetch_and_persist(book_id) do
-    # In production, this would fetch real review data from external sources.
-    # For now we use mock review data — real scraping is a future issue.
-    review_sources = mock_review_data(book_id)
+    fetcher = review_fetcher()
+    review_sources = fetcher.fetch_reviews(book_id)
 
     together_client = Application.get_env(:core, :together_client, Stacks.AI.TogetherClient)
 
@@ -114,21 +113,7 @@ defmodule Stacks.Workers.FetchReviewsJob do
     :ok
   end
 
-  # Mock review data — in production this would be replaced by actual scraping.
-  # Each source returns structured data that gets summarized and persisted.
-  defp mock_review_data(book_id) do
-    [
-      %{
-        source: :goodreads,
-        source_url: "https://goodreads.com/book/show/#{book_id}",
-        review_text:
-          "Readers found this book engaging and well-written. The plot was compelling with strong character development.",
-        rating: 4.2,
-        rating_count: 1250,
-        sentiment_score: 0.78,
-        title: "Unknown",
-        author: "Unknown"
-      }
-    ]
+  defp review_fetcher do
+    Application.get_env(:core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher)
   end
 end

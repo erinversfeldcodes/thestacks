@@ -62,6 +62,7 @@ config :core, :brave_client, Stacks.Discovery.BraveClient
 config :core, :together_client, Stacks.AI.TogetherClient
 config :core, :searxng_client, Stacks.Discovery.SearxngClient
 config :core, :searxng_url, "http://localhost:8888"
+config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
 # The key below is for development only. In production, set CLOAK_KEY.

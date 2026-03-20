@@ -79,7 +79,9 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
         {:error, reason}
     end
   rescue
-    e -> {:error, {:request_failed, Exception.message(e)}}
+    e ->
+      Logger.warning("DiscoverBookstoreEventsJob: fetch_page failed: #{Exception.message(e)}")
+      {:error, {:request_failed, Exception.message(e)}}
   end
 
   @doc """
