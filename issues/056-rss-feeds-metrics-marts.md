@@ -33,9 +33,9 @@ Each public shelf has an Atom feed that RSS readers can subscribe to. The metric
 - Custom Telemetry events: `[:stacks, :api, :request]` with duration + endpoint
 - API latency P50/P95/P99 per endpoint — read from Telemetry and surface in metrics API
 
-**dbt mart consumption:**
-- Metrics context reads from `wh.mart_*` views (Issue #052)
-- If marts don't exist yet, gracefully return empty/placeholder data
+**dbt mart consumption (ADR 010 — this issue is the named consumer for metrics marts):**
+- Metrics context reads from `wh.mart_*` views (Issue #052). Per ADR 010, every mart has a named consumer — this issue is the consumer for: `mart_system_health`, `mart_job_stats`, `mart_data_freshness`, `mart_cost_tracking`, `mart_gdpr_compliance`, `mart_data_quality_trend`, `mart_enrichment_gaps`, `mart_llm_faithfulness`, `mart_marketplace_activity`, `mart_transaction_volume`, `mart_blog_activity`
+- If marts don't exist yet, gracefully return empty/placeholder data (allows #056 to run in Wave D alongside #052)
 
 **Data quality dashboard enhancements (see `docs/data-quality.md`):**
 - `get_quality_trends/0` — reads from `mart_data_quality_trend`, returns 12-week sparkline data per category

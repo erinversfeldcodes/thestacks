@@ -27,7 +27,7 @@ The Stacks is a greenfield book management and discovery platform. This plan seq
 - **Vision service**: Python + FastAPI on Modal (Qwen2.5-VL-7B-Instruct on A10G GPU; HMAC-authenticated HTTPS; not co-located with core)
 - **Price scraper**: Rust microservice (TOML config per store, standalone OSS tool)
 - **Database**: PostgreSQL with 3 schemas (`op`, `wh`, `audit`), 3 DB roles. **Works/editions model**: `books` = work (logical book), `book_editions` = edition (ISBN, format, cover). Placements/reviews reference works; prices/partner inventory reference editions.
-- **Data transforms**: dbt (staging -> intermediate -> marts)
+- **Data transforms**: dbt (staging → intermediate → marts) following the **contract-first derived data** pattern (ADR 010). Not star schema or medallion — purpose-built read models derived from contract-enforced systems of record. Event-triggered selective refresh with daily cron catch-all.
 - **Event bus**: Oban-backed EDA with `event_log` table (no Kafka, no RabbitMQ)
 - **Schema contracts**: Protobuf + buf (JSON on wire, `.proto` as source of truth). Lands early — event envelope and core messages are proto-defined from day one.
 - **Infrastructure**: Fly.io (IAD region), Nix/Flox dev environment, Docker for deploys
@@ -198,9 +198,9 @@ thestacks/
 - Active marketplace listings (`listing_status = 'active'`) are exempt from profile ceiling — always visible to platform users
 - RLS policies documented in `docs/rls-design.md`; enforced via `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` after 1B.3 visibility contexts pass tests
 
-**dbt setup:**
+**dbt setup (contract-first derived data — ADR 010):**
 - `profiles.yml` pointing to `stacks_dbt` role
-- `dbt_project.yml` with `+materialized: view` for staging, `+schema` routing per schema
+- `dbt_project.yml` with `+materialized: view` for staging, `+schema` routing per schema. Intermediate and mart materialisation strategies (view, incremental, materialized_view) configured per model when those layers are built (Issue #052).
 - `macros/generate_schema_name.sql` — custom macro so seeds land in `op`/`audit` without target-schema prefix
 - `packages.yml` — pin `AxelThevenot/dbt-assertions` for row-level data quality assertions (see below); run `dbt deps` after creating
 - Staging models for ALL tables: `stg_books`, `stg_book_editions`, `stg_authors`, `stg_users`, `stg_bookshelves`, `stg_bookshelf_placements`, `stg_bookshelf_placement_history`, `stg_uploaded_images`, `stg_audit_log`, `stg_discovered_sources`, `stg_review_snapshots`, `stg_bookstores`, `stg_price_snapshots`, `stg_bookstore_events`, `stg_third_spaces`, `stg_third_space_events`, `stg_event_log`, `stg_user_blocks`, `stg_groups`, `stg_group_members`, `stg_blog_posts`, `stg_post_book_associations`, `stg_offer_threads`, `stg_partners`, `stg_partner_inventory`, `stg_partner_events`, `stg_partner_spaces`, `stg_listings`, `stg_transactions`
@@ -502,14 +502,37 @@ See current Phase 7B content (minus comments).
 - `Stacks.Workers.EmailDeliveryJob` — Oban worker for async email send with retry
 - All emails respect `users.notify_*` preferences (except ToS changes and registration confirmation)
 
-**dbt models for 1E.3:**
-- `mart_system_health`, `mart_job_stats`, `mart_data_freshness`, `mart_cost_tracking`, `mart_gdpr_compliance`
-- `mart_community_read_count` (for Looking for a Home wear — refreshes every 5 min)
-- `mart_platform_searchable` (for platform-wide search index — refreshes every 5 min)
-- `mart_marketplace_activity`, `mart_transaction_volume`
-- `mart_blog_activity`
-- **Data quality models** (see `docs/data-quality.md`): `int_source_health`, `mart_data_quality_trend`, `mart_enrichment_gaps`, `mart_llm_faithfulness`
-- Source health monitoring infrastructure: Issue #068 — per-source health recording, HTML structure change detection, RSS liveness, LLM faithfulness tracking
+**dbt models for 1E.3 (contract-first derived data — ADR 010):**
+
+All intermediate and mart models follow the contract-first derived data pattern (ADR 010). Each mart has a named consumer, a refresh strategy (event-triggered or cron catch-all), and an explicit materialisation choice.
+
+*Intermediate models (semantic aggregates):*
+- `int_price_history` — price over time per edition per store (`incremental` — unbounded growth)
+- `int_review_sentiment` — unified reviews with sentiment scores (`view`)
+- `int_author_activity` — author + RSS posts + events (`view`)
+- `int_event_matches` — events matched to user book/author graph (`view`)
+- `int_book_engagement` — wear level computation from placement history (`view`)
+- `int_book_detail_view` — pre-joined work + editions + latest prices + reviews (`view`)
+- `int_source_health` — per-source operational health (`view`)
+- `int_blog_engagement` — which books users write about most (`view`)
+- `int_visibility_resolution` — audit/debugging view for visibility decisions (`view`)
+
+*Mart models (consumer-optimised read models):*
+- `mart_community_read_count` — consumer: Looking for a Home wear state. **5-min event-triggered** (`shelf.book_placed/moved`). Materialisation: `incremental` or `materialized_view` with `REFRESH CONCURRENTLY`.
+- `mart_platform_searchable` — consumer: platform-wide search endpoint. **5-min event-triggered**. Materialisation: `incremental` or `materialized_view`.
+- `mart_book_reviews`, `mart_book_prices` — consumer: book detail overlay. Event-triggered (`enrichment.reviews/prices_scraped`).
+- `mart_system_health`, `mart_job_stats`, `mart_data_freshness`, `mart_cost_tracking`, `mart_gdpr_compliance` — consumer: metrics dashboard. Daily cron.
+- `mart_marketplace_activity`, `mart_transaction_volume` — consumer: metrics dashboard. Daily cron.
+- `mart_blog_activity` — consumer: metrics dashboard. Event-triggered (`post.published/updated`).
+- `mart_data_quality_trend` — consumer: metrics dashboard quality sparklines. Daily cron. 12-week rolling window (`incremental`).
+- `mart_enrichment_gaps` — consumer: metrics dashboard gap drill-down. Daily cron.
+- `mart_llm_faithfulness` — consumer: metrics dashboard AI quality. Daily cron.
+
+*Refresh architecture:*
+- `Stacks.Workers.DbtRefreshJob` (Oban, `dbt_refresh` queue, concurrency 1) — event-to-model mapping centralised in this worker, not scattered across event handlers. Daily cron as catch-all.
+- See ADR 010 for the full event-to-model mapping table.
+
+*Source health monitoring infrastructure:* Issue #068 — per-source health recording, HTML structure change detection, RSS liveness, LLM faithfulness tracking.
 
 ---
 

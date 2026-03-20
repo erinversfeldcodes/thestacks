@@ -43,6 +43,11 @@ Each enrichment Oban worker records success/failure after every execution:
 - If HTTP 404/410 for 2+ consecutive weeks: clear `authors.rss_feed_url`, emit `author.rss_dead` event, enqueue `DiscoverAuthorSourcesJob` to re-discover
 - Record result in `source_health_checks`
 
+**Source health event emission (ADR 010 — event-triggered dbt refresh):**
+- After every `record_success/2` or `record_failure/3` call, emit `source_health.recorded` event via `Events.emit_safe/1` with payload: `%{source_name: name, source_type: type, status: status, consecutive_failures: N}`
+- This event is consumed by `DbtRefreshJob` (Issue #052) to trigger selective rebuild of `int_source_health`, `mart_data_quality_trend`, `mart_enrichment_gaps`
+- Use `emit_safe/1` — health recording must never fail because the event emission failed
+
 **LLM faithfulness tracking:**
 - Review summaries: `FetchReviewsJob` already validates URLs. Add: log confidence score distribution in `source_health_checks` (source_name = "llm_review_summary", source_type = "llm_output")
 - Blog associations: `PostBookAssociationWorker` records: total suggestions, mean confidence, count of high-confidence (>0.8) suggestions. Logged per run.
@@ -58,6 +63,7 @@ Each enrichment Oban worker records success/failure after every execution:
 - [ ] Rust scraper returns `selector_match_rate`; low rate flags config as degraded
 - [ ] `RSSLivenessJob` checks feed URLs weekly; dead feeds cleared and re-discovered
 - [ ] LLM faithfulness: confidence distributions logged, confirm/dismiss ratios tracked
+- [ ] `source_health.recorded` event emitted after every health record write
 - [ ] `stg_source_health_checks` dbt staging model exists
 - [ ] `mix test` passes
 - [ ] Migration creates `source_health_checks` table
