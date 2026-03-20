@@ -1,2 +1,5 @@
 frontend/public/textures/*.png filter=lfs diff=lfs merge=lfs -text
 concepts/**/*.png filter=lfs diff=lfs merge=lfs -text
+
+# Exclude from GitHub language statistics (Linguist)
+concepts/**/*.html linguist-vendored
