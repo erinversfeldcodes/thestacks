@@ -1,5 +1,5 @@
 defmodule Stacks.AccountsTest do
-  use Core.DataCase, async: true
+  use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
@@ -86,6 +86,78 @@ defmodule Stacks.AccountsTest do
 
     test "returns error for unknown email" do
       assert {:error, :invalid_credentials} = Accounts.authenticate("nobody@example.com", "pass")
+    end
+  end
+
+  describe "authenticate/2 email confirmation gate" do
+    test "returns :email_unconfirmed when flag is on and user is unconfirmed" do
+      insert(:user,
+        email: "unconfirmed@example.com",
+        password_hash: Argon2.hash_pwd_salt("password123"),
+        email_confirmed: false
+      )
+
+      Application.put_env(:core, :require_email_confirmation, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :require_email_confirmation, false)
+      end)
+
+      assert {:error, :email_unconfirmed} =
+               Accounts.authenticate("unconfirmed@example.com", "password123")
+    end
+
+    test "succeeds when flag is on and user is confirmed" do
+      insert(:user,
+        email: "confirmed@example.com",
+        password_hash: Argon2.hash_pwd_salt("password123"),
+        email_confirmed: true
+      )
+
+      Application.put_env(:core, :require_email_confirmation, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :require_email_confirmation, false)
+      end)
+
+      assert {:ok, user} = Accounts.authenticate("confirmed@example.com", "password123")
+      assert user.email == "confirmed@example.com"
+    end
+
+    test "succeeds when flag is off even if user is unconfirmed" do
+      insert(:user,
+        email: "unconfirmed2@example.com",
+        password_hash: Argon2.hash_pwd_salt("password123"),
+        email_confirmed: false
+      )
+
+      # flag is false by default in test.exs
+      assert {:ok, _user} = Accounts.authenticate("unconfirmed2@example.com", "password123")
+    end
+  end
+
+  describe "register/1 email confirmation" do
+    test "auto-confirms user when flag is off" do
+      attrs = %{"email" => "autoconfirm@example.com", "password" => "password123"}
+      assert {:ok, user} = Accounts.register(attrs)
+      assert user.email_confirmed == true
+      assert user.email_confirmation_token == nil
+    end
+
+    test "sets confirmation token when flag is on" do
+      Application.put_env(:core, :require_email_confirmation, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :require_email_confirmation, false)
+      end)
+
+      # Insert a user first so the new one doesn't get owner role
+      insert(:user)
+
+      attrs = %{"email" => "needsconfirm@example.com", "password" => "password123"}
+      assert {:ok, user} = Accounts.register(attrs)
+      assert user.email_confirmed == false
+      assert is_binary(user.email_confirmation_token)
     end
   end
 

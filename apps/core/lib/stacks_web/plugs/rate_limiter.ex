@@ -30,6 +30,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @upload_limit 10
   @password_change_limit 3
   @social_limit 20
+  @public_limit 30
 
   def init(opts), do: opts
 
@@ -70,6 +71,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   defp get_limit(:upload), do: @upload_limit
   defp get_limit(:password_change), do: @password_change_limit
   defp get_limit(:social), do: @social_limit
+  defp get_limit(:public), do: @public_limit
   defp get_limit(_), do: @global_limit
 
   # Upload and social buckets key on user ID so the limit is per-user, not per-IP.

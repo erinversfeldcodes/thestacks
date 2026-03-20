@@ -39,6 +39,10 @@ defmodule Stacks.Accounts do
 
   @doc """
   Registers a new user. The first user on the platform receives the `owner` role.
+
+  When `require_email_confirmation` is `true`, the user is created with
+  `email_confirmed: false` and a confirmation token. When `false` (dev/test),
+  the user is auto-confirmed on creation.
   """
   @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) do
@@ -46,7 +50,24 @@ defmodule Stacks.Accounts do
 
     Multi.new()
     |> Multi.insert(:user, User.registration_changeset(%User{}, attrs))
-    |> Multi.run(:emit_event, fn _repo, %{user: user} ->
+    |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
+      if require_email_confirmation?() do
+        token =
+          Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+        user
+        |> User.email_confirmation_changeset(%{
+          email_confirmed: false,
+          email_confirmation_token: token
+        })
+        |> Repo.update()
+      else
+        user
+        |> User.email_confirmation_changeset(%{email_confirmed: true})
+        |> Repo.update()
+      end
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{set_confirmation: user} ->
       Events.emit_safe(%{
         event_type: "user.registered",
         aggregate_type: "user",
@@ -58,7 +79,7 @@ defmodule Stacks.Accounts do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{user: user}} ->
+      {:ok, %{set_confirmation: user}} ->
         maybe_send_confirmation(user)
         {:ok, user}
 
@@ -72,12 +93,18 @@ defmodule Stacks.Accounts do
 
   @doc """
   Authenticates a user by email and password.
-  Returns `{:ok, user}` on success, `{:error, :invalid_credentials}` on failure.
+
+  Returns `{:ok, user}` on success. On failure, returns one of:
+  - `{:error, :invalid_credentials}` — wrong email or password
+  - `{:error, :email_unconfirmed}` — valid credentials but email not confirmed
   """
-  @spec authenticate(String.t(), String.t()) :: {:ok, User.t()} | {:error, :invalid_credentials}
+  @spec authenticate(String.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid_credentials | :email_unconfirmed}
   def authenticate(email, password) do
-    user = get_user_by_email(email)
-    check_password(user, password)
+    with {:ok, user} <- check_password(get_user_by_email(email), password),
+         :ok <- check_email_confirmed(user) do
+      {:ok, user}
+    end
   end
 
   defp check_password(nil, _password) do
@@ -92,6 +119,20 @@ defmodule Stacks.Accounts do
     else
       {:error, :invalid_credentials}
     end
+  end
+
+  defp check_email_confirmed(%User{email_confirmed: true}), do: :ok
+
+  defp check_email_confirmed(%User{}) do
+    if require_email_confirmation?() do
+      {:error, :email_unconfirmed}
+    else
+      :ok
+    end
+  end
+
+  defp require_email_confirmation? do
+    Application.get_env(:core, :require_email_confirmation, false)
   end
 
   @doc """
