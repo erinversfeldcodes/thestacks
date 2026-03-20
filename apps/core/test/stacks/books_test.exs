@@ -1,8 +1,10 @@
 defmodule Stacks.BooksTest do
   use Core.DataCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Books
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
@@ -166,6 +168,24 @@ defmodule Stacks.BooksTest do
     test "returns {:error, :not_found} for an unknown edition_id" do
       assert {:error, :not_found} =
                Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
+    end
+
+    test "emits book.cover_confirmed event with edition_id and cover_url" do
+      edition = insert(:book_edition)
+      cover_url = "https://example.com/cover.jpg"
+      before_count = event_count("book.cover_confirmed")
+
+      Books.confirm_cover_association(edition.id, cover_url)
+
+      assert event_count("book.cover_confirmed") == before_count + 1
+    end
+
+    test "does not emit event when edition_id is not found" do
+      before_count = event_count("book.cover_confirmed")
+
+      Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
+
+      assert event_count("book.cover_confirmed") == before_count
     end
   end
 
@@ -346,6 +366,15 @@ defmodule Stacks.BooksTest do
       assert {:error, {:merge_required, work_id}} = result
       assert work_id == existing_book.id
     end
+
+    test "emits books.confirmed event on new book creation" do
+      user = insert(:user)
+      before_count = event_count("books.confirmed")
+
+      Books.confirm(user.id, %{isbn: "9780141036144"})
+
+      assert event_count("books.confirmed") == before_count + 1
+    end
   end
 
   describe "merge_edition/2" do
@@ -402,6 +431,16 @@ defmodule Stacks.BooksTest do
 
       result = Books.merge_edition(nonexistent_id, %{isbn: "9780451524935"})
       assert {:error, _} = result
+    end
+
+    test "emits books.edition_merged event on success" do
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      before_count = event_count("books.edition_merged")
+
+      Books.merge_edition(book.id, %{isbn: "9780451524935", format_label: "Paperback"})
+
+      assert event_count("books.edition_merged") == before_count + 1
     end
   end
 
@@ -467,5 +506,55 @@ defmodule Stacks.BooksTest do
       # This test verifies at minimum one of the two keys is present.
       assert Map.has_key?(meta, :open_library_id) or Map.has_key?(meta, :open_library_work_id)
     end
+  end
+
+  describe "store_upload/2" do
+    test "emits image.submitted event on successful upload" do
+      user = insert(:user)
+      tmp = System.tmp_dir!() |> Path.join("test_upload_#{System.unique_integer()}.jpg")
+      File.write!(tmp, "fake image bytes")
+
+      upload = %Plug.Upload{path: tmp, filename: "test.jpg", content_type: "image/jpeg"}
+      before_count = event_count("image.submitted")
+
+      Books.store_upload(user.id, upload)
+
+      assert event_count("image.submitted") == before_count + 1
+
+      File.rm(tmp)
+    end
+
+    test "returns {:ok, {image, b64}} on success" do
+      user = insert(:user)
+      tmp = System.tmp_dir!() |> Path.join("test_upload_#{System.unique_integer()}.jpg")
+      File.write!(tmp, "fake image bytes")
+
+      upload = %Plug.Upload{path: tmp, filename: "test.jpg", content_type: "image/jpeg"}
+
+      assert {:ok, {image, b64}} = Books.store_upload(user.id, upload)
+      assert image.id != nil
+      assert is_binary(b64)
+
+      File.rm(tmp)
+    end
+
+    test "returns {:error, reason} when file does not exist" do
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: "/nonexistent/path.jpg",
+        filename: "x.jpg",
+        content_type: "image/jpeg"
+      }
+
+      assert {:error, _reason} = Books.store_upload(user.id, upload)
+    end
+  end
+
+  defp event_count(event_type) do
+    Repo.aggregate(
+      from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
   end
 end

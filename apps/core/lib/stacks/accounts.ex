@@ -15,6 +15,7 @@ defmodule Stacks.Accounts do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Events
+  alias Stacks.Workers.VisibilityRecapJob
 
   @doc """
   Returns a user by ID, or nil if not found.
@@ -112,10 +113,30 @@ defmodule Stacks.Accounts do
   @spec update_profile_visibility(binary(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_profile_visibility(user_id, visibility) do
-    user_id
-    |> get_user!()
-    |> User.profile_visibility_changeset(%{profile_visibility: visibility})
-    |> Repo.update()
+    result =
+      user_id
+      |> get_user!()
+      |> User.profile_visibility_changeset(%{profile_visibility: visibility})
+      |> Repo.update()
+
+    case result do
+      {:ok, user} ->
+        Events.emit_safe(%{
+          event_type: "user.profile_visibility_changed",
+          aggregate_type: "user",
+          aggregate_id: user.id,
+          payload: %{visibility: visibility}
+        })
+
+        %{"user_id" => user.id, "new_visibility" => visibility}
+        |> VisibilityRecapJob.new()
+        |> Oban.insert()
+
+        {:ok, user}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -208,9 +229,25 @@ defmodule Stacks.Accounts do
           {:ok, User.t()} | {:error, :invalid_password} | {:error, Ecto.Changeset.t()}
   def change_password(%User{} = user, current_password, new_password) do
     with :ok <- verify_password(user, current_password) do
-      user
-      |> User.password_change_changeset(%{"password" => new_password})
-      |> Repo.update()
+      result =
+        user
+        |> User.password_change_changeset(%{"password" => new_password})
+        |> Repo.update()
+
+      case result do
+        {:ok, updated} ->
+          Events.emit_safe(%{
+            event_type: "user.password_changed",
+            aggregate_type: "user",
+            aggregate_id: updated.id,
+            payload: %{}
+          })
+
+          {:ok, updated}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -219,9 +256,30 @@ defmodule Stacks.Accounts do
   """
   @spec update_notifications(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_notifications(%User{} = user, attrs) do
-    user
-    |> User.notifications_changeset(attrs)
-    |> Repo.update()
+    result =
+      user
+      |> User.notifications_changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        Events.emit_safe(%{
+          event_type: "user.notifications_updated",
+          aggregate_type: "user",
+          aggregate_id: updated.id,
+          payload: %{
+            notify_wishlist_availability: updated.notify_wishlist_availability,
+            notify_marketplace: updated.notify_marketplace,
+            notify_group_invitations: updated.notify_group_invitations,
+            notify_event_matches: updated.notify_event_matches
+          }
+        })
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   defp verify_password(%User{password_hash: hash}, current_password)
