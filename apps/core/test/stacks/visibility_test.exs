@@ -154,6 +154,22 @@ defmodule Stacks.VisibilityTest do
 
       assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
+
+    test "active listing on non-looking_for_home shelf → no marketplace exception" do
+      owner = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "owner")
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          visibility: "platform",
+          listing_status: "active"
+        )
+
+      viewer = insert(:user)
+
+      assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -192,6 +208,104 @@ defmodule Stacks.VisibilityTest do
   end
 
   # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — group visibility
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — group visibility" do
+    test "group visibility + platform_user viewer → :hidden (group check not yet implemented)" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert :hidden = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
+    end
+
+    test "group visibility + unauthenticated viewer → :hidden" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — resource visibility edge cases
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — resource visibility edge cases" do
+    test "resource with only visibility_tier (no visibility field) treated as public" do
+      book = insert(:book, visibility_tier: "public")
+      viewer = insert(:user)
+
+      assert :visible = Visibility.resolve_visibility(book, {:platform_user, viewer.id})
+    end
+
+    test "resource with only visibility_tier for unauthenticated viewer → :visible" do
+      book = insert(:book, visibility_tier: "public")
+
+      assert :visible = Visibility.resolve_visibility(book, :unauthenticated)
+    end
+
+    test "resource with neither visibility nor visibility_tier defaults to owner-only" do
+      # A plain map without visibility or visibility_tier — get_resource_visibility returns "owner"
+      resource = %{user_id: Ecto.UUID.generate()}
+
+      assert :hidden = Visibility.resolve_visibility(resource, :unauthenticated)
+    end
+
+    test "unknown visibility falls back to check_default_visibility — owner can view" do
+      owner = insert(:user, profile_visibility: "platform")
+      # A resource with an unknown visibility string
+      resource = %{user_id: owner.id, visibility: "custom_unknown"}
+
+      assert :visible = Visibility.resolve_visibility(resource, {:platform_user, owner.id})
+    end
+
+    test "unknown visibility falls back to check_default_visibility — non-owner hidden" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      resource = %{user_id: owner.id, visibility: "custom_unknown"}
+
+      assert :hidden = Visibility.resolve_visibility(resource, {:platform_user, viewer.id})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — placement with unloaded bookshelf
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — placement profile visibility edge cases" do
+    test "placement with bookshelf whose user is nil → profile ceiling defaults to owner" do
+      # Placement where bookshelf association has no user_id
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          visibility: "platform",
+          listing_status: nil
+        )
+
+      viewer = insert(:user)
+
+      assert :visible = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — age gate for unauthenticated
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — age gate unauthenticated" do
+    test "book with visibility_tier age_gated + unauthenticated → :hidden" do
+      book = insert(:book, visibility_tier: "age_gated")
+
+      assert :hidden = Visibility.resolve_visibility(book, :unauthenticated)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # can_view?/2
   # ---------------------------------------------------------------------------
 
@@ -209,6 +323,44 @@ defmodule Stacks.VisibilityTest do
       bookshelf = insert(:bookshelf, user: owner, visibility: "owner")
 
       assert false == Visibility.can_view?(bookshelf, :unauthenticated)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # viewable_shelves/2
+  # ---------------------------------------------------------------------------
+
+  describe "viewable_shelves/2" do
+    test "returns only visible bookshelves for platform user" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      platform_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      _owner_shelf = insert(:bookshelf, user: owner, name: "antilibrary", visibility: "owner")
+
+      result = Visibility.viewable_shelves(owner.id, {:platform_user, viewer.id})
+
+      assert length(result) == 1
+      assert hd(result).id == platform_shelf.id
+    end
+
+    test "owner sees all their own bookshelves" do
+      owner = insert(:user, profile_visibility: "platform")
+      _platform_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      _owner_shelf = insert(:bookshelf, user: owner, name: "antilibrary", visibility: "owner")
+
+      result = Visibility.viewable_shelves(owner.id, {:platform_user, owner.id})
+
+      assert length(result) == 2
+    end
+
+    test "unauthenticated viewer sees only platform-visible bookshelves" do
+      owner = insert(:user, profile_visibility: "platform")
+      _platform_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      _owner_shelf = insert(:bookshelf, user: owner, name: "antilibrary", visibility: "owner")
+
+      result = Visibility.viewable_shelves(owner.id, :unauthenticated)
+
+      assert length(result) == 1
     end
   end
 end

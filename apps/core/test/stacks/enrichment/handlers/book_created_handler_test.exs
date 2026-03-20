@@ -61,5 +61,10 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
       assert :ok = BookCreatedHandler.handle_event(event)
       refute_enqueued(worker: TriggerPriceScrapeJob)
     end
+
+    test "catch-all clause handles events without matching structure" do
+      assert :ok = BookCreatedHandler.handle_event(%{event_type: "something.else"})
+      refute_enqueued(worker: TriggerPriceScrapeJob)
+    end
   end
 end

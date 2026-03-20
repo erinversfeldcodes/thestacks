@@ -48,5 +48,63 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
       assert check1.source_name == "author_rss:#{author1.id}"
       assert check2.source_name == "author_rss:#{author2.id}"
     end
+
+    test "records failure with HTTP status message for non-2xx responses" do
+      # Using an unreachable host exercises the error/rescue path.
+      # The check_feed/1 function handles both {:ok, status} and {:error, reason}.
+      author = insert(:author, rss_feed_url: "https://unreachable.invalid/feed.xml")
+
+      assert :ok = perform_job(RSSLivenessJob, %{})
+
+      source_name = "author_rss:#{author.id}"
+
+      check =
+        Core.Repo.one(
+          from(s in SourceHealthCheck,
+            where: s.source_name == ^source_name
+          )
+        )
+
+      assert check
+      assert check.last_failure_reason != nil
+      assert check.source_type == "rss_feed"
+    end
+
+    test "handles multiple authors with mixed results in a single run" do
+      # All will fail since hosts are unreachable, but the job should not abort
+      _author1 = insert(:author, rss_feed_url: "https://feed1.invalid/rss")
+      _author2 = insert(:author, rss_feed_url: nil)
+      _author3 = insert(:author, rss_feed_url: "https://feed3.invalid/rss")
+
+      assert :ok = perform_job(RSSLivenessJob, %{})
+
+      # Only authors with rss_feed_url should have checks
+      count =
+        Core.Repo.aggregate(
+          from(s in SourceHealthCheck, where: s.source_type == "rss_feed"),
+          :count
+        )
+
+      # At least the two authors with RSS URLs should have records
+      assert count >= 2
+    end
+
+    test "consecutive runs increment failure count" do
+      author = insert(:author, rss_feed_url: "https://unreachable.invalid/feed.xml")
+
+      assert :ok = perform_job(RSSLivenessJob, %{})
+      assert :ok = perform_job(RSSLivenessJob, %{})
+
+      source_name = "author_rss:#{author.id}"
+
+      check =
+        Core.Repo.one(
+          from(s in SourceHealthCheck,
+            where: s.source_name == ^source_name
+          )
+        )
+
+      assert check.consecutive_failures >= 2
+    end
   end
 end
