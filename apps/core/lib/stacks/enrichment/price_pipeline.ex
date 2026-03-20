@@ -60,12 +60,20 @@ defmodule Stacks.Enrichment.PricePipeline do
       end)
 
     unless successes == [] do
+      first_book_id =
+        successes
+        |> List.first()
+        |> elem(1)
+        |> Map.get(:data)
+        |> Map.get(:book_id, Ecto.UUID.generate())
+
       Events.emit_safe(%{
         event_type: "enrichment.prices_scraped",
         aggregate_type: "enrichment",
-        aggregate_id: Ecto.UUID.generate(),
+        aggregate_id: first_book_id,
         payload: %{
-          count: Enum.count(successes)
+          count: Enum.count(successes),
+          book_ids: successes |> Enum.map(fn {:ok, msg} -> msg.data[:book_id] end) |> Enum.uniq()
         },
         metadata: %{actor: "system:price_pipeline"}
       })
