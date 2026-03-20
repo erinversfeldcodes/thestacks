@@ -9,6 +9,7 @@ defmodule Stacks.Monitoring.SourceHealthCheck do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   @schema_prefix "op"
+  @type t :: %__MODULE__{}
 
   schema "source_health_checks" do
     field :source_name, :string

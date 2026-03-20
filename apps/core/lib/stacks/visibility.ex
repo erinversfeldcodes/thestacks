@@ -1,6 +1,11 @@
 defmodule Stacks.Visibility do
   @moduledoc "Authoritative visibility gate for all content read paths."
 
+  # load_user/1 has a defensive catch-all clause that dialyzer considers
+  # unreachable because the only call site already matches %{user_id: _}.
+  # The fallback is intentional safety — suppress the warning.
+  @dialyzer {:nowarn_function, load_user: 1}
+
   import Ecto.Query
 
   alias Core.Repo

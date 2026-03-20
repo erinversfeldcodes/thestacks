@@ -123,12 +123,11 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Generated migration #{path}")
     else
       # Check for removed fields (warn only, additive-only convention)
-      removed = MapSet.difference(existing, MapSet.new(proto_field_names))
-      # Filter out known non-proto columns (timestamps, id)
-      timestamp_cols = MapSet.new(~w(created_at updated_at inserted_at))
-      removed = MapSet.difference(removed, timestamp_cols)
+      timestamp_cols = ~w(created_at updated_at inserted_at)
 
-      Enum.each(removed, fn col ->
+      existing
+      |> Enum.reject(fn col -> col in proto_field_names or col in timestamp_cols end)
+      |> Enum.each(fn col ->
         Mix.shell().info(
           "Note: column '#{col}' exists in migrations for #{table.table_name} but not in proto. " <>
             "Per additive-only convention, no DROP COLUMN generated."
@@ -173,7 +172,7 @@ defmodule Mix.Tasks.Proto.Sync do
         Mix.shell().error(diff)
       end)
 
-      Mix.raise("Proto sync drift detected. Run `mix proto.sync` to fix.")
+      raise("Proto sync drift detected. Run `mix proto.sync` to fix.")
     end
   end
 
@@ -183,11 +182,11 @@ defmodule Mix.Tasks.Proto.Sync do
     if migration_exists do
       # For existing tables, check if any proto fields are missing from migrations
       existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
-      proto_field_names = MapSet.new(Enum.map(fields, & &1.name))
-      missing = MapSet.difference(proto_field_names, existing)
+      proto_field_names = Enum.map(fields, & &1.name)
+      missing = Enum.reject(proto_field_names, fn name -> name in existing end)
 
-      if MapSet.size(missing) > 0 do
-        cols = missing |> MapSet.to_list() |> Enum.sort() |> Enum.join(", ")
+      if missing != [] do
+        cols = missing |> Enum.sort() |> Enum.join(", ")
 
         [
           {:drift, "migrations/#{table.table_name}",
@@ -236,7 +235,7 @@ defmodule Mix.Tasks.Proto.Sync do
       true ->
         case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
           {root, 0} -> String.trim(root)
-          _ -> Mix.raise("Cannot find repo root. Run from the repo root or apps/core/.")
+          _ -> raise("Cannot find repo root. Run from the repo root or apps/core/.")
         end
     end
   end

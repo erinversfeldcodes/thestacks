@@ -20,7 +20,7 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
       )
 
     unless exit_code == 0 do
-      Mix.raise("buf build failed (exit #{exit_code}). Is buf installed and proto/ valid?")
+      raise("buf build failed (exit #{exit_code}). Is buf installed and proto/ valid?")
     end
 
     json = File.read!(tmp_path)
@@ -39,11 +39,11 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   def extract_fields(descriptor, proto_file, proto_message) do
     file_entry =
       Enum.find(descriptor["file"], fn f -> f["name"] == proto_file end) ||
-        Mix.raise("Proto file #{proto_file} not found in descriptor.")
+        raise("Proto file #{proto_file} not found in descriptor.")
 
     message =
       Enum.find(file_entry["messageType"] || [], fn m -> m["name"] == proto_message end) ||
-        Mix.raise("Message #{proto_message} not found in #{proto_file}.")
+        raise("Message #{proto_message} not found in #{proto_file}.")
 
     (message["field"] || [])
     |> Enum.sort_by(& &1["number"])

@@ -9,7 +9,7 @@ defmodule Mix.Tasks.ProtoSync.Manifest do
   """
   def load!(path) do
     unless File.exists?(path) do
-      Mix.raise("Manifest not found at #{path}. Create proto/persisted.exs first.")
+      raise("Manifest not found at #{path}. Create proto/persisted.exs first.")
     end
 
     {manifest, _bindings} = Code.eval_file(path)
@@ -19,9 +19,7 @@ defmodule Mix.Tasks.ProtoSync.Manifest do
 
   defp validate!(manifest, path) do
     unless is_map(manifest) and is_integer(manifest[:version]) and is_list(manifest[:tables]) do
-      Mix.raise(
-        "Invalid manifest structure in #{path}. Expected %{version: integer, tables: list}."
-      )
+      raise("Invalid manifest structure in #{path}. Expected %{version: integer, tables: list}.")
     end
 
     Enum.each(manifest.tables, &validate_table!(&1, path))
@@ -40,7 +38,7 @@ defmodule Mix.Tasks.ProtoSync.Manifest do
   defp validate_table!(table, path) do
     Enum.each(@required_table_keys, fn key ->
       unless Map.has_key?(table, key) do
-        Mix.raise("Table entry missing required key :#{key} in #{path}.")
+        raise("Table entry missing required key :#{key} in #{path}.")
       end
     end)
   end

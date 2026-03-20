@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
 
     test "raises on missing file" do
-      assert_raise Mix.Error, ~r/Manifest not found/, fn ->
+      assert_raise RuntimeError, ~r/Manifest not found/, fn ->
         Manifest.load!("/nonexistent/path.exs")
       end
     end
@@ -30,7 +30,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_path = Path.join(System.tmp_dir!(), "bad_manifest.exs")
       File.write!(tmp_path, "%{version: 1, tables: [%{proto_file: \"test.proto\"}]}")
 
-      assert_raise Mix.Error, ~r/missing required key/, fn ->
+      assert_raise RuntimeError, ~r/missing required key/, fn ->
         Manifest.load!(tmp_path)
       end
 
@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_path = Path.join(System.tmp_dir!(), "invalid_manifest.exs")
       File.write!(tmp_path, "[1, 2, 3]")
 
-      assert_raise Mix.Error, ~r/Invalid manifest structure/, fn ->
+      assert_raise RuntimeError, ~r/Invalid manifest structure/, fn ->
         Manifest.load!(tmp_path)
       end
 
@@ -106,13 +106,13 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
 
     test "raises on unknown proto file", %{descriptor: descriptor} do
-      assert_raise Mix.Error, ~r/not found in descriptor/, fn ->
+      assert_raise RuntimeError, ~r/not found in descriptor/, fn ->
         Descriptor.extract_fields(descriptor, "nonexistent.proto", "Foo")
       end
     end
 
     test "raises on unknown message", %{descriptor: descriptor} do
-      assert_raise Mix.Error, ~r/not found in/, fn ->
+      assert_raise RuntimeError, ~r/not found in/, fn ->
         Descriptor.extract_fields(
           descriptor,
           "stacks/internal/v1/event_bus.proto",
@@ -216,7 +216,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      assert_raise Mix.Error, ~r/Unknown message type/, fn ->
+      assert_raise RuntimeError, ~r/Unknown message type/, fn ->
         TypeMapper.ecto_type(field)
       end
     end
