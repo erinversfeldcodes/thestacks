@@ -44,24 +44,29 @@ Only the first category is in scope. Domain tables remain hand-written because t
 
 ## Decision
 
-**Implement `mix proto.sync` — a Mix task that generates Ecto migrations, Ecto schema modules, and dbt staging models from `.proto` messages tagged with a custom option `(stacks.persisted) = true`.**
+**Implement `mix proto.sync` — a Mix task that generates Ecto migrations, Ecto schema modules, and dbt staging models from `.proto` messages listed in an Elixir manifest file (`proto/persisted.exs`).**
 
 **Marking messages for codegen:**
-```protobuf
-import "stacks/options.proto";
 
-message EventEnvelope {
-  option (stacks.persisted) = true;
-  option (stacks.table_name) = "event_log";
-  option (stacks.schema_prefix) = "op";
+An Elixir term file (`proto/persisted.exs`) maps proto messages to database tables. This approach was chosen over custom proto options (see Implementation Findings below) because persistence metadata — table names, schema prefixes, NOT NULL constraints, defaults, indexes — is an Elixir/Postgres concern, not a wire contract property.
 
-  string event_type = 1;
-  string aggregate_type = 2;
-  // ...
+```elixir
+%{
+  version: 1,
+  tables: [
+    %{
+      proto_file: "stacks/internal/v1/event_bus.proto",
+      proto_message: "EventEnvelope",
+      table_name: "event_log",
+      schema_prefix: "op",
+      ecto_module: Stacks.Events.EventLog,
+      # ...field_overrides, indexes, timestamps, etc.
+    }
+  ]
 }
 ```
 
-Messages without the `persisted` option are ignored by the codegen.
+Messages not listed in the manifest are ignored by the codegen.
 
 **Generated artifacts per message:**
 
@@ -107,9 +112,44 @@ Implement before or alongside Issue #052 (dbt intermediate + mart models) so sta
 
 **Negative:**
 - Adds a build step (`mix proto.sync`) that must run when `.proto` files change. Same pattern as existing `buf generate` for Elm decoders.
-- Custom proto options (`stacks.persisted`, `stacks.table_name`) are non-standard and require an `options.proto` file.
+- The manifest file (`proto/persisted.exs`) must be manually kept in sync with proto message additions and removals. CI drift detection catches field-level mismatches but not missing manifest entries.
 - Not all tables are covered — domain tables remain hand-written. Developers must understand which category a table falls into.
 - Generated Ecto schemas are basic (no business logic in changesets). Context modules still own validation and domain rules.
 
 **Relationship to ADR 007:**
 This extends ADR 007's principle ("`.proto` files as single source of truth") from wire contracts to storage contracts for the raw ingestion layer. ADR 007 governs what crosses service boundaries; this ADR governs how that data is persisted.
+
+---
+
+## Implementation Findings
+
+### Manifest file, not custom proto options
+
+During implementation, we chose an Elixir manifest file (`proto/persisted.exs`) over the custom proto options approach described above. Persistence metadata — table name, schema prefix, column defaults, NOT NULL constraints, indexes — is an Elixir/Postgres concern, not a wire contract property. A manifest file keeps `.proto` files focused on the wire format and avoids creating a non-standard `options.proto` dependency. The descriptor is still parsed via `buf build --as-file-descriptor-set` (JSON FileDescriptorSet), which handles WKTs, imports, and nested types without a custom text parser.
+
+### Read-only generated schemas
+
+Generated Ecto schemas contain no changesets, no `@derive`, and no business logic. Context modules (e.g., `Stacks.Monitoring`) own validation and changesets. This separation ensures that generated schemas can be overwritten freely without losing domain logic.
+
+### Generated schemas must be checked into git
+
+We experimented with build-time generation (schemas gitignored, regenerated on every `mix compile`). This fails due to an unavoidable bootstrap problem in Elixir's compilation model:
+
+1. Generated schemas define modules like `Stacks.Monitoring.SourceHealthCheck`
+2. Context modules pattern-match on these structs: `def change_source_health_check(%SourceHealthCheck{} = check, attrs)`
+3. Elixir struct expansion (`%Module{}`) requires the target module to already be compiled
+4. On a fresh clone with no generated files, `mix compile` fails before any Mix task (including `mix proto.sync`) can run
+5. Custom Mix compilers (`Mix.Task.Compiler`) defined in the same project suffer the same problem — they must be compiled before they can execute
+
+This creates a circular dependency: compilation needs the schemas, but generating the schemas needs compilation.
+
+We evaluated three workarounds:
+- **Two-pass compilation** — compile Mix tasks first, run generator, then compile everything. Not supported by Mix without significant plumbing.
+- **Remove struct pattern matching** — replace `%SourceHealthCheck{}` guards with bare variables. Degrades code quality and removes compile-time type safety.
+- **Minimal stub files checked in** — commit trivial schema files that define the module name only. Fragile: any field reference in business code would still fail.
+
+**Resolution:** Generated schemas are checked into git as bootstrap files. `mix proto.sync --check` runs in CI to ensure they match the proto definitions. This follows the same pattern as Elm decoders in the project ("checked in, no runtime codegen"). The tradeoff is that generated files appear in pull request diffs (~25 lines per schema), but they are clearly marked with "DO NOT EDIT MANUALLY" headers.
+
+### Migration generation scope
+
+Migrations are always checked in and never regenerated. Unlike schemas and dbt models (which are pure functions of the current proto state), migrations are sequential history — they record the delta at a specific point in time, may include data backfill logic, and have already run against real databases. The generator produces CREATE TABLE migrations for new tables and ADD COLUMN migrations for new fields. Type changes, renames, and constraint modifications remain manual.

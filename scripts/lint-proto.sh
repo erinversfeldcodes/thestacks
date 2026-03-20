@@ -25,3 +25,9 @@ if git rev-parse --verify origin/main &>/dev/null 2>&1; then
         echo "No .proto files on origin/main — skipping buf breaking check."
     fi
 fi
+
+# Proto-to-schema drift check — ensures generated Ecto schemas and dbt models
+# match the proto definitions in proto/persisted.exs.
+if [ -f proto/persisted.exs ]; then
+    (cd apps/core && mix proto.sync --check)
+fi

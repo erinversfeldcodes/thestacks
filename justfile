@@ -176,6 +176,14 @@ buf-lint:
 buf-generate:
     buf generate proto/
 
+# Generate Ecto schemas + dbt models from proto definitions
+proto-sync:
+    cd apps/core && mix proto.sync
+
+# Check proto-to-schema drift (CI mode — no writes)
+proto-sync-check:
+    cd apps/core && mix proto.sync --check
+
 # Run E2E tests with service lifecycle management
 test-e2e-ci:
     scripts/test-e2e.sh
