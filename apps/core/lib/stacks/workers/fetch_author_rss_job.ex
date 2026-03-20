@@ -14,6 +14,7 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
 
   alias Stacks.Enrichment.Authors
   alias Stacks.Events
+  alias Stacks.Monitoring
 
   @impl true
   def perform(%Oban.Job{}) do
@@ -26,8 +27,12 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
   end
 
   defp poll_author_feed(author) do
-    case fetch_and_parse(author.rss_feed_url) do
-      {:ok, entries} ->
+    source_name = "author_rss:#{author.id}"
+
+    case rss_fetcher().fetch_and_parse(author.rss_feed_url) do
+      {:ok, feed} ->
+        Monitoring.record_success(source_name, "rss_feed")
+        entries = extract_entries(feed)
         recent = filter_recent_entries(entries)
 
         if recent != [] do
@@ -44,6 +49,8 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
         end
 
       {:error, reason} ->
+        Monitoring.record_failure(source_name, "rss_feed", inspect(reason))
+
         Logger.warning(
           "FetchAuthorRSSJob: failed to parse feed for author #{author.id} " <>
             "(#{author.rss_feed_url}): #{inspect(reason)}"
@@ -52,47 +59,22 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
   end
 
   @doc false
-  def fetch_and_parse(feed_url) do
-    req = Finch.build(:get, feed_url)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
-      {:ok, %Finch.Response{status: 200, body: body}} ->
-        parse_feed(body)
-
-      {:ok, %Finch.Response{status: status}} ->
-        {:error, {:unexpected_status, status}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  rescue
-    e -> {:error, {:fetch_error, Exception.message(e)}}
+  @spec extract_entries(map()) :: [map()]
+  def extract_entries(feed) do
+    Map.get(feed, :entries, [])
+    |> Enum.map(fn entry ->
+      %{
+        title: Map.get(entry, :title, ""),
+        url: Map.get(entry, :url, Map.get(entry, :link, "")),
+        published: parse_date(Map.get(entry, :updated, nil)),
+        summary: Map.get(entry, :summary, "")
+      }
+    end)
   end
 
-  defp parse_feed(xml_body) do
-    case ElixirFeedParser.parse(xml_body) do
-      {:ok, feed} ->
-        entries =
-          Map.get(feed, :entries, [])
-          |> Enum.map(fn entry ->
-            %{
-              title: Map.get(entry, :title, ""),
-              url: Map.get(entry, :url, Map.get(entry, :link, "")),
-              published: parse_date(Map.get(entry, :updated, nil)),
-              summary: Map.get(entry, :summary, "")
-            }
-          end)
-
-        {:ok, entries}
-
-      {:error, reason} ->
-        {:error, {:parse_error, reason}}
-    end
-  rescue
-    e -> {:error, {:parse_error, Exception.message(e)}}
-  end
-
-  defp filter_recent_entries(entries) do
+  @doc false
+  @spec filter_recent_entries([map()]) :: [map()]
+  def filter_recent_entries(entries) do
     cutoff = DateTime.add(DateTime.utc_now(), -1, :day)
 
     Enum.filter(entries, fn entry ->
@@ -103,24 +85,51 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
     end)
   end
 
-  defp parse_date(nil), do: nil
+  @doc false
+  @spec parse_date(nil | String.t() | term()) :: DateTime.t() | nil
+  def parse_date(nil), do: nil
 
-  defp parse_date(date_string) when is_binary(date_string) do
+  def parse_date(date_string) when is_binary(date_string) do
     case DateTime.from_iso8601(date_string) do
       {:ok, dt, _offset} -> dt
       _ -> try_rfc2822(date_string)
     end
   end
 
-  defp parse_date(_), do: nil
+  def parse_date(_), do: nil
 
-  defp try_rfc2822(_date_string) do
-    # RFC 2822 dates are common in RSS but non-trivial to parse without
-    # a dedicated library. For now, return nil for non-ISO-8601 dates.
-    # Timex could be used here if more robust parsing is needed.
-    nil
+  @doc false
+  @spec try_rfc2822(String.t()) :: DateTime.t() | nil
+  def try_rfc2822(date_string) do
+    # RSS feeds use RFC 2822 dates which have 4-digit years. Timex's {RFC1123}
+    # matches this format (e.g. "Tue, 05 Mar 2013 23:25:19 +0200"), while
+    # {RFC822} expects 2-digit years. Try both {RFC1123} variants, then fall
+    # back to {RFC822} for legacy feeds.
+    with {:error, _} <- try_timex_format(date_string, "{RFC1123}"),
+         {:error, _} <- try_timex_format(date_string, "{RFC1123z}"),
+         {:error, _} <- try_timex_format(date_string, "{RFC822}"),
+         {:error, _} <- try_timex_format(date_string, "{RFC822z}") do
+      nil
+    else
+      {:ok, dt} -> dt
+    end
   end
 
+  @spec try_timex_format(String.t(), String.t()) :: {:ok, DateTime.t()} | {:error, term()}
+  defp try_timex_format(date_string, format) do
+    case Timex.parse(date_string, format) do
+      {:ok, %DateTime{} = dt} ->
+        {:ok, DateTime.shift_zone!(dt, "Etc/UTC")}
+
+      {:ok, %NaiveDateTime{} = ndt} ->
+        {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec serialize_entry(map()) :: map()
   defp serialize_entry(entry) do
     %{
       title: entry.title,
@@ -128,5 +137,10 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
       published: if(entry.published, do: DateTime.to_iso8601(entry.published)),
       summary: String.slice(entry.summary || "", 0, 500)
     }
+  end
+
+  @spec rss_fetcher() :: module()
+  defp rss_fetcher do
+    Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end
 end

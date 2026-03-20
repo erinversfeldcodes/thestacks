@@ -17,6 +17,7 @@ defmodule Stacks.Workers.FetchReviewsJob do
 
   alias Stacks.Enrichment.Reviews
   alias Stacks.Events
+  alias Stacks.Monitoring
 
   @doc false
   @impl true
@@ -71,9 +72,15 @@ defmodule Stacks.Workers.FetchReviewsJob do
 
       case Reviews.upsert_snapshot(attrs) do
         {:ok, _snapshot} ->
-          :ok
+          Monitoring.record_success(to_string(source_data.source), "review_source")
 
         {:error, changeset} ->
+          Monitoring.record_failure(
+            to_string(source_data.source),
+            "review_source",
+            inspect(changeset.errors)
+          )
+
           Logger.warning(
             "FetchReviewsJob: upsert failed for book_id=#{book_id} source=#{source_data.source}: #{inspect(changeset.errors)}"
           )

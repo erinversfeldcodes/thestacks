@@ -15,6 +15,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
 
   alias Stacks.Books.Author
   alias Stacks.Enrichment.{Events, Prices}
+  alias Stacks.Monitoring
 
   @impl true
   def perform(%Oban.Job{args: %{"store_id" => store_id}}) do
@@ -43,14 +44,18 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   end
 
   defp discover_for_store(store) do
+    store_name = store.name || store.id
     events_url = build_events_url(store.website_url)
 
     case fetch_page(events_url) do
       {:ok, body} ->
+        Monitoring.record_success(store_name, "event_source")
         events = parse_events(body, store)
         persist_events(events, store)
 
       {:error, reason} ->
+        Monitoring.record_failure(store_name, "event_source", inspect(reason))
+
         Logger.warning(
           "DiscoverBookstoreEventsJob: fetch failed for store #{store.id}: #{inspect(reason)}"
         )
