@@ -1,0 +1,79 @@
+// source_health_check.proto — Tracks health of external data sources.
+// Each source (scraper config, review source, RSS feed, etc.) has periodic
+// health checks that update status and failure counters in op.source_health_checks.
+syntax = "proto3";
+
+package stacks.monitoring.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.monitoring.v1";
+option java_outer_classname = "SourceHealthCheckProto";
+option java_multiple_files = true;
+
+// HealthStatus indicates the current operational state of a data source.
+enum HealthStatus {
+  // Default unspecified value — must never be stored.
+  HEALTH_STATUS_UNSPECIFIED = 0;
+
+  // Source is responding normally with no recent failures.
+  HEALTH_STATUS_HEALTHY = 1;
+
+  // Source has intermittent failures but is still partially available.
+  HEALTH_STATUS_DEGRADED = 2;
+
+  // Source has exceeded the failure threshold and is considered unavailable.
+  HEALTH_STATUS_BROKEN = 3;
+}
+
+// SourceType classifies the kind of external data source being monitored.
+enum SourceType {
+  // Default unspecified value — must never be stored.
+  SOURCE_TYPE_UNSPECIFIED = 0;
+
+  // A scraper configuration targeting a bookshop or catalogue.
+  SOURCE_TYPE_SCRAPER_CONFIG = 1;
+
+  // An external book review aggregation source.
+  SOURCE_TYPE_REVIEW_SOURCE = 2;
+
+  // An RSS or Atom feed providing book-related updates.
+  SOURCE_TYPE_RSS_FEED = 3;
+
+  // An event source such as a webhook or streaming endpoint.
+  SOURCE_TYPE_EVENT_SOURCE = 4;
+
+  // Output from a large language model used for metadata enrichment.
+  SOURCE_TYPE_LLM_OUTPUT = 5;
+}
+
+// SourceHealthCheck records the operational health of a single external data source.
+// Maps to the op.source_health_checks table.
+message SourceHealthCheck {
+  // Human-readable unique name for this source (e.g. "takealot_scraper").
+  string source_name = 1 [json_name = "source_name"];
+
+  // Classification of the source being monitored.
+  SourceType source_type = 2 [json_name = "source_type"];
+
+  // Timestamp of the most recent successful health check, if any.
+  optional google.protobuf.Timestamp last_success_at = 3 [json_name = "last_success_at"];
+
+  // Timestamp of the most recent failed health check, if any.
+  optional google.protobuf.Timestamp last_failure_at = 4 [json_name = "last_failure_at"];
+
+  // Human-readable reason for the most recent failure, if any.
+  optional string last_failure_reason = 5 [json_name = "last_failure_reason"];
+
+  // Number of consecutive failures since the last success. Resets to 0 on success.
+  int32 consecutive_failures = 6 [json_name = "consecutive_failures"];
+
+  // Lifetime count of successful health checks.
+  int32 total_successes = 7 [json_name = "total_successes"];
+
+  // Lifetime count of failed health checks.
+  int32 total_failures = 8 [json_name = "total_failures"];
+
+  // Current health status derived from failure patterns.
+  HealthStatus status = 9 [json_name = "status"];
+}

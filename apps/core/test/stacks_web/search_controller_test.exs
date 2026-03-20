@@ -82,4 +82,48 @@ defmodule StacksWeb.SearchControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  describe "GET /api/search — visibility filtering" do
+    test "excludes age_gated books from results for non-age-verified user", %{conn: conn} do
+      insert_book_with_edition(title: "Thornfield Chronicles", isbn: "9781234567897")
+      age_gated_book = insert(:book, title: "Thornfield Secrets", visibility_tier: "age_gated")
+
+      insert(:book_edition,
+        book: age_gated_book,
+        isbn: "9781234567880",
+        is_primary: true
+      )
+
+      conn = get(conn, "/api/search", q: "Thornfield")
+      response = json_response(conn, 200)
+      titles = Enum.map(response["results"], & &1["title"])
+
+      assert "Thornfield Chronicles" in titles
+      refute "Thornfield Secrets" in titles
+    end
+
+    test "includes age_gated books in results for age-verified user", %{conn: conn} do
+      age_verified_user = insert(:user, age_verified: true)
+      {:ok, token, _} = Guardian.encode_and_sign(age_verified_user)
+      verified_conn = put_req_header(conn, "authorization", "Bearer #{token}")
+
+      insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9780000000111")
+
+      age_gated_book =
+        insert(:book, title: "Gatekeeper Secrets", visibility_tier: "age_gated")
+
+      insert(:book_edition,
+        book: age_gated_book,
+        isbn: "9780000000222",
+        is_primary: true
+      )
+
+      conn = get(verified_conn, "/api/search", q: "Gatekeeper")
+      response = json_response(conn, 200)
+      titles = Enum.map(response["results"], & &1["title"])
+
+      assert "Gatekeeper Chronicles" in titles
+      assert "Gatekeeper Secrets" in titles
+    end
+  end
 end

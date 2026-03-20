@@ -11,6 +11,8 @@ defmodule Stacks.Shelving.Bookshelf do
   @foreign_key_type :binary_id
   @schema_prefix "op"
 
+  @type t :: %__MODULE__{}
+
   @valid_names ~w(antilibrary library wishlist reading_pile looking_for_home)
   @valid_visibilities ~w(owner group platform)
 

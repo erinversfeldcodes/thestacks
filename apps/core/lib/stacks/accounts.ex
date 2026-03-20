@@ -15,6 +15,7 @@ defmodule Stacks.Accounts do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Events
+  alias Stacks.Workers.VisibilityRecapJob
 
   @doc """
   Returns a user by ID, or nil if not found.
@@ -104,6 +105,193 @@ defmodule Stacks.Accounts do
     |> User.settings_changeset(%{age_verified: age_verified})
     |> Repo.update()
   end
+
+  @doc """
+  Updates the profile_visibility setting for a user.
+  Accepts "platform" or "owner". Returns {:error, changeset} for invalid values.
+  """
+  @spec update_profile_visibility(binary(), String.t()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_profile_visibility(user_id, visibility) do
+    result =
+      user_id
+      |> get_user!()
+      |> User.profile_visibility_changeset(%{profile_visibility: visibility})
+      |> Repo.update()
+
+    case result do
+      {:ok, user} ->
+        Events.emit_safe(%{
+          event_type: "user.profile_visibility_changed",
+          aggregate_type: "user",
+          aggregate_id: user.id,
+          payload: %{visibility: visibility}
+        })
+
+        %{"user_id" => user.id, "new_visibility" => visibility}
+        |> VisibilityRecapJob.new()
+        |> Oban.insert()
+
+        {:ok, user}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Updates the display_name and website_url for a user.
+  To change email, supply `email:` and `current_password:` — the current password
+  is verified before the email is updated.
+  """
+  @spec update_profile(User.t(), map()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password}
+  def update_profile(%User{} = user, attrs) do
+    if Map.has_key?(attrs, "email") do
+      update_profile_with_email(user, attrs)
+    else
+      user
+      |> User.profile_changeset(attrs)
+      |> Repo.update()
+      |> tap_emit_profile_updated()
+    end
+  end
+
+  defp update_profile_with_email(user, attrs) do
+    with :ok <- verify_password(user, Map.get(attrs, "current_password")) do
+      Multi.new()
+      |> Multi.update(:profile, User.profile_changeset(user, attrs))
+      |> Multi.update(:email, fn %{profile: u} ->
+        User.email_changeset(u, %{"email" => attrs["email"]})
+      end)
+      |> Multi.run(:emit_event, fn _repo, %{email: u} ->
+        Events.emit_safe(%{
+          event_type: "user.profile_updated",
+          aggregate_type: "user",
+          aggregate_id: u.id,
+          payload: %{display_name: u.display_name}
+        })
+
+        {:ok, u}
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{email: u}} -> {:ok, u}
+        {:error, _, reason, _} -> {:error, reason}
+      end
+    end
+  end
+
+  defp tap_emit_profile_updated({:ok, user} = result) do
+    Events.emit_safe(%{
+      event_type: "user.profile_updated",
+      aggregate_type: "user",
+      aggregate_id: user.id,
+      payload: %{display_name: user.display_name}
+    })
+
+    result
+  end
+
+  defp tap_emit_profile_updated(error), do: error
+
+  @doc """
+  Updates the country_code and city for a user. Emits `user.location_updated` event.
+  """
+  @spec update_location(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_location(%User{} = user, attrs) do
+    result =
+      user
+      |> User.location_changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        Events.emit_safe(%{
+          event_type: "user.location_updated",
+          aggregate_type: "user",
+          aggregate_id: updated.id,
+          payload: %{country_code: updated.country_code, city: updated.city}
+        })
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Changes the password for a user. Verifies `current_password` with Argon2 before
+  applying the new password. Returns `{:error, :invalid_password}` on mismatch.
+  """
+  @spec change_password(User.t(), String.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid_password} | {:error, Ecto.Changeset.t()}
+  def change_password(%User{} = user, current_password, new_password) do
+    with :ok <- verify_password(user, current_password) do
+      result =
+        user
+        |> User.password_change_changeset(%{"password" => new_password})
+        |> Repo.update()
+
+      case result do
+        {:ok, updated} ->
+          Events.emit_safe(%{
+            event_type: "user.password_changed",
+            aggregate_type: "user",
+            aggregate_id: updated.id,
+            payload: %{}
+          })
+
+          {:ok, updated}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  @doc """
+  Updates notification preferences for a user.
+  """
+  @spec update_notifications(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_notifications(%User{} = user, attrs) do
+    result =
+      user
+      |> User.notifications_changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        Events.emit_safe(%{
+          event_type: "user.notifications_updated",
+          aggregate_type: "user",
+          aggregate_id: updated.id,
+          payload: %{
+            notify_wishlist_availability: updated.notify_wishlist_availability,
+            notify_marketplace: updated.notify_marketplace,
+            notify_group_invitations: updated.notify_group_invitations,
+            notify_event_matches: updated.notify_event_matches
+          }
+        })
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
+  end
+
+  defp verify_password(%User{password_hash: hash}, current_password)
+       when is_binary(current_password) do
+    if Argon2.verify_pass(current_password, hash) do
+      :ok
+    else
+      {:error, :invalid_password}
+    end
+  end
+
+  defp verify_password(_user, _), do: {:error, :invalid_password}
 
   defp maybe_send_confirmation(user) do
     if Application.get_env(:core, :require_email_confirmation, false) do

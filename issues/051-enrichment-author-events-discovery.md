@@ -37,6 +37,13 @@ Author data is auto-discovered when books are added. Bookstore events are discov
 - For partnership: route to partner onboarding (Phase 2)
 - `OptOutConfirmationJob` — sends confirmation email to business
 
+**Enrichment completion events (ADR 010 — event-triggered dbt refresh):**
+- After `FetchAuthorRSSJob` stores new posts, emit `enrichment.author_updated` event with payload: `%{author_id: uuid, new_posts: N}`
+- After `DiscoverBookstoreEventsJob` stores new events, emit `enrichment.events_discovered` event with payload: `%{bookstore_id: uuid, event_count: N}`
+- After `SourceDiscoveryJob` discovers and scores new sources, emit `enrichment.sources_discovered` event with payload: `%{source_count: N, high_confidence_count: N}`
+- These events are consumed by `DbtRefreshJob` (Issue #052) to trigger selective rebuild of `int_author_activity`, `int_event_matches`, `int_source_approval_rate`
+- Use `Events.emit_safe/1` so failed event emission doesn't rollback the enrichment data write
+
 **Search infrastructure:**
 - Brave Search API client with rate limiting (2000 queries/month free tier)
 - SearXNG fallback (self-hosted — deployment in Issue #063)
@@ -52,6 +59,9 @@ Author data is auto-discovered when books are added. Bookstore events are discov
 - [ ] Exclusion list prevents re-discovery of opted-out URLs
 - [ ] Human approval flow: discover → score → approve/reject
 - [ ] Circuit breakers on Brave Search and SearXNG calls
+- [ ] `enrichment.author_updated` event emitted after successful RSS fetch
+- [ ] `enrichment.events_discovered` event emitted after successful event discovery
+- [ ] `enrichment.sources_discovered` event emitted after source discovery run
 - [ ] `mix test` passes with mocked external services
 
 ## Dependencies

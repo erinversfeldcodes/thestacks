@@ -139,20 +139,40 @@ defmodule StacksWeb.CatalogueControllerTest do
       assert length(books) == 2
     end
 
-    test "includes age_gated books in catalogue listing", %{conn: conn} do
-      user = insert(:user)
+    test "excludes age_gated books from unauthenticated catalogue listing", %{conn: conn} do
       insert_book_with_edition(title: "Normal Book", visibility_tier: "public")
       insert_book_with_edition(title: "Age Gated Book", visibility_tier: "age_gated")
 
-      conn =
-        conn
-        |> auth_conn(user)
-        |> get("/api/catalogue")
+      conn = get(conn, "/api/catalogue")
 
       %{"books" => books, "total" => total} = json_response(conn, 200)
-      assert total == 2
-      titles = Enum.map(books, & &1["title"]) |> Enum.sort()
-      assert "Age Gated Book" in titles
+      assert total == 1
+      titles = Enum.map(books, & &1["title"])
+      assert "Normal Book" in titles
+      refute "Age Gated Book" in titles
+    end
+
+    test "total reflects age-gated exclusion — is accurate, not raw DB count", %{conn: conn} do
+      insert_book_with_edition(title: "Public A", visibility_tier: "public")
+      insert_book_with_edition(title: "Public B", visibility_tier: "public")
+      insert_book_with_edition(title: "Public C", visibility_tier: "public")
+      insert_book_with_edition(title: "Age Gated 1", visibility_tier: "age_gated")
+      insert_book_with_edition(title: "Age Gated 2", visibility_tier: "age_gated")
+
+      %{"books" => books, "total" => total} = json_response(get(conn, "/api/catalogue"), 200)
+      assert total == 3
+      assert length(books) == 3
+    end
+
+    test "authenticated user sees age_gated books in catalogue", %{conn: conn} do
+      user = insert(:user, age_verified: true)
+      insert_book_with_edition(title: "Age Gated Book", visibility_tier: "age_gated")
+
+      %{"books" => books, "total" => total} =
+        conn |> auth_conn(user) |> get("/api/catalogue") |> json_response(200)
+
+      assert total == 1
+      assert List.first(books)["title"] == "Age Gated Book"
     end
 
     test "returns author data when present", %{conn: conn} do

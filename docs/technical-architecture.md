@@ -553,7 +553,28 @@ This allows immediate shutdown of AI spending if a bug causes runaway costs, or 
 
 ### Overview
 
-The Stacks is fundamentally an **ELT pipeline with a user-facing frontend**. Data flows from external sources through Elixir orchestration into PostgreSQL, then gets transformed via dbt into clean materialized views.
+The Stacks is fundamentally an **ELT pipeline with a user-facing frontend**. Data flows from external sources through Elixir orchestration into PostgreSQL, then gets transformed via dbt into analytical views.
+
+### Architecture Pattern: Contract-First Derived Data (ADR 010)
+
+The data pipeline follows a **contract-first derived data** pattern, drawing from Kleppmann's *Designing Data-Intensive Applications* (Chapters 4, 11, 12). This is neither star schema (no surrogate keys, no conformed dimensions) nor medallion/lakehouse (no data lake, no raw file ingestion). It is:
+
+1. **Contract-enforced input** — Protobuf contracts validate data shape at the write boundary (schema-on-write). The staging layer doesn't clean — it projects.
+2. **One log, many derivations** — The `event_log` is the ordered, immutable history. All downstream views (staging, intermediate, marts, ETS caches, search indexes, RSS feeds) are derived data systems that can be rebuilt from the systems of record (`op.*` + `audit.*`).
+3. **Purpose-built read models** — Each mart serves a specific consumer with a specific access pattern. A mart isn't "gold" because it's cleaner — it's a read model optimised for the metrics dashboard, or the search index, or the wear calculation.
+
+```
+SYSTEMS OF RECORD                 DERIVED DATA (all rebuildable)
+─────────────────                 ──────────────────────────────
+op.* tables (OLTP) ──► wh.stg_*  (structural projections, PII-excluded)
+op.event_log       ──► wh.int_*  (semantic aggregates, domain joins)
+audit.audit_log    ──► wh.mart_* (consumer-optimised read models)
+                   ──► ETS caches, search indexes, Atom feeds
+```
+
+**Key invariant:** Every layer after `op.*` is derived and rebuildable. If the `wh` schema is dropped, `dbt run` reconstructs it. The only non-rebuildable data is in `op.*` and `audit.*`.
+
+See ADR 010 for the full rationale, including why star schema, medallion, and full CQRS were evaluated and rejected.
 
 ### Broadway Pipelines (Elixir)
 
@@ -611,36 +632,57 @@ This approach conserves API budgets and scraper resources while keeping the most
 
 ### dbt Models
 
-dbt targets PostgreSQL, writing to the `wh` schema. Models are organised in three layers:
+dbt targets PostgreSQL, writing to the `wh` schema. Models are organised in three layers that map to the contract-first derived data pattern (ADR 010):
 
 ```
 models/
-├── staging/                          # 1:1 with source tables, light cleaning
-│   ├── stg_books.sql                 # Canonical book data
-│   ├── stg_reviews_goodreads.sql     # Raw GoodReads reviews
-│   ├── stg_reviews_reddit.sql        # Raw Reddit mentions
-│   ├── stg_prices.sql                # Price snapshots per store
-│   ├── stg_author_events.sql         # Author event and release data
-│   └── stg_third_spaces.sql          # Discovered third spaces
+├── staging/                          # Structural projections (1:1 with source, PII-excluded)
+│   ├── stg_books.sql                 # Works (logical books)
+│   ├── stg_book_editions.sql         # Editions (ISBN, format, cover)
+│   ├── stg_review_snapshots.sql      # Raw reviews from all sources
+│   ├── stg_price_snapshots.sql       # Price snapshots per store
+│   ├── stg_event_log.sql             # Domain events (proto-generated)
+│   ├── stg_source_health_checks.sql  # Source health (proto-generated)
+│   └── ... (25 total staging views)
 │
-├── intermediate/                     # Business logic joins and transforms
-│   ├── int_reviews_unified.sql       # All reviews in a common schema
-│   ├── int_price_history.sql         # Price over time per book per store
-│   └── int_book_enriched.sql         # Book + all metadata joined
+├── intermediate/                     # Semantic aggregates (domain-meaningful joins)
+│   ├── int_price_history.sql         # Price over time per edition per store (incremental)
+│   ├── int_review_sentiment.sql      # All reviews in common schema
+│   ├── int_book_detail_view.sql      # Pre-joined work + editions + prices + reviews
+│   ├── int_book_engagement.sql       # Wear level from placement history
+│   ├── int_source_health.sql         # Per-source operational health
+│   └── ... (10+ intermediate models)
 │
-└── marts/                            # Consumer-facing models
-    ├── mart_bookshelf.sql            # Shelf assignment, reading status
-    ├── mart_price_alerts.sql         # Books below price threshold
-    ├── mart_author_activity.sql      # Recent author events and releases
-    ├── mart_content_moderation.sql   # Visibility tiers, flags
-    └── mart_community_read_count.sql # Aggregate read count per work (US-18.1.1)
+└── marts/                            # Consumer-optimised read models (one per use case)
+    ├── mart_community_read_count.sql # Looking for a Home wear (5-min refresh)
+    ├── mart_platform_searchable.sql  # Platform search index (5-min refresh)
+    ├── mart_book_reviews.sql         # Book detail overlay consumer
+    ├── mart_book_prices.sql          # Price comparison consumer
+    ├── mart_data_quality_trend.sql   # Metrics dashboard: 12-week sparklines
+    ├── mart_system_health.sql        # Metrics dashboard: uptime, latency
+    └── ... (16+ mart models)
 ```
 
-dbt runs as a subprocess triggered by Oban after scrape cycles complete:
+**Materialisation strategy (ADR 010):**
+- Staging: `VIEW` (zero storage cost, always current)
+- Intermediate: `VIEW` for low-volume; `incremental` for high-volume (e.g., `int_price_history`)
+- Marts: `incremental` table for hot-path (5-min refresh); `VIEW` or daily `table` for cold-path
+- Hot-path marts may use PostgreSQL `MATERIALIZED VIEW` with `REFRESH CONCURRENTLY` via dbt's `materialized_view` adapter for non-locking refresh
 
-```elixir
-System.cmd("dbt", ["run", "--target", "prod"])
-```
+**Refresh strategy — event-triggered with cron catch-all (ADR 010):**
+
+`Stacks.Workers.DbtRefreshJob` (Oban, `dbt_refresh` queue, concurrency 1) supports two trigger modes:
+
+| Trigger | Models refreshed | Latency |
+|---------|-----------------|---------|
+| `shelf.book_placed`, `shelf.book_moved` | `mart_community_read_count` | ≤ 5 min |
+| `enrichment.prices_scraped` | `int_price_history`, `mart_book_prices` | ≤ 5 min |
+| `enrichment.reviews_scraped` | `int_review_sentiment`, `mart_book_reviews` | ≤ 5 min |
+| `post.published`, `post.updated` | `int_blog_engagement`, `mart_blog_activity` | ≤ 5 min |
+| `source_health.recorded` | `int_source_health`, `mart_data_quality_trend` | ≤ 5 min |
+| Daily cron (catch-all) | All models | Daily |
+
+The event-to-model mapping lives in `Stacks.Workers.DbtRefreshJob` — not scattered across event handlers.
 
 ### Scaling Beyond PostgreSQL
 
@@ -664,7 +706,15 @@ dbt tests enforce:
 - ISBN: `not_null`, `unique`, format validation (ISBN-10 / ISBN-13)
 - Price sanity: `> 0`, `< reasonable_max` (configurable per currency)
 - Recency: alert if no prices scraped in 7 days for active books
-- Security: Tier 3 and Tier 4 data never leaks to warehouse (those models are disabled in dbt via tags)
+- Security: Tier 3 and Tier 4 data never enters the warehouse — `stg_*` models explicitly select only permitted columns (no `SELECT *`)
+
+### Schema Evolution in the Derived Layer
+
+The staging layer serves as a **second evolution boundary** (ADR 010), independent of the Elixir `Events.Upcaster`:
+
+- When a proto message gains a new field, old rows have the column as `NULL`. Staging models use `COALESCE` or conditional logic to handle both old and new rows.
+- When a domain table adds a column via migration, the corresponding `stg_*` model must be updated to include or exclude it.
+- The `mix proto.sync --check` CI gate (ADR 009) catches drift between proto definitions and their generated staging models.
 
 ---
 
@@ -5031,9 +5081,11 @@ proto/
 │   │   ├── inventory.proto           # InventoryItem, InventorySync
 │   │   ├── events.proto              # PartnerEvent, EventType enum
 │   │   └── spaces.proto              # Space, SpaceType, Amenity enums
-│   └── internal/
-│       ├── event_bus.proto           # EventEnvelope, Metadata
-│       └── enrichment.proto          # EnrichmentRequest, EnrichmentResult
+│   ├── internal/
+│   │   ├── event_bus.proto           # EventEnvelope, Metadata
+│   │   └── enrichment.proto          # EnrichmentRequest, EnrichmentResult
+│   └── monitoring/
+│       └── source_health_check.proto # SourceHealthCheck, HealthStatus, SourceType
 ```
 
 ### Example: Partner Inventory Schema
@@ -5120,6 +5172,48 @@ Rules enforced by `buf breaking`:
 - No removing enum values
 - Additive changes (new fields, new enum values) are always safe
 
+### Proto-to-Schema Codegen (`mix proto.sync`)
+
+For tables at the **raw ingestion boundary** — where the stored schema IS the wire format, just persisted — the proto message is the single source of truth. `mix proto.sync` generates Ecto schemas, dbt staging models, and migrations from the proto descriptor, eliminating drift between layers.
+
+See ADR 009 (`docs/decisions/009-proto-to-schema-codegen.md`) for the full decision record.
+
+**How it works:**
+
+1. `proto/persisted.exs` — an Elixir manifest mapping proto messages to database tables, with field overrides for NOT NULL, defaults, indexes, and grants
+2. `buf build --as-file-descriptor-set` produces a JSON FileDescriptorSet with full type info
+3. The Mix task parses the descriptor, maps types, and generates three artifacts per table
+
+**Type mapping (proto → Ecto schema → migration):**
+
+| Proto type | Ecto schema type | Migration type |
+|-----------|-----------------|----------------|
+| `string` | `:string` | `:text` |
+| `int32`, `uint32`, `sint32`, `fixed32`, `sfixed32` | `:integer` | `:integer` |
+| `int64`, `uint64`, `sint64`, `fixed64`, `sfixed64` | `:integer` | `:bigint` |
+| `float`, `double` | `:float` | `:float` |
+| `bool` | `:boolean` | `:boolean` |
+| `bytes` | `:binary` | `:binary` |
+| `google.protobuf.Timestamp` | `:utc_datetime_usec` | `:utc_datetime_usec` |
+| `google.protobuf.Struct` | `:map` | `:map` |
+| enum | `:string` | `:text` |
+| repeated | `{:array, <inner>}` | `{:array, <inner>}` |
+
+Field overrides in `persisted.exs` take precedence (e.g., `aggregate_id` overridden from `:string` to `:binary_id`).
+
+**Adding a new proto-backed table:**
+
+1. Write the `.proto` message in `proto/stacks/<domain>/v1/`
+2. Add an entry to `proto/persisted.exs` with table name, prefix, module, field overrides, indexes
+3. Run `mix proto.sync` — generates Ecto schema, dbt staging model, and CREATE TABLE migration
+4. Commit all generated files (schemas are checked in for bootstrap — see ADR 009)
+
+**CI enforcement:**
+
+`mix proto.sync --check` runs in `scripts/lint-proto.sh` alongside `buf lint` and `buf breaking`. It exits non-zero if any generated file has drifted from the proto definition, preventing stale schemas from reaching main.
+
+**Scope:** Raw/ingestion tables only (`event_log`, `source_health_checks`, future partner inventory). Domain tables (`bookshelves`, `users`, etc.) remain hand-written because their shape is driven by business logic, not wire format.
+
 ### Event Upcasting
 
 Old events in `event_log` are upcasted to the current schema version on read:
@@ -5153,6 +5247,43 @@ end
 ```
 
 This is the same pattern used by Commanded (Elixir CQRS library). Each version bump is an explicit, testable function clause.
+
+### Proto-to-Schema Codegen (Issue #080, ADR 009)
+
+For **raw ingestion tables** — tables whose schema is the wire format persisted — the `.proto` message is the single source of truth. A `mix proto.sync` task generates three artifacts from each tagged message:
+
+1. **Ecto migration** (Postgres DDL)
+2. **Ecto schema module** (struct + changeset)
+3. **dbt staging model** (SQL view)
+
+Messages opt in via a custom proto option:
+
+```protobuf
+import "stacks/options.proto";
+
+message EventEnvelope {
+  option (stacks.persisted) = true;
+  option (stacks.table_name) = "event_log";
+  option (stacks.schema_prefix) = "op";
+  // fields...
+}
+```
+
+**Type mapping:**
+
+| Proto type | Postgres type |
+|-----------|---------------|
+| `string` | `text` |
+| `int32` / `int64` | `integer` / `bigint` |
+| `float` / `double` | `double precision` |
+| `bool` | `boolean` |
+| `bytes` | `bytea` |
+| `google.protobuf.Timestamp` | `timestamptz` |
+| `map<string, string>` | `jsonb` |
+
+**CI:** `mix proto.sync --check` runs alongside `buf lint` and `buf breaking`. Exits non-zero if any generated file drifts from the proto source.
+
+**Scope:** Only raw/ingestion tables (where table schema = wire format). Domain tables (`bookshelves`, `users`, `post_book_associations`, etc.) remain hand-written.
 
 ---
 
@@ -5561,7 +5692,7 @@ The LLM is instructed to return only books from the provided catalogue (no hallu
 
 ## Data Quality Framework
 
-Data quality is measured per data product relative to its consumer, not as a platform-wide score. See `docs/data-quality.md` for the full framework.
+Data quality is measured per data product relative to its consumer, not as a platform-wide score. This aligns with ADR 010's principle that each mart serves a specific consumer — quality SLAs are defined per consumer, not globally. See `docs/data-quality.md` for the full framework.
 
 ### Key principles
 

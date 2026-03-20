@@ -21,6 +21,7 @@ defmodule Stacks.Books do
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
+  alias Stacks.Shelving
   alias Stacks.Workers.IdentifyBookJob
 
   @doc """
@@ -32,6 +33,29 @@ defmodule Stacks.Books do
     |> where([b], b.id == ^id)
     |> preload([:author, :editions])
     |> Repo.one()
+  end
+
+  @doc """
+  Returns the community read count for a book from the wh.mart_community_read_count
+  analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
+  """
+  @spec community_read_count(binary()) :: non_neg_integer()
+  def community_read_count(book_id) do
+    result =
+      Repo.query(
+        "SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1",
+        [book_id]
+      )
+
+    case result do
+      {:ok, %{rows: [[count]]}} -> count
+      _ -> 0
+    end
+  rescue
+    e ->
+      require Logger
+      Logger.warning("community_read_count: unexpected error for book #{book_id}: #{inspect(e)}")
+      0
   end
 
   @doc """
@@ -235,6 +259,7 @@ defmodule Stacks.Books do
     page = max(Keyword.get(opts, :page, 1), 1)
     per_page = min(max(Keyword.get(opts, :per_page, 24), 1), 100)
     offset = (page - 1) * per_page
+    viewer = Keyword.get(opts, :viewer, :unauthenticated)
 
     base =
       Book
@@ -244,6 +269,7 @@ defmodule Stacks.Books do
       base
       |> maybe_search(search)
       |> maybe_filter_subject(subject)
+      |> maybe_exclude_age_gated(viewer)
 
     total = Repo.aggregate(filtered, :count)
 
@@ -276,6 +302,12 @@ defmodule Stacks.Books do
   defp maybe_filter_subject(query, subject) do
     where(query, [b], ^subject in b.subjects)
   end
+
+  defp maybe_exclude_age_gated(query, :unauthenticated) do
+    where(query, [b], b.visibility_tier != "age_gated")
+  end
+
+  defp maybe_exclude_age_gated(query, _viewer), do: query
 
   defp apply_sort(query, "author") do
     query
@@ -330,7 +362,7 @@ defmodule Stacks.Books do
 
         case Repo.update(changeset) do
           {:ok, updated} ->
-            Events.emit(%{
+            Events.emit_safe(%{
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,
@@ -344,6 +376,335 @@ defmodule Stacks.Books do
             {:error, changeset}
         end
     end
+  end
+
+  @doc """
+  Searches the platform catalogue for publicly visible books.
+
+  Full-text search is performed against the book title and joined author name.
+  An empty query returns a paginated slice of the full catalogue.
+
+  ## Options
+
+    * `:page` — 1-based page number (default 1)
+    * `:per_page` / `:limit` — items per page (default 24, max 100)
+
+  Returns `{books_list, total_count}`.
+  """
+  @spec search_platform(String.t(), keyword()) :: {[map()], non_neg_integer()}
+  def search_platform(query, opts \\ []) do
+    per_page = min(max(Keyword.get(opts, :per_page, Keyword.get(opts, :limit, 24)), 1), 100)
+    page = max(Keyword.get(opts, :page, 1), 1)
+    offset = (page - 1) * per_page
+
+    base =
+      Book
+      |> join(:left, [b], a in Author, on: a.id == b.author_id)
+      |> preload([:author, :editions])
+
+    filtered =
+      if query == nil or String.trim(query) == "" do
+        base
+      else
+        safe = String.replace(query, ~r/[^\w\s]/, "")
+
+        where(
+          base,
+          [b, a],
+          ilike(b.title, ^"%#{safe}%") or ilike(a.name, ^"%#{safe}%")
+        )
+      end
+
+    total = Repo.aggregate(filtered, :count)
+
+    books =
+      filtered
+      |> order_by([b], asc: b.title)
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+
+    {books, total}
+  end
+
+  @doc """
+  Finds books in the platform that are likely the same work as the given title
+  and author, using Jaro-Winkler string similarity on both fields combined.
+
+  Returns matches where the combined similarity score exceeds 0.8.
+  Each result is a map with `:id`, `:title`, `:author`, `:similarity`.
+  """
+  @spec find_same_work(String.t(), String.t()) :: [map()]
+  def find_same_work(title, author) do
+    title_prefix = title |> String.split() |> List.first("") |> String.downcase()
+    author_prefix = author |> String.split() |> List.first("") |> String.downcase()
+
+    candidates =
+      Book
+      |> join(:left, [b], a in Author, on: a.id == b.author_id)
+      |> select([b, a], %{id: b.id, title: b.title, author: a.name})
+      |> where(
+        [b, a],
+        ilike(b.title, ^"%#{title_prefix}%") or ilike(a.name, ^"%#{author_prefix}%")
+      )
+      |> Repo.all()
+
+    candidates
+    |> Enum.map(fn %{title: t, author: a} = row ->
+      title_sim = jaro_winkler(title, t || "")
+      author_sim = jaro_winkler(author, a || "")
+      combined = (title_sim + author_sim) / 2.0
+      Map.put(row, :similarity, combined)
+    end)
+    |> Enum.filter(fn %{similarity: s} -> s > 0.8 end)
+    |> Enum.sort_by(& &1.similarity, :desc)
+  end
+
+  # Jaro-Winkler similarity: jaro + prefix_len * p * (1 - jaro)
+  # p = 0.1, prefix length capped at 4.
+  defp jaro_winkler(s1, s2) do
+    jaro = String.jaro_distance(s1, s2)
+
+    prefix_len =
+      [s1, s2]
+      |> Enum.map(&String.graphemes/1)
+      |> then(fn [g1, g2] ->
+        Enum.zip(g1, g2)
+        |> Enum.take(4)
+        |> Enum.take_while(fn {a, b} -> a == b end)
+        |> length()
+      end)
+
+    jaro + prefix_len * 0.1 * (1 - jaro)
+  end
+
+  @doc """
+  Sends an image to the vision service to extract ISBN candidates, then resolves
+  each ISBN via Open Library / Google Books.
+
+  Returns `{:ok, candidates}` where each candidate is a map with `:isbn`,
+  `:title`, `:author`, and `:open_library_work_id`.
+  Returns `{:error, reason}` if the vision call fails.
+
+  Nothing is committed to the database by this function.
+  """
+  @spec identify(binary(), {:b64, binary()} | {:url, binary()}) ::
+          {:ok, [map()]} | {:error, term()}
+  def identify(_user_id, image_input) do
+    client = Application.get_env(:core, :vision_client, Stacks.AI.Client)
+    payload = build_identify_payload(image_input)
+
+    case client.call_vision("extract_isbn", payload) do
+      {:ok, %{"books" => books}} when is_list(books) ->
+        {:ok, Enum.flat_map(books, &resolve_candidates/1)}
+
+      {:ok, _other} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp build_identify_payload({:b64, data}), do: %{image_b64: data}
+  defp build_identify_payload({:url, data}), do: %{image_url: data}
+
+  defp resolve_candidates(book_result) do
+    book_result
+    |> Map.get("potential_isbns", [])
+    |> Enum.map(&resolve_isbn_candidate(&1, book_result))
+  end
+
+  defp resolve_isbn_candidate(isbn, book_result) do
+    metadata =
+      case ISBNResolver.resolve(isbn) do
+        {:ok, meta} -> meta
+        _ -> %{}
+      end
+
+    %{
+      isbn: isbn,
+      title: metadata[:title] || Map.get(book_result, "title"),
+      author: metadata[:author] || Map.get(book_result, "author"),
+      open_library_work_id: metadata[:open_library_work_id]
+    }
+  end
+
+  @doc """
+  Confirms a book by ISBN, creating the work, primary edition, and placing it
+  on a bookshelf for the given user.
+
+  If the ISBN already exists, returns `{:ok, existing_book}` without creating
+  a duplicate.
+
+  If a different ISBN resolves to a title+author that fuzzy-matches an existing
+  work (Jaro-Winkler score > 0.8), returns
+  `{:error, {:merge_required, existing_work_id}}`.
+
+  Otherwise creates the work + primary edition + placement and emits a
+  `books.confirmed` event, returning `{:ok, book}`.
+
+  ## Options
+
+    * `:shelf_name` in `attrs` — bookshelf to place on (default `"wishlist"`)
+  """
+  @spec confirm(binary(), map()) ::
+          {:ok, :created, Book.t()}
+          | {:ok, :existing, Book.t(), Shelving.Placement.t()}
+          | {:ok, :already_placed, Book.t(), Shelving.Placement.t()}
+          | {:error, {:merge_required, String.t()}}
+          | {:error, term()}
+  def confirm(user_id, attrs) do
+    isbn = attrs[:isbn] || attrs["isbn"]
+    shelf_name = attrs[:shelf_name] || attrs["shelf_name"] || "wishlist"
+
+    with {:ok, isbn} <- require_isbn(isbn),
+         nil <- find_existing(isbn),
+         {:ok, metadata} <- ISBNResolver.resolve(isbn),
+         [] <- find_same_work(metadata[:title] || "Unknown Title", metadata[:author] || "") do
+      create_confirmed_book(user_id, isbn, metadata, shelf_name)
+    else
+      {:error, :missing_isbn} ->
+        {:error, :missing_isbn}
+
+      %Book{} = existing ->
+        place_or_return_existing(user_id, existing, shelf_name)
+
+      [%{id: existing_work_id} | _] ->
+        {:error, {:merge_required, existing_work_id}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp place_or_return_existing(user_id, book, shelf_name) do
+    case Shelving.get_placement_for_book(user_id, book.id) do
+      nil -> create_placement_for_existing(user_id, book, shelf_name)
+      placement -> {:ok, :already_placed, book, placement}
+    end
+  end
+
+  defp create_placement_for_existing(user_id, book, shelf_name) do
+    case Shelving.place_book(user_id, book.id, shelf_name) do
+      {:ok, _} ->
+        placement = Shelving.get_placement_for_book(user_id, book.id)
+        {:ok, :existing, book, placement}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp require_isbn(isbn) when is_nil(isbn) or isbn == "", do: {:error, :missing_isbn}
+  defp require_isbn(isbn), do: {:ok, isbn}
+
+  defp create_confirmed_book(user_id, isbn, metadata, shelf_name) do
+    author_name = metadata[:author]
+
+    with {:ok, author} <- find_or_create_author(author_name) do
+      attrs = build_book_attrs(isbn, metadata, author)
+
+      Multi.new()
+      |> Multi.insert(:book, %Book{} |> Book.changeset(attrs))
+      |> Multi.insert(:edition, fn %{book: book} ->
+        %BookEdition{}
+        |> BookEdition.changeset(%{
+          "isbn" => isbn,
+          "book_id" => book.id,
+          "format_label" => metadata[:format_label],
+          "cover_image_url" => metadata[:cover_image_url],
+          "page_count" => metadata[:page_count],
+          "publisher" => metadata[:publisher],
+          "publication_year" => metadata[:publication_year],
+          "open_library_id" => metadata[:open_library_id],
+          "is_primary" => true
+        })
+      end)
+      |> Multi.run(:placement, fn _repo, %{book: book} ->
+        Shelving.place_book(user_id, book.id, shelf_name)
+      end)
+      |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
+        Events.emit_safe(%{
+          event_type: "books.confirmed",
+          aggregate_type: "book",
+          aggregate_id: book.id,
+          payload: %{isbn: edition.isbn, title: book.title, shelf: shelf_name}
+        })
+
+        {:ok, book}
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{book: book, edition: edition}} ->
+          {:ok, :created, %{book | editions: [edition]}}
+
+        {:error, :book, changeset, _} ->
+          {:error, changeset}
+
+        {:error, :edition, changeset, _} ->
+          {:error, changeset}
+
+        {:error, _, reason, _} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Merges a new edition (ISBN) into an existing work.
+
+  Creates a non-primary `book_edition` row linked to `work_id`.
+
+  Returns `{:ok, edition}` on success.
+  Returns `{:error, :not_found}` when `work_id` does not exist.
+  Returns `{:error, changeset}` on validation failure (e.g. duplicate ISBN).
+  """
+  @spec merge_edition(String.t(), map()) :: {:ok, BookEdition.t()} | {:error, term()}
+  def merge_edition(work_id, attrs) do
+    isbn = attrs[:isbn] || attrs["isbn"]
+    format_label = attrs[:format_label] || attrs["format_label"]
+
+    with {:ok, _meta} <- ISBNResolver.resolve(isbn),
+         book when not is_nil(book) <- Repo.get(Book, work_id) do
+      insert_edition(book, isbn, format_label, work_id)
+    else
+      {:error, _} -> {:error, :isbn_not_found}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp insert_edition(book, isbn, format_label, work_id) do
+    %BookEdition{}
+    |> BookEdition.changeset(%{
+      "isbn" => isbn,
+      "book_id" => book.id,
+      "format_label" => format_label,
+      "is_primary" => false
+    })
+    |> Repo.insert()
+    |> emit_or_classify_edition(isbn, work_id)
+  end
+
+  defp emit_or_classify_edition({:ok, edition}, isbn, work_id) do
+    Events.emit_safe(%{
+      event_type: "books.edition_merged",
+      aggregate_type: "book_edition",
+      aggregate_id: edition.id,
+      payload: %{isbn: isbn, work_id: work_id}
+    })
+
+    {:ok, edition}
+  end
+
+  defp emit_or_classify_edition({:error, changeset}, _isbn, _work_id) do
+    if isbn_taken?(changeset), do: {:error, :duplicate_isbn}, else: {:error, changeset}
+  end
+
+  defp isbn_taken?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {field, {_msg, opts}} ->
+      field == :isbn and opts[:constraint] == :unique
+    end)
   end
 
   defp maybe_create_author(changeset, %{"author" => name}) when is_binary(name) and name != "" do

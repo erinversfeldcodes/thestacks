@@ -130,6 +130,24 @@ test.describe("Catalogue — unauthenticated", () => {
       page.locator(".catalogue__collection-filter")
     ).not.toBeVisible();
   });
+
+  test("API excludes age_gated books from unauthenticated catalogue", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async () => {
+      const resp = await fetch("/api/catalogue?per_page=200");
+      const data = await resp.json();
+      return {
+        total: data.total,
+        hasAgeGated: data.books.some(
+          (b: any) => b.visibility_tier === "age_gated"
+        ),
+      };
+    });
+    expect(result.total).toBeGreaterThan(0);
+    expect(result.hasAgeGated).toBe(false);
+  });
 });
 
 test.describe("Catalogue — authenticated", () => {
@@ -194,5 +212,25 @@ test.describe("Catalogue — authenticated", () => {
     // But there should be cards with "Add to Shelf" buttons
     const addButtons = await page.locator(".catalogue__card-add").count();
     expect(addButtons).toBeGreaterThan(0);
+  });
+
+  test("API includes age_gated books for authenticated users", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async () => {
+      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      const resp = await fetch("/api/catalogue?per_page=200", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      const data = await resp.json();
+      return {
+        total: data.total,
+        hasAgeGated: data.books.some(
+          (b: any) => b.visibility_tier === "age_gated"
+        ),
+      };
+    });
+    expect(result.hasAgeGated).toBe(true);
   });
 });

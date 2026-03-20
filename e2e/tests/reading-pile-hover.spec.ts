@@ -1,20 +1,21 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile } from "./helpers";
+import { suiteAuthFile, ensureBookOnShelf } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("reading-pile-hover") });
 
 test.describe("Reading Pile hover diagnostics", () => {
+  test.beforeEach(async ({ page }) => {
+    await ensureBookOnShelf(page, "reading_pile");
+  });
+
   test("screenshot hover sequence using mouse move", async ({ page }) => {
     await page.goto("/reading-pile");
     await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
 
-    // Skip if the reading pile is empty (no seeded books)
     const books = page.locator(".book-pile__book");
+    await expect(books.first()).toBeAttached({ timeout: 10000 });
+
     const count = await books.count();
-    if (count === 0) {
-      console.log("No books on reading pile — skipping hover test");
-      return;
-    }
     console.log(`Found ${count} books`);
 
     const targetBook = books.nth(Math.min(4, count - 1));
@@ -24,13 +25,10 @@ test.describe("Reading Pile hover diagnostics", () => {
     // Screenshot before
     await page.screenshot({ path: "test-results/pile-00-before.png", fullPage: true });
 
-    if (!box) {
-      console.log("ERROR: book has no bounding box");
-      return;
-    }
+    expect(box).toBeTruthy();
 
-    const centerX = box.x + box.width / 2;
-    const centerY = box.y + box.height / 2;
+    const centerX = box!.x + box!.width / 2;
+    const centerY = box!.y + box!.height / 2;
     console.log(`Moving mouse to (${centerX}, ${centerY})`);
 
     await page.mouse.move(centerX, centerY);

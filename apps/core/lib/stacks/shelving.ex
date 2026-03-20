@@ -35,6 +35,18 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
+  Returns the bookshelf struct for the given user and bookshelf name, with the
+  user association preloaded. Returns `nil` if the bookshelf does not exist.
+  """
+  @spec get_bookshelf(binary(), String.t()) :: Bookshelf.t() | nil
+  def get_bookshelf(user_id, bookshelf_name) do
+    Bookshelf
+    |> where([b], b.user_id == ^user_id and b.name == ^bookshelf_name)
+    |> preload(:user)
+    |> Repo.one()
+  end
+
+  @doc """
   Returns all active (non-removed) placements for a user on the named bookshelf,
   with books preloaded.
   """
@@ -252,6 +264,7 @@ defmodule Stacks.Shelving do
   Updates the formats list for a placement. Verifies ownership.
   Returns `{:ok, placement}` or `{:error, :unauthorized}` or `{:error, changeset}`.
   """
+  @deprecated "Use the editions model via Books.merge_edition/2 instead. Kept for Elm compatibility."
   @spec update_placement_formats(binary(), binary(), [String.t()]) ::
           {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
   def update_placement_formats(placement_id, user_id, formats) when is_list(formats) do
@@ -267,8 +280,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Returns spine rendering data for a placement: page_count and wear level
-  (derived from how many times the book has been moved).
+  Returns spine rendering data for a placement: formats (derived from
+  edition format labels), page_count (from the primary edition), and
+  wear level (derived from how many times the book has been moved).
   """
   @spec spine_data(binary()) :: map() | nil
   def spine_data(placement_id) do
@@ -286,11 +300,13 @@ defmodule Stacks.Shelving do
 
         wear_level = compute_wear_level(move_count)
 
+        editions = if p.book && is_list(p.book.editions), do: p.book.editions, else: []
+        primary = if p.book, do: Stacks.Books.primary_edition(p.book), else: nil
+
         %{
           placement_id: placement_id,
-          page_count:
-            p.book && Stacks.Books.primary_edition(p.book) &&
-              Stacks.Books.primary_edition(p.book).page_count,
+          formats: editions |> Enum.map(& &1.format_label) |> Enum.reject(&is_nil/1),
+          page_count: primary && primary.page_count,
           move_count: move_count,
           wear_level: wear_level
         }
@@ -326,6 +342,67 @@ defmodule Stacks.Shelving do
     |> where([p], is_nil(p.removed_at))
     |> select([p, bs], %{book_id: p.book_id, bookshelf_name: bs.name})
     |> Repo.all()
+  end
+
+  @doc """
+  Updates the visibility of a bookshelf. Verifies ownership.
+  Returns `{:ok, bookshelf}`, `{:error, :unauthorized}`, or `{:error, :not_found}`.
+  """
+  @spec update_bookshelf_visibility(binary(), binary(), String.t()) ::
+          {:ok, Bookshelf.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_bookshelf_visibility(bookshelf_id, user_id, visibility) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+        {:error, :unauthorized}
+
+      bookshelf ->
+        bookshelf
+        |> Bookshelf.changeset(%{visibility: visibility})
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Updates the visibility of a placement. Verifies ownership and enforces that
+  placement visibility is not less restrictive than the parent bookshelf.
+  Returns `{:ok, placement}`, `{:error, :unauthorized}`, `{:error, :not_found}`,
+  or `{:error, reason_string}` if the ceiling rule is violated.
+  """
+  @spec update_placement_visibility(binary(), binary(), String.t()) ::
+          {:ok, Placement.t()}
+          | {:error, :unauthorized | :not_found | String.t() | Ecto.Changeset.t()}
+  def update_placement_visibility(placement_id, user_id, visibility) do
+    placement =
+      case Repo.get(Placement, placement_id) do
+        nil -> nil
+        p -> Repo.preload(p, :bookshelf)
+      end
+
+    case placement do
+      nil ->
+        {:error, :not_found}
+
+      %Placement{bookshelf: %Bookshelf{user_id: owner_id}} when owner_id != user_id ->
+        {:error, :unauthorized}
+
+      %Placement{bookshelf: bookshelf} ->
+        case Stacks.Visibility.validate_visibility_ceiling(
+               visibility,
+               bookshelf.visibility,
+               :placement
+             ) do
+          :ok ->
+            placement
+            |> Placement.changeset(%{visibility: visibility})
+            |> Repo.update()
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
   end
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do

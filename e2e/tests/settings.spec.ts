@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile } from "./helpers";
+import { suiteAuthFile, E2E_PASSWORD } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
 
@@ -40,6 +40,201 @@ test.describe("Settings — Privacy & Consent", () => {
     await page.waitForTimeout(1000);
     const errorCount = await page.locator(".error").count();
     expect(errorCount).toBe(0);
+  });
+});
+
+/**
+ * API-level smoke tests for settings endpoints added in Issue #048.
+ * These run against the real server via fetch() inside page.evaluate()
+ * so they are independent of whether the Elm settings pages are built.
+ */
+test.describe("Settings — Profile & Account API", () => {
+  test.use({ storageState: suiteAuthFile("settings") });
+
+  /**
+   * Helper: extract the JWT from localStorage and make a settings API call.
+   */
+  async function apiCall(
+    page: any,
+    method: string,
+    path: string,
+    body: Record<string, unknown>
+  ): Promise<{ status: number; data: unknown }> {
+    await page.goto("/");
+    return page.evaluate(
+      async ({
+        method,
+        path,
+        body,
+      }: {
+        method: string;
+        path: string;
+        body: Record<string, unknown>;
+      }) => {
+        const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+        const resp = await fetch(path, {
+          method,
+          headers: {
+            Authorization: `Bearer ${auth.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => null);
+        return { status: resp.status, data };
+      },
+      { method, path, body }
+    );
+  }
+
+  test("PUT /api/settings/profile updates display_name", async ({ page }) => {
+    const { status } = await apiCall(page, "PUT", "/api/settings/profile", {
+      display_name: "E2E Settings User",
+    });
+    expect(status).toBe(200);
+  });
+
+  test("PUT /api/settings/profile with email update requires current_password", async ({
+    page,
+  }) => {
+    const { status: noPasswordStatus } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/profile",
+      { email: "new-e2e-settings@thestacks.test" }
+    );
+    expect(noPasswordStatus).toBe(422);
+
+    const { status: wrongPasswordStatus } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/profile",
+      {
+        email: "new-e2e-settings@thestacks.test",
+        current_password: "wrong-password",
+      }
+    );
+    expect(wrongPasswordStatus).toBe(422);
+  });
+
+  test("PUT /api/settings/location updates country_code and city", async ({
+    page,
+  }) => {
+    const { status, data } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/location",
+      { country_code: "GB", city: "London" }
+    );
+    expect(status).toBe(200);
+    expect((data as any).country_code).toBeDefined();
+  });
+
+  test("PUT /api/settings/location rejects invalid country_code", async ({
+    page,
+  }) => {
+    const { status } = await apiCall(page, "PUT", "/api/settings/location", {
+      country_code: "GBR",
+    });
+    expect(status).toBe(422);
+  });
+
+  test("PUT /api/settings/notifications updates notification preferences", async ({
+    page,
+  }) => {
+    const { status } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/notifications",
+      {
+        notify_wishlist_availability: true,
+        notify_marketplace: false,
+        notify_group_invitations: true,
+        notify_event_matches: false,
+      }
+    );
+    expect(status).toBe(200);
+  });
+
+  test("PUT /api/settings/password changes password with correct current password", async ({
+    page,
+  }) => {
+    // Use a separate password update and then restore it so suite remains usable
+    const { status } = await apiCall(page, "PUT", "/api/settings/password", {
+      current_password: E2E_PASSWORD,
+      new_password: E2E_PASSWORD,
+    });
+    expect(status).toBe(200);
+  });
+
+  test("PUT /api/settings/password rejects wrong current password", async ({
+    page,
+  }) => {
+    const { status, data } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/password",
+      {
+        current_password: "definitely-wrong-password",
+        new_password: "new-password-123",
+      }
+    );
+    expect(status).toBe(422);
+    expect((data as any).error).toBe("invalid_current_password");
+  });
+
+  test("PUT /api/settings/password rejects new password shorter than 8 characters", async ({
+    page,
+  }) => {
+    const { status } = await apiCall(page, "PUT", "/api/settings/password", {
+      current_password: E2E_PASSWORD,
+      new_password: "short",
+    });
+    expect(status).toBe(422);
+  });
+
+  test("PUT /api/settings/profile_visibility updates visibility", async ({
+    page,
+  }) => {
+    const { status } = await apiCall(
+      page,
+      "PUT",
+      "/api/settings/profile_visibility",
+      { profile_visibility: "platform" }
+    );
+    expect(status).toBe(200);
+  });
+
+  test("settings endpoints return 401 when not authenticated", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const unauthResults = await page.evaluate(async () => {
+      const endpoints = [
+        { method: "PUT", path: "/api/settings/profile" },
+        { method: "PUT", path: "/api/settings/location" },
+        { method: "PUT", path: "/api/settings/notifications" },
+        { method: "PUT", path: "/api/settings/password" },
+        { method: "PUT", path: "/api/settings/profile_visibility" },
+      ];
+
+      const results = await Promise.all(
+        endpoints.map(async ({ method, path }) => {
+          const resp = await fetch(path, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          return { path, status: resp.status };
+        })
+      );
+      return results;
+    });
+
+    for (const result of unauthResults) {
+      expect(result.status, `${result.path} should require auth`).toBe(401);
+    }
   });
 });
 
