@@ -553,7 +553,28 @@ This allows immediate shutdown of AI spending if a bug causes runaway costs, or 
 
 ### Overview
 
-The Stacks is fundamentally an **ELT pipeline with a user-facing frontend**. Data flows from external sources through Elixir orchestration into PostgreSQL, then gets transformed via dbt into clean materialized views.
+The Stacks is fundamentally an **ELT pipeline with a user-facing frontend**. Data flows from external sources through Elixir orchestration into PostgreSQL, then gets transformed via dbt into analytical views.
+
+### Architecture Pattern: Contract-First Derived Data (ADR 010)
+
+The data pipeline follows a **contract-first derived data** pattern, drawing from Kleppmann's *Designing Data-Intensive Applications* (Chapters 4, 11, 12). This is neither star schema (no surrogate keys, no conformed dimensions) nor medallion/lakehouse (no data lake, no raw file ingestion). It is:
+
+1. **Contract-enforced input** — Protobuf contracts validate data shape at the write boundary (schema-on-write). The staging layer doesn't clean — it projects.
+2. **One log, many derivations** — The `event_log` is the ordered, immutable history. All downstream views (staging, intermediate, marts, ETS caches, search indexes, RSS feeds) are derived data systems that can be rebuilt from the systems of record (`op.*` + `audit.*`).
+3. **Purpose-built read models** — Each mart serves a specific consumer with a specific access pattern. A mart isn't "gold" because it's cleaner — it's a read model optimised for the metrics dashboard, or the search index, or the wear calculation.
+
+```
+SYSTEMS OF RECORD                 DERIVED DATA (all rebuildable)
+─────────────────                 ──────────────────────────────
+op.* tables (OLTP) ──► wh.stg_*  (structural projections, PII-excluded)
+op.event_log       ──► wh.int_*  (semantic aggregates, domain joins)
+audit.audit_log    ──► wh.mart_* (consumer-optimised read models)
+                   ──► ETS caches, search indexes, Atom feeds
+```
+
+**Key invariant:** Every layer after `op.*` is derived and rebuildable. If the `wh` schema is dropped, `dbt run` reconstructs it. The only non-rebuildable data is in `op.*` and `audit.*`.
+
+See ADR 010 for the full rationale, including why star schema, medallion, and full CQRS were evaluated and rejected.
 
 ### Broadway Pipelines (Elixir)
 
@@ -611,36 +632,57 @@ This approach conserves API budgets and scraper resources while keeping the most
 
 ### dbt Models
 
-dbt targets PostgreSQL, writing to the `wh` schema. Models are organised in three layers:
+dbt targets PostgreSQL, writing to the `wh` schema. Models are organised in three layers that map to the contract-first derived data pattern (ADR 010):
 
 ```
 models/
-├── staging/                          # 1:1 with source tables, light cleaning
-│   ├── stg_books.sql                 # Canonical book data
-│   ├── stg_reviews_goodreads.sql     # Raw GoodReads reviews
-│   ├── stg_reviews_reddit.sql        # Raw Reddit mentions
-│   ├── stg_prices.sql                # Price snapshots per store
-│   ├── stg_author_events.sql         # Author event and release data
-│   └── stg_third_spaces.sql          # Discovered third spaces
+├── staging/                          # Structural projections (1:1 with source, PII-excluded)
+│   ├── stg_books.sql                 # Works (logical books)
+│   ├── stg_book_editions.sql         # Editions (ISBN, format, cover)
+│   ├── stg_review_snapshots.sql      # Raw reviews from all sources
+│   ├── stg_price_snapshots.sql       # Price snapshots per store
+│   ├── stg_event_log.sql             # Domain events (proto-generated)
+│   ├── stg_source_health_checks.sql  # Source health (proto-generated)
+│   └── ... (25 total staging views)
 │
-├── intermediate/                     # Business logic joins and transforms
-│   ├── int_reviews_unified.sql       # All reviews in a common schema
-│   ├── int_price_history.sql         # Price over time per book per store
-│   └── int_book_enriched.sql         # Book + all metadata joined
+├── intermediate/                     # Semantic aggregates (domain-meaningful joins)
+│   ├── int_price_history.sql         # Price over time per edition per store (incremental)
+│   ├── int_review_sentiment.sql      # All reviews in common schema
+│   ├── int_book_detail_view.sql      # Pre-joined work + editions + prices + reviews
+│   ├── int_book_engagement.sql       # Wear level from placement history
+│   ├── int_source_health.sql         # Per-source operational health
+│   └── ... (10+ intermediate models)
 │
-└── marts/                            # Consumer-facing models
-    ├── mart_bookshelf.sql            # Shelf assignment, reading status
-    ├── mart_price_alerts.sql         # Books below price threshold
-    ├── mart_author_activity.sql      # Recent author events and releases
-    ├── mart_content_moderation.sql   # Visibility tiers, flags
-    └── mart_community_read_count.sql # Aggregate read count per work (US-18.1.1)
+└── marts/                            # Consumer-optimised read models (one per use case)
+    ├── mart_community_read_count.sql # Looking for a Home wear (5-min refresh)
+    ├── mart_platform_searchable.sql  # Platform search index (5-min refresh)
+    ├── mart_book_reviews.sql         # Book detail overlay consumer
+    ├── mart_book_prices.sql          # Price comparison consumer
+    ├── mart_data_quality_trend.sql   # Metrics dashboard: 12-week sparklines
+    ├── mart_system_health.sql        # Metrics dashboard: uptime, latency
+    └── ... (16+ mart models)
 ```
 
-dbt runs as a subprocess triggered by Oban after scrape cycles complete:
+**Materialisation strategy (ADR 010):**
+- Staging: `VIEW` (zero storage cost, always current)
+- Intermediate: `VIEW` for low-volume; `incremental` for high-volume (e.g., `int_price_history`)
+- Marts: `incremental` table for hot-path (5-min refresh); `VIEW` or daily `table` for cold-path
+- Hot-path marts may use PostgreSQL `MATERIALIZED VIEW` with `REFRESH CONCURRENTLY` via dbt's `materialized_view` adapter for non-locking refresh
 
-```elixir
-System.cmd("dbt", ["run", "--target", "prod"])
-```
+**Refresh strategy — event-triggered with cron catch-all (ADR 010):**
+
+`Stacks.Workers.DbtRefreshJob` (Oban, `dbt_refresh` queue, concurrency 1) supports two trigger modes:
+
+| Trigger | Models refreshed | Latency |
+|---------|-----------------|---------|
+| `shelf.book_placed`, `shelf.book_moved` | `mart_community_read_count` | ≤ 5 min |
+| `enrichment.prices_scraped` | `int_price_history`, `mart_book_prices` | ≤ 5 min |
+| `enrichment.reviews_scraped` | `int_review_sentiment`, `mart_book_reviews` | ≤ 5 min |
+| `post.published`, `post.updated` | `int_blog_engagement`, `mart_blog_activity` | ≤ 5 min |
+| `source_health.recorded` | `int_source_health`, `mart_data_quality_trend` | ≤ 5 min |
+| Daily cron (catch-all) | All models | Daily |
+
+The event-to-model mapping lives in `Stacks.Workers.DbtRefreshJob` — not scattered across event handlers.
 
 ### Scaling Beyond PostgreSQL
 
@@ -664,7 +706,15 @@ dbt tests enforce:
 - ISBN: `not_null`, `unique`, format validation (ISBN-10 / ISBN-13)
 - Price sanity: `> 0`, `< reasonable_max` (configurable per currency)
 - Recency: alert if no prices scraped in 7 days for active books
-- Security: Tier 3 and Tier 4 data never leaks to warehouse (those models are disabled in dbt via tags)
+- Security: Tier 3 and Tier 4 data never enters the warehouse — `stg_*` models explicitly select only permitted columns (no `SELECT *`)
+
+### Schema Evolution in the Derived Layer
+
+The staging layer serves as a **second evolution boundary** (ADR 010), independent of the Elixir `Events.Upcaster`:
+
+- When a proto message gains a new field, old rows have the column as `NULL`. Staging models use `COALESCE` or conditional logic to handle both old and new rows.
+- When a domain table adds a column via migration, the corresponding `stg_*` model must be updated to include or exclude it.
+- The `mix proto.sync --check` CI gate (ADR 009) catches drift between proto definitions and their generated staging models.
 
 ---
 
@@ -5642,7 +5692,7 @@ The LLM is instructed to return only books from the provided catalogue (no hallu
 
 ## Data Quality Framework
 
-Data quality is measured per data product relative to its consumer, not as a platform-wide score. See `docs/data-quality.md` for the full framework.
+Data quality is measured per data product relative to its consumer, not as a platform-wide score. This aligns with ADR 010's principle that each mart serves a specific consumer — quality SLAs are defined per consumer, not globally. See `docs/data-quality.md` for the full framework.
 
 ### Key principles
 
