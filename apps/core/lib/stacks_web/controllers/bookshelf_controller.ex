@@ -5,6 +5,7 @@ defmodule StacksWeb.BookshelfController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
+  alias Stacks.Visibility
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
@@ -12,17 +13,70 @@ defmodule StacksWeb.BookshelfController do
   def show(conn, %{"bookshelf_name" => bookshelf_name}) do
     if bookshelf_name in @valid_bookshelves do
       user = Guardian.Plug.current_resource(conn)
-      placements = Shelving.get_bookshelf_books(user.id, bookshelf_name)
+      viewer = {:platform_user, user.id}
+      render_bookshelf(conn, user, bookshelf_name, viewer)
+    else
+      conn
+      |> put_status(404)
+      |> json(%{error: "invalid bookshelf name"})
+    end
+  end
+
+  @doc "PUT /api/bookshelves/:id/visibility — update the visibility of a bookshelf."
+  def update_visibility(conn, %{"id" => bookshelf_id, "visibility" => visibility}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.update_bookshelf_visibility(bookshelf_id, user.id, visibility) do
+      {:ok, bookshelf} ->
+        json(conn, %{id: bookshelf.id, visibility: bookshelf.visibility})
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      {:error, :unauthorized} ->
+        conn |> put_status(403) |> json(%{error: "forbidden"})
+
+      {:error, changeset} ->
+        conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def update_visibility(conn, _params) do
+    conn |> put_status(422) |> json(%{error: "visibility is required"})
+  end
+
+  defp format_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
+  end
+
+  defp render_bookshelf(conn, user, bookshelf_name, viewer) do
+    case Shelving.get_bookshelf(user.id, bookshelf_name) do
+      nil ->
+        json(conn, %{bookshelf: bookshelf_name, count: 0, placements: []})
+
+      bookshelf ->
+        render_visible_bookshelf(conn, user, bookshelf_name, bookshelf, viewer)
+    end
+  end
+
+  defp render_visible_bookshelf(conn, user, bookshelf_name, bookshelf, viewer) do
+    if Visibility.resolve_visibility(bookshelf, viewer) == :hidden do
+      conn |> put_status(404) |> json(%{error: "not_found"})
+    else
+      placements =
+        user.id
+        |> Shelving.get_bookshelf_books(bookshelf_name)
+        |> Enum.filter(&(Visibility.resolve_visibility(&1, viewer) == :visible))
 
       json(conn, %{
         bookshelf: bookshelf_name,
         count: length(placements),
         placements: Enum.map(placements, &format_placement/1)
       })
-    else
-      conn
-      |> put_status(404)
-      |> json(%{error: "invalid bookshelf name"})
     end
   end
 

@@ -304,4 +304,59 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  describe "PUT /api/placements/:id/visibility" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      placement = insert(:placement, bookshelf: bookshelf, visibility: "owner")
+      {:ok, conn: auth_conn(conn, user), user: user, bookshelf: bookshelf, placement: placement}
+    end
+
+    test "updates placement visibility within ceiling", %{conn: conn, placement: placement} do
+      conn = put(conn, "/api/placements/#{placement.id}/visibility", %{visibility: "platform"})
+      assert %{"id" => _, "visibility" => "platform"} = json_response(conn, 200)
+    end
+
+    test "returns 422 when visibility exceeds bookshelf ceiling", %{conn: conn, user: user} do
+      owner_bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "owner")
+      placement = insert(:placement, bookshelf: owner_bookshelf, visibility: "owner")
+
+      conn = put(conn, "/api/placements/#{placement.id}/visibility", %{visibility: "platform"})
+      assert %{"error" => _} = json_response(conn, 422)
+    end
+
+    test "returns 403 when user does not own the placement", %{conn: _conn, placement: placement} do
+      other_user = insert(:user)
+
+      conn =
+        build_conn()
+        |> auth_conn(other_user)
+        |> put("/api/placements/#{placement.id}/visibility", %{visibility: "owner"})
+
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+
+    test "returns 404 for nonexistent placement", %{conn: conn} do
+      conn =
+        put(conn, "/api/placements/00000000-0000-0000-0000-000000000000/visibility", %{
+          visibility: "owner"
+        })
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 422 when visibility parameter is missing", %{conn: conn, placement: placement} do
+      conn = put(conn, "/api/placements/#{placement.id}/visibility", %{})
+      assert %{"error" => "visibility is required"} = json_response(conn, 422)
+    end
+
+    test "returns 401 when not authenticated", %{placement: placement} do
+      conn =
+        build_conn()
+        |> put("/api/placements/#{placement.id}/visibility", %{visibility: "owner"})
+
+      assert json_response(conn, 401)
+    end
+  end
 end

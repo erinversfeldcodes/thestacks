@@ -54,3 +54,16 @@ Issue #047 (visibility core must exist to retrofit into controllers)
 elixir-agent
 
 ## Progress Notes
+
+**2026-03-20 — Complete. All gates passed.**
+
+- `User` schema: added `website_url`, `country_code`, `city` fields + `profile_changeset/2`, `email_changeset/2`, `location_changeset/2`, `password_change_changeset/2`, `notifications_changeset/2`
+- `Accounts`: added `update_profile/2` (email change requires `current_password` Argon2 verify), `update_location/2` (emits `user.location_updated`), `change_password/3` (Argon2 verify + update), `update_notifications/2`
+- Settings endpoints: `PUT /api/settings/profile`, `PUT /api/settings/location`, `PUT /api/settings/password` (rate-limited 3/min via new `:password_change` RateLimiter bucket), `PUT /api/settings/notifications`
+- Shelf/placement visibility: `Shelving.update_bookshelf_visibility/3` and `update_placement_visibility/3` (ceiling rule enforced via `Visibility.validate_visibility_ceiling/3`)
+- `PUT /api/bookshelves/:id/visibility` and `PUT /api/placements/:id/visibility` endpoints added
+- Controller retrofit: `CatalogueController` now applies `Visibility.resolve_visibility/2` for `:unauthenticated` viewer — age-gated books are filtered out of the public catalogue
+- `BookshelfController` and `BookshelfPlacementController` already use `resolve_visibility/2`
+- RLS migration `20260319000008_enable_rls_policies.exs`: enables RLS + FORCE RLS on `bookshelves`, `bookshelf_placements`, `user_blocks`, `visibility_grants` with test-safe `current_setting('app.current_user_id', true)` NULL guard
+- 561 tests, 0 failures; Credo clean
+
