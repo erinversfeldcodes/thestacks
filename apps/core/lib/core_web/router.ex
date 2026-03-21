@@ -34,12 +34,12 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
-  pipeline :require_owner do
-    plug StacksWeb.Plugs.RequireRole, role: "owner"
-  end
-
   pipeline :view_as do
     plug StacksWeb.Plugs.ViewAsPlug
+  end
+
+  pipeline :require_owner do
+    plug StacksWeb.Plugs.RequireRole, role: "owner"
   end
 
   scope "/api", CoreWeb do
@@ -52,6 +52,17 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
     post "/opt-out", OptOutController, :create
+  end
+
+  # Authenticated listing routes — must be before optional_auth `:id` catch-all
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated]
+    get "/listings/mine", ListingController, :mine
+  end
+
+  # Public feeds — no auth required (Atom XML)
+  scope "/api", StacksWeb do
+    pipe_through [:api, :rate_limit_public]
     get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 
@@ -60,6 +71,8 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :optional_auth]
     get "/books/:id", BookController, :show
     get "/catalogue", CatalogueController, :index
+    get "/listings", ListingController, :index
+    get "/listings/:id", ListingController, :show
     get "/blog/posts", BlogController, :index
     get "/blog/posts/:id", BlogController, :show
   end
@@ -98,6 +111,10 @@ defmodule CoreWeb.Router do
 
     get "/search", SearchController, :index
 
+    post "/listings", ListingController, :create
+    put "/listings/:id/activate", ListingController, :activate
+    put "/listings/:id/deactivate", ListingController, :deactivate
+
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
     get "/placements/mine", BookshelfPlacementController, :mine
     put "/placements/:id/move", BookshelfPlacementController, :move
@@ -114,24 +131,14 @@ defmodule CoreWeb.Router do
     put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
 
-    post "/gdpr/export", GDPRController, :export
-    delete "/gdpr/account", GDPRController, :delete_account
-    post "/gdpr/consent", GDPRController, :update_consent
-
     post "/blog/posts", BlogController, :create
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
-  end
 
-  # Admin-only endpoints — require owner role
-  scope "/api", StacksWeb do
-    pipe_through [:api, :authenticated, :require_owner]
-
-    get "/metrics", MetricsController, :index
-    get "/metrics/quality-trends", MetricsController, :quality_trends
-    get "/metrics/source-health", MetricsController, :source_health
-    get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
+    post "/gdpr/export", GDPRController, :export
+    delete "/gdpr/account", GDPRController, :delete_account
+    post "/gdpr/consent", GDPRController, :update_consent
   end
 
   # Content display routes — support ?view_as=<perspective> for preview
@@ -151,6 +158,15 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated, :rate_limit_social]
     post "/users/:id/block", SocialController, :block
     delete "/users/:id/block", SocialController, :unblock
+  end
+
+  # Metrics dashboard — owner role required
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :require_owner]
+    get "/metrics", MetricsController, :index
+    get "/metrics/quality-trends", MetricsController, :quality_trends
+    get "/metrics/source-health", MetricsController, :source_health
+    get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth
