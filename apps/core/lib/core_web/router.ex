@@ -48,6 +48,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
     post "/opt-out", OptOutController, :create
+    get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 
   # Public with optional auth — returns extra data when authenticated
@@ -55,6 +56,8 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :optional_auth]
     get "/books/:id", BookController, :show
     get "/catalogue", CatalogueController, :index
+    get "/blog/posts", BlogController, :index
+    get "/blog/posts/:id", BlogController, :show
   end
 
   scope "/api", StacksWeb do
@@ -110,6 +113,16 @@ defmodule CoreWeb.Router do
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
+
+    post "/blog/posts", BlogController, :create
+    put "/blog/posts/:id", BlogController, :update
+    delete "/blog/posts/:id", BlogController, :delete
+    post "/blog/posts/:id/publish", BlogController, :publish
+
+    get "/metrics", MetricsController, :index
+    get "/metrics/quality-trends", MetricsController, :quality_trends
+    get "/metrics/source-health", MetricsController, :source_health
+    get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
   end
 
   # Content display routes — support ?view_as=<perspective> for preview

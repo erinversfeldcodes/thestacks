@@ -25,6 +25,15 @@ defmodule Stacks.Events.Registry do
     ],
     "user.registered" => [
       Stacks.Notifications.EmailConfirmationHandler
+    ],
+    "placement.created" => [
+      Stacks.Feeds.Handlers.PlacementHandler
+    ],
+    "placement.moved" => [
+      Stacks.Feeds.Handlers.PlacementHandler
+    ],
+    "placement.removed" => [
+      Stacks.Feeds.Handlers.PlacementHandler
     ]
   }
 

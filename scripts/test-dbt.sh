@@ -41,5 +41,5 @@ mix ecto.create --quiet
 mix ecto.migrate --quiet
 mix run apps/core/priv/repo/seeds.exs
 
-(cd dbt && dbt run --select staging)
-(cd dbt && dbt test --select staging)
+(cd dbt && dbt run)
+(cd dbt && dbt test)
