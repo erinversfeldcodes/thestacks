@@ -13,13 +13,20 @@
 #   NEON_PROJECT_ID — Neon project to branch from
 #
 # Optional env vars:
-#   NEON_API_KEY        — Neon API key (required when using Neon branch)
-#   MODAL_TOKEN_ID      — Modal API token ID
-#   MODAL_TOKEN_SECRET  — Modal API token secret
-#   VISION_HMAC_SECRET  — Elixir → vision HMAC auth
-#   SECRET_KEY_BASE     — Phoenix secret key base
-#   NEON_PARENT_BRANCH  — Name of parent branch (default: production)
-#   GITHUB_HEAD_REF     — set automatically in GitHub Actions
+#   NEON_API_KEY            — Neon API key (required when using Neon branch)
+#   MODAL_TOKEN_ID          — Modal API token ID
+#   MODAL_TOKEN_SECRET      — Modal API token secret
+#   VISION_HMAC_SECRET      — Elixir → vision HMAC auth
+#   SECRET_KEY_BASE         — Phoenix secret key base
+#   NEON_PARENT_BRANCH      — Name of parent branch (default: production)
+#   GITHUB_HEAD_REF         — set automatically in GitHub Actions
+#   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
+#   R2_ACCESS_KEY_ID        — R2 access key
+#   R2_SECRET_ACCESS_KEY    — R2 secret key
+#   R2_BUCKET_NAME          — R2 bucket name (default: stacks-images)
+#   VISION_TOGETHER_API_KEY — Together AI API key (LLM features)
+#   SCRAPER_HMAC_SECRET     — Scraper sidecar HMAC auth
+#   BRAVE_SEARCH_API_KEY    — Brave Search API key (source discovery)
 #
 # Usage:
 #   scripts/deploy-stack.sh
@@ -192,6 +199,13 @@ fly secrets set \
     PHX_HOST="${CORE_APP}.fly.dev" \
     RATE_LIMIT_AUTH="60" \
     ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
+    ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
+    ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
+    ${R2_SECRET_ACCESS_KEY:+R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"} \
+    ${R2_BUCKET_NAME:+R2_BUCKET_NAME="${R2_BUCKET_NAME}"} \
+    ${VISION_TOGETHER_API_KEY:+VISION_TOGETHER_API_KEY="${VISION_TOGETHER_API_KEY}"} \
+    ${SCRAPER_HMAC_SECRET:+SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}"} \
+    ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
     --app "${CORE_APP}" --stage
 
 # ── Build frontend assets ─────────────────────────────────────────────────────
