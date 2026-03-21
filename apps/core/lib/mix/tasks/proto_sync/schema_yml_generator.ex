@@ -174,7 +174,7 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
 
   defp timestamp_columns(_), do: []
 
-  defp build_tests(field, override, ecto_type, descriptor) do
+  defp build_tests(field, override, _ecto_type, descriptor) do
     tests = []
 
     # not_null for fields with null: false override
