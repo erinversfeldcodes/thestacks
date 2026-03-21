@@ -1096,7 +1096,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert Enum.at(lines, event_type_idx + 3) =~ "- not_null"
     end
 
-    test "relationships test for binary_id FK fields", %{descriptor: descriptor} do
+    test "no auto-generated relationships tests (removed — Postgres enforces FKs)", %{
+      descriptor: descriptor
+    } do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       [event_log_table | _] = manifest.tables
 
@@ -1109,9 +1111,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
 
-      # aggregate_id has binary_id override and ends in _id
-      assert output =~ "relationships:"
-      assert output =~ "ref('stg_aggregates')"
+      # relationships tests are no longer auto-generated
+      refute output =~ "relationships:"
     end
   end
 

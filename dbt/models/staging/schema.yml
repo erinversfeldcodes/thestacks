@@ -475,10 +475,6 @@ models:
         description: Aggregate id.
         tests:
           - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_aggregates')
-                field: id
       - name: schema_version
         description: Schema version.
         tests:
