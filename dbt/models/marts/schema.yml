@@ -55,6 +55,10 @@ models:
           - unique
       - name: read_count
         description: Number of distinct shelf placements.
+      - name: last_refreshed_at
+        description: Timestamp of last incremental refresh.
+        tests:
+          - not_null
 
   - name: mart_platform_searchable
     description: Denormalised book data for catalogue search — consumer CatalogueController.index.
@@ -77,8 +81,16 @@ models:
         description: Primary edition ISBN.
       - name: primary_cover_image_url
         description: Primary edition cover image URL.
+      - name: description
+        description: Book description.
+      - name: language
+        description: Book language.
       - name: visibility_tier
-        description: Content visibility tier.
+        description: Visibility tier of the book.
+      - name: last_refreshed_at
+        description: Timestamp of last incremental refresh.
+        tests:
+          - not_null
 
   - name: mart_system_health
     description: Source health overview — consumer MetricsController (admin dashboard).
@@ -187,3 +199,72 @@ models:
         description: Number of book associations.
       - name: published_at
         description: Publish timestamp.
+
+  - name: mart_data_quality_trend
+    description: Daily snapshot of data quality metrics with 12-week retention (incremental).
+    columns:
+      - name: snapshot_date
+        description: Date of the quality snapshot.
+        tests:
+          - not_null
+          - unique
+      - name: total_books
+        description: Total books in catalogue.
+      - name: books_with_covers
+        description: Books with cover images.
+      - name: books_with_prices
+        description: Books with at least one price snapshot.
+      - name: books_with_reviews
+        description: Books with at least one review.
+      - name: cover_pct
+        description: Cover image coverage percentage.
+      - name: price_pct
+        description: Price coverage percentage.
+      - name: review_pct
+        description: Review coverage percentage.
+      - name: total_sources
+        description: Total monitored sources.
+      - name: healthy_sources
+        description: Sources with healthy status.
+
+  - name: mart_enrichment_gaps
+    description: Books missing enrichment data (covers, prices, reviews).
+    columns:
+      - name: book_id
+        description: Book UUID.
+        tests:
+          - not_null
+          - unique
+      - name: title
+        description: Book title.
+      - name: missing_cover
+        description: True if book has no cover image.
+      - name: missing_prices
+        description: True if book has no price data.
+      - name: missing_reviews
+        description: True if book has no review data.
+      - name: gap_count
+        description: Number of missing enrichment types (0-3).
+
+  - name: mart_llm_faithfulness
+    description: Confidence distribution for LLM-generated post-book associations by source.
+    columns:
+      - name: source
+        description: Association source type (e.g., llm, manual).
+        tests:
+          - not_null
+          - unique
+      - name: total_associations
+        description: Total associations from this source.
+      - name: high_confidence
+        description: Associations with confidence >= 0.9.
+      - name: medium_confidence
+        description: Associations with confidence 0.7-0.9.
+      - name: low_confidence
+        description: Associations with confidence < 0.7.
+      - name: avg_confidence
+        description: Average confidence score.
+      - name: min_confidence
+        description: Minimum confidence score.
+      - name: max_confidence
+        description: Maximum confidence score.
