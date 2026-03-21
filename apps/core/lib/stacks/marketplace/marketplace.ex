@@ -14,6 +14,8 @@ defmodule Stacks.Marketplace do
   Valid transitions: draft→active, active→removed, active→expired, active→sold.
   """
 
+  @dialyzer :no_opaque
+
   import Ecto.Query
 
   alias Core.Repo

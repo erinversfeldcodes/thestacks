@@ -9,9 +9,9 @@ with book_counts as (
     select
         count(*) as total_books,
         count(*) filter (
-            where cover_image_url is not null
+            where primary_cover_image_url is not null
         ) as books_with_covers
-    from {{ ref('stg_books') }}
+    from {{ ref('int_book_detail_view') }}
 ),
 
 price_counts as (
