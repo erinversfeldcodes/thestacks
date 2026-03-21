@@ -266,19 +266,28 @@ async def associate(
 async def classify(request: Request, body: ClassificationRequest) -> ClassificationResponse:
     log = logger.bind(endpoint="/classify")
 
-    try:
-        decoded = base64.b64decode(body.image, validate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
-    if len(decoded) > settings.max_image_size_bytes:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
-        )
+    # --- image_url path ---
+    if body.image_url is not None:
+        log = log.bind(image_url=str(body.image_url))
+        image_bytes = await _download_image(str(body.image_url))
+        image_b64 = base64.b64encode(image_bytes).decode()
+    else:
+        # --- base64 image path ---
+        assert body.image is not None  # guaranteed by model_validator
+        try:
+            decoded = base64.b64decode(body.image, validate=True)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+        if len(decoded) > settings.max_image_size_bytes:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+            )
+        image_b64 = body.image
 
     client: VisionClient = request.app.state.vision_client
     log.info("calling vision model for classification")
-    parsed: dict[str, object] = await client.classify(body.image)
+    parsed: dict[str, object] = await client.classify(image_b64)
 
     raw_classification = parsed.get("classification", "ambiguous")
     try:
