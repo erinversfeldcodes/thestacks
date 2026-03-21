@@ -79,8 +79,8 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
         join: bs in "bookshelves",
         prefix: "op",
         on: bs.id == bp.bookshelf_id,
-        where: bp.id == ^placement_id,
-        select: bs.user_id
+        where: bp.id == type(^placement_id, Ecto.UUID),
+        select: type(bs.user_id, Ecto.UUID)
       )
 
     Core.Repo.one(query)
