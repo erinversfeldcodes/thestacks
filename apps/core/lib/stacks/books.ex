@@ -14,6 +14,8 @@ defmodule Stacks.Books do
   # chained call. This is a known false positive.
   @dialyzer :no_opaque
 
+  require Logger
+
   import Ecto.Query
 
   alias Core.Repo
