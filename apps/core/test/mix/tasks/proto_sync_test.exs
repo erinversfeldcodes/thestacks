@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @repo_root Path.expand("../../../../..", __DIR__)
@@ -955,6 +956,327 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
   end
 
+  describe "Descriptor.extract_enum_values" do
+    setup do
+      descriptor = Descriptor.parse!(@repo_root)
+      %{descriptor: descriptor}
+    end
+
+    test "extracts HealthStatus enum values", %{descriptor: descriptor} do
+      values =
+        Descriptor.extract_enum_values(
+          descriptor,
+          ".stacks.monitoring.v1.HealthStatus"
+        )
+
+      assert values == ["healthy", "degraded", "broken"]
+    end
+
+    test "extracts SourceType enum values", %{descriptor: descriptor} do
+      values =
+        Descriptor.extract_enum_values(
+          descriptor,
+          ".stacks.monitoring.v1.SourceType"
+        )
+
+      assert values == [
+               "scraper_config",
+               "review_source",
+               "rss_feed",
+               "event_source",
+               "llm_output"
+             ]
+    end
+
+    test "excludes UNSPECIFIED sentinel values", %{descriptor: descriptor} do
+      values =
+        Descriptor.extract_enum_values(
+          descriptor,
+          ".stacks.monitoring.v1.HealthStatus"
+        )
+
+      refute Enum.any?(values, &String.contains?(&1, "unspecified"))
+    end
+
+    test "returns empty list for unknown enum", %{descriptor: descriptor} do
+      assert Descriptor.extract_enum_values(descriptor, ".nonexistent.Enum") == []
+    end
+
+    test "returns empty list for nil type_name", %{descriptor: descriptor} do
+      assert Descriptor.extract_enum_values(descriptor, nil) == []
+    end
+  end
+
+  describe "SchemaYmlGenerator.generate" do
+    setup do
+      descriptor = Descriptor.parse!(@repo_root)
+      %{descriptor: descriptor}
+    end
+
+    test "generates event_log model block", %{descriptor: descriptor} do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [event_log_table | _] = manifest.tables
+
+      fields =
+        Descriptor.extract_fields(
+          descriptor,
+          event_log_table.proto_file,
+          event_log_table.proto_message
+        )
+
+      output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
+
+      assert output =~ "  - name: stg_event_log"
+      assert output =~ "Proto-synced staging model for event_log."
+      assert output =~ "      - name: id"
+      assert output =~ "          - not_null"
+      assert output =~ "          - unique"
+      assert output =~ "      - name: event_type"
+      assert output =~ "      - name: aggregate_id"
+      assert output =~ "      - name: payload"
+      assert output =~ "      - name: occurred_at"
+      assert output =~ "      - name: published_at"
+      # event_log has no timestamps
+      refute output =~ "      - name: created_at"
+      refute output =~ "      - name: updated_at"
+    end
+
+    test "generates source_health_checks with timestamps and enum tests", %{
+      descriptor: descriptor
+    } do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [_, shc_table] = manifest.tables
+
+      fields =
+        Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
+
+      output = SchemaYmlGenerator.generate(shc_table, fields, descriptor)
+
+      assert output =~ "  - name: stg_source_health_checks"
+      assert output =~ "      - name: created_at"
+      assert output =~ "      - name: updated_at"
+
+      # source_type enum should have accepted_values
+      assert output =~ "accepted_values"
+      assert output =~ "'scraper_config'"
+      assert output =~ "'review_source'"
+      assert output =~ "'rss_feed'"
+      assert output =~ "'event_source'"
+      assert output =~ "'llm_output'"
+
+      # status enum should have accepted_values
+      assert output =~ "'healthy'"
+      assert output =~ "'degraded'"
+      assert output =~ "'broken'"
+    end
+
+    test "not_null tests are generated for null: false overrides", %{descriptor: descriptor} do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [event_log_table | _] = manifest.tables
+
+      fields =
+        Descriptor.extract_fields(
+          descriptor,
+          event_log_table.proto_file,
+          event_log_table.proto_message
+        )
+
+      output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
+
+      # event_type has null: false in overrides
+      # Extract the event_type column block
+      lines = String.split(output, "\n")
+
+      event_type_idx =
+        Enum.find_index(lines, fn l -> String.contains?(l, "- name: event_type") end)
+
+      assert event_type_idx != nil
+      # The tests section should follow with not_null
+      assert Enum.at(lines, event_type_idx + 2) =~ "tests:"
+      assert Enum.at(lines, event_type_idx + 3) =~ "- not_null"
+    end
+
+    test "relationships test for binary_id FK fields", %{descriptor: descriptor} do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [event_log_table | _] = manifest.tables
+
+      fields =
+        Descriptor.extract_fields(
+          descriptor,
+          event_log_table.proto_file,
+          event_log_table.proto_message
+        )
+
+      output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
+
+      # aggregate_id has binary_id override and ends in _id
+      assert output =~ "relationships:"
+      assert output =~ "ref('stg_aggregates')"
+    end
+  end
+
+  describe "SchemaYmlGenerator.merge" do
+    test "preserves non-proto model entries" do
+      existing = """
+      version: 2
+
+      models:
+        - name: stg_books
+          description: Hand-written books model.
+          columns:
+            - name: id
+              description: PK.
+
+        - name: stg_event_log
+          description: Old description.
+          columns:
+            - name: id
+              description: PK.
+      """
+
+      new_block =
+        "  - name: stg_event_log\n" <>
+          "    description: >\n" <>
+          "      Proto-synced staging model for event_log.\n" <>
+          "    columns:\n" <>
+          "      - name: id\n" <>
+          "        description: Surrogate UUID primary key."
+
+      merged = SchemaYmlGenerator.merge(existing, %{"stg_event_log" => new_block})
+
+      # stg_books is preserved
+      assert merged =~ "stg_books"
+      assert merged =~ "Hand-written books model."
+
+      # stg_event_log is replaced
+      assert merged =~ "Proto-synced staging model for event_log."
+      refute merged =~ "Old description."
+    end
+
+    test "preserves section comment separators" do
+      existing = """
+      version: 2
+
+      models:
+        - name: stg_books
+          description: Books.
+          columns:
+            - name: id
+              description: PK.
+
+        # -------------------------------------------------------------------------
+        # Section header
+        # -------------------------------------------------------------------------
+
+        - name: stg_event_log
+          description: Old.
+          columns:
+            - name: id
+              description: PK.
+      """
+
+      new_block =
+        "  - name: stg_event_log\n" <>
+          "    description: >\n" <>
+          "      Proto-synced.\n" <>
+          "    columns:\n" <>
+          "      - name: id\n" <>
+          "        description: Surrogate UUID primary key."
+
+      merged = SchemaYmlGenerator.merge(existing, %{"stg_event_log" => new_block})
+
+      assert merged =~ "# Section header"
+      assert merged =~ "Proto-synced."
+    end
+
+    test "appends new proto models not in existing file" do
+      existing = """
+      version: 2
+
+      models:
+        - name: stg_books
+          description: Books.
+          columns:
+            - name: id
+              description: PK.
+      """
+
+      new_block =
+        "  - name: stg_new_table\n" <>
+          "    description: >\n" <>
+          "      Proto-synced.\n" <>
+          "    columns:\n" <>
+          "      - name: id\n" <>
+          "        description: PK."
+
+      merged = SchemaYmlGenerator.merge(existing, %{"stg_new_table" => new_block})
+
+      assert merged =~ "stg_books"
+      assert merged =~ "stg_new_table"
+    end
+  end
+
+  describe "SchemaYmlGenerator.check_drift" do
+    test "returns :ok when content matches" do
+      tmp_path = Path.join(System.tmp_dir!(), "schema_drift_ok_#{System.unique_integer()}.yml")
+
+      content = """
+      version: 2
+
+      models:
+        - name: stg_test
+          description: Test.
+          columns:
+            - name: id
+              description: PK.
+      """
+
+      File.write!(tmp_path, content)
+
+      # No proto models -> merge is a no-op
+      assert :ok == SchemaYmlGenerator.check_drift(tmp_path, %{})
+
+      File.rm!(tmp_path)
+    end
+
+    test "returns drift when proto model has changed" do
+      tmp_path = Path.join(System.tmp_dir!(), "schema_drift_chg_#{System.unique_integer()}.yml")
+
+      content = """
+      version: 2
+
+      models:
+        - name: stg_event_log
+          description: Old.
+          columns:
+            - name: id
+              description: PK.
+      """
+
+      File.write!(tmp_path, content)
+
+      new_block =
+        "  - name: stg_event_log\n" <>
+          "    description: >\n" <>
+          "      New.\n" <>
+          "    columns:\n" <>
+          "      - name: id\n" <>
+          "        description: PK."
+
+      assert {:drift, ^tmp_path, _diff} =
+               SchemaYmlGenerator.check_drift(tmp_path, %{"stg_event_log" => new_block})
+
+      File.rm!(tmp_path)
+    end
+
+    test "returns drift when schema.yml does not exist" do
+      path = "/nonexistent/schema.yml"
+
+      assert {:drift, ^path, msg} = SchemaYmlGenerator.check_drift(path, %{})
+      assert msg =~ "file not found"
+    end
+  end
+
   describe "integration" do
     test "mix proto.sync generates files that pass --check" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
@@ -991,6 +1313,34 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
         flunk("Generated files have drifted from proto definitions:\n#{details}")
       end
+    end
+
+    test "schema.yml roundtrip: generate then check passes" do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
+      schema_yml_path = Path.join(@repo_root, "dbt/models/staging/schema.yml")
+
+      generated_blocks =
+        Map.new(manifest.tables, fn table ->
+          fields =
+            Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
+
+          model_name = "stg_#{table.table_name}"
+          block = SchemaYmlGenerator.generate(table, fields, descriptor)
+          {model_name, block}
+        end)
+
+      # After merge, check_drift should return :ok
+      existing = File.read!(schema_yml_path)
+      merged = SchemaYmlGenerator.merge(existing, generated_blocks)
+
+      # Write merged content to a temp file and check drift
+      tmp_path = Path.join(System.tmp_dir!(), "schema_roundtrip_#{System.unique_integer()}.yml")
+      File.write!(tmp_path, merged)
+
+      assert :ok == SchemaYmlGenerator.check_drift(tmp_path, generated_blocks)
+
+      File.rm!(tmp_path)
     end
   end
 end
