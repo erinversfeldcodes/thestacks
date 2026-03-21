@@ -32,6 +32,7 @@ config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
 config :core, :together_client, Stacks.AI.MockTogetherClient
 config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
 config :core, :storage, Stacks.Storage.Mock
+config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
 
 config :core, Stacks.Vault,
   ciphers: [
