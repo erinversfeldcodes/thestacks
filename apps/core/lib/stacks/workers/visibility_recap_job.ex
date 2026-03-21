@@ -26,6 +26,7 @@ defmodule Stacks.Workers.VisibilityRecapJob do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Blog
   alias Stacks.Events
   alias Stacks.Shelving.Bookshelf
   alias Stacks.Shelving.Placement
@@ -56,9 +57,12 @@ defmodule Stacks.Workers.VisibilityRecapJob do
         |> where([p, b], b.user_id == ^user_id and p.visibility in ^violating)
         |> Repo.update_all([set: [visibility: new_visibility, updated_at: now]], prefix: "op")
 
+      {:ok, posts_capped} = Blog.tighten_posts_to_ceiling(user_id, new_visibility)
+
       Logger.info(
-        "VisibilityRecapJob: capped #{bookshelf_count} bookshelves and " <>
-          "#{placement_count} placements for user #{user_id} → #{new_visibility}"
+        "VisibilityRecapJob: capped #{bookshelf_count} bookshelves, " <>
+          "#{placement_count} placements, and #{posts_capped} posts " <>
+          "for user #{user_id} → #{new_visibility}"
       )
 
       Events.emit_safe(%{
@@ -68,7 +72,8 @@ defmodule Stacks.Workers.VisibilityRecapJob do
         payload: %{
           new_visibility: new_visibility,
           bookshelves_capped: bookshelf_count,
-          placements_capped: placement_count
+          placements_capped: placement_count,
+          posts_capped: posts_capped
         }
       })
 
