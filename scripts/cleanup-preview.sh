@@ -43,15 +43,21 @@ SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1
 SANITISED="${SANITISED%-}"
 
 CORE_APP="stacks-core-pr-${SANITISED}"
+SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
+SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
 MODAL_APP="thestacks-vision-${SANITISED}"
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
-echo "    Core app:   ${CORE_APP}"
-echo "    Modal app:  ${MODAL_APP}"
+echo "    Core app:    ${CORE_APP}"
+echo "    Scraper app: ${SCRAPER_APP}"
+echo "    SearXNG app: ${SEARXNG_APP}"
+echo "    Modal app:   ${MODAL_APP}"
 
 # ── Fly apps ─────────────────────────────────────────────────────────────────
 if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     fly apps destroy "${CORE_APP}" --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}." || echo "    ${CORE_APP} not found (already gone)."
+    fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
+    fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
 else
     echo "    SKIP: flyctl not available or FLY_API_TOKEN not set — skipping Fly cleanup."
 fi

@@ -26,15 +26,61 @@ if config_env() != :test do
   config :core, :vision_hmac_secret, vision_hmac_secret
 end
 
+# Optional service credentials — available in all envs when set.
+if brave_key = System.get_env("BRAVE_SEARCH_API_KEY") do
+  config :core, :brave_search_api_key, brave_key
+end
+
+if together_key = System.get_env("VISION_TOGETHER_API_KEY") do
+  config :core, :vision_together_api_key, together_key
+end
+
+if System.get_env("REQUIRE_EMAIL_CONFIRMATION") == "true" do
+  config :core, :require_email_confirmation, true
+end
+
+if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
+  config :core, :rate_limit_auth, String.to_integer(auth_limit)
+end
+
+# Cloudflare R2 object storage — activated when R2_ACCOUNT_ID is set.
+# Without this, falls back to Storage.Local (file:// URLs, dev only).
+if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
+  config :core, :storage, Stacks.Storage.R2
+
+  config :ex_aws,
+    access_key_id: System.fetch_env!("R2_ACCESS_KEY_ID"),
+    secret_access_key: System.fetch_env!("R2_SECRET_ACCESS_KEY"),
+    region: "auto"
+
+  config :ex_aws, :s3,
+    scheme: "https://",
+    host: "#{r2_account_id}.r2.cloudflarestorage.com",
+    region: "auto"
+
+  config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
+end
+
+# Scraper + SearXNG — optional in dev, wired via internal Fly networking in prod.
+if scraper_hmac = System.get_env("SCRAPER_HMAC_SECRET") do
+  config :core, :scraper_hmac_secret, scraper_hmac
+end
+
+if scraper_url = System.get_env("SCRAPER_SERVICE_URL") do
+  config :core, :scraper_service_url, scraper_url
+end
+
+if searxng_url = System.get_env("SEARXNG_URL") do
+  config :core, :searxng_url, searxng_url
+end
+
 if config_env() == :prod do
   vision_service_url =
     System.get_env("VISION_SERVICE_URL") ||
       raise "environment variable VISION_SERVICE_URL is missing."
 
   config :core, :vision_service_url, vision_service_url
-end
 
-if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -72,4 +118,10 @@ if config_env() == :prod do
   # Use an absolute writable path for uploads in production.
   # The relative default ("priv/static/uploads") is not writable in a Fly.io release.
   config :core, upload_dir: "/tmp/uploads"
+
+  if System.get_env("EMAIL_PROVIDER") == "resend" do
+    config :core, Stacks.Email.Mailer,
+      adapter: Swoosh.Adapters.Resend,
+      api_key: System.fetch_env!("RESEND_API_KEY")
+  end
 end
