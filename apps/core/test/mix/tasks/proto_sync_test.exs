@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Proto.SyncTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Mix.Tasks.Proto.Sync, as: ProtoSync
   alias Mix.Tasks.ProtoSync.DbtGenerator
