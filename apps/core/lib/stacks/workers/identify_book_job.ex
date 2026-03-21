@@ -3,9 +3,9 @@ defmodule Stacks.Workers.IdentifyBookJob do
   Oban worker that processes an uploaded image through the Modal vision service
   to identify and create/update a book record.
 
-  The image is passed as base64 in the job args — no filesystem access needed.
-  This means any Fly machine can execute the job regardless of which machine
-  handled the original upload.
+  New jobs receive a `storage_key` in args and fetch a presigned URL at execution
+  time. Legacy in-flight jobs that still carry `image_b64` are handled via
+  backwards-compatible pattern matching.
   """
 
   use Oban.Worker, queue: :vision, max_attempts: 3
@@ -17,12 +17,43 @@ defmodule Stacks.Workers.IdentifyBookJob do
   alias Core.Repo
   alias Stacks.Events
   alias Stacks.Moderation
+  alias Stacks.Storage
+
+  # ── New path: storage_key ─────────────────────────────────────────────────
 
   @impl true
   def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64}
+        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key}
       }) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
+
+    case Storage.get_image_url(storage_key) do
+      {:ok, image_url} ->
+        context = %{
+          image_url: image_url,
+          user_id: user_id,
+          image_id: image_id
+        }
+
+        run_pipeline(context, image_id)
+
+      {:error, reason} ->
+        Logger.error(
+          "IdentifyBookJob: failed to get presigned URL for #{storage_key}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # ── Legacy path: image_b64 (backwards compat for in-flight jobs) ──────────
+
+  def perform(%Oban.Job{
+        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64}
+      }) do
+    Logger.info(
+      "IdentifyBookJob: processing image #{image_id} for user #{user_id} (legacy b64 path)"
+    )
 
     context = %{
       image_b64: image_b64,
@@ -30,6 +61,10 @@ defmodule Stacks.Workers.IdentifyBookJob do
       image_id: image_id
     }
 
+    run_pipeline(context, image_id)
+  end
+
+  defp run_pipeline(context, image_id) do
     case Moderation.run_pipeline(context) do
       {:ok, books} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
