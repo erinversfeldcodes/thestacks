@@ -15,6 +15,7 @@ defmodule Core.Application do
         finch_spec(),
         StacksWeb.Plugs.RateLimiter.Server,
         Stacks.AI.BudgetTracker,
+        Stacks.Books.BookDetailCache,
         {Oban, Application.fetch_env!(:core, Oban)},
         CoreWeb.Telemetry,
         CoreWeb.Endpoint
