@@ -20,7 +20,12 @@ models:
     staging:
       +materialized: view
       +schema: staging
-    # intermediate and marts configs added when those layers are built
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: view
+      +schema: marts
 
 # Seeds are managed via apps/core/priv/repo/seeds.exs (Ecto) rather than dbt CSV seeds.
 # dbt seeds are reserved for future wh-schema lookup tables that dbt fully owns.
