@@ -726,21 +726,28 @@ defmodule Mix.Tasks.Proto.SyncTest do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       [table | _] = manifest.tables
       ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
+
+      # Read the generated file, append a drift marker, write it back.
+      # The after block MUST restore the original content — this file is
+      # checked in and other tests/compilation depend on it being clean.
       original_content = File.read!(ecto_path)
 
       try do
         File.cd!(@repo_root)
-
-        # Corrupt the file temporarily
         File.write!(ecto_path, original_content <> "\n# drift marker\n")
 
         assert_raise RuntimeError, ~r/Proto sync drift detected/, fn ->
           ProtoSync.run(["--check"])
         end
       after
-        # Always restore the file and CWD, even if the test fails
         File.write!(ecto_path, original_content)
         File.cd!(original_cwd)
+
+        # Double-check the file was restored — if not, force regeneration
+        # to prevent downstream test failures from stale drift markers.
+        if File.read!(ecto_path) != original_content do
+          File.write!(ecto_path, original_content)
+        end
       end
     end
   end
