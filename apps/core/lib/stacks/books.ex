@@ -363,7 +363,8 @@ defmodule Stacks.Books do
         {:error, :not_found}
 
       edition ->
-        changeset = BookEdition.changeset(edition, %{cover_image_url: cover_url})
+        final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
+        changeset = BookEdition.changeset(edition, %{cover_image_url: final_url})
 
         case Repo.update(changeset) do
           {:ok, updated} ->
@@ -371,7 +372,7 @@ defmodule Stacks.Books do
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,
-              payload: %{cover_image_url: cover_url},
+              payload: %{cover_image_url: final_url},
               metadata: %{actor: "vision_sidecar"}
             })
 
@@ -381,6 +382,33 @@ defmodule Stacks.Books do
             {:error, changeset}
         end
     end
+  end
+
+  defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
+    # Covers are permanent — use a long-lived presigned URL (7 days).
+    # In production, R2 public bucket access or CDN would serve these.
+    with {:ok, image_data} <- download_cover(cover_url),
+         {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
+         {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
+      r2_url
+    else
+      _ -> cover_url
+    end
+  end
+
+  defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
+
+  defp download_cover(url) when is_binary(url) do
+    req = Finch.build(:get, url)
+
+    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000) do
+      {:ok, %Finch.Response{status: 200, body: body}} -> {:ok, body}
+      _ -> {:error, :download_failed}
+    end
+  rescue
+    e ->
+      Logger.warning("Books: cover download failed for #{url}: #{Exception.message(e)}")
+      {:error, :download_failed}
   end
 
   @doc """

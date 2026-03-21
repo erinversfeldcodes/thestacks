@@ -107,6 +107,45 @@ defmodule Stacks.GDPR.ImageRetention do
     error -> {:error, error}
   end
 
+  @doc """
+  Returns image IDs that should have been purged but weren't.
+
+  Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
+  events whose `expires_at` has passed, but which have no corresponding
+  `image.expired` event. These are orphaned images that the retention job
+  missed.
+
+  Run daily as a health check — a non-empty result indicates a retention gap.
+  """
+  @spec missing_purge_check() :: [String.t()]
+  def missing_purge_check do
+    cutoff = DateTime.utc_now()
+
+    query =
+      from(i in "uploaded_images",
+        prefix: "op",
+        where: i.expires_at < ^cutoff,
+        select: %{id: i.id, storage_path: i.storage_path}
+      )
+
+    orphaned = Repo.all(query)
+
+    if orphaned != [] do
+      count = length(orphaned)
+
+      Logger.warning(
+        "ImageRetention: missing-purge alarm — #{count} image(s) past expiry still in DB"
+      )
+    end
+
+    Enum.map(orphaned, fn %{id: id} ->
+      case Ecto.UUID.load(id) do
+        {:ok, uuid} -> uuid
+        _ -> inspect(id)
+      end
+    end)
+  end
+
   defp delete_storage_objects(rows) do
     Enum.each(rows, fn
       %{storage_path: path} when is_binary(path) and path != "" ->
