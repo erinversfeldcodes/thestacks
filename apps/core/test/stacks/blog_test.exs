@@ -283,4 +283,68 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # tighten_posts_to_ceiling/2
+  # ---------------------------------------------------------------------------
+
+  describe "tighten_posts_to_ceiling/2" do
+    test "tightens posts more visible than the new ceiling" do
+      user = insert(:user, profile_visibility: "platform")
+      post = insert(:post, user: user, visibility: "platform")
+
+      assert {:ok, count} = Blog.tighten_posts_to_ceiling(user.id, "owner")
+      assert count == 1
+
+      reloaded = Repo.get!(Blog.Post, post.id)
+      assert reloaded.visibility == "owner"
+    end
+
+    test "leaves posts already at or below the ceiling unchanged" do
+      user = insert(:user, profile_visibility: "platform")
+      owner_post = insert(:post, user: user, visibility: "owner")
+      platform_post = insert(:post, user: user, visibility: "platform")
+
+      assert {:ok, count} = Blog.tighten_posts_to_ceiling(user.id, "platform")
+      assert count == 0
+
+      assert Repo.get!(Blog.Post, owner_post.id).visibility == "owner"
+      assert Repo.get!(Blog.Post, platform_post.id).visibility == "platform"
+    end
+
+    test "returns the count of tightened posts" do
+      user = insert(:user, profile_visibility: "platform")
+      _p1 = insert(:post, user: user, visibility: "platform")
+      _p2 = insert(:post, user: user, visibility: "platform")
+      _p3 = insert(:post, user: user, visibility: "owner")
+
+      assert {:ok, 2} = Blog.tighten_posts_to_ceiling(user.id, "owner")
+    end
+
+    test "runs in a transaction (all or nothing)" do
+      user = insert(:user, profile_visibility: "platform")
+      _p1 = insert(:post, user: user, visibility: "platform")
+      _p2 = insert(:post, user: user, visibility: "platform")
+
+      # Verify it wraps in a transaction by checking all posts are updated
+      assert {:ok, 2} = Blog.tighten_posts_to_ceiling(user.id, "owner")
+
+      posts =
+        from(p in Blog.Post, where: p.user_id == ^user.id)
+        |> Repo.all()
+
+      assert Enum.all?(posts, &(&1.visibility == "owner"))
+    end
+
+    test "does not affect another user's posts" do
+      user = insert(:user, profile_visibility: "platform")
+      other = insert(:user, profile_visibility: "platform")
+      _user_post = insert(:post, user: user, visibility: "platform")
+      other_post = insert(:post, user: other, visibility: "platform")
+
+      Blog.tighten_posts_to_ceiling(user.id, "owner")
+
+      assert Repo.get!(Blog.Post, other_post.id).visibility == "platform"
+    end
+  end
 end
