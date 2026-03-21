@@ -36,6 +36,7 @@ config :core, Oban,
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
+       {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob}
      ]}
   ],
