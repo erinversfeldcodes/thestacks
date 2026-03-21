@@ -12,7 +12,10 @@ defmodule Stacks.Moderation do
   - POST /classify  → %{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}
   - POST /extract   → %{"books" => [%{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "confidence" => float}], "model_used" => str}
 
-  Both endpoints expect base64-encoded image data (not image URLs).
+  The pipeline accepts either `image_b64` (base64-encoded) or `image_url`
+  (presigned URL) in the context map. The `image_url` path is preferred for
+  new uploads stored in object storage; `image_b64` is retained for backwards
+  compatibility with in-flight jobs.
   """
 
   require Logger
@@ -24,14 +27,25 @@ defmodule Stacks.Moderation do
   @doc """
   Runs the full moderation pipeline for an uploaded image.
 
-  Expects `context` to include:
-  - `image_b64` — base64-encoded image bytes
-  - `user_id`, `image_id` — for logging/context
+  Expects `context` to include one of:
+  - `image_url` — presigned URL to the image in object storage (preferred)
+  - `image_b64` — base64-encoded image bytes (legacy/backwards compat)
+
+  Plus `user_id`, `image_id` for logging/context.
 
   Returns `{:ok, [Book.t()]}` on success (one or more books identified),
   or `{:error, reason}` on failure.
   """
   @spec run_pipeline(map()) :: {:ok, [Stacks.Books.Book.t()]} | {:error, term()}
+  def run_pipeline(%{image_url: image_url} = context) do
+    with {:ok, :is_book} <- check_is_book_url(image_url),
+         {:ok, candidates} <- extract_all_candidates_url(image_url) do
+      resolve_and_store_all(candidates, context)
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   def run_pipeline(%{image_b64: image_b64} = context) do
     with {:ok, :is_book} <- check_is_book(image_b64),
          {:ok, candidates} <- extract_all_candidates(image_b64) do
@@ -40,6 +54,32 @@ defmodule Stacks.Moderation do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  # ── image_url path ───────────────────────────────────────────────────────
+
+  defp check_is_book_url(image_url) do
+    case AIClient.call_vision("is_book", %{image_url: image_url}) do
+      {:ok, %{"classification" => "book"}} -> {:ok, :is_book}
+      {:ok, %{"classification" => _}} -> {:error, :not_a_book}
+      error -> error
+    end
+  end
+
+  defp extract_all_candidates_url(image_url) do
+    case AIClient.call_vision("extract_isbn", %{image_url: image_url}) do
+      {:ok, %{"books" => []}} ->
+        {:error, :isbn_not_found}
+
+      {:ok, %{"books" => books}} when is_list(books) ->
+        Logger.info("Moderation: extraction returned #{length(books)} candidate(s)")
+        {:ok, books}
+
+      error ->
+        error
+    end
+  end
+
+  # ── image_b64 path (legacy) ──────────────────────────────────────────────
 
   defp check_is_book(image_b64) do
     case AIClient.call_vision("is_book", %{image: image_b64}) do

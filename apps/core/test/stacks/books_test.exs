@@ -524,16 +524,17 @@ defmodule Stacks.BooksTest do
       File.rm(tmp)
     end
 
-    test "returns {:ok, {image, b64}} on success" do
+    test "returns {:ok, image} with storage_path on success" do
       user = insert(:user)
       tmp = System.tmp_dir!() |> Path.join("test_upload_#{System.unique_integer()}.jpg")
       File.write!(tmp, "fake image bytes")
 
       upload = %Plug.Upload{path: tmp, filename: "test.jpg", content_type: "image/jpeg"}
 
-      assert {:ok, {image, b64}} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Books.store_upload(user.id, upload)
       assert image.id != nil
-      assert is_binary(b64)
+      assert is_binary(image.storage_path)
+      assert String.starts_with?(image.storage_path, "uploads/")
 
       File.rm(tmp)
     end

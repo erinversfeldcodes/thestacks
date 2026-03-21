@@ -6,19 +6,24 @@ defmodule Stacks.GDPR.ImageRetention do
   - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
     for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
 
-  Both functions emit an `image.expired` event for each deleted record so the
-  event log has a complete lifecycle trace for every uploaded image.
+  Both functions delete the object from storage (R2/Local/Mock) when a
+  `storage_path` is present, then remove the DB record and emit an
+  `image.expired` event for each deleted record.
   """
+
+  require Logger
 
   import Ecto.Query
 
   alias Core.Repo
   alias Stacks.Events
+  alias Stacks.Storage
 
   @stuck_threshold_hours 2
 
   @doc """
   Deletes all uploaded_images records where `expires_at < now()`.
+  Removes the corresponding object from storage, then the DB record.
   Emits `image.expired` for each deleted record.
   Returns `{:ok, count}` with the number of deleted records.
   """
@@ -26,11 +31,16 @@ defmodule Stacks.GDPR.ImageRetention do
   def cleanup_expired_images do
     now = DateTime.utc_now()
 
-    expired_ids =
+    expired_rows =
       "uploaded_images"
       |> where([i], not is_nil(i.expires_at) and i.expires_at < ^now)
-      |> select([i], i.id)
+      |> select([i], %{id: i.id, storage_path: i.storage_path})
       |> Repo.all(prefix: "op")
+
+    expired_ids = Enum.map(expired_rows, & &1.id)
+
+    # Delete objects from storage before removing DB records
+    delete_storage_objects(expired_rows)
 
     {count, _} =
       "uploaded_images"
@@ -57,6 +67,7 @@ defmodule Stacks.GDPR.ImageRetention do
   Deletes uploaded_images records stuck in `pending` status for longer than
   #{@stuck_threshold_hours} hours. These are images whose IdentifyBookJob
   failed silently or never ran.
+  Removes the corresponding object from storage, then the DB record.
   Emits `image.expired` for each deleted record.
   Returns `{:ok, count}`.
   """
@@ -64,11 +75,16 @@ defmodule Stacks.GDPR.ImageRetention do
   def cleanup_stuck_images do
     threshold = DateTime.add(DateTime.utc_now(), -@stuck_threshold_hours * 3600, :second)
 
-    stuck_ids =
+    stuck_rows =
       "uploaded_images"
       |> where([i], i.status == "pending" and i.uploaded_at < ^threshold)
-      |> select([i], i.id)
+      |> select([i], %{id: i.id, storage_path: i.storage_path})
       |> Repo.all(prefix: "op")
+
+    stuck_ids = Enum.map(stuck_rows, & &1.id)
+
+    # Delete objects from storage before removing DB records
+    delete_storage_objects(stuck_rows)
 
     {count, _} =
       "uploaded_images"
@@ -89,5 +105,23 @@ defmodule Stacks.GDPR.ImageRetention do
     {:ok, count}
   rescue
     error -> {:error, error}
+  end
+
+  defp delete_storage_objects(rows) do
+    Enum.each(rows, fn
+      %{storage_path: path} when is_binary(path) and path != "" ->
+        case Storage.delete_image(path) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "ImageRetention: failed to delete storage object #{path}: #{inspect(reason)}"
+            )
+        end
+
+      _ ->
+        :ok
+    end)
   end
 end
