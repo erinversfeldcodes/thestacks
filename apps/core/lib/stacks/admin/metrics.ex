@@ -220,7 +220,9 @@ defmodule Stacks.Admin.Metrics do
     end
   end
 
-  defp count_table(table_name) do
+  @allowed_tables ~w(books users bookshelf_placements)
+
+  defp count_table(table_name) when table_name in @allowed_tables do
     case Repo.query("SELECT count(*) FROM op.#{table_name}") do
       {:ok, %{rows: [[count]]}} -> count
       _ -> 0
