@@ -18,7 +18,17 @@ defmodule Stacks.Events.Registry do
   @registry %{
     "book.created" => [
       Stacks.Enrichment.Handlers.BookCreatedHandler,
-      Stacks.Enrichment.Handlers.AuthorDiscoveryHandler
+      Stacks.Enrichment.Handlers.AuthorDiscoveryHandler,
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    "book.cover_confirmed" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    "blog.post_published" => [
+      Stacks.Blog.Handlers.BlogAssociationHandler
+    ],
+    "blog.associations_suggested" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "user.location_updated" => [
       Stacks.Discovery.Handlers.LocationUpdatedHandler
@@ -27,13 +37,30 @@ defmodule Stacks.Events.Registry do
       Stacks.Notifications.EmailConfirmationHandler
     ],
     "placement.created" => [
-      Stacks.Feeds.Handlers.PlacementHandler
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
     ],
     "placement.moved" => [
-      Stacks.Feeds.Handlers.PlacementHandler
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
     ],
     "placement.removed" => [
       Stacks.Feeds.Handlers.PlacementHandler
+    ],
+    "enrichment.prices_scraped" => [
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "enrichment.reviews_scraped" => [
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "enrichment.author_updated" => [
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "enrichment.events_discovered" => [
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "source_health.recorded" => [
+      Stacks.Workers.DbtRefreshHandler
     ]
   }
 
