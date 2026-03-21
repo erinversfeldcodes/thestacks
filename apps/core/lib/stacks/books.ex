@@ -14,6 +14,8 @@ defmodule Stacks.Books do
   # chained call. This is a known false positive.
   @dialyzer :no_opaque
 
+  require Logger
+
   import Ecto.Query
 
   alias Core.Repo
@@ -179,59 +181,64 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Reads an uploaded file, inserts an `UploadedImage` record, and returns the record
-  together with the image bytes base64-encoded.
+  Reads an uploaded file, stores it in object storage, inserts an `UploadedImage`
+  record with the `storage_path` set, and returns the record.
 
-  Returns `{:ok, {uploaded_image, image_b64}}` or `{:error, reason}`.
+  Returns `{:ok, uploaded_image}` or `{:error, reason}`.
 
-  The bytes are passed directly to `upload_and_identify/3` and included in the Oban
-  job args so any machine can execute the job without shared filesystem access.
+  The storage key is persisted on the record so any machine can retrieve the
+  image via a presigned URL — no shared filesystem or base64 in job args needed.
   """
   @spec store_upload(binary(), Plug.Upload.t()) ::
-          {:ok, {UploadedImage.t(), String.t()}} | {:error, term()}
+          {:ok, UploadedImage.t()} | {:error, term()}
   def store_upload(_user_id, %Plug.Upload{path: tmp_path}) do
-    case File.read(tmp_path) do
-      {:ok, bytes} ->
-        now = DateTime.utc_now()
+    image_id = Ecto.UUID.generate()
+    storage_key = "uploads/#{image_id}"
 
-        result =
-          %UploadedImage{}
-          |> UploadedImage.changeset(%{
-            status: "pending",
-            uploaded_at: now,
-            expires_at: DateTime.add(now, 30, :day)
-          })
-          |> Repo.insert()
+    with {:ok, bytes} <- File.read(tmp_path),
+         {:ok, _key} <- Stacks.Storage.upload_image(image_id, bytes),
+         {:ok, image} <- insert_uploaded_image(image_id, storage_key) do
+      Events.emit_safe(%{
+        event_type: "image.submitted",
+        aggregate_type: "image",
+        aggregate_id: image.id,
+        payload: %{storage_path: storage_key}
+      })
 
-        case result do
-          {:ok, image} ->
-            Events.emit_safe(%{
-              event_type: "image.submitted",
-              aggregate_type: "image",
-              aggregate_id: image.id,
-              payload: %{}
-            })
-
-            {:ok, {image, Base.encode64(bytes)}}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-
+      {:ok, image}
+    else
       {:error, reason} ->
+        # Clean up stored object if DB insert fails (no-op if upload never happened)
+        Stacks.Storage.delete_image(storage_key)
         {:error, reason}
     end
   end
 
+  defp insert_uploaded_image(image_id, storage_key) do
+    now = DateTime.utc_now()
+
+    %UploadedImage{id: image_id}
+    |> UploadedImage.changeset(%{
+      storage_path: storage_key,
+      status: "pending",
+      uploaded_at: now,
+      expires_at: DateTime.add(now, 30, :day)
+    })
+    |> Repo.insert()
+  end
+
   @doc """
   Enqueues a vision-model identification job for an uploaded image.
-  `image_b64` is included in the job args so the worker needs no filesystem access.
+
+  The `storage_key` is included in the job args so the worker can fetch a
+  presigned URL at execution time — no base64 blob in the job payload.
+
   Returns `{:ok, job}` immediately; the job resolves ISBN and creates the book asynchronously.
   """
   @spec upload_and_identify(binary(), binary(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, term()}
-  def upload_and_identify(user_id, image_id, image_b64) do
-    %{user_id: user_id, image_id: image_id, image_b64: image_b64}
+  def upload_and_identify(user_id, image_id, storage_key) do
+    %{user_id: user_id, image_id: image_id, storage_key: storage_key}
     |> IdentifyBookJob.new()
     |> Oban.insert()
   end
@@ -358,7 +365,8 @@ defmodule Stacks.Books do
         {:error, :not_found}
 
       edition ->
-        changeset = BookEdition.changeset(edition, %{cover_image_url: cover_url})
+        final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
+        changeset = BookEdition.changeset(edition, %{cover_image_url: final_url})
 
         case Repo.update(changeset) do
           {:ok, updated} ->
@@ -366,7 +374,7 @@ defmodule Stacks.Books do
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,
-              payload: %{cover_image_url: cover_url},
+              payload: %{cover_image_url: final_url},
               metadata: %{actor: "vision_sidecar"}
             })
 
@@ -376,6 +384,33 @@ defmodule Stacks.Books do
             {:error, changeset}
         end
     end
+  end
+
+  defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
+    # Covers are permanent — use a long-lived presigned URL (7 days).
+    # In production, R2 public bucket access or CDN would serve these.
+    with {:ok, image_data} <- download_cover(cover_url),
+         {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
+         {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
+      r2_url
+    else
+      _ -> cover_url
+    end
+  end
+
+  defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
+
+  defp download_cover(url) when is_binary(url) do
+    req = Finch.build(:get, url)
+
+    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000) do
+      {:ok, %Finch.Response{status: 200, body: body}} -> {:ok, body}
+      _ -> {:error, :download_failed}
+    end
+  rescue
+    e ->
+      Logger.warning("Books: cover download failed for #{url}: #{Exception.message(e)}")
+      {:error, :download_failed}
   end
 
   @doc """

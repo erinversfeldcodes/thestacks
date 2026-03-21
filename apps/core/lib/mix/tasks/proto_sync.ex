@@ -30,6 +30,7 @@ defmodule Mix.Tasks.Proto.Sync do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
 
   @shortdoc "Generate Ecto schemas, dbt models, and migrations from proto definitions"
 
@@ -52,24 +53,39 @@ defmodule Mix.Tasks.Proto.Sync do
     core_root = Path.join(repo_root, "apps/core")
     dbt_root = Path.join(repo_root, "dbt/models/staging")
     migrations_dir = Path.join(core_root, "priv/repo/migrations")
+    schema_yml_path = Path.join(dbt_root, "schema.yml")
 
-    Enum.each(manifest.tables, fn table ->
-      fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
+    generated_blocks =
+      Map.new(manifest.tables, fn table ->
+        fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-      ecto_content = EctoGenerator.generate(table, fields)
-      ecto_path = Path.join(core_root, table.ecto_path)
-      File.mkdir_p!(Path.dirname(ecto_path))
-      File.write!(ecto_path, ecto_content)
-      Mix.shell().info("Generated #{ecto_path}")
+        ecto_content = EctoGenerator.generate(table, fields)
+        ecto_path = Path.join(core_root, table.ecto_path)
+        File.mkdir_p!(Path.dirname(ecto_path))
+        File.write!(ecto_path, ecto_content)
+        Mix.shell().info("Generated #{ecto_path}")
 
-      dbt_content = DbtGenerator.generate(table, fields)
-      dbt_path = Path.join(dbt_root, table.dbt_path)
-      File.mkdir_p!(Path.dirname(dbt_path))
-      File.write!(dbt_path, dbt_content)
-      Mix.shell().info("Generated #{dbt_path}")
+        dbt_content = DbtGenerator.generate(table, fields)
+        dbt_path = Path.join(dbt_root, table.dbt_path)
+        File.mkdir_p!(Path.dirname(dbt_path))
+        File.write!(dbt_path, dbt_content)
+        Mix.shell().info("Generated #{dbt_path}")
 
-      generate_migration(table, fields, migrations_dir)
-    end)
+        generate_migration(table, fields, migrations_dir)
+
+        model_name = "stg_#{table.table_name}"
+        block = SchemaYmlGenerator.generate(table, fields, descriptor)
+        {model_name, block}
+      end)
+
+    if File.exists?(schema_yml_path) do
+      existing = File.read!(schema_yml_path)
+      merged = SchemaYmlGenerator.merge(existing, generated_blocks)
+      File.write!(schema_yml_path, merged)
+      Mix.shell().info("Updated #{schema_yml_path}")
+    else
+      Mix.shell().info("Skipped schema.yml — file not found at #{schema_yml_path}")
+    end
 
     Mix.shell().info("Proto sync complete.")
   end
@@ -140,9 +156,10 @@ defmodule Mix.Tasks.Proto.Sync do
     core_root = Path.join(repo_root, "apps/core")
     dbt_root = Path.join(repo_root, "dbt/models/staging")
     migrations_dir = Path.join(core_root, "priv/repo/migrations")
+    schema_yml_path = Path.join(dbt_root, "schema.yml")
 
-    results =
-      Enum.flat_map(manifest.tables, fn table ->
+    {results, generated_blocks} =
+      Enum.map_reduce(manifest.tables, %{}, fn table, blocks_acc ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
         ecto_result =
@@ -159,8 +176,17 @@ defmodule Mix.Tasks.Proto.Sync do
 
         migration_result = check_migration_drift(table, fields, migrations_dir)
 
-        [ecto_result, dbt_result | migration_result]
+        model_name = "stg_#{table.table_name}"
+        block = SchemaYmlGenerator.generate(table, fields, descriptor)
+        blocks_acc = Map.put(blocks_acc, model_name, block)
+
+        {[ecto_result, dbt_result | migration_result], blocks_acc}
       end)
+
+    results = List.flatten(results)
+
+    schema_yml_result = SchemaYmlGenerator.check_drift(schema_yml_path, generated_blocks)
+    results = results ++ List.wrap(schema_yml_result)
 
     drifted = Enum.filter(results, &match?({:drift, _, _}, &1))
 
