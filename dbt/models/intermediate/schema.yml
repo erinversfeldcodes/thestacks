@@ -1,0 +1,198 @@
+version: 2
+
+models:
+  - name: int_price_trends
+    description: Latest price per book per store from price snapshots, with recency ranking.
+    columns:
+      - name: id
+        description: Price snapshot UUID.
+        tests:
+          - not_null
+      - name: book_id
+        description: FK to books.
+        tests:
+          - not_null
+      - name: store_id
+        description: FK to bookstores.
+        tests:
+          - not_null
+      - name: store_name
+        description: Bookstore display name.
+      - name: price_cents
+        description: Price in minor currency units.
+        tests:
+          - not_null
+      - name: currency
+        description: ISO 4217 currency code.
+      - name: in_stock
+        description: Whether the book was in stock at scrape time.
+      - name: scraped_at
+        description: When the price was observed.
+        tests:
+          - not_null
+      - name: recency_rank
+        description: Row number partitioned by (book_id, store_id), 1 = latest.
+
+  - name: int_review_sentiment
+    description: Average rating, sentiment score, and review count per book.
+    columns:
+      - name: book_id
+        description: FK to books (group-by key).
+        tests:
+          - not_null
+          - unique
+      - name: review_count
+        description: Number of review snapshots for this book.
+      - name: avg_rating
+        description: Average rating across all sources.
+      - name: avg_sentiment_score
+        description: Average sentiment score across all sources.
+      - name: latest_scraped_at
+        description: Most recent review scrape timestamp.
+
+  - name: int_author_activity
+    description: Author enrichment status — website and RSS feed availability.
+    columns:
+      - name: author_id
+        description: Author UUID.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Author display name.
+      - name: website_url
+        description: Author website URL (null if not discovered).
+      - name: rss_feed_url
+        description: Author RSS feed URL (null if not discovered).
+      - name: has_website
+        description: Whether the author has a known website.
+      - name: has_rss
+        description: Whether the author has a known RSS feed.
+
+  - name: int_event_matches
+    description: Upcoming bookstore and third-space events.
+    columns:
+      - name: id
+        description: Event UUID.
+        tests:
+          - not_null
+      - name: venue_id
+        description: FK to bookstore or third space.
+      - name: title
+        description: Event title.
+        tests:
+          - not_null
+      - name: event_date
+        description: Scheduled event date.
+      - name: event_source
+        description: Source type (bookstore or third_space).
+
+  - name: int_book_engagement
+    description: Placement count and engagement metrics per book.
+    columns:
+      - name: book_id
+        description: FK to books (group-by key).
+        tests:
+          - not_null
+          - unique
+      - name: placement_count
+        description: Total placements across all users.
+      - name: active_placement_count
+        description: Placements not yet removed.
+      - name: reread_count
+        description: Number of re-read indicators.
+
+  - name: int_book_detail_view
+    description: Denormalised book + primary edition + author for API consumption.
+    columns:
+      - name: book_id
+        description: Book UUID (primary key).
+        tests:
+          - not_null
+          - unique
+      - name: title
+        description: Work title.
+        tests:
+          - not_null
+      - name: author_name
+        description: Author display name (null if no author).
+      - name: primary_isbn
+        description: ISBN of the primary edition.
+      - name: primary_cover_image_url
+        description: Cover image URL of the primary edition.
+      - name: visibility_tier
+        description: Content visibility tier.
+
+  - name: int_source_approval_rate
+    description: Discovered source counts by type with per-status breakdown.
+    columns:
+      - name: source_type
+        description: Source type (bookshop, review_site, community, event_source).
+        tests:
+          - not_null
+          - unique
+      - name: source_count
+        description: Total sources of this type.
+      - name: approved_count
+        description: Sources with status approved.
+      - name: dismissed_count
+        description: Sources with status dismissed.
+      - name: pending_count
+        description: Sources with status pending_review.
+      - name: excluded_count
+        description: Sources with status excluded.
+
+  - name: int_partner_availability
+    description: Book availability across partner bookstores (in-stock counts).
+    columns:
+      - name: book_id
+        description: FK to books (group-by key).
+        tests:
+          - not_null
+          - unique
+      - name: total_snapshot_count
+        description: Total price snapshots for this book.
+      - name: in_stock_count
+        description: Snapshots where book was in stock.
+      - name: out_of_stock_count
+        description: Snapshots where book was out of stock.
+
+  - name: int_blog_engagement
+    description: Blog posts with book association counts and publish status.
+    columns:
+      - name: post_id
+        description: Blog post UUID.
+        tests:
+          - not_null
+          - unique
+      - name: title
+        description: Post title.
+      - name: visibility
+        description: Post visibility (owner, group, platform).
+      - name: book_association_count
+        description: Number of book associations on this post.
+      - name: published_at
+        description: Publish timestamp (null if draft).
+
+  - name: int_visibility_resolution
+    description: Bookshelf and placement visibility summary per user.
+    columns:
+      - name: bookshelf_id
+        description: Bookshelf UUID.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: FK to users.
+        tests:
+          - not_null
+      - name: bookshelf_name
+        description: Bookshelf category name.
+      - name: bookshelf_visibility
+        description: Bookshelf visibility level.
+      - name: placement_count
+        description: Active placements on this bookshelf.
+      - name: platform_placement_count
+        description: Platform-visible placements.
+      - name: owner_placement_count
+        description: Owner-only placements.
