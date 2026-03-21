@@ -2,11 +2,11 @@
 
 with books as (
     select
-        id as book_id,
+        book_id,
         title,
-        cover_image_url,
+        primary_cover_image_url,
         created_at
-    from {{ ref('stg_books') }}
+    from {{ ref('int_book_detail_view') }}
 ),
 
 price_coverage as (
@@ -23,12 +23,12 @@ select
     books.book_id,
     books.title,
     books.created_at,
-    books.cover_image_url is null as missing_cover,
+    books.primary_cover_image_url is null as missing_cover,
     price_coverage.book_id is null as missing_prices,
     review_coverage.book_id is null as missing_reviews,
     (
         case
-            when books.cover_image_url is null
+            when books.primary_cover_image_url is null
                 then 1
             else 0
         end
@@ -49,6 +49,6 @@ left join price_coverage
 left join review_coverage
     on books.book_id = review_coverage.book_id
 where
-    books.cover_image_url is null
+    books.primary_cover_image_url is null
     or price_coverage.book_id is null
     or review_coverage.book_id is null

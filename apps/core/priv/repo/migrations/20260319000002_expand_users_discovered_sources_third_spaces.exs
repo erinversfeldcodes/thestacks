@@ -11,10 +11,7 @@ defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
   use Ecto.Migration
 
   @disable_ddl_transaction true
-  # @migration_lock false is required alongside @disable_ddl_transaction true.
-  # Without it, Ecto still acquires a pg_advisory_lock inside a transaction,
-  # which contradicts the intent of disabling DDL transactions.
-  @migration_lock false
+  @disable_migration_lock true
 
   def up do
     alter table(:users, prefix: "op") do
