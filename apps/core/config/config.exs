@@ -36,10 +36,12 @@ config :core, Oban,
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
-       {"0 3 * * 0", Stacks.Workers.RSSLivenessJob}
+       {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
+       {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
+       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}}
      ]}
   ],
-  queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3]
+  queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
   url: [host: "localhost"],
@@ -63,9 +65,11 @@ config :core, :brave_client, Stacks.Discovery.BraveClient
 config :core, :together_client, Stacks.AI.TogetherClient
 config :core, :searxng_client, Stacks.Discovery.SearxngClient
 config :core, :searxng_url, "http://localhost:8888"
+config :core, :dbt_runner, Stacks.Workers.DbtRunner
 config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
 config :core, :rss_fetcher, Stacks.Enrichment.RssFetcher
 config :core, :require_email_confirmation, false
+config :core, :storage, Stacks.Storage.Local
 
 # Cloak vault — AES-256-GCM encryption for sensitive fields at rest.
 # The key below is for development only. In production, set CLOAK_KEY.

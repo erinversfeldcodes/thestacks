@@ -13,13 +13,20 @@
 #   NEON_PROJECT_ID — Neon project to branch from
 #
 # Optional env vars:
-#   NEON_API_KEY        — Neon API key (required when using Neon branch)
-#   MODAL_TOKEN_ID      — Modal API token ID
-#   MODAL_TOKEN_SECRET  — Modal API token secret
-#   VISION_HMAC_SECRET  — Elixir → vision HMAC auth
-#   SECRET_KEY_BASE     — Phoenix secret key base
-#   NEON_PARENT_BRANCH  — Name of parent branch (default: production)
-#   GITHUB_HEAD_REF     — set automatically in GitHub Actions
+#   NEON_API_KEY            — Neon API key (required when using Neon branch)
+#   MODAL_TOKEN_ID          — Modal API token ID
+#   MODAL_TOKEN_SECRET      — Modal API token secret
+#   VISION_HMAC_SECRET      — Elixir → vision HMAC auth
+#   SECRET_KEY_BASE         — Phoenix secret key base
+#   NEON_PARENT_BRANCH      — Name of parent branch (default: production)
+#   GITHUB_HEAD_REF         — set automatically in GitHub Actions
+#   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
+#   R2_ACCESS_KEY_ID        — R2 access key
+#   R2_SECRET_ACCESS_KEY    — R2 secret key
+#   R2_BUCKET_NAME          — R2 bucket name (default: stacks-images)
+#   VISION_TOGETHER_API_KEY — Together AI API key (LLM features)
+#   SCRAPER_HMAC_SECRET     — Scraper sidecar HMAC auth
+#   BRAVE_SEARCH_API_KEY    — Brave Search API key (source discovery)
 #
 # Usage:
 #   scripts/deploy-stack.sh
@@ -177,6 +184,82 @@ else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
 fi
 
+# ── Deploy scraper service ──────────────────────────────────────────────────
+SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
+SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
+
+if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+    echo ""
+    echo "==> Deploying scraper (app: ${SCRAPER_APP})..."
+    fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
+    fly apps create "${SCRAPER_APP}" 2>&1 || true
+
+    fly secrets set \
+        SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}" \
+        RUST_LOG="info" \
+        --app "${SCRAPER_APP}" --stage
+
+    if (cd "$REPO_ROOT" && fly deploy \
+            --app "${SCRAPER_APP}" \
+            --config "${REPO_ROOT}/deploy/fly.scraper.toml" \
+            --image-label "pr-${SANITISED}" \
+            --no-cache); then
+        echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
+    else
+        echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
+        SCRAPER_INTERNAL_URL=""
+    fi
+else
+    echo "WARN: SCRAPER_HMAC_SECRET not set — skipping scraper deploy."
+    SCRAPER_INTERNAL_URL=""
+fi
+
+# ── Deploy SearXNG (ephemeral per preview) ─────────────────────────────────
+SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
+SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.internal:8080"
+
+if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
+    echo ""
+    echo "==> Deploying SearXNG (app: ${SEARXNG_APP})..."
+    fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
+    fly apps create "${SEARXNG_APP}" 2>&1 || true
+
+    fly secrets set \
+        SEARXNG_SECRET_KEY="${SEARXNG_SECRET_KEY}" \
+        --app "${SEARXNG_APP}" --stage
+
+    # Create volume for settings mount (required by fly.searxng.toml)
+    fly volumes create searxng_settings \
+        --app "${SEARXNG_APP}" \
+        --region iad \
+        --size 1 \
+        --yes 2>&1 || true
+
+    # Render settings.yml with the secret key
+    SETTINGS_TEMPLATE="${REPO_ROOT}/deploy/searxng/settings.yml"
+    SETTINGS_TMP="$(mktemp /tmp/searxng-settings-XXXXXX.yml)"
+    sed "s|__SEARXNG_SECRET_KEY__|${SEARXNG_SECRET_KEY}|g" \
+        "${SETTINGS_TEMPLATE}" > "${SETTINGS_TMP}"
+
+    if (fly deploy \
+            --app "${SEARXNG_APP}" \
+            --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
+            --yes); then
+        # Upload rendered settings to the running machine
+        fly ssh sftp shell --app "${SEARXNG_APP}" <<SFTP_EOF || true
+put ${SETTINGS_TMP} /etc/searxng/settings.yml
+SFTP_EOF
+        echo "PASS deploy: SearXNG deployed at ${SEARXNG_INTERNAL_URL}"
+    else
+        echo "WARN deploy: SearXNG deployment failed — core will degrade gracefully"
+        SEARXNG_INTERNAL_URL=""
+    fi
+    rm -f "${SETTINGS_TMP}"
+else
+    echo "WARN: SEARXNG_SECRET_KEY not set — skipping SearXNG deploy."
+    SEARXNG_INTERNAL_URL=""
+fi
+
 # ── Create core app ───────────────────────────────────────────────────────────
 echo ""
 echo "==> Creating ephemeral Fly app..."
@@ -192,6 +275,15 @@ fly secrets set \
     PHX_HOST="${CORE_APP}.fly.dev" \
     RATE_LIMIT_AUTH="60" \
     ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
+    ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
+    ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
+    ${R2_SECRET_ACCESS_KEY:+R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"} \
+    ${R2_BUCKET_NAME:+R2_BUCKET_NAME="${R2_BUCKET_NAME}"} \
+    ${VISION_TOGETHER_API_KEY:+VISION_TOGETHER_API_KEY="${VISION_TOGETHER_API_KEY}"} \
+    ${SCRAPER_HMAC_SECRET:+SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}"} \
+    ${SCRAPER_INTERNAL_URL:+SCRAPER_SERVICE_URL="${SCRAPER_INTERNAL_URL}"} \
+    ${SEARXNG_INTERNAL_URL:+SEARXNG_URL="${SEARXNG_INTERNAL_URL}"} \
+    ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
     --app "${CORE_APP}" --stage
 
 # ── Build frontend assets ─────────────────────────────────────────────────────

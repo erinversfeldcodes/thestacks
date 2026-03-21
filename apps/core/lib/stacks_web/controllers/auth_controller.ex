@@ -5,6 +5,8 @@ defmodule StacksWeb.AuthController do
 
   use CoreWeb, :controller
 
+  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.Audit
@@ -142,14 +144,6 @@ defmodule StacksWeb.AuthController do
       age_verified: user.age_verified,
       consent_analytics: user.consent_analytics
     }
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 
   defp require_email_confirmation? do

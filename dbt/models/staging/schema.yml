@@ -456,9 +456,7 @@ models:
 
   - name: stg_event_log
     description: >
-      Outbox table for all domain events emitted via Stacks.Events.emit/1.
-      Oban delivers events to registered subscribers. Immutable except for
-      GDPR erasure of PII within the payload.
+      Proto-synced staging model for event_log.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -466,35 +464,35 @@ models:
           - not_null
           - unique
       - name: event_type
-        description: Fully-qualified event type identifier (e.g. book.placed).
+        description: Event type.
         tests:
           - not_null
       - name: aggregate_type
-        description: The domain entity type this event applies to.
+        description: Aggregate type.
         tests:
           - not_null
       - name: aggregate_id
-        description: UUID of the domain entity this event applies to.
+        description: Aggregate id.
         tests:
           - not_null
       - name: schema_version
-        description: Version of the event payload schema for forward compatibility.
+        description: Schema version.
         tests:
           - not_null
       - name: payload
-        description: JSONB event payload containing the event-specific data.
+        description: Payload.
         tests:
           - not_null
       - name: metadata
-        description: JSONB metadata (correlation IDs, actor info, etc.).
+        description: Metadata.
         tests:
           - not_null
       - name: occurred_at
-        description: Timestamp when the event was emitted.
+        description: Occurred at.
         tests:
           - not_null
       - name: published_at
-        description: Timestamp when Oban delivered the event (null if pending).
+        description: Published at.
 
   # -------------------------------------------------------------------------
   # Social models (Issue #043)
@@ -1048,9 +1046,7 @@ models:
 
   - name: stg_source_health_checks
     description: >
-      Rolling health state for each external data source (scrapers, review
-      feeds, LLM outputs, etc.). Updated by the monitoring worker after each
-      probe cycle.
+      Proto-synced staging model for source_health_checks.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -1058,47 +1054,46 @@ models:
           - not_null
           - unique
       - name: source_name
-        description: Human-readable identifier for the external source.
+        description: Source name.
         tests:
           - not_null
-          - unique
       - name: source_type
-        description: Category of the external data source.
+        description: Source type.
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['scraper_config', 'review_source', 'rss_feed', 'event_source', 'llm_output']
       - name: last_success_at
-        description: Timestamp of the most recent successful probe.
+        description: Last success at.
       - name: last_failure_at
-        description: Timestamp of the most recent failed probe.
+        description: Last failure at.
       - name: last_failure_reason
-        description: Error message or reason from the most recent failure.
+        description: Last failure reason.
       - name: consecutive_failures
-        description: Number of consecutive probe failures since last success.
+        description: Consecutive failures.
         tests:
           - not_null
       - name: total_successes
-        description: Cumulative count of successful probes since source creation.
+        description: Total successes.
         tests:
           - not_null
       - name: total_failures
-        description: Cumulative count of failed probes since source creation.
+        description: Total failures.
         tests:
           - not_null
       - name: status
-        description: Aggregated health status derived from recent probe results.
+        description: Status.
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['healthy', 'degraded', 'broken']
       - name: created_at
-        description: Timestamp when the health check record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last probe update.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null

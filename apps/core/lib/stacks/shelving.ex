@@ -263,8 +263,9 @@ defmodule Stacks.Shelving do
   @doc """
   Updates the formats list for a placement. Verifies ownership.
   Returns `{:ok, placement}` or `{:error, :unauthorized}` or `{:error, changeset}`.
+
+  Deprecated: prefer `Books.merge_edition/2` for new code. Kept for Elm frontend compatibility.
   """
-  @deprecated "Use the editions model via Books.merge_edition/2 instead. Kept for Elm compatibility."
   @spec update_placement_formats(binary(), binary(), [String.t()]) ::
           {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
   def update_placement_formats(placement_id, user_id, formats) when is_list(formats) do

@@ -3,6 +3,8 @@ defmodule StacksWeb.BookshelfPlacementController do
 
   use CoreWeb, :controller
 
+  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+
   alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
@@ -170,13 +172,5 @@ defmodule StacksWeb.BookshelfPlacementController do
       placed_at: placement.placed_at,
       removed_at: placement.removed_at
     }
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 end

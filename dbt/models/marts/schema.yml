@@ -1,0 +1,270 @@
+version: 2
+
+models:
+  - name: mart_book_reviews
+    description: Review summary per book — consumer BookController.show (review tab).
+    columns:
+      - name: book_id
+        description: FK to books.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+          - unique
+      - name: avg_rating
+        description: Average rating across sources.
+      - name: avg_sentiment_score
+        description: Average sentiment score.
+      - name: review_count
+        description: Number of review sources.
+
+  - name: mart_book_prices
+    description: Latest price per book per store — consumer BookController.show (price comparison).
+    columns:
+      - name: book_id
+        description: FK to books.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+      - name: store_name
+        description: Bookstore name.
+      - name: price_cents
+        description: Price in minor currency units.
+        tests:
+          - not_null
+      - name: currency
+        description: ISO 4217 currency code.
+      - name: in_stock
+        description: Whether the book is in stock.
+      - name: scraped_at
+        description: When the price was observed.
+
+  - name: mart_community_read_count
+    description: Count of distinct shelf placements per book — consumer BookController.show (social proof).
+    columns:
+      - name: book_id
+        description: FK to books.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+          - unique
+      - name: read_count
+        description: Number of distinct shelf placements.
+      - name: last_refreshed_at
+        description: Timestamp of last incremental refresh.
+        tests:
+          - not_null
+
+  - name: mart_platform_searchable
+    description: Denormalised book data for catalogue search — consumer CatalogueController.index.
+    columns:
+      - name: book_id
+        description: Book UUID.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
+          - unique
+      - name: title
+        description: Work title.
+        tests:
+          - not_null
+      - name: author_name
+        description: Author display name.
+      - name: primary_isbn
+        description: Primary edition ISBN.
+      - name: primary_cover_image_url
+        description: Primary edition cover image URL.
+      - name: description
+        description: Book description.
+      - name: language
+        description: Book language.
+      - name: visibility_tier
+        description: Visibility tier of the book.
+      - name: last_refreshed_at
+        description: Timestamp of last incremental refresh.
+        tests:
+          - not_null
+
+  - name: mart_system_health
+    description: Source health overview — consumer MetricsController (admin dashboard).
+    columns:
+      - name: id
+        description: Source health check UUID.
+        tests:
+          - not_null
+          - unique
+      - name: source_name
+        description: Source identifier.
+        tests:
+          - not_null
+      - name: source_type
+        description: Source category.
+      - name: status
+        description: Health status (healthy, degraded, broken).
+
+  - name: mart_job_stats
+    description: Event counts by type — consumer MetricsController (job monitoring).
+    columns:
+      - name: event_type
+        description: Event type identifier.
+        tests:
+          - not_null
+          - unique
+      - name: event_count
+        description: Total events of this type.
+      - name: earliest
+        description: Earliest event timestamp.
+      - name: latest
+        description: Most recent event timestamp.
+
+  - name: mart_data_freshness
+    description: Latest event timestamp per aggregate type — consumer MetricsController (staleness).
+    columns:
+      - name: aggregate_type
+        description: Domain aggregate type.
+        tests:
+          - not_null
+          - unique
+      - name: last_event_at
+        description: Most recent event for this aggregate type.
+
+  - name: mart_cost_tracking
+    description: Platform operational costs by service — consumer CostController.index. Tests deferred — source table requires dbt role grant.
+    columns:
+      - name: id
+        description: Cost record UUID.
+      - name: category
+        description: Cost category.
+      - name: service
+        description: Service name.
+      - name: amount_cents
+        description: Cost in minor currency units.
+
+  - name: mart_gdpr_compliance
+    description: Consent and verification rates across the user base — consumer MetricsController.
+    columns:
+      - name: total_users
+        description: Total registered users.
+      - name: analytics_consented
+        description: Users who consented to analytics.
+      - name: email_confirmed
+        description: Users with confirmed email.
+      - name: age_verified
+        description: Users who completed age verification.
+
+  - name: mart_marketplace_activity
+    description: Listing counts by status — consumer MetricsController (marketplace health).
+    columns:
+      - name: status
+        description: Listing status.
+        tests:
+          - not_null
+          - unique
+      - name: listing_count
+        description: Number of listings in this status.
+
+  - name: mart_transaction_volume
+    description: Transaction aggregates by payment status — consumer MetricsController (sales).
+    columns:
+      - name: payment_status
+        description: Payment processing status.
+        tests:
+          - not_null
+          - unique
+      - name: transaction_count
+        description: Number of transactions.
+      - name: total_amount_cents
+        description: Sum of transaction amounts in minor currency units.
+
+  - name: mart_blog_activity
+    description: Blog post stats with association counts — consumer MetricsController.
+    columns:
+      - name: post_id
+        description: Blog post UUID.
+        tests:
+          - not_null
+          - unique
+      - name: title
+        description: Post title.
+      - name: visibility
+        description: Post visibility level.
+      - name: book_association_count
+        description: Number of book associations.
+      - name: published_at
+        description: Publish timestamp.
+
+  - name: mart_data_quality_trend
+    description: Daily snapshot of data quality metrics with 12-week retention (incremental).
+    columns:
+      - name: snapshot_date
+        description: Date of the quality snapshot.
+        tests:
+          - not_null
+          - unique
+      - name: total_books
+        description: Total books in catalogue.
+      - name: books_with_covers
+        description: Books with cover images.
+      - name: books_with_prices
+        description: Books with at least one price snapshot.
+      - name: books_with_reviews
+        description: Books with at least one review.
+      - name: cover_pct
+        description: Cover image coverage percentage.
+      - name: price_pct
+        description: Price coverage percentage.
+      - name: review_pct
+        description: Review coverage percentage.
+      - name: total_sources
+        description: Total monitored sources.
+      - name: healthy_sources
+        description: Sources with healthy status.
+
+  - name: mart_enrichment_gaps
+    description: Books missing enrichment data (covers, prices, reviews).
+    columns:
+      - name: book_id
+        description: Book UUID.
+        tests:
+          - not_null
+          - unique
+      - name: title
+        description: Book title.
+      - name: missing_cover
+        description: True if book has no cover image.
+      - name: missing_prices
+        description: True if book has no price data.
+      - name: missing_reviews
+        description: True if book has no review data.
+      - name: gap_count
+        description: Number of missing enrichment types (0-3).
+
+  - name: mart_llm_faithfulness
+    description: Confidence distribution for LLM-generated post-book associations by source.
+    columns:
+      - name: source
+        description: Association source type (e.g., llm, manual).
+        tests:
+          - not_null
+          - unique
+      - name: total_associations
+        description: Total associations from this source.
+      - name: high_confidence
+        description: Associations with confidence >= 0.9.
+      - name: medium_confidence
+        description: Associations with confidence 0.7-0.9.
+      - name: low_confidence
+        description: Associations with confidence < 0.7.
+      - name: avg_confidence
+        description: Average confidence score.
+      - name: min_confidence
+        description: Minimum confidence score.
+      - name: max_confidence
+        description: Maximum confidence score.

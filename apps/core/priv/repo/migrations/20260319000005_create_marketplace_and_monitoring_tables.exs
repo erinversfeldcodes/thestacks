@@ -114,7 +114,7 @@ defmodule Core.Repo.Migrations.CreateMarketplaceAndMonitoringTables do
       add :expires_at, :utc_datetime_usec
       add :sold_at, :utc_datetime_usec
 
-      timestamps(type: :utc_datetime_usec)
+      timestamps(type: :utc_datetime_usec, inserted_at: :created_at)
     end
 
     create index(:listings, [:seller_id], prefix: "op")
