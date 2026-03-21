@@ -185,13 +185,10 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
         tests
       end
 
-    # relationships for binary_id FK fields (only when field name ends in _id)
-    tests =
-      if ecto_type == :binary_id and String.ends_with?(field.name, "_id") do
-        tests ++ [{:relationships, infer_ref_model(field.name)}]
-      else
-        tests
-      end
+    # relationships tests removed: Postgres enforces FK integrity at the OLTP
+    # layer, and auto-inferred ref model names are unreliable (naive pluralisation,
+    # polymorphic references like aggregate_id). Add relationships tests manually
+    # to intermediate/mart schema.yml where denormalised joins could produce orphans.
 
     # accepted_values for enum fields
     if field.type == "TYPE_ENUM" do
@@ -212,19 +209,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     |> String.replace("_", " ")
     |> String.capitalize()
     |> Kernel.<>(".")
-  end
-
-  defp infer_ref_model(field_name) do
-    base = String.trim_trailing(field_name, "_id")
-
-    ref_table =
-      cond do
-        String.ends_with?(base, "s") -> base
-        String.ends_with?(base, "y") -> String.slice(base, 0..-2//1) <> "ies"
-        true -> base <> "s"
-      end
-
-    "stg_#{ref_table}"
   end
 
   # -- YAML rendering ---------------------------------------------------------
