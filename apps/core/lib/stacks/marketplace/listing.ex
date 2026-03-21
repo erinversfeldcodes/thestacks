@@ -15,8 +15,6 @@ defmodule Stacks.Marketplace.Listing do
   @derive {Jason.Encoder,
            only: [
              :id,
-             :book_id,
-             :seller_id,
              :status,
              :pricing_mode,
              :price_cents,
@@ -28,7 +26,9 @@ defmodule Stacks.Marketplace.Listing do
              :expires_at,
              :sold_at,
              :created_at,
-             :updated_at
+             :updated_at,
+             :book,
+             :seller
            ]}
 
   @type t :: %__MODULE__{}
@@ -68,7 +68,6 @@ defmodule Stacks.Marketplace.Listing do
   @valid_pricing_modes ~w(fixed offer)
   @valid_conditions ~w(new like_new good fair poor)
 
-  @doc "Changeset for creating or updating a listing."
   def changeset(listing, attrs) do
     listing
     |> cast(attrs, @required_fields ++ @optional_fields)
@@ -76,5 +75,10 @@ defmodule Stacks.Marketplace.Listing do
     |> validate_inclusion(:status, @valid_statuses)
     |> validate_inclusion(:pricing_mode, @valid_pricing_modes)
     |> validate_inclusion(:condition, @valid_conditions)
+    |> validate_number(:price_cents, greater_than: 0)
+    |> unique_constraint([:book_id, :seller_id],
+      name: "listings_active_book_seller_idx",
+      message: "already has a draft or active listing for this book"
+    )
   end
 end
