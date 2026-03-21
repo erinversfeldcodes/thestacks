@@ -23,6 +23,15 @@ defmodule Stacks.Workers.ImageRetentionJob do
         "ImageRetentionJob: cleaned up #{stuck_count} stuck + #{expired_count} expired image records"
       )
 
+      # Missing-purge alarm: detect images that should have been cleaned but weren't
+      orphaned = ImageRetention.missing_purge_check()
+
+      if orphaned != [] do
+        Logger.error(
+          "ImageRetentionJob: ALARM — #{length(orphaned)} orphaned image(s) past expiry: #{inspect(orphaned)}"
+        )
+      end
+
       :ok
     else
       {:error, reason} ->
