@@ -8,6 +8,9 @@ models:
         description: FK to books.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
           - unique
       - name: avg_rating
         description: Average rating across sources.
@@ -23,6 +26,9 @@ models:
         description: FK to books.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: store_name
         description: Bookstore name.
       - name: price_cents
@@ -43,6 +49,9 @@ models:
         description: FK to books.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
           - unique
       - name: read_count
         description: Number of distinct shelf placements.
@@ -54,6 +63,9 @@ models:
         description: Book UUID.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
           - unique
       - name: title
         description: Work title.

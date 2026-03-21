@@ -12,6 +12,9 @@ models:
         description: FK to books.
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: store_id
         description: FK to bookstores.
         tests:
@@ -41,6 +44,9 @@ models:
         tests:
           - not_null
           - unique
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: review_count
         description: Number of review snapshots for this book.
       - name: avg_rating
@@ -95,6 +101,9 @@ models:
         tests:
           - not_null
           - unique
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: placement_count
         description: Total placements across all users.
       - name: active_placement_count
@@ -110,6 +119,9 @@ models:
         tests:
           - not_null
           - unique
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: title
         description: Work title.
         tests:
