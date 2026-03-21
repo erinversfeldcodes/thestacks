@@ -34,6 +34,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
+  pipeline :require_owner do
+    plug StacksWeb.Plugs.RequireRole, role: "owner"
+  end
+
   pipeline :view_as do
     plug StacksWeb.Plugs.ViewAsPlug
   end
@@ -118,6 +122,11 @@ defmodule CoreWeb.Router do
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
+  end
+
+  # Admin-only endpoints — require owner role
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :require_owner]
 
     get "/metrics", MetricsController, :index
     get "/metrics/quality-trends", MetricsController, :quality_trends
