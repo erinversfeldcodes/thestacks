@@ -3,6 +3,8 @@ defmodule StacksWeb.BookshelfController do
 
   use CoreWeb, :controller
 
+  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
   alias Stacks.Visibility
@@ -50,14 +52,6 @@ defmodule StacksWeb.BookshelfController do
 
   def update_visibility(conn, _params) do
     conn |> put_status(422) |> json(%{error: "visibility is required"})
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 
   defp render_bookshelf(conn, user, bookshelf_name, viewer) do
