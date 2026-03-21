@@ -2,12 +2,295 @@ defmodule Stacks.Marketplace do
   @moduledoc """
   Context for marketplace features: listings, offer threads, offer messages,
   and transactions.
+
+  Listing state machine:
+
+      draft ──→ active ──→ removed
+                  │
+                  ├──→ expired
+                  │
+                  └──→ sold
+
+  Valid transitions: draft→active, active→removed, active→expired, active→sold.
   """
 
-  alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
+  import Ecto.Query
 
-  _ = OfferThread
-  _ = OfferMessage
-  _ = Listing
-  _ = Transaction
+  alias Core.Repo
+  alias Ecto.Multi
+  alias Stacks.Events
+  alias Stacks.Marketplace.Listing
+  alias Stacks.Shelving.{Bookshelf, Placement}
+
+  @valid_transitions %{
+    "draft" => ~w(active),
+    "active" => ~w(removed expired sold)
+  }
+
+  @default_limit 50
+
+  # ---------------------------------------------------------------------------
+  # Create
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Creates a new listing in `draft` status.
+
+  Validates that the seller has an active (non-removed) placement of the book
+  on one of their bookshelves. Returns `{:error, :no_placement}` if they don't.
+  """
+  @spec create_listing(binary(), map()) ::
+          {:ok, Listing.t()} | {:error, :no_placement | Ecto.Changeset.t()}
+  def create_listing(seller_id, attrs) do
+    book_id = attrs[:book_id] || attrs["book_id"]
+
+    attrs =
+      attrs
+      |> Map.new(fn {k, v} -> {to_string(k), v} end)
+      |> Map.merge(%{"seller_id" => seller_id, "status" => "draft"})
+
+    Multi.new()
+    |> Multi.run(:placement, fn repo, _ ->
+      case find_seller_placement_with_repo(repo, seller_id, book_id) do
+        nil -> {:error, :no_placement}
+        placement -> {:ok, placement}
+      end
+    end)
+    |> Multi.insert(:listing, fn _ -> Listing.changeset(%Listing{}, attrs) end)
+    |> Multi.run(:emit_event, fn _repo, %{listing: listing} ->
+      Events.emit_safe(%{
+        event_type: "listing.created",
+        aggregate_type: "listing",
+        aggregate_id: listing.id,
+        payload: %{book_id: listing.book_id, seller_id: seller_id}
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{listing: listing}} -> {:ok, Repo.preload(listing, [:book, :seller])}
+      {:error, :placement, :no_placement, _} -> {:error, :no_placement}
+      {:error, :listing, changeset, _} -> {:error, changeset}
+      {:error, _, reason, _} -> {:error, reason}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Read
+  # ---------------------------------------------------------------------------
+
+  @doc "Fetches a single listing with book and seller preloaded."
+  @spec get_listing(binary()) :: Listing.t() | nil
+  def get_listing(id) do
+    Listing
+    |> Repo.get(id)
+    |> Repo.preload([:book, :seller])
+  end
+
+  @doc "Returns active listings, most recently listed first. Limited to `limit` (default 50)."
+  @spec list_active_listings(keyword()) :: [Listing.t()]
+  def list_active_listings(opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_limit)
+
+    Listing
+    |> where([l], l.status == "active")
+    |> order_by([l], desc: l.listed_at)
+    |> limit(^limit)
+    |> preload([:book, :seller])
+    |> Repo.all()
+  end
+
+  @doc "Returns listings for a given seller, newest first. Limited to `limit` (default 50)."
+  @spec list_user_listings(binary(), keyword()) :: [Listing.t()]
+  def list_user_listings(seller_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_limit)
+
+    Listing
+    |> where([l], l.seller_id == ^seller_id)
+    |> order_by([l], desc: l.created_at)
+    |> limit(^limit)
+    |> preload([:book, :seller])
+    |> Repo.all()
+  end
+
+  # ---------------------------------------------------------------------------
+  # State transitions
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Activates a draft listing: draft → active.
+
+  Sets `listed_at` to now, sets `expires_at` to 30 days from now,
+  and denormalizes `listing_status = "active"` on the seller's placement.
+  """
+  @spec activate_listing(Listing.t(), binary()) ::
+          {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
+  def activate_listing(%Listing{} = listing, user_id) do
+    with :ok <- verify_ownership(listing, user_id) do
+      now = DateTime.utc_now()
+      expires_at = DateTime.add(now, 30, :day)
+
+      Multi.new()
+      |> Multi.run(:locked_listing, fn repo, _ ->
+        lock_and_validate_transition(repo, listing.id, "active")
+      end)
+      |> Multi.update(:listing, fn %{locked_listing: locked} ->
+        Listing.changeset(locked, %{
+          status: "active",
+          listed_at: now,
+          expires_at: expires_at
+        })
+      end)
+      |> Multi.run(:denormalize, fn repo, %{listing: l} ->
+        update_placement_listing_status(repo, user_id, l.book_id, "active")
+      end)
+      |> Multi.run(:emit_event, fn _repo, %{listing: l} ->
+        Events.emit_safe(%{
+          event_type: "listing.activated",
+          aggregate_type: "listing",
+          aggregate_id: l.id,
+          payload: %{book_id: l.book_id, seller_id: user_id}
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{listing: listing}} -> {:ok, Repo.preload(listing, [:book, :seller])}
+        {:error, :locked_listing, reason, _} -> {:error, reason}
+        {:error, :listing, changeset, _} -> {:error, changeset}
+        {:error, _, reason, _} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Deactivates an active listing: active → removed.
+
+  Clears `listing_status` on the seller's placement.
+  """
+  @spec deactivate_listing(Listing.t(), binary()) ::
+          {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
+  def deactivate_listing(%Listing{} = listing, user_id) do
+    with :ok <- verify_ownership(listing, user_id) do
+      Multi.new()
+      |> Multi.run(:locked_listing, fn repo, _ ->
+        lock_and_validate_transition(repo, listing.id, "removed")
+      end)
+      |> Multi.update(:listing, fn %{locked_listing: locked} ->
+        Listing.changeset(locked, %{status: "removed"})
+      end)
+      |> Multi.run(:denormalize, fn repo, %{listing: l} ->
+        update_placement_listing_status(repo, user_id, l.book_id, nil)
+      end)
+      |> Multi.run(:emit_event, fn _repo, %{listing: l} ->
+        Events.emit_safe(%{
+          event_type: "listing.removed",
+          aggregate_type: "listing",
+          aggregate_id: l.id,
+          payload: %{book_id: l.book_id, seller_id: user_id}
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{listing: listing}} -> {:ok, Repo.preload(listing, [:book, :seller])}
+        {:error, :locked_listing, reason, _} -> {:error, reason}
+        {:error, :listing, changeset, _} -> {:error, changeset}
+        {:error, _, reason, _} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Expires an active listing: active → expired.
+
+  Called by ListingExpiryJob for listings past their `expires_at`.
+  Clears `listing_status` on the seller's placement.
+  """
+  @spec expire_listing(Listing.t()) ::
+          {:ok, Listing.t()} | {:error, :invalid_transition | Ecto.Changeset.t()}
+  def expire_listing(%Listing{} = listing) do
+    Multi.new()
+    |> Multi.run(:locked_listing, fn repo, _ ->
+      lock_and_validate_transition(repo, listing.id, "expired")
+    end)
+    |> Multi.update(:listing, fn %{locked_listing: locked} ->
+      Listing.changeset(locked, %{status: "expired"})
+    end)
+    |> Multi.run(:denormalize, fn repo, %{listing: l} ->
+      update_placement_listing_status(repo, l.seller_id, l.book_id, nil)
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{listing: l} ->
+      Events.emit_safe(%{
+        event_type: "listing.expired",
+        aggregate_type: "listing",
+        aggregate_id: l.id,
+        payload: %{book_id: l.book_id, seller_id: l.seller_id}
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{listing: listing}} -> {:ok, Repo.preload(listing, [:book, :seller])}
+      {:error, :locked_listing, reason, _} -> {:error, reason}
+      {:error, :listing, changeset, _} -> {:error, changeset}
+      {:error, _, reason, _} -> {:error, reason}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Private helpers
+  # ---------------------------------------------------------------------------
+
+  defp verify_ownership(%Listing{seller_id: seller_id}, user_id) do
+    if seller_id == user_id, do: :ok, else: {:error, :unauthorized}
+  end
+
+  defp validate_transition(current_status, target_status) do
+    allowed = Map.get(@valid_transitions, current_status, [])
+
+    if target_status in allowed do
+      :ok
+    else
+      {:error, :invalid_transition}
+    end
+  end
+
+  defp lock_and_validate_transition(repo, listing_id, target_status) do
+    case repo.one(from(l in Listing, where: l.id == ^listing_id, lock: "FOR UPDATE")) do
+      nil ->
+        {:error, :not_found}
+
+      %Listing{} = locked ->
+        case validate_transition(locked.status, target_status) do
+          :ok -> {:ok, locked}
+          error -> error
+        end
+    end
+  end
+
+  defp find_seller_placement_with_repo(repo, seller_id, book_id) when is_binary(book_id) do
+    query =
+      Placement
+      |> join(:inner, [p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^seller_id
+      )
+      |> where([p], p.book_id == ^book_id and is_nil(p.removed_at))
+      |> limit(1)
+
+    repo.one(query)
+  end
+
+  defp find_seller_placement_with_repo(_repo, _seller_id, _book_id), do: nil
+
+  defp update_placement_listing_status(repo, user_id, book_id, status) do
+    case find_seller_placement_with_repo(repo, user_id, book_id) do
+      nil when status != nil ->
+        {:error, :placement_not_found}
+
+      nil ->
+        {:ok, nil}
+
+      placement ->
+        placement
+        |> Placement.changeset(%{listing_status: status})
+        |> repo.update()
+    end
+  end
 end
