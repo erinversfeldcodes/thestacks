@@ -9,6 +9,8 @@ defmodule StacksWeb.BlogController do
 
   use CoreWeb, :controller
 
+  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+
   alias Stacks.Accounts.Guardian
   alias Stacks.Blog
 
@@ -167,14 +169,6 @@ defmodule StacksWeb.BlogController do
       created_at: post.created_at,
       updated_at: post.updated_at
     }
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 
   defp atomize_keys(map) do
