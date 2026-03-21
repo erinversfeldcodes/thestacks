@@ -208,3 +208,28 @@ models:
         description: Platform-visible placements.
       - name: owner_placement_count
         description: Owner-only placements.
+
+  - name: int_source_health
+    description: Source health aggregation with uptime percentage from stg_source_health_checks.
+    columns:
+      - name: source_name
+        description: Unique source identifier.
+        tests:
+          - not_null
+          - unique
+      - name: status
+        description: Current health status.
+        tests:
+          - not_null
+      - name: consecutive_failures
+        description: Current streak of consecutive failures.
+      - name: total_successes
+        description: All-time successful checks.
+      - name: total_failures
+        description: All-time failed checks.
+      - name: total_checks
+        description: Sum of successes and failures.
+      - name: uptime_pct
+        description: Uptime percentage (0-100).
+      - name: last_checked_at
+        description: Alias for updated_at — when the source was last checked.
