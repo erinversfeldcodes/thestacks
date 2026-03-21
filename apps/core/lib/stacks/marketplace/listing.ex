@@ -21,6 +21,7 @@ defmodule Stacks.Marketplace.Listing do
              :currency,
              :condition,
              :description,
+             :contact_info,
              :photo_urls,
              :listed_at,
              :expires_at,
@@ -40,6 +41,7 @@ defmodule Stacks.Marketplace.Listing do
     field :currency, :string, default: "ZAR"
     field :condition, :string
     field :description, :string
+    field :contact_info, :string
     field :photo_urls, {:array, :string}, default: []
     field :listed_at, :utc_datetime_usec
     field :expires_at, :utc_datetime_usec
@@ -58,6 +60,7 @@ defmodule Stacks.Marketplace.Listing do
     :status,
     :currency,
     :description,
+    :contact_info,
     :photo_urls,
     :listed_at,
     :expires_at,
@@ -76,6 +79,7 @@ defmodule Stacks.Marketplace.Listing do
     |> validate_inclusion(:pricing_mode, @valid_pricing_modes)
     |> validate_inclusion(:condition, @valid_conditions)
     |> validate_number(:price_cents, greater_than: 0)
+    |> validate_length(:contact_info, max: 500)
     |> unique_constraint([:book_id, :seller_id],
       name: "listings_active_book_seller_idx",
       message: "already has a draft or active listing for this book"
