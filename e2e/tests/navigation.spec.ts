@@ -18,7 +18,7 @@ test.describe("Navbar navigation — authenticated", () => {
   const dropdownItems = [
     { label: "Search", path: "/search", href: "/search", parent: "Catalogue" },
     { label: "Add Book", path: "/upload", href: "/upload", parent: "Catalogue" },
-    { label: "Settings", path: "/settings/consent", href: "/settings/consent", parent: null },
+    { label: "Settings", path: "/settings/profile", href: "/settings/profile", parent: null },
   ];
 
   for (const item of topLevelItems) {

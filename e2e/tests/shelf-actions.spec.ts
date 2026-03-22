@@ -9,7 +9,7 @@ test.use({ storageState: suiteAuthFile("shelf-actions") });
 test.describe.configure({ mode: "serial" });
 
 test.describe("Shelf actions — move book between shelves", () => {
-  test("move a book from library to wishlist via book detail", async ({
+  test("move a book from library to wishlist via book detail overlay", async ({
     page,
   }) => {
     await ensureBookOnLibrary(page);
@@ -18,37 +18,40 @@ test.describe("Shelf actions — move book between shelves", () => {
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
-    // Click the first book to open detail
+    // Click the first book to open detail overlay
     const bookButton = page.locator(".book-button").first();
     await expect(bookButton).toBeAttached({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    // Wait for book detail to load
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    // Wait for overlay to appear
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await overlay.waitFor({ state: "visible" });
+    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
 
     // Verify the shelf title shows "from Library"
-    const shelfTitle = page.locator(".book-detail__section-title", {
+    const shelfTitle = overlay.locator(".book-detail__section-title", {
       hasText: "Move to Shelf from Library",
     });
     await expect(shelfTitle).toBeVisible({ timeout: 5000 });
 
     // Open the shelf mover
-    await page.click('button:has-text("Choose Bookshelf")');
-    await expect(page.locator(".shelf-mover")).toBeVisible();
+    await overlay.locator('button:has-text("Choose Bookshelf")').click();
+    await expect(overlay.locator(".shelf-mover")).toBeVisible();
 
     // Select Wish List from the dropdown
-    await page.selectOption(".shelf-mover__select", "wishlist");
+    await overlay.locator(".shelf-mover__select").selectOption("wishlist");
 
     // Click Move
-    await page.click('button:has-text("Move")');
+    await overlay.locator('button:has-text("Move")').click();
 
     // Wait for success message
     await expect(
-      page.locator(".book-detail__status--success")
+      overlay.locator(".book-detail__status--success")
     ).toBeVisible({ timeout: 5000 });
 
     // Verify the title updated to show "from Wish List"
-    const updatedTitle = page.locator(".book-detail__section-title", {
+    const updatedTitle = overlay.locator(".book-detail__section-title", {
       hasText: "Move to Shelf from Wish List",
     });
     await expect(updatedTitle).toBeVisible();
@@ -95,8 +98,8 @@ test.describe("Shelf actions — add book from catalogue", () => {
   });
 });
 
-test.describe("Shelf actions — add unplaced book from detail page", () => {
-  test("open an unplaced book detail and add to collection", async ({
+test.describe("Shelf actions — add unplaced book from detail overlay", () => {
+  test("open an unplaced book detail overlay and add to collection", async ({
     page,
   }) => {
     // Find an unplaced book via API (reliable, no UI race conditions)
@@ -120,35 +123,45 @@ test.describe("Shelf actions — add unplaced book from detail page", () => {
 
     test.skip(!unplacedBookId, "No unplaced books available in catalogue");
 
-    // Navigate directly to the unplaced book's detail page
-    await page.goto(`/books/${unplacedBookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    // Open the unplaced book's detail via the catalogue overlay
+    await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
+    const cardLink = page.locator(`.catalogue__card-link[href="/books/${unplacedBookId}"]`).first();
+    if (await cardLink.count() > 0) {
+      await cardLink.click();
+    } else {
+      // Fallback: click any card link for an unplaced book
+      await page.locator(".catalogue__card-link").first().click();
+    }
+
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
 
     // Should NOT show "Remove from collection" (book is unplaced)
     await expect(
-      page.locator('button:has-text("Remove from collection")')
+      overlay.locator('button:has-text("Remove from collection")')
     ).not.toBeVisible();
 
     // Should show "Add to Collection"
-    const addSection = page.locator(".book-detail__section-title", {
+    const addSection = overlay.locator(".book-detail__section-title", {
       hasText: "Add to Collection",
     });
     await expect(addSection).toBeVisible({ timeout: 10000 });
 
     // Click "Choose Bookshelf"
-    await page.click('button:has-text("Choose Bookshelf")');
-    await expect(page.locator(".shelf-mover")).toBeVisible();
+    await overlay.locator('button:has-text("Choose Bookshelf")').click();
+    await expect(overlay.locator(".shelf-mover")).toBeVisible();
 
     // Select "Antilibrary" and click Move (which triggers ConfirmPlace)
-    await page.selectOption(".shelf-mover__select", "antilibrary");
-    await page.click('.shelf-mover__btn:has-text("Move")');
+    await overlay.locator(".shelf-mover__select").selectOption("antilibrary");
+    await overlay.locator('.shelf-mover__btn:has-text("Move")').click();
 
     // Should show success and switch to "Move to Shelf from Antilibrary"
     await expect(
-      page.locator(".book-detail__status--success")
+      overlay.locator(".book-detail__status--success")
     ).toBeVisible({ timeout: 5000 });
     await expect(
-      page.locator(".book-detail__section-title", {
+      overlay.locator(".book-detail__section-title", {
         hasText: "Move to Shelf from Antilibrary",
       })
     ).toBeVisible();
@@ -166,11 +179,14 @@ test.describe("Shelf actions — remove book from collection", () => {
     const bookButton = page.locator(".book-button").first();
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
 
     // The remove button should be visible since the book is placed
     await expect(
-      page.locator('button:has-text("Remove from collection")')
+      overlay.locator('button:has-text("Remove from collection")')
     ).toBeVisible({ timeout: 5000 });
   });
 
@@ -184,12 +200,15 @@ test.describe("Shelf actions — remove book from collection", () => {
     const bookButton = page.locator(".book-button").first();
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
 
     // Click remove
-    await page.click('button:has-text("Remove from collection")');
+    await overlay.locator('button:has-text("Remove from collection")').click();
 
-    // Modal should appear
+    // Modal should appear (may be outside the dialog overlay)
     await expect(page.locator(".modal-overlay")).toBeVisible({ timeout: 3000 });
 
     // Click "Remove" in the modal (not "Keep It")
@@ -197,7 +216,8 @@ test.describe("Shelf actions — remove book from collection", () => {
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
-    // Should navigate back to the library
-    await page.waitForURL("**/library", { timeout: 10000 });
+    // Overlay should close and we should be back on the library page
+    await expect(overlay).not.toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/library/, { timeout: 10000 });
   });
 });

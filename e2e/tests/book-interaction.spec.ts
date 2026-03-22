@@ -26,7 +26,7 @@ test.describe("Book interaction — Library page", () => {
     expect(isVisible).toBeTruthy();
   });
 
-  test("clicking a book navigates to the book detail page", async ({ page }) => {
+  test("clicking a book opens the book detail overlay", async ({ page }) => {
     await page.goto("/library");
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
@@ -37,11 +37,12 @@ test.describe("Book interaction — Library page", () => {
     // inside a CSS perspective/3D context (reports "outside viewport")
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    // Should navigate to the book detail page
-    await page.waitForURL("**/books/**", { timeout: 5000 });
+    // Should open the book detail overlay (URL does NOT change)
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
 
-    // The book detail page should show the book's title
-    const detailTitle = page.locator(".book-detail__title, h1");
+    // The overlay should show the book's title
+    const detailTitle = overlay.locator(".book-detail__title, h1");
     await expect(detailTitle).toBeVisible({ timeout: 5000 });
     const titleText = await detailTitle.textContent();
     expect(titleText).toBeTruthy();
