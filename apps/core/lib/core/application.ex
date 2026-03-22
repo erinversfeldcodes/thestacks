@@ -3,8 +3,6 @@ defmodule Core.Application do
 
   use Application
 
-  alias Stacks.Workers.RefreshCostsJob
-
   @impl true
   def start(_type, _args) do
     children =
@@ -22,20 +20,7 @@ defmodule Core.Application do
       ] ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
-    result = Supervisor.start_link(children, opts)
-
-    # Enqueue RefreshCostsJob shortly after startup so cost data is populated
-    # immediately after a deploy. Delayed to ensure Oban is fully initialized.
-    # The daily cron keeps it fresh after that.
-    # Skipped in test: the spawned Task has no Ecto sandbox access.
-    if match?({:ok, _}, result) and Application.get_env(:core, :env) != :test do
-      Task.start(fn ->
-        Process.sleep(5_000)
-        Oban.insert(RefreshCostsJob.new(%{}))
-      end)
-    end
-
-    result
+    Supervisor.start_link(children, opts)
   end
 
   # Fly's internal .internal hostnames resolve to IPv6 (6PN) addresses only.
