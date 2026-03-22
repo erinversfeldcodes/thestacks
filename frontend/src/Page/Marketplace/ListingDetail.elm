@@ -1,6 +1,6 @@
 module Page.Marketplace.ListingDetail exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view
@@ -14,14 +14,13 @@ only on active listings).
 
 -}
 
-import Api
 import Html exposing (Html, a, div, h1, h2, img, p, span, text)
 import Html.Attributes exposing (class, href, src)
 import Http
 import Json.Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, authorName, bookCoverImageUrl, bookIsbn, bookPageCount, bookPublicationYear)
-import Types.Listing exposing (Listing, ListingStatus(..), conditionLabel, listingDecoder, statusLabel)
+import Types.Book exposing (authorName, bookCoverImageUrl, bookIsbn, bookPageCount, bookPublicationYear)
+import Types.Listing exposing (Listing, ListingStatus(..), conditionLabel, statusLabel)
 import Types.RemoteData exposing (RemoteData(..))
 
 

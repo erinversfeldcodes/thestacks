@@ -21,16 +21,8 @@ type alias StoreListing =
     { storeName : String
     , priceZar : Float
     , buyUrl : String
-    , trend : PriceTrend
+    , trend : String
     }
-
-
-{-| Simple price trend indicator.
--}
-type PriceTrend
-    = TrendUp
-    | TrendDown
-    | TrendStable
 
 
 {-| Prices grouped by edition format.
@@ -123,17 +115,17 @@ viewStoreListing store =
         ]
 
 
-trendIndicator : PriceTrend -> String
+trendIndicator : String -> String
 trendIndicator trend =
     case trend of
-        TrendUp ->
-            "^"
+        "up" ->
+            "↑"
 
-        TrendDown ->
-            "v"
+        "down" ->
+            "↓"
 
-        TrendStable ->
-            "-"
+        _ ->
+            "→"
 
 
 {-| Format a Float as a ZAR price string with two decimal places.

@@ -1,6 +1,6 @@
 module Page.Marketplace.CreateListing exposing
     ( Model
-    , Msg(..)
+    , Msg
     , OutMsg(..)
     , init
     , update
@@ -18,7 +18,7 @@ Activate button.
 
 import Api
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text, textarea)
-import Html.Attributes exposing (attribute, class, disabled, for, id, name, placeholder, selected, type_, value)
+import Html.Attributes exposing (class, disabled, for, id, name, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route

@@ -1,6 +1,6 @@
 module Page.Marketplace.MyListings exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

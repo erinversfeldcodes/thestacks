@@ -2,8 +2,6 @@ module Navigation.Route exposing
     ( ConfirmStatus(..)
     , Route(..)
     , fromUrl
-    , isAdminRoute
-    , isMarketplaceRoute
     , isSettingsRoute
     , toPath
     )
@@ -221,41 +219,6 @@ isSettingsRoute route =
             True
 
         SettingsPrivacy ->
-            True
-
-        _ ->
-            False
-
-
-isAdminRoute : Route -> Bool
-isAdminRoute route =
-    case route of
-        AdminSourceApproval ->
-            True
-
-        AdminScraperConfig ->
-            True
-
-        AdminMetrics ->
-            True
-
-        _ ->
-            False
-
-
-isMarketplaceRoute : Route -> Bool
-isMarketplaceRoute route =
-    case route of
-        MarketplaceBrowse ->
-            True
-
-        MarketplaceCreate ->
-            True
-
-        MarketplaceMyListings ->
-            True
-
-        MarketplaceDetail _ ->
             True
 
         _ ->

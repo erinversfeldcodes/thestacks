@@ -1,6 +1,6 @@
 module Page.Admin.SourceApproval exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

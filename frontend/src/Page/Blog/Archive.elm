@@ -1,6 +1,6 @@
 module Page.Blog.Archive exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view
@@ -8,11 +8,11 @@ module Page.Blog.Archive exposing
 
 import Api
 import Components.VisibilityBadge as VisibilityBadge
-import Html exposing (Html, a, button, div, h1, h2, li, p, text, ul)
+import Html exposing (Html, a, div, h1, h2, li, p, text, ul)
 import Html.Attributes exposing (class, href)
 import Http
 import Navigation.Route as Route exposing (Route(..))
-import Types.BlogPost exposing (BlogPostSummary, Visibility(..), blogPostSummaryDecoder, visibilityToString)
+import Types.BlogPost exposing (BlogPostSummary, visibilityToString)
 import Types.RemoteData exposing (RemoteData(..))
 
 

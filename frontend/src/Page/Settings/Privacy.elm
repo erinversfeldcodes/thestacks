@@ -1,6 +1,6 @@
 module Page.Settings.Privacy exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

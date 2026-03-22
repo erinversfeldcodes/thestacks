@@ -1,6 +1,6 @@
 module Page.Marketplace.Browse exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view
@@ -19,8 +19,8 @@ import Html exposing (Html, a, div, h1, h3, img, p, span, text)
 import Html.Attributes exposing (class, href, src)
 import Http
 import Navigation.Route as Route
-import Types.Book exposing (Book, authorName, bookCoverImageUrl)
-import Types.Listing exposing (Listing, ListingsResponse, conditionLabel, statusLabel)
+import Types.Book exposing (authorName, bookCoverImageUrl)
+import Types.Listing exposing (Listing, ListingsResponse, conditionLabel)
 import Types.RemoteData exposing (RemoteData(..))
 
 

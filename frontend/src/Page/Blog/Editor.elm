@@ -1,7 +1,7 @@
 module Page.Blog.Editor exposing
     ( Mode(..)
     , Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view
@@ -12,7 +12,7 @@ import Html exposing (Html, button, div, h1, label, option, p, select, text, tex
 import Html.Attributes exposing (class, disabled, placeholder, rows, selected, value)
 import Html.Events exposing (onClick, onInput)
 import Http
-import Types.BlogPost exposing (BlogPost, Visibility(..), blogPostDecoder, visibilityToString)
+import Types.BlogPost exposing (BlogPost, Visibility(..), visibilityToString)
 import Types.RemoteData exposing (RemoteData(..))
 
 
