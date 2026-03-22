@@ -82,7 +82,7 @@ navigateToLibrary =
                     fromPath "/library"
 
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig Nothing
+                    Bookshelf.init Bookshelf.libraryConfig Nothing "test-user-id"
 
                 view =
                     Bookshelf.view model
