@@ -59,6 +59,7 @@ sidebarItems =
     , { route = SettingsNotifications, label = "Notifications", path = Route.toPath SettingsNotifications }
     , { route = SettingsConsent, label = "Consent", path = Route.toPath SettingsConsent }
     , { route = SettingsAgeVerification, label = "Age Verification", path = Route.toPath SettingsAgeVerification }
+    , { route = SettingsPrivacy, label = "Privacy", path = Route.toPath SettingsPrivacy }
     ]
 
 
