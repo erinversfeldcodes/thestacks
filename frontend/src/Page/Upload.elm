@@ -9,12 +9,12 @@ module Page.Upload exposing
     , view
     )
 
-import Api exposing (BookDetailResponse, PollResponse, PollStatus(..))
+import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, a, button, div, h1, h2, img, li, option, p, select, span, text, ul)
-import Html.Attributes exposing (alt, class, href, src, value)
+import Html.Attributes exposing (alt, attribute, class, href, src, value)
 import Html.Events exposing (onClick, onInput, preventDefaultOn)
 import Http
 import Json.Decode as Decode
@@ -75,6 +75,11 @@ type alias Model =
 
     -- ISBN lookup state
     , isbnLookupState : RemoteData Http.Error ()
+
+    -- Merge format flow
+    , mergeFormatState : RemoteData Http.Error MergeFormatResponse
+    , mergeIsbn : String
+    , mergeFormatLabel : String
     }
 
 
@@ -97,8 +102,9 @@ type Msg
     | SubmitManualIsbn
     | EnterManualMode
     | DuplicateShelfSelected String
-    | ConfirmDuplicateMove String
-    | DuplicateMoveCompleted (Result Http.Error ())
+    | ConfirmMergeFormat String
+    | SkipMerge
+    | MergeFormatCompleted (Result Http.Error MergeFormatResponse)
     | Reset
     | ConfirmIdentification
     | RejectIdentification
@@ -126,6 +132,9 @@ init =
     , selectedShelf = "wishlist"
     , placementState = NotAsked
     , isbnLookupState = NotAsked
+    , mergeFormatState = NotAsked
+    , mergeIsbn = ""
+    , mergeFormatLabel = ""
     }
 
 
@@ -332,7 +341,25 @@ update msg model maybeToken =
         GotDuplicateBook result ->
             case result of
                 Ok response ->
-                    ( { model | result = DuplicateDetected response.book }, Cmd.none, NoOut )
+                    let
+                        isbn =
+                            response.book.primaryEdition
+                                |> Maybe.map .isbn
+                                |> Maybe.withDefault ""
+
+                        formatLabel =
+                            response.book.primaryEdition
+                                |> Maybe.andThen .formatLabel
+                                |> Maybe.withDefault "Unknown"
+                    in
+                    ( { model
+                        | result = DuplicateDetected response.book
+                        , mergeIsbn = isbn
+                        , mergeFormatLabel = formatLabel
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
@@ -376,26 +403,62 @@ update msg model maybeToken =
         DuplicateShelfSelected shelf ->
             ( { model | duplicateShelf = shelf }, Cmd.none, NoOut )
 
-        ConfirmDuplicateMove _ ->
-            -- TODO: Duplicate move requires the existing placement ID, not the book ID.
-            -- The merge prompt flow needs a placement lookup step. For now, skip to complete.
+        ConfirmMergeFormat bookId ->
             case maybeToken of
-                Just _ ->
-                    ( { model | duplicateMoveState = Success () }
-                    , Cmd.none
+                Just token ->
+                    ( { model | mergeFormatState = Loading }
+                    , Api.mergeFormat bookId
+                        { isbn = model.mergeIsbn, formatLabel = model.mergeFormatLabel }
+                        token
+                        MergeFormatCompleted
                     , NoOut
                     )
 
                 Nothing ->
                     ( model, Cmd.none, NoOut )
 
-        DuplicateMoveCompleted result ->
+        SkipMerge ->
+            -- User chose "No, add as separate" — proceed to normal shelf picker.
+            case model.result of
+                DuplicateDetected book ->
+                    ( { model
+                        | result = Identified [ book ]
+                        , step = Verifying book
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        MergeFormatCompleted result ->
             case result of
-                Ok _ ->
-                    ( { model | duplicateMoveState = Success () }, Cmd.none, NoOut )
+                Ok response ->
+                    case model.result of
+                        DuplicateDetected book ->
+                            let
+                                newEditionCount =
+                                    book.editionCount + 1
+                            in
+                            ( { model
+                                | mergeFormatState = Success response
+                                , result =
+                                    DuplicateDetected
+                                        { book | editionCount = newEditionCount }
+                              }
+                            , Cmd.none
+                            , NoOut
+                            )
+
+                        _ ->
+                            ( { model | mergeFormatState = Success response }
+                            , Cmd.none
+                            , NoOut
+                            )
 
                 Err err ->
-                    ( { model | duplicateMoveState = Failure err }, Cmd.none, NoOut )
+                    ( { model | mergeFormatState = Failure err }, Cmd.none, NoOut )
 
         Reset ->
             ( init, Cmd.none, NoOut )
@@ -465,40 +528,42 @@ view : Model -> Maybe String -> Html Msg
 view model maybeToken =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]
-        , case maybeToken of
-            Nothing ->
-                viewSignInRequired
+        , div [ attribute "aria-live" "polite", class "upload-status-region" ]
+            [ case maybeToken of
+                Nothing ->
+                    viewSignInRequired
 
-            Just _ ->
-                case model.step of
-                    Verifying book ->
-                        viewVerifying book
+                Just _ ->
+                    case model.step of
+                        Verifying book ->
+                            viewVerifying book
 
-                    ChoosingShelf book ->
-                        viewChoosingShelf model book
+                        ChoosingShelf book ->
+                            viewChoosingShelf model book
 
-                    Complete book shelfName ->
-                        viewComplete book shelfName
+                        Complete book shelfName ->
+                            viewComplete book shelfName
 
-                    Uploading ->
-                        case model.result of
-                            NoResult ->
-                                viewUploadArea model
+                        Uploading ->
+                            case model.result of
+                                NoResult ->
+                                    viewUploadArea model
 
-                            Identified books ->
-                                viewIdentified books
+                                Identified books ->
+                                    viewIdentified books
 
-                            IdentificationFailed ->
-                                viewIdentificationFailed
+                                IdentificationFailed ->
+                                    viewIdentificationFailed
 
-                            NotABook ->
-                                viewNotABook
+                                NotABook ->
+                                    viewNotABook
 
-                            ManualISBNEntry ->
-                                viewManualEntry model
+                                ManualISBNEntry ->
+                                    viewManualEntry model
 
-                            DuplicateDetected book ->
-                                viewDuplicate model book
+                                DuplicateDetected book ->
+                                    viewDuplicate model book
+            ]
         ]
 
 
@@ -544,16 +609,16 @@ viewUploadArea model =
             ]
             [ case model.uploadState of
                 Loading ->
-                    div [ class "upload-area__loading" ]
+                    div [ class "upload-area__loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
-                        , p [] [ text "Uploading..." ]
+                        , p [] [ text "Processing image..." ]
                         ]
 
                 Success _ ->
                     -- Upload accepted; polling the vision pipeline.
-                    div [ class "upload-area__loading" ]
+                    div [ class "upload-area__loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
-                        , p [] [ text "Identifying your book..." ]
+                        , p [] [ text "Processing image..." ]
                         ]
 
                 Failure _ ->
@@ -592,7 +657,7 @@ viewDropPrompt =
 
 viewIdentified : List Book -> Html Msg
 viewIdentified books =
-    div [ class "upload-result upload-result--identified" ]
+    div [ class "upload-result upload-result--identified", attribute "role" "status" ]
         ([ h2 []
             [ text
                 (if List.length books == 1 then
@@ -785,7 +850,7 @@ viewChoosingShelf model book =
 -}
 viewComplete : Book -> String -> Html Msg
 viewComplete book shelfName =
-    div [ class "upload-complete" ]
+    div [ class "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
             [ text
                 ("\""
@@ -809,56 +874,110 @@ viewComplete book shelfName =
         ]
 
 
+{-| Duplicate detected view with merge-format flow.
+
+When a duplicate is found, the user can:
+
+1.  "Yes, merge" — call Api.mergeFormat to add a new edition to the existing book.
+2.  "No, add as separate" — proceed to the normal shelf picker as a new placement.
+3.  "View Book" — navigate to the existing book detail.
+
+-}
 viewDuplicate : Model -> Book -> Html Msg
 viewDuplicate model book =
+    let
+        existingFormat =
+            book.primaryEdition
+                |> Maybe.andThen .formatLabel
+                |> Maybe.withDefault "an edition"
+    in
     div [ class "upload-result upload-result--duplicate" ]
         [ h2 [] [ text "Already in Your Library" ]
         , p []
             [ text
-                ("\"" ++ book.title ++ "\" is already on one of your shelves.")
+                ("You own \""
+                    ++ book.title
+                    ++ "\" as "
+                    ++ existingFormat
+                    ++ "."
+                )
+            ]
+        , case model.mergeFormatState of
+            Success _ ->
+                viewMergeSuccess book
+
+            Loading ->
+                div [ class "upload-duplicate__merge-loading" ]
+                    [ span [ class "spinner" ] []
+                    , p [] [ text "Merging format..." ]
+                    ]
+
+            Failure _ ->
+                div [ class "upload-duplicate__merge-error" ]
+                    [ p [] [ text "Merge failed. Please try again." ]
+                    , viewMergePrompt book
+                    ]
+
+            NotAsked ->
+                viewMergePrompt book
+        , div [ class "upload-duplicate__secondary" ]
+            [ a
+                [ href (Route.toPath (Route.BookDetail book.id))
+                , class "btn btn--ghost"
+                ]
+                [ text "View Book" ]
+            , button [ class "btn btn--ghost", onClick Reset ] [ text "Go Back" ]
+            ]
+        ]
+
+
+viewMergePrompt : Book -> Html Msg
+viewMergePrompt book =
+    let
+        newFormat =
+            "a new format"
+    in
+    div [ class "upload-duplicate__merge" ]
+        [ p [] [ text ("Add " ++ newFormat ++ "?") ]
+        , div [ class "upload-duplicate__merge-actions" ]
+            [ button
+                [ class "btn btn--primary"
+                , onClick (ConfirmMergeFormat book.id)
+                ]
+                [ text "Yes, merge" ]
+            , button
+                [ class "btn btn--secondary"
+                , onClick SkipMerge
+                ]
+                [ text "No, add as separate" ]
+            ]
+        ]
+
+
+viewMergeSuccess : Book -> Html Msg
+viewMergeSuccess book =
+    div [ class "upload-duplicate__merge-success" ]
+        [ p [ class "upload-duplicate__merge-success-text" ]
+            [ text
+                ("\""
+                    ++ book.title
+                    ++ "\" now has "
+                    ++ String.fromInt book.editionCount
+                    ++ " edition"
+                    ++ (if book.editionCount == 1 then
+                            ""
+
+                        else
+                            "s"
+                       )
+                )
             ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
             , class "btn btn--primary"
             ]
-            [ text "View Book" ]
-        , div [ class "upload-duplicate__move" ]
-            [ p [] [ text "Move to a different shelf:" ]
-            , select
-                [ class "upload-duplicate__shelf-select"
-                , onInput DuplicateShelfSelected
-                ]
-                (List.map
-                    (\shelf ->
-                        option [ value shelf.value ] [ text shelf.label ]
-                    )
-                    allShelves
-                )
-            , case model.duplicateMoveState of
-                Loading ->
-                    p [] [ text "Moving..." ]
-
-                Success _ ->
-                    p [ class "upload-duplicate__move-success" ] [ text "Moved!" ]
-
-                Failure _ ->
-                    div []
-                        [ p [ class "upload-duplicate__move-error" ] [ text "Move failed. Please try again." ]
-                        , button
-                            [ class "btn btn--secondary"
-                            , onClick (ConfirmDuplicateMove book.id)
-                            ]
-                            [ text "Move to Shelf" ]
-                        ]
-
-                NotAsked ->
-                    button
-                        [ class "btn btn--secondary"
-                        , onClick (ConfirmDuplicateMove book.id)
-                        ]
-                        [ text "Move to Shelf" ]
-            ]
-        , button [ class "btn btn--ghost", onClick Reset ] [ text "Go Back" ]
+            [ text "View book details" ]
+        , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
         ]
 
 

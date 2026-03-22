@@ -10,7 +10,7 @@ module Components.Spine exposing
 
 import Bitwise
 import Html exposing (Html, div, span, text)
-import Html.Attributes exposing (class, style, title)
+import Html.Attributes exposing (attribute, class, style, title)
 
 
 type WearLevel
@@ -258,12 +258,32 @@ book config =
         coverTransform =
             "rotateY(90deg)"
     in
+    let
+        wearSuffix =
+            case config.wearLevel of
+                Pristine ->
+                    ""
+
+                Softened ->
+                    ", well-loved"
+
+        ariaLabel =
+            "Book: "
+                ++ config.title
+                ++ " by "
+                ++ config.author
+                ++ ", "
+                ++ String.fromInt config.pageCount
+                ++ " pages"
+                ++ wearSuffix
+    in
     div
         [ class "book"
         , style "width" (String.fromInt widthPx ++ "px")
         , style "height" (String.fromInt heightPx ++ "px")
         , style "transform-style" "preserve-3d"
         , title (config.title ++ " — " ++ config.author)
+        , attribute "aria-label" ariaLabel
         ]
         [ div
             [ class "book__face book__spine"
