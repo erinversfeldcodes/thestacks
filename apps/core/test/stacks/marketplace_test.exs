@@ -272,6 +272,64 @@ defmodule Stacks.MarketplaceTest do
   end
 
   # ---------------------------------------------------------------------------
+  # sold_listing/2
+  # ---------------------------------------------------------------------------
+
+  describe "sold_listing/2" do
+    setup :setup_seller_with_placement
+
+    test "transitions active → sold and sets sold_at", %{seller: seller, book: book} do
+      {:ok, listing} = Marketplace.create_listing(seller.id, valid_listing_attrs(book.id))
+      {:ok, activated} = Marketplace.activate_listing(listing, seller.id)
+
+      assert {:ok, %Listing{status: "sold"} = sold} =
+               Marketplace.sold_listing(activated, seller.id)
+
+      assert sold.sold_at != nil
+    end
+
+    test "clears listing_status on placement", %{
+      seller: seller,
+      book: book,
+      placement: placement
+    } do
+      {:ok, listing} = Marketplace.create_listing(seller.id, valid_listing_attrs(book.id))
+      {:ok, activated} = Marketplace.activate_listing(listing, seller.id)
+      {:ok, _sold} = Marketplace.sold_listing(activated, seller.id)
+
+      updated_placement = Repo.get!(Placement, placement.id)
+      assert updated_placement.listing_status == nil
+    end
+
+    test "emits listing.sold event", %{seller: seller, book: book} do
+      {:ok, listing} = Marketplace.create_listing(seller.id, valid_listing_attrs(book.id))
+      {:ok, activated} = Marketplace.activate_listing(listing, seller.id)
+      {:ok, _sold} = Marketplace.sold_listing(activated, seller.id)
+
+      assert Repo.exists?(
+               from(e in "event_log",
+                 prefix: "op",
+                 where: e.event_type == "listing.sold"
+               )
+             )
+    end
+
+    test "returns :invalid_transition for draft → sold", %{seller: seller, book: book} do
+      {:ok, listing} = Marketplace.create_listing(seller.id, valid_listing_attrs(book.id))
+
+      assert {:error, :invalid_transition} = Marketplace.sold_listing(listing, seller.id)
+    end
+
+    test "returns :unauthorized for non-owner", %{seller: seller, book: book} do
+      other_user = insert(:user)
+      {:ok, listing} = Marketplace.create_listing(seller.id, valid_listing_attrs(book.id))
+      {:ok, activated} = Marketplace.activate_listing(listing, seller.id)
+
+      assert {:error, :unauthorized} = Marketplace.sold_listing(activated, other_user.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # expire_listing/1
   # ---------------------------------------------------------------------------
 
