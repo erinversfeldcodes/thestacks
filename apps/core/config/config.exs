@@ -66,6 +66,9 @@ config :core, :together_client, Stacks.AI.TogetherClient
 config :core, :searxng_client, Stacks.Discovery.SearxngClient
 config :core, :searxng_url, "http://localhost:8888"
 config :core, :dbt_runner, Stacks.Workers.DbtRunner
+# review_fetcher defaults to mock in all environments — no real review API
+# integration exists yet. FetchReviewsJob uses this mock to return sample data.
+# Replace with a real implementation when a review source API is integrated.
 config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
 config :core, :rss_fetcher, Stacks.Enrichment.RssFetcher
 config :core, :storage, Stacks.Storage.Local
