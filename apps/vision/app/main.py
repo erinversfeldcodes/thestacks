@@ -17,6 +17,7 @@ from app.models.classification import Classification, ClassificationRequest, Cla
 from app.models.extraction import ExtractedBook, ExtractionRequest, ExtractionResponse
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
+from app.services.url_validator import validate_image_url
 from app.services.vision_client import VisionClient
 
 structlog.configure(
@@ -52,8 +53,9 @@ async def health() -> dict[str, str]:
 
 async def _download_image(image_url: str) -> bytes:
     """Download an image from a URL, enforcing size and timeout limits."""
+    validate_image_url(image_url)
     async with (
-        httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as client,
+        httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False) as client,
         client.stream("GET", image_url) as resp,
     ):
         if resp.status_code != 200:
