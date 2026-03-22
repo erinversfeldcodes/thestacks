@@ -13,6 +13,9 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     "enrichment.author_updated" => ["int_author_activity"],
     "enrichment.events_discovered" => ["int_event_matches"],
     "source_health.recorded" => ["mart_system_health"],
+    "blog.post_published" => ["int_blog_engagement", "mart_blog_activity"],
+    "blog.post_updated" => ["int_blog_engagement", "mart_blog_activity"],
+    "blog.post_deleted" => ["int_blog_engagement", "mart_blog_activity"],
     "placement.created" => ["mart_community_read_count", "mart_platform_searchable"],
     "placement.moved" => ["mart_community_read_count"]
   }
