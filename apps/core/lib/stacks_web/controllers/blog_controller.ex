@@ -38,7 +38,15 @@ defmodule StacksWeb.BlogController do
         {:error, :not_found}
 
       post ->
-        associations = Blog.list_associations(post.id)
+        user = Guardian.Plug.current_resource(conn)
+        is_owner = user != nil && user.id == post.user_id
+
+        associations =
+          post.id
+          |> Blog.list_associations()
+          |> Enum.filter(fn a -> is_owner || a.visible end)
+          |> Enum.map(&serialize_association(&1, is_owner))
+
         json(conn, %{post: format_post(post), associations: associations})
     end
   end
@@ -99,6 +107,42 @@ defmodule StacksWeb.BlogController do
     end
   end
 
+  @doc "PUT /api/blog/posts/:post_id/associations/:id/confirm — confirm a book association."
+  @spec confirm_association(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def confirm_association(conn, %{"post_id" => post_id, "id" => id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(post_id),
+         :ok <- check_ownership(post, user),
+         {:ok, association} <- Blog.confirm_association(post, id) do
+      json(conn, %{
+        association: %{
+          id: association.id,
+          book_id: association.book_id,
+          visible: association.visible
+        }
+      })
+    end
+  end
+
+  @doc "PUT /api/blog/posts/:post_id/associations/:id/dismiss — dismiss a book association."
+  @spec dismiss_association(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def dismiss_association(conn, %{"post_id" => post_id, "id" => id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(post_id),
+         :ok <- check_ownership(post, user),
+         {:ok, association} <- Blog.dismiss_association(post, id) do
+      json(conn, %{
+        association: %{
+          id: association.id,
+          book_id: association.book_id,
+          visible: association.visible
+        }
+      })
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
@@ -108,6 +152,21 @@ defmodule StacksWeb.BlogController do
       nil -> {:error, :not_found}
       post -> {:ok, post}
     end
+  end
+
+  defp check_ownership(%{user_id: owner_id}, %{id: user_id}) when owner_id == user_id, do: :ok
+  defp check_ownership(_post, _user), do: {:error, :unauthorized}
+
+  defp serialize_association(a, is_owner) do
+    base = %{
+      id: a.id,
+      book_id: a.book_id,
+      confidence: a.confidence,
+      source: a.source,
+      visible: a.visible
+    }
+
+    if is_owner, do: Map.put(base, :reasoning, a.reasoning), else: base
   end
 
   defp build_viewer(conn) do
