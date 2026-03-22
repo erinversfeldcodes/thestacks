@@ -40,9 +40,10 @@ defmodule Stacks.Accounts do
   @doc """
   Registers a new user. The first user on the platform receives the `owner` role.
 
-  When `require_email_confirmation` is `true`, the user is created with
-  `email_confirmed: false` and a confirmation token. When `false` (dev/test),
-  the user is auto-confirmed on creation.
+  The user is created with `email_confirmed: false` and a confirmation token.
+  A confirmation email is sent via `EmailConfirmationHandler` (event-driven)
+  and the caller receives `{:ok, user}` where `user.email_confirmed == false`.
+  The user must confirm their email before they can authenticate.
   """
   @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) do
@@ -51,21 +52,15 @@ defmodule Stacks.Accounts do
     Multi.new()
     |> Multi.insert(:user, User.registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
-      if require_email_confirmation?() do
-        token =
-          Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+      token =
+        Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
-        user
-        |> User.email_confirmation_changeset(%{
-          email_confirmed: false,
-          email_confirmation_token: token
-        })
-        |> Repo.update()
-      else
-        user
-        |> User.email_confirmation_changeset(%{email_confirmed: true})
-        |> Repo.update()
-      end
+      user
+      |> User.email_confirmation_changeset(%{
+        email_confirmed: false,
+        email_confirmation_token: token
+      })
+      |> Repo.update()
     end)
     |> Multi.run(:emit_event, fn _repo, %{set_confirmation: user} ->
       Events.emit_safe(%{
@@ -80,7 +75,6 @@ defmodule Stacks.Accounts do
     |> Repo.transaction()
     |> case do
       {:ok, %{set_confirmation: user}} ->
-        maybe_send_confirmation(user)
         {:ok, user}
 
       {:error, :user, changeset, _} ->
@@ -122,18 +116,7 @@ defmodule Stacks.Accounts do
   end
 
   defp check_email_confirmed(%User{email_confirmed: true}), do: :ok
-
-  defp check_email_confirmed(%User{}) do
-    if require_email_confirmation?() do
-      {:error, :email_unconfirmed}
-    else
-      :ok
-    end
-  end
-
-  defp require_email_confirmation? do
-    Application.get_env(:core, :require_email_confirmation, false)
-  end
+  defp check_email_confirmed(%User{}), do: {:error, :email_unconfirmed}
 
   @doc """
   Updates the age_verified flag for a user.
@@ -333,12 +316,6 @@ defmodule Stacks.Accounts do
   end
 
   defp verify_password(_user, _), do: {:error, :invalid_password}
-
-  defp maybe_send_confirmation(user) do
-    if Application.get_env(:core, :require_email_confirmation, false) do
-      Stacks.Email.send_registration_confirmation(user)
-    end
-  end
 
   defp maybe_assign_owner_role(attrs) do
     user_count = Repo.aggregate(User, :count, :id)

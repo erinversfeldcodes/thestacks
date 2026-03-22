@@ -1,7 +1,7 @@
 defmodule Stacks.Notifications.EmailConfirmationHandler do
   @moduledoc """
   Event handler that enqueues a registration confirmation email when a new
-  user registers and email confirmation is required.
+  user registers.
 
   Implements `Stacks.Events.Handler` and is registered in
   `Stacks.Events.Registry` for the `"user.registered"` event type.
@@ -16,12 +16,8 @@ defmodule Stacks.Notifications.EmailConfirmationHandler do
   @impl true
   @spec handle_event(map()) :: :ok | {:error, term()}
   def handle_event(%{event_type: "user.registered", aggregate_id: user_id}) do
-    if Application.get_env(:core, :require_email_confirmation, false) do
-      user = Stacks.Accounts.get_user(user_id)
-      do_send_confirmation(user)
-    else
-      :ok
-    end
+    user = Stacks.Accounts.get_user(user_id)
+    do_send_confirmation(user)
   end
 
   def handle_event(_event), do: :ok

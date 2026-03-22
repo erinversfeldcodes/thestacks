@@ -4,15 +4,14 @@ defmodule StacksWeb.AuthControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Accounts.User
 
   describe "POST /api/auth/register" do
-    test "creates user and returns JWT", %{conn: conn} do
+    test "creates user and returns confirmation_email_sent", %{conn: conn} do
       params = %{email: "new@example.com", password: "password123"}
       conn = post(conn, "/api/auth/register", params)
 
-      assert %{"token" => token, "user" => user} = json_response(conn, 201)
-      assert is_binary(token)
-      assert user["email"] == "new@example.com"
+      assert %{"message" => "confirmation_email_sent"} = json_response(conn, 201)
     end
 
     test "returns 422 on duplicate email", %{conn: conn} do
@@ -56,18 +55,12 @@ defmodule StacksWeb.AuthControllerTest do
       assert json_response(conn, 401)
     end
 
-    test "returns 403 when email is unconfirmed and flag is on", %{conn: conn} do
+    test "returns 403 when email is unconfirmed", %{conn: conn} do
       insert(:user,
         email: "unconfirmed@example.com",
         password_hash: Argon2.hash_pwd_salt("secret123"),
         email_confirmed: false
       )
-
-      Application.put_env(:core, :require_email_confirmation, true)
-
-      on_exit(fn ->
-        Application.put_env(:core, :require_email_confirmation, false)
-      end)
 
       params = %{email: "unconfirmed@example.com", password: "secret123"}
       conn = post(conn, "/api/auth/login", params)
@@ -163,15 +156,33 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "integration: register → login → access protected route → logout" do
+  describe "integration: register → confirm → login → access protected route → logout" do
     test "full auth flow works end to end", %{conn: conn} do
-      # Register
+      # Register — returns confirmation message, no JWT
       reg_conn =
         post(conn, "/api/auth/register", %{email: "flow@example.com", password: "password123"})
 
-      assert %{"token" => _token} = json_response(reg_conn, 201)
+      assert %{"message" => "confirmation_email_sent"} = json_response(reg_conn, 201)
 
-      # Login
+      # Login fails before confirmation
+      pre_confirm_conn =
+        post(conn, "/api/auth/login", %{email: "flow@example.com", password: "password123"})
+
+      assert %{"error" => "email_unconfirmed"} = json_response(pre_confirm_conn, 403)
+
+      # Confirm the user's email directly (in production this happens via
+      # the confirmation link, but Oban jobs don't run in :manual test mode)
+      user = Stacks.Accounts.get_user_by_email("flow@example.com")
+
+      {:ok, _} =
+        user
+        |> User.email_confirmation_changeset(%{
+          email_confirmed: true,
+          email_confirmation_token: nil
+        })
+        |> Core.Repo.update()
+
+      # Login succeeds after confirmation
       login_conn =
         post(conn, "/api/auth/login", %{email: "flow@example.com", password: "password123"})
 
@@ -183,8 +194,8 @@ defmodule StacksWeb.AuthControllerTest do
         |> put_req_header("authorization", "Bearer #{login_token}")
         |> get("/api/auth/me")
 
-      assert %{"user" => user} = json_response(me_conn, 200)
-      assert user["email"] == "flow@example.com"
+      assert %{"user" => returned_user} = json_response(me_conn, 200)
+      assert returned_user["email"] == "flow@example.com"
 
       # Logout
       logout_conn =
