@@ -429,4 +429,44 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["id"] == book.id
     end
   end
+
+  describe "GET /api/books/:id — my_writing" do
+    test "authenticated user with associated posts sees my_writing", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      blog_post = insert(:post, user: user, title: "My Review", published_at: DateTime.utc_now())
+      {:ok, _assoc} = Stacks.Blog.associate_book(blog_post, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"book" => _, "my_writing" => my_writing} = json_response(conn, 200)
+      assert length(my_writing) == 1
+      assert hd(my_writing)["title"] == "My Review"
+    end
+
+    test "authenticated user with no associations sees empty my_writing", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"book" => _, "my_writing" => my_writing} = json_response(conn, 200)
+      assert my_writing == []
+    end
+
+    test "unauthenticated user sees empty my_writing array", %{conn: conn} do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      conn = get(conn, "/api/books/#{book.id}")
+
+      assert %{"book" => _, "my_writing" => my_writing} = json_response(conn, 200)
+      assert my_writing == []
+    end
+  end
 end
