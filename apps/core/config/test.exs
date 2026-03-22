@@ -5,9 +5,6 @@ config :core, Core.Repo,
   password: "postgres",
   hostname: "localhost",
   database: "stacks_test#{System.get_env("MIX_TEST_PARTITION")}",
-  # public first so schema_migrations always lands in public, avoiding a
-  # duplicate-table issue when mix test runs ecto.migrate in the apps/core
-  # context (which would otherwise find op.schema_migrations before public's).
   parameters: [search_path: "public,op"],
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
