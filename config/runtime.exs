@@ -29,6 +29,10 @@ else
 
   config :core, :vision_hmac_secret, vision_hmac_secret
 
+  if guardian_secret = System.get_env("GUARDIAN_SECRET_KEY") do
+    config :core, Stacks.Accounts.Guardian, issuer: "stacks", secret_key: guardian_secret
+  end
+
   # ── Optional service config (dev + prod) ─────────────────────────────────
 
   if brave_key = System.get_env("BRAVE_SEARCH_API_KEY") do
