@@ -7,12 +7,16 @@ import Browser
 import Browser.Events
 import Browser.Navigation as Nav
 import Components.UserMenu as UserMenu
+import Components.ViewAsBar as ViewAsBar
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (attribute, class, href, id)
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isMarketplaceRoute, isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
+import Page.Blog.Archive as BlogArchive
+import Page.Blog.Editor as BlogEditor
+import Page.Blog.Post as BlogPostPage
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.LookingForHome as LookingForHome
@@ -20,12 +24,17 @@ import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
+import Page.Marketplace.Browse as MarketplaceBrowse
+import Page.Marketplace.CreateListing as CreateListing
+import Page.Marketplace.ListingDetail as ListingDetail
+import Page.Marketplace.MyListings as MyListings
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
 import Page.Settings.Notifications as Notifications
 import Page.Settings.Password as Password
+import Page.Settings.Privacy as Privacy
 import Page.Settings.Profile as Profile
 import Page.Upload as Upload
 import Types.User exposing (AuthToken, User)
@@ -79,6 +88,14 @@ type Page
     | PageSettingsNotifications Notifications.Model
     | PageCostTransparency CostTransparency.Model
     | PageCatalogue Catalogue.Model
+    | PageMarketplaceBrowse MarketplaceBrowse.Model
+    | PageMarketplaceCreate CreateListing.Model
+    | PageMarketplaceMyListings MyListings.Model
+    | PageMarketplaceDetail ListingDetail.Model
+    | PageSettingsPrivacy Privacy.Model
+    | PageBlogArchive BlogArchive.Model
+    | PageBlogEditor BlogEditor.Model
+    | PageBlogPost BlogPostPage.Model
     | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
@@ -178,6 +195,18 @@ requiresAuth route =
             False
 
         BookDetail _ ->
+            False
+
+        MarketplaceBrowse ->
+            False
+
+        MarketplaceDetail _ ->
+            False
+
+        BlogArchive ->
+            False
+
+        BlogPost _ ->
             False
 
         ConfirmEmail _ ->
@@ -313,6 +342,68 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         SettingsNotifications ->
             ( PageSettingsNotifications Notifications.init, Cmd.none )
 
+        MarketplaceBrowse ->
+            let
+                ( model, cmd ) =
+                    MarketplaceBrowse.init maybeToken
+            in
+            ( PageMarketplaceBrowse model, Cmd.map MarketplaceBrowseMsg cmd )
+
+        MarketplaceCreate ->
+            let
+                ( model, cmd ) =
+                    CreateListing.init maybeToken
+            in
+            ( PageMarketplaceCreate model, Cmd.map CreateListingMsg cmd )
+
+        MarketplaceMyListings ->
+            let
+                ( model, cmd ) =
+                    MyListings.init maybeToken
+            in
+            ( PageMarketplaceMyListings model, Cmd.map MyListingsMsg cmd )
+
+        MarketplaceDetail listingId ->
+            let
+                ( model, cmd ) =
+                    ListingDetail.init listingId maybeToken
+            in
+            ( PageMarketplaceDetail model, Cmd.map ListingDetailMsg cmd )
+
+        SettingsPrivacy ->
+            ( PageSettingsPrivacy Privacy.init, Cmd.none )
+
+        BlogArchive ->
+            let
+                ( blogModel, blogCmd ) =
+                    BlogArchive.init maybeToken
+            in
+            ( PageBlogArchive blogModel, Cmd.map BlogArchiveMsg blogCmd )
+
+        BlogNew ->
+            let
+                ( editorModel, editorCmd ) =
+                    BlogEditor.init BlogEditor.New maybeToken
+            in
+            ( PageBlogEditor editorModel, Cmd.map BlogEditorMsg editorCmd )
+
+        BlogEdit postId ->
+            let
+                ( editorModel, editorCmd ) =
+                    BlogEditor.init (BlogEditor.Edit postId) maybeToken
+            in
+            ( PageBlogEditor editorModel, Cmd.map BlogEditorMsg editorCmd )
+
+        Route.BlogPost postId ->
+            let
+                currentUserId =
+                    Maybe.map (.user >> .id) maybeAuth
+
+                ( postModel, postCmd ) =
+                    BlogPostPage.init postId maybeToken currentUserId
+            in
+            ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
+
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
@@ -352,6 +443,14 @@ type Msg
     | NotificationsMsg Notifications.Msg
     | CostTransparencyMsg CostTransparency.Msg
     | CatalogueMsg Catalogue.Msg
+    | MarketplaceBrowseMsg MarketplaceBrowse.Msg
+    | CreateListingMsg CreateListing.Msg
+    | MyListingsMsg MyListings.Msg
+    | ListingDetailMsg ListingDetail.Msg
+    | PrivacyMsg Privacy.Msg
+    | BlogArchiveMsg BlogArchive.Msg
+    | BlogEditorMsg BlogEditor.Msg
+    | BlogPostMsg BlogPostPage.Msg
     | UserMenuMsg UserMenu.Msg
     | LogoutCompleted (Result () ())
     | SettingsMobileNavChanged String
@@ -795,6 +894,147 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        MarketplaceBrowseMsg subMsg ->
+            case model.page of
+                PageMarketplaceBrowse subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            MarketplaceBrowse.update subMsg subModel
+                    in
+                    ( { model | page = PageMarketplaceBrowse newSubModel }
+                    , Cmd.map MarketplaceBrowseMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        CreateListingMsg subMsg ->
+            case model.page of
+                PageMarketplaceCreate subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            CreateListing.update subMsg subModel maybeToken
+
+                        baseModel =
+                            { model | page = PageMarketplaceCreate newSubModel }
+
+                        baseCmd =
+                            Cmd.map CreateListingMsg subCmd
+                    in
+                    case outMsg of
+                        CreateListing.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        CreateListing.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        MyListingsMsg subMsg ->
+            case model.page of
+                PageMarketplaceMyListings subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            MyListings.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageMarketplaceMyListings newSubModel }
+                    , Cmd.map MyListingsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ListingDetailMsg subMsg ->
+            case model.page of
+                PageMarketplaceDetail subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ListingDetail.update subMsg subModel
+                    in
+                    ( { model | page = PageMarketplaceDetail newSubModel }
+                    , Cmd.map ListingDetailMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        PrivacyMsg subMsg ->
+            case model.page of
+                PageSettingsPrivacy subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Privacy.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsPrivacy newSubModel }
+                    , Cmd.map PrivacyMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogArchiveMsg subMsg ->
+            case model.page of
+                PageBlogArchive subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            BlogArchive.update subMsg subModel
+                    in
+                    ( { model | page = PageBlogArchive newSubModel }
+                    , Cmd.map BlogArchiveMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogEditorMsg subMsg ->
+            case model.page of
+                PageBlogEditor subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            BlogEditor.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageBlogEditor newSubModel }
+                    , Cmd.map BlogEditorMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogPostMsg subMsg ->
+            case model.page of
+                PageBlogPost subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            BlogPostPage.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageBlogPost newSubModel }
+                    , Cmd.map BlogPostMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         OpenBookOverlay bookId ->
             openOverlay model bookId
 
@@ -980,6 +1220,7 @@ view model =
     { title = pageTitle model.route
     , body =
         [ viewOverlay model
+        , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewNav model
@@ -1060,6 +1301,33 @@ pageTitle route =
         Catalogue ->
             "Catalogue — The Stacks"
 
+        MarketplaceBrowse ->
+            "Marketplace — The Stacks"
+
+        MarketplaceCreate ->
+            "Create Listing — The Stacks"
+
+        MarketplaceMyListings ->
+            "My Listings — The Stacks"
+
+        MarketplaceDetail _ ->
+            "Listing — The Stacks"
+
+        SettingsPrivacy ->
+            "Privacy — The Stacks"
+
+        BlogArchive ->
+            "Blog — The Stacks"
+
+        BlogNew ->
+            "New Post — The Stacks"
+
+        BlogEdit _ ->
+            "Edit Post — The Stacks"
+
+        BlogPost _ ->
+            "Blog Post — The Stacks"
+
         ConfirmEmail EmailConfirmed ->
             "Email Confirmed — The Stacks"
 
@@ -1087,6 +1355,7 @@ viewNav model =
                 (case model.auth of
                     Nothing ->
                         [ navItem model.route Catalogue "Catalogue"
+                        , navItem model.route MarketplaceBrowse "Marketplace"
                         , navItem model.route Login "Sign In"
                         ]
 
@@ -1101,6 +1370,12 @@ viewNav model =
                             "Catalogue"
                             [ ( Search, "Search" )
                             , ( Upload, "Add Book" )
+                            ]
+                        , navDropdown model.route
+                            MarketplaceBrowse
+                            "Marketplace"
+                            [ ( MarketplaceCreate, "Create Listing" )
+                            , ( MarketplaceMyListings, "My Listings" )
                             ]
                         , li
                             [ class
@@ -1221,6 +1496,31 @@ viewPage model =
 
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)
+
+        PageMarketplaceBrowse subModel ->
+            Html.map MarketplaceBrowseMsg (MarketplaceBrowse.view subModel)
+
+        PageMarketplaceCreate subModel ->
+            Html.map CreateListingMsg (CreateListing.view subModel)
+
+        PageMarketplaceMyListings subModel ->
+            Html.map MyListingsMsg (MyListings.view subModel)
+
+        PageMarketplaceDetail subModel ->
+            Html.map ListingDetailMsg (ListingDetail.view subModel)
+
+        PageSettingsPrivacy subModel ->
+            viewSettingsHub model.route
+                (Html.map PrivacyMsg (Privacy.view subModel))
+
+        PageBlogArchive subModel ->
+            Html.map BlogArchiveMsg (BlogArchive.view subModel)
+
+        PageBlogEditor subModel ->
+            Html.map BlogEditorMsg (BlogEditor.view subModel)
+
+        PageBlogPost subModel ->
+            Html.map BlogPostMsg (BlogPostPage.view subModel)
 
         PageConfirmEmail status ->
             viewConfirmEmail status

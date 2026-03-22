@@ -2,6 +2,7 @@ module Navigation.Route exposing
     ( ConfirmStatus(..)
     , Route(..)
     , fromUrl
+    , isMarketplaceRoute
     , isSettingsRoute
     , toPath
     )
@@ -34,6 +35,15 @@ type Route
     | SettingsAgeVerification
     | CostTransparency
     | Catalogue
+    | MarketplaceBrowse
+    | MarketplaceCreate
+    | MarketplaceMyListings
+    | MarketplaceDetail String
+    | SettingsPrivacy
+    | BlogArchive
+    | BlogNew
+    | BlogEdit String
+    | BlogPost String
     | ConfirmEmail ConfirmStatus
     | NotFound
 
@@ -59,6 +69,15 @@ parser =
         , Parser.map Settings (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Catalogue (s "catalogue")
+        , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
+        , Parser.map MarketplaceMyListings (s "marketplace" </> s "mine")
+        , Parser.map MarketplaceDetail (s "marketplace" </> string)
+        , Parser.map MarketplaceBrowse (s "marketplace")
+        , Parser.map SettingsPrivacy (s "settings" </> s "privacy")
+        , Parser.map BlogNew (s "blog" </> s "new")
+        , Parser.map BlogEdit (s "blog" </> string </> s "edit")
+        , Parser.map BlogPost (s "blog" </> string)
+        , Parser.map BlogArchive (s "blog")
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         ]
@@ -127,6 +146,33 @@ toPath route =
         Catalogue ->
             "/catalogue"
 
+        MarketplaceBrowse ->
+            "/marketplace"
+
+        MarketplaceCreate ->
+            "/marketplace/create"
+
+        MarketplaceMyListings ->
+            "/marketplace/mine"
+
+        MarketplaceDetail listingId ->
+            "/marketplace/" ++ listingId
+
+        SettingsPrivacy ->
+            "/settings/privacy"
+
+        BlogArchive ->
+            "/blog"
+
+        BlogNew ->
+            "/blog/new"
+
+        BlogEdit postId ->
+            "/blog/" ++ postId ++ "/edit"
+
+        BlogPost postId ->
+            "/blog/" ++ postId
+
         ConfirmEmail EmailConfirmed ->
             "/confirm-email/success"
 
@@ -156,6 +202,28 @@ isSettingsRoute route =
             True
 
         SettingsAgeVerification ->
+            True
+
+        SettingsPrivacy ->
+            True
+
+        _ ->
+            False
+
+
+isMarketplaceRoute : Route -> Bool
+isMarketplaceRoute route =
+    case route of
+        MarketplaceBrowse ->
+            True
+
+        MarketplaceCreate ->
+            True
+
+        MarketplaceMyListings ->
+            True
+
+        MarketplaceDetail _ ->
             True
 
         _ ->
