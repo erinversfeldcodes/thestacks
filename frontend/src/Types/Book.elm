@@ -9,6 +9,7 @@ module Types.Book exposing
     , bookIsbn
     , bookPageCount
     , bookPublicationYear
+    , editionDecoder
     )
 
 import Json.Decode as Decode exposing (Decoder)

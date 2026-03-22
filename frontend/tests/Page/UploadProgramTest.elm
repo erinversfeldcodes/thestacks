@@ -152,9 +152,9 @@ uploadDuplicateDetected =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Already in Your Library" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.class "upload-duplicate__shelf-select" ]
+                    [ Selector.class "upload-duplicate__merge" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Move to Shelf" ]
+                    [ Selector.text "Yes, merge" ]
 
 
 uploadManualIsbnEntry : Test
