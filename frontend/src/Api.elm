@@ -1,27 +1,39 @@
 module Api exposing
-    ( AuthResponse
+    ( AdminSource
+    , AdminSourcesResponse
+    , AuthResponse
     , BookDetailResponse
     , CatalogueResponse
+    , EnrichmentGaps
     , ListingParams
     , MergeFormatResponse
+    , MetricsDashboard
     , NotificationPreferences
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
+    , QualityTrends
+    , SourceHealth
     , activateListing
+    , approveSource
     , confirmAssociation
     , createBlogPost
     , createListing
     , deactivateListing
     , dismissAssociation
+    , getAdminSources
     , getBlogPost
     , getBlogPosts
     , getBook
     , getBookshelf
     , getCatalogue
+    , getEnrichmentGaps
     , getListings
+    , getMetrics
     , getMyListings
     , getMyPlacements
+    , getQualityTrends
+    , getSourceHealth
     , getUserPlacements
     , login
     , logout
@@ -32,6 +44,7 @@ module Api exposing
     , pollUploadStatus
     , publishBlogPost
     , register
+    , rejectSource
     , removeBook
     , saveConsent
     , searchBooks
@@ -68,16 +81,22 @@ type alias AuthResponse =
     , userId : String
     , email : String
     , displayName : String
+    , role : String
     }
 
 
 authResponseDecoder : Decoder AuthResponse
 authResponseDecoder =
-    Decode.map4 AuthResponse
+    Decode.map5 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "role" ] Decode.string
+            , Decode.succeed "user"
+            ]
+        )
 
 
 {-| The identification status of an uploaded image.
@@ -1038,6 +1057,287 @@ updateShelfVisibility shelfName visibility token toMsg =
                     [ ( "visibility", Encode.string visibility ) ]
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- ADMIN: SOURCE APPROVAL
+
+
+{-| A source as returned by the admin sources API.
+-}
+type alias AdminSource =
+    { id : String
+    , name : String
+    , url : String
+    , sourceType : String
+    , status : String
+    , confidenceScore : Float
+    }
+
+
+adminSourceDecoder : Decoder AdminSource
+adminSourceDecoder =
+    Decode.map6 AdminSource
+        (Decode.field "id" Decode.string)
+        (Decode.field "name" Decode.string)
+        (Decode.field "url" Decode.string)
+        (Decode.field "source_type" Decode.string)
+        (Decode.field "status" Decode.string)
+        (Decode.field "confidence_score" Decode.float)
+
+
+{-| Paginated admin sources response.
+-}
+type alias AdminSourcesResponse =
+    { sources : List AdminSource
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+adminSourcesResponseDecoder : Decoder AdminSourcesResponse
+adminSourcesResponseDecoder =
+    Decode.map4 AdminSourcesResponse
+        (Decode.field "sources" (Decode.list adminSourceDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.field "per_page" Decode.int)
+
+
+{-| GET /api/admin/sources — fetch paginated admin sources, optionally filtered by status.
+-}
+getAdminSources :
+    { status : Maybe String, page : Int }
+    -> String
+    -> (Result Http.Error AdminSourcesResponse -> msg)
+    -> Cmd msg
+getAdminSources params token toMsg =
+    let
+        queryParams =
+            [ Just (Url.Builder.int "page" params.page)
+            , params.status |> Maybe.map (Url.Builder.string "status")
+            ]
+                |> List.filterMap identity
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = Url.Builder.absolute [ "api", "admin", "sources" ] queryParams
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg adminSourcesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/sources/:id/approve — approve a pending source.
+-}
+approveSource :
+    String
+    -> String
+    -> (Result Http.Error AdminSource -> msg)
+    -> Cmd msg
+approveSource sourceId token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/approve"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/sources/:id/reject — reject a pending source.
+-}
+rejectSource :
+    String
+    -> String
+    -> (Result Http.Error AdminSource -> msg)
+    -> Cmd msg
+rejectSource sourceId token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- ADMIN: METRICS
+
+
+{-| Source health record from GET /api/metrics/source-health.
+-}
+type alias SourceHealth =
+    { name : String
+    , sourceType : String
+    , status : String
+    , consecutiveFailures : Int
+    , lastSuccess : Maybe String
+    , lastFailure : Maybe String
+    }
+
+
+sourceHealthDecoder : Decoder SourceHealth
+sourceHealthDecoder =
+    Decode.map6 SourceHealth
+        (Decode.field "name" Decode.string)
+        (Decode.field "source_type" Decode.string)
+        (Decode.field "status" Decode.string)
+        (Decode.field "consecutive_failures" Decode.int)
+        (Decode.maybe (Decode.field "last_success" Decode.string))
+        (Decode.maybe (Decode.field "last_failure" Decode.string))
+
+
+{-| GET /api/metrics/source-health — fetch per-source health status.
+-}
+getSourceHealth :
+    String
+    -> (Result Http.Error (List SourceHealth) -> msg)
+    -> Cmd msg
+getSourceHealth token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/metrics/source-health"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "sources" (Decode.list sourceHealthDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Main metrics dashboard data from GET /api/metrics.
+-}
+type alias MetricsDashboard =
+    { totalBooks : Int
+    , coverPercentage : Float
+    , pricePercentage : Float
+    , reviewPercentage : Float
+    , gdprImagesPending : Int
+    , costs : List CostItem
+    }
+
+
+type alias CostItem =
+    { name : String
+    , category : String
+    , amountZar : Int
+    }
+
+
+costItemDecoder : Decoder CostItem
+costItemDecoder =
+    Decode.map3 CostItem
+        (Decode.field "name" Decode.string)
+        (Decode.field "category" Decode.string)
+        (Decode.field "amount_zar" Decode.int)
+
+
+metricsDashboardDecoder : Decoder MetricsDashboard
+metricsDashboardDecoder =
+    Decode.map6 MetricsDashboard
+        (Decode.field "total_books" Decode.int)
+        (Decode.field "cover_percentage" Decode.float)
+        (Decode.field "price_percentage" Decode.float)
+        (Decode.field "review_percentage" Decode.float)
+        (Decode.field "gdpr_images_pending" Decode.int)
+        (Decode.field "costs" (Decode.list costItemDecoder))
+
+
+{-| GET /api/metrics — fetch main dashboard data.
+-}
+getMetrics :
+    String
+    -> (Result Http.Error MetricsDashboard -> msg)
+    -> Cmd msg
+getMetrics token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/metrics"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg metricsDashboardDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Quality trend data from GET /api/metrics/quality-trends.
+-}
+type alias QualityTrends =
+    { coverTrend : String
+    , priceTrend : String
+    , reviewTrend : String
+    }
+
+
+qualityTrendsDecoder : Decoder QualityTrends
+qualityTrendsDecoder =
+    Decode.map3 QualityTrends
+        (Decode.field "cover_trend" Decode.string)
+        (Decode.field "price_trend" Decode.string)
+        (Decode.field "review_trend" Decode.string)
+
+
+{-| GET /api/metrics/quality-trends — fetch quality trend indicators.
+-}
+getQualityTrends :
+    String
+    -> (Result Http.Error QualityTrends -> msg)
+    -> Cmd msg
+getQualityTrends token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/metrics/quality-trends"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg qualityTrendsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Enrichment gap counts from GET /api/metrics/enrichment-gaps.
+-}
+type alias EnrichmentGaps =
+    { booksWithoutPrices : Int
+    , booksWithoutCovers : Int
+    , booksWithoutReviews : Int
+    }
+
+
+enrichmentGapsDecoder : Decoder EnrichmentGaps
+enrichmentGapsDecoder =
+    Decode.map3 EnrichmentGaps
+        (Decode.field "books_without_prices" Decode.int)
+        (Decode.field "books_without_covers" Decode.int)
+        (Decode.field "books_without_reviews" Decode.int)
+
+
+{-| GET /api/metrics/enrichment-gaps — fetch enrichment gap counts.
+-}
+getEnrichmentGaps :
+    String
+    -> (Result Http.Error EnrichmentGaps -> msg)
+    -> Cmd msg
+getEnrichmentGaps token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/metrics/enrichment-gaps"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg enrichmentGapsDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

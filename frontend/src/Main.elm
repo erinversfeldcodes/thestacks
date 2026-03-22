@@ -12,8 +12,11 @@ import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text,
 import Html.Attributes exposing (attribute, class, href, id)
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isMarketplaceRoute, isSettingsRoute)
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isAdminRoute, isMarketplaceRoute, isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
+import Page.Admin.Metrics as AdminMetrics
+import Page.Admin.ScraperConfig as AdminScraperConfig
+import Page.Admin.SourceApproval as AdminSourceApproval
 import Page.Blog.Archive as BlogArchive
 import Page.Blog.Editor as BlogEditor
 import Page.Blog.Post as BlogPostPage
@@ -96,6 +99,9 @@ type Page
     | PageBlogArchive BlogArchive.Model
     | PageBlogEditor BlogEditor.Model
     | PageBlogPost BlogPostPage.Model
+    | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminScraperConfig AdminScraperConfig.Model
+    | PageAdminMetrics AdminMetrics.Model
     | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
@@ -157,13 +163,13 @@ decodeFlags : Decode.Value -> Maybe Auth
 decodeFlags flags =
     let
         authDecoder =
-            Decode.map4
-                (\token userId email displayName ->
+            Decode.map5
+                (\token userId email displayName role ->
                     { user =
                         { id = userId
                         , email = email
                         , displayName = displayName
-                        , role = "user"
+                        , role = role
                         , countryCode = Nothing
                         , city = Nothing
                         }
@@ -174,9 +180,24 @@ decodeFlags flags =
                 (Decode.field "userId" Decode.string)
                 (Decode.field "email" Decode.string)
                 (Decode.field "displayName" Decode.string)
+                (Decode.oneOf
+                    [ Decode.field "role" Decode.string
+                    , Decode.succeed "user"
+                    ]
+                )
     in
     Decode.decodeValue authDecoder flags
         |> Result.toMaybe
+
+
+isOwner : Maybe Auth -> Bool
+isOwner maybeAuth =
+    case maybeAuth of
+        Just auth ->
+            auth.user.role == "owner"
+
+        Nothing ->
+            False
 
 
 requiresAuth : Route -> Bool
@@ -404,6 +425,39 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 
+        Route.AdminSourceApproval ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminSourceApproval.init maybeToken
+                in
+                ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminScraperConfig ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminScraperConfig.init maybeToken
+                in
+                ( PageAdminScraperConfig subModel, Cmd.map AdminScraperConfigMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminMetrics ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminMetrics.init maybeToken
+                in
+                ( PageAdminMetrics subModel, Cmd.map AdminMetricsMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
@@ -418,6 +472,7 @@ encodeAuth auth =
         , ( "userId", Json.Encode.string auth.user.id )
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
+        , ( "role", Json.Encode.string auth.user.role )
         ]
 
 
@@ -451,6 +506,9 @@ type Msg
     | BlogArchiveMsg BlogArchive.Msg
     | BlogEditorMsg BlogEditor.Msg
     | BlogPostMsg BlogPostPage.Msg
+    | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminScraperConfigMsg AdminScraperConfig.Msg
+    | AdminMetricsMsg AdminMetrics.Msg
     | UserMenuMsg UserMenu.Msg
     | LogoutCompleted (Result () ())
     | SettingsMobileNavChanged String
@@ -539,7 +597,7 @@ update msg model =
                                         { id = authResponse.userId
                                         , email = authResponse.email
                                         , displayName = authResponse.displayName
-                                        , role = "user"
+                                        , role = authResponse.role
                                         , countryCode = Nothing
                                         , city = Nothing
                                         }
@@ -1035,6 +1093,51 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        AdminSourceApprovalMsg subMsg ->
+            case model.page of
+                PageAdminSourceApproval subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            AdminSourceApproval.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageAdminSourceApproval newSubModel }
+                    , Cmd.map AdminSourceApprovalMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminScraperConfigMsg subMsg ->
+            case model.page of
+                PageAdminScraperConfig subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            AdminScraperConfig.update subMsg subModel
+                    in
+                    ( { model | page = PageAdminScraperConfig newSubModel }
+                    , Cmd.map AdminScraperConfigMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminMetricsMsg subMsg ->
+            case model.page of
+                PageAdminMetrics subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            AdminMetrics.update subMsg subModel
+                    in
+                    ( { model | page = PageAdminMetrics newSubModel }
+                    , Cmd.map AdminMetricsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         OpenBookOverlay bookId ->
             openOverlay model bookId
 
@@ -1328,6 +1431,15 @@ pageTitle route =
         BlogPost _ ->
             "Blog Post — The Stacks"
 
+        Route.AdminSourceApproval ->
+            "Source Approval — The Stacks"
+
+        Route.AdminScraperConfig ->
+            "Scraper Health — The Stacks"
+
+        Route.AdminMetrics ->
+            "Metrics — The Stacks"
+
         ConfirmEmail EmailConfirmed ->
             "Email Confirmed — The Stacks"
 
@@ -1377,6 +1489,16 @@ viewNav model =
                             [ ( MarketplaceCreate, "Create Listing" )
                             , ( MarketplaceMyListings, "My Listings" )
                             ]
+                        , if auth.user.role == "owner" then
+                            navDropdown model.route
+                                Route.AdminMetrics
+                                "Admin"
+                                [ ( Route.AdminSourceApproval, "Sources" )
+                                , ( Route.AdminScraperConfig, "Scrapers" )
+                                ]
+
+                          else
+                            text ""
                         , li
                             [ class
                                 (if isSettingsRoute model.route then
@@ -1521,6 +1643,15 @@ viewPage model =
 
         PageBlogPost subModel ->
             Html.map BlogPostMsg (BlogPostPage.view subModel)
+
+        PageAdminSourceApproval subModel ->
+            Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
+
+        PageAdminScraperConfig subModel ->
+            Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
+
+        PageAdminMetrics subModel ->
+            Html.map AdminMetricsMsg (AdminMetrics.view subModel)
 
         PageConfirmEmail status ->
             viewConfirmEmail status

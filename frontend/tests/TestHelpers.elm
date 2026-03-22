@@ -835,11 +835,16 @@ searchProgram maybeToken =
 -}
 decodeAuthResponse : Decode.Decoder AuthResponse
 decodeAuthResponse =
-    Decode.map4 AuthResponse
+    Decode.map5 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "role" ] Decode.string
+            , Decode.succeed "user"
+            ]
+        )
 
 
 {-| Translate Login page Cmds into SimulatedEffects.
