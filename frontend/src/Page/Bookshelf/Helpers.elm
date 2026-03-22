@@ -11,7 +11,7 @@ module Page.Bookshelf.Helpers exposing
 
 import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
 import Html exposing (Html, button, div, p, span, text)
-import Html.Attributes exposing (attribute, class)
+import Html.Attributes exposing (attribute, class, id, tabindex)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
@@ -243,6 +243,8 @@ viewClickableSpine wearLevel onBookClicked placement =
     button
         [ class "book-button"
         , attribute "role" "listitem"
+        , id ("spine-" ++ bookData.id)
+        , tabindex 0
         , onClick (onBookClicked bookData)
         ]
         [ Components.Spine.book

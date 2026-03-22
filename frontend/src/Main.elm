@@ -4,12 +4,15 @@ import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
 import Api
 import Browser
+import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Components.OnboardingOverlay as OnboardingOverlay
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (attribute, class, href, id)
+import Http
 import Json.Decode as Decode
 import Json.Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isAdminRoute, isMarketplaceRoute, isSettingsRoute)
@@ -40,6 +43,9 @@ import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
 import Page.Settings.Profile as Profile
 import Page.Upload as Upload
+import Task
+import Types.Placement
+import Types.RemoteData
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
 
@@ -57,6 +63,15 @@ port saveAuth : Json.Encode.Value -> Cmd msg
 
 
 port clearAuth : () -> Cmd msg
+
+
+port saveOnboardingCompleted : () -> Cmd msg
+
+
+port requestOnboardingStatus : () -> Cmd msg
+
+
+port onOnboardingStatus : (Bool -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -115,6 +130,7 @@ type alias Auth =
 type alias BookDetailOverlay =
     { bookId : String
     , detail : BookDetail.Model
+    , triggerSpineId : Maybe String
     }
 
 
@@ -129,6 +145,9 @@ type alias Model =
     , pendingAuthResponse : Maybe Api.AuthResponse
     , bookDetailOverlay : Maybe BookDetailOverlay
     , userMenu : UserMenu.Model
+    , onboarding : OnboardingOverlay.Model
+    , onboardingCompleted : Bool
+    , hasAnyPlacements : Bool
     }
 
 
@@ -154,8 +173,20 @@ init flags url key =
       , pendingAuthResponse = Nothing
       , bookDetailOverlay = Nothing
       , userMenu = UserMenu.init
+      , onboarding = OnboardingOverlay.init
+      , onboardingCompleted = False
+      , hasAnyPlacements = False
       }
-    , cmd
+    , Cmd.batch
+        [ cmd
+        , requestOnboardingStatus ()
+        , case maybeAuth of
+            Just auth ->
+                Api.getMyPlacements auth.token GotPlacementCheck
+
+            Nothing ->
+                Cmd.none
+        ]
     )
 
 
@@ -518,6 +549,10 @@ type Msg
     | CloseBookOverlay
     | OverlayBookDetailMsg BookDetail.Msg
     | EscapePressed
+    | OnboardingMsg OnboardingOverlay.Msg
+    | OnboardingStatusReceived Bool
+    | FocusResult (Result Browser.Dom.Error ())
+    | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -656,8 +691,19 @@ update msg model =
                         ( newSubModel, subCmd, outMsg ) =
                             Bookshelf.update subMsg subModel
 
+                        hasPlacements =
+                            case newSubModel.books of
+                                Types.RemoteData.Success placements ->
+                                    not (List.isEmpty placements)
+
+                                _ ->
+                                    model.hasAnyPlacements
+
                         baseModel =
-                            { model | page = PageBookshelf newSubModel }
+                            { model
+                                | page = PageBookshelf newSubModel
+                                , hasAnyPlacements = model.hasAnyPlacements || hasPlacements
+                            }
 
                         baseCmd =
                             Cmd.map BookshelfMsg subCmd
@@ -1142,7 +1188,21 @@ update msg model =
             openOverlay model bookId
 
         CloseBookOverlay ->
-            ( { model | bookDetailOverlay = Nothing }, Cmd.none )
+            let
+                focusCmd =
+                    case model.bookDetailOverlay of
+                        Just overlay ->
+                            case overlay.triggerSpineId of
+                                Just spineId ->
+                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
+
+                                Nothing ->
+                                    Cmd.none
+
+                        Nothing ->
+                            Cmd.none
+            in
+            ( { model | bookDetailOverlay = Nothing }, focusCmd )
 
         OverlayBookDetailMsg subMsg ->
             case model.bookDetailOverlay of
@@ -1156,11 +1216,19 @@ update msg model =
 
                         updatedOverlay =
                             { overlay | detail = newDetail }
+
+                        returnFocusCmd =
+                            case overlay.triggerSpineId of
+                                Just spineId ->
+                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
+
+                                Nothing ->
+                                    Cmd.none
                     in
                     case outMsg of
                         BookDetail.RequestCloseOverlay ->
                             ( { model | bookDetailOverlay = Nothing }
-                            , Cmd.none
+                            , returnFocusCmd
                             )
 
                         BookDetail.NavigateTo route ->
@@ -1216,8 +1284,17 @@ update msg model =
 
         EscapePressed ->
             case model.bookDetailOverlay of
-                Just _ ->
-                    ( { model | bookDetailOverlay = Nothing }, Cmd.none )
+                Just overlay ->
+                    let
+                        focusCmd =
+                            case overlay.triggerSpineId of
+                                Just spineId ->
+                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
+
+                                Nothing ->
+                                    Cmd.none
+                    in
+                    ( { model | bookDetailOverlay = Nothing }, focusCmd )
 
                 Nothing ->
                     let
@@ -1225,6 +1302,40 @@ update msg model =
                             UserMenu.update UserMenu.Close model.userMenu
                     in
                     ( { model | userMenu = newUserMenu }, Cmd.none )
+
+        OnboardingMsg subMsg ->
+            let
+                ( newOnboarding, outMsg ) =
+                    OnboardingOverlay.update subMsg model.onboarding
+            in
+            case outMsg of
+                OnboardingOverlay.SkipCompleted ->
+                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
+                    , saveOnboardingCompleted ()
+                    )
+
+                OnboardingOverlay.FinishCompleted ->
+                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
+                    , saveOnboardingCompleted ()
+                    )
+
+                OnboardingOverlay.NoOut ->
+                    ( { model | onboarding = newOnboarding }, Cmd.none )
+
+        OnboardingStatusReceived completed ->
+            ( { model | onboardingCompleted = completed }, Cmd.none )
+
+        FocusResult _ ->
+            -- Focus attempt completed (success or failure); nothing to do.
+            ( model, Cmd.none )
+
+        GotPlacementCheck result ->
+            case result of
+                Ok placements ->
+                    ( { model | hasAnyPlacements = not (List.isEmpty placements) }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
 
         SwipeReceived direction ->
             let
@@ -1248,6 +1359,7 @@ update msg model =
 
 {-| Open the book detail overlay for a given book ID.
 Initialises a BookDetail.Model and fires the API fetch command.
+Stores the triggering spine element ID so focus can return on close.
 -}
 openOverlay : Model -> String -> ( Model, Cmd Msg )
 openOverlay model bookId =
@@ -1261,10 +1373,14 @@ openOverlay model bookId =
         overlay =
             { bookId = bookId
             , detail = detailModel
+            , triggerSpineId = Just ("spine-" ++ bookId)
             }
     in
     ( { model | bookDetailOverlay = Just overlay }
-    , Cmd.map OverlayBookDetailMsg detailCmd
+    , Cmd.batch
+        [ Cmd.map OverlayBookDetailMsg detailCmd
+        , Task.attempt FocusResult (Browser.Dom.focus "book-overlay-close")
+        ]
     )
 
 
@@ -1286,10 +1402,11 @@ transitionClass from to =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
+subscriptions model =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        , onOnboardingStatus OnboardingStatusReceived
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
@@ -1298,7 +1415,7 @@ subscriptions _ =
                             Decode.succeed EscapePressed
 
                         else
-                            Decode.fail "not escape"
+                            Decode.fail "not handled"
                     )
             )
         ]
@@ -1323,6 +1440,7 @@ view model =
     { title = pageTitle model.route
     , body =
         [ viewOverlay model
+        , viewOnboarding model
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
@@ -1674,6 +1792,23 @@ viewOverlay model =
     case model.bookDetailOverlay of
         Just overlay ->
             Html.map OverlayBookDetailMsg (BookDetail.overlayView overlay.detail)
+
+        Nothing ->
+            text ""
+
+
+{-| Show onboarding overlay for authenticated users with no placements
+who haven't completed onboarding yet.
+-}
+viewOnboarding : Model -> Html Msg
+viewOnboarding model =
+    case model.auth of
+        Just _ ->
+            if not model.onboardingCompleted && not model.hasAnyPlacements then
+                Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+
+            else
+                text ""
 
         Nothing ->
             text ""

@@ -784,6 +784,7 @@ overlayView model =
             ]
             [ button
                 [ class "book-overlay__close"
+                , id "book-overlay-close"
                 , attribute "aria-label" "Close book details"
                 , onClick CloseOverlay
                 , style "position" "absolute"
