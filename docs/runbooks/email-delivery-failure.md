@@ -37,7 +37,7 @@
 **Still working:**
 - All platform features that don't require email confirmation
 - Existing authenticated users can still use the platform normally
-- Registration is possible if email confirmation is not yet required (check `REQUIRE_EMAIL_CONFIRMATION` env var)
+- Registration creates accounts but new users cannot log in until email is confirmed — email delivery failure blocks all new signups
 
 ---
 
@@ -203,5 +203,5 @@ Register a new test account (if in a staging environment) and verify the confirm
 - If the API key expires: add the expiry date to a calendar reminder 30 days in advance.
 - If domain authentication lapsed: set a 6-month calendar reminder to re-verify domain DNS records.
 - Consider adding email delivery success rate as a metric on the metrics dashboard (via Resend/Postmark webhooks for delivery status).
-- If email confirmation is currently required (`REQUIRE_EMAIL_CONFIRMATION=true`): document the impact of email failures on new user onboarding in the SLA.
+- Email confirmation is always required — email delivery failure blocks new signups. Document the impact on new user onboarding in the SLA.
 - Consider a secondary email provider as fallback (e.g., primary: Resend, fallback: AWS SES) for registration confirmation and password reset — these are the most critical email types.
