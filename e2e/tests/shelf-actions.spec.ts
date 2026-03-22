@@ -42,8 +42,8 @@ test.describe("Shelf actions — move book between shelves", () => {
     // Select Wish List from the dropdown
     await overlay.locator(".shelf-mover__select").selectOption("wishlist");
 
-    // Click Move
-    await overlay.locator('button:has-text("Move")').click();
+    // Click Move (exact match to avoid matching "Remove")
+    await overlay.locator('button:text-is("Move")').click();
 
     // Wait for success message
     await expect(
@@ -154,7 +154,7 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
 
     // Select "Antilibrary" and click Move (which triggers ConfirmPlace)
     await overlay.locator(".shelf-mover__select").selectOption("antilibrary");
-    await overlay.locator('.shelf-mover__btn:has-text("Move")').click();
+    await overlay.locator('.shelf-mover__btn:text-is("Move")').click();
 
     // Should show success and switch to "Move to Shelf from Antilibrary"
     await expect(

@@ -49,15 +49,21 @@ test.describe("Navbar navigation — authenticated", () => {
         const parentLink = page.locator(`a.app-nav__link:has-text("${item.parent}")`);
         await parentLink.hover();
       } else {
-        // Settings is under the user name dropdown
+        // Settings is under the user name dropdown (button-based, needs click to open)
         const userDropdown = page.locator(".app-nav__user");
-        await userDropdown.hover();
+        await userDropdown.click();
       }
 
-      const dropdownLink = page.locator(`a.app-nav__dropdown-link[href="${item.href}"]`);
-      await expect(dropdownLink).toBeVisible({ timeout: 5000 });
-
-      await dropdownLink.click();
+      if (item.parent) {
+        const dropdownLink = page.locator(`a.app-nav__dropdown-link[href="${item.href}"]`);
+        await expect(dropdownLink).toBeVisible({ timeout: 5000 });
+        await dropdownLink.click();
+      } else {
+        // UserMenu uses button elements with onClick, not <a> links
+        const dropdownLink = page.locator('button.app-nav__dropdown-link:has-text("Settings")');
+        await expect(dropdownLink).toBeVisible({ timeout: 5000 });
+        await dropdownLink.click();
+      }
 
       await expect(page).toHaveURL(new RegExp(item.path.replace(/\//g, "\\/")), {
         timeout: 10000,
