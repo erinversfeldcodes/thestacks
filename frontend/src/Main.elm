@@ -175,7 +175,7 @@ init flags url key =
       , userMenu = UserMenu.init
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
-      , hasAnyPlacements = False
+      , hasAnyPlacements = True
       }
     , Cmd.batch
         [ cmd

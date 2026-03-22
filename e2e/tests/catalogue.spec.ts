@@ -110,13 +110,16 @@ test.describe("Catalogue — unauthenticated", () => {
     }
   });
 
-  test("clicking a card navigates to book detail", async ({ page }) => {
+  test("clicking a card opens the book detail overlay", async ({ page }) => {
     await page.goto("/catalogue");
     await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
 
     await page.locator(".catalogue__card-link").first().click();
-    await page.waitForURL("**/books/**", { timeout: 5000 });
-    await expect(page.locator(".book-detail__parchment")).toBeVisible({
+
+    // Book detail now opens as an overlay (URL does NOT change)
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({
       timeout: 10000,
     });
   });
