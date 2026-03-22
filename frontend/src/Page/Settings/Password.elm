@@ -1,6 +1,6 @@
 module Page.Settings.Password exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

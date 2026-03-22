@@ -1,6 +1,6 @@
 module Page.Admin.ScraperConfig exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

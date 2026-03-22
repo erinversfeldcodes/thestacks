@@ -1,6 +1,6 @@
 module Page.Settings.Notifications exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

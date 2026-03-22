@@ -1,6 +1,6 @@
 module Components.OnboardingOverlay exposing
     ( Model
-    , Msg(..)
+    , Msg
     , OutMsg(..)
     , init
     , update

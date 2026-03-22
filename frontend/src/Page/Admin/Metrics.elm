@@ -1,6 +1,6 @@
 module Page.Admin.Metrics exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view

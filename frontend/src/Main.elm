@@ -15,7 +15,7 @@ import Html.Attributes exposing (attribute, class, href, id)
 import Http
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isAdminRoute, isMarketplaceRoute, isSettingsRoute)
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.Admin.Metrics as AdminMetrics
 import Page.Admin.ScraperConfig as AdminScraperConfig
@@ -541,17 +541,15 @@ type Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminMetricsMsg AdminMetrics.Msg
     | UserMenuMsg UserMenu.Msg
-    | LogoutCompleted (Result () ())
+    | LogoutCompleted
     | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
-    | OpenBookOverlay String
-    | CloseBookOverlay
     | OverlayBookDetailMsg BookDetail.Msg
     | EscapePressed
     | OnboardingMsg OnboardingOverlay.Msg
     | OnboardingStatusReceived Bool
-    | FocusResult (Result Browser.Dom.Error ())
+    | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
 
 
@@ -1184,26 +1182,6 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        OpenBookOverlay bookId ->
-            openOverlay model bookId
-
-        CloseBookOverlay ->
-            let
-                focusCmd =
-                    case model.bookDetailOverlay of
-                        Just overlay ->
-                            case overlay.triggerSpineId of
-                                Just spineId ->
-                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
-
-                                Nothing ->
-                                    Cmd.none
-
-                        Nothing ->
-                            Cmd.none
-            in
-            ( { model | bookDetailOverlay = Nothing }, focusCmd )
-
         OverlayBookDetailMsg subMsg ->
             case model.bookDetailOverlay of
                 Just overlay ->
@@ -1220,7 +1198,7 @@ update msg model =
                         returnFocusCmd =
                             case overlay.triggerSpineId of
                                 Just spineId ->
-                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
+                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
 
                                 Nothing ->
                                     Cmd.none
@@ -1263,7 +1241,7 @@ update msg model =
                         logoutCmd =
                             case model.auth of
                                 Just auth ->
-                                    Api.logout auth.token (\_ -> LogoutCompleted (Ok ()))
+                                    Api.logout auth.token (always LogoutCompleted)
 
                                 Nothing ->
                                     Cmd.none
@@ -1276,7 +1254,7 @@ update msg model =
                         ]
                     )
 
-        LogoutCompleted _ ->
+        LogoutCompleted ->
             ( model, Cmd.none )
 
         SettingsMobileNavChanged path ->
@@ -1289,7 +1267,7 @@ update msg model =
                         focusCmd =
                             case overlay.triggerSpineId of
                                 Just spineId ->
-                                    Task.attempt FocusResult (Browser.Dom.focus spineId)
+                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
 
                                 Nothing ->
                                     Cmd.none
@@ -1325,7 +1303,7 @@ update msg model =
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
 
-        FocusResult _ ->
+        FocusResult ->
             -- Focus attempt completed (success or failure); nothing to do.
             ( model, Cmd.none )
 
@@ -1379,7 +1357,7 @@ openOverlay model bookId =
     ( { model | bookDetailOverlay = Just overlay }
     , Cmd.batch
         [ Cmd.map OverlayBookDetailMsg detailCmd
-        , Task.attempt FocusResult (Browser.Dom.focus "book-overlay-close")
+        , Task.attempt (always FocusResult) (Browser.Dom.focus "book-overlay-close")
         ]
     )
 
@@ -1402,7 +1380,7 @@ transitionClass from to =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
+subscriptions _ =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)

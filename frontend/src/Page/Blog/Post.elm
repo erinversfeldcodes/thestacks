@@ -1,6 +1,6 @@
 module Page.Blog.Post exposing
     ( Model
-    , Msg(..)
+    , Msg
     , init
     , update
     , view
@@ -12,7 +12,7 @@ import Html exposing (Html, a, div, h1, p, pre, text)
 import Html.Attributes exposing (class, href)
 import Http
 import Navigation.Route as Route exposing (Route(..))
-import Types.BlogPost exposing (BlogPost, blogPostDecoder)
+import Types.BlogPost exposing (BlogPost)
 import Types.RemoteData exposing (RemoteData(..))
 
 

@@ -17,7 +17,7 @@ import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, option, p, section, select, span, text)
-import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, target, value)
+import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route exposing (Route)

@@ -13,9 +13,9 @@ import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, Poll
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, a, button, div, h1, h2, img, li, option, p, select, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, href, src, value)
-import Html.Events exposing (onClick, onInput, preventDefaultOn)
+import Html exposing (Html, a, button, div, h1, h2, img, li, p, span, text, ul)
+import Html.Attributes exposing (alt, attribute, class, href, src)
+import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
@@ -101,7 +101,6 @@ type Msg
     | ManualIsbnChanged String
     | SubmitManualIsbn
     | EnterManualMode
-    | DuplicateShelfSelected String
     | ConfirmMergeFormat String
     | SkipMerge
     | MergeFormatCompleted (Result Http.Error MergeFormatResponse)
@@ -400,9 +399,6 @@ update msg model maybeToken =
         EnterManualMode ->
             ( { model | result = ManualISBNEntry, isbnLookupState = NotAsked }, Cmd.none, NoOut )
 
-        DuplicateShelfSelected shelf ->
-            ( { model | duplicateShelf = shelf }, Cmd.none, NoOut )
-
         ConfirmMergeFormat bookId ->
             case maybeToken of
                 Just token ->
@@ -493,7 +489,7 @@ update msg model maybeToken =
                 ( Ok _, ChoosingShelf book ) ->
                     ( { model
                         | step = Complete book model.selectedShelf
-                        , placementState = Success (placementStub book.id)
+                        , placementState = Success placementStub
                       }
                     , Cmd.none
                     , NoOut
@@ -511,8 +507,8 @@ update msg model maybeToken =
 
 {-| Minimal placement stub — only used to track success state.
 -}
-placementStub : String -> Placement
-placementStub _ =
+placementStub : Placement
+placementStub =
     { id = ""
     , book = Nothing
     , position = Nothing
