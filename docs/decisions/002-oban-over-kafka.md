@@ -41,22 +41,18 @@ All significant state changes emit events via `Stacks.Events.emit/1`, which:
 
 **Event log schema:** `op.event_log` with `event_type`, `aggregate_type`, `aggregate_id`, `schema_version`, `payload` (JSONB), `metadata` (JSONB), `occurred_at`, `published_at`. Full schema in `docs/technical-architecture.md` section 7.
 
-**Oban queue configuration** (`apps/core/lib/stacks/jobs/`):
-
-> **Note:** The table below reflects the target queue configuration for Phase 1. As of Wave A, the queues configured in `apps/core/config/config.exs` are `default`, `events`, `vision`, and `scraper`. Remaining queues will be added as their respective features are implemented.
+**Oban queue configuration** (`apps/core/config/config.exs`):
 
 | Queue | Concurrency | Purpose |
 |-------|------------|---------|
 | `default` | 10 | General-purpose fallback |
 | `events` | 20 | Event fan-out to registered subscribers |
-| `vision` | 2 | GPU calls to Modal — expensive, rate-limited |
+| `vision` | 5 | GPU calls to Modal — expensive, rate-limited |
 | `scraper` | 5 | Per-bookshop price fetches |
-| `review_scrape` | 3 | Review site fetches (planned) |
-| `author_scrape` | 2 | Author enrichment (planned) |
-| `source_discovery` | 2 | Brave Search queries (planned) |
-| `geographic_discovery` | 2 | Location-triggered sweeps (planned) |
-| `notifications` | 3 | Email delivery (planned) |
-| `dbt_refresh` | 1 | Sequential dbt runs (planned) |
+| `notifications` | 3 | Email delivery |
+| `dbt_refresh` | 1 | Sequential dbt runs |
+
+> **Note:** The original ADR planned dedicated queues for `review_scrape`, `author_scrape`, `source_discovery`, and `geographic_discovery`. These were never created — those workers run on the `default` queue instead, which provides sufficient concurrency for Phase 1 volumes.
 
 **Event subscriber registration:** Subscribers register centrally via `Stacks.Events.Registry`. See ADR 006 for the rationale behind centralised registration over decentralised.
 
