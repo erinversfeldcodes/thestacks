@@ -2,6 +2,7 @@ module Navigation.Route exposing
     ( ConfirmStatus(..)
     , Route(..)
     , fromUrl
+    , isAdminRoute
     , isMarketplaceRoute
     , isSettingsRoute
     , toPath
@@ -44,6 +45,9 @@ type Route
     | BlogNew
     | BlogEdit String
     | BlogPost String
+    | AdminSourceApproval
+    | AdminScraperConfig
+    | AdminMetrics
     | ConfirmEmail ConfirmStatus
     | NotFound
 
@@ -78,6 +82,9 @@ parser =
         , Parser.map BlogEdit (s "blog" </> string </> s "edit")
         , Parser.map BlogPost (s "blog" </> string)
         , Parser.map BlogArchive (s "blog")
+        , Parser.map AdminSourceApproval (s "admin" </> s "sources")
+        , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
+        , Parser.map AdminMetrics (s "admin" </> s "metrics")
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         ]
@@ -173,6 +180,15 @@ toPath route =
         BlogPost postId ->
             "/blog/" ++ postId
 
+        AdminSourceApproval ->
+            "/admin/sources"
+
+        AdminScraperConfig ->
+            "/admin/scrapers"
+
+        AdminMetrics ->
+            "/admin/metrics"
+
         ConfirmEmail EmailConfirmed ->
             "/confirm-email/success"
 
@@ -205,6 +221,22 @@ isSettingsRoute route =
             True
 
         SettingsPrivacy ->
+            True
+
+        _ ->
+            False
+
+
+isAdminRoute : Route -> Bool
+isAdminRoute route =
+    case route of
+        AdminSourceApproval ->
+            True
+
+        AdminScraperConfig ->
+            True
+
+        AdminMetrics ->
             True
 
         _ ->
