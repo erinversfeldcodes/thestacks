@@ -13,6 +13,7 @@ module Page.Bookshelf exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
+import Components.RSSLink as RSSLink
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (attribute, class)
@@ -86,6 +87,9 @@ type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
     , config : Config
+    , userId : String
+    , visibility : String
+    , rssLink : RSSLink.Model
     }
 
 
@@ -99,10 +103,11 @@ type Msg
     | VerifyAge
     | DismissAgeGate
     | BookClicked Book
+    | RSSLinkMsg RSSLink.Msg
 
 
-init : Config -> Maybe String -> ( Model, Cmd Msg )
-init config maybeToken =
+init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
+init config maybeToken userId =
     let
         apiCmd =
             case maybeToken of
@@ -115,6 +120,9 @@ init config maybeToken =
     ( { books = Loading
       , showAgeGate = False
       , config = config
+      , userId = userId
+      , visibility = "platform"
+      , rssLink = RSSLink.init
       }
     , apiCmd
     )
@@ -150,6 +158,9 @@ update msg model =
         BookClicked bk ->
             ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
 
+        RSSLinkMsg subMsg ->
+            ( { model | rssLink = RSSLink.update subMsg model.rssLink }, Cmd.none, NoOut )
+
 
 
 -- VIEW
@@ -165,7 +176,17 @@ view model =
         [ div [ class ("wallpaper " ++ cfg.wallpaperClass) ] []
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
-            [ viewShelfLabel cfg.label
+            [ div [ class "shelf-room__header" ]
+                [ viewShelfLabel cfg.label
+                , Html.map RSSLinkMsg
+                    (RSSLink.view
+                        { visibility = model.visibility
+                        , userId = model.userId
+                        , bookshelfName = cfg.apiName
+                        }
+                        model.rssLink
+                    )
+                ]
             , if model.showAgeGate then
                 ageGate
                     { onVerify = VerifyAge
