@@ -70,6 +70,26 @@ defmodule Stacks.Workers.DbtRefreshJobTest do
       )
     end
 
+    test "maps blog.post_published to correct models" do
+      event = %{event_type: "blog.post_published", aggregate_id: "test", payload: %{}}
+      assert :ok = DbtRefreshHandler.handle_event(event)
+
+      assert_enqueued(
+        worker: DbtRefreshJob,
+        args: %{models: ["int_blog_engagement", "mart_blog_activity"]}
+      )
+    end
+
+    test "maps blog.post_updated to correct models" do
+      event = %{event_type: "blog.post_updated", aggregate_id: "test", payload: %{}}
+      assert :ok = DbtRefreshHandler.handle_event(event)
+
+      assert_enqueued(
+        worker: DbtRefreshJob,
+        args: %{models: ["int_blog_engagement", "mart_blog_activity"]}
+      )
+    end
+
     test "ignores unmapped events" do
       event = %{event_type: "user.registered", aggregate_id: "test", payload: %{}}
       assert :ok = DbtRefreshHandler.handle_event(event)
