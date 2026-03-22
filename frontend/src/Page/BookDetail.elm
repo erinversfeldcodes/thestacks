@@ -3,6 +3,7 @@ module Page.BookDetail exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , overlayView
     , update
     , view
     )
@@ -13,7 +14,7 @@ import Components.FormatPicker exposing (formatPicker)
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, option, p, section, select, span, text)
-import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, target, value)
+import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, target, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route exposing (Route)
@@ -44,6 +45,7 @@ type alias Model =
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | RequestCloseOverlay
 
 
 type Msg
@@ -63,6 +65,7 @@ type Msg
     | EditionSelected String
     | VerifyAge
     | DismissAgeGate
+    | CloseOverlay
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -164,6 +167,9 @@ update msg model maybeToken =
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
+
+        CloseOverlay ->
+            ( model, Cmd.none, RequestCloseOverlay )
 
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
@@ -764,3 +770,128 @@ bookshelfLabel name =
 
         other ->
             other
+
+
+{-| Render the book detail as a modal overlay.
+Clicking the backdrop or the close button fires CloseOverlay.
+Click on the card content is stopped from propagating to the backdrop.
+-}
+overlayView : Model -> Html Msg
+overlayView model =
+    let
+        ariaLabel =
+            case model.book of
+                Success book ->
+                    "Book details: " ++ book.title
+
+                _ ->
+                    "Book details"
+    in
+    div
+        [ class "book-overlay"
+        , style "position" "fixed"
+        , style "top" "0"
+        , style "left" "0"
+        , style "width" "100vw"
+        , style "height" "100vh"
+        , style "z-index" "1000"
+        , style "display" "flex"
+        , style "align-items" "center"
+        , style "justify-content" "center"
+        ]
+        [ div
+            [ class "book-overlay__backdrop"
+            , style "position" "absolute"
+            , style "top" "0"
+            , style "left" "0"
+            , style "width" "100%"
+            , style "height" "100%"
+            , style "background" "rgba(10, 8, 6, 0.75)"
+            , style "backdrop-filter" "blur(4px)"
+            , style "-webkit-backdrop-filter" "blur(4px)"
+            , onClick CloseOverlay
+            ]
+            []
+        , div
+            [ class "book-overlay__card"
+            , attribute "role" "dialog"
+            , attribute "aria-label" ariaLabel
+            , attribute "aria-modal" "true"
+            , tabindex -1
+            , style "position" "relative"
+            , style "z-index" "1001"
+            , style "max-width" "900px"
+            , style "width" "90vw"
+            , style "max-height" "90vh"
+            , style "overflow-y" "auto"
+            , style "border-radius" "12px"
+            , style "box-shadow" "0 8px 32px rgba(0,0,0,0.5)"
+            ]
+            [ button
+                [ class "book-overlay__close"
+                , attribute "aria-label" "Close book details"
+                , onClick CloseOverlay
+                , style "position" "absolute"
+                , style "top" "12px"
+                , style "right" "12px"
+                , style "z-index" "1002"
+                , style "background" "rgba(0,0,0,0.4)"
+                , style "color" "#e8dcc8"
+                , style "border" "none"
+                , style "border-radius" "50%"
+                , style "width" "36px"
+                , style "height" "36px"
+                , style "font-size" "20px"
+                , style "cursor" "pointer"
+                , style "display" "flex"
+                , style "align-items" "center"
+                , style "justify-content" "center"
+                ]
+                [ text "×" ]
+            , overlayContent model
+            ]
+        ]
+
+
+{-| The inner content of the overlay — reuses the same view logic as the full page
+but without the page wrapper classes.
+-}
+overlayContent : Model -> Html Msg
+overlayContent model =
+    if model.showAgeGate then
+        ageGate
+            { onVerify = VerifyAge
+            , onDismiss = DismissAgeGate
+            }
+
+    else
+        div [ class "book-detail__parchment" ]
+            [ case model.book of
+                NotAsked ->
+                    text ""
+
+                Loading ->
+                    div [ class "loading", style "padding" "3rem", style "text-align" "center" ]
+                        [ text "Loading book..." ]
+
+                Failure _ ->
+                    p [ class "error", style "padding" "3rem" ]
+                        [ text "Could not load this book. Please try again." ]
+
+                Success book ->
+                    viewBook model book
+            , if model.removeModalOpen then
+                case model.book of
+                    Success book ->
+                        removeBookModal
+                            { bookTitle = book.title
+                            , onConfirm = ConfirmRemove
+                            , onCancel = CloseRemoveModal
+                            }
+
+                    _ ->
+                        text ""
+
+              else
+                text ""
+            ]
