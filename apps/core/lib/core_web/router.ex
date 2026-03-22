@@ -114,6 +114,7 @@ defmodule CoreWeb.Router do
     post "/listings", ListingController, :create
     put "/listings/:id/activate", ListingController, :activate
     put "/listings/:id/deactivate", ListingController, :deactivate
+    put "/listings/:id/sold", ListingController, :sold
 
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
     get "/placements/mine", BookshelfPlacementController, :mine

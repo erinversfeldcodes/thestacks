@@ -201,6 +201,45 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
+  Marks an active listing as sold: active → sold.
+
+  Sets `sold_at` to now and clears `listing_status` on the seller's placement.
+  """
+  @spec sold_listing(Listing.t(), binary()) ::
+          {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
+  def sold_listing(%Listing{} = listing, user_id) do
+    with :ok <- verify_ownership(listing, user_id) do
+      now = DateTime.utc_now()
+
+      Multi.new()
+      |> Multi.run(:locked_listing, fn repo, _ ->
+        lock_and_validate_transition(repo, listing.id, "sold")
+      end)
+      |> Multi.update(:listing, fn %{locked_listing: locked} ->
+        Listing.changeset(locked, %{status: "sold", sold_at: now})
+      end)
+      |> Multi.run(:denormalize, fn repo, %{listing: l} ->
+        update_placement_listing_status(repo, user_id, l.book_id, nil)
+      end)
+      |> Multi.run(:emit_event, fn _repo, %{listing: l} ->
+        Events.emit_safe(%{
+          event_type: "listing.sold",
+          aggregate_type: "listing",
+          aggregate_id: l.id,
+          payload: %{book_id: l.book_id, seller_id: user_id}
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{listing: listing}} -> {:ok, Repo.preload(listing, [:book, :seller])}
+        {:error, :locked_listing, reason, _} -> {:error, reason}
+        {:error, :listing, changeset, _} -> {:error, changeset}
+        {:error, _, reason, _} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
   Expires an active listing: active → expired.
 
   Called by ListingExpiryJob for listings past their `expires_at`.
