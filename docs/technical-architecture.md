@@ -1,7 +1,7 @@
 # The Stacks — Technical Architecture
 
-> **Version:** 1.5
-> **Last updated:** 2026-03-17
+> **Version:** 1.6
+> **Last updated:** 2026-03-21
 > **Status:** Living document — update as decisions evolve
 
 The Stacks is an open-source, self-hosted book management and discovery platform. This document is the canonical technical reference for the project's architecture, data model, infrastructure, and design decisions.
@@ -34,7 +34,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 22. [Schema Contracts (Protobuf)](#schema-contracts-protobuf)
 23. [Partner Integration](#partner-integration)
 24. [RSS / OPDS](#rss--opds)
-25. [Marketplace (Future)](#marketplace-future)
+25. [Marketplace (Classifieds)](#marketplace-classifieds)
 26. [Potential OSS Contributions](#potential-oss-contributions)
 27. [Visibility & Privacy Architecture](#visibility--privacy-architecture)
 28. [Blog & LLM Associations](#blog--llm-associations)
@@ -71,9 +71,8 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 | **Google Books API** | Fallback ISBN resolution | Free tier |
 | **Brave Search API** | Primary search for source discovery | Free tier: 2k queries/mo; Paid: $3/1k |
 | **SearXNG** | Self-hosted federated meta-search as fallback, deployed on same Fly.io infra | Self-hosted |
-| **Stitch Money** | Payment initiation and payouts (future marketplace) | Per-transaction |
-| **Smile Identity / Yoti / Sumsub** | KYC and age verification without full identity disclosure | Per-verification |
-| **Pargo** | Shipping calculator for marketplace (future) | Per-calculation |
+| **Stitch Money** | Payment initiation and payouts — **DEFERRED** (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Schema exists; no integration built. | Per-transaction |
+| **Pargo** | Shipping calculator — **DEFERRED** (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Schema exists; no integration built. | Per-calculation |
 | **Resend** or **Postmark** | Transactional email (partner notifications, GDPR confirmation, account verification) | Free tier / low volume |
 
 ---
@@ -901,8 +900,8 @@ A book's placement on a bookshelf, with metadata. Soft-delete via `removed_at` p
 | `notes` | `TEXT` | `NULL`, encrypted (Tier 2) |
 | `visibility` | `ENUM('owner', 'group', 'platform')` | `NULL` — inherits bookshelf visibility when NULL. Can only be equal to or more restrictive than the bookshelf's visibility. |
 | `visibility_group_id` | `UUID` | `NULL` — Foreign key to `groups`. Set when placement `visibility = 'group'`. |
-| `listing_mode` | `ENUM('fixed', 'offers')` | `NULL` — only set for `looking_for_home` placements. Closed bid deferred to a future phase. |
-| `listing_status` | `ENUM('active', 'pending', 'sold')` | `NULL` — only set for `looking_for_home` placements. |
+| `listing_mode` | `ENUM('fixed', 'offers')` | `NULL` — only set for `looking_for_home` placements. |
+| `listing_status` | `TEXT` | `NULL` — denormalised from `listings.status`. Values: `'active'`, `'sold'`, `'expired'`, `'removed'`. Only set for `looking_for_home` placements with a listing. See Section 25. |
 | `listing_price_cents` | `INTEGER` | `NULL` — fixed price in smallest currency unit. |
 | `listing_min_price_cents` | `INTEGER` | `NULL` — minimum acceptable offer for `offers` mode. |
 
@@ -1180,9 +1179,9 @@ Polymorphic comments. Parents are either a `blog_post` or a `shelf_placement` (m
 
 ---
 
-### `offer_threads`
+### `offer_threads` (Future — Unused)
 
-Private negotiation threads on marketplace listings. One thread per buyer-listing pair.
+Private negotiation threads on marketplace listings. One thread per buyer-listing pair. **Table exists in DB but is not referenced by application code.** See [ADR 013](decisions/013-marketplace-classifieds-first.md).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -1197,9 +1196,9 @@ Private negotiation threads on marketplace listings. One thread per buyer-listin
 
 ---
 
-### `offer_messages`
+### `offer_messages` (Future — Unused)
 
-Individual messages within an offer thread. Includes both conversational messages and formal offer amounts.
+Individual messages within an offer thread. Includes both conversational messages and formal offer amounts. **Table exists in DB but is not referenced by application code.** See [ADR 013](decisions/013-marketplace-classifieds-first.md).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -1380,9 +1379,9 @@ Persistent event store for the internal event bus. All significant state changes
 - `schema_version` enables event upcasting: old events are transformed to current shape on read.
 - `metadata.correlation_id` links related events (e.g., a photo upload triggers vision → ISBN resolve → enrichment fan-out — all share one correlation ID).
 
-### `listings` (Future — Marketplace)
+### `listings`
 
-Marketplace listings for secondhand books.
+Classifieds listings for secondhand books. See [ADR 013](decisions/013-marketplace-classifieds-first.md).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -1395,6 +1394,7 @@ Marketplace listings for secondhand books.
 | `currency` | `TEXT` | Default `'ZAR'` |
 | `condition` | `ENUM('new', 'like_new', 'good', 'fair', 'poor')` | `NOT NULL` |
 | `description` | `TEXT` | Seller's description of condition/edition |
+| `contact_info` | `TEXT` | Seller's preferred contact method (email, phone, WhatsApp, etc.) |
 | `photo_urls` | `TEXT[]` | At least one required |
 | `listed_at` | `TIMESTAMPTZ` | |
 | `expires_at` | `TIMESTAMPTZ` | Auto-expiry for stale listings |
@@ -1402,9 +1402,9 @@ Marketplace listings for secondhand books.
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
-### `offers` (Future — Marketplace)
+### `offers` (Future — Unused)
 
-Offers made on `offer`-mode listings.
+Offers made on `offer`-mode listings. **Table exists in DB but is not referenced by application code.** See [ADR 013](decisions/013-marketplace-classifieds-first.md).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -1423,9 +1423,9 @@ Offers made on `offer`-mode listings.
 - Seller can set `listings.price_cents` as a minimum — offers below it are auto-declined.
 - Expired offers auto-expire after 7 days without response.
 
-### `transactions` (Future — Marketplace)
+### `transactions` (Future — Unused)
 
-Completed purchases (fixed price or accepted offer).
+Completed purchases (fixed price or accepted offer). **Table exists in DB but is not referenced by application code.** See [ADR 013](decisions/013-marketplace-classifieds-first.md).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -5424,54 +5424,54 @@ OPDS support enables integration with e-reader apps like KOReader, Calibre, and 
 
 ---
 
-## Marketplace (Future)
+## Marketplace (Classifieds)
 
-A Depop/Vinted-style marketplace for secondhand books, initially ZA-only.
+A classifieds board for secondhand books, initially ZA-only. **Not an e-commerce platform.** See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision rationale.
 
 ### Design
 
 | Aspect | Decision |
 |--------|----------|
-| Interaction model | **Depop/Vinted**: public Q&A on listings (visible to all platform users) + private offer threads (buyer + seller only) |
-| Pricing modes | Fixed price or open-to-offers (with optional minimum). Closed bid deferred to a future phase. |
-| Listings | Photos required + condition grading (new / good / fair / poor) |
-| Payments | Stitch Money for payment initiation and payouts |
-| Shipping | Pargo for calculated shipping at checkout |
-| Trust | KYC required for sellers (Smile Identity / Yoti / Sumsub) |
-| Open source | Others fork the platform and swap in local equivalents for payments, shipping, and KYC |
-
-### Interaction Model Detail
-
-**Open and offers listings:**
-- Public Q&A section on each listing — questions and answers visible to all platform users who can see the listing.
-- Block filtering applies to Q&A identically to blog comments (see Section 27).
-- Private offer thread per buyer — one `offer_thread` row per `(placement_id, buyer_id)` pair.
-- Offer thread supports: plain messages, formal offer amounts, counter-offers, accept, and decline.
-- On offer acceptance: `listing_status` transitions to `'pending'`, listing is locked from new offers, checkout is initiated.
-
-**Closed bid listings:** Deferred to a future phase. See user stories for rationale.
+| Interaction model | **Classifieds board**: sellers list books with contact info; interested buyers contact the seller directly off-platform |
+| Listings | Photos required + condition grading (new / like_new / good / fair / poor) |
+| Contact | `contact_info` text field on listings — seller provides their preferred contact method (email, phone, WhatsApp, etc.) |
+| Payments | None — transactions happen off-platform between buyer and seller |
+| Shipping | None — buyer and seller arrange delivery themselves |
+| On-platform messaging | None — deferred to a future phase |
 
 ### State Machine
 
 ```
 looking_for_home placement:
-  active ──(offer accepted)──► pending ──(payment complete)──► sold
-  active ──(seller removes)──► [removed_at set, placement soft-deleted]
-  pending ──(payment fails / expires)──► active
-  sold ──(event emitted)──► buyer prompted to add to their collection
+  draft ──(seller activates)──► active ──(30-day TTL expires)──► expired
+  active ──(seller marks sold)──► sold
+  active ──(seller removes)──► removed
+  expired ──(seller re-activates)──► active
 ```
 
-### Post-Sale Lifecycle (US-7.2)
+The `sold` status is seller-managed — the seller manually marks a listing as sold. There is no system-triggered transition because the platform has no visibility into off-platform transactions.
 
-When a sale completes (`listing_status` transitions to `'sold'`):
-1. The seller's placement is soft-deleted (`removed_at` set). The book leaves their "Looking for a Home" shelf.
-2. A `book.sold` event is emitted to the event log.
-3. An Oban worker (`MarketplaceSaleWorker`) checks if the buyer has the book's work on their WishList.
-4. If yes: the system prompts the buyer to move it from WishList to Library or AntiLibrary (via email if opted in, and via an in-platform prompt on next visit).
-5. If no: the buyer is prompted to add the work to one of their shelves.
-6. Adding is optional — the buyer may dismiss the prompt. The book can always be added later via the standard upload flow.
+### Listing Expiry
 
-**Refund, dispute, and non-delivery flows:** TBD — to be specified when the marketplace is closer to implementation.
+Active listings expire automatically after 30 days. `Stacks.Workers.ListingExpiryJob` runs daily and transitions any listing past its `expires_at` timestamp to `expired` status. Sellers can re-activate expired listings.
+
+### Denormalisation
+
+`bookshelf_placements.listing_status` is denormalised from the `listings` table for efficient query-time filtering (e.g. "show only active listings on Looking for a Home"). The canonical status lives on the `listings` row; the placement field is kept in sync by the `Marketplace` context.
+
+### Unused Schemas
+
+The `transactions`, `offer_threads`, and `offer_messages` tables exist in the database (created in migration `20260319000005`). No application code references them. They remain in place — dropping them would require a new migration for no benefit, and they will be used if on-platform payments or messaging are introduced in the future (see deferred issues #054b and #054c).
+
+### Future Phases (Deferred)
+
+The following features are deferred indefinitely, not cancelled. The database schema supports them when needed:
+
+- **On-platform payments** via Stitch Money (#054b)
+- **On-platform shipping** via Pargo (#054c)
+- **On-platform messaging / offer threads** (future issue)
+- **Post-sale buyer prompts** (`MarketplaceSaleWorker` — will become relevant when payments are on-platform)
+- **Seller KYC** (will become relevant when the platform facilitates financial transactions)
 
 ---
 
@@ -5595,8 +5595,7 @@ Sub-threads rooted in a blocked user's comment collapse entirely — no `[hidden
 
 - Block filtering is enforced **server-side only**. Client receives filtered data; filtering is never delegated to the client.
 - `ViewAsPlug` is owner-authenticated — it cannot be invoked by a third party to spy on another user's visibility configuration.
-- Offer threads are scoped to exactly `(placement_id, buyer_id)` — Phoenix controllers validate the session user is one of the two parties before returning thread data.
-- GDPR: `user_blocks`, `group_members`, `group_invitations`, `offer_threads`, `offer_messages`, `comments`, `blog_posts`, and `post_book_associations` all contain personal data and must be included in right-to-export (US-8.1) and right-to-erasure (US-8.2) flows.
+- GDPR: `user_blocks`, `group_members`, `group_invitations`, `comments`, `blog_posts`, `post_book_associations`, and `listings` all contain personal data and must be included in right-to-export (US-8.1) and right-to-erasure (US-8.2) flows. The `offer_threads` and `offer_messages` tables exist but are currently unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)).
 
 ---
 
