@@ -6,8 +6,8 @@ test.use({ storageState: suiteAuthFile("settings") });
 test.describe("Settings — Privacy & Consent", () => {
   test("consent page loads with title and toggle", async ({ page }) => {
     await page.goto("/settings/consent");
-    await expect(page.locator(".page--settings")).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".page__title")).toContainText("Privacy");
+    await expect(page.locator(".page--settings").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".page__title").last()).toContainText("Privacy");
     await expect(page.locator(".toggle")).toBeVisible();
   });
 
@@ -241,8 +241,8 @@ test.describe("Settings — Profile & Account API", () => {
 test.describe("Settings — Age Verification", () => {
   test("age verification page loads with toggle", async ({ page }) => {
     await page.goto("/settings/age-verification");
-    await expect(page.locator(".page--settings")).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".page__title")).toContainText("Age Verification");
+    await expect(page.locator(".page--settings").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".page__title").last()).toContainText("Age Verification");
     await expect(page.locator(".toggle")).toBeVisible();
   });
 

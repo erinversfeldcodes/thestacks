@@ -27,7 +27,7 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 30_000 }
       );
 
@@ -61,7 +61,7 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
@@ -102,7 +102,7 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
@@ -137,7 +137,7 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
@@ -172,9 +172,9 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
-      // Upload is accepted; spinner switches to "Identifying your book..."
+      // Upload is accepted; spinner switches to "Processing image..."
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
