@@ -39,10 +39,6 @@ else
     config :core, :vision_together_api_key, together_key
   end
 
-  if System.get_env("REQUIRE_EMAIL_CONFIRMATION") == "true" do
-    config :core, :require_email_confirmation, true
-  end
-
   if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
     config :core, :rate_limit_auth, String.to_integer(auth_limit)
   end

@@ -279,6 +279,83 @@ defmodule Stacks.Blog do
     |> Repo.all()
   end
 
+  @doc """
+  Confirms a book association by setting `visible: true`.
+
+  The caller must own the post. Returns `{:error, :not_found}` if the
+  association does not exist or does not belong to the post.
+  """
+  @spec confirm_association(Post.t(), String.t()) ::
+          {:ok, PostBookAssociation.t()} | {:error, atom()}
+  def confirm_association(%Post{} = post, association_id) do
+    case get_association_for_post(post.id, association_id) do
+      nil ->
+        {:error, :not_found}
+
+      association ->
+        association
+        |> PostBookAssociation.changeset(%{visible: true})
+        |> Repo.update()
+        |> tap_ok(fn assoc ->
+          Events.emit_safe(%{
+            event_type: "blog.association_confirmed",
+            aggregate_type: "post_book_association",
+            aggregate_id: assoc.id,
+            payload: %{post_id: post.id, book_id: assoc.book_id}
+          })
+        end)
+    end
+  end
+
+  @doc """
+  Dismisses a book association by setting `visible: false`.
+
+  The caller must own the post. Returns `{:error, :not_found}` if the
+  association does not exist or does not belong to the post.
+  """
+  @spec dismiss_association(Post.t(), String.t()) ::
+          {:ok, PostBookAssociation.t()} | {:error, atom()}
+  def dismiss_association(%Post{} = post, association_id) do
+    case get_association_for_post(post.id, association_id) do
+      nil ->
+        {:error, :not_found}
+
+      association ->
+        association
+        |> PostBookAssociation.changeset(%{visible: false})
+        |> Repo.update()
+        |> tap_ok(fn assoc ->
+          Events.emit_safe(%{
+            event_type: "blog.association_dismissed",
+            aggregate_type: "post_book_association",
+            aggregate_id: assoc.id,
+            payload: %{post_id: post.id, book_id: assoc.book_id}
+          })
+        end)
+    end
+  end
+
+  defp get_association_for_post(post_id, association_id) do
+    Repo.get_by(PostBookAssociation, id: association_id, post_id: post_id)
+  end
+
+  @doc """
+  Lists posts written by a user that are associated with a given book.
+
+  Only returns posts with visible associations. Ordered by `published_at` descending.
+  """
+  @spec list_posts_for_book_by_user(String.t(), String.t()) :: [Post.t()]
+  def list_posts_for_book_by_user(book_id, user_id) do
+    from(p in Post,
+      join: a in PostBookAssociation,
+      on: a.post_id == p.id,
+      where: a.book_id == ^book_id and a.visible == true and p.user_id == ^user_id,
+      order_by: [desc: p.published_at],
+      distinct: true
+    )
+    |> Repo.all()
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------

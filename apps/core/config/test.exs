@@ -42,6 +42,5 @@ config :core, Stacks.Vault,
   ]
 
 config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Test
-config :core, :require_email_confirmation, false
 
 config :logger, level: :warning

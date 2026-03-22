@@ -12,7 +12,7 @@ defmodule StacksWeb.AuthController do
   alias Stacks.Audit
   alias Stacks.Email
 
-  @doc "POST /api/auth/register — create a new user account and return a JWT."
+  @doc "POST /api/auth/register — create a new user account and send confirmation email."
   def register(conn, params) do
     case Accounts.register(params) do
       {:ok, user} ->
@@ -22,17 +22,9 @@ defmodule StacksWeb.AuthController do
           ip: get_ip(conn)
         )
 
-        if require_email_confirmation?() do
-          conn
-          |> put_status(201)
-          |> json(%{message: "confirmation_email_sent"})
-        else
-          {:ok, token, _claims} = Guardian.encode_and_sign(user)
-
-          conn
-          |> put_status(201)
-          |> json(%{token: token, user: format_user(user)})
-        end
+        conn
+        |> put_status(201)
+        |> json(%{message: "confirmation_email_sent"})
 
       {:error, changeset} ->
         conn
@@ -144,10 +136,6 @@ defmodule StacksWeb.AuthController do
       age_verified: user.age_verified,
       consent_analytics: user.consent_analytics
     }
-  end
-
-  defp require_email_confirmation? do
-    Application.get_env(:core, :require_email_confirmation, false)
   end
 
   defp get_ip(conn) do

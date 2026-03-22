@@ -66,6 +66,7 @@ setup("authenticate as owner", async ({ request, page }) => {
  * Each gets its own storage state file for parallel isolation.
  */
 setup("authenticate E2E suite users", async ({ request, browser }) => {
+  setup.setTimeout(120_000); // 15 suite users × ~2s each against remote preview
   for (const slug of E2E_SUITES) {
     const context = await browser.newContext();
     const page = await context.newPage();

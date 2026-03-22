@@ -721,34 +721,41 @@ defmodule Mix.Tasks.Proto.SyncTest do
       end
     end
 
-    test "run([\"--check\"]) raises when ecto schema has drifted" do
-      original_cwd = File.cwd!()
+    test "DriftChecker detects when ecto schema has drifted" do
+      # Instead of corrupting the real generated file (which causes CI race
+      # conditions), we test the DriftChecker module directly by writing a
+      # drifted file to a temp directory and comparing against expected content.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       [table | _] = manifest.tables
       ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
 
-      # Read the generated file, append a drift marker, write it back.
-      # The after block MUST restore the original content — this file is
-      # checked in and other tests/compilation depend on it being clean.
       original_content = File.read!(ecto_path)
+      drifted_content = original_content <> "\n# drift marker\n"
+
+      tmp_dir = Path.join(System.tmp_dir!(), "proto_drift_#{System.unique_integer([:positive])}")
+      tmp_file = Path.join(tmp_dir, "drifted.ex")
+      File.mkdir_p!(tmp_dir)
 
       try do
-        File.cd!(@repo_root)
-        File.write!(ecto_path, original_content <> "\n# drift marker\n")
+        File.write!(tmp_file, drifted_content)
 
-        assert_raise RuntimeError, ~r/Proto sync drift detected/, fn ->
-          ProtoSync.run(["--check"])
-        end
+        assert {:drift, ^tmp_file, diff} =
+                 DriftChecker.check(original_content, tmp_file)
+
+        assert diff =~ "drift marker"
       after
-        File.write!(ecto_path, original_content)
-        File.cd!(original_cwd)
-
-        # Double-check the file was restored — if not, force regeneration
-        # to prevent downstream test failures from stale drift markers.
-        if File.read!(ecto_path) != original_content do
-          File.write!(ecto_path, original_content)
-        end
+        File.rm_rf!(tmp_dir)
       end
+    end
+
+    test "DriftChecker returns :ok when file matches expected content" do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      [table | _] = manifest.tables
+      ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
+
+      original_content = File.read!(ecto_path)
+
+      assert :ok = DriftChecker.check(original_content, ecto_path)
     end
   end
 

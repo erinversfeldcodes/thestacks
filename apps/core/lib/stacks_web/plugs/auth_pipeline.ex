@@ -14,4 +14,5 @@ defmodule StacksWeb.Plugs.AuthPipeline do
   plug Guardian.Plug.VerifyHeader, scheme: "Bearer"
   plug Guardian.Plug.EnsureAuthenticated
   plug Guardian.Plug.LoadResource, allow_blank: false
+  plug StacksWeb.Plugs.RequireConfirmedEmail
 end
