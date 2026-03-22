@@ -8,7 +8,7 @@ kill_timeout = "5s"
 # http://thestacks-searxng.internal:8080 — no public IP is allocated.
 
 [build]
-  image = "searxng/searxng:2024.11.10-5f089c7c0"
+  image = "searxng/searxng:latest"
 
 [env]
   SEARXNG_SETTINGS_PATH = "/etc/searxng/settings.yml"
