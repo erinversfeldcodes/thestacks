@@ -2,6 +2,7 @@ module Navigation.Route exposing
     ( ConfirmStatus(..)
     , Route(..)
     , fromUrl
+    , isSettingsRoute
     , toPath
     )
 
@@ -25,6 +26,10 @@ type Route
     | BookDetail String
     | Upload
     | Search
+    | Settings
+    | SettingsProfile
+    | SettingsPassword
+    | SettingsNotifications
     | SettingsConsent
     | SettingsAgeVerification
     | CostTransparency
@@ -46,8 +51,12 @@ parser =
         , Parser.map BookDetail (s "books" </> string)
         , Parser.map Upload (s "upload")
         , Parser.map Search (s "search")
+        , Parser.map SettingsProfile (s "settings" </> s "profile")
+        , Parser.map SettingsPassword (s "settings" </> s "password")
+        , Parser.map SettingsNotifications (s "settings" </> s "notifications")
         , Parser.map SettingsConsent (s "settings" </> s "consent")
         , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
+        , Parser.map Settings (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
@@ -94,6 +103,18 @@ toPath route =
         Search ->
             "/search"
 
+        Settings ->
+            "/settings/profile"
+
+        SettingsProfile ->
+            "/settings/profile"
+
+        SettingsPassword ->
+            "/settings/password"
+
+        SettingsNotifications ->
+            "/settings/notifications"
+
         SettingsConsent ->
             "/settings/consent"
 
@@ -114,3 +135,28 @@ toPath route =
 
         NotFound ->
             "/not-found"
+
+
+isSettingsRoute : Route -> Bool
+isSettingsRoute route =
+    case route of
+        Settings ->
+            True
+
+        SettingsProfile ->
+            True
+
+        SettingsPassword ->
+            True
+
+        SettingsNotifications ->
+            True
+
+        SettingsConsent ->
+            True
+
+        SettingsAgeVerification ->
+            True
+
+        _ ->
+            False
