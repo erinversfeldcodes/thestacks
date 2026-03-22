@@ -9,7 +9,7 @@ defmodule StacksWeb.BlogController do
 
   use CoreWeb, :controller
 
-  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+  action_fallback CoreWeb.FallbackController
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Blog
@@ -35,7 +35,7 @@ defmodule StacksWeb.BlogController do
 
     case Blog.get_post_for_viewer(id, viewer) do
       nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
+        {:error, :not_found}
 
       post ->
         associations = Blog.list_associations(post.id)
@@ -54,21 +54,10 @@ defmodule StacksWeb.BlogController do
       visibility: params["visibility"] || "owner"
     }
 
-    case Blog.create_post(user, attrs) do
-      {:ok, post} ->
-        conn
-        |> put_status(201)
-        |> json(%{post: format_post(post)})
-
-      {:error, :visibility_ceiling} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "post visibility exceeds profile visibility ceiling"})
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(422)
-        |> json(%{errors: format_errors(changeset)})
+    with {:ok, post} <- Blog.create_post(user, attrs) do
+      conn
+      |> put_status(201)
+      |> json(%{post: format_post(post)})
     end
   end
 
@@ -77,33 +66,14 @@ defmodule StacksWeb.BlogController do
   def update(conn, %{"id" => id} = params) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Blog.get_post(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
+    attrs =
+      params
+      |> Map.take(["title", "body", "visibility"])
+      |> atomize_keys()
 
-      post ->
-        attrs =
-          params
-          |> Map.take(["title", "body", "visibility"])
-          |> atomize_keys()
-
-        case Blog.update_post(post, user, attrs) do
-          {:ok, updated_post} ->
-            json(conn, %{post: format_post(updated_post)})
-
-          {:error, :unauthorized} ->
-            conn |> put_status(403) |> json(%{error: "forbidden"})
-
-          {:error, :visibility_ceiling} ->
-            conn
-            |> put_status(422)
-            |> json(%{error: "post visibility exceeds profile visibility ceiling"})
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            conn
-            |> put_status(422)
-            |> json(%{errors: format_errors(changeset)})
-        end
+    with {:ok, post} <- fetch_post(id),
+         {:ok, updated_post} <- Blog.update_post(post, user, attrs) do
+      json(conn, %{post: format_post(updated_post)})
     end
   end
 
@@ -112,18 +82,9 @@ defmodule StacksWeb.BlogController do
   def delete(conn, %{"id" => id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Blog.get_post(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
-
-      post ->
-        case Blog.delete_post(post, user) do
-          {:ok, _post} ->
-            json(conn, %{deleted: true})
-
-          {:error, :unauthorized} ->
-            conn |> put_status(403) |> json(%{error: "forbidden"})
-        end
+    with {:ok, post} <- fetch_post(id),
+         {:ok, _post} <- Blog.delete_post(post, user) do
+      json(conn, %{deleted: true})
     end
   end
 
@@ -132,24 +93,22 @@ defmodule StacksWeb.BlogController do
   def publish(conn, %{"id" => id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Blog.get_post(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
-
-      post ->
-        case Blog.publish_post(post, user) do
-          {:ok, published_post} ->
-            json(conn, %{post: format_post(published_post)})
-
-          {:error, :unauthorized} ->
-            conn |> put_status(403) |> json(%{error: "forbidden"})
-        end
+    with {:ok, post} <- fetch_post(id),
+         {:ok, published_post} <- Blog.publish_post(post, user) do
+      json(conn, %{post: format_post(published_post)})
     end
   end
 
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp fetch_post(id) do
+    case Blog.get_post(id) do
+      nil -> {:error, :not_found}
+      post -> {:ok, post}
+    end
+  end
 
   defp build_viewer(conn) do
     case Guardian.Plug.current_resource(conn) do
