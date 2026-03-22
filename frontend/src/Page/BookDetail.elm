@@ -10,8 +10,11 @@ module Page.BookDetail exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
+import Components.AuthorCard as AuthorCard
 import Components.FormatPicker exposing (formatPicker)
+import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal exposing (removeBookModal)
+import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, option, p, section, select, span, text)
 import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, target, value)
@@ -547,76 +550,28 @@ viewAboutSection book =
         ]
 
 
+{-| Review summary section — delegates to the ReviewSummary component.
+Currently passes NotAsked since the API does not yet provide per-book reviews.
+-}
 viewReviewsSection : Html Msg
 viewReviewsSection =
-    section [ class "book-detail__section book-detail__reviews", attribute "role" "region", attribute "aria-labelledby" "section-reviews" ]
-        [ h3 [ class "book-detail__section-title", id "section-reviews" ] [ text "What People Think" ]
-        , div [ class "book-detail__reviews-grid" ]
-            [ viewReviewSource "GoodReads" "goodreads"
-            , viewReviewSource "Storygraph" "storygraph"
-            , viewReviewSource "Reddit" "reddit"
-            ]
-        ]
+    ReviewSummary.view NotAsked
 
 
-viewReviewSource : String -> String -> Html Msg
-viewReviewSource sourceName sourceClass =
-    div [ class ("book-detail__review-card book-detail__review-card--" ++ sourceClass) ]
-        [ div [ class "book-detail__review-header" ]
-            [ div [ class "book-detail__review-icon" ] []
-            , span [ class "book-detail__review-source" ] [ text sourceName ]
-            ]
-        , div [ class "book-detail__review-body" ]
-            [ div [ class "book-detail__review-sentiment", attribute "aria-label" "Sentiment data not yet available" ] []
-            , p [ class "stub-notice" ] [ text "Sentiment data coming soon" ]
-            ]
-        ]
-
-
+{-| Price info section — delegates to the PriceInfo component.
+Currently passes NotAsked since the API does not yet provide per-book prices.
+-}
 viewPricesSection : Html Msg
 viewPricesSection =
-    section [ class "book-detail__section book-detail__prices", attribute "role" "region", attribute "aria-labelledby" "section-prices" ]
-        [ h3 [ class "book-detail__section-title", id "section-prices" ] [ text "Where to Buy (ZAR)" ]
-        , div [ class "book-detail__prices-list" ] []
-        , p [ class "book-detail__prices-empty" ]
-            [ text "No bookshop listings yet" ]
-        ]
+    PriceInfo.view NotAsked
 
 
+{-| Author card section — delegates to the AuthorCard component.
+Passes the author from the book; enrichment is Nothing until the API is extended.
+-}
 viewAuthorSection : Book -> Html Msg
 viewAuthorSection book =
-    case book.author of
-        Just author ->
-            section [ class "book-detail__section book-detail__author-card", attribute "role" "region", attribute "aria-labelledby" "section-author" ]
-                [ h3 [ class "book-detail__section-title", id "section-author" ] [ text "The Author" ]
-                , div [ class "book-detail__author-info" ]
-                    [ div [ class "book-detail__author-avatar" ]
-                        [ span [ class "book-detail__author-initial" ]
-                            [ text (String.left 1 author.name) ]
-                        ]
-                    , div [ class "book-detail__author-details" ]
-                        [ p [ class "book-detail__author-name" ] [ text author.name ]
-                        , case author.bio of
-                            Just bio ->
-                                p [ class "book-detail__author-bio" ] [ text bio ]
-
-                            Nothing ->
-                                text ""
-                        , case author.website of
-                            Just url ->
-                                a [ class "book-detail__author-link", href url, target "_blank" ]
-                                    [ text "Website" ]
-
-                            Nothing ->
-                                text ""
-                        , div [ class "book-detail__author-rss stub-notice" ] [ text "RSS feed coming soon" ]
-                        , div [ class "book-detail__author-events stub-notice" ] [ text "Events coming soon" ]
-                        ]
-                    ]
-                ]
-
-        Nothing ->
-            text ""
+    AuthorCard.view book.author Nothing
 
 
 viewWritingSection : Html Msg
