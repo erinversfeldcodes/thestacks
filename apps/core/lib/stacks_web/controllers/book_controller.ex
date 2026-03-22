@@ -5,6 +5,7 @@ defmodule StacksWeb.BookController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
+  alias Stacks.Books.BookDetailCache
   alias Stacks.Shelving
   alias Stacks.Visibility
   alias StacksWeb.Plugs.AgeGate
@@ -127,7 +128,13 @@ defmodule StacksWeb.BookController do
 
   @doc "GET /api/books/:id — retrieve a book by UUID."
   def show(conn, %{"id" => id}) do
-    case Books.get_book_detail(id) do
+    book =
+      case BookDetailCache.get(id) do
+        {:ok, cached} -> cached
+        {:miss, _} -> fetch_and_cache_book(id)
+      end
+
+    case book do
       nil ->
         conn
         |> put_status(404)
@@ -153,6 +160,17 @@ defmodule StacksWeb.BookController do
               placement: format_placement_or_nil(placement)
             })
         end
+    end
+  end
+
+  defp fetch_and_cache_book(id) do
+    case Books.get_book_detail(id) do
+      nil ->
+        nil
+
+      book ->
+        BookDetailCache.put(id, book)
+        book
     end
   end
 
