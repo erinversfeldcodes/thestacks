@@ -2,6 +2,7 @@ module Api exposing
     ( AuthResponse
     , BookDetailResponse
     , CatalogueResponse
+    , MergeFormatResponse
     , NotificationPreferences
     , PlacementSummary
     , PollResponse
@@ -13,6 +14,7 @@ module Api exposing
     , login
     , logout
     , lookupByIsbn
+    , mergeFormat
     , moveBook
     , placeBook
     , pollUploadStatus
@@ -32,7 +34,7 @@ import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
-import Types.Book exposing (Book, bookDecoder)
+import Types.Book exposing (Book, Edition, bookDecoder, editionDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Url.Builder
 
@@ -589,6 +591,45 @@ updateNotifications prefs token toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Response from POST /api/books/:id/merge-format — the new edition.
+-}
+type alias MergeFormatResponse =
+    { edition : Edition
+    }
+
+
+mergeFormatResponseDecoder : Decoder MergeFormatResponse
+mergeFormatResponseDecoder =
+    Decode.map MergeFormatResponse
+        (Decode.field "edition" editionDecoder)
+
+
+{-| POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book.
+-}
+mergeFormat :
+    String
+    -> { isbn : String, formatLabel : String }
+    -> String
+    -> (Result Http.Error MergeFormatResponse -> msg)
+    -> Cmd msg
+mergeFormat bookId body token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "isbn", Encode.string body.isbn )
+                    , ( "format_label", Encode.string body.formatLabel )
+                    ]
+                )
+        , expect = Http.expectJson toMsg mergeFormatResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

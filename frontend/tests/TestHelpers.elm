@@ -592,24 +592,6 @@ uploadEffects msg model maybeToken =
                 Rejected ->
                     SimulatedEffect.Cmd.none
 
-        Upload.ConfirmDuplicateMove bookId ->
-            case maybeToken of
-                Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ bookId ++ "/move"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "bookshelf", Encode.string model.duplicateShelf ) ])
-                        , expect = SimulatedEffect.Http.expectWhatever Upload.DuplicateMoveCompleted
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
         Upload.GotFile _ ->
             case maybeToken of
                 Just token ->
