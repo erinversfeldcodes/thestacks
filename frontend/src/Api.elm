@@ -10,6 +10,7 @@ module Api exposing
     , getCatalogue
     , getUserPlacements
     , login
+    , logout
     , moveBook
     , placeBook
     , pollUploadStatus
@@ -140,6 +141,24 @@ login body toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
+        }
+
+
+{-| POST /api/auth/logout — invalidate the current session.
+-}
+logout :
+    String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+logout token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/auth/logout"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
         }
 
 
