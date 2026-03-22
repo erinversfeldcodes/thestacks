@@ -13,8 +13,10 @@ module Page.Bookshelf exposing
 
 import Api
 import Components.AgeGate exposing (ageGate)
+import Components.BookList as BookList
 import Components.RSSLink as RSSLink
 import Components.Spine exposing (WearLevel(..))
+import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
 import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (attribute, class)
 import Http
@@ -90,6 +92,8 @@ type alias Model =
     , userId : String
     , visibility : String
     , rssLink : RSSLink.Model
+    , viewMode : ShelfViewMode
+    , sortState : BookList.SortState
     }
 
 
@@ -104,6 +108,8 @@ type Msg
     | DismissAgeGate
     | BookClicked Book
     | RSSLinkMsg RSSLink.Msg
+    | ViewModeChanged ShelfViewMode
+    | SortColumnClicked BookList.SortColumn
 
 
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
@@ -123,6 +129,8 @@ init config maybeToken userId =
       , userId = userId
       , visibility = "platform"
       , rssLink = RSSLink.init
+      , viewMode = SpineView
+      , sortState = { column = BookList.Title, direction = BookList.Asc }
       }
     , apiCmd
     )
@@ -161,6 +169,25 @@ update msg model =
         RSSLinkMsg subMsg ->
             ( { model | rssLink = RSSLink.update subMsg model.rssLink }, Cmd.none, NoOut )
 
+        ViewModeChanged mode ->
+            ( { model | viewMode = mode }, Cmd.none, NoOut )
+
+        SortColumnClicked column ->
+            let
+                newDirection =
+                    if model.sortState.column == column then
+                        case model.sortState.direction of
+                            BookList.Asc ->
+                                BookList.Desc
+
+                            BookList.Desc ->
+                                BookList.Asc
+
+                    else
+                        BookList.Asc
+            in
+            ( { model | sortState = { column = column, direction = newDirection } }, Cmd.none, NoOut )
+
 
 
 -- VIEW
@@ -178,6 +205,7 @@ view model =
         , div [ class "shelf-room" ]
             [ div [ class "shelf-room__header" ]
                 [ viewShelfLabel cfg.label
+                , ViewModeToggle.view model.viewMode ViewModeChanged
                 , Html.map RSSLinkMsg
                     (RSSLink.view
                         { visibility = model.visibility
@@ -227,13 +255,20 @@ viewEmptyBookshelf model =
 
 viewBookshelf : Model -> List Placement -> Html Msg
 viewBookshelf model placements =
-    let
-        rows =
-            groupIntoRows 990 placements
+    case model.viewMode of
+        ListView ->
+            div [ class "bookshelf bookshelf--list-view" ]
+                [ BookList.view model.sortState SortColumnClicked BookClicked placements
+                ]
 
-        shelfViews =
-            List.map (viewShelfRowClickable model.config.wearLevel BookClicked) rows
-    in
-    div [ class "bookshelf" ]
-        [ viewBookcase (minShelfRows 4 shelfViews)
-        ]
+        SpineView ->
+            let
+                rows =
+                    groupIntoRows 990 placements
+
+                shelfViews =
+                    List.map (viewShelfRowClickable model.config.wearLevel BookClicked) rows
+            in
+            div [ class "bookshelf" ]
+                [ viewBookcase (minShelfRows 4 shelfViews)
+                ]

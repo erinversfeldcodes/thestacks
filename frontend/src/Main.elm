@@ -8,7 +8,7 @@ import Browser.Events
 import Browser.Navigation as Nav
 import Components.UserMenu as UserMenu
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
-import Html.Attributes exposing (class, href)
+import Html.Attributes exposing (attribute, class, href, id)
 import Json.Decode as Decode
 import Json.Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
@@ -981,9 +981,11 @@ view model =
     , body =
         [ viewOverlay model
         , div [ class "app" ]
-            [ viewNav model
+            [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
+            , viewNav model
             , main_
-                [ class
+                [ id "main-content"
+                , class
                     ("app__main"
                         ++ (case model.transition of
                                 Just t ->
@@ -1080,7 +1082,7 @@ viewNav model =
                     ]
                 ]
             ]
-        , nav [ class "app-nav" ]
+        , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
                 (case model.auth of
                     Nothing ->
