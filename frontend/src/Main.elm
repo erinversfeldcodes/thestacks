@@ -24,6 +24,9 @@ import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
+import Page.Settings.Notifications as Notifications
+import Page.Settings.Password as Password
+import Page.Settings.Profile as Profile
 import Page.Upload as Upload
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
@@ -71,9 +74,9 @@ type Page
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
-    | PageSettingsProfile
-    | PageSettingsPassword
-    | PageSettingsNotifications
+    | PageSettingsProfile Profile.Model
+    | PageSettingsPassword Password.Model
+    | PageSettingsNotifications Notifications.Model
     | PageCostTransparency CostTransparency.Model
     | PageCatalogue Catalogue.Model
     | PageConfirmEmail ConfirmStatus
@@ -144,6 +147,8 @@ decodeFlags flags =
                         , email = email
                         , displayName = displayName
                         , role = "user"
+                        , countryCode = Nothing
+                        , city = Nothing
                         }
                     , token = token
                     }
@@ -200,8 +205,11 @@ initBookshelf config maybeAuth =
         maybeToken =
             Maybe.map .token maybeAuth
 
+        userId =
+            maybeAuth |> Maybe.map (.user >> .id) |> Maybe.withDefault ""
+
         ( model, cmd ) =
-            Bookshelf.init config maybeToken
+            Bookshelf.init config maybeToken userId
     in
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
@@ -276,16 +284,34 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
 
         Settings ->
-            ( PageSettingsProfile, Cmd.none )
+            let
+                profileModel =
+                    case maybeAuth of
+                        Just auth ->
+                            Profile.init auth.user
+
+                        Nothing ->
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+            in
+            ( PageSettingsProfile profileModel, Cmd.none )
 
         SettingsProfile ->
-            ( PageSettingsProfile, Cmd.none )
+            let
+                profileModel =
+                    case maybeAuth of
+                        Just auth ->
+                            Profile.init auth.user
+
+                        Nothing ->
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+            in
+            ( PageSettingsProfile profileModel, Cmd.none )
 
         SettingsPassword ->
-            ( PageSettingsPassword, Cmd.none )
+            ( PageSettingsPassword Password.init, Cmd.none )
 
         SettingsNotifications ->
-            ( PageSettingsNotifications, Cmd.none )
+            ( PageSettingsNotifications Notifications.init, Cmd.none )
 
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
@@ -321,6 +347,9 @@ type Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
+    | ProfileMsg Profile.Msg
+    | PasswordMsg Password.Msg
+    | NotificationsMsg Notifications.Msg
     | CostTransparencyMsg CostTransparency.Msg
     | CatalogueMsg Catalogue.Msg
     | UserMenuMsg UserMenu.Msg
@@ -412,6 +441,8 @@ update msg model =
                                         , email = authResponse.email
                                         , displayName = authResponse.displayName
                                         , role = "user"
+                                        , countryCode = Nothing
+                                        , city = Nothing
                                         }
                                     , token = authResponse.token
                                     }
@@ -445,6 +476,8 @@ update msg model =
                                         , email = ar.email
                                         , displayName = ar.displayName
                                         , role = "user"
+                                        , countryCode = Nothing
+                                        , city = Nothing
                                         }
                                     , token = ar.token
                                     }
@@ -605,12 +638,26 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Upload.update subMsg subModel maybeToken
+
+                        baseModel =
+                            { model | page = PageUpload newSubModel }
+
+                        baseCmd =
+                            Cmd.map UploadMsg subCmd
                     in
-                    ( { model | page = PageUpload newSubModel }
-                    , Cmd.map UploadMsg subCmd
-                    )
+                    case outMsg of
+                        Upload.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Upload.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -661,6 +708,57 @@ update msg model =
                     in
                     ( { model | page = PageSettingsAgeVerification newSubModel }
                     , Cmd.map AgeVerificationMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ProfileMsg subMsg ->
+            case model.page of
+                PageSettingsProfile subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Profile.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsProfile newSubModel }
+                    , Cmd.map ProfileMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        PasswordMsg subMsg ->
+            case model.page of
+                PageSettingsPassword subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Password.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsPassword newSubModel }
+                    , Cmd.map PasswordMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        NotificationsMsg subMsg ->
+            case model.page of
+                PageSettingsNotifications subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Notifications.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsNotifications newSubModel }
+                    , Cmd.map NotificationsMsg subCmd
                     )
 
                 _ ->
@@ -1104,17 +1202,17 @@ viewPage model =
             viewSettingsHub model.route
                 (Html.map AgeVerificationMsg (AgeVerification.view subModel))
 
-        PageSettingsProfile ->
+        PageSettingsProfile subModel ->
             viewSettingsHub model.route
-                (viewSettingsPlaceholder "Profile" "Profile settings will be available soon.")
+                (Html.map ProfileMsg (Profile.view subModel))
 
-        PageSettingsPassword ->
+        PageSettingsPassword subModel ->
             viewSettingsHub model.route
-                (viewSettingsPlaceholder "Password" "Password settings will be available soon.")
+                (Html.map PasswordMsg (Password.view subModel))
 
-        PageSettingsNotifications ->
+        PageSettingsNotifications subModel ->
             viewSettingsHub model.route
-                (viewSettingsPlaceholder "Notifications" "Notification preferences will be available soon.")
+                (Html.map NotificationsMsg (Notifications.view subModel))
 
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
@@ -1136,14 +1234,6 @@ viewSettingsHub currentRoute content =
         , content = content
         , onMobileNavChange = SettingsMobileNavChanged
         }
-
-
-viewSettingsPlaceholder : String -> String -> Html Msg
-viewSettingsPlaceholder title description =
-    div [ class "settings-placeholder" ]
-        [ h1 [ class "page__title" ] [ text title ]
-        , p [ class "settings-placeholder__desc" ] [ text description ]
-        ]
 
 
 viewOverlay : Model -> Html Msg

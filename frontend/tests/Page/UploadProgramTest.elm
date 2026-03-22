@@ -65,7 +65,7 @@ uploadHappyPath =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Test Book" "Test Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Book Identified!" ]
+                    [ Selector.text "We think this is…" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Test Book" ]
                 |> ProgramTest.expectViewHas

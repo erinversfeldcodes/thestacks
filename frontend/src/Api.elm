@@ -2,6 +2,7 @@ module Api exposing
     ( AuthResponse
     , BookDetailResponse
     , CatalogueResponse
+    , NotificationPreferences
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
@@ -11,6 +12,7 @@ module Api exposing
     , getUserPlacements
     , login
     , logout
+    , lookupByIsbn
     , moveBook
     , placeBook
     , pollUploadStatus
@@ -19,6 +21,10 @@ module Api exposing
     , saveConsent
     , searchBooks
     , updateAgeVerification
+    , updateLocation
+    , updateNotifications
+    , updatePassword
+    , updateProfile
     , uploadImage
     )
 
@@ -425,6 +431,25 @@ getUserPlacements token toMsg =
         }
 
 
+{-| GET /api/books/isbn/:isbn — look up a book by ISBN.
+-}
+lookupByIsbn :
+    String
+    -> String
+    -> (Result Http.Error BookDetailResponse -> msg)
+    -> Cmd msg
+lookupByIsbn isbn token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/books/isbn/" ++ isbn
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg bookDetailResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 {-| GET /api/catalogue — fetch paginated book catalogue.
 -}
 getCatalogue :
@@ -451,6 +476,119 @@ getCatalogue params toMsg =
         , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg catalogueResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/settings/profile — update display name, email, and website URL.
+-}
+updateProfile :
+    { displayName : String, email : String, websiteUrl : String }
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updateProfile body token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/profile"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "display_name", Encode.string body.displayName )
+                    , ( "email", Encode.string body.email )
+                    , ( "website_url", Encode.string body.websiteUrl )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/settings/location — update the user's location.
+-}
+updateLocation :
+    { countryCode : String, city : String }
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updateLocation body token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/settings/location"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "country_code", Encode.string body.countryCode )
+                    , ( "city", Encode.string body.city )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/settings/password — change the user's password.
+-}
+updatePassword :
+    { currentPassword : String, newPassword : String }
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updatePassword body token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/password"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "current_password", Encode.string body.currentPassword )
+                    , ( "new_password", Encode.string body.newPassword )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Notification preference flags.
+-}
+type alias NotificationPreferences =
+    { priceDrops : Bool
+    , newReviews : Bool
+    , authorUpdates : Bool
+    , eventAlerts : Bool
+    }
+
+
+{-| PUT /api/settings/notifications — update notification preferences.
+-}
+updateNotifications :
+    NotificationPreferences
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updateNotifications prefs token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/notifications"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "price_drops", Encode.bool prefs.priceDrops )
+                    , ( "new_reviews", Encode.bool prefs.newReviews )
+                    , ( "author_updates", Encode.bool prefs.authorUpdates )
+                    , ( "event_alerts", Encode.bool prefs.eventAlerts )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
