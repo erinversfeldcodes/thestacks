@@ -4,13 +4,14 @@ import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
 import Api
 import Browser
+import Browser.Events
 import Browser.Navigation as Nav
-import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, text, ul)
+import Components.UserMenu as UserMenu
+import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (class, href)
-import Html.Events exposing (onClick)
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
@@ -20,6 +21,7 @@ import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
 import Page.Search as Search
+import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
 import Page.Upload as Upload
@@ -69,6 +71,9 @@ type Page
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
+    | PageSettingsProfile
+    | PageSettingsPassword
+    | PageSettingsNotifications
     | PageCostTransparency CostTransparency.Model
     | PageCatalogue Catalogue.Model
     | PageConfirmEmail ConfirmStatus
@@ -81,6 +86,12 @@ type alias Auth =
     }
 
 
+type alias BookDetailOverlay =
+    { bookId : String
+    , detail : BookDetail.Model
+    }
+
+
 type alias Model =
     { key : Nav.Key
     , url : Url
@@ -90,6 +101,8 @@ type alias Model =
     , previousRoute : Maybe Route
     , transition : Maybe String
     , pendingAuthResponse : Maybe Api.AuthResponse
+    , bookDetailOverlay : Maybe BookDetailOverlay
+    , userMenu : UserMenu.Model
     }
 
 
@@ -113,6 +126,8 @@ init flags url key =
       , previousRoute = Nothing
       , transition = Nothing
       , pendingAuthResponse = Nothing
+      , bookDetailOverlay = Nothing
+      , userMenu = UserMenu.init
       }
     , cmd
     )
@@ -260,6 +275,18 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             in
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
 
+        Settings ->
+            ( PageSettingsProfile, Cmd.none )
+
+        SettingsProfile ->
+            ( PageSettingsProfile, Cmd.none )
+
+        SettingsPassword ->
+            ( PageSettingsPassword, Cmd.none )
+
+        SettingsNotifications ->
+            ( PageSettingsNotifications, Cmd.none )
+
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
@@ -296,9 +323,15 @@ type Msg
     | AgeVerificationMsg AgeVerification.Msg
     | CostTransparencyMsg CostTransparency.Msg
     | CatalogueMsg Catalogue.Msg
-    | Logout
+    | UserMenuMsg UserMenu.Msg
+    | LogoutCompleted (Result () ())
+    | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
+    | OpenBookOverlay String
+    | CloseBookOverlay
+    | OverlayBookDetailMsg BookDetail.Msg
+    | EscapePressed
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -307,7 +340,16 @@ update msg model =
         LinkClicked urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    case Route.fromUrl url of
+                        BookDetail bookId ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay model bookId
+                            in
+                            ( overlayModel, overlayCmd )
+
+                        _ ->
+                            ( model, Nav.pushUrl model.key (Url.toString url) )
 
                 Browser.External url ->
                     ( model, Nav.load url )
@@ -329,6 +371,7 @@ update msg model =
                 , page = page
                 , previousRoute = Just model.route
                 , transition = transition
+                , userMenu = UserMenu.init
               }
             , cmd
             )
@@ -433,6 +476,15 @@ update msg model =
                         Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
 
+                        Bookshelf.NavigateTo (BookDetail bookId) ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay baseModel bookId
+                            in
+                            ( overlayModel
+                            , Cmd.batch [ baseCmd, overlayCmd ]
+                            )
+
                         Bookshelf.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -461,6 +513,15 @@ update msg model =
                         ReadingPile.NoOut ->
                             ( baseModel, baseCmd )
 
+                        ReadingPile.NavigateTo (BookDetail bookId) ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay baseModel bookId
+                            in
+                            ( overlayModel
+                            , Cmd.batch [ baseCmd, overlayCmd ]
+                            )
+
                         ReadingPile.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -488,6 +549,9 @@ update msg model =
                     case outMsg of
                         LookingForHome.NoOut ->
                             ( baseModel, baseCmd )
+
+                        LookingForHome.NavigateTo (Route.BookDetail bookId) ->
+                            openOverlay baseModel bookId
 
                         LookingForHome.NavigateTo route ->
                             ( baseModel
@@ -518,6 +582,9 @@ update msg model =
                     in
                     case outMsg of
                         BookDetail.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        BookDetail.RequestCloseOverlay ->
                             ( baseModel, baseCmd )
 
                         BookDetail.NavigateTo route ->
@@ -630,6 +697,94 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        OpenBookOverlay bookId ->
+            openOverlay model bookId
+
+        CloseBookOverlay ->
+            ( { model | bookDetailOverlay = Nothing }, Cmd.none )
+
+        OverlayBookDetailMsg subMsg ->
+            case model.bookDetailOverlay of
+                Just overlay ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newDetail, subCmd, outMsg ) =
+                            BookDetail.update subMsg overlay.detail maybeToken
+
+                        updatedOverlay =
+                            { overlay | detail = newDetail }
+                    in
+                    case outMsg of
+                        BookDetail.RequestCloseOverlay ->
+                            ( { model | bookDetailOverlay = Nothing }
+                            , Cmd.none
+                            )
+
+                        BookDetail.NavigateTo route ->
+                            ( { model | bookDetailOverlay = Nothing }
+                            , Nav.pushUrl model.key (Route.toPath route)
+                            )
+
+                        BookDetail.NoOut ->
+                            ( { model | bookDetailOverlay = Just updatedOverlay }
+                            , Cmd.map OverlayBookDetailMsg subCmd
+                            )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        UserMenuMsg subMsg ->
+            let
+                ( newUserMenu, outMsg ) =
+                    UserMenu.update subMsg model.userMenu
+            in
+            case outMsg of
+                UserMenu.NoOut ->
+                    ( { model | userMenu = newUserMenu }, Cmd.none )
+
+                UserMenu.NavigateToSettings ->
+                    ( { model | userMenu = newUserMenu }
+                    , Nav.pushUrl model.key (Route.toPath SettingsProfile)
+                    )
+
+                UserMenu.SignOut ->
+                    let
+                        logoutCmd =
+                            case model.auth of
+                                Just auth ->
+                                    Api.logout auth.token (\_ -> LogoutCompleted (Ok ()))
+
+                                Nothing ->
+                                    Cmd.none
+                    in
+                    ( { model | userMenu = newUserMenu, auth = Nothing, page = PageLogin Login.init }
+                    , Cmd.batch
+                        [ logoutCmd
+                        , clearAuth ()
+                        , Nav.pushUrl model.key (Route.toPath Login)
+                        ]
+                    )
+
+        LogoutCompleted _ ->
+            ( model, Cmd.none )
+
+        SettingsMobileNavChanged path ->
+            ( model, Nav.pushUrl model.key path )
+
+        EscapePressed ->
+            case model.bookDetailOverlay of
+                Just _ ->
+                    ( { model | bookDetailOverlay = Nothing }, Cmd.none )
+
+                Nothing ->
+                    let
+                        ( newUserMenu, _ ) =
+                            UserMenu.update UserMenu.Close model.userMenu
+                    in
+                    ( { model | userMenu = newUserMenu }, Cmd.none )
+
         SwipeReceived direction ->
             let
                 maybeNext =
@@ -646,13 +801,30 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        Logout ->
-            ( { model | auth = Nothing, page = PageLogin Login.init }
-            , Cmd.batch [ clearAuth (), Nav.pushUrl model.key (Route.toPath Login) ]
-            )
-
         SwipeIgnored ->
             ( model, Cmd.none )
+
+
+{-| Open the book detail overlay for a given book ID.
+Initialises a BookDetail.Model and fires the API fetch command.
+-}
+openOverlay : Model -> String -> ( Model, Cmd Msg )
+openOverlay model bookId =
+    let
+        maybeToken =
+            Maybe.map .token model.auth
+
+        ( detailModel, detailCmd ) =
+            BookDetail.init bookId maybeToken (Just model.route)
+
+        overlay =
+            { bookId = bookId
+            , detail = detailModel
+            }
+    in
+    ( { model | bookDetailOverlay = Just overlay }
+    , Cmd.map OverlayBookDetailMsg detailCmd
+    )
 
 
 transitionClass : Route -> Route -> String
@@ -677,6 +849,17 @@ subscriptions _ =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        , Browser.Events.onKeyDown
+            (Decode.field "key" Decode.string
+                |> Decode.andThen
+                    (\key ->
+                        if key == "Escape" then
+                            Decode.succeed EscapePressed
+
+                        else
+                            Decode.fail "not escape"
+                    )
+            )
         ]
 
 
@@ -698,7 +881,8 @@ view : Model -> Browser.Document Msg
 view model =
     { title = pageTitle model.route
     , body =
-        [ div [ class "app" ]
+        [ viewOverlay model
+        , div [ class "app" ]
             [ viewNav model
             , main_
                 [ class
@@ -751,6 +935,18 @@ pageTitle route =
 
         Search ->
             "Search — The Stacks"
+
+        Settings ->
+            "Settings — The Stacks"
+
+        SettingsProfile ->
+            "Profile — The Stacks"
+
+        SettingsPassword ->
+            "Password — The Stacks"
+
+        SettingsNotifications ->
+            "Notifications — The Stacks"
 
         SettingsConsent ->
             "Privacy Settings — The Stacks"
@@ -806,19 +1002,17 @@ viewNav model =
                             [ ( Search, "Search" )
                             , ( Upload, "Add Book" )
                             ]
-                        , li [ class "app-nav__item app-nav__dropdown" ]
-                            [ Html.span [ class "app-nav__link app-nav__user" ]
-                                [ text auth.user.displayName ]
-                            , ul [ class "app-nav__dropdown-menu" ]
-                                [ li []
-                                    [ a [ href (Route.toPath SettingsConsent), class "app-nav__dropdown-link" ]
-                                        [ text "Settings" ]
-                                    ]
-                                , li []
-                                    [ button [ class "app-nav__dropdown-link app-nav__logout", onClick Logout ]
-                                        [ text "Sign Out" ]
-                                    ]
-                                ]
+                        , li
+                            [ class
+                                (if isSettingsRoute model.route then
+                                    "app-nav__item app-nav__item--active app-nav__dropdown"
+
+                                 else
+                                    "app-nav__item app-nav__dropdown"
+                                )
+                            ]
+                            [ Html.map UserMenuMsg
+                                (UserMenu.view auth.user model.userMenu)
                             ]
                         ]
                 )
@@ -903,10 +1097,24 @@ viewPage model =
             Html.map SearchMsg (Search.view subModel)
 
         PageSettingsConsent subModel ->
-            Html.map ConsentMsg (Consent.view subModel)
+            viewSettingsHub model.route
+                (Html.map ConsentMsg (Consent.view subModel))
 
         PageSettingsAgeVerification subModel ->
-            Html.map AgeVerificationMsg (AgeVerification.view subModel)
+            viewSettingsHub model.route
+                (Html.map AgeVerificationMsg (AgeVerification.view subModel))
+
+        PageSettingsProfile ->
+            viewSettingsHub model.route
+                (viewSettingsPlaceholder "Profile" "Profile settings will be available soon.")
+
+        PageSettingsPassword ->
+            viewSettingsHub model.route
+                (viewSettingsPlaceholder "Password" "Password settings will be available soon.")
+
+        PageSettingsNotifications ->
+            viewSettingsHub model.route
+                (viewSettingsPlaceholder "Notifications" "Notification preferences will be available soon.")
 
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
@@ -919,6 +1127,33 @@ viewPage model =
 
         PageNotFound ->
             viewNotFound
+
+
+viewSettingsHub : Route -> Html Msg -> Html Msg
+viewSettingsHub currentRoute content =
+    Settings.view
+        { currentRoute = currentRoute
+        , content = content
+        , onMobileNavChange = SettingsMobileNavChanged
+        }
+
+
+viewSettingsPlaceholder : String -> String -> Html Msg
+viewSettingsPlaceholder title description =
+    div [ class "settings-placeholder" ]
+        [ h1 [ class "page__title" ] [ text title ]
+        , p [ class "settings-placeholder__desc" ] [ text description ]
+        ]
+
+
+viewOverlay : Model -> Html Msg
+viewOverlay model =
+    case model.bookDetailOverlay of
+        Just overlay ->
+            Html.map OverlayBookDetailMsg (BookDetail.overlayView overlay.detail)
+
+        Nothing ->
+            text ""
 
 
 viewHome : Html Msg
