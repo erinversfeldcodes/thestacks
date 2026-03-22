@@ -71,6 +71,7 @@ e2e_users =
       profile_visibility: "owner",
       age_verified: true,
       age_verified_at: jan_01,
+      email_confirmed: true,
       country_code: "ZA",
       city: "Test City",
       consent_analytics: true,
@@ -92,6 +93,7 @@ Repo.insert_all(
       profile_visibility: "owner",
       age_verified: true,
       age_verified_at: jan_01,
+      email_confirmed: true,
       country_code: "ZA",
       city: "Johannesburg",
       consent_analytics: true,
@@ -107,6 +109,7 @@ Repo.insert_all(
       role: "user",
       profile_visibility: "owner",
       age_verified: false,
+      email_confirmed: true,
       country_code: "ZA",
       city: "Cape Town",
       consent_analytics: false,
@@ -115,7 +118,8 @@ Repo.insert_all(
     }
   ] ++ e2e_users,
   prefix: "op",
-  on_conflict: :nothing
+  on_conflict: {:replace, [:email_confirmed, :password_hash, :updated_at]},
+  conflict_target: :id
 )
 
 # ── Authors ─────────────────────────────────────────────────────────────────
