@@ -22,7 +22,7 @@
    - [4. Content Moderation](#4-content-moderation)
    - [5. Metrics Dashboard](#5-metrics-dashboard)
    - [6. RSS Feeds](#6-rss-feeds)
-   - [7. Marketplace](#7-marketplace-future)
+   - [7. Marketplace (Classifieds)](#7-marketplace-classifieds)
    - [8. GDPR & Privacy](#8-gdpr--privacy)
    - [9. Partner Integration](#9-partner-integration)
    - [10. Visibility & Privacy](#10-visibility--privacy)
@@ -46,11 +46,11 @@
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, US-5.1.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (Metrics), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Listings, payments via Stitch Money, shipping via Pargo, seller KYC. Depop/Vinted model: public Q&A + private offer threads. Post-sale buyer prompt. Closed bid deferred. |
+| **Phase 5** | Marketplace (Classifieds) | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-13.1.1, US-13.1.2 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering. Requires Phase 6 visibility infrastructure. |
 | **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), and accessibility (US-19.x). |
-| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `offer_threads`, `groups`, `user_blocks`. |
+| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). |
 
 ---
 
@@ -95,9 +95,9 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
 | US-5.1.1 | RW (dashboard) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
-| US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (bookshelf_placements, uploaded_images) | -- | -- |
-| US-7.2 | RW (purchase flow) | RW (transaction) | -- | -- | RW (bookshelf_placements, offer_threads, offer_messages, audit_log) | -- | Stitch Money, Pargo |
-| US-7.3 | RW (KYC flow) | RW (verification) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
+| US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (listings, bookshelf_placements, uploaded_images) | -- | -- |
+| US-7.2 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
+| US-7.3 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
 | US-10.1.1 | RW (privacy settings) | RW (profile visibility) | -- | -- | RW (users) | -- | -- |
 | US-10.1.2 | RW (block UI) | RW (block) | -- | -- | RW (user_blocks) | -- | -- |
 | US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (bookshelves, groups) | -- | -- |
@@ -115,7 +115,7 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-13.1.1 | RW (comment UI) | RW (comment) | -- | -- | RW (comments) | -- | -- |
 | US-13.1.2 | R (filtered thread) | R (recursive CTE) | -- | -- | R (comments, user_blocks) | -- | -- |
 | US-13.2.1 | RW (Q&A UI) | RW (comment) | -- | -- | RW (comments) | -- | -- |
-| US-13.2.2 | RW (offer thread) | RW (thread + message) | -- | -- | RW (offer_threads, offer_messages) | -- | -- |
+| US-13.2.2 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
 | US-8.1.1 | RW (export UI) | RW (export gen) | -- | -- | R (all user data) | -- | -- |
 | US-8.1.2 | RW (delete flow) | RW (cascade) | -- | -- | RW (all user data, wh anonymise) | -- | -- |
 | US-8.1.3 | RW (consent UI) | RW (consent) | -- | -- | RW (audit_log) | -- | -- |
@@ -1098,7 +1098,9 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 ---
 
-### 7. Marketplace (Future)
+### 7. Marketplace (Classifieds)
+
+See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision to ship as a classifieds board rather than a full e-commerce platform.
 
 ---
 
@@ -1106,59 +1108,37 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Photos required, condition grading, fixed price or make-an-offer with seller-set minimum or decline. |
-| **Phase** | Phase 5 (Marketplace) |
+| **Summary** | Classifieds listing: photos, condition grading (new / like_new / good / fair / poor), pricing, and seller contact info for off-platform communication. No on-platform payments or messaging. |
+| **Phase** | Phase 5 (Marketplace) — **Implemented** |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Marketplace.CreateListing` -- photo upload (reuse upload components), condition selector (enum), pricing mode toggle (fixed / offer), minimum price input. `Components.ConditionGrader`. |
-| **Backend (Phoenix)** | `Stacks.Marketplace` context. `Marketplace.create_listing/1`. `StacksWeb.ListingController`. Listing state machine: `draft -> active -> sold -> removed`. |
-| **Database** | **Write:** `op.books` (listing fields or separate listings table), `op.uploaded_images` (listing photos). **Read:** `op.books`. |
-| **Jobs (Oban)** | `Stacks.Workers.ListingExpiryJob` -- auto-expire stale listings. |
+| **Frontend (Elm)** | `Page.Marketplace.CreateListing` -- photo upload (reuse upload components), condition selector (enum), pricing mode toggle (fixed / offer), minimum price input, contact info field. `Components.ConditionGrader`. |
+| **Backend (Phoenix)** | `Stacks.Marketplace` context. `Marketplace.create_listing/1`. `StacksWeb.ListingController`. Listing state machine: `draft -> active -> sold -> removed -> expired`. Denormalises `listing_status` to `bookshelf_placements`. |
+| **Database** | **Write:** `op.listings` (including `contact_info`), `op.uploaded_images` (listing photos), `op.bookshelf_placements` (`listing_status` denorm). **Read:** `op.books`. |
+| **Jobs (Oban)** | `Stacks.Workers.ListingExpiryJob` -- auto-expire listings past 30-day TTL. |
 | **External Services** | None. |
 | **dbt Models** | `stg_listings`, `mart_marketplace_activity`. |
 | **Infrastructure** | Image storage for listing photos. |
-| **Dependencies** | US-7.3.1 (seller must be verified), US-1.1.1 (book must exist). |
+| **Dependencies** | US-1.1.1 (book must exist). |
 
 ---
 
-#### US-7.2.1 -- Buy a Book
+#### US-7.2.1 -- Buy a Book — DEFERRED
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Browse listings, make offer or buy at fixed price. Stitch Money payment. Pargo shipping at checkout. |
-| **Phase** | Phase 5 (Marketplace) |
-
-| Layer | Components |
-|-------|------------|
-| **Frontend (Elm)** | `Page.Marketplace.Browse` -- listing cards with price/condition. `Page.Marketplace.Checkout` -- payment form (Stitch widget), shipping address, Pargo pickup point selector. `Components.OfferModal`. |
-| **Backend (Phoenix)** | `Stacks.Marketplace.Transactions` -- `create_offer/1`, `accept_offer/1`, `initiate_payment/1`, `create_shipment/1`. `StacksWeb.TransactionController`. Webhook handlers for Stitch and Pargo callbacks. |
-| **Database** | **Write:** transactions table, `op.audit_log`. **Read:** listings, `op.books`. |
-| **Jobs (Oban)** | `Stacks.Workers.PaymentCallbackJob`, `Stacks.Workers.ShipmentTrackingJob`. |
-| **External Services** | Stitch Money (payment), Pargo (shipping). |
-| **dbt Models** | `mart_transaction_volume`, `mart_marketplace_revenue`. |
-| **Infrastructure** | Webhook endpoints for payment/shipping providers. PCI considerations for payment flow. |
-| **Dependencies** | US-7.1.1 (listings must exist). |
+| **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** On-platform payments (Stitch Money, #054b) and shipping (Pargo, #054c) are deferred indefinitely. Buyers contact sellers directly using the contact info on the listing. The `transactions`, `offer_threads`, and `offer_messages` tables exist in DB but are unused. |
+| **Phase** | Future (was Phase 5) |
 
 ---
 
-#### US-7.3.1 -- Seller Verification
+#### US-7.3.1 -- Seller Verification — DEFERRED
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | KYC and age verification required before listing books for sale. |
-| **Phase** | Phase 5 (Marketplace) |
-
-| Layer | Components |
-|-------|------------|
-| **Frontend (Elm)** | `Page.Marketplace.SellerOnboarding` -- KYC flow, age verification, terms acceptance. Reuses `Components.KYCWidget` from US-4.1.2. |
-| **Backend (Phoenix)** | `Stacks.Marketplace.SellerVerification` -- extends `Stacks.Accounts.Verification`. Additional checks: identity + age + terms. |
-| **Database** | **Write:** `op.audit_log`, seller verification status. |
-| **Jobs (Oban)** | Reuses `KYCCallbackJob` from US-4.1.2. |
-| **External Services** | Smile Identity / Yoti / Sumsub. |
-| **dbt Models** | `int_seller_verification_funnel`. |
-| **Infrastructure** | Same as US-4.1.2. |
-| **Dependencies** | US-4.1.2 (age verification infrastructure). |
+| **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** Seller KYC becomes relevant when the platform facilitates financial transactions. Not needed for classifieds model. |
+| **Phase** | Future (was Phase 5) |
 
 ---
 
@@ -2071,12 +2051,12 @@ Which user stories touch each database table:
 | `ScoreSourceJob` | US-2.5.1 | On-demand (after discovery) |
 | `DiscoverThirdSpacesJob` | US-3.1.1 | Scheduled (weekly) |
 | `ModerationPipelineJob` | US-4.1.1 | On-demand (part of upload) |
-| `KYCCallbackJob` | US-4.1.2, US-7.3.1 | Webhook-driven |
+| `KYCCallbackJob` | US-4.1.2 | Webhook-driven (US-7.3.1 deferred per ADR 013) |
 | `MetricsSnapshotJob` | US-5.1.1 | Scheduled (every 5 min) |
 | `RegenerateFeedJob` | US-6.1.1 | Event-driven (shelf change) |
 | `ListingExpiryJob` | US-7.1.1 | Scheduled (daily) |
-| `PaymentCallbackJob` | US-7.2.1 | Webhook-driven |
-| `ShipmentTrackingJob` | US-7.2.1 | Scheduled (hourly) |
+| `PaymentCallbackJob` | US-7.2.1 | Webhook-driven — **DEFERRED** (ADR 013) |
+| `ShipmentTrackingJob` | US-7.2.1 | Scheduled (hourly) — **DEFERRED** (ADR 013) |
 | `DataExportJob` | US-8.1.1 | On-demand |
 | `AccountDeletionJob` | US-8.1.2 | On-demand |
 | `ConfirmDeletionJob` | US-8.1.2 | On-demand |
@@ -2087,8 +2067,8 @@ Which user stories touch each database table:
 | `PartnerMetricsSnapshotJob` | US-9.5.1 | Scheduled (daily) |
 | `GeographicDiscoveryJob` | US-2.5.2 | Event-driven (user.location_updated) + quarterly Oban.Cron |
 | `OptOutConfirmationJob` | US-2.5.3 | On-demand (opt-out request) |
-| `MarketplaceSaleWorker` | US-7.2 | Event-driven (book.sold — checks buyer WishList, prompts) |
-| `WishListAvailabilityJob` | US-17.3.1 | Event-driven (partner inventory ingested, marketplace listing created) |
+| `MarketplaceSaleWorker` | US-7.2 | Event-driven (book.sold — checks buyer WishList, prompts) — **DEFERRED** (ADR 013, relevant when payments are on-platform) |
+| `WishListAvailabilityJob` | US-17.3.1 | Event-driven (partner inventory ingested, classifieds listing activated) |
 | `EmailNotificationJob` | US-17.3.1 | On-demand (checks preferences before sending) |
 | `EventSubscriberWorker` | EDA (cross-cutting) | Event-driven (dispatches to subscriber modules) |
 
@@ -2106,9 +2086,9 @@ Which user stories touch each database table:
 | GoodReads | US-2.1.1 | Review aggregation |
 | Reddit API | US-2.1.1 | Review aggregation |
 | Storygraph | US-2.1.1 | Review aggregation |
-| Smile Identity / Yoti / Sumsub | US-4.1.2, US-7.3.1 | KYC / age verification |
-| Stitch Money | US-7.2.1 | Payment processing |
-| Pargo | US-7.2.1 | Shipping / logistics |
+| Smile Identity / Yoti / Sumsub | US-4.1.2 | KYC / age verification (US-7.3.1 deferred per ADR 013) |
+| Stitch Money | US-7.2.1 | Payment processing — **DEFERRED** (ADR 013) |
+| Pargo | US-7.2.1 | Shipping / logistics — **DEFERRED** (ADR 013) |
 | Resend / Postmark | US-2.5.3, US-8.1.2, US-9.1.1, US-9.7.1, US-17.3.1 | Transactional email (business opt-out confirmation, GDPR confirmation, partner notifications, status updates, WishList availability, event match, group invitation emails) |
 
 ---

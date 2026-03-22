@@ -6,7 +6,6 @@ defmodule Stacks.Marketplace.Listing do
 
   alias Stacks.Accounts.User
   alias Stacks.Books.Book
-  alias Stacks.Marketplace.Transaction
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -49,8 +48,6 @@ defmodule Stacks.Marketplace.Listing do
 
     belongs_to :book, Book
     belongs_to :seller, User
-
-    has_many :transactions, Transaction
 
     timestamps(type: :utc_datetime_usec, inserted_at: :created_at)
   end
