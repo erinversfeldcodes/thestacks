@@ -798,7 +798,7 @@ uploadProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _ ) =
+                    ( newModel, _, _ ) =
                         Upload.update msg model maybeToken
                 in
                 ( newModel, uploadEffects msg model maybeToken )
@@ -816,7 +816,7 @@ libraryProgram maybeToken =
             \() ->
                 let
                     ( model, _ ) =
-                        Bookshelf.init Bookshelf.libraryConfig maybeToken
+                        Bookshelf.init Bookshelf.libraryConfig maybeToken "test-user-id"
                 in
                 ( model, libraryInitEffects maybeToken )
         , update =
