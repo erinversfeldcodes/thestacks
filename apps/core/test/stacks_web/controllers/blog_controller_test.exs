@@ -319,4 +319,130 @@ defmodule StacksWeb.BlogControllerTest do
       assert conn.status == 401
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/blog/posts/:post_id/associations/:id/confirm
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/blog/posts/:post_id/associations/:id/confirm" do
+    test "sets visible to true and returns association", %{conn: conn} do
+      user = insert(:user)
+      blog_post = insert(:post, user: user)
+      book = insert(:book)
+      {:ok, assoc} = Stacks.Blog.associate_book(blog_post, book.id, %{visible: false})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{assoc.id}/confirm")
+
+      assert %{"association" => returned} = json_response(conn, 200)
+      assert returned["id"] == assoc.id
+      assert returned["book_id"] == book.id
+      assert returned["visible"] == true
+    end
+
+    test "returns 403 when called by non-owner", %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      blog_post = insert(:post, user: owner)
+      book = insert(:book)
+      {:ok, assoc} = Stacks.Blog.associate_book(blog_post, book.id)
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{assoc.id}/confirm")
+
+      assert json_response(conn, 403)
+    end
+
+    test "returns 404 for nonexistent post", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put(
+          "/api/blog/posts/#{Ecto.UUID.generate()}/associations/#{Ecto.UUID.generate()}/confirm"
+        )
+
+      assert json_response(conn, 404)
+    end
+
+    test "returns 404 for nonexistent association", %{conn: conn} do
+      user = insert(:user)
+      blog_post = insert(:post, user: user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{Ecto.UUID.generate()}/confirm")
+
+      assert json_response(conn, 404)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/blog/posts/:post_id/associations/:id/dismiss
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/blog/posts/:post_id/associations/:id/dismiss" do
+    test "sets visible to false and returns association", %{conn: conn} do
+      user = insert(:user)
+      blog_post = insert(:post, user: user)
+      book = insert(:book)
+      {:ok, assoc} = Stacks.Blog.associate_book(blog_post, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{assoc.id}/dismiss")
+
+      assert %{"association" => returned} = json_response(conn, 200)
+      assert returned["id"] == assoc.id
+      assert returned["book_id"] == book.id
+      assert returned["visible"] == false
+    end
+
+    test "returns 403 when called by non-owner", %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      blog_post = insert(:post, user: owner)
+      book = insert(:book)
+      {:ok, assoc} = Stacks.Blog.associate_book(blog_post, book.id)
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{assoc.id}/dismiss")
+
+      assert json_response(conn, 403)
+    end
+
+    test "returns 404 for nonexistent post", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put(
+          "/api/blog/posts/#{Ecto.UUID.generate()}/associations/#{Ecto.UUID.generate()}/dismiss"
+        )
+
+      assert json_response(conn, 404)
+    end
+
+    test "returns 404 for nonexistent association", %{conn: conn} do
+      user = insert(:user)
+      blog_post = insert(:post, user: user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/blog/posts/#{blog_post.id}/associations/#{Ecto.UUID.generate()}/dismiss")
+
+      assert json_response(conn, 404)
+    end
+  end
 end
