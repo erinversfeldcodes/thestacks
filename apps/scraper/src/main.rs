@@ -1,15 +1,15 @@
 use anyhow::Context;
 use axum::{
+    Router,
     body::Body,
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use stacks_scraper::{scraper::Engine, stores::StoreRegistry};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -45,7 +45,7 @@ async fn hmac_auth_middleware(
                     StatusCode::UNAUTHORIZED,
                     Json(json!({"error": "invalid token header encoding"})),
                 )
-                    .into_response()
+                    .into_response();
             }
         },
         None => {
@@ -53,7 +53,7 @@ async fn hmac_auth_middleware(
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "missing X-Internal-Token header"})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -98,7 +98,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
     let config = match state.registry.get(&payload.store) {
         Ok(c) => c,
         Err(e) => {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response()
+            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response();
         }
     };
 

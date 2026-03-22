@@ -3,7 +3,7 @@ defmodule StacksWeb.ListingController do
 
   use CoreWeb, :controller
 
-  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+  action_fallback CoreWeb.FallbackController
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Marketplace
@@ -18,11 +18,8 @@ defmodule StacksWeb.ListingController do
   @doc "GET /api/listings/:id — show a single listing."
   def show(conn, %{"id" => id}) do
     case Marketplace.get_listing(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
-
-      listing ->
-        json(conn, %{listing: listing})
+      nil -> {:error, :not_found}
+      listing -> json(conn, %{listing: listing})
     end
   end
 
@@ -37,21 +34,10 @@ defmodule StacksWeb.ListingController do
   def create(conn, params) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Marketplace.create_listing(user.id, params) do
-      {:ok, listing} ->
-        conn
-        |> put_status(201)
-        |> json(%{listing: listing})
-
-      {:error, :no_placement} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "you must own a placement of this book"})
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(422)
-        |> json(%{errors: format_errors(changeset)})
+    with {:ok, listing} <- Marketplace.create_listing(user.id, params) do
+      conn
+      |> put_status(201)
+      |> json(%{listing: listing})
     end
   end
 
@@ -59,24 +45,19 @@ defmodule StacksWeb.ListingController do
   def activate(conn, %{"id" => id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Marketplace.get_listing(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
+    with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
+         {:ok, listing} <- Marketplace.activate_listing(listing, user.id) do
+      json(conn, %{listing: listing})
+    end
+  end
 
-      %Listing{} = listing ->
-        case Marketplace.activate_listing(listing, user.id) do
-          {:ok, listing} ->
-            json(conn, %{listing: listing})
+  @doc "PUT /api/listings/:id/sold — mark an active listing as sold."
+  def sold(conn, %{"id" => id}) do
+    user = Guardian.Plug.current_resource(conn)
 
-          {:error, :unauthorized} ->
-            conn |> put_status(403) |> json(%{error: "forbidden"})
-
-          {:error, :invalid_transition} ->
-            conn |> put_status(422) |> json(%{error: "invalid state transition"})
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
-        end
+    with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
+         {:ok, listing} <- Marketplace.sold_listing(listing, user.id) do
+      json(conn, %{listing: listing})
     end
   end
 
@@ -84,24 +65,9 @@ defmodule StacksWeb.ListingController do
   def deactivate(conn, %{"id" => id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Marketplace.get_listing(id) do
-      nil ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
-
-      %Listing{} = listing ->
-        case Marketplace.deactivate_listing(listing, user.id) do
-          {:ok, listing} ->
-            json(conn, %{listing: listing})
-
-          {:error, :unauthorized} ->
-            conn |> put_status(403) |> json(%{error: "forbidden"})
-
-          {:error, :invalid_transition} ->
-            conn |> put_status(422) |> json(%{error: "invalid state transition"})
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
-        end
+    with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
+         {:ok, listing} <- Marketplace.deactivate_listing(listing, user.id) do
+      json(conn, %{listing: listing})
     end
   end
 end

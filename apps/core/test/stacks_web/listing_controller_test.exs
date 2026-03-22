@@ -214,6 +214,72 @@ defmodule StacksWeb.ListingControllerTest do
   end
 
   # ---------------------------------------------------------------------------
+  # PUT /api/listings/:id/sold
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/listings/:id/sold" do
+    test "marks an active listing as sold", %{conn: conn} do
+      seller = insert(:user)
+      listing = create_listing_for(seller)
+
+      # Activate first
+      conn
+      |> auth_conn(seller)
+      |> put("/api/listings/#{listing.id}/activate")
+
+      conn =
+        conn
+        |> auth_conn(seller)
+        |> put("/api/listings/#{listing.id}/sold")
+
+      assert %{"listing" => sold} = json_response(conn, 200)
+      assert sold["status"] == "sold"
+      assert sold["sold_at"] != nil
+    end
+
+    test "returns 403 for non-owner", %{conn: conn} do
+      seller = insert(:user)
+      listing = create_listing_for(seller)
+      other_user = insert(:user)
+
+      # Activate first
+      conn
+      |> auth_conn(seller)
+      |> put("/api/listings/#{listing.id}/activate")
+
+      conn =
+        conn
+        |> auth_conn(other_user)
+        |> put("/api/listings/#{listing.id}/sold")
+
+      assert json_response(conn, 403)
+    end
+
+    test "returns 422 for draft listing (invalid transition)", %{conn: conn} do
+      seller = insert(:user)
+      listing = create_listing_for(seller)
+
+      conn =
+        conn
+        |> auth_conn(seller)
+        |> put("/api/listings/#{listing.id}/sold")
+
+      assert %{"error" => "invalid state transition"} = json_response(conn, 422)
+    end
+
+    test "returns 404 for nonexistent listing", %{conn: conn} do
+      seller = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(seller)
+        |> put("/api/listings/#{Ecto.UUID.generate()}/sold")
+
+      assert json_response(conn, 404)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # PUT /api/listings/:id/deactivate
   # ---------------------------------------------------------------------------
 

@@ -114,6 +114,7 @@ defmodule CoreWeb.Router do
     post "/listings", ListingController, :create
     put "/listings/:id/activate", ListingController, :activate
     put "/listings/:id/deactivate", ListingController, :deactivate
+    put "/listings/:id/sold", ListingController, :sold
 
     post "/bookshelves/:bookshelf_name/placements", BookshelfPlacementController, :create
     get "/placements/mine", BookshelfPlacementController, :mine
@@ -135,6 +136,8 @@ defmodule CoreWeb.Router do
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
+    put "/blog/posts/:post_id/associations/:id/confirm", BlogController, :confirm_association
+    put "/blog/posts/:post_id/associations/:id/dismiss", BlogController, :dismiss_association
 
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
@@ -167,6 +170,10 @@ defmodule CoreWeb.Router do
     get "/metrics/quality-trends", MetricsController, :quality_trends
     get "/metrics/source-health", MetricsController, :source_health
     get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
+
+    get "/admin/sources", SourceAdminController, :index
+    put "/admin/sources/:id/approve", SourceAdminController, :approve
+    put "/admin/sources/:id/reject", SourceAdminController, :reject
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

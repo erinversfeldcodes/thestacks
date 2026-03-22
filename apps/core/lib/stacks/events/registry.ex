@@ -25,7 +25,14 @@ defmodule Stacks.Events.Registry do
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "blog.post_published" => [
-      Stacks.Blog.Handlers.BlogAssociationHandler
+      Stacks.Blog.Handlers.BlogAssociationHandler,
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "blog.post_updated" => [
+      Stacks.Workers.DbtRefreshHandler
+    ],
+    "blog.post_deleted" => [
+      Stacks.Workers.DbtRefreshHandler
     ],
     "blog.associations_suggested" => [
       Stacks.Books.Handlers.CacheInvalidationHandler

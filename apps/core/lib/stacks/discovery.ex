@@ -11,6 +11,7 @@ defmodule Stacks.Discovery do
 
   alias Core.Repo
   alias Stacks.Enrichment.DiscoveredSource
+  alias Stacks.Events
 
   # ---------------------------------------------------------------------------
   # Create
@@ -93,6 +94,74 @@ defmodule Stacks.Discovery do
     Repo.all(query)
   end
 
+  @doc """
+  Lists discovered sources with optional filtering and pagination.
+
+  Options:
+  - `:status` — filter by status atom or string (e.g. `:pending_review`, `"approved"`)
+  - `:type` — filter by source type atom or string (e.g. `:bookshop`, `"review_site"`)
+  - `:page` — page number (default 1)
+  - `:per_page` — results per page (default 50)
+
+  Returns `{sources, total_count}`.
+  """
+  @spec list_sources(keyword()) :: {[DiscoveredSource.t()], non_neg_integer()}
+  def list_sources(opts \\ []) do
+    page = parse_int(opts[:page], 1)
+    per_page = min(parse_int(opts[:per_page], 50), 200)
+
+    query = from(s in DiscoveredSource, order_by: [desc: s.created_at])
+
+    query = maybe_filter_status(query, opts[:status])
+    query = maybe_filter_type(query, opts[:type])
+
+    total = Repo.aggregate(query, :count, :id)
+
+    sources =
+      query
+      |> limit(^per_page)
+      |> offset(^((page - 1) * per_page))
+      |> Repo.all()
+
+    {sources, total}
+  end
+
+  defp maybe_filter_status(query, nil), do: query
+
+  defp maybe_filter_status(query, status) when is_atom(status) do
+    from(s in query, where: s.status == ^status)
+  end
+
+  defp maybe_filter_status(query, status) when is_binary(status) do
+    maybe_filter_status(query, String.to_existing_atom(status))
+  rescue
+    ArgumentError -> query
+  end
+
+  defp maybe_filter_type(query, nil), do: query
+
+  defp maybe_filter_type(query, type) when is_atom(type) do
+    from(s in query, where: s.type == ^type)
+  end
+
+  defp maybe_filter_type(query, type) when is_binary(type) do
+    maybe_filter_type(query, String.to_existing_atom(type))
+  rescue
+    ArgumentError -> query
+  end
+
+  defp parse_int(nil, default), do: default
+  defp parse_int(val, _default) when is_integer(val), do: max(val, 1)
+
+  defp parse_int(val, default) when is_binary(val) do
+    case Integer.parse(val) do
+      {n, _} -> max(n, 1)
+      :error -> default
+    end
+  end
+
+  defp parse_int(_, default), do: default
+
   defp escape_like(value) do
     value
     |> String.replace("\\", "\\\\")
@@ -126,6 +195,69 @@ defmodule Stacks.Discovery do
     source
     |> DiscoveredSource.confidence_changeset(%{confidence: confidence})
     |> Repo.update()
+  end
+
+  # ---------------------------------------------------------------------------
+  # Admin transitions
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Approves a discovered source. Only sources with `status: :pending_review`
+  can be approved. Sets `approved_at` to the current timestamp.
+
+  Emits a `source.approved` event on success.
+  """
+  @spec approve_source(String.t()) ::
+          {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
+  def approve_source(source_id) when is_binary(source_id) do
+    transition_source(source_id, :approved, "source.approved")
+  end
+
+  @doc """
+  Rejects a discovered source. Only sources with `status: :pending_review`
+  can be rejected. Transitions status to `:dismissed`.
+
+  Emits a `source.rejected` event on success.
+  """
+  @spec reject_source(String.t()) ::
+          {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
+  def reject_source(source_id) when is_binary(source_id) do
+    transition_source(source_id, :dismissed, "source.rejected")
+  end
+
+  defp transition_source(source_id, target_status, event_type) do
+    case get_source(source_id) do
+      nil ->
+        {:error, :not_found}
+
+      %DiscoveredSource{status: :pending_review} = source ->
+        attrs = %{status: target_status}
+
+        attrs =
+          if target_status == :approved do
+            Map.put(attrs, :approved_at, DateTime.utc_now())
+          else
+            attrs
+          end
+
+        case update_source_status(source, attrs) do
+          {:ok, updated} = result ->
+            Events.emit_safe(%{
+              event_type: event_type,
+              aggregate_type: "discovered_source",
+              aggregate_id: updated.id,
+              payload: %{status: to_string(target_status)}
+            })
+
+            result
+
+          error ->
+            error
+        end
+
+      %DiscoveredSource{} ->
+        {:error, :invalid_transition}
+    end
   end
 
   # ---------------------------------------------------------------------------

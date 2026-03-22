@@ -4,7 +4,9 @@ defmodule StacksWeb.BookController do
   use CoreWeb, :controller
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Blog
   alias Stacks.Books
+  alias Stacks.Books.BookDetailCache
   alias Stacks.Shelving
   alias Stacks.Visibility
   alias StacksWeb.Plugs.AgeGate
@@ -127,32 +129,64 @@ defmodule StacksWeb.BookController do
 
   @doc "GET /api/books/:id — retrieve a book by UUID."
   def show(conn, %{"id" => id}) do
-    case Books.get_book_detail(id) do
+    book = cached_or_fetch(id)
+
+    case book do
       nil ->
-        conn
-        |> put_status(404)
-        |> json(%{error: "not_found"})
+        conn |> put_status(404) |> json(%{error: "not_found"})
 
       book ->
         conn = AgeGate.enforce(conn, book)
-        viewer = build_viewer(conn)
+        render_book_detail(conn, book, id)
+    end
+  end
 
-        cond do
-          conn.halted ->
-            conn
+  defp cached_or_fetch(id) do
+    case BookDetailCache.get(id) do
+      {:ok, cached} -> cached
+      {:miss, _} -> fetch_and_cache_book(id)
+    end
+  end
 
-          Visibility.resolve_visibility(book, viewer) == :hidden ->
-            conn |> put_status(404) |> json(%{error: "not_found"})
+  defp render_book_detail(conn, book, id) do
+    viewer = build_viewer(conn)
 
-          true ->
-            placement = lookup_placement(conn, id)
-            count = Books.community_read_count(book.id)
+    cond do
+      conn.halted ->
+        conn
 
-            json(conn, %{
-              book: format_book(book, count),
-              placement: format_placement_or_nil(placement)
-            })
-        end
+      Visibility.resolve_visibility(book, viewer) == :hidden ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      true ->
+        placement = lookup_placement(conn, id)
+        count = Books.community_read_count(book.id)
+        my_writing = my_writing_for(conn, id)
+
+        json(conn, %{
+          book: format_book(book, count),
+          placement: format_placement_or_nil(placement),
+          my_writing:
+            Enum.map(my_writing, &%{id: &1.id, title: &1.title, published_at: &1.published_at})
+        })
+    end
+  end
+
+  defp my_writing_for(conn, book_id) do
+    case Guardian.Plug.current_resource(conn) do
+      nil -> []
+      user -> Blog.list_posts_for_book_by_user(book_id, user.id)
+    end
+  end
+
+  defp fetch_and_cache_book(id) do
+    case Books.get_book_detail(id) do
+      nil ->
+        nil
+
+      book ->
+        BookDetailCache.put(id, book)
+        book
     end
   end
 
