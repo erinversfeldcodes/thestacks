@@ -19,6 +19,9 @@ libraryInit =
     { books = Loading
     , showAgeGate = False
     , config = Bookshelf.libraryConfig
+    , userId = "test-user-id"
+    , visibility = "owner"
+    , rssLink = { showUrl = False }
     }
 
 
