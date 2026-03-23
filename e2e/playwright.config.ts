@@ -26,14 +26,21 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
-      testIgnore: /upload\.spec\.ts/,
+      testIgnore: /upload.*\.spec\.ts/,
     },
-    // Upload tests: serial execution (GPU constraint)
+    // Mock-based upload pipeline tests: parallelised (no GPU needed)
+    {
+      name: "upload-mock",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup"],
+      testMatch: /upload-pipeline\.spec\.ts/,
+    },
+    // Real upload tests: serial execution (GPU constraint)
     {
       name: "upload",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
-      testMatch: /upload\.spec\.ts/,
+      testMatch: /upload\.spec\.ts$/,
       fullyParallel: false,
     },
   ],

@@ -204,6 +204,10 @@ check-licenses:
 squawk:
     scripts/security-squawk.sh
 
+# Run deployed-only tests against a preview stack (requires TEST_TARGET=deployed)
+test-deployed:
+    bash scripts/test-deployed.sh
+
 # Deploy ephemeral preview + run E2E against it + destroy
 deploy-preview:
     scripts/deploy-preview.sh

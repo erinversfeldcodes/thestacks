@@ -3,6 +3,7 @@ module Components.SearchBar exposing (searchBar)
 import Html exposing (Html, button, div, input, text)
 import Html.Attributes exposing (class, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
+import Util.TestId exposing (testId)
 
 
 searchBar :
@@ -18,6 +19,7 @@ searchBar config =
         , input
             [ type_ "text"
             , class "search-bar__input"
+            , testId "search-input"
             , placeholder config.placeholder_
             , value config.query
             , onInput config.onInput
@@ -29,6 +31,7 @@ searchBar config =
           else
             button
                 [ class "search-bar__clear"
+                , testId "search-clear"
                 , onClick config.onClear
                 ]
                 [ text "✕" ]

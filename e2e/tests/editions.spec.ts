@@ -23,7 +23,7 @@ async function findMultiEditionBookId(page: Page): Promise<string | null> {
  */
 async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise<void> {
   await page.goto("/catalogue");
-  await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
+  await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
   // Find and click the card link for this specific book
   const cardLink = page.locator(`.catalogue__card-link[href="/books/${bookId}"], .catalogue__card-link[data-book-id="${bookId}"]`).first();
@@ -36,7 +36,7 @@ async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise
 
   // Wait for the overlay to appear
   await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-  await page.waitForSelector('[role="dialog"] .book-detail__parchment, .book-detail__parchment', { timeout: 10000 });
+  await page.waitForSelector('[role="dialog"] [data-testid="book-overlay"], [data-testid="book-overlay"]', { timeout: 10000 });
 }
 
 async function findPlacedBookId(page: Page): Promise<string | null> {
@@ -59,7 +59,7 @@ async function openPlacedBookOverlay(page: Page): Promise<void> {
   await page.goto("/library");
   await page.waitForSelector(".bookcase", { timeout: 10000 });
 
-  const bookButton = page.locator(".book-button").first();
+  const bookButton = page.getByTestId('book-spine').first();
   await expect(bookButton).toBeAttached({ timeout: 10000 });
   await bookButton.evaluate((el) => (el as HTMLElement).click());
 
@@ -76,7 +76,7 @@ test.describe("Book Detail — Editions", () => {
 
     const overlay = page.locator('[role="dialog"]');
     await expect(
-      overlay.locator(".book-detail__edition-selector")
+      overlay.getByTestId('edition-selector')
     ).toBeVisible();
   });
 
@@ -87,11 +87,11 @@ test.describe("Book Detail — Editions", () => {
 
     const overlay = page.locator('[role="dialog"]');
     await expect(
-      overlay.locator(".book-detail__edition-select")
+      overlay.getByTestId('edition-selector')
     ).toBeVisible({ timeout: 5000 });
 
     const options = await overlay
-      .locator(".book-detail__edition-select option")
+      .getByTestId('edition-selector').locator("option")
       .count();
     expect(options).toBeGreaterThanOrEqual(2);
   });
@@ -104,9 +104,9 @@ test.describe("Book Detail — Editions", () => {
     await openBookOverlayFromCatalogue(page, bookId!);
 
     const overlay = page.locator('[role="dialog"]');
-    const isbnBefore = await overlay.locator(".book-detail__isbn").textContent();
+    const isbnBefore = await overlay.getByTestId('book-isbn').textContent();
 
-    const select = overlay.locator(".book-detail__edition-select");
+    const select = overlay.getByTestId('edition-selector');
     const secondOption = await select
       .locator("option")
       .nth(1)
@@ -115,7 +115,7 @@ test.describe("Book Detail — Editions", () => {
       await select.selectOption(secondOption);
       await page.waitForTimeout(300);
 
-      const isbnAfter = await overlay.locator(".book-detail__isbn").textContent();
+      const isbnAfter = await overlay.getByTestId('book-isbn').textContent();
       expect(isbnAfter).not.toEqual(isbnBefore);
     }
   });
@@ -136,7 +136,7 @@ test.describe("Book Detail — Editions", () => {
 
     const overlay = page.locator('[role="dialog"]');
     await expect(
-      overlay.locator(".book-detail__edition-selector")
+      overlay.getByTestId('edition-selector')
     ).not.toBeVisible();
   });
 
@@ -147,7 +147,7 @@ test.describe("Book Detail — Editions", () => {
 
     const overlay = page.locator('[role="dialog"]');
     await expect(overlay.locator(".book-detail__meta-details")).toBeVisible();
-    await expect(overlay.locator(".book-detail__isbn")).toBeVisible();
+    await expect(overlay.getByTestId('book-isbn')).toBeVisible();
   });
 });
 

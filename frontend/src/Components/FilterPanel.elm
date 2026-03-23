@@ -8,6 +8,7 @@ module Components.FilterPanel exposing
 import Html exposing (Html, button, div, input, label, text)
 import Html.Attributes exposing (class, type_, value)
 import Html.Events exposing (onClick, onInput)
+import Util.TestId exposing (testId)
 
 
 type SortOrder
@@ -47,6 +48,7 @@ filterPanel config =
     div [ class "filter-panel" ]
         [ button
             [ class "filter-panel__toggle"
+            , testId "filter-toggle"
             , onClick config.onToggle
             ]
             [ text

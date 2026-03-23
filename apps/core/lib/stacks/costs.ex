@@ -138,12 +138,27 @@ defmodule Stacks.Costs do
   """
   @spec upsert_cost(map()) :: {:ok, PlatformCost.t()} | {:error, Ecto.Changeset.t()}
   def upsert_cost(attrs) do
-    %PlatformCost{}
-    |> PlatformCost.changeset(attrs)
-    |> Repo.insert(
-      on_conflict: {:replace, [:amount_cents, :description, :updated_at]},
-      conflict_target: [:service, :period_start, :period_end]
-    )
+    result =
+      %PlatformCost{}
+      |> PlatformCost.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: {:replace, [:amount_cents, :description, :updated_at]},
+        conflict_target: [:service, :period_start, :period_end]
+      )
+
+    case result do
+      {:ok, cost} ->
+        :telemetry.execute(
+          [:stacks, :costs, :recorded],
+          %{amount_cents: cost.amount_cents},
+          %{category: cost.category, service: cost.service}
+        )
+
+      _ ->
+        :ok
+    end
+
+    result
   end
 
   # ── Public Breakdown ──────────────────────────────────────────────────────

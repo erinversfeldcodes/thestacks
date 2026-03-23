@@ -20,6 +20,7 @@ import Page.Bookshelf.Helpers exposing (pickTexture)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -95,6 +96,7 @@ view : Model -> Html Msg
 view model =
     div
         [ class "page page--shelf shelf-reading-pile"
+        , testId "reading-pile-page"
         , onClick Deselect
         ]
         [ div [ class "wallpaper wallpaper--dragons" ] []

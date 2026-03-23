@@ -4,6 +4,7 @@ import Components.FilterPanel exposing (SortOrder)
 import Html exposing (Html, div, label, option, select, text)
 import Html.Attributes exposing (class, value)
 import Html.Events exposing (onInput)
+import Util.TestId exposing (testId)
 
 
 sortSelector :
@@ -16,6 +17,7 @@ sortSelector config =
         [ label [ class "sort-selector__label" ] [ text "Sort by" ]
         , select
             [ class "sort-selector__select"
+            , testId "sort-selector"
             , onInput config.onChange
             ]
             [ option [ value "title" ] [ text "Title" ]
