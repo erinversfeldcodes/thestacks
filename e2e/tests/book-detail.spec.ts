@@ -14,7 +14,7 @@ async function openBookDetailOverlay(page: import("@playwright/test").Page) {
   const bookButton = page.getByTestId('book-spine').first();
   await expect(bookButton).toBeAttached({ timeout: 10000 });
   await bookButton.evaluate((el) => (el as HTMLElement).click());
-  const overlay = page.locator('[role="dialog"]');
+  const overlay = page.getByTestId('book-overlay');
   await expect(overlay).toBeVisible({ timeout: 5000 });
   return overlay;
 }
@@ -24,13 +24,11 @@ test.describe("Book Detail overlay — layout and structure", () => {
     page,
   }) => {
     const overlay = await openBookDetailOverlay(page);
-    const parchment = overlay.getByTestId('book-overlay');
-    await expect(parchment).toBeVisible({ timeout: 10000 });
+    await expect(overlay).toBeVisible({ timeout: 10000 });
   });
 
   test("Cover image or placeholder is displayed", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
     const coverImg = overlay.getByTestId('book-cover');
     const coverPlaceholder = overlay.locator(".book-detail__cover-placeholder");
     const hasCover = (await coverImg.count()) > 0;
@@ -42,7 +40,6 @@ test.describe("Book Detail overlay — layout and structure", () => {
 
   test("All sections visible when book loads", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
     const bookDetail = overlay.locator(".book-detail");
     if ((await bookDetail.count()) > 0) {
       await expect(
@@ -73,7 +70,6 @@ test.describe("Book Detail overlay — layout and structure", () => {
 
   test("Format picker buttons are interactive", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
     const formatBtn = overlay.locator(".format-picker__btn").first();
     if ((await formatBtn.count()) > 0) {
       await formatBtn.click();
@@ -83,7 +79,6 @@ test.describe("Book Detail overlay — layout and structure", () => {
 
   test("Move to Shelf dropdown works", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
     const chooseBtnLocator = overlay.locator("button", {
       hasText: "Choose Bookshelf",
     });

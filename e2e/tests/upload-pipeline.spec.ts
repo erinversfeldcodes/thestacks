@@ -20,15 +20,18 @@ function fakeBook(overrides: Record<string, unknown> = {}) {
     description: "A medieval mystery.",
     editions: [],
     primary_edition: {
+      id: "edition-1",
       isbn: "9780151446476",
       format_label: "Hardcover",
       page_count: 502,
       publication_year: 1983,
       publisher: "Harcourt",
       cover_image_url: "/covers/rose.jpg",
+      is_primary: true,
     },
     edition_count: 1,
     subjects: [],
+    visibility_tier: "public",
     ...overrides,
   };
 }
@@ -39,12 +42,14 @@ function fakeBook2() {
     title: "Foucault's Pendulum",
     author: { id: "author-1", name: "Umberto Eco", bio: null, website: null },
     primary_edition: {
+      id: "edition-2",
       isbn: "9780151327652",
       format_label: "Paperback",
       page_count: 623,
       publication_year: 1989,
       publisher: "Harcourt",
       cover_image_url: null,
+      is_primary: true,
     },
   });
 }
@@ -275,12 +280,14 @@ async function mockMergeFormatSuccess(
       contentType: "application/json",
       body: JSON.stringify({
         edition: {
+          id: "edition-merge-1",
           isbn: "9780151446476",
           format_label: "Paperback",
           page_count: 502,
           publication_year: 1984,
           publisher: "Harcourt",
           cover_image_url: null,
+          is_primary: false,
         },
       }),
     });
@@ -690,18 +697,15 @@ test.describe("Sad paths", () => {
     });
   });
 
-  test("unauthenticated -> Sign in prompt", async ({ browser }) => {
+  test("unauthenticated -> redirects to login", async ({ browser }) => {
     // Create a fresh context without auth storage state
     const context = await browser.newContext();
     const page = await context.newPage();
 
     await page.goto("/upload");
 
-    await expect(page.getByTestId("upload-auth-required")).toBeVisible();
-    await expect(page.getByTestId("upload-auth-required")).toContainText(
-      "sign in"
-    );
-    await expect(page.getByRole("link", { name: "Sign In" })).toBeVisible();
+    // Server-side redirect to login page for unauthenticated users
+    await expect(page.locator('input[id="email"]')).toBeVisible();
 
     await context.close();
   });

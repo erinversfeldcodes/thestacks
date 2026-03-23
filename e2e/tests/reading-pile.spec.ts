@@ -39,11 +39,8 @@ test.describe("Reading Pile page", () => {
     const bookBtn = page.locator(".book-pile__book").first();
     if ((await bookBtn.count()) > 0) {
       await bookBtn.click();
-      const overlay = page.locator('[role="dialog"]');
-      await expect(overlay).toBeVisible({ timeout: 5000 });
-      await expect(overlay.getByTestId('book-overlay')).toBeVisible({
-        timeout: 10000,
-      });
+      const overlay = page.getByTestId('book-overlay');
+      await expect(overlay).toBeVisible({ timeout: 10000 });
     }
   });
 

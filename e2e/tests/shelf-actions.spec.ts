@@ -24,10 +24,8 @@ test.describe("Shelf actions — move book between shelves", () => {
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
     // Wait for overlay to appear
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await overlay.waitFor({ state: "visible" });
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Verify the shelf title shows "from Library"
     const shelfTitle = overlay.locator(".book-detail__section-title", {
@@ -133,9 +131,8 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
       await page.locator(".catalogue__card-link").first().click();
     }
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Should NOT show "Remove from collection" (book is unplaced)
     await expect(
@@ -180,9 +177,8 @@ test.describe("Shelf actions — remove book from collection", () => {
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // The remove button should be visible since the book is placed
     await expect(
@@ -201,9 +197,8 @@ test.describe("Shelf actions — remove book from collection", () => {
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Click remove
     await overlay.locator('button:has-text("Remove from collection")').click();
