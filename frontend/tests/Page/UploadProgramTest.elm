@@ -65,7 +65,7 @@ uploadHappyPath =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Test Book" "Test Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Book Identified!" ]
+                    [ Selector.text "We think this is…" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Test Book" ]
                 |> ProgramTest.expectViewHas
@@ -152,9 +152,9 @@ uploadDuplicateDetected =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Already in Your Library" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.class "upload-duplicate__shelf-select" ]
+                    [ Selector.class "upload-duplicate__merge" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Move to Shelf" ]
+                    [ Selector.text "Yes, merge" ]
 
 
 uploadManualIsbnEntry : Test

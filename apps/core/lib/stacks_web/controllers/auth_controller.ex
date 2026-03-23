@@ -134,7 +134,9 @@ defmodule StacksWeb.AuthController do
       role: user.role,
       profile_visibility: user.profile_visibility,
       age_verified: user.age_verified,
-      consent_analytics: user.consent_analytics
+      consent_analytics: user.consent_analytics,
+      country_code: user.country_code,
+      city: user.city
     }
   end
 

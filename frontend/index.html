@@ -21603,6 +21603,52 @@ type alias Process =
                         });
                     });
                 }
+
+                // Onboarding localStorage persistence (Issue #057e)
+                if (app.ports && app.ports.saveOnboardingCompleted) {
+                    app.ports.saveOnboardingCompleted.subscribe(function () {
+                        try {
+                            localStorage.setItem("onboarding_completed", "true");
+                        } catch (e) {
+                            // localStorage may be unavailable in private browsing
+                        }
+                    });
+                }
+
+                if (app.ports && app.ports.requestOnboardingStatus) {
+                    app.ports.requestOnboardingStatus.subscribe(function () {
+                        var completed = false;
+                        try {
+                            completed = localStorage.getItem("onboarding_completed") === "true";
+                        } catch (e) {
+                            // localStorage may be unavailable
+                        }
+                        if (app.ports && app.ports.onOnboardingStatus) {
+                            app.ports.onOnboardingStatus.send(completed);
+                        }
+                    });
+                }
+
+                // Auth persistence (Issue #028)
+                if (app.ports && app.ports.saveAuth) {
+                    app.ports.saveAuth.subscribe(function (auth) {
+                        try {
+                            localStorage.setItem("auth", JSON.stringify(auth));
+                        } catch (e) {
+                            // localStorage may be unavailable
+                        }
+                    });
+                }
+
+                if (app.ports && app.ports.clearAuth) {
+                    app.ports.clearAuth.subscribe(function () {
+                        try {
+                            localStorage.removeItem("auth");
+                        } catch (e) {
+                            // localStorage may be unavailable
+                        }
+                    });
+                }
             } catch (e) {
                 // display initialization errors (e.g. bad flags, infinite recursion)
                 var header = document.createElement("h1");

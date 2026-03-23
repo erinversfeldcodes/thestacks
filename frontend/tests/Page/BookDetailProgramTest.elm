@@ -186,7 +186,7 @@ sectionContentDetails =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Reddit" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "No bookshop listings yet" ]
+                    [ Selector.text "No price data yet" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Charles Duhigg" ]
                 |> ProgramTest.expectViewHas

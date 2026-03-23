@@ -4,14 +4,25 @@ import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
 import Api
 import Browser
+import Browser.Dom
+import Browser.Events
 import Browser.Navigation as Nav
-import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, text, ul)
-import Html.Attributes exposing (class, href)
-import Html.Events exposing (onClick)
+import Components.OnboardingOverlay as OnboardingOverlay
+import Components.UserMenu as UserMenu
+import Components.ViewAsBar as ViewAsBar
+import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
+import Html.Attributes exposing (attribute, class, href, id)
+import Http
 import Json.Decode as Decode
 import Json.Encode
-import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
+import Page.Admin.Metrics as AdminMetrics
+import Page.Admin.ScraperConfig as AdminScraperConfig
+import Page.Admin.SourceApproval as AdminSourceApproval
+import Page.Blog.Archive as BlogArchive
+import Page.Blog.Editor as BlogEditor
+import Page.Blog.Post as BlogPostPage
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.LookingForHome as LookingForHome
@@ -19,10 +30,22 @@ import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Login as Login
+import Page.Marketplace.Browse as MarketplaceBrowse
+import Page.Marketplace.CreateListing as CreateListing
+import Page.Marketplace.ListingDetail as ListingDetail
+import Page.Marketplace.MyListings as MyListings
 import Page.Search as Search
+import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
+import Page.Settings.Notifications as Notifications
+import Page.Settings.Password as Password
+import Page.Settings.Privacy as Privacy
+import Page.Settings.Profile as Profile
 import Page.Upload as Upload
+import Task
+import Types.Placement
+import Types.RemoteData
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
 
@@ -40,6 +63,15 @@ port saveAuth : Json.Encode.Value -> Cmd msg
 
 
 port clearAuth : () -> Cmd msg
+
+
+port saveOnboardingCompleted : () -> Cmd msg
+
+
+port requestOnboardingStatus : () -> Cmd msg
+
+
+port onOnboardingStatus : (Bool -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -69,8 +101,22 @@ type Page
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
+    | PageSettingsProfile Profile.Model
+    | PageSettingsPassword Password.Model
+    | PageSettingsNotifications Notifications.Model
     | PageCostTransparency CostTransparency.Model
     | PageCatalogue Catalogue.Model
+    | PageMarketplaceBrowse MarketplaceBrowse.Model
+    | PageMarketplaceCreate CreateListing.Model
+    | PageMarketplaceMyListings MyListings.Model
+    | PageMarketplaceDetail ListingDetail.Model
+    | PageSettingsPrivacy Privacy.Model
+    | PageBlogArchive BlogArchive.Model
+    | PageBlogEditor BlogEditor.Model
+    | PageBlogPost BlogPostPage.Model
+    | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminScraperConfig AdminScraperConfig.Model
+    | PageAdminMetrics AdminMetrics.Model
     | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
@@ -78,6 +124,13 @@ type Page
 type alias Auth =
     { user : User
     , token : AuthToken
+    }
+
+
+type alias BookDetailOverlay =
+    { bookId : String
+    , detail : BookDetail.Model
+    , triggerSpineId : Maybe String
     }
 
 
@@ -90,6 +143,11 @@ type alias Model =
     , previousRoute : Maybe Route
     , transition : Maybe String
     , pendingAuthResponse : Maybe Api.AuthResponse
+    , bookDetailOverlay : Maybe BookDetailOverlay
+    , userMenu : UserMenu.Model
+    , onboarding : OnboardingOverlay.Model
+    , onboardingCompleted : Bool
+    , hasAnyPlacements : Bool
     }
 
 
@@ -113,8 +171,22 @@ init flags url key =
       , previousRoute = Nothing
       , transition = Nothing
       , pendingAuthResponse = Nothing
+      , bookDetailOverlay = Nothing
+      , userMenu = UserMenu.init
+      , onboarding = OnboardingOverlay.init
+      , onboardingCompleted = False
+      , hasAnyPlacements = True
       }
-    , cmd
+    , Cmd.batch
+        [ cmd
+        , requestOnboardingStatus ()
+        , case maybeAuth of
+            Just auth ->
+                Api.getMyPlacements auth.token GotPlacementCheck
+
+            Nothing ->
+                Cmd.none
+        ]
     )
 
 
@@ -122,13 +194,15 @@ decodeFlags : Decode.Value -> Maybe Auth
 decodeFlags flags =
     let
         authDecoder =
-            Decode.map4
-                (\token userId email displayName ->
+            Decode.map5
+                (\token userId email displayName role ->
                     { user =
                         { id = userId
                         , email = email
                         , displayName = displayName
-                        , role = "user"
+                        , role = role
+                        , countryCode = Nothing
+                        , city = Nothing
                         }
                     , token = token
                     }
@@ -137,9 +211,24 @@ decodeFlags flags =
                 (Decode.field "userId" Decode.string)
                 (Decode.field "email" Decode.string)
                 (Decode.field "displayName" Decode.string)
+                (Decode.oneOf
+                    [ Decode.field "role" Decode.string
+                    , Decode.succeed "user"
+                    ]
+                )
     in
     Decode.decodeValue authDecoder flags
         |> Result.toMaybe
+
+
+isOwner : Maybe Auth -> Bool
+isOwner maybeAuth =
+    case maybeAuth of
+        Just auth ->
+            auth.user.role == "owner"
+
+        Nothing ->
+            False
 
 
 requiresAuth : Route -> Bool
@@ -158,6 +247,18 @@ requiresAuth route =
             False
 
         BookDetail _ ->
+            False
+
+        MarketplaceBrowse ->
+            False
+
+        MarketplaceDetail _ ->
+            False
+
+        BlogArchive ->
+            False
+
+        BlogPost _ ->
             False
 
         ConfirmEmail _ ->
@@ -185,8 +286,11 @@ initBookshelf config maybeAuth =
         maybeToken =
             Maybe.map .token maybeAuth
 
+        userId =
+            maybeAuth |> Maybe.map (.user >> .id) |> Maybe.withDefault ""
+
         ( model, cmd ) =
-            Bookshelf.init config maybeToken
+            Bookshelf.init config maybeToken userId
     in
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
@@ -260,6 +364,131 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             in
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
 
+        Settings ->
+            let
+                profileModel =
+                    case maybeAuth of
+                        Just auth ->
+                            Profile.init auth.user
+
+                        Nothing ->
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+            in
+            ( PageSettingsProfile profileModel, Cmd.none )
+
+        SettingsProfile ->
+            let
+                profileModel =
+                    case maybeAuth of
+                        Just auth ->
+                            Profile.init auth.user
+
+                        Nothing ->
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+            in
+            ( PageSettingsProfile profileModel, Cmd.none )
+
+        SettingsPassword ->
+            ( PageSettingsPassword Password.init, Cmd.none )
+
+        SettingsNotifications ->
+            ( PageSettingsNotifications Notifications.init, Cmd.none )
+
+        MarketplaceBrowse ->
+            let
+                ( model, cmd ) =
+                    MarketplaceBrowse.init maybeToken
+            in
+            ( PageMarketplaceBrowse model, Cmd.map MarketplaceBrowseMsg cmd )
+
+        MarketplaceCreate ->
+            let
+                ( model, cmd ) =
+                    CreateListing.init maybeToken
+            in
+            ( PageMarketplaceCreate model, Cmd.map CreateListingMsg cmd )
+
+        MarketplaceMyListings ->
+            let
+                ( model, cmd ) =
+                    MyListings.init maybeToken
+            in
+            ( PageMarketplaceMyListings model, Cmd.map MyListingsMsg cmd )
+
+        MarketplaceDetail listingId ->
+            let
+                ( model, cmd ) =
+                    ListingDetail.init listingId maybeToken
+            in
+            ( PageMarketplaceDetail model, Cmd.map ListingDetailMsg cmd )
+
+        SettingsPrivacy ->
+            ( PageSettingsPrivacy Privacy.init, Cmd.none )
+
+        BlogArchive ->
+            let
+                ( blogModel, blogCmd ) =
+                    BlogArchive.init maybeToken
+            in
+            ( PageBlogArchive blogModel, Cmd.map BlogArchiveMsg blogCmd )
+
+        BlogNew ->
+            let
+                ( editorModel, editorCmd ) =
+                    BlogEditor.init BlogEditor.New maybeToken
+            in
+            ( PageBlogEditor editorModel, Cmd.map BlogEditorMsg editorCmd )
+
+        BlogEdit postId ->
+            let
+                ( editorModel, editorCmd ) =
+                    BlogEditor.init (BlogEditor.Edit postId) maybeToken
+            in
+            ( PageBlogEditor editorModel, Cmd.map BlogEditorMsg editorCmd )
+
+        Route.BlogPost postId ->
+            let
+                currentUserId =
+                    Maybe.map (.user >> .id) maybeAuth
+
+                ( postModel, postCmd ) =
+                    BlogPostPage.init postId maybeToken currentUserId
+            in
+            ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
+
+        Route.AdminSourceApproval ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminSourceApproval.init maybeToken
+                in
+                ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminScraperConfig ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminScraperConfig.init maybeToken
+                in
+                ( PageAdminScraperConfig subModel, Cmd.map AdminScraperConfigMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminMetrics ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminMetrics.init maybeToken
+                in
+                ( PageAdminMetrics subModel, Cmd.map AdminMetricsMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
@@ -274,6 +503,7 @@ encodeAuth auth =
         , ( "userId", Json.Encode.string auth.user.id )
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
+        , ( "role", Json.Encode.string auth.user.role )
         ]
 
 
@@ -294,11 +524,33 @@ type Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
+    | ProfileMsg Profile.Msg
+    | PasswordMsg Password.Msg
+    | NotificationsMsg Notifications.Msg
     | CostTransparencyMsg CostTransparency.Msg
     | CatalogueMsg Catalogue.Msg
-    | Logout
+    | MarketplaceBrowseMsg MarketplaceBrowse.Msg
+    | CreateListingMsg CreateListing.Msg
+    | MyListingsMsg MyListings.Msg
+    | ListingDetailMsg ListingDetail.Msg
+    | PrivacyMsg Privacy.Msg
+    | BlogArchiveMsg BlogArchive.Msg
+    | BlogEditorMsg BlogEditor.Msg
+    | BlogPostMsg BlogPostPage.Msg
+    | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminScraperConfigMsg AdminScraperConfig.Msg
+    | AdminMetricsMsg AdminMetrics.Msg
+    | UserMenuMsg UserMenu.Msg
+    | LogoutCompleted
+    | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
+    | OverlayBookDetailMsg BookDetail.Msg
+    | EscapePressed
+    | OnboardingMsg OnboardingOverlay.Msg
+    | OnboardingStatusReceived Bool
+    | FocusResult
+    | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -307,7 +559,16 @@ update msg model =
         LinkClicked urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    case Route.fromUrl url of
+                        BookDetail bookId ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay model bookId
+                            in
+                            ( overlayModel, overlayCmd )
+
+                        _ ->
+                            ( model, Nav.pushUrl model.key (Url.toString url) )
 
                 Browser.External url ->
                     ( model, Nav.load url )
@@ -329,6 +590,7 @@ update msg model =
                 , page = page
                 , previousRoute = Just model.route
                 , transition = transition
+                , userMenu = UserMenu.init
               }
             , cmd
             )
@@ -368,7 +630,9 @@ update msg model =
                                         { id = authResponse.userId
                                         , email = authResponse.email
                                         , displayName = authResponse.displayName
-                                        , role = "user"
+                                        , role = authResponse.role
+                                        , countryCode = Nothing
+                                        , city = Nothing
                                         }
                                     , token = authResponse.token
                                     }
@@ -402,6 +666,8 @@ update msg model =
                                         , email = ar.email
                                         , displayName = ar.displayName
                                         , role = "user"
+                                        , countryCode = Nothing
+                                        , city = Nothing
                                         }
                                     , token = ar.token
                                     }
@@ -423,8 +689,19 @@ update msg model =
                         ( newSubModel, subCmd, outMsg ) =
                             Bookshelf.update subMsg subModel
 
+                        hasPlacements =
+                            case newSubModel.books of
+                                Types.RemoteData.Success placements ->
+                                    not (List.isEmpty placements)
+
+                                _ ->
+                                    model.hasAnyPlacements
+
                         baseModel =
-                            { model | page = PageBookshelf newSubModel }
+                            { model
+                                | page = PageBookshelf newSubModel
+                                , hasAnyPlacements = model.hasAnyPlacements || hasPlacements
+                            }
 
                         baseCmd =
                             Cmd.map BookshelfMsg subCmd
@@ -432,6 +709,15 @@ update msg model =
                     case outMsg of
                         Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
+
+                        Bookshelf.NavigateTo (BookDetail bookId) ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay baseModel bookId
+                            in
+                            ( overlayModel
+                            , Cmd.batch [ baseCmd, overlayCmd ]
+                            )
 
                         Bookshelf.NavigateTo route ->
                             ( baseModel
@@ -461,6 +747,15 @@ update msg model =
                         ReadingPile.NoOut ->
                             ( baseModel, baseCmd )
 
+                        ReadingPile.NavigateTo (BookDetail bookId) ->
+                            let
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlay baseModel bookId
+                            in
+                            ( overlayModel
+                            , Cmd.batch [ baseCmd, overlayCmd ]
+                            )
+
                         ReadingPile.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -488,6 +783,9 @@ update msg model =
                     case outMsg of
                         LookingForHome.NoOut ->
                             ( baseModel, baseCmd )
+
+                        LookingForHome.NavigateTo (Route.BookDetail bookId) ->
+                            openOverlay baseModel bookId
 
                         LookingForHome.NavigateTo route ->
                             ( baseModel
@@ -520,6 +818,9 @@ update msg model =
                         BookDetail.NoOut ->
                             ( baseModel, baseCmd )
 
+                        BookDetail.RequestCloseOverlay ->
+                            ( baseModel, baseCmd )
+
                         BookDetail.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -538,12 +839,26 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Upload.update subMsg subModel maybeToken
+
+                        baseModel =
+                            { model | page = PageUpload newSubModel }
+
+                        baseCmd =
+                            Cmd.map UploadMsg subCmd
                     in
-                    ( { model | page = PageUpload newSubModel }
-                    , Cmd.map UploadMsg subCmd
-                    )
+                    case outMsg of
+                        Upload.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Upload.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -599,6 +914,57 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        ProfileMsg subMsg ->
+            case model.page of
+                PageSettingsProfile subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Profile.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsProfile newSubModel }
+                    , Cmd.map ProfileMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        PasswordMsg subMsg ->
+            case model.page of
+                PageSettingsPassword subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Password.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsPassword newSubModel }
+                    , Cmd.map PasswordMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        NotificationsMsg subMsg ->
+            case model.page of
+                PageSettingsNotifications subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Notifications.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsNotifications newSubModel }
+                    , Cmd.map NotificationsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         CostTransparencyMsg subMsg ->
             case model.page of
                 PageCostTransparency subModel ->
@@ -630,6 +996,325 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        MarketplaceBrowseMsg subMsg ->
+            case model.page of
+                PageMarketplaceBrowse subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            MarketplaceBrowse.update subMsg subModel
+                    in
+                    ( { model | page = PageMarketplaceBrowse newSubModel }
+                    , Cmd.map MarketplaceBrowseMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        CreateListingMsg subMsg ->
+            case model.page of
+                PageMarketplaceCreate subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            CreateListing.update subMsg subModel maybeToken
+
+                        baseModel =
+                            { model | page = PageMarketplaceCreate newSubModel }
+
+                        baseCmd =
+                            Cmd.map CreateListingMsg subCmd
+                    in
+                    case outMsg of
+                        CreateListing.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        CreateListing.NavigateTo route ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        MyListingsMsg subMsg ->
+            case model.page of
+                PageMarketplaceMyListings subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            MyListings.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageMarketplaceMyListings newSubModel }
+                    , Cmd.map MyListingsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ListingDetailMsg subMsg ->
+            case model.page of
+                PageMarketplaceDetail subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ListingDetail.update subMsg subModel
+                    in
+                    ( { model | page = PageMarketplaceDetail newSubModel }
+                    , Cmd.map ListingDetailMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        PrivacyMsg subMsg ->
+            case model.page of
+                PageSettingsPrivacy subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            Privacy.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageSettingsPrivacy newSubModel }
+                    , Cmd.map PrivacyMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogArchiveMsg subMsg ->
+            case model.page of
+                PageBlogArchive subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            BlogArchive.update subMsg subModel
+                    in
+                    ( { model | page = PageBlogArchive newSubModel }
+                    , Cmd.map BlogArchiveMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogEditorMsg subMsg ->
+            case model.page of
+                PageBlogEditor subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            BlogEditor.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageBlogEditor newSubModel }
+                    , Cmd.map BlogEditorMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BlogPostMsg subMsg ->
+            case model.page of
+                PageBlogPost subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            BlogPostPage.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageBlogPost newSubModel }
+                    , Cmd.map BlogPostMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminSourceApprovalMsg subMsg ->
+            case model.page of
+                PageAdminSourceApproval subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd ) =
+                            AdminSourceApproval.update subMsg subModel maybeToken
+                    in
+                    ( { model | page = PageAdminSourceApproval newSubModel }
+                    , Cmd.map AdminSourceApprovalMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminScraperConfigMsg subMsg ->
+            case model.page of
+                PageAdminScraperConfig subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            AdminScraperConfig.update subMsg subModel
+                    in
+                    ( { model | page = PageAdminScraperConfig newSubModel }
+                    , Cmd.map AdminScraperConfigMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminMetricsMsg subMsg ->
+            case model.page of
+                PageAdminMetrics subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            AdminMetrics.update subMsg subModel
+                    in
+                    ( { model | page = PageAdminMetrics newSubModel }
+                    , Cmd.map AdminMetricsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        OverlayBookDetailMsg subMsg ->
+            case model.bookDetailOverlay of
+                Just overlay ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newDetail, subCmd, outMsg ) =
+                            BookDetail.update subMsg overlay.detail maybeToken
+
+                        updatedOverlay =
+                            { overlay | detail = newDetail }
+
+                        returnFocusCmd =
+                            case overlay.triggerSpineId of
+                                Just spineId ->
+                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
+
+                                Nothing ->
+                                    Cmd.none
+                    in
+                    case outMsg of
+                        BookDetail.RequestCloseOverlay ->
+                            ( { model | bookDetailOverlay = Nothing }
+                            , returnFocusCmd
+                            )
+
+                        BookDetail.NavigateTo route ->
+                            ( { model | bookDetailOverlay = Nothing }
+                            , Nav.pushUrl model.key (Route.toPath route)
+                            )
+
+                        BookDetail.NoOut ->
+                            ( { model | bookDetailOverlay = Just updatedOverlay }
+                            , Cmd.map OverlayBookDetailMsg subCmd
+                            )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        UserMenuMsg subMsg ->
+            let
+                ( newUserMenu, outMsg ) =
+                    UserMenu.update subMsg model.userMenu
+            in
+            case outMsg of
+                UserMenu.NoOut ->
+                    ( { model | userMenu = newUserMenu }, Cmd.none )
+
+                UserMenu.NavigateToSettings ->
+                    ( { model | userMenu = newUserMenu }
+                    , Nav.pushUrl model.key (Route.toPath SettingsProfile)
+                    )
+
+                UserMenu.SignOut ->
+                    let
+                        logoutCmd =
+                            case model.auth of
+                                Just auth ->
+                                    Api.logout auth.token (always LogoutCompleted)
+
+                                Nothing ->
+                                    Cmd.none
+                    in
+                    ( { model | userMenu = newUserMenu, auth = Nothing, page = PageLogin Login.init }
+                    , Cmd.batch
+                        [ logoutCmd
+                        , clearAuth ()
+                        , Nav.pushUrl model.key (Route.toPath Login)
+                        ]
+                    )
+
+        LogoutCompleted ->
+            ( model, Cmd.none )
+
+        SettingsMobileNavChanged path ->
+            ( model, Nav.pushUrl model.key path )
+
+        EscapePressed ->
+            case model.bookDetailOverlay of
+                Just overlay ->
+                    let
+                        focusCmd =
+                            case overlay.triggerSpineId of
+                                Just spineId ->
+                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
+
+                                Nothing ->
+                                    Cmd.none
+                    in
+                    ( { model | bookDetailOverlay = Nothing }, focusCmd )
+
+                Nothing ->
+                    let
+                        ( newUserMenu, _ ) =
+                            UserMenu.update UserMenu.Close model.userMenu
+                    in
+                    ( { model | userMenu = newUserMenu }, Cmd.none )
+
+        OnboardingMsg subMsg ->
+            let
+                ( newOnboarding, outMsg ) =
+                    OnboardingOverlay.update subMsg model.onboarding
+            in
+            case outMsg of
+                OnboardingOverlay.SkipCompleted ->
+                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
+                    , saveOnboardingCompleted ()
+                    )
+
+                OnboardingOverlay.FinishCompleted ->
+                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
+                    , saveOnboardingCompleted ()
+                    )
+
+                OnboardingOverlay.NoOut ->
+                    ( { model | onboarding = newOnboarding }, Cmd.none )
+
+        OnboardingStatusReceived completed ->
+            ( { model | onboardingCompleted = completed }, Cmd.none )
+
+        FocusResult ->
+            -- Focus attempt completed (success or failure); nothing to do.
+            ( model, Cmd.none )
+
+        GotPlacementCheck result ->
+            case result of
+                Ok placements ->
+                    ( { model | hasAnyPlacements = not (List.isEmpty placements) }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         SwipeReceived direction ->
             let
                 maybeNext =
@@ -646,13 +1331,35 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        Logout ->
-            ( { model | auth = Nothing, page = PageLogin Login.init }
-            , Cmd.batch [ clearAuth (), Nav.pushUrl model.key (Route.toPath Login) ]
-            )
-
         SwipeIgnored ->
             ( model, Cmd.none )
+
+
+{-| Open the book detail overlay for a given book ID.
+Initialises a BookDetail.Model and fires the API fetch command.
+Stores the triggering spine element ID so focus can return on close.
+-}
+openOverlay : Model -> String -> ( Model, Cmd Msg )
+openOverlay model bookId =
+    let
+        maybeToken =
+            Maybe.map .token model.auth
+
+        ( detailModel, detailCmd ) =
+            BookDetail.init bookId maybeToken (Just model.route)
+
+        overlay =
+            { bookId = bookId
+            , detail = detailModel
+            , triggerSpineId = Just ("spine-" ++ bookId)
+            }
+    in
+    ( { model | bookDetailOverlay = Just overlay }
+    , Cmd.batch
+        [ Cmd.map OverlayBookDetailMsg detailCmd
+        , Task.attempt (always FocusResult) (Browser.Dom.focus "book-overlay-close")
+        ]
+    )
 
 
 transitionClass : Route -> Route -> String
@@ -677,6 +1384,18 @@ subscriptions _ =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        , onOnboardingStatus OnboardingStatusReceived
+        , Browser.Events.onKeyDown
+            (Decode.field "key" Decode.string
+                |> Decode.andThen
+                    (\key ->
+                        if key == "Escape" then
+                            Decode.succeed EscapePressed
+
+                        else
+                            Decode.fail "not handled"
+                    )
+            )
         ]
 
 
@@ -698,10 +1417,15 @@ view : Model -> Browser.Document Msg
 view model =
     { title = pageTitle model.route
     , body =
-        [ div [ class "app" ]
-            [ viewNav model
+        [ viewOverlay model
+        , viewOnboarding model
+        , ViewAsBar.view model.url
+        , div [ class "app" ]
+            [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
+            , viewNav model
             , main_
-                [ class
+                [ id "main-content"
+                , class
                     ("app__main"
                         ++ (case model.transition of
                                 Just t ->
@@ -752,6 +1476,18 @@ pageTitle route =
         Search ->
             "Search — The Stacks"
 
+        Settings ->
+            "Settings — The Stacks"
+
+        SettingsProfile ->
+            "Profile — The Stacks"
+
+        SettingsPassword ->
+            "Password — The Stacks"
+
+        SettingsNotifications ->
+            "Notifications — The Stacks"
+
         SettingsConsent ->
             "Privacy Settings — The Stacks"
 
@@ -763,6 +1499,42 @@ pageTitle route =
 
         Catalogue ->
             "Catalogue — The Stacks"
+
+        MarketplaceBrowse ->
+            "Marketplace — The Stacks"
+
+        MarketplaceCreate ->
+            "Create Listing — The Stacks"
+
+        MarketplaceMyListings ->
+            "My Listings — The Stacks"
+
+        MarketplaceDetail _ ->
+            "Listing — The Stacks"
+
+        SettingsPrivacy ->
+            "Privacy — The Stacks"
+
+        BlogArchive ->
+            "Blog — The Stacks"
+
+        BlogNew ->
+            "New Post — The Stacks"
+
+        BlogEdit _ ->
+            "Edit Post — The Stacks"
+
+        BlogPost _ ->
+            "Blog Post — The Stacks"
+
+        Route.AdminSourceApproval ->
+            "Source Approval — The Stacks"
+
+        Route.AdminScraperConfig ->
+            "Scraper Health — The Stacks"
+
+        Route.AdminMetrics ->
+            "Metrics — The Stacks"
 
         ConfirmEmail EmailConfirmed ->
             "Email Confirmed — The Stacks"
@@ -786,11 +1558,12 @@ viewNav model =
                     ]
                 ]
             ]
-        , nav [ class "app-nav" ]
+        , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
                 (case model.auth of
                     Nothing ->
                         [ navItem model.route Catalogue "Catalogue"
+                        , navItem model.route MarketplaceBrowse "Marketplace"
                         , navItem model.route Login "Sign In"
                         ]
 
@@ -806,19 +1579,33 @@ viewNav model =
                             [ ( Search, "Search" )
                             , ( Upload, "Add Book" )
                             ]
-                        , li [ class "app-nav__item app-nav__dropdown" ]
-                            [ Html.span [ class "app-nav__link app-nav__user" ]
-                                [ text auth.user.displayName ]
-                            , ul [ class "app-nav__dropdown-menu" ]
-                                [ li []
-                                    [ a [ href (Route.toPath SettingsConsent), class "app-nav__dropdown-link" ]
-                                        [ text "Settings" ]
-                                    ]
-                                , li []
-                                    [ button [ class "app-nav__dropdown-link app-nav__logout", onClick Logout ]
-                                        [ text "Sign Out" ]
-                                    ]
+                        , navDropdown model.route
+                            MarketplaceBrowse
+                            "Marketplace"
+                            [ ( MarketplaceCreate, "Create Listing" )
+                            , ( MarketplaceMyListings, "My Listings" )
+                            ]
+                        , if auth.user.role == "owner" then
+                            navDropdown model.route
+                                Route.AdminMetrics
+                                "Admin"
+                                [ ( Route.AdminSourceApproval, "Sources" )
+                                , ( Route.AdminScraperConfig, "Scrapers" )
                                 ]
+
+                          else
+                            text ""
+                        , li
+                            [ class
+                                (if isSettingsRoute model.route then
+                                    "app-nav__item app-nav__item--active app-nav__dropdown"
+
+                                 else
+                                    "app-nav__item app-nav__dropdown"
+                                )
+                            ]
+                            [ Html.map UserMenuMsg
+                                (UserMenu.view auth.user model.userMenu)
                             ]
                         ]
                 )
@@ -903,10 +1690,24 @@ viewPage model =
             Html.map SearchMsg (Search.view subModel)
 
         PageSettingsConsent subModel ->
-            Html.map ConsentMsg (Consent.view subModel)
+            viewSettingsHub model.route
+                (Html.map ConsentMsg (Consent.view subModel))
 
         PageSettingsAgeVerification subModel ->
-            Html.map AgeVerificationMsg (AgeVerification.view subModel)
+            viewSettingsHub model.route
+                (Html.map AgeVerificationMsg (AgeVerification.view subModel))
+
+        PageSettingsProfile subModel ->
+            viewSettingsHub model.route
+                (Html.map ProfileMsg (Profile.view subModel))
+
+        PageSettingsPassword subModel ->
+            viewSettingsHub model.route
+                (Html.map PasswordMsg (Password.view subModel))
+
+        PageSettingsNotifications subModel ->
+            viewSettingsHub model.route
+                (Html.map NotificationsMsg (Notifications.view subModel))
 
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
@@ -914,11 +1715,81 @@ viewPage model =
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)
 
+        PageMarketplaceBrowse subModel ->
+            Html.map MarketplaceBrowseMsg (MarketplaceBrowse.view subModel)
+
+        PageMarketplaceCreate subModel ->
+            Html.map CreateListingMsg (CreateListing.view subModel)
+
+        PageMarketplaceMyListings subModel ->
+            Html.map MyListingsMsg (MyListings.view subModel)
+
+        PageMarketplaceDetail subModel ->
+            Html.map ListingDetailMsg (ListingDetail.view subModel)
+
+        PageSettingsPrivacy subModel ->
+            viewSettingsHub model.route
+                (Html.map PrivacyMsg (Privacy.view subModel))
+
+        PageBlogArchive subModel ->
+            Html.map BlogArchiveMsg (BlogArchive.view subModel)
+
+        PageBlogEditor subModel ->
+            Html.map BlogEditorMsg (BlogEditor.view subModel)
+
+        PageBlogPost subModel ->
+            Html.map BlogPostMsg (BlogPostPage.view subModel)
+
+        PageAdminSourceApproval subModel ->
+            Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
+
+        PageAdminScraperConfig subModel ->
+            Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
+
+        PageAdminMetrics subModel ->
+            Html.map AdminMetricsMsg (AdminMetrics.view subModel)
+
         PageConfirmEmail status ->
             viewConfirmEmail status
 
         PageNotFound ->
             viewNotFound
+
+
+viewSettingsHub : Route -> Html Msg -> Html Msg
+viewSettingsHub currentRoute content =
+    Settings.view
+        { currentRoute = currentRoute
+        , content = content
+        , onMobileNavChange = SettingsMobileNavChanged
+        }
+
+
+viewOverlay : Model -> Html Msg
+viewOverlay model =
+    case model.bookDetailOverlay of
+        Just overlay ->
+            Html.map OverlayBookDetailMsg (BookDetail.overlayView overlay.detail)
+
+        Nothing ->
+            text ""
+
+
+{-| Show onboarding overlay for authenticated users with no placements
+who haven't completed onboarding yet.
+-}
+viewOnboarding : Model -> Html Msg
+viewOnboarding model =
+    case model.auth of
+        Just _ ->
+            if not model.onboardingCompleted && not model.hasAnyPlacements then
+                Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+
+            else
+                text ""
+
+        Nothing ->
+            text ""
 
 
 viewHome : Html Msg

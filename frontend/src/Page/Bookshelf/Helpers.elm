@@ -11,7 +11,7 @@ module Page.Bookshelf.Helpers exposing
 
 import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
 import Html exposing (Html, button, div, p, span, text)
-import Html.Attributes exposing (attribute, class)
+import Html.Attributes exposing (attribute, class, id, tabindex)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
@@ -94,9 +94,20 @@ viewShelfLabel label =
 -}
 viewShelfRow : WearLevel -> List Placement -> Html msg
 viewShelfRow wearLevel placements =
+    let
+        bookCount =
+            List.length placements
+
+        shelfAriaLabel =
+            "Shelf — " ++ String.fromInt bookCount ++ " books"
+    in
     div [ class "shelf-row" ]
         [ div [ class "shelf-row__back" ] []
-        , div [ class "shelf-row__books", attribute "role" "list" ]
+        , div
+            [ class "shelf-row__books"
+            , attribute "role" "list"
+            , attribute "aria-label" shelfAriaLabel
+            ]
             (List.map (viewSpine wearLevel) placements)
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
@@ -146,9 +157,20 @@ The onBookClicked callback receives the Book data when a spine is clicked.
 -}
 viewShelfRowClickable : WearLevel -> (Book -> msg) -> List Placement -> Html msg
 viewShelfRowClickable wearLevel onBookClicked placements =
+    let
+        bookCount =
+            List.length placements
+
+        shelfAriaLabel =
+            "Shelf — " ++ String.fromInt bookCount ++ " books"
+    in
     div [ class "shelf-row" ]
         [ div [ class "shelf-row__back" ] []
-        , div [ class "shelf-row__books", attribute "role" "list" ]
+        , div
+            [ class "shelf-row__books"
+            , attribute "role" "list"
+            , attribute "aria-label" shelfAriaLabel
+            ]
             (List.map (viewClickableSpine wearLevel onBookClicked) placements)
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
@@ -221,6 +243,8 @@ viewClickableSpine wearLevel onBookClicked placement =
     button
         [ class "book-button"
         , attribute "role" "listitem"
+        , id ("spine-" ++ bookData.id)
+        , tabindex 0
         , onClick (onBookClicked bookData)
         ]
         [ Components.Spine.book
