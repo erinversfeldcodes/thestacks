@@ -11,6 +11,7 @@ import Html exposing (Html, button, div, li, text, ul)
 import Html.Attributes exposing (attribute, class, style)
 import Html.Events exposing (onClick)
 import Types.User exposing (User)
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -60,6 +61,7 @@ view user model =
         ]
         [ button
             [ class "user-menu__trigger app-nav__link app-nav__user"
+            , testId "user-menu"
             , onClick Toggle
             , attribute "aria-expanded" (boolToString model.open)
             , attribute "aria-haspopup" "true"
@@ -90,6 +92,7 @@ viewDropdown =
             []
         , ul
             [ class "user-menu__dropdown app-nav__dropdown-menu"
+            , testId "user-menu-dropdown"
             , style "position" "relative"
             , style "z-index" "1000"
             ]

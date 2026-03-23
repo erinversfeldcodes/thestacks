@@ -16,14 +16,14 @@ test.describe("Cost Transparency", () => {
     );
 
     // Wait for cost data to load (replaces loading indicator)
-    await expect(page.locator(".costs__content")).toBeVisible({
+    await expect(page.getByTestId('costs-content')).toBeVisible({
       timeout: 10_000,
     });
 
     // Cost data depends on RefreshCostsJob having run.
     // On fresh preview deploys the job may not have fired yet.
     const hasCostData =
-      (await page.locator(".costs__category-card").count()) > 0;
+      (await page.getByTestId('costs-category-card').count()) > 0;
 
     if (hasCostData) {
       // Total banner should show a dollar amount
@@ -32,7 +32,7 @@ test.describe("Cost Transparency", () => {
 
       // At least one category card should render
       await expect(
-        page.locator(".costs__category-card").first()
+        page.getByTestId('costs-category-card').first()
       ).toBeVisible();
 
       // Story cards should be present

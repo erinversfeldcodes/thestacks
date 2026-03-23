@@ -6,14 +6,14 @@ test.use({ storageState: suiteAuthFile("settings") });
 test.describe("Settings — Privacy & Consent", () => {
   test("consent page loads with title and toggle", async ({ page }) => {
     await page.goto("/settings/consent");
-    await expect(page.locator(".page--settings").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('settings-hub').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".page__title").last()).toContainText("Privacy");
     await expect(page.locator(".toggle")).toBeVisible();
   });
 
   test("analytics toggle switches between on and off", async ({ page }) => {
     await page.goto("/settings/consent");
-    await page.waitForSelector(".page--settings", { timeout: 5000 });
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const toggle = page.locator("button.toggle");
     const initialText = await toggle.textContent();
@@ -27,7 +27,7 @@ test.describe("Settings — Privacy & Consent", () => {
 
   test("save button is visible and clickable", async ({ page }) => {
     await page.goto("/settings/consent");
-    await page.waitForSelector(".page--settings", { timeout: 5000 });
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const saveBtn = page.locator("button", { hasText: "Save" });
     await expect(saveBtn).toBeVisible();
@@ -241,14 +241,14 @@ test.describe("Settings — Profile & Account API", () => {
 test.describe("Settings — Age Verification", () => {
   test("age verification page loads with toggle", async ({ page }) => {
     await page.goto("/settings/age-verification");
-    await expect(page.locator(".page--settings").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('settings-hub').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".page__title").last()).toContainText("Age Verification");
     await expect(page.locator(".toggle")).toBeVisible();
   });
 
   test("clicking toggle opens confirmation modal", async ({ page }) => {
     await page.goto("/settings/age-verification");
-    await page.waitForSelector(".page--settings", { timeout: 5000 });
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     await page.locator(".toggle").click();
     await expect(page.locator(".modal-overlay")).toBeVisible({ timeout: 3000 });
@@ -257,7 +257,7 @@ test.describe("Settings — Age Verification", () => {
 
   test("cancel closes modal without changing state", async ({ page }) => {
     await page.goto("/settings/age-verification");
-    await page.waitForSelector(".page--settings", { timeout: 5000 });
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const toggleTextBefore = await page.locator(".toggle").textContent();
 
@@ -273,7 +273,7 @@ test.describe("Settings — Age Verification", () => {
 
   test("confirm saves age verification", async ({ page }) => {
     await page.goto("/settings/age-verification");
-    await page.waitForSelector(".page--settings", { timeout: 5000 });
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     await page.locator(".toggle").click();
     await expect(page.locator(".modal-overlay")).toBeVisible();

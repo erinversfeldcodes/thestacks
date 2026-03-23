@@ -24,6 +24,7 @@ import Task
 import Types.Book exposing (Book, authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 {-| Maximum number of poll attempts before giving up (~300 seconds at 2s intervals).
@@ -565,7 +566,7 @@ view model maybeToken =
 
 viewSignInRequired : Html Msg
 viewSignInRequired =
-    div [ class "upload-auth-required" ]
+    div [ class "upload-auth-required", testId "upload-auth-required" ]
         [ p [] [ text "You need to sign in to add books." ]
         , a [ href "/login", class "btn btn--primary" ] [ text "Sign In" ]
         ]
@@ -599,26 +600,27 @@ viewUploadArea model =
     div []
         [ div
             [ class draggingClass
+            , testId "upload-drop-zone"
             , onDrop_
             , onDragOver_
             , onDragLeave_
             ]
             [ case model.uploadState of
                 Loading ->
-                    div [ class "upload-area__loading", attribute "role" "status" ]
+                    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
                         , p [] [ text "Processing image..." ]
                         ]
 
                 Success _ ->
                     -- Upload accepted; polling the vision pipeline.
-                    div [ class "upload-area__loading", attribute "role" "status" ]
+                    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
                         , p [] [ text "Processing image..." ]
                         ]
 
                 Failure _ ->
-                    div [ class "upload-area__error" ]
+                    div [ class "upload-area__error", testId "upload-error" ]
                         [ p [] [ text "Upload failed. Please try again." ]
                         , button [ class "btn btn--primary", onClick Reset ]
                             [ text "Try Again" ]
@@ -685,7 +687,7 @@ viewIdentifiedBook book =
 
 viewIdentificationFailed : Html Msg
 viewIdentificationFailed =
-    div [ class "upload-result upload-result--failed" ]
+    div [ class "upload-result upload-result--failed", testId "upload-error" ]
         [ h2 [] [ text "Could Not Identify Book" ]
         , p []
             [ text
@@ -699,7 +701,7 @@ viewIdentificationFailed =
 
 viewNotABook : Html Msg
 viewNotABook =
-    div [ class "upload-result upload-result--not-book" ]
+    div [ class "upload-result upload-result--not-book", testId "upload-error" ]
         [ h2 [] [ text "That Doesn't Look Like a Book" ]
         , p []
             [ text
@@ -729,12 +731,12 @@ viewManualEntry model =
                 div [ class "upload-manual__error" ]
                     [ p [ class "upload-manual__error-text" ]
                         [ text "Book not found. Please check the ISBN and try again." ]
-                    , button [ class "btn btn--primary", onClick SubmitManualIsbn ]
+                    , button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
                         [ text "Look Up Book" ]
                     ]
 
             _ ->
-                button [ class "btn btn--primary", onClick SubmitManualIsbn ]
+                button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
                     [ text "Look Up Book" ]
         , button [ class "btn btn--ghost", onClick Reset ] [ text "Cancel" ]
         ]
@@ -744,7 +746,7 @@ viewManualEntry model =
 -}
 viewVerifying : Book -> Html Msg
 viewVerifying book =
-    div [ class "upload-verify" ]
+    div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
@@ -769,11 +771,13 @@ viewVerifying book =
         , div [ class "upload-verify__actions" ]
             [ button
                 [ class "btn btn--primary"
+                , testId "upload-confirm-btn"
                 , onClick ConfirmIdentification
                 ]
                 [ text "Yes, that's it" ]
             , button
                 [ class "btn btn--secondary"
+                , testId "upload-reject-btn"
                 , onClick RejectIdentification
                 ]
                 [ text "No, try again" ]
@@ -795,7 +799,7 @@ allShelves =
 -}
 viewChoosingShelf : Model -> Book -> Html Msg
 viewChoosingShelf model book =
-    div [ class "upload-shelf-picker" ]
+    div [ class "upload-shelf-picker", testId "upload-shelf-picker" ]
         [ h2 [ class "upload-shelf-picker__heading" ]
             [ text ("Add \"" ++ book.title ++ "\" to a shelf") ]
         , div [ class "upload-shelf-picker__shelves" ]
@@ -846,7 +850,7 @@ viewChoosingShelf model book =
 -}
 viewComplete : Book -> String -> Html Msg
 viewComplete book shelfName =
-    div [ class "upload-complete", attribute "role" "status" ]
+    div [ class "upload-complete", testId "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
             [ text
                 ("\""

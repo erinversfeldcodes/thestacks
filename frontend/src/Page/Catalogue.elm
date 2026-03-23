@@ -28,6 +28,7 @@ import Task
 import Types.Book exposing (Book, authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type CollectionFilter
@@ -268,7 +269,7 @@ fetchCatalogue model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--catalogue" ]
+    div [ class "page page--catalogue", testId "catalogue-page" ]
         [ h1 [ class "page__title catalogue__title" ] [ text "Book Catalogue" ]
         , p [ class "catalogue__subtitle" ]
             [ text "Browse and discover books in the collection." ]
@@ -412,7 +413,7 @@ viewContent model =
 
             else
                 div []
-                    [ div [ class "catalogue__grid" ]
+                    [ div [ class "catalogue__grid", testId "catalogue-grid" ]
                         (List.map (viewBookCard model) filteredBooks)
                     , viewPagination response
                     ]

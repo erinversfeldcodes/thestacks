@@ -30,7 +30,7 @@ test.describe("Age-gated content", () => {
     // (depends on whether the seeded user is age_verified)
     const hasAgeGate = (await page.locator(".age-gate").count()) > 0;
     const hasBookDetail =
-      (await page.locator(".book-detail__parchment").count()) > 0;
+      (await page.getByTestId('book-overlay').count()) > 0;
 
     // One of these must be true — the page rendered something
     expect(hasAgeGate || hasBookDetail).toBeTruthy();

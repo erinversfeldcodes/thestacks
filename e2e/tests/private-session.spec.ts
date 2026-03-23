@@ -15,7 +15,7 @@ test.describe("Private/incognito session isolation", () => {
 
     // Should NOT be logged in — nav should show "Sign In", not a user name
     await expect(page.locator('a[href="/login"]')).toBeVisible();
-    await expect(page.locator(".app-nav__user")).not.toBeVisible();
+    await expect(page.getByTestId('user-menu')).not.toBeVisible();
 
     // localStorage should not contain auth
     const storedAuth = await page.evaluate(() =>
@@ -34,7 +34,7 @@ test.describe("Private/incognito session isolation", () => {
     await page1.goto("/login");
     await page1.fill('input[id="email"]', DEV_EMAIL);
     await page1.fill('input[id="password"]', DEV_PASSWORD);
-    await page1.click("button.login-card__submit");
+    await page1.getByTestId('login-submit').click();
     await page1.waitForURL("**/antilibrary", { timeout: 15000 });
 
     const authInCtx1 = await page1.evaluate(() =>
@@ -55,7 +55,7 @@ test.describe("Private/incognito session isolation", () => {
 
     // Should show unauthenticated nav
     await expect(page2.locator('a[href="/login"]')).toBeVisible();
-    await expect(page2.locator(".app-nav__user")).not.toBeVisible();
+    await expect(page2.getByTestId('user-menu')).not.toBeVisible();
 
     await ctx1.close();
     await ctx2.close();

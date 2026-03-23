@@ -7,19 +7,19 @@ test.describe("Looking for a Home page", () => {
   test("page loads with correct theme class", async ({ page }) => {
     await page.goto("/looking-for-home");
     await expect(
-      page.locator(".shelf-looking-for-home")
+      page.getByTestId('looking-for-home-page')
     ).toBeVisible({ timeout: 10000 });
   });
 
   test("page title is visible", async ({ page }) => {
     await page.goto("/looking-for-home");
-    await page.waitForSelector(".shelf-looking-for-home", { timeout: 10000 });
+    await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
     await expect(page.locator(".page__title")).toContainText("Looking for a Home");
   });
 
   test("page renders content (pile view or empty state)", async ({ page }) => {
     await page.goto("/looking-for-home");
-    await page.waitForSelector(".shelf-looking-for-home", { timeout: 10000 });
+    await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
 
     // The page should show either a pile view with books or an empty/loading state
     const hasPileView = (await page.locator(".pile-view").count()) > 0;

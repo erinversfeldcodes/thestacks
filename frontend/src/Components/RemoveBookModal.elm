@@ -3,6 +3,7 @@ module Components.RemoveBookModal exposing (removeBookModal)
 import Html exposing (Html, button, div, h2, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
+import Util.TestId exposing (testId)
 
 
 removeBookModal :
@@ -12,7 +13,7 @@ removeBookModal :
     }
     -> Html msg
 removeBookModal config =
-    div [ class "modal-overlay" ]
+    div [ class "modal-overlay", testId "remove-book-modal" ]
         [ div [ class "modal" ]
             [ h2 [ class "modal__title" ] [ text "Remove Book" ]
             , p [ class "modal__message" ]
@@ -30,6 +31,7 @@ removeBookModal config =
                     [ text "Keep It" ]
                 , button
                     [ class "btn btn--danger"
+                    , testId "remove-book-confirm"
                     , onClick config.onConfirm
                     ]
                     [ text "Remove" ]
