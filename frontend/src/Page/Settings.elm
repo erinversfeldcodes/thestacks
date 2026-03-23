@@ -4,6 +4,7 @@ import Html exposing (Html, a, div, h1, li, nav, option, select, text, ul)
 import Html.Attributes exposing (class, href, selected, value)
 import Html.Events exposing (onInput)
 import Navigation.Route as Route exposing (Route(..))
+import Util.TestId exposing (testId)
 
 
 type alias Config msg =
@@ -15,7 +16,7 @@ type alias Config msg =
 
 view : Config msg -> Html msg
 view config =
-    div [ class "page page--settings settings-hub" ]
+    div [ class "page page--settings settings-hub", testId "settings-hub" ]
         [ h1 [ class "page__title" ] [ text "Settings" ]
         , div [ class "settings-hub__layout" ]
             [ viewSidebar config
@@ -28,7 +29,7 @@ view config =
 
 viewSidebar : Config msg -> Html msg
 viewSidebar config =
-    nav [ class "settings-hub__sidebar" ]
+    nav [ class "settings-hub__sidebar", testId "settings-sidebar" ]
         [ ul [ class "settings-hub__nav" ]
             (List.map (viewSidebarItem config.currentRoute) sidebarItems)
         ]

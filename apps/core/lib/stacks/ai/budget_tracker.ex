@@ -58,6 +58,12 @@ defmodule Stacks.AI.BudgetTracker do
   def handle_cast({:record_cost, provider, cost_cents}, state) do
     provider_key = to_string(provider)
 
+    :telemetry.execute(
+      [:stacks, :budget, :cost_recorded],
+      %{amount_cents: cost_cents},
+      %{provider: provider_key}
+    )
+
     providers =
       Map.update(state.providers, provider_key, cost_cents, &(&1 + cost_cents))
 
@@ -72,15 +78,32 @@ defmodule Stacks.AI.BudgetTracker do
   end
 
   @impl true
-  def handle_call({:check_budget, _provider}, _from, state) do
+  def handle_call({:check_budget, provider}, _from, state) do
     daily_limit = get_limit(:daily_limit_cents, @default_daily_limit_cents)
     monthly_limit = get_limit(:monthly_limit_cents, @default_monthly_limit_cents)
 
     result =
       cond do
-        state.monthly_total_cents >= monthly_limit -> {:error, :monthly_limit_exceeded}
-        state.daily_total_cents >= daily_limit -> {:error, :daily_limit_exceeded}
-        true -> :ok
+        state.monthly_total_cents >= monthly_limit ->
+          :telemetry.execute(
+            [:stacks, :budget, :limit_exceeded],
+            %{},
+            %{provider: to_string(provider), type: :monthly}
+          )
+
+          {:error, :monthly_limit_exceeded}
+
+        state.daily_total_cents >= daily_limit ->
+          :telemetry.execute(
+            [:stacks, :budget, :limit_exceeded],
+            %{},
+            %{provider: to_string(provider), type: :daily}
+          )
+
+          {:error, :daily_limit_exceeded}
+
+        true ->
+          :ok
       end
 
     {:reply, result, state}

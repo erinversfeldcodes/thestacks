@@ -16,6 +16,7 @@ defmodule Core.Application do
         Stacks.Books.BookDetailCache,
         {Oban, Application.fetch_env!(:core, Oban)},
         CoreWeb.Telemetry,
+        Core.PromEx,
         CoreWeb.Endpoint
       ] ++ pipeline_children()
 

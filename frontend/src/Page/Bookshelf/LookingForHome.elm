@@ -17,6 +17,7 @@ import Navigation.Route exposing (Route(..))
 import Types.Book exposing (authorName)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -73,7 +74,7 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--bookshelf shelf-looking-for-home" ]
+    div [ class "page page--bookshelf shelf-looking-for-home", testId "looking-for-home-page" ]
         [ h1 [ class "page__title" ] [ text "Looking for a Home" ]
         , if model.showAgeGate then
             ageGate

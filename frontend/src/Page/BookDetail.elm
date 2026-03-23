@@ -24,6 +24,7 @@ import Navigation.Route as Route exposing (Route)
 import Types.Book exposing (Book, Edition, authorName)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -403,6 +404,7 @@ viewHero model book =
                             [ src url
                             , alt ("Cover of " ++ book.title)
                             , class "book-detail__cover-img"
+                            , testId "book-cover"
                             ]
                             []
 
@@ -414,8 +416,8 @@ viewHero model book =
                 ]
             ]
         , div [ class "book-detail__meta" ]
-            [ h1 [ class "book-detail__title", id "section-hero" ] [ text book.title ]
-            , h2 [ class "book-detail__author" ] [ text (authorName book) ]
+            [ h1 [ class "book-detail__title", testId "book-title", id "section-hero" ] [ text book.title ]
+            , h2 [ class "book-detail__author", testId "book-author" ] [ text (authorName book) ]
             , viewEditionSelector book model.selectedEdition
             , viewEditionDetails edition
             , viewRating model
@@ -453,6 +455,7 @@ viewEditionSelector book selectedEdition =
         div [ class "book-detail__edition-selector" ]
             [ select
                 [ class "book-detail__edition-select"
+                , testId "edition-selector"
                 , onInput EditionSelected
                 ]
                 (List.map
@@ -511,7 +514,7 @@ viewEditionDetails edition =
 
             Nothing ->
                 text ""
-        , p [ class "book-detail__isbn" ]
+        , p [ class "book-detail__isbn", testId "book-isbn" ]
             [ text
                 ("ISBN "
                     ++ (edition |> Maybe.map .isbn |> Maybe.withDefault "—")
@@ -744,6 +747,7 @@ overlayView model =
     in
     div
         [ class "book-overlay"
+        , testId "book-overlay"
         , style "position" "fixed"
         , style "top" "0"
         , style "left" "0"
@@ -784,6 +788,7 @@ overlayView model =
             ]
             [ button
                 [ class "book-overlay__close"
+                , testId "book-overlay-close"
                 , id "book-overlay-close"
                 , attribute "aria-label" "Close book details"
                 , onClick CloseOverlay
