@@ -120,6 +120,11 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "duplicate_isbn"})
 
+      {:error, :isbn_not_found} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "isbn_not_found"})
+
       {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(422)
