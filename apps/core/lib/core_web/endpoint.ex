@@ -32,5 +32,10 @@ defmodule CoreWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+
+  # Prometheus metrics — no auth, restricted to internal network in production
+  # (Fly private networking). PromEx renders metrics at /internal/metrics.
+  plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
+
   plug CoreWeb.Router
 end
