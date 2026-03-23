@@ -486,12 +486,12 @@ test.describe("Happy paths", () => {
     const shelfPicker = page.getByTestId("upload-shelf-picker");
     await expect(shelfPicker).toBeVisible();
 
-    // All 5 shelves should be visible
+    // All 5 shelves should be visible (exact: true to avoid "Library" matching "Antilibrary")
     await expect(
-      shelfPicker.getByRole("button", { name: "Library" })
+      shelfPicker.getByRole("button", { name: "Library", exact: true })
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Antilibrary" })
+      shelfPicker.getByRole("button", { name: "Antilibrary", exact: true })
     ).toBeVisible();
     await expect(
       shelfPicker.getByRole("button", { name: "Wish List" })
@@ -697,15 +697,19 @@ test.describe("Sad paths", () => {
     });
   });
 
-  test("unauthenticated -> redirects to login", async ({ browser }) => {
+  test("unauthenticated -> redirects to login", async ({ browser, baseURL }) => {
     // Create a fresh context without auth storage state
-    const context = await browser.newContext();
+    const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
 
     await page.goto("/upload");
 
-    // Server-side redirect to login page for unauthenticated users
-    await expect(page.locator('input[id="email"]')).toBeVisible();
+    // The SPA serves the page but Elm checks auth client-side.
+    // Either the server redirects to login or Elm shows auth-required.
+    const hasLoginForm = await page.locator('input[id="email"]').isVisible({ timeout: 5000 }).catch(() => false);
+    const hasAuthRequired = await page.getByTestId("upload-auth-required").isVisible({ timeout: 5000 }).catch(() => false);
+
+    expect(hasLoginForm || hasAuthRequired).toBeTruthy();
 
     await context.close();
   });

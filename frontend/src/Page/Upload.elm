@@ -655,7 +655,7 @@ viewDropPrompt =
 
 viewIdentified : List Book -> Html Msg
 viewIdentified books =
-    div [ class "upload-result upload-result--identified", attribute "role" "status" ]
+    div [ class "upload-result upload-result--identified", attribute "role" "status", testId "upload-identified" ]
         ([ h2 []
             [ text
                 (if List.length books == 1 then

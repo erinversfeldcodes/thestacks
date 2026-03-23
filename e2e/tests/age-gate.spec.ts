@@ -22,17 +22,15 @@ test.describe("Age-gated content", () => {
 
     expect(ageGatedBook).toBeDefined();
 
-    // Navigate to the age-gated book
+    // Navigate to the age-gated book detail page
     await page.goto(`/books/${ageGatedBook.id}`);
-    await page.waitForTimeout(3000);
 
-    // The page should show either the age gate or the book detail
-    // (depends on whether the seeded user is age_verified)
-    const hasAgeGate = (await page.locator(".age-gate").count()) > 0;
-    const hasBookDetail =
-      (await page.getByTestId('book-overlay').count()) > 0;
+    // Wait for either the age gate (403 → showAgeGate) or the book overlay
+    // (user already age-verified). Use proper Playwright waiting, not hard sleep.
+    const ageGate = page.locator(".age-gate");
+    const bookOverlay = page.getByTestId("book-overlay");
 
-    // One of these must be true — the page rendered something
-    expect(hasAgeGate || hasBookDetail).toBeTruthy();
+    // Wait for either element to appear (whichever comes first)
+    await expect(ageGate.or(bookOverlay)).toBeVisible({ timeout: 15000 });
   });
 });
