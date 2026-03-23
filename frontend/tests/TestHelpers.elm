@@ -592,24 +592,6 @@ uploadEffects msg model maybeToken =
                 Rejected ->
                     SimulatedEffect.Cmd.none
 
-        Upload.ConfirmDuplicateMove bookId ->
-            case maybeToken of
-                Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ bookId ++ "/move"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "bookshelf", Encode.string model.duplicateShelf ) ])
-                        , expect = SimulatedEffect.Http.expectWhatever Upload.DuplicateMoveCompleted
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
         Upload.GotFile _ ->
             case maybeToken of
                 Just token ->
@@ -798,7 +780,7 @@ uploadProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _ ) =
+                    ( newModel, _, _ ) =
                         Upload.update msg model maybeToken
                 in
                 ( newModel, uploadEffects msg model maybeToken )
@@ -816,7 +798,7 @@ libraryProgram maybeToken =
             \() ->
                 let
                     ( model, _ ) =
-                        Bookshelf.init Bookshelf.libraryConfig maybeToken
+                        Bookshelf.init Bookshelf.libraryConfig maybeToken "test-user-id"
                 in
                 ( model, libraryInitEffects maybeToken )
         , update =
@@ -853,11 +835,16 @@ searchProgram maybeToken =
 -}
 decodeAuthResponse : Decode.Decoder AuthResponse
 decodeAuthResponse =
-    Decode.map4 AuthResponse
+    Decode.map5 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "role" ] Decode.string
+            , Decode.succeed "user"
+            ]
+        )
 
 
 {-| Translate Login page Cmds into SimulatedEffects.

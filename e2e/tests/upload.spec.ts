@@ -27,22 +27,20 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 30_000 }
       );
 
-      await expect(page.locator(".upload-result--identified")).toBeVisible({
+      await expect(page.locator(".upload-verify")).toBeVisible({
         timeout: 60_000,
       });
 
-      const result = page.locator(".upload-result--identified");
+      const result = page.locator(".upload-verify");
+      await expect(result).toContainText("We think this is");
       await expect(result).toContainText("Name of the Rose", {
         ignoreCase: true,
       });
       await expect(result).toContainText("Eco");
-
-      const viewBookLink = result.locator('a[href^="/books/"]');
-      await expect(viewBookLink).toBeVisible();
     }
   );
 });
@@ -63,7 +61,7 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
@@ -104,23 +102,23 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
-      await expect(page.locator(".upload-result--identified")).toBeVisible({
+      await expect(page.locator(".upload-verify")).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
-      await expect(page.locator(".upload-result--identified")).toContainText(
+      await expect(page.locator(".upload-verify")).toContainText(
+        "We think this is"
+      );
+      await expect(page.locator(".upload-verify")).toContainText(
         "Crystal City"
       );
-      await expect(page.locator(".upload-result--identified")).toContainText(
+      await expect(page.locator(".upload-verify")).toContainText(
         "Russell"
       );
-
-      const viewBookLink = page.locator('.upload-result--identified a[href^="/books/"]');
-      await expect(viewBookLink).toBeVisible();
     }
   );
 
@@ -139,23 +137,23 @@ test.describe("Upload pipeline", () => {
       );
 
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
-      await expect(page.locator(".upload-result--identified")).toBeVisible({
+      await expect(page.locator(".upload-verify")).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
-      await expect(page.locator(".upload-result--identified")).toContainText(
+      await expect(page.locator(".upload-verify")).toContainText(
+        "We think this is"
+      );
+      await expect(page.locator(".upload-verify")).toContainText(
         "Flyboys"
       );
-      await expect(page.locator(".upload-result--identified")).toContainText(
+      await expect(page.locator(".upload-verify")).toContainText(
         "Bradley"
       );
-
-      const viewBookLink = page.locator('.upload-result--identified a[href^="/books/"]');
-      await expect(viewBookLink).toBeVisible();
     }
   );
 
@@ -174,28 +172,29 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
-      // Upload is accepted; spinner switches to "Identifying your book..."
+      // Upload is accepted; spinner switches to "Processing image..."
       await expect(page.locator(".upload-area__loading p")).toHaveText(
-        "Identifying your book...",
+        "Processing image...",
         { timeout: 60_000 }
       );
 
-      // Wait for the vision pipeline to complete and the result to render.
-      await expect(page.locator(".upload-result--identified")).toBeVisible({
+      // Wait for the vision pipeline to complete and the verification step to render.
+      await expect(page.locator(".upload-verify")).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
-      // Title and author should match the book in the image.
-      await expect(page.locator(".upload-result--identified")).toContainText(
-        "Born Again Bodies"
-      );
-      await expect(page.locator(".upload-result--identified")).toContainText(
-        "Griffith"
+      // Verification heading should be present.
+      await expect(page.locator(".upload-verify")).toContainText(
+        "We think this is"
       );
 
-      // "View Book" link should be present and point to a book detail page.
-      const viewBookLink = page.locator('.upload-result--identified a[href^="/books/"]');
-      await expect(viewBookLink).toBeVisible();
+      // Title and author should match the book in the image.
+      await expect(page.locator(".upload-verify")).toContainText(
+        "Born Again Bodies"
+      );
+      await expect(page.locator(".upload-verify")).toContainText(
+        "Griffith"
+      );
     }
   );
 });

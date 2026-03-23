@@ -4,8 +4,8 @@ import { suiteAuthFile } from "./helpers";
 test.use({ storageState: suiteAuthFile("editions") });
 
 /**
- * Helper: navigate to the app root first (needed for localStorage access),
- * then find a multi-edition book from the catalogue API.
+ * Helper: find a multi-edition book from the catalogue API
+ * and open it via the catalogue overlay.
  */
 async function findMultiEditionBookId(page: Page): Promise<string | null> {
   await page.goto("/catalogue");
@@ -15,6 +15,28 @@ async function findMultiEditionBookId(page: Page): Promise<string | null> {
     const book = data.books.find((b: any) => b.edition_count > 1);
     return book?.id ?? null;
   });
+}
+
+/**
+ * Open a book's detail overlay by clicking its card in the catalogue.
+ * The overlay has role="dialog" and contains .book-detail__parchment.
+ */
+async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise<void> {
+  await page.goto("/catalogue");
+  await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
+
+  // Find and click the card link for this specific book
+  const cardLink = page.locator(`.catalogue__card-link[href="/books/${bookId}"], .catalogue__card-link[data-book-id="${bookId}"]`).first();
+  if (await cardLink.count() > 0) {
+    await cardLink.click();
+  } else {
+    // Fallback: click the first card link
+    await page.locator(".catalogue__card-link").first().click();
+  }
+
+  // Wait for the overlay to appear
+  await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+  await page.waitForSelector('[role="dialog"] .book-detail__parchment, .book-detail__parchment', { timeout: 10000 });
 }
 
 async function findPlacedBookId(page: Page): Promise<string | null> {
@@ -30,30 +52,45 @@ async function findPlacedBookId(page: Page): Promise<string | null> {
   });
 }
 
+/**
+ * Open a placed book's detail overlay by clicking it on the library shelf.
+ */
+async function openPlacedBookOverlay(page: Page): Promise<void> {
+  await page.goto("/library");
+  await page.waitForSelector(".bookcase", { timeout: 10000 });
+
+  const bookButton = page.locator(".book-button").first();
+  await expect(bookButton).toBeAttached({ timeout: 10000 });
+  await bookButton.evaluate((el) => (el as HTMLElement).click());
+
+  await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+}
+
 test.describe("Book Detail — Editions", () => {
   test("edition selector appears for books with multiple editions", async ({
     page,
   }) => {
     const bookId = await findMultiEditionBookId(page);
     test.skip(!bookId, "No multi-edition books in seed data");
-    await page.goto(`/books/${bookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    await openBookOverlayFromCatalogue(page, bookId!);
+
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__edition-selector")
+      overlay.locator(".book-detail__edition-selector")
     ).toBeVisible();
   });
 
   test("edition selector has all editions listed", async ({ page }) => {
     const bookId = await findMultiEditionBookId(page);
     test.skip(!bookId, "No multi-edition books in seed data");
-    await page.goto(`/books/${bookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
-    // Wait for edition selector to render
+    await openBookOverlayFromCatalogue(page, bookId!);
+
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__edition-select")
+      overlay.locator(".book-detail__edition-select")
     ).toBeVisible({ timeout: 5000 });
 
-    const options = await page
+    const options = await overlay
       .locator(".book-detail__edition-select option")
       .count();
     expect(options).toBeGreaterThanOrEqual(2);
@@ -64,12 +101,12 @@ test.describe("Book Detail — Editions", () => {
   }) => {
     const bookId = await findMultiEditionBookId(page);
     test.skip(!bookId, "No multi-edition books in seed data");
-    await page.goto(`/books/${bookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    await openBookOverlayFromCatalogue(page, bookId!);
 
-    const isbnBefore = await page.locator(".book-detail__isbn").textContent();
+    const overlay = page.locator('[role="dialog"]');
+    const isbnBefore = await overlay.locator(".book-detail__isbn").textContent();
 
-    const select = page.locator(".book-detail__edition-select");
+    const select = overlay.locator(".book-detail__edition-select");
     const secondOption = await select
       .locator("option")
       .nth(1)
@@ -78,7 +115,7 @@ test.describe("Book Detail — Editions", () => {
       await select.selectOption(secondOption);
       await page.waitForTimeout(300);
 
-      const isbnAfter = await page.locator(".book-detail__isbn").textContent();
+      const isbnAfter = await overlay.locator(".book-detail__isbn").textContent();
       expect(isbnAfter).not.toEqual(isbnBefore);
     }
   });
@@ -95,22 +132,22 @@ test.describe("Book Detail — Editions", () => {
     });
     test.skip(!singleBookId, "No single-edition books in seed data");
 
-    await page.goto(`/books/${singleBookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    await openBookOverlayFromCatalogue(page, singleBookId!);
 
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__edition-selector")
+      overlay.locator(".book-detail__edition-selector")
     ).not.toBeVisible();
   });
 
   test("edition details section shows metadata", async ({ page }) => {
     const bookId = await findMultiEditionBookId(page);
     test.skip(!bookId, "No multi-edition books in seed data");
-    await page.goto(`/books/${bookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    await openBookOverlayFromCatalogue(page, bookId!);
 
-    await expect(page.locator(".book-detail__meta-details")).toBeVisible();
-    await expect(page.locator(".book-detail__isbn")).toBeVisible();
+    const overlay = page.locator('[role="dialog"]');
+    await expect(overlay.locator(".book-detail__meta-details")).toBeVisible();
+    await expect(overlay.locator(".book-detail__isbn")).toBeVisible();
   });
 });
 
@@ -119,11 +156,11 @@ test.describe("Book Detail — Formats on My Shelf", () => {
     const placedBookId = await findPlacedBookId(page);
     test.skip(!placedBookId, "No placed books on library shelf");
 
-    await page.goto(`/books/${placedBookId}`);
-    await page.waitForSelector(".book-detail", { timeout: 10000 });
+    await openPlacedBookOverlay(page);
 
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__section-title", {
+      overlay.locator(".book-detail__section-title", {
         hasText: "Formats on My Shelf",
       })
     ).toBeVisible({ timeout: 5000 });
@@ -135,16 +172,16 @@ test.describe("Book Detail — Formats on My Shelf", () => {
     const placedBookId = await findPlacedBookId(page);
     test.skip(!placedBookId, "No placed books on library shelf");
 
-    await page.goto(`/books/${placedBookId}`);
-    await page.waitForSelector(".book-detail", { timeout: 10000 });
+    await openPlacedBookOverlay(page);
 
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__section-title", {
+      overlay.locator(".book-detail__section-title", {
         hasText: "Formats on My Shelf",
       })
     ).toBeVisible({ timeout: 5000 });
 
-    const formatBtns = page.locator(".format-picker__btn");
+    const formatBtns = overlay.locator(".format-picker__btn");
     expect(await formatBtns.count()).toBe(3);
   });
 
@@ -152,10 +189,10 @@ test.describe("Book Detail — Formats on My Shelf", () => {
     const placedBookId = await findPlacedBookId(page);
     test.skip(!placedBookId, "No placed books on library shelf");
 
-    await page.goto(`/books/${placedBookId}`);
-    await page.waitForSelector(".book-detail", { timeout: 10000 });
+    await openPlacedBookOverlay(page);
 
-    const physicalBtn = page.locator(".format-picker__btn").first();
+    const overlay = page.locator('[role="dialog"]');
+    const physicalBtn = overlay.locator(".format-picker__btn").first();
     await expect(physicalBtn).toBeVisible({ timeout: 5000 });
     await physicalBtn.click();
 
@@ -182,11 +219,11 @@ test.describe("Book Detail — Formats on My Shelf", () => {
     });
     test.skip(!unplacedBookId, "All books are placed");
 
-    await page.goto(`/books/${unplacedBookId}`);
-    await page.waitForSelector(".book-detail__parchment", { timeout: 10000 });
+    await openBookOverlayFromCatalogue(page, unplacedBookId!);
 
+    const overlay = page.locator('[role="dialog"]');
     await expect(
-      page.locator(".book-detail__section-title", {
+      overlay.locator(".book-detail__section-title", {
         hasText: "Formats on My Shelf",
       })
     ).not.toBeVisible();

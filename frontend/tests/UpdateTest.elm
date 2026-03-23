@@ -1,5 +1,7 @@
 module UpdateTest exposing (..)
 
+import Components.BookList as BookList
+import Components.ViewModeToggle exposing (ShelfViewMode(..))
 import Expect
 import Http
 import Navigation.Route exposing (Route(..))
@@ -19,6 +21,11 @@ libraryInit =
     { books = Loading
     , showAgeGate = False
     , config = Bookshelf.libraryConfig
+    , userId = "test-user-id"
+    , visibility = "owner"
+    , rssLink = { showUrl = False }
+    , viewMode = SpineView
+    , sortState = { column = BookList.Title, direction = BookList.Asc }
     }
 
 

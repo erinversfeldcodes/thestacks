@@ -3,7 +3,8 @@ module UploadTest exposing (suite)
 import Api exposing (PollResponse, PollStatus(..))
 import Expect
 import Http
-import Page.Upload as Upload exposing (Msg(..), UploadResult(..))
+import Navigation.Route
+import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadResult(..), UploadStep(..))
 import Test exposing (Test, describe, test)
 import Types.Book exposing (Book, VisibilityTier(..))
 import Types.RemoteData exposing (RemoteData(..))
@@ -94,7 +95,7 @@ suite =
             [ test "Ok imageId sets uploadState to Success and resets pollCount" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just "tok")
                     in
                     Expect.all
@@ -105,7 +106,7 @@ suite =
             , test "Err sets uploadState to Failure" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (UploadAccepted (Err Http.NetworkError)) Upload.init (Just "tok")
                     in
                     model.uploadState |> Expect.equal (Failure Http.NetworkError)
@@ -114,7 +115,7 @@ suite =
             [ test "increments pollCount" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update CheckStatus modelWithImage (Just "tok")
                     in
                     model.pollCount |> Expect.equal 1
@@ -127,21 +128,21 @@ suite =
                         timedOut =
                             { base | uploadState = Success "img-1", pollCount = 150 }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update CheckStatus timedOut (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
             , test "no-ops when uploadState is not Success" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update CheckStatus Upload.init (Just "tok")
                     in
                     model.pollCount |> Expect.equal 0
             , test "no-ops when token is absent" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update CheckStatus modelWithImage Nothing
                     in
                     model.pollCount |> Expect.equal 0
@@ -150,28 +151,28 @@ suite =
             [ test "Pending leaves result unchanged" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok pendingPoll)) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal NoResult
             , test "Rejected sets result to IdentificationFailed" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok rejectedPoll)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
             , test "Resolved without bookId sets result to NotABook" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok resolvedNotABook)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal NotABook
             , test "Resolved with bookId leaves result pending (waits for GotIdentifiedBook)" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok resolvedNewBook)) Upload.init (Just "tok")
                     in
                     -- Model unchanged while getBook request is in-flight.
@@ -179,20 +180,20 @@ suite =
             , test "Resolved with duplicate flag leaves result pending (waits for GotDuplicateBook)" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok resolvedDuplicate)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal NoResult
             , test "Http error on poll sets result to IdentificationFailed" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (StatusReceived (Err Http.NetworkError)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
             ]
         , describe "GotIdentifiedBook"
-            [ test "Ok collects book and shows Identified when no more pending" <|
+            [ test "Ok collects book and enters Verifying step when no more pending" <|
                 \_ ->
                     let
                         base =
@@ -201,10 +202,14 @@ suite =
                         modelPending =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing })) modelPending Nothing
                     in
-                    model.result |> Expect.equal (Identified [ dummyBook ])
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
+                        , \m -> m.step |> Expect.equal (Verifying dummyBook)
+                        ]
+                        model
             , test "Err sets result to IdentificationFailed when no books collected" <|
                 \_ ->
                     let
@@ -214,7 +219,7 @@ suite =
                         modelPending =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (GotIdentifiedBook "book-1" (Err Http.NetworkError)) modelPending Nothing
                     in
                     model.result |> Expect.equal IdentificationFailed
@@ -223,16 +228,63 @@ suite =
             [ test "Ok sets result to DuplicateDetected" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , test "Err sets result to IdentificationFailed" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Err Http.NetworkError)) Upload.init Nothing
                     in
                     model.result |> Expect.equal IdentificationFailed
+            ]
+        , describe "Verification step"
+            [ test "ConfirmIdentification moves from Verifying to ChoosingShelf" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying dummyBook }
+
+                        ( model, _, _ ) =
+                            Upload.update ConfirmIdentification verifying Nothing
+                    in
+                    model.step |> Expect.equal (ChoosingShelf dummyBook)
+            , test "RejectIdentification resets to init" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying dummyBook }
+
+                        ( model, _, _ ) =
+                            Upload.update RejectIdentification verifying Nothing
+                    in
+                    model.step |> Expect.equal Uploading
+            , test "ShelfSelected updates selectedShelf" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update (ShelfSelected "antilibrary") Upload.init Nothing
+                    in
+                    model.selectedShelf |> Expect.equal "antilibrary"
+            , test "default selectedShelf is wishlist" <|
+                \_ ->
+                    Upload.init.selectedShelf |> Expect.equal "wishlist"
+            ]
+        , describe "GoToShelf"
+            [ test "emits NavigateTo with Library route" <|
+                \_ ->
+                    let
+                        ( _, _, outMsg ) =
+                            Upload.update (GoToShelf "library") Upload.init Nothing
+                    in
+                    outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
             ]
         ]

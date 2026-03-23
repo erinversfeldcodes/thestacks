@@ -13,4 +13,6 @@ type alias User =
     , email : String
     , displayName : String
     , role : String
+    , countryCode : Maybe String
+    , city : Maybe String
     }

@@ -14,6 +14,7 @@ fakeAuthResponse =
     , userId = "user-1"
     , email = "reader@stacks.dev"
     , displayName = "A Reader"
+    , role = "user"
     }
 
 
