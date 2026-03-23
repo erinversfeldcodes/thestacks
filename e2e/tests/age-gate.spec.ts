@@ -22,15 +22,16 @@ test.describe("Age-gated content", () => {
 
     expect(ageGatedBook).toBeDefined();
 
-    // Navigate to the age-gated book detail page
+    // Navigate to the age-gated book detail page.
+    // Direct navigation renders PageBookDetail (page--book-detail), not the
+    // overlay (book-overlay). The overlay only renders when opened from a shelf.
     await page.goto(`/books/${ageGatedBook.id}`);
 
-    // Wait for either the age gate (403 → showAgeGate) or the book overlay
-    // (user already age-verified). Use proper Playwright waiting, not hard sleep.
+    // Wait for either the age gate (403 → showAgeGate) or the book detail
+    // page content (user already age-verified).
     const ageGate = page.locator(".age-gate");
-    const bookOverlay = page.getByTestId("book-overlay");
+    const bookDetail = page.locator(".page--book-detail");
 
-    // Wait for either element to appear (whichever comes first)
-    await expect(ageGate.or(bookOverlay)).toBeVisible({ timeout: 15000 });
+    await expect(ageGate.or(bookDetail)).toBeVisible({ timeout: 15000 });
   });
 });

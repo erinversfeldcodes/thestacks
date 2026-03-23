@@ -494,13 +494,13 @@ test.describe("Happy paths", () => {
       shelfPicker.getByRole("button", { name: "Antilibrary", exact: true })
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Wish List" })
+      shelfPicker.getByRole("button", { name: "Wish List", exact: true })
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Reading Pile" })
+      shelfPicker.getByRole("button", { name: "Reading Pile", exact: true })
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Looking for a Home" })
+      shelfPicker.getByRole("button", { name: "Looking for a Home", exact: true })
     ).toBeVisible();
 
     // Default confirm button says "Add to Wish List"
@@ -706,10 +706,11 @@ test.describe("Sad paths", () => {
 
     // The SPA serves the page but Elm checks auth client-side.
     // Either the server redirects to login or Elm shows auth-required.
-    const hasLoginForm = await page.locator('input[id="email"]').isVisible({ timeout: 5000 }).catch(() => false);
-    const hasAuthRequired = await page.getByTestId("upload-auth-required").isVisible({ timeout: 5000 }).catch(() => false);
+    // Use waitFor with catch since isVisible() has no timeout param.
+    const loginForm = page.locator('input[id="email"]');
+    const authRequired = page.getByTestId("upload-auth-required");
 
-    expect(hasLoginForm || hasAuthRequired).toBeTruthy();
+    await expect(loginForm.or(authRequired)).toBeVisible({ timeout: 10000 });
 
     await context.close();
   });
