@@ -55,6 +55,10 @@ defmodule Stacks.Shelving.Placement do
     |> validate_required([:book_id, :bookshelf_id])
     |> validate_inclusion(:visibility, @valid_visibilities)
     |> validate_number(:personal_rating, greater_than_or_equal_to: 1, less_than_or_equal_to: 5)
+    |> unique_constraint([:book_id, :bookshelf_id],
+      name: :bookshelf_placements_book_active_idx,
+      message: "book is already on this bookshelf"
+    )
     |> put_placed_at()
   end
 
