@@ -17,6 +17,7 @@ defmodule CoreWeb.Telemetry do
 
   def metrics do
     [
+      # ── Phoenix ───────────────────────────────────────────────────────
       summary("phoenix.endpoint.start.system_time",
         unit: {:native, :millisecond}
       ),
@@ -27,6 +28,8 @@ defmodule CoreWeb.Telemetry do
         tags: [:route],
         unit: {:native, :millisecond}
       ),
+
+      # ── Ecto ──────────────────────────────────────────────────────────
       summary("core.repo.query.total_time",
         unit: {:native, :millisecond},
         description: "The sum of the other measurements"
@@ -42,6 +45,50 @@ defmodule CoreWeb.Telemetry do
       summary("core.repo.query.queue_time",
         unit: {:native, :millisecond},
         description: "The time spent waiting for a database connection"
+      ),
+
+      # ── Vision Client (Issue #129) ───────────────────────────────────
+      counter("stacks.vision.request.start.system_time",
+        tags: [:endpoint],
+        description: "Count of vision request starts"
+      ),
+      summary("stacks.vision.request.stop.duration",
+        tags: [:endpoint, :status],
+        unit: {:native, :millisecond},
+        description: "Vision request duration"
+      ),
+      counter("stacks.vision.request.exception.duration",
+        tags: [:endpoint, :kind],
+        description: "Count of vision request exceptions"
+      ),
+
+      # ── Fuse (Issue #129) ────────────────────────────────────────────
+      counter("stacks.fuse.melt.count",
+        event_name: [:stacks, :fuse, :melt],
+        tags: [:fuse_name],
+        description: "Fuse melt events (circuit still closed)"
+      ),
+      counter("stacks.fuse.blown.count",
+        event_name: [:stacks, :fuse, :blown],
+        tags: [:fuse_name],
+        description: "Fuse blown events (circuit opened)"
+      ),
+
+      # ── Budget Tracker (Issue #129) ──────────────────────────────────
+      sum("stacks.budget.cost_recorded.amount_cents",
+        tags: [:provider],
+        description: "AI API cost recorded in cents"
+      ),
+      counter("stacks.budget.limit_exceeded.count",
+        event_name: [:stacks, :budget, :limit_exceeded],
+        tags: [:provider, :type],
+        description: "Budget limit exceeded events"
+      ),
+
+      # ── Costs Context (Issue #129) ───────────────────────────────────
+      sum("stacks.costs.recorded.amount_cents",
+        tags: [:category, :service],
+        description: "Platform cost recorded in cents"
       )
     ]
   end
