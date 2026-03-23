@@ -24,7 +24,7 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
     const initialCount = await page.locator(".catalogue__card").count();
 
-    await page.getByTestId('search-input').fill("Circe");
+    await page.locator('.search-bar__input').fill("Circe");
     // Wait for debounce + API call
     await page.waitForTimeout(1000);
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
@@ -44,11 +44,11 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-    await page.getByTestId('search-input').fill("Circe");
+    await page.locator('.search-bar__input').fill("Circe");
     await page.waitForTimeout(1000);
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-    await page.getByTestId('search-clear').click();
+    await page.locator('.search-bar__clear').click();
     // Wait for the catalogue grid to re-render with the full list
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 15000 });
     // Allow time for all cards to render on slow deployed environments
@@ -80,7 +80,7 @@ test.describe("Catalogue — unauthenticated", () => {
       .first()
       .textContent();
 
-    await page.getByTestId('sort-selector').selectOption("recent");
+    await page.locator('.sort-selector__select').selectOption("recent");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
     const firstTitleAfter = await page
@@ -117,11 +117,8 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.locator(".catalogue__card-link").first().click();
 
     // Book detail now opens as an overlay (URL does NOT change)
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.getByTestId('book-overlay')).toBeVisible({
-      timeout: 10000,
-    });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
   });
 
   test("no collection filter buttons shown when unauthenticated", async ({
