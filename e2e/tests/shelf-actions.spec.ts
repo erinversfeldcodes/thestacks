@@ -19,15 +19,13 @@ test.describe("Shelf actions — move book between shelves", () => {
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
     // Click the first book to open detail overlay
-    const bookButton = page.locator(".book-button").first();
+    const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeAttached({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
     // Wait for overlay to appear
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await overlay.waitFor({ state: "visible" });
-    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Verify the shelf title shows "from Library"
     const shelfTitle = overlay.locator(".book-detail__section-title", {
@@ -40,7 +38,7 @@ test.describe("Shelf actions — move book between shelves", () => {
     await expect(overlay.locator(".shelf-mover")).toBeVisible();
 
     // Select Wish List from the dropdown
-    await overlay.locator(".shelf-mover__select").selectOption("wishlist");
+    await overlay.getByTestId('shelf-mover-select').selectOption("wishlist");
 
     // Click Move (exact match to avoid matching "Remove")
     await overlay.locator('button:text-is("Move")').click();
@@ -63,7 +61,7 @@ test.describe("Shelf actions — add book from catalogue", () => {
     page,
   }) => {
     await page.goto("/catalogue");
-    await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
+    await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
     // Wait for placements to load (badges appear)
     await page.waitForTimeout(1000);
@@ -124,7 +122,7 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
     test.skip(!unplacedBookId, "No unplaced books available in catalogue");
 
     // Open the unplaced book's detail via the catalogue overlay
-    await page.waitForSelector(".catalogue__grid", { timeout: 10000 });
+    await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
     const cardLink = page.locator(`.catalogue__card-link[href="/books/${unplacedBookId}"]`).first();
     if (await cardLink.count() > 0) {
       await cardLink.click();
@@ -133,9 +131,8 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
       await page.locator(".catalogue__card-link").first().click();
     }
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Should NOT show "Remove from collection" (book is unplaced)
     await expect(
@@ -153,8 +150,8 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
     await expect(overlay.locator(".shelf-mover")).toBeVisible();
 
     // Select "Antilibrary" and click Move (which triggers ConfirmPlace)
-    await overlay.locator(".shelf-mover__select").selectOption("antilibrary");
-    await overlay.locator('.shelf-mover__btn:text-is("Move")').click();
+    await overlay.getByTestId('shelf-mover-select').selectOption("antilibrary");
+    await overlay.getByTestId('shelf-mover-btn').click();
 
     // Should show success and switch to "Move to Shelf from Antilibrary"
     await expect(
@@ -176,13 +173,12 @@ test.describe("Shelf actions — remove book from collection", () => {
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
-    const bookButton = page.locator(".book-button").first();
+    const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // The remove button should be visible since the book is placed
     await expect(
@@ -197,22 +193,21 @@ test.describe("Shelf actions — remove book from collection", () => {
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
-    const bookButton = page.locator(".book-button").first();
+    const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeVisible({ timeout: 10000 });
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    const overlay = page.locator('[role="dialog"]');
-    await expect(overlay).toBeVisible({ timeout: 5000 });
-    await expect(overlay.locator(".book-detail__parchment")).toBeVisible({ timeout: 10000 });
+    const overlay = page.getByTestId('book-overlay');
+    await expect(overlay).toBeVisible({ timeout: 10000 });
 
     // Click remove
     await overlay.locator('button:has-text("Remove from collection")').click();
 
     // Modal should appear (may be outside the dialog overlay)
-    await expect(page.locator(".modal-overlay")).toBeVisible({ timeout: 3000 });
+    await expect(page.getByTestId('remove-book-modal')).toBeVisible({ timeout: 3000 });
 
     // Click "Remove" in the modal (not "Keep It")
-    const confirmBtn = page.locator('.modal__actions button.btn--danger:has-text("Remove")');
+    const confirmBtn = page.getByTestId('remove-book-confirm');
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 

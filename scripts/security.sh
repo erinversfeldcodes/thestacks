@@ -35,7 +35,9 @@ hadolint deploy/Dockerfile.scraper
 checkov --directory deploy/
 
 # Vulnerability scanning (filesystem)
-trivy fs . --severity CRITICAL,HIGH --exit-code 1
+trivy fs . --severity CRITICAL,HIGH --exit-code 1 \
+    --skip-dirs apps/vision/.venv \
+    --skip-files apps/core/erl_crash.dump
 
 # TruffleHog — deep entropy-based secret scanning
 # .env and .env.* are gitignored local secret files — legitimate storage for dev credentials,

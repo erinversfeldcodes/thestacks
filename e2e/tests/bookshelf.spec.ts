@@ -56,14 +56,14 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
 
   test("Reading Pile decorative armchair has aria-hidden", async ({ page }) => {
     await page.goto("/reading-pile");
-    await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
+    await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
     const armchair = page.locator(".armchair");
     await expect(armchair).toHaveAttribute("aria-hidden", "true");
   });
 
   test("Reading Pile decorative floor has aria-hidden", async ({ page }) => {
     await page.goto("/reading-pile");
-    await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
+    await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
     const floor = page.locator(".reading-pile__floor");
     await expect(floor).toHaveAttribute("aria-hidden", "true");
   });
@@ -109,7 +109,7 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     page,
   }) => {
     await page.goto("/reading-pile");
-    await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
+    await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
     // Wait for loading to finish — either books appear or the empty message shows
     await page.waitForFunction(
       () => {

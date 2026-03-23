@@ -28,6 +28,7 @@ import Html.Attributes exposing (class)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 
@@ -193,7 +194,7 @@ view model =
 
 viewBreakdown : CostBreakdown -> Html Msg
 viewBreakdown breakdown =
-    div [ class "costs__content" ]
+    div [ class "costs__content", testId "costs-content" ]
         [ viewTotalBanner breakdown
         , viewStorySection breakdown
         , viewCategoryCards breakdown.categories
@@ -290,7 +291,7 @@ viewCategoryCards categories =
 
 viewCategoryCard : CostCategory -> Html Msg
 viewCategoryCard cat =
-    div [ class "costs__category-card" ]
+    div [ class "costs__category-card", testId "costs-category-card" ]
         [ div [ class "costs__category-header" ]
             [ h3 [ class "costs__category-name" ] [ text (formatCategoryName cat.category) ]
             , span [ class "costs__category-total" ] [ text (formatCents cat.totalCents) ]

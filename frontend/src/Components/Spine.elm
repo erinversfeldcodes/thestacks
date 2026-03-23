@@ -11,6 +11,7 @@ module Components.Spine exposing
 import Bitwise
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (attribute, class, style, title)
+import Util.TestId exposing (testId)
 
 
 type WearLevel
@@ -279,6 +280,7 @@ book config =
     in
     div
         [ class "book"
+        , testId "book-spine"
         , style "width" (String.fromInt widthPx ++ "px")
         , style "height" (String.fromInt heightPx ++ "px")
         , style "transform-style" "preserve-3d"

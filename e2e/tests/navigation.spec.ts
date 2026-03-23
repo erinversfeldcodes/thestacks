@@ -35,7 +35,7 @@ test.describe("Navbar navigation — authenticated", () => {
         timeout: 10000,
       });
 
-      await expect(page.locator(".app-nav__user")).toBeVisible();
+      await expect(page.getByTestId('user-menu')).toBeVisible();
     });
   }
 
@@ -50,7 +50,7 @@ test.describe("Navbar navigation — authenticated", () => {
         await parentLink.hover();
       } else {
         // Settings is under the user name dropdown (button-based, needs click to open)
-        const userDropdown = page.locator(".app-nav__user");
+        const userDropdown = page.getByTestId('user-menu');
         await userDropdown.click();
       }
 
@@ -69,7 +69,7 @@ test.describe("Navbar navigation — authenticated", () => {
         timeout: 10000,
       });
 
-      await expect(page.locator(".app-nav__user")).toBeVisible();
+      await expect(page.getByTestId('user-menu')).toBeVisible();
     });
   }
 
@@ -90,7 +90,7 @@ test.describe("Navbar navigation — authenticated", () => {
       await expect(page).toHaveURL(new RegExp(shelf.href.replace(/\//g, "\\/")), {
         timeout: 10000,
       });
-      await expect(page.locator(".app-nav__user")).toBeVisible();
+      await expect(page.getByTestId('user-menu')).toBeVisible();
     }
 
     // Sign In link should NOT be visible when authenticated

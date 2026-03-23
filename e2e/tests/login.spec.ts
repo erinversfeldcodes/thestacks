@@ -35,9 +35,9 @@ test.describe("Login Page Aesthetic", () => {
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', "wrong-password");
-    await page.click("button.login-card__submit");
+    await page.getByTestId('login-submit').click();
 
-    const error = page.locator(".login-card__error");
+    const error = page.getByTestId('login-error');
     await expect(error).toBeVisible();
     await expect(error).toContainText("Invalid");
   });
@@ -49,7 +49,7 @@ test.describe("Login Page Aesthetic", () => {
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click("button.login-card__submit");
+    await page.getByTestId('login-submit').click();
 
     // Should redirect to antilibrary after transition completes
     await page.waitForURL("**/antilibrary", { timeout: 15000 });

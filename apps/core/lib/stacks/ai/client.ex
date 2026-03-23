@@ -109,18 +109,62 @@ defmodule Stacks.AI.Client do
     path = "/#{endpoint_path(endpoint)}"
     req = build_vision_request(path, payload)
 
+    start_time = System.monotonic_time()
+
+    :telemetry.execute(
+      [:stacks, :vision, :request, :start],
+      %{system_time: System.system_time()},
+      %{endpoint: endpoint}
+    )
+
     # 210s gives the Modal service headroom beyond its own 300s inference timeout.
     case Finch.request(req, Stacks.Finch, receive_timeout: 210_000) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :vision, :request, :stop],
+          %{duration: duration},
+          %{endpoint: endpoint, status: 200}
+        )
+
         Jason.decode(resp_body)
 
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
-        :fuse.melt(@fuse_name)
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :vision, :request, :stop],
+          %{duration: duration},
+          %{endpoint: endpoint, status: status}
+        )
+
+        melt_fuse(@fuse_name)
         {:error, %{status: status, body: resp_body}}
 
       {:error, reason} ->
-        :fuse.melt(@fuse_name)
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :vision, :request, :exception],
+          %{duration: duration},
+          %{endpoint: endpoint, kind: :error, reason: reason}
+        )
+
+        melt_fuse(@fuse_name)
         {:error, reason}
+    end
+  end
+
+  defp melt_fuse(fuse_name) do
+    :fuse.melt(fuse_name)
+
+    case :fuse.ask(fuse_name, :sync) do
+      :blown ->
+        :telemetry.execute([:stacks, :fuse, :blown], %{}, %{fuse_name: fuse_name})
+
+      _ ->
+        :telemetry.execute([:stacks, :fuse, :melt], %{}, %{fuse_name: fuse_name})
     end
   end
 
