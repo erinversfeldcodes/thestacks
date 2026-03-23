@@ -33,6 +33,7 @@ import Page.Bookshelf.Helpers
 import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 {-| Configuration that differs between bookshelf pages.
@@ -199,7 +200,7 @@ view model =
         cfg =
             model.config
     in
-    div [ class ("page page--shelf " ++ cfg.themeClass) ]
+    div [ class ("page page--shelf " ++ cfg.themeClass), testId "bookshelf-page" ]
         [ div [ class ("wallpaper " ++ cfg.wallpaperClass) ] []
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
@@ -247,7 +248,7 @@ view model =
 
 viewEmptyBookshelf : Model -> Html Msg
 viewEmptyBookshelf model =
-    div [ class "bookshelf" ]
+    div [ class "bookshelf", testId "bookshelf-empty" ]
         [ viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
         ]

@@ -11,13 +11,13 @@ test.describe("Authentication", () => {
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click('button.login-card__submit');
+    await page.getByTestId('login-submit').click();
 
     // Should redirect to antilibrary after login transition completes (~4s animation)
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
 
     // Nav should show the user's display name instead of "Sign In"
-    await expect(page.locator(".app-nav__user")).toHaveText("Platform Owner");
+    await expect(page.getByTestId('user-menu')).toHaveText("Platform Owner");
     await expect(page.locator('a[href="/login"]')).not.toBeVisible();
   });
 
@@ -26,10 +26,10 @@ test.describe("Authentication", () => {
 
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', "wrong-password");
-    await page.click('button.login-card__submit');
+    await page.getByTestId('login-submit').click();
 
-    await expect(page.locator(".login-card__error")).toBeVisible();
-    await expect(page.locator(".login-card__error")).toContainText(
+    await expect(page.getByTestId('login-error')).toBeVisible();
+    await expect(page.getByTestId('login-error')).toContainText(
       "The door remains shut."
     );
 
@@ -42,9 +42,9 @@ test.describe("Authentication", () => {
 
     await page.fill('input[id="email"]', "nobody@example.com");
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click('button.login-card__submit');
+    await page.getByTestId('login-submit').click();
 
-    await expect(page.locator(".login-card__error")).toBeVisible();
+    await expect(page.getByTestId('login-error')).toBeVisible();
     await expect(page).toHaveURL("/login");
   });
 
@@ -61,7 +61,7 @@ test.describe("Authentication", () => {
     await page.goto("/login");
     await page.fill('input[id="email"]', DEV_EMAIL);
     await page.fill('input[id="password"]', DEV_PASSWORD);
-    await page.click('button.login-card__submit');
+    await page.getByTestId('login-submit').click();
     // waitForURL is more reliable than toHaveURL here — Nav.pushUrl is async
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
 
@@ -73,7 +73,7 @@ test.describe("Authentication", () => {
     await page.waitForURL("/upload");
 
     // Should show the upload area, not the auth-required prompt
-    await expect(page.locator(".upload-auth-required")).not.toBeVisible();
-    await expect(page.locator(".upload-area")).toBeVisible();
+    await expect(page.getByTestId('upload-auth-required')).not.toBeVisible();
+    await expect(page.getByTestId('upload-drop-zone')).toBeVisible();
   });
 });

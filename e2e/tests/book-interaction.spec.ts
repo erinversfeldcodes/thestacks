@@ -18,7 +18,7 @@ test.describe("Book interaction — Library page", () => {
     await expect(books.first()).toBeAttached({ timeout: 10000 });
 
     // The book should be wrapped in a button for accessibility
-    const bookButton = page.locator("button.book-button, .book-button").first();
+    const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeAttached();
 
     // The button should not be obscured — check it's actually clickable
@@ -30,7 +30,7 @@ test.describe("Book interaction — Library page", () => {
     await page.goto("/library");
     await page.waitForSelector(".bookcase, .shelf-room, .empty-shelf", { timeout: 10000 });
 
-    const bookButton = page.locator("button.book-button, .book-button").first();
+    const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeAttached({ timeout: 10000 });
 
     // Use evaluate to click because Playwright can't target elements
@@ -42,7 +42,7 @@ test.describe("Book interaction — Library page", () => {
     await expect(overlay).toBeVisible({ timeout: 5000 });
 
     // The overlay should show the book's title
-    const detailTitle = overlay.locator(".book-detail__title, h1");
+    const detailTitle = overlay.getByTestId('book-title');
     await expect(detailTitle).toBeVisible({ timeout: 5000 });
     const titleText = await detailTitle.textContent();
     expect(titleText).toBeTruthy();

@@ -10,6 +10,7 @@ module Components.OnboardingOverlay exposing
 import Html exposing (Html, button, div, h2, p, span, text)
 import Html.Attributes exposing (attribute, class, tabindex)
 import Html.Events exposing (onClick)
+import Util.TestId exposing (testId)
 
 
 type OnboardingStep
@@ -72,6 +73,7 @@ view model =
     else
         div
             [ class "onboarding-overlay"
+            , testId "onboarding-overlay"
             , attribute "role" "dialog"
             , attribute "aria-modal" "true"
             , attribute "aria-label" "Welcome to The Stacks"

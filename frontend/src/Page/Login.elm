@@ -20,6 +20,7 @@ import Html.Attributes exposing (attribute, class, disabled, for, id, placeholde
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type FieldValidation
@@ -182,7 +183,7 @@ view model =
 
 viewLoginCard : Model -> Html Msg
 viewLoginCard model =
-    div [ class "login-card" ]
+    div [ class "login-card", testId "login-form" ]
         [ h1 [ class "login-card__title" ] [ text "The Stacks" ]
         , p [ class "login-card__subtitle" ]
             [ text
@@ -262,6 +263,7 @@ viewLoginCard model =
             , input
                 [ id "email"
                 , class "login-card__input"
+                , testId "login-email"
                 , type_ "email"
                 , placeholder "you@example.com"
                 , value model.email
@@ -277,6 +279,7 @@ viewLoginCard model =
             , input
                 [ id "password"
                 , class "login-card__input"
+                , testId "login-password"
                 , type_ "password"
                 , placeholder "Enter your password"
                 , value model.password
@@ -289,6 +292,7 @@ viewLoginCard model =
         , viewError model
         , button
             [ class "login-card__submit"
+            , testId "login-submit"
             , onClick FormSubmitted
             , disabled (isSubmitDisabled model)
             ]
@@ -364,7 +368,7 @@ viewError : Model -> Html Msg
 viewError model =
     case model.submitState of
         Failure err ->
-            div [ attribute "aria-live" "polite" ]
+            div [ attribute "aria-live" "polite", testId "login-error" ]
                 [ p [ class "login-card__error" ]
                     [ text (errorMessage model.mode err) ]
                 ]

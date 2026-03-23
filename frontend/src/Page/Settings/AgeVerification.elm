@@ -12,6 +12,7 @@ import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -71,7 +72,7 @@ update msg model maybeToken =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--settings" ]
+    div [ class "page page--settings", testId "age-verification-page" ]
         [ h1 [ class "page__title" ] [ text "Age Verification" ]
         , div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "I am 18 or older" ]
