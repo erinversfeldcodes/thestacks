@@ -8,6 +8,7 @@ module Components.ISBNInput exposing
 import Html exposing (Html, div, input, p, text)
 import Html.Attributes exposing (class, placeholder, type_, value)
 import Html.Events exposing (onInput)
+import Util.TestId exposing (testId)
 
 
 validateISBN10 : String -> Bool
@@ -144,6 +145,7 @@ isbnInput config =
         [ input
             [ type_ "text"
             , class inputClass
+            , testId "upload-manual-isbn-input"
             , placeholder "Enter ISBN-10 or ISBN-13"
             , value config.value
             , onInput config.onInput

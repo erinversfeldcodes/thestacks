@@ -26,16 +26,16 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
         path.join(__dirname, "../../images/barcode_isbn_clean.jpg")
       );
 
-      await expect(page.locator(".upload-area__loading p")).toHaveText(
+      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 30_000 }
       );
 
-      await expect(page.locator(".upload-verify")).toBeVisible({
+      await expect(page.getByTestId('upload-verify')).toBeVisible({
         timeout: 60_000,
       });
 
-      const result = page.locator(".upload-verify");
+      const result = page.getByTestId('upload-verify');
       await expect(result).toContainText("We think this is");
       await expect(result).toContainText("Name of the Rose", {
         ignoreCase: true,
@@ -60,7 +60,7 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mixed_text.jpg")
       );
 
-      await expect(page.locator(".upload-area__loading p")).toHaveText(
+      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 60_000 }
       );
@@ -101,22 +101,22 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed_and_cut_off.jpg")
       );
 
-      await expect(page.locator(".upload-area__loading p")).toHaveText(
+      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 60_000 }
       );
 
-      await expect(page.locator(".upload-verify")).toBeVisible({
+      await expect(page.getByTestId('upload-verify')).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "We think this is"
       );
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Crystal City"
       );
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Russell"
       );
     }
@@ -136,22 +136,22 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed.jpg")
       );
 
-      await expect(page.locator(".upload-area__loading p")).toHaveText(
+      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 60_000 }
       );
 
-      await expect(page.locator(".upload-verify")).toBeVisible({
+      await expect(page.getByTestId('upload-verify')).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "We think this is"
       );
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Flyboys"
       );
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Bradley"
       );
     }
@@ -173,26 +173,26 @@ test.describe("Upload pipeline", () => {
       );
 
       // Upload is accepted; spinner switches to "Processing image..."
-      await expect(page.locator(".upload-area__loading p")).toHaveText(
+      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 60_000 }
       );
 
       // Wait for the vision pipeline to complete and the verification step to render.
-      await expect(page.locator(".upload-verify")).toBeVisible({
+      await expect(page.getByTestId('upload-verify')).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
 
       // Verification heading should be present.
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "We think this is"
       );
 
       // Title and author should match the book in the image.
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Born Again Bodies"
       );
-      await expect(page.locator(".upload-verify")).toContainText(
+      await expect(page.getByTestId('upload-verify')).toContainText(
         "Griffith"
       );
     }

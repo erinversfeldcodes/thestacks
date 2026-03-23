@@ -3,6 +3,7 @@ module Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, button, div, option, select, span, text)
 import Html.Attributes exposing (attribute, class, selected, value)
 import Html.Events exposing (onClick, onInput)
+import Util.TestId exposing (testId)
 
 
 allBookshelves : List { value : String, label : String }
@@ -27,6 +28,7 @@ shelfMover config =
         [ span [ class "shelf-mover__label" ] [ text "Move to:" ]
         , select
             [ class "shelf-mover__select"
+            , testId "shelf-mover-select"
             , attribute "aria-label" "Target bookshelf"
             , onInput config.onSelectBookshelf
             ]
@@ -42,6 +44,7 @@ shelfMover config =
             )
         , button
             [ class "shelf-mover__btn"
+            , testId "shelf-mover-btn"
             , onClick config.onMove
             ]
             [ text "Move" ]

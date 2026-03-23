@@ -17,6 +17,7 @@ import Process
 import Task
 import Types.Book exposing (Book, authorName, bookPublicationYear)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -151,7 +152,7 @@ update msg model maybeToken =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page page--search" ]
+    div [ class "page page--search", testId "search-page" ]
         [ h1 [ class "page__title" ] [ text "Search Books" ]
         , searchBar
             { query = model.query
@@ -186,7 +187,7 @@ view model =
                     p [ class "search-empty" ] [ text "No books found matching your search." ]
 
                 else
-                    div [ class "search-results" ]
+                    div [ class "search-results", testId "search-results" ]
                         (List.map viewBookResult books)
         ]
 

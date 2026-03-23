@@ -10,7 +10,7 @@ test.describe("Reading Pile hover diagnostics", () => {
 
   test("screenshot hover sequence using mouse move", async ({ page }) => {
     await page.goto("/reading-pile");
-    await page.waitForSelector(".shelf-reading-pile", { timeout: 10000 });
+    await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
 
     const books = page.locator(".book-pile__book");
     await expect(books.first()).toBeAttached({ timeout: 10000 });
