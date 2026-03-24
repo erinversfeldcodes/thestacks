@@ -158,16 +158,16 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
-        , test "fails when id is missing" <|
+        , test "missing id defaults to empty string (proto3 resilience)" <|
             \_ ->
                 let
                     result =
                         Decode.decodeString placementDecoder missingRequiredFieldJson
                 in
                 case result of
-                    Ok _ ->
-                        Expect.fail "Expected decode failure when id is missing"
+                    Ok placement ->
+                        Expect.equal "" placement.id
 
-                    Err _ ->
-                        Expect.pass
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         ]
