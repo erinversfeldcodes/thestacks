@@ -1,6 +1,6 @@
 module UploadTest exposing (suite)
 
-import Api exposing (MergeFormatResponse, PollResponse, PollStatus(..))
+import Api exposing (PollResponse, PollStatus(..))
 import Expect
 import Http
 import Navigation.Route
