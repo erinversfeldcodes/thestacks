@@ -205,9 +205,9 @@ thestacks/
 │   │   └── common/
 │   │       ├── book.proto
 │   │       └── location.proto
-│   └── gen/               # Generated code (gitignored per-language, checked in for Elm)
+│   └── gen/               # Generated code (all gitignored, regenerated at build time)
 │       ├── elixir/
-│       ├── elm/            # Checked in — Elm has no runtime codegen
+│       ├── elm/            # Gitignored — regenerated via scripts/gen-elm-proto.sh
 │       ├── rust/
 │       └── python/
 ├── dbt/                   # dbt models and config
@@ -5060,7 +5060,7 @@ end
 |---------|----------|------|
 | Schema evolution | Field numbering — never reuse a number, additive changes are safe | Schema registry enforces compatibility modes |
 | Breaking change detection | `buf breaking` in CI — no running service needed | Requires a schema registry service |
-| Code generation | Mature support for Elixir, Rust, Python. Elm requires checked-in generated code. | Weaker polyglot support |
+| Code generation | Mature support for Elixir, Rust, Python. Elm decoders regenerated at build time via `scripts/gen-elm-proto.sh`. | Weaker polyglot support |
 | Wire format | Binary (compact) or JSON (human-readable) | Binary only (needs registry to decode) |
 | Infrastructure overhead | Zero — `.proto` files in the repo, `buf` in CI | Schema registry is another service to host |
 | Fit for our architecture | Partner API (request/response), internal events (Oban jobs) | Better suited for Kafka + many independent teams |
@@ -5152,7 +5152,7 @@ plugins:
     out: proto/gen/rust
 ```
 
-**Elm exception:** Elm has no Protobuf runtime. Generated Elm decoders/encoders are checked into `proto/gen/elm/` and maintained via a custom `buf` plugin or a small script that converts `.proto` → Elm `Json.Decode`/`Json.Encode` modules. These are JSON decoders, not binary Protobuf.
+**Elm exception:** Elm has no Protobuf runtime. Generated Elm decoders/encoders in `proto/gen/elm/` are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`. CI runs `scripts/gen-elm-proto.sh --check` to verify the generator output matches. These are JSON decoders, not binary Protobuf.
 
 ### Breaking Change Detection in CI
 
