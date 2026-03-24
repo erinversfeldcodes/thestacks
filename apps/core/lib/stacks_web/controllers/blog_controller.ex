@@ -13,13 +13,14 @@ defmodule StacksWeb.BlogController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Blog
+  alias StacksWeb.ProtoJSON
 
   @doc "GET /api/blog/posts — list published posts for a user (query param: user_id)."
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, %{"user_id" => user_id}) do
     viewer = build_viewer(conn)
     posts = Blog.list_user_posts(user_id, viewer)
-    json(conn, %{posts: Enum.map(posts, &format_post/1)})
+    json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
   end
 
   def index(conn, _params) do
@@ -45,9 +46,9 @@ defmodule StacksWeb.BlogController do
           post.id
           |> Blog.list_associations()
           |> Enum.filter(fn a -> is_owner || a.visible end)
-          |> Enum.map(&serialize_association(&1, is_owner))
+          |> Enum.map(&ProtoJSON.blog_association(&1, is_owner))
 
-        json(conn, %{post: format_post(post), associations: associations})
+        json(conn, %{post: ProtoJSON.blog_post(post), associations: associations})
     end
   end
 
@@ -65,7 +66,7 @@ defmodule StacksWeb.BlogController do
     with {:ok, post} <- Blog.create_post(user, attrs) do
       conn
       |> put_status(201)
-      |> json(%{post: format_post(post)})
+      |> json(%{post: ProtoJSON.blog_post(post)})
     end
   end
 
@@ -81,7 +82,7 @@ defmodule StacksWeb.BlogController do
 
     with {:ok, post} <- fetch_post(id),
          {:ok, updated_post} <- Blog.update_post(post, user, attrs) do
-      json(conn, %{post: format_post(updated_post)})
+      json(conn, %{post: ProtoJSON.blog_post(updated_post)})
     end
   end
 
@@ -103,7 +104,7 @@ defmodule StacksWeb.BlogController do
 
     with {:ok, post} <- fetch_post(id),
          {:ok, published_post} <- Blog.publish_post(post, user) do
-      json(conn, %{post: format_post(published_post)})
+      json(conn, %{post: ProtoJSON.blog_post(published_post)})
     end
   end
 
@@ -115,13 +116,7 @@ defmodule StacksWeb.BlogController do
     with {:ok, post} <- fetch_post(post_id),
          :ok <- check_ownership(post, user),
          {:ok, association} <- Blog.confirm_association(post, id) do
-      json(conn, %{
-        association: %{
-          id: association.id,
-          book_id: association.book_id,
-          visible: association.visible
-        }
-      })
+      json(conn, %{association: ProtoJSON.association_action(association)})
     end
   end
 
@@ -133,13 +128,7 @@ defmodule StacksWeb.BlogController do
     with {:ok, post} <- fetch_post(post_id),
          :ok <- check_ownership(post, user),
          {:ok, association} <- Blog.dismiss_association(post, id) do
-      json(conn, %{
-        association: %{
-          id: association.id,
-          book_id: association.book_id,
-          visible: association.visible
-        }
-      })
+      json(conn, %{association: ProtoJSON.association_action(association)})
     end
   end
 
@@ -157,36 +146,11 @@ defmodule StacksWeb.BlogController do
   defp check_ownership(%{user_id: owner_id}, %{id: user_id}) when owner_id == user_id, do: :ok
   defp check_ownership(_post, _user), do: {:error, :unauthorized}
 
-  defp serialize_association(a, is_owner) do
-    base = %{
-      id: a.id,
-      book_id: a.book_id,
-      confidence: a.confidence,
-      source: a.source,
-      visible: a.visible
-    }
-
-    if is_owner, do: Map.put(base, :reasoning, a.reasoning), else: base
-  end
-
   defp build_viewer(conn) do
     case Guardian.Plug.current_resource(conn) do
       nil -> :unauthenticated
       %{id: id} -> {:platform_user, id}
     end
-  end
-
-  defp format_post(post) do
-    %{
-      id: post.id,
-      user_id: post.user_id,
-      title: post.title,
-      body: post.body,
-      visibility: post.visibility,
-      published_at: post.published_at,
-      created_at: post.created_at,
-      updated_at: post.updated_at
-    }
   end
 
   defp atomize_keys(map) do
