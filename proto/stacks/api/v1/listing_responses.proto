@@ -14,8 +14,11 @@ message ListingResponse {
 }
 
 // ListingListResponse is returned by GET /api/listings and GET /api/listings/mine.
-// JSON shape: {listings: [...]}
+// JSON shape: {listings: [...], total: N}
 message ListingListResponse {
   // List of marketplace listings.
   repeated stacks.common.v1.Listing listings = 1 [json_name = "listings"];
+
+  // Total number of matching listings (may exceed the length of `listings` when paginated).
+  int32 total = 2 [json_name = "total"];
 }
