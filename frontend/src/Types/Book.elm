@@ -9,10 +9,13 @@ module Types.Book exposing
     , bookIsbn
     , bookPageCount
     , bookPublicationYear
-    , editionDecoder
+    , fromProtoBook
+    , fromProtoEdition
     )
 
 import Json.Decode as Decode exposing (Decoder)
+import Stacks.Common.V1.Book as Proto
+import Types.ProtoHelpers exposing (emptyToNothing, zeroToNothing)
 
 
 type alias Author =
@@ -56,14 +59,79 @@ type alias Book =
 
 
 
--- HELPERS
+-- MAPPING FROM PROTO
+
+
+fromProtoVisibility : Proto.VisibilityTier -> VisibilityTier
+fromProtoVisibility pv =
+    case pv of
+        Proto.VisibilityTierPublic ->
+            Public
+
+        Proto.VisibilityTierAgeGated ->
+            AgeGated
+
+        Proto.VisibilityTierUnlisted ->
+            Unlisted
+
+        Proto.VisibilityTierPrivate ->
+            Private
+
+        Proto.VisibilityTierUnspecified ->
+            Public
+
+
+fromProtoAuthor : Proto.Author -> Author
+fromProtoAuthor pa =
+    { id = pa.id
+    , name = pa.name
+    , bio = emptyToNothing pa.bio
+    , website = emptyToNothing pa.website
+    }
+
+
+fromProtoEdition : Proto.Edition -> Edition
+fromProtoEdition pe =
+    { id = pe.id
+    , isbn = pe.isbn
+    , formatLabel = emptyToNothing pe.formatLabel
+    , coverImageUrl = emptyToNothing pe.coverImageUrl
+    , pageCount = zeroToNothing pe.pageCount
+    , publisher = emptyToNothing pe.publisher
+    , publicationYear = zeroToNothing pe.publicationYear
+    , isPrimary = pe.isPrimary
+    }
+
+
+fromProtoBook : Proto.Book -> Book
+fromProtoBook pb =
+    { id = pb.id
+    , title = pb.title
+    , author =
+        if pb.author.id == "" && pb.author.name == "" then
+            Nothing
+
+        else
+            Just (fromProtoAuthor pb.author)
+    , description = emptyToNothing pb.description
+    , editions = List.map fromProtoEdition pb.editions
+    , primaryEdition =
+        if pb.primaryEdition.id == "" && pb.primaryEdition.isbn == "" then
+            Nothing
+
+        else
+            Just (fromProtoEdition pb.primaryEdition)
+    , editionCount = pb.editionCount
+    , subjects = pb.subjects
+    , visibilityTier = fromProtoVisibility pb.visibilityTier
+    }
 
 
 {-| Returns the author's name, or "Unknown Author" when author is nil.
 -}
 authorName : Book -> String
-authorName book =
-    case book.author of
+authorName bk =
+    case bk.author of
         Just a ->
             a.name
 
@@ -74,8 +142,8 @@ authorName book =
 {-| ISBN from the primary edition, or empty string.
 -}
 bookIsbn : Book -> String
-bookIsbn book =
-    case book.primaryEdition of
+bookIsbn bk =
+    case bk.primaryEdition of
         Just ed ->
             ed.isbn
 
@@ -86,132 +154,28 @@ bookIsbn book =
 {-| Cover image URL from the primary edition.
 -}
 bookCoverImageUrl : Book -> Maybe String
-bookCoverImageUrl book =
-    book.primaryEdition |> Maybe.andThen .coverImageUrl
+bookCoverImageUrl bk =
+    bk.primaryEdition |> Maybe.andThen .coverImageUrl
 
 
 {-| Page count from the primary edition.
 -}
 bookPageCount : Book -> Maybe Int
-bookPageCount book =
-    book.primaryEdition |> Maybe.andThen .pageCount
+bookPageCount bk =
+    bk.primaryEdition |> Maybe.andThen .pageCount
 
 
 {-| Publication year from the primary edition.
 -}
 bookPublicationYear : Book -> Maybe Int
-bookPublicationYear book =
-    book.primaryEdition |> Maybe.andThen .publicationYear
+bookPublicationYear bk =
+    bk.primaryEdition |> Maybe.andThen .publicationYear
 
 
 
 -- DECODERS
 
 
-authorDecoder : Decoder Author
-authorDecoder =
-    Decode.map4 Author
-        (Decode.field "id" Decode.string)
-        (Decode.field "name" Decode.string)
-        (Decode.maybe (Decode.field "bio" Decode.string))
-        (Decode.maybe (Decode.field "website" Decode.string))
-
-
-visibilityTierDecoder : Decoder VisibilityTier
-visibilityTierDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "public" ->
-                        Decode.succeed Public
-
-                    "age_gated" ->
-                        Decode.succeed AgeGated
-
-                    "unlisted" ->
-                        Decode.succeed Unlisted
-
-                    "private" ->
-                        Decode.succeed Private
-
-                    _ ->
-                        Decode.fail ("Unknown visibility tier: " ++ s)
-            )
-
-
-{-| Decodes an optional integer field. Returns Nothing when the field is absent
-or null, Just n when present with an integer value, and fails if the field is
-present with the wrong type.
--}
-optionalInt : String -> Decoder (Maybe Int)
-optionalInt fieldName =
-    Decode.value
-        |> Decode.andThen
-            (\json ->
-                case Decode.decodeValue (Decode.field fieldName Decode.value) json of
-                    Err _ ->
-                        Decode.succeed Nothing
-
-                    Ok _ ->
-                        Decode.field fieldName (Decode.nullable Decode.int)
-            )
-
-
-editionDecoder : Decoder Edition
-editionDecoder =
-    Decode.map8 Edition
-        (Decode.field "id" Decode.string)
-        (Decode.field "isbn" Decode.string)
-        (Decode.maybe (Decode.field "format_label" Decode.string))
-        (Decode.maybe (Decode.field "cover_image_url" Decode.string))
-        (optionalInt "page_count")
-        (Decode.maybe (Decode.field "publisher" Decode.string))
-        (optionalInt "publication_year")
-        (Decode.oneOf
-            [ Decode.field "is_primary" Decode.bool
-            , Decode.succeed False
-            ]
-        )
-
-
 bookDecoder : Decoder Book
 bookDecoder =
-    Decode.map8
-        (\id title author description editions primaryEdition editionCount subjects ->
-            { id = id
-            , title = title
-            , author = author
-            , description = description
-            , editions = editions
-            , primaryEdition = primaryEdition
-            , editionCount = editionCount
-            , subjects = subjects
-            , visibilityTier = Public
-            }
-        )
-        (Decode.field "id" Decode.string)
-        (Decode.field "title" Decode.string)
-        (Decode.field "author" (Decode.nullable authorDecoder))
-        (Decode.maybe (Decode.field "description" Decode.string))
-        (Decode.oneOf
-            [ Decode.field "editions" (Decode.list editionDecoder)
-            , Decode.succeed []
-            ]
-        )
-        (Decode.maybe (Decode.field "primary_edition" editionDecoder))
-        (Decode.oneOf
-            [ Decode.field "edition_count" Decode.int
-            , Decode.succeed 0
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "subjects" (Decode.list Decode.string)
-            , Decode.succeed []
-            ]
-        )
-        |> Decode.andThen
-            (\partial ->
-                Decode.map (\vt -> { partial | visibilityTier = vt })
-                    (Decode.field "visibility_tier" visibilityTierDecoder)
-            )
+    Decode.map fromProtoBook Proto.decodeBook
