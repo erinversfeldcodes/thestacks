@@ -17,28 +17,38 @@ import Json.Decode as D
 import Json.Encode as E
 import Stacks.Api.V1.Admin
     exposing
-        ( CostItem
+        ( CostBreakdown
+        , CostItem
+        , EnrichmentGaps
         , MetricsDashboard
-        , PlatformStats
-        , QualityTrends
+        , MonthlyTotal
+        , QualityTrendRow
+        , SystemHealth
+        , UsageMetrics
+        , decodeCostBreakdown
         , decodeCostItem
+        , decodeEnrichmentGaps
         , decodeMetricsDashboard
-        , decodePlatformStats
-        , decodeQualityTrends
-        , defaultCostItem
+        , decodeMonthlyTotal
+        , decodeQualityTrendRow
+        , decodeSystemHealth
+        , decodeUsageMetrics
         , defaultMetricsDashboard
-        , defaultPlatformStats
-        , defaultQualityTrends
+        , defaultSystemHealth
+        , defaultUsageMetrics
+        , encodeCostBreakdown
         , encodeCostItem
+        , encodeEnrichmentGaps
         , encodeMetricsDashboard
-        , encodePlatformStats
-        , encodeQualityTrends
+        , encodeMonthlyTotal
+        , encodeQualityTrendRow
+        , encodeSystemHealth
+        , encodeUsageMetrics
         )
 import Stacks.Api.V1.AuthResponses
     exposing
         ( AuthResponse
         , decodeAuthResponse
-        , defaultAuthResponse
         , encodeAuthResponse
         )
 import Stacks.Api.V1.BlogResponses
@@ -51,10 +61,6 @@ import Stacks.Api.V1.BlogResponses
         , decodeBlogPostListResponse
         , decodeBlogPostResponse
         , decodeBlogPostShowResponse
-        , defaultAssociationActionResponse
-        , defaultBlogPostListResponse
-        , defaultBlogPostResponse
-        , defaultBlogPostShowResponse
         , encodeAssociationActionResponse
         , encodeBlogPostListResponse
         , encodeBlogPostResponse
@@ -64,14 +70,12 @@ import Stacks.Api.V1.BookResponses
     exposing
         ( BookDetailResponse
         , decodeBookDetailResponse
-        , defaultBookDetailResponse
         , encodeBookDetailResponse
         )
 import Stacks.Api.V1.BookshelfResponses
     exposing
         ( BookshelfResponse
         , decodeBookshelfResponse
-        , defaultBookshelfResponse
         , encodeBookshelfResponse
         )
 import Stacks.Api.V1.ListingResponses
@@ -80,8 +84,6 @@ import Stacks.Api.V1.ListingResponses
         , ListingResponse
         , decodeListingListResponse
         , decodeListingResponse
-        , defaultListingListResponse
-        , defaultListingResponse
         , encodeListingListResponse
         , encodeListingResponse
         )
@@ -93,9 +95,6 @@ import Stacks.Api.V1.SourceResponses
         , decodeDiscoveredSource
         , decodeSourceAdminListResponse
         , decodeVisibilityUpdateResponse
-        , defaultDiscoveredSource
-        , defaultSourceAdminListResponse
-        , defaultVisibilityUpdateResponse
         , encodeDiscoveredSource
         , encodeSourceAdminListResponse
         , encodeVisibilityUpdateResponse
@@ -110,27 +109,21 @@ import Stacks.Common.V1.Blog
         , decodeBlogVisibility
         , decodeBookAssociation
         , defaultBlogPost
-        , defaultBookAssociation
         , encodeBlogPost
-        , encodeBlogPostSummary
-        , encodeBlogVisibility
         , encodeBookAssociation
         )
 import Stacks.Common.V1.Book
     exposing
-        ( Author
-        , Book
+        ( Book
         , Edition
         , VisibilityTier(..)
         , decodeBook
         , decodeEdition
         , decodeVisibilityTier
-        , defaultAuthor
         , defaultBook
         , defaultEdition
         , encodeBook
         , encodeEdition
-        , encodeVisibilityTier
         )
 import Stacks.Common.V1.Listing
     exposing
@@ -153,26 +146,18 @@ import Stacks.Common.V1.Location
         )
 import Stacks.Common.V1.Placement
     exposing
-        ( BookPlacement
-        , PlacementDetail
-        , decodeBookPlacement
+        ( PlacementDetail
         , decodePlacementDetail
-        , defaultBookPlacement
         , encodePlacementDetail
         )
 import Stacks.Common.V1.Upload
     exposing
         ( PollResponse
         , PollStatus(..)
-        , UploadAccepted
         , decodePollResponse
         , decodePollStatus
         , decodeUploadAccepted
-        , defaultPollResponse
-        , defaultUploadAccepted
         , encodePollResponse
-        , encodePollStatus
-        , encodeUploadAccepted
         )
 import Stacks.Common.V1.User
     exposing
@@ -1469,6 +1454,8 @@ blogSuite =
                         , source = "llm"
                         , visible = True
                         , reasoning = "title mentioned"
+                        , bookTitle = "Test Book"
+                        , status = "confirmed"
                         }
 
                     result =
@@ -1584,6 +1571,7 @@ listingSuite =
                         , description = "Great condition"
                         , status = "draft"
                         , createdAt = "2026-03-20T00:00:00Z"
+                        , book = defaultBook
                         , currency = "ZAR"
                         , photoUrls = []
                         , listedAt = ""
@@ -1792,6 +1780,8 @@ blogResponseSuite =
                               , source = "llm"
                               , visible = True
                               , reasoning = "title mentioned"
+                              , bookTitle = "Test Book"
+                              , status = "confirmed"
                               }
                             ]
                         }
@@ -1852,6 +1842,8 @@ blogResponseSuite =
                             , source = "manual"
                             , visible = False
                             , reasoning = "user linked"
+                            , bookTitle = "Another Book"
+                            , status = "dismissed"
                             }
                         }
 
@@ -1977,7 +1969,7 @@ listingResponseSuite =
                 let
                     original : ListingListResponse
                     original =
-                        { listings = [] }
+                        { listings = [], total = 0 }
 
                     result =
                         D.decodeValue decodeListingListResponse (encodeListingListResponse original)
@@ -2364,29 +2356,395 @@ uploadSuite =
 adminSuite : Test
 adminSuite =
     describe "Admin decoders"
-        [ test "MetricsDashboard decodes all fields" <|
+        [ test "SystemHealth decodes all fields" <|
             \_ ->
                 let
                     json =
                         """
                         {
-                            "stats": {
-                                "total_users": 42,
-                                "total_books": 1000,
-                                "total_editions": 2500,
-                                "total_placements": 800,
-                                "total_listings": 50,
-                                "total_uploads": 200
-                            },
-                            "costs": [
-                                {"label": "Fly.io compute", "amount_zar": "150.00", "category": "infrastructure"}
+                            "db_size_bytes": 5000000,
+                            "total_books": 1000,
+                            "total_users": 42,
+                            "total_placements": 800,
+                            "generated_at": "2026-03-24T00:00:00Z"
+                        }
+                        """
+
+                    result =
+                        D.decodeString decodeSystemHealth json
+                in
+                case result of
+                    Ok health ->
+                        Expect.all
+                            [ \h -> Expect.equal 5000000 h.dbSizeBytes
+                            , \h -> Expect.equal 1000 h.totalBooks
+                            , \h -> Expect.equal 42 h.totalUsers
+                            , \h -> Expect.equal 800 h.totalPlacements
+                            , \h -> Expect.equal "2026-03-24T00:00:00Z" h.generatedAt
+                            ]
+                            health
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "SystemHealth encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : SystemHealth
+                    original =
+                        { dbSizeBytes = 3000000
+                        , totalBooks = 500
+                        , totalUsers = 10
+                        , totalPlacements = 300
+                        , generatedAt = "2026-03-24T12:00:00Z"
+                        }
+
+                    result =
+                        D.decodeValue decodeSystemHealth (encodeSystemHealth original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.equal original decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "SystemHealth defaults missing fields" <|
+            \_ ->
+                let
+                    result =
+                        D.decodeString decodeSystemHealth """{}"""
+                in
+                case result of
+                    Ok health ->
+                        Expect.equal defaultSystemHealth health
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "CostItem decodes all fields" <|
+            \_ ->
+                let
+                    json =
+                        """{"service":"Neon","description":"Database storage","amount_cents":4250}"""
+
+                    result =
+                        D.decodeString decodeCostItem json
+                in
+                case result of
+                    Ok item ->
+                        Expect.all
+                            [ \i -> Expect.equal "Neon" i.service
+                            , \i -> Expect.equal "Database storage" i.description
+                            , \i -> Expect.equal 4250 i.amountCents
+                            ]
+                            item
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "CostItem encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : CostItem
+                    original =
+                        { service = "Fly.io"
+                        , description = "Compute"
+                        , amountCents = 15000
+                        }
+
+                    result =
+                        D.decodeValue decodeCostItem (encodeCostItem original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.equal original decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "CostBreakdown decodes nested categories" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "total_cents": 20000,
+                            "currency": "USD",
+                            "cost_per_book": 0.42,
+                            "categories": [
+                                {
+                                    "category": "hosting",
+                                    "total_cents": 15000,
+                                    "items": [
+                                        {"service": "Fly.io", "description": "VM", "amount_cents": 15000}
+                                    ]
+                                }
                             ],
+                            "metrics": {
+                                "books": 100,
+                                "uploads": 50,
+                                "placements": 200,
+                                "db_size_bytes": 1000000,
+                                "avg_upload_payload_bytes": 500000,
+                                "vision_jobs_this_month": 30
+                            },
+                            "monthly_totals": [
+                                {"period_start": "2026-03-01", "period_end": "2026-03-31", "total_cents": 20000}
+                            ],
+                            "generated_at": "2026-03-24T12:00:00Z"
+                        }
+                        """
+
+                    result =
+                        D.decodeString decodeCostBreakdown json
+                in
+                case result of
+                    Ok breakdown ->
+                        Expect.all
+                            [ \b -> Expect.equal 20000 b.totalCents
+                            , \b -> Expect.equal "USD" b.currency
+                            , \b -> Expect.within (Expect.Absolute 0.01) 0.42 b.costPerBook
+                            , \b -> Expect.equal 1 (List.length b.categories)
+                            , \b -> Expect.equal 100 b.metrics.books
+                            , \b -> Expect.equal 1 (List.length b.monthlyTotals)
+                            , \b -> Expect.equal "2026-03-24T12:00:00Z" b.generatedAt
+                            ]
+                            breakdown
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "CostBreakdown encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : CostBreakdown
+                    original =
+                        { totalCents = 20000
+                        , currency = "USD"
+                        , costPerBook = 0.42
+                        , categories =
+                            [ { category = "hosting"
+                              , totalCents = 15000
+                              , items =
+                                    [ { service = "Fly.io"
+                                      , description = "VM"
+                                      , amountCents = 15000
+                                      }
+                                    ]
+                              }
+                            ]
+                        , metrics = defaultUsageMetrics
+                        , monthlyTotals =
+                            [ { periodStart = "2026-03-01"
+                              , periodEnd = "2026-03-31"
+                              , totalCents = 20000
+                              }
+                            ]
+                        , generatedAt = "2026-03-24T12:00:00Z"
+                        }
+
+                    result =
+                        D.decodeValue decodeCostBreakdown (encodeCostBreakdown original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.all
+                            [ \b -> Expect.equal original.totalCents b.totalCents
+                            , \b -> Expect.equal original.currency b.currency
+                            , \b -> Expect.within (Expect.Absolute 0.01) original.costPerBook b.costPerBook
+                            , \b -> Expect.equal 1 (List.length b.categories)
+                            , \b -> Expect.equal original.generatedAt b.generatedAt
+                            ]
+                            decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "EnrichmentGaps decodes all fields" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "status": "ok",
+                            "books_without_prices": 10,
+                            "books_without_covers": 5,
+                            "books_without_reviews": 20
+                        }
+                        """
+
+                    result =
+                        D.decodeString decodeEnrichmentGaps json
+                in
+                case result of
+                    Ok gaps ->
+                        Expect.all
+                            [ \g -> Expect.equal "ok" g.status
+                            , \g -> Expect.equal 10 g.booksWithoutPrices
+                            , \g -> Expect.equal 5 g.booksWithoutCovers
+                            , \g -> Expect.equal 20 g.booksWithoutReviews
+                            ]
+                            gaps
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "EnrichmentGaps encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : EnrichmentGaps
+                    original =
+                        { status = "ok"
+                        , booksWithoutPrices = 15
+                        , booksWithoutCovers = 8
+                        , booksWithoutReviews = 25
+                        }
+
+                    result =
+                        D.decodeValue decodeEnrichmentGaps (encodeEnrichmentGaps original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.equal original decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "QualityTrendRow decodes all 10 fields" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "snapshot_date": "2026-03-24",
+                            "total_books": 1000,
+                            "books_with_covers": 800,
+                            "books_with_prices": 600,
+                            "books_with_reviews": 400,
+                            "total_sources": 10,
+                            "healthy_sources": 8,
+                            "cover_pct": 80.0,
+                            "price_pct": 60.0,
+                            "review_pct": 40.0
+                        }
+                        """
+
+                    result =
+                        D.decodeString decodeQualityTrendRow json
+                in
+                case result of
+                    Ok row ->
+                        Expect.all
+                            [ \r -> Expect.equal "2026-03-24" r.snapshotDate
+                            , \r -> Expect.equal 1000 r.totalBooks
+                            , \r -> Expect.equal 800 r.booksWithCovers
+                            , \r -> Expect.within (Expect.Absolute 0.1) 80.0 r.coverPct
+                            , \r -> Expect.within (Expect.Absolute 0.1) 60.0 r.pricePct
+                            , \r -> Expect.within (Expect.Absolute 0.1) 40.0 r.reviewPct
+                            ]
+                            row
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "QualityTrendRow encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : QualityTrendRow
+                    original =
+                        { snapshotDate = "2026-03-24"
+                        , totalBooks = 1000
+                        , booksWithCovers = 800
+                        , booksWithPrices = 600
+                        , booksWithReviews = 400
+                        , totalSources = 10
+                        , healthySources = 8
+                        , coverPct = 80.0
+                        , pricePct = 60.0
+                        , reviewPct = 40.0
+                        }
+
+                    result =
+                        D.decodeValue decodeQualityTrendRow (encodeQualityTrendRow original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.all
+                            [ \r -> Expect.equal original.snapshotDate r.snapshotDate
+                            , \r -> Expect.equal original.totalBooks r.totalBooks
+                            , \r -> Expect.within (Expect.Absolute 0.1) original.coverPct r.coverPct
+                            , \r -> Expect.within (Expect.Absolute 0.1) original.pricePct r.pricePct
+                            , \r -> Expect.within (Expect.Absolute 0.1) original.reviewPct r.reviewPct
+                            ]
+                            decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "MonthlyTotal encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : MonthlyTotal
+                    original =
+                        { periodStart = "2026-03-01"
+                        , periodEnd = "2026-03-31"
+                        , totalCents = 18500
+                        }
+
+                    result =
+                        D.decodeValue decodeMonthlyTotal (encodeMonthlyTotal original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.equal original decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "UsageMetrics encode-decode round-trip" <|
+            \_ ->
+                let
+                    original : UsageMetrics
+                    original =
+                        { books = 100
+                        , uploads = 50
+                        , placements = 200
+                        , dbSizeBytes = 1000000
+                        , avgUploadPayloadBytes = 500000
+                        , visionJobsThisMonth = 30
+                        }
+
+                    result =
+                        D.decodeValue decodeUsageMetrics (encodeUsageMetrics original)
+                in
+                case result of
+                    Ok decoded ->
+                        Expect.equal original decoded
+
+                    Err e ->
+                        Expect.fail (D.errorToString e)
+        , test "MetricsDashboard decodes nested structure" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "system_health": {
+                                "db_size_bytes": 5000000,
+                                "total_books": 1000,
+                                "total_users": 42,
+                                "total_placements": 800,
+                                "generated_at": "2026-03-24T00:00:00Z"
+                            },
+                            "job_stats": [],
+                            "costs": {
+                                "total_cents": 20000,
+                                "currency": "USD",
+                                "cost_per_book": 0.42,
+                                "categories": [],
+                                "monthly_totals": [],
+                                "generated_at": "2026-03-24T12:00:00Z"
+                            },
+                            "gdpr": {
+                                "images_pending_deletion": 3,
+                                "users_with_consent": 40,
+                                "generated_at": "2026-03-24T00:00:00Z"
+                            },
+                            "quality_trends": [],
                             "source_health": [],
-                            "quality": {
-                                "isbn_coverage_pct": 95.5,
-                                "cover_image_pct": 80.0,
-                                "subject_tag_pct": 60.0,
-                                "computed_at": "2026-03-24T00:00:00Z"
+                            "enrichment_gaps": {
+                                "books_without_prices": 10,
+                                "books_without_covers": 5,
+                                "books_without_reviews": 20
                             },
                             "generated_at": "2026-03-24T12:00:00Z"
                         }
@@ -2398,34 +2756,14 @@ adminSuite =
                 case result of
                     Ok dashboard ->
                         Expect.all
-                            [ \d -> Expect.equal 42 d.stats.totalUsers
-                            , \d -> Expect.equal 1000 d.stats.totalBooks
-                            , \d -> Expect.equal 2500 d.stats.totalEditions
-                            , \d -> Expect.equal 1 (List.length d.costs)
-                            , \d -> Expect.within (Expect.Absolute 0.1) 95.5 d.quality.isbnCoveragePct
+                            [ \d -> Expect.equal 42 d.systemHealth.totalUsers
+                            , \d -> Expect.equal 1000 d.systemHealth.totalBooks
+                            , \d -> Expect.equal 20000 d.costs.totalCents
+                            , \d -> Expect.equal 3 d.gdpr.imagesPendingDeletion
+                            , \d -> Expect.equal 10 d.enrichmentGaps.booksWithoutPrices
                             , \d -> Expect.equal "2026-03-24T12:00:00Z" d.generatedAt
                             ]
                             dashboard
-
-                    Err e ->
-                        Expect.fail (D.errorToString e)
-        , test "CostItem decodes all fields" <|
-            \_ ->
-                let
-                    json =
-                        """{"label":"Neon storage","amount_zar":"42.50","category":"storage"}"""
-
-                    result =
-                        D.decodeString decodeCostItem json
-                in
-                case result of
-                    Ok item ->
-                        Expect.all
-                            [ \i -> Expect.equal "Neon storage" i.label
-                            , \i -> Expect.equal "42.50" i.amountZar
-                            , \i -> Expect.equal "storage" i.category
-                            ]
-                            item
 
                     Err e ->
                         Expect.fail (D.errorToString e)
@@ -2434,29 +2772,7 @@ adminSuite =
                 let
                     original : MetricsDashboard
                     original =
-                        { stats =
-                            { totalUsers = 10
-                            , totalBooks = 500
-                            , totalEditions = 1200
-                            , totalPlacements = 300
-                            , totalListings = 20
-                            , totalUploads = 100
-                            }
-                        , costs =
-                            [ { label = "Fly.io"
-                              , amountZar = "100.00"
-                              , category = "infrastructure"
-                              }
-                            ]
-                        , sourceHealth = []
-                        , quality =
-                            { isbnCoveragePct = 90.0
-                            , coverImagePct = 75.0
-                            , subjectTagPct = 50.0
-                            , computedAt = "2026-03-24T00:00:00Z"
-                            }
-                        , generatedAt = "2026-03-24T12:00:00Z"
-                        }
+                        defaultMetricsDashboard
 
                     result =
                         D.decodeValue decodeMetricsDashboard (encodeMetricsDashboard original)
@@ -2464,10 +2780,9 @@ adminSuite =
                 case result of
                     Ok decoded ->
                         Expect.all
-                            [ \d -> Expect.equal original.stats.totalUsers d.stats.totalUsers
-                            , \d -> Expect.equal original.stats.totalBooks d.stats.totalBooks
-                            , \d -> Expect.equal 1 (List.length d.costs)
-                            , \d -> Expect.within (Expect.Absolute 0.1) original.quality.isbnCoveragePct d.quality.isbnCoveragePct
+                            [ \d -> Expect.equal original.systemHealth.totalUsers d.systemHealth.totalUsers
+                            , \d -> Expect.equal original.systemHealth.totalBooks d.systemHealth.totalBooks
+                            , \d -> Expect.equal original.costs.totalCents d.costs.totalCents
                             , \d -> Expect.equal original.generatedAt d.generatedAt
                             ]
                             decoded
