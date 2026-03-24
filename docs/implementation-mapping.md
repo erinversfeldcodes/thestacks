@@ -1973,7 +1973,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | `.proto` files as single source of truth for all structured data contracts. `buf` for linting and breaking change detection in CI. JSON on the wire. |
 | **Affects stories** | All partner stories (US-9.x), internal event bus, service-to-service contracts. |
 | **Proto files** | `proto/stacks/partner/` (inventory, events, spaces), `proto/stacks/internal/` (event_bus, enrichment), `proto/stacks/common/` (book, location). |
-| **Code generation** | Elixir, Rust, Python: generated at build time, gitignored. Elm: generated JSON decoders checked in (no runtime codegen). |
+| **Code generation** | Elixir, Rust, Python: generated at build time, gitignored. Elm: generated JSON decoders gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`. |
 | **Schema codegen (Issue #080)** | `mix proto.sync` generates Ecto migrations, Ecto schemas, and dbt staging models from `.proto` messages tagged with `(stacks.persisted) = true`. `mix proto.sync --check` in CI catches drift. Covers raw ingestion tables only — domain tables remain hand-written. This is the "contract-enforced input" pillar of ADR 010 — the proto defines the shape, and the staging model is mechanically derived from that contract. See ADR 009. |
 | **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` + `mix proto.sync --check` in every PR. |
 | **Event upcasting** | `Stacks.Events.Upcaster` -- pattern-matched version transforms for old events. Same pattern as Commanded (Elixir CQRS). |

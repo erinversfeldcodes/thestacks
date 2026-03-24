@@ -54,7 +54,7 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **`buf breaking` passes**: No breaking changes without an explicit migration path approved by the human.
 - **Generated code quality**: Does the generated Elixir, Rust, Python, or Elm code compile without warnings? Generated code that requires manual patching after generation is a smell — fix the `.proto` or the generator config.
 - **Round-trip tests**: For any schema used on the wire, is there a test that serialises a message and deserialises it back, verifying field values survive the round trip?
-- **Elm decoder correctness**: For partner-facing schemas, are the checked-in Elm decoders consistent with the `.proto` definitions? Are all fields decoded? Are enum values handled, including `UNSPECIFIED`?
+- **Elm decoder correctness**: For partner-facing schemas, are the generated Elm decoders (in `proto/gen/elm/`, regenerated at build time) consistent with the `.proto` definitions? Are all fields decoded? Are enum values handled, including `UNSPECIFIED`?
 - **Edge case coverage**: Are there tests for messages with optional fields unset, repeated fields empty, `oneof` with each variant, and the zero enum value?
 
 ### 4. Performance (judgment — reviewer only)
