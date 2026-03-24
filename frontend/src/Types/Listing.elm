@@ -12,7 +12,9 @@ module Types.Listing exposing
     )
 
 import Json.Decode as Decode exposing (Decoder)
-import Types.Book exposing (Book, bookDecoder)
+import Stacks.Common.V1.Listing as Proto
+import Types.Book exposing (Book, fromProtoBook)
+import Types.ProtoHelpers exposing (emptyToNothing, zeroToNothing)
 
 
 type Condition
@@ -117,108 +119,127 @@ statusLabel status =
 
 
 
+-- MAPPING
+
+
+{-| Parse a condition string from the API.
+
+Defaults to Good on unknown values for proto3 forward-compatibility:
+new enum variants added server-side won't crash the decoder, they
+degrade gracefully to the safest mid-range default.
+
+-}
+parseCondition : String -> Condition
+parseCondition s =
+    case s of
+        "new" ->
+            New
+
+        "like_new" ->
+            LikeNew
+
+        "good" ->
+            Good
+
+        "fair" ->
+            Fair
+
+        "poor" ->
+            Poor
+
+        _ ->
+            -- Proto3 resilience: unknown values default to Good (safe mid-range)
+            Good
+
+
+{-| Parse a pricing mode string from the API.
+
+Defaults to Fixed on unknown values for proto3 forward-compatibility:
+new pricing modes added server-side won't crash the decoder, they
+degrade to Fixed which is the most conservative option.
+
+-}
+parsePricingMode : String -> PricingMode
+parsePricingMode s =
+    case s of
+        "fixed" ->
+            Fixed
+
+        "offer" ->
+            Offer
+
+        _ ->
+            -- Proto3 resilience: unknown values default to Fixed (conservative)
+            Fixed
+
+
+{-| Parse a listing status string from the API.
+
+Defaults to Draft on unknown values for proto3 forward-compatibility:
+new statuses added server-side won't crash the decoder, they degrade
+to Draft which is the least-visible state (safest default).
+
+-}
+parseStatus : String -> ListingStatus
+parseStatus s =
+    case s of
+        "draft" ->
+            Draft
+
+        "active" ->
+            Active
+
+        "sold" ->
+            Sold
+
+        "expired" ->
+            Expired
+
+        "removed" ->
+            Removed
+
+        _ ->
+            -- Proto3 resilience: unknown values default to Draft (least visible)
+            Draft
+
+
+fromProtoListing : Proto.Listing -> Listing
+fromProtoListing pl =
+    let
+        maybeBook =
+            if pl.book.id == "" && pl.book.title == "" then
+                Nothing
+
+            else
+                Just (fromProtoBook pl.book)
+    in
+    { id = pl.id
+    , book = maybeBook
+    , condition = parseCondition pl.condition
+    , pricingMode = parsePricingMode pl.pricingMode
+    , priceZar = zeroToNothing pl.priceCents
+    , contactInfo = pl.contactInfo
+    , description = emptyToNothing pl.description
+    , status = parseStatus pl.status
+    , createdAt = emptyToNothing pl.createdAt
+    }
+
+
+
 -- DECODERS
-
-
-conditionDecoder : Decoder Condition
-conditionDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "new" ->
-                        Decode.succeed New
-
-                    "like_new" ->
-                        Decode.succeed LikeNew
-
-                    "good" ->
-                        Decode.succeed Good
-
-                    "fair" ->
-                        Decode.succeed Fair
-
-                    "poor" ->
-                        Decode.succeed Poor
-
-                    _ ->
-                        Decode.fail ("Unknown condition: " ++ s)
-            )
-
-
-pricingModeDecoder : Decoder PricingMode
-pricingModeDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "fixed" ->
-                        Decode.succeed Fixed
-
-                    "offer" ->
-                        Decode.succeed Offer
-
-                    _ ->
-                        Decode.fail ("Unknown pricing mode: " ++ s)
-            )
-
-
-statusDecoder : Decoder ListingStatus
-statusDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "draft" ->
-                        Decode.succeed Draft
-
-                    "active" ->
-                        Decode.succeed Active
-
-                    "sold" ->
-                        Decode.succeed Sold
-
-                    "expired" ->
-                        Decode.succeed Expired
-
-                    "removed" ->
-                        Decode.succeed Removed
-
-                    _ ->
-                        Decode.fail ("Unknown listing status: " ++ s)
-            )
 
 
 listingDecoder : Decoder Listing
 listingDecoder =
-    Decode.map8
-        (\id book condition pricingMode priceZar contactInfo description status ->
-            { id = id
-            , book = book
-            , condition = condition
-            , pricingMode = pricingMode
-            , priceZar = priceZar
-            , contactInfo = contactInfo
-            , description = description
-            , status = status
-            , createdAt = Nothing
-            }
-        )
-        (Decode.field "id" Decode.string)
-        (Decode.maybe (Decode.field "book" bookDecoder))
-        (Decode.field "condition" conditionDecoder)
-        (Decode.field "pricing_mode" pricingModeDecoder)
-        (Decode.maybe (Decode.field "price_zar" Decode.int))
-        (Decode.field "contact_info" Decode.string)
-        (Decode.maybe (Decode.field "description" Decode.string))
-        (Decode.field "status" statusDecoder)
-        |> Decode.andThen
-            (\partial ->
-                Decode.map (\ca -> { partial | createdAt = ca })
-                    (Decode.maybe (Decode.field "created_at" Decode.string))
-            )
+    Decode.map fromProtoListing Proto.decodeListing
 
 
+{-| Decode a ListingsResponse from JSON.
+
+Decodes the listings array and total count. The total field fallback
+computes length from the listings array for defensive compatibility.
+
+-}
 listingsResponseDecoder : Decoder ListingsResponse
 listingsResponseDecoder =
     Decode.map2 ListingsResponse
