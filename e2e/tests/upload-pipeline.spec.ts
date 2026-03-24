@@ -369,6 +369,7 @@ async function triggerDragAndDrop(page: Page) {
 // ===========================================================================
 
 test.describe("Happy paths", () => {
+  // US-1.1.1 | Suite 1: Playwright
   test("single photo drag-and-drop: drop -> processing -> verify -> shelf pick -> success", async ({
     page,
   }) => {
@@ -436,6 +437,7 @@ test.describe("Happy paths", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("file picker flow: click -> select -> same pipeline", async ({
     page,
   }) => {
@@ -467,6 +469,7 @@ test.describe("Happy paths", () => {
     await expect(page.getByTestId("upload-complete")).toBeVisible();
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("shelf selection: 5 shelves shown, Wish List pre-selected, change selection", async ({
     page,
   }) => {
@@ -526,6 +529,33 @@ test.describe("Happy paths", () => {
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText("Library");
   });
+
+  // US-1.1.1 | Suite 1: Playwright
+  test("'View on shelf' navigates to the correct shelf route", async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollResolved(page);
+    await mockGetBook(page);
+    await mockPlacementSuccess(page);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    // Progress through verify -> shelf pick -> complete
+    await expect(page.getByTestId("upload-verify")).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByTestId("upload-confirm-btn").click();
+    await page
+      .getByRole("button", { name: /Add to Wish List/ })
+      .click();
+    await expect(page.getByTestId("upload-complete")).toBeVisible();
+
+    // Click "View on shelf" and verify navigation to /wishlist
+    await page.getByRole("button", { name: "View on shelf" }).click();
+    await expect(page).toHaveURL(/\/wishlist/);
+  });
 });
 
 // ===========================================================================
@@ -533,6 +563,7 @@ test.describe("Happy paths", () => {
 // ===========================================================================
 
 test.describe("Sad paths", () => {
+  // US-1.1.1 | Suite 1: Playwright
   test("upload HTTP failure (500) -> error -> retry", async ({ page }) => {
     await mockUploadFailure(page);
 
@@ -565,6 +596,7 @@ test.describe("Sad paths", () => {
     await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("poll timeout -> Could Not Identify -> manual ISBN / retry", async ({
     page,
   }) => {
@@ -606,6 +638,7 @@ test.describe("Sad paths", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.2 | Suite 1: Playwright
   test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", async ({
     page,
   }) => {
@@ -632,6 +665,7 @@ test.describe("Sad paths", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.3 | Suite 1: Playwright
   test("non-book rejection -> Doesn't Look Like a Book -> retry", async ({
     page,
   }) => {
@@ -655,6 +689,7 @@ test.describe("Sad paths", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("placement API failure (422) -> error -> retry", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
@@ -697,6 +732,7 @@ test.describe("Sad paths", () => {
     });
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("unauthenticated -> shows auth gate or redirects", async ({
     browser,
     baseURL,
@@ -728,6 +764,7 @@ test.describe("Sad paths", () => {
 // ===========================================================================
 
 test.describe("Manual ISBN entry", () => {
+  // US-1.1.5 | Suite 1: Playwright
   test("invalid ISBN -> error message", async ({ page }) => {
     await page.goto("/upload");
 
@@ -748,6 +785,7 @@ test.describe("Manual ISBN entry", () => {
     await expect(page.getByText("Invalid ISBN checksum")).toBeVisible();
   });
 
+  // US-1.1.5 | Suite 1: Playwright
   test("valid ISBN-10 accepted", async ({ page }) => {
     // Valid ISBN-10: 0306406152 (checksum valid)
     const isbn10 = "0306406152";
@@ -770,6 +808,7 @@ test.describe("Manual ISBN entry", () => {
     );
   });
 
+  // US-1.1.5 | Suite 1: Playwright
   test("valid ISBN-13 accepted", async ({ page }) => {
     // Valid ISBN-13: 9780306406157 (checksum valid)
     const isbn13 = "9780306406157";
@@ -792,6 +831,7 @@ test.describe("Manual ISBN entry", () => {
     );
   });
 
+  // US-1.1.5 | Suite 1: Playwright
   test("API returns book -> verify view", async ({ page }) => {
     const isbn = "0306406152";
     await mockIsbnLookupSuccess(page, isbn);
@@ -817,6 +857,7 @@ test.describe("Manual ISBN entry", () => {
     await expect(page.getByTestId("upload-reject-btn")).toBeVisible();
   });
 
+  // US-1.1.5 | Suite 1: Playwright
   test("API returns 404 -> Book not found error", async ({ page }) => {
     const isbn = "0306406152";
     await mockIsbnLookupNotFound(page, isbn);
@@ -833,6 +874,7 @@ test.describe("Manual ISBN entry", () => {
     });
   });
 
+  // US-1.1.5 | Suite 1: Playwright
   test("entry from rejection flow", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollRejected(page);
@@ -882,6 +924,7 @@ test.describe("Duplicate detection", () => {
     await triggerFileUpload(page);
   }
 
+  // US-1.1.6 | Suite 1: Playwright
   test("Already in Your Library heading and action buttons visible", async ({
     page,
   }) => {
@@ -907,6 +950,7 @@ test.describe("Duplicate detection", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.6 | Suite 1: Playwright
   test("'No, add as separate' proceeds to shelf picker", async ({ page }) => {
     await setupDuplicateFlow(page);
     await mockPlacementSuccess(page);
@@ -926,6 +970,7 @@ test.describe("Duplicate detection", () => {
     );
   });
 
+  // US-1.1.6 | Suite 1: Playwright
   test("'Go Back' resets the upload flow", async ({ page }) => {
     await setupDuplicateFlow(page);
 
@@ -939,6 +984,7 @@ test.describe("Duplicate detection", () => {
     await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
   });
 
+  // US-1.1.6 | Suite 1: Playwright
   test("'View Book' links to book detail", async ({ page }) => {
     await setupDuplicateFlow(page);
 
@@ -957,6 +1003,7 @@ test.describe("Duplicate detection", () => {
 // ===========================================================================
 
 test.describe("Multi-format merge", () => {
+  // US-1.1.8 | Suite 1: Playwright
   test("merge success shows edition count", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -987,6 +1034,7 @@ test.describe("Multi-format merge", () => {
     ).toBeVisible();
   });
 
+  // US-1.1.8 | Suite 1: Playwright
   test("merge failure -> retry", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -1025,6 +1073,7 @@ test.describe("Multi-format merge", () => {
 // ===========================================================================
 
 test.describe("Multi-book extraction", () => {
+  // US-1.1.7 | Suite 1: Playwright
   test("multiple books rendered in verification view", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, {
@@ -1054,10 +1103,78 @@ test.describe("Multi-book extraction", () => {
 });
 
 // ===========================================================================
+// AGE-GATED CONTENT (US-1.1.4)
+// ===========================================================================
+
+test.describe("Age-gated content (US-1.1.4)", () => {
+  // US-1.1.4 | Suite 1: Playwright
+  test("age-gated book flows through upload normally — gating happens on book detail", async ({
+    page,
+  }) => {
+    const ageGatedBook = fakeBook({ visibility_tier: "age_gated" });
+
+    await mockUploadAccept(page);
+    await mockPollResolved(page);
+    await mockGetBook(page, FAKE_BOOK_ID, ageGatedBook);
+    await mockPlacementSuccess(page);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    // Processing spinner should appear
+    await expect(page.getByTestId("upload-loading")).toBeVisible();
+
+    // Verification view should appear normally — age gating is transparent during upload
+    await expect(page.getByTestId("upload-verify")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("upload-verify")).toContainText(
+      "We think this is"
+    );
+    await expect(page.getByTestId("upload-verify")).toContainText(
+      "The Name of the Rose"
+    );
+    await expect(page.getByTestId("upload-verify")).toContainText("Eco");
+
+    // Confirm identification
+    await page.getByTestId("upload-confirm-btn").click();
+
+    // Shelf picker should appear — no age gate blocks placement
+    await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
+
+    // Confirm placement (defaults to Wish List)
+    await page
+      .getByRole("button", { name: /Add to Wish List/ })
+      .click();
+
+    // Success view should appear normally
+    await expect(page.getByTestId("upload-complete")).toBeVisible();
+    await expect(page.getByTestId("upload-complete")).toContainText(
+      "The Name of the Rose"
+    );
+    await expect(page.getByTestId("upload-complete")).toContainText(
+      "Wish List"
+    );
+
+    // "View on shelf" and "Add another" buttons should be present
+    await expect(
+      page.getByRole("button", { name: "View on shelf" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Add another" })
+    ).toBeVisible();
+
+    // NOTE: The age gate itself appears when viewing the book detail page,
+    // which is tested separately in age-gate.spec.ts
+  });
+});
+
+// ===========================================================================
 // ARIA / ACCESSIBILITY
 // ===========================================================================
 
 test.describe("ARIA and accessibility", () => {
+  // US-1.1.1 | Suite 1: Playwright
   test("aria-live='polite' on status region", async ({ page }) => {
     await page.goto("/upload");
 
@@ -1066,6 +1183,7 @@ test.describe("ARIA and accessibility", () => {
     await expect(statusRegion).toBeVisible();
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("role='status' on loading state", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollPending(page);
@@ -1078,6 +1196,7 @@ test.describe("ARIA and accessibility", () => {
     await expect(loading).toHaveAttribute("role", "status");
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("role='status' on complete state", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
@@ -1100,6 +1219,7 @@ test.describe("ARIA and accessibility", () => {
     await expect(complete).toHaveAttribute("role", "status");
   });
 
+  // US-1.1.1 | Suite 1: Playwright
   test("drop zone is keyboard-accessible via file picker", async ({
     page,
   }) => {

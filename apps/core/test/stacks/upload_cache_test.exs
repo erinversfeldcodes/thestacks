@@ -29,6 +29,7 @@ defmodule Stacks.UploadCacheTest do
   # ---------------------------------------------------------------------------
 
   describe "BookDetailCache invalidation via CacheInvalidationHandler" do
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "book.created event invalidates a cached entry" do
       book_id = Ecto.UUID.generate()
 
@@ -45,11 +46,13 @@ defmodule Stacks.UploadCacheTest do
       assert {:miss, ^book_id} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "get/1 returns :miss for a freshly created book (no cache entry yet)" do
       book_id = Ecto.UUID.generate()
       assert {:miss, ^book_id} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "after put/1, get/1 returns the cached data (simulates BookController.show populating cache)" do
       book_id = Ecto.UUID.generate()
       detail = %{title: "Circe", author: "Madeline Miller", isbn: "9780316556347"}
@@ -58,6 +61,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:ok, ^detail} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "cache miss on first fetch, hit on second" do
       book_id = Ecto.UUID.generate()
 
@@ -71,6 +75,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:ok, %{title: "The Song of Achilles"}} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "cache entry structure stores data with monotonic timestamp" do
       book_id = Ecto.UUID.generate()
       data = %{title: "Test", author: "Author"}
@@ -84,6 +89,7 @@ defmodule Stacks.UploadCacheTest do
       assert_in_delta inserted_at, System.monotonic_time(:millisecond), 1_000
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "TTL expiry: entries older than 5 minutes return :miss" do
       book_id = Ecto.UUID.generate()
       # Insert an entry with an expired timestamp (6 minutes ago).
@@ -93,6 +99,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:miss, ^book_id} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "entries within TTL window are still returned" do
       book_id = Ecto.UUID.generate()
       # Insert an entry from 4 minutes ago (within 5 min TTL).
@@ -102,6 +109,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:ok, %{title: "Recent"}} = BookDetailCache.get(book_id)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "invalidate_all/0 clears all cached entries" do
       ids = for _ <- 1..3, do: Ecto.UUID.generate()
       Enum.each(ids, &BookDetailCache.put(&1, %{title: "Book #{&1}"}))
@@ -121,6 +129,7 @@ defmodule Stacks.UploadCacheTest do
   # ---------------------------------------------------------------------------
 
   describe "BudgetTracker budget enforcement" do
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "record_cost/2 increases daily spend" do
       assert :ok = BudgetTracker.record_cost(:modal, 50)
 
@@ -130,6 +139,7 @@ defmodule Stacks.UploadCacheTest do
       assert state.providers["modal"] == 50
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "record_cost/2 accumulates across multiple calls" do
       BudgetTracker.record_cost(:modal, 100)
       BudgetTracker.record_cost(:modal, 200)
@@ -140,6 +150,7 @@ defmodule Stacks.UploadCacheTest do
       assert state.providers["modal"] == 300
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "record_cost/2 with zero cost is a no-op on totals" do
       BudgetTracker.record_cost(:modal, 0)
       # current_state/0 is a call — it serializes after the cast, ensuring the
@@ -149,6 +160,7 @@ defmodule Stacks.UploadCacheTest do
       assert state.monthly_total_cents == 0
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "check_budget/1 returns :ok when under daily limit" do
       BudgetTracker.record_cost(:modal, 100)
       # current_state/0 is a call that serializes after preceding casts.
@@ -157,6 +169,7 @@ defmodule Stacks.UploadCacheTest do
       assert :ok = BudgetTracker.check_budget(:modal)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "check_budget/1 returns {:error, :daily_limit_exceeded} when at daily limit" do
       # Default daily limit is 500 cents
       BudgetTracker.record_cost(:modal, 500)
@@ -165,6 +178,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "check_budget/1 returns {:error, :daily_limit_exceeded} when over daily limit" do
       BudgetTracker.record_cost(:modal, 600)
       _ = BudgetTracker.current_state()
@@ -172,6 +186,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "check_budget/1 returns {:error, :monthly_limit_exceeded} when over monthly limit" do
       # Isolate monthly from daily: set monthly >= 5000 but daily = 0 via state replacement.
       :sys.replace_state(BudgetTracker, fn state ->
@@ -181,6 +196,7 @@ defmodule Stacks.UploadCacheTest do
       assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "daily reset clears daily total and providers but preserves monthly total" do
       BudgetTracker.record_cost(:modal, 200)
       _ = BudgetTracker.current_state()
@@ -195,6 +211,7 @@ defmodule Stacks.UploadCacheTest do
       assert state.monthly_total_cents == 200
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "after daily reset, check_budget returns :ok even if previous day was full" do
       BudgetTracker.record_cost(:modal, 500)
       _ = BudgetTracker.current_state()
@@ -207,6 +224,7 @@ defmodule Stacks.UploadCacheTest do
       assert :ok = BudgetTracker.check_budget(:modal)
     end
 
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "monthly limit enforced even after daily reset" do
       # Fill up almost all monthly budget
       BudgetTracker.record_cost(:modal, 4900)

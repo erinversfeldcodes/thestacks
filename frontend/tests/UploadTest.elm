@@ -133,7 +133,8 @@ suite : Test
 suite =
     describe "Page.Upload"
         [ describe "UploadAccepted"
-            [ test "Ok imageId sets uploadState to Success and resets pollCount" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "Ok imageId sets uploadState to Success and resets pollCount" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -144,7 +145,8 @@ suite =
                         , \m -> m.pollCount |> Expect.equal 0
                         ]
                         model
-            , test "Err sets uploadState to Failure" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "Err sets uploadState to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -153,14 +155,16 @@ suite =
                     model.uploadState |> Expect.equal (Failure Http.NetworkError)
             ]
         , describe "CheckStatus"
-            [ test "increments pollCount" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "increments pollCount" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update CheckStatus modelWithImage (Just "tok")
                     in
                     model.pollCount |> Expect.equal 1
-            , test "sets result to IdentificationFailed when maxPollCount reached" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "sets result to IdentificationFailed when maxPollCount reached" <|
                 \_ ->
                     let
                         base =
@@ -173,14 +177,16 @@ suite =
                             Upload.update CheckStatus timedOut (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
-            , test "no-ops when uploadState is not Success" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "no-ops when uploadState is not Success" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update CheckStatus Upload.init (Just "tok")
                     in
                     model.pollCount |> Expect.equal 0
-            , test "no-ops when token is absent" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "no-ops when token is absent" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -189,28 +195,32 @@ suite =
                     model.pollCount |> Expect.equal 0
             ]
         , describe "StatusReceived"
-            [ test "Pending leaves result unchanged" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "Pending leaves result unchanged" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok pendingPoll)) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal NoResult
-            , test "Rejected sets result to IdentificationFailed" <|
+            , -- US-1.1.2 | Suite 10: Elm
+              test "Rejected sets result to IdentificationFailed" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok rejectedPoll)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
-            , test "Resolved without bookId sets result to NotABook" <|
+            , -- US-1.1.3 | Suite 10: Elm
+              test "Resolved without bookId sets result to NotABook" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok resolvedNotABook)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal NotABook
-            , test "Resolved with bookId leaves result pending (waits for GotIdentifiedBook)" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "Resolved with bookId leaves result pending (waits for GotIdentifiedBook)" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -218,14 +228,16 @@ suite =
                     in
                     -- Model unchanged while getBook request is in-flight.
                     model.result |> Expect.equal NoResult
-            , test "Resolved with duplicate flag leaves result pending (waits for GotDuplicateBook)" <|
+            , -- US-1.1.6 | Suite 10: Elm
+              test "Resolved with duplicate flag leaves result pending (waits for GotDuplicateBook)" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok resolvedDuplicate)) Upload.init (Just "tok")
                     in
                     model.result |> Expect.equal NoResult
-            , test "Http error on poll sets result to IdentificationFailed" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "Http error on poll sets result to IdentificationFailed" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -234,7 +246,8 @@ suite =
                     model.result |> Expect.equal IdentificationFailed
             ]
         , describe "GotIdentifiedBook"
-            [ test "Ok collects book and enters Verifying step when no more pending" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "Ok collects book and enters Verifying step when no more pending" <|
                 \_ ->
                     let
                         base =
@@ -252,7 +265,8 @@ suite =
                         , \m -> m.pendingBookIds |> Expect.equal []
                         ]
                         model
-            , test "Ok with remaining pending IDs does not set result to Identified yet" <|
+            , -- US-1.1.7 | Suite 10: Elm
+              test "Ok with remaining pending IDs does not set result to Identified yet" <|
                 \_ ->
                     let
                         modelPending =
@@ -267,7 +281,8 @@ suite =
                         , \m -> m.step |> Expect.equal Uploading
                         ]
                         model
-            , test "Err sets result to IdentificationFailed when no books collected" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "Err sets result to IdentificationFailed when no books collected" <|
                 \_ ->
                     let
                         base =
@@ -282,14 +297,16 @@ suite =
                     model.result |> Expect.equal IdentificationFailed
             ]
         , describe "GotDuplicateBook"
-            [ test "Ok sets result to DuplicateDetected" <|
+            [ -- US-1.1.6 | Suite 10: Elm
+              test "Ok sets result to DuplicateDetected" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
-            , test "Err sets result to IdentificationFailed" <|
+            , -- US-1.1.6 | Suite 10: Elm
+              test "Err sets result to IdentificationFailed" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -298,7 +315,8 @@ suite =
                     model.result |> Expect.equal IdentificationFailed
             ]
         , describe "Verification step"
-            [ test "ConfirmIdentification moves from Verifying to ChoosingShelf" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "ConfirmIdentification moves from Verifying to ChoosingShelf" <|
                 \_ ->
                     let
                         base =
@@ -311,7 +329,8 @@ suite =
                             Upload.update ConfirmIdentification verifying Nothing
                     in
                     model.step |> Expect.equal (ChoosingShelf dummyBook)
-            , test "RejectIdentification resets to init" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "RejectIdentification resets to init" <|
                 \_ ->
                     let
                         verifying =
@@ -330,40 +349,46 @@ suite =
                         , \m -> m.uploadState |> Expect.equal NotAsked
                         ]
                         model
-            , test "ShelfSelected updates selectedShelf" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "ShelfSelected updates selectedShelf" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (ShelfSelected "antilibrary") Upload.init Nothing
                     in
                     model.selectedShelf |> Expect.equal "antilibrary"
-            , test "default selectedShelf is wishlist" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "default selectedShelf is wishlist" <|
                 \_ ->
                     Upload.init.selectedShelf |> Expect.equal "wishlist"
             ]
         , describe "GoToShelf"
-            [ test "emits NavigateTo with Library route" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "emits NavigateTo with Library route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
                             Upload.update (GoToShelf "library") Upload.init Nothing
                     in
                     outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
-            , test "emits NavigateTo with AntiLibrary route" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "emits NavigateTo with AntiLibrary route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
                             Upload.update (GoToShelf "antilibrary") Upload.init Nothing
                     in
                     outMsg |> Expect.equal (NavigateTo Navigation.Route.AntiLibrary)
-            , test "emits NavigateTo with WishList route" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "emits NavigateTo with WishList route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
                             Upload.update (GoToShelf "wishlist") Upload.init Nothing
                     in
                     outMsg |> Expect.equal (NavigateTo Navigation.Route.WishList)
-            , test "unknown shelf falls back to Library route" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "unknown shelf falls back to Library route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
@@ -372,28 +397,36 @@ suite =
                     outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
             ]
         , describe "init state"
-            [ test "step is Uploading" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "step is Uploading" <|
                 \_ ->
                     Upload.init.step |> Expect.equal Uploading
-            , test "uploadState is NotAsked" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "uploadState is NotAsked" <|
                 \_ ->
                     Upload.init.uploadState |> Expect.equal NotAsked
-            , test "isDragging is False" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "isDragging is False" <|
                 \_ ->
                     Upload.init.isDragging |> Expect.equal False
-            , test "result is NoResult" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "result is NoResult" <|
                 \_ ->
                     Upload.init.result |> Expect.equal NoResult
-            , test "placementState is NotAsked" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "placementState is NotAsked" <|
                 \_ ->
                     Upload.init.placementState |> Expect.equal NotAsked
-            , test "isbnLookupState is NotAsked" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "isbnLookupState is NotAsked" <|
                 \_ ->
                     Upload.init.isbnLookupState |> Expect.equal NotAsked
-            , test "mergeFormatState is NotAsked" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "mergeFormatState is NotAsked" <|
                 \_ ->
                     Upload.init.mergeFormatState |> Expect.equal NotAsked
-            , test "manualIsbn is empty" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "manualIsbn is empty" <|
                 \_ ->
                     Upload.init.manualIsbn |> Expect.equal ""
             ]
@@ -401,14 +434,16 @@ suite =
         -- NOTE: GotFile cannot be tested in pure Elm — File values require
         -- a JS runtime. Use elm-program-test or E2E tests for this branch.
         , describe "DragOver / DragLeave"
-            [ test "DragOver sets isDragging to True" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "DragOver sets isDragging to True" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update DragOver Upload.init Nothing
                     in
                     model.isDragging |> Expect.equal True
-            , test "DragLeave sets isDragging to False" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "DragLeave sets isDragging to False" <|
                 \_ ->
                     let
                         dragging =
@@ -420,7 +455,8 @@ suite =
                     model.isDragging |> Expect.equal False
             ]
         , describe "ConfirmPlacement"
-            [ test "sets placementState to Loading when in ChoosingShelf with token" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "sets placementState to Loading when in ChoosingShelf with token" <|
                 \_ ->
                     let
                         choosing =
@@ -430,14 +466,16 @@ suite =
                             Upload.update ConfirmPlacement choosing (Just "tok")
                     in
                     model.placementState |> Expect.equal Loading
-            , test "no-ops when not in ChoosingShelf" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "no-ops when not in ChoosingShelf" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update ConfirmPlacement Upload.init (Just "tok")
                     in
                     model.placementState |> Expect.equal NotAsked
-            , test "no-ops when token absent" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "no-ops when token absent" <|
                 \_ ->
                     let
                         choosing =
@@ -449,7 +487,8 @@ suite =
                     model.placementState |> Expect.equal NotAsked
             ]
         , describe "PlacementCompleted"
-            [ test "Ok sets step to Complete with book and shelf" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "Ok sets step to Complete with book and shelf" <|
                 \_ ->
                     let
                         choosing =
@@ -462,7 +501,8 @@ suite =
                             Upload.update (PlacementCompleted (Ok dummyPlacement)) choosing Nothing
                     in
                     model.step |> Expect.equal (Complete dummyBook "antilibrary")
-            , test "Err sets placementState to Failure" <|
+            , -- US-1.1.1 | Suite 10: Elm
+              test "Err sets placementState to Failure" <|
                 \_ ->
                     let
                         choosing =
@@ -474,7 +514,8 @@ suite =
                     model.placementState |> Expect.equal (Failure Http.NetworkError)
             ]
         , describe "Reset"
-            [ test "resets to init" <|
+            [ -- US-1.1.1 | Suite 10: Elm
+              test "resets to init" <|
                 \_ ->
                     let
                         modified =
@@ -498,14 +539,16 @@ suite =
                         model
             ]
         , describe "Manual ISBN entry"
-            [ test "EnterManualMode sets result to ManualISBNEntry" <|
+            [ -- US-1.1.5 | Suite 10: Elm
+              test "EnterManualMode sets result to ManualISBNEntry" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update EnterManualMode Upload.init Nothing
                     in
                     model.result |> Expect.equal ManualISBNEntry
-            , test "EnterManualMode resets isbnLookupState to NotAsked" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "EnterManualMode resets isbnLookupState to NotAsked" <|
                 \_ ->
                     let
                         withFailure =
@@ -515,14 +558,16 @@ suite =
                             Upload.update EnterManualMode withFailure Nothing
                     in
                     model.isbnLookupState |> Expect.equal NotAsked
-            , test "ManualIsbnChanged updates manualIsbn" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "ManualIsbnChanged updates manualIsbn" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (ManualIsbnChanged "9780201633610") Upload.init Nothing
                     in
                     model.manualIsbn |> Expect.equal "9780201633610"
-            , test "ManualIsbnChanged clears showIsbnError" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "ManualIsbnChanged clears showIsbnError" <|
                 \_ ->
                     let
                         withError =
@@ -532,7 +577,8 @@ suite =
                             Upload.update (ManualIsbnChanged "978") withError Nothing
                     in
                     model.showIsbnError |> Expect.equal False
-            , test "SubmitManualIsbn with valid ISBN sets isbnLookupState to Loading" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "SubmitManualIsbn with valid ISBN sets isbnLookupState to Loading" <|
                 \_ ->
                     let
                         withIsbn =
@@ -542,7 +588,8 @@ suite =
                             Upload.update SubmitManualIsbn withIsbn (Just "tok")
                     in
                     model.isbnLookupState |> Expect.equal Loading
-            , test "SubmitManualIsbn with invalid ISBN sets showIsbnError" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "SubmitManualIsbn with invalid ISBN sets showIsbnError" <|
                 \_ ->
                     let
                         withBadIsbn =
@@ -552,7 +599,8 @@ suite =
                             Upload.update SubmitManualIsbn withBadIsbn (Just "tok")
                     in
                     model.showIsbnError |> Expect.equal True
-            , test "SubmitManualIsbn without token does nothing" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "SubmitManualIsbn without token does nothing" <|
                 \_ ->
                     let
                         withIsbn =
@@ -562,7 +610,8 @@ suite =
                             Upload.update SubmitManualIsbn withIsbn Nothing
                     in
                     model.isbnLookupState |> Expect.equal NotAsked
-            , test "IsbnLookupResult Ok sets result to Identified and step to Verifying" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "IsbnLookupResult Ok sets result to Identified and step to Verifying" <|
                 \_ ->
                     let
                         response =
@@ -577,7 +626,8 @@ suite =
                         , \m -> m.isbnLookupState |> Expect.equal (Success ())
                         ]
                         model
-            , test "IsbnLookupResult Err sets isbnLookupState to Failure" <|
+            , -- US-1.1.5 | Suite 10: Elm
+              test "IsbnLookupResult Err sets isbnLookupState to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -586,7 +636,8 @@ suite =
                     model.isbnLookupState |> Expect.equal (Failure Http.NetworkError)
             ]
         , describe "Duplicate detection"
-            [ test "GotDuplicateBook Ok populates mergeIsbn from primaryEdition" <|
+            [ -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "GotDuplicateBook Ok populates mergeIsbn from primaryEdition" <|
                 \_ ->
                     let
                         response =
@@ -596,7 +647,8 @@ suite =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
                     in
                     model.mergeIsbn |> Expect.equal "9780201633610"
-            , test "GotDuplicateBook Ok populates mergeFormatLabel from primaryEdition" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "GotDuplicateBook Ok populates mergeFormatLabel from primaryEdition" <|
                 \_ ->
                     let
                         response =
@@ -606,7 +658,8 @@ suite =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
                     in
                     model.mergeFormatLabel |> Expect.equal "Hardcover"
-            , test "SkipMerge converts DuplicateDetected to Identified and enters Verifying" <|
+            , -- US-1.1.6 | Suite 10: Elm
+              test "SkipMerge converts DuplicateDetected to Identified and enters Verifying" <|
                 \_ ->
                     let
                         duplicate =
@@ -620,14 +673,16 @@ suite =
                         , \m -> m.step |> Expect.equal (Verifying dummyBook)
                         ]
                         model
-            , test "SkipMerge no-ops when result is not DuplicateDetected" <|
+            , -- US-1.1.6 | Suite 10: Elm
+              test "SkipMerge no-ops when result is not DuplicateDetected" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update SkipMerge Upload.init Nothing
                     in
                     model.result |> Expect.equal NoResult
-            , test "ConfirmMergeFormat sets mergeFormatState to Loading when token present" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "ConfirmMergeFormat sets mergeFormatState to Loading when token present" <|
                 \_ ->
                     let
                         dup =
@@ -641,7 +696,8 @@ suite =
                             Upload.update (ConfirmMergeFormat "book-1") dup (Just "tok")
                     in
                     model.mergeFormatState |> Expect.equal Loading
-            , test "ConfirmMergeFormat no-ops when token absent" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "ConfirmMergeFormat no-ops when token absent" <|
                 \_ ->
                     let
                         dup =
@@ -651,7 +707,8 @@ suite =
                             Upload.update (ConfirmMergeFormat "book-1") dup Nothing
                     in
                     model.mergeFormatState |> Expect.equal NotAsked
-            , test "MergeFormatCompleted Ok increments editionCount on DuplicateDetected book" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "MergeFormatCompleted Ok increments editionCount on DuplicateDetected book" <|
                 \_ ->
                     let
                         mergeResponse =
@@ -669,7 +726,8 @@ suite =
 
                         _ ->
                             Expect.fail "Expected DuplicateDetected"
-            , test "MergeFormatCompleted Err sets mergeFormatState to Failure" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
+              test "MergeFormatCompleted Err sets mergeFormatState to Failure" <|
                 \_ ->
                     let
                         dup =
