@@ -113,6 +113,16 @@ info "Installing npm packages in frontend/..."
 (cd frontend && npm install --save-dev elm elm-format elm-test)
 success "Elm tooling installed"
 
+# ── 5b. Generate Elm proto decoders ──────────────────────────────────────────
+step "Elm proto decoders"
+if [[ -f "$REPO_ROOT/scripts/gen-elm-proto.sh" ]] && command -v buf &>/dev/null; then
+    info "Generating Elm decoders from .proto schemas..."
+    bash "$REPO_ROOT/scripts/gen-elm-proto.sh"
+    success "Elm proto decoders generated in proto/gen/elm/"
+else
+    warn "Skipping Elm proto generation (buf or gen-elm-proto.sh not found)"
+fi
+
 # ── 6. Python virtualenv (apps/vision) ────────────────────────────────────────
 step "Python 3.12 virtualenv (apps/vision)"
 VENV_DIR="$REPO_ROOT/apps/vision/.venv"
