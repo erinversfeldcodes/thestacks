@@ -334,7 +334,9 @@ defmodule StacksWeb.ProtoJSON do
       book_id: assoc.book_id,
       confidence: assoc.confidence,
       source: assoc.source,
-      visible: assoc.visible
+      visible: assoc.visible,
+      book_title: association_book_title(assoc),
+      status: if(assoc.visible, do: "confirmed", else: "dismissed")
     }
 
     if is_owner, do: Map.put(base, :reasoning, assoc.reasoning), else: base
@@ -499,6 +501,13 @@ defmodule StacksWeb.ProtoJSON do
       updated_at: book.updated_at
     }
   end
+
+  # Extracts the book title from a preloaded association, handling not-loaded and nil.
+  @spec association_book_title(map()) :: String.t()
+  defp association_book_title(%{book: %Ecto.Association.NotLoaded{}}), do: ""
+  defp association_book_title(%{book: nil}), do: ""
+  defp association_book_title(%{book: %{title: title}}), do: title || ""
+  defp association_book_title(_), do: ""
 
   # Matches `User @derive {Jason.Encoder, only: [...]}` — the shape Jason
   # produces when ListingController passes the raw struct through `json/2`.
