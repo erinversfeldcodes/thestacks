@@ -64,10 +64,19 @@ import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
+import Stacks.Api.V1.Admin as ProtoAdmin
+import Stacks.Api.V1.AuthResponses as ProtoAuth
+import Stacks.Api.V1.BookResponses as ProtoBookResp
+import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
+import Stacks.Api.V1.SourceResponses as ProtoSourceResp
+import Stacks.Common.V1.Placement as ProtoPlacement
+import Stacks.Common.V1.Upload as ProtoUpload
+import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, blogPostDecoder, blogPostSummaryDecoder)
-import Types.Book exposing (Book, Edition, bookDecoder, editionDecoder)
+import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
+import Types.ProtoHelpers exposing (emptyToNothing)
 import Url.Builder
 
 
@@ -85,18 +94,26 @@ type alias AuthResponse =
     }
 
 
+{-| Adapter: proto AuthResponse (nested user) -> app AuthResponse (flat fields).
+-}
+fromProtoAuthResponse : ProtoAuth.AuthResponse -> AuthResponse
+fromProtoAuthResponse proto =
+    { token = proto.token
+    , userId = proto.user.id
+    , email = proto.user.email
+    , displayName = proto.user.displayName
+    , role =
+        if proto.user.role == "" then
+            "user"
+
+        else
+            proto.user.role
+    }
+
+
 authResponseDecoder : Decoder AuthResponse
 authResponseDecoder =
-    Decode.map5 AuthResponse
-        (Decode.field "token" Decode.string)
-        (Decode.at [ "user", "id" ] Decode.string)
-        (Decode.at [ "user", "email" ] Decode.string)
-        (Decode.at [ "user", "display_name" ] Decode.string)
-        (Decode.oneOf
-            [ Decode.at [ "user", "role" ] Decode.string
-            , Decode.succeed "user"
-            ]
-        )
+    Decode.map fromProtoAuthResponse ProtoAuth.decodeAuthResponse
 
 
 {-| The identification status of an uploaded image.
@@ -106,26 +123,6 @@ type PollStatus
     = Pending
     | Resolved
     | Rejected
-
-
-pollStatusDecoder : Decoder PollStatus
-pollStatusDecoder =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "pending" ->
-                        Decode.succeed Pending
-
-                    "resolved" ->
-                        Decode.succeed Resolved
-
-                    "rejected" ->
-                        Decode.succeed Rejected
-
-                    _ ->
-                        Decode.fail ("Unknown upload status: " ++ s)
-            )
 
 
 {-| Response from GET /api/upload/:image\_id/status.
@@ -142,15 +139,40 @@ type alias PollResponse =
     }
 
 
+{-| Adapter: proto PollResponse -> app PollResponse.
+
+Proto uses string status and non-Maybe fields with empty/false defaults.
+App uses PollStatus ADT and Maybe for optional fields.
+
+-}
+fromProtoPollResponse : ProtoUpload.PollResponse -> PollResponse
+fromProtoPollResponse proto =
+    { imageId = proto.imageId
+    , status =
+        case proto.status of
+            "resolved" ->
+                Resolved
+
+            "rejected" ->
+                Rejected
+
+            _ ->
+                Pending
+    , bookId = emptyToNothing proto.bookId
+    , bookIds = proto.bookIds
+    , rejectionReason = emptyToNothing proto.rejectionReason
+    , isDuplicate =
+        if proto.isDuplicate then
+            Just True
+
+        else
+            Nothing
+    }
+
+
 pollResponseDecoder : Decoder PollResponse
 pollResponseDecoder =
-    Decode.map6 PollResponse
-        (Decode.field "image_id" Decode.string)
-        (Decode.field "status" pollStatusDecoder)
-        (Decode.maybe (Decode.field "book_id" Decode.string))
-        (Decode.field "book_ids" (Decode.list Decode.string) |> Decode.maybe |> Decode.map (Maybe.withDefault []))
-        (Decode.maybe (Decode.field "rejection_reason" Decode.string))
-        (Decode.maybe (Decode.field "is_duplicate" Decode.bool))
+    Decode.map fromProtoPollResponse ProtoUpload.decodePollResponse
 
 
 register :
@@ -221,7 +243,7 @@ uploadImage file token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/upload"
         , body = Http.multipartBody [ Http.filePart "image" file ]
-        , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
+        , expect = Http.expectJson toMsg (Decode.map .imageId ProtoUpload.decodeUploadAccepted)
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -254,6 +276,12 @@ type alias BookDetailResponse =
     }
 
 
+{-| Adapter: proto BookDetailResponse -> app BookDetailResponse.
+
+Proto includes myWriting (dropped). Proto book/placement are proto types
+decoded through the existing app-level decoders which already delegate to proto.
+
+-}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
     Decode.map2 BookDetailResponse
@@ -269,11 +297,14 @@ type alias PlacementSummary =
     }
 
 
-placementSummaryDecoder : Decoder PlacementSummary
-placementSummaryDecoder =
-    Decode.map2 PlacementSummary
-        (Decode.field "book_id" Decode.string)
-        (Decode.field "bookshelf_name" Decode.string)
+{-| Adapter: proto PlacementSummary -> app PlacementSummary.
+Fields match exactly.
+-}
+fromProtoPlacementSummary : ProtoPlacement.PlacementSummary -> PlacementSummary
+fromProtoPlacementSummary proto =
+    { bookId = proto.bookId
+    , bookshelfName = proto.bookshelfName
+    }
 
 
 getBook :
@@ -420,13 +451,22 @@ type alias CatalogueResponse =
     }
 
 
+{-| Adapter: proto CatalogueResponse -> app CatalogueResponse.
+Proto has same fields but in different declaration order. We map through
+the proto decoder and reorder.
+-}
+fromProtoCatalogueResponse : ProtoBookResp.CatalogueResponse -> CatalogueResponse
+fromProtoCatalogueResponse proto =
+    { books = List.map Types.Book.fromProtoBook proto.books
+    , total = proto.total
+    , page = proto.page
+    , perPage = proto.perPage
+    }
+
+
 catalogueResponseDecoder : Decoder CatalogueResponse
 catalogueResponseDecoder =
-    Decode.map4 CatalogueResponse
-        (Decode.field "books" (Decode.list bookDecoder))
-        (Decode.field "total" Decode.int)
-        (Decode.field "page" Decode.int)
-        (Decode.field "per_page" Decode.int)
+    Decode.map fromProtoCatalogueResponse ProtoBookResp.decodeCatalogueResponse
 
 
 {-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
@@ -465,7 +505,11 @@ getUserPlacements token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
+        , expect =
+            Http.expectJson toMsg
+                (Decode.map .placements ProtoBookshelfResp.decodePlacementsMineResponse
+                    |> Decode.map (List.map fromProtoPlacementSummary)
+                )
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -641,10 +685,13 @@ type alias MergeFormatResponse =
     }
 
 
+{-| Adapter: proto MergeFormatResponse -> app MergeFormatResponse.
+Maps proto Edition through the app-level edition adapter.
+-}
 mergeFormatResponseDecoder : Decoder MergeFormatResponse
 mergeFormatResponseDecoder =
-    Decode.map MergeFormatResponse
-        (Decode.field "edition" editionDecoder)
+    Decode.map (\resp -> { edition = Types.Book.fromProtoEdition resp.edition })
+        ProtoBookResp.decodeMergeFormatResponse
 
 
 {-| POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book.
@@ -1078,15 +1125,22 @@ type alias AdminSource =
     }
 
 
+{-| Adapter: proto DiscoveredSource -> app AdminSource.
+-}
+fromProtoDiscoveredSource : ProtoSourceResp.DiscoveredSource -> AdminSource
+fromProtoDiscoveredSource proto =
+    { id = proto.id
+    , name = proto.name
+    , url = proto.url
+    , sourceType = proto.type_
+    , status = proto.status
+    , confidenceScore = proto.confidence
+    }
+
+
 adminSourceDecoder : Decoder AdminSource
 adminSourceDecoder =
-    Decode.map6 AdminSource
-        (Decode.field "id" Decode.string)
-        (Decode.field "name" Decode.string)
-        (Decode.field "url" Decode.string)
-        (Decode.field "source_type" Decode.string)
-        (Decode.field "status" Decode.string)
-        (Decode.field "confidence_score" Decode.float)
+    Decode.map fromProtoDiscoveredSource ProtoSourceResp.decodeDiscoveredSource
 
 
 {-| Paginated admin sources response.
@@ -1099,13 +1153,23 @@ type alias AdminSourcesResponse =
     }
 
 
+{-| Adapter: proto SourceAdminListResponse -> app AdminSourcesResponse.
+
+Proto has no perPage field — we default to 20 (the server default page size).
+
+-}
+fromProtoSourceAdminListResponse : ProtoSourceResp.SourceAdminListResponse -> AdminSourcesResponse
+fromProtoSourceAdminListResponse proto =
+    { sources = List.map fromProtoDiscoveredSource proto.sources
+    , total = proto.total
+    , page = proto.page
+    , perPage = 20
+    }
+
+
 adminSourcesResponseDecoder : Decoder AdminSourcesResponse
 adminSourcesResponseDecoder =
-    Decode.map4 AdminSourcesResponse
-        (Decode.field "sources" (Decode.list adminSourceDecoder))
-        (Decode.field "total" Decode.int)
-        (Decode.field "page" Decode.int)
-        (Decode.field "per_page" Decode.int)
+    Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
 
 
 {-| GET /api/admin/sources — fetch paginated admin sources, optionally filtered by status.
@@ -1188,15 +1252,61 @@ type alias SourceHealth =
     }
 
 
+{-| Adapter: proto SourceHealthCheck -> app SourceHealth.
+Proto uses typed enums for status/sourceType; API sends string values.
+-}
+fromProtoSourceHealthCheck : ProtoHealth.SourceHealthCheck -> SourceHealth
+fromProtoSourceHealthCheck proto =
+    { name = proto.sourceName
+    , sourceType = sourceTypeToString proto.sourceType
+    , status = healthStatusToString proto.status
+    , consecutiveFailures = proto.consecutiveFailures
+    , lastSuccess = proto.lastSuccessAt
+    , lastFailure = proto.lastFailureAt
+    }
+
+
+sourceTypeToString : ProtoHealth.SourceType -> String
+sourceTypeToString st =
+    case st of
+        ProtoHealth.SourceTypeScraperConfig ->
+            "scraper_config"
+
+        ProtoHealth.SourceTypeReviewSource ->
+            "review_source"
+
+        ProtoHealth.SourceTypeRssFeed ->
+            "rss_feed"
+
+        ProtoHealth.SourceTypeEventSource ->
+            "event_source"
+
+        ProtoHealth.SourceTypeLlmOutput ->
+            "llm_output"
+
+        ProtoHealth.SourceTypeUnspecified ->
+            "unspecified"
+
+
+healthStatusToString : ProtoHealth.HealthStatus -> String
+healthStatusToString hs =
+    case hs of
+        ProtoHealth.HealthStatusHealthy ->
+            "healthy"
+
+        ProtoHealth.HealthStatusDegraded ->
+            "degraded"
+
+        ProtoHealth.HealthStatusBroken ->
+            "broken"
+
+        ProtoHealth.HealthStatusUnspecified ->
+            "unspecified"
+
+
 sourceHealthDecoder : Decoder SourceHealth
 sourceHealthDecoder =
-    Decode.map6 SourceHealth
-        (Decode.field "name" Decode.string)
-        (Decode.field "source_type" Decode.string)
-        (Decode.field "status" Decode.string)
-        (Decode.field "consecutive_failures" Decode.int)
-        (Decode.maybe (Decode.field "last_success" Decode.string))
-        (Decode.maybe (Decode.field "last_failure" Decode.string))
+    Decode.map fromProtoSourceHealthCheck ProtoHealth.decodeSourceHealthCheck
 
 
 {-| GET /api/metrics/source-health — fetch per-source health status.
@@ -1236,23 +1346,53 @@ type alias CostItem =
     }
 
 
-costItemDecoder : Decoder CostItem
-costItemDecoder =
-    Decode.map3 CostItem
-        (Decode.field "name" Decode.string)
-        (Decode.field "category" Decode.string)
-        (Decode.field "amount_zar" Decode.int)
+{-| Adapter: proto MetricsDashboard -> app MetricsDashboard.
+
+Maps the proto's nested structure to the app's flat shape. Quality percentages
+come from the first quality trend row (if present). Costs are flattened from
+CostBreakdown.categories, attaching each category name to its items.
+
+-}
+fromProtoMetricsDashboard : ProtoAdmin.MetricsDashboard -> MetricsDashboard
+fromProtoMetricsDashboard proto =
+    let
+        firstTrend =
+            List.head proto.qualityTrends
+
+        coverPct =
+            firstTrend |> Maybe.map .coverPct |> Maybe.withDefault 0.0
+
+        pricePct =
+            firstTrend |> Maybe.map .pricePct |> Maybe.withDefault 0.0
+
+        reviewPct =
+            firstTrend |> Maybe.map .reviewPct |> Maybe.withDefault 0.0
+
+        flattenCategory cat =
+            List.map (fromProtoCostItem cat.category) cat.items
+    in
+    { totalBooks = proto.systemHealth.totalBooks
+    , coverPercentage = coverPct
+    , pricePercentage = pricePct
+    , reviewPercentage = reviewPct
+    , gdprImagesPending = proto.gdpr.imagesPendingDeletion
+    , costs = List.concatMap flattenCategory proto.costs.categories
+    }
+
+
+{-| Adapter: proto CostItem -> app CostItem, attaching the parent category name.
+-}
+fromProtoCostItem : String -> ProtoAdmin.CostItem -> CostItem
+fromProtoCostItem categoryName proto =
+    { name = proto.service
+    , category = categoryName
+    , amountZar = proto.amountCents
+    }
 
 
 metricsDashboardDecoder : Decoder MetricsDashboard
 metricsDashboardDecoder =
-    Decode.map6 MetricsDashboard
-        (Decode.field "total_books" Decode.int)
-        (Decode.field "cover_percentage" Decode.float)
-        (Decode.field "price_percentage" Decode.float)
-        (Decode.field "review_percentage" Decode.float)
-        (Decode.field "gdpr_images_pending" Decode.int)
-        (Decode.field "costs" (Decode.list costItemDecoder))
+    Decode.map fromProtoMetricsDashboard ProtoAdmin.decodeMetricsDashboard
 
 
 {-| GET /api/metrics — fetch main dashboard data.
@@ -1274,6 +1414,11 @@ getMetrics token toMsg =
 
 
 {-| Quality trend data from GET /api/metrics/quality-trends.
+
+The proto has QualityTrendRow with percentage floats. The API endpoint wraps these
+in a list; we take the two most recent rows to compute trend direction (up/down/flat)
+by comparing cover\_pct, price\_pct, and review\_pct.
+
 -}
 type alias QualityTrends =
     { coverTrend : String
@@ -1282,12 +1427,46 @@ type alias QualityTrends =
     }
 
 
+{-| Adapter: list of proto QualityTrendRow -> app QualityTrends.
+
+Compares the two most recent rows to derive trend direction. If fewer than two
+rows are available, defaults to "flat".
+
+-}
+fromProtoQualityTrendRows : List ProtoAdmin.QualityTrendRow -> QualityTrends
+fromProtoQualityTrendRows rows =
+    let
+        sorted =
+            List.sortBy .snapshotDate rows |> List.reverse
+
+        trendDir prev cur =
+            if cur > prev then
+                "up"
+
+            else if cur < prev then
+                "down"
+
+            else
+                "flat"
+    in
+    case sorted of
+        current :: previous :: _ ->
+            { coverTrend = trendDir previous.coverPct current.coverPct
+            , priceTrend = trendDir previous.pricePct current.pricePct
+            , reviewTrend = trendDir previous.reviewPct current.reviewPct
+            }
+
+        _ ->
+            { coverTrend = "flat"
+            , priceTrend = "flat"
+            , reviewTrend = "flat"
+            }
+
+
 qualityTrendsDecoder : Decoder QualityTrends
 qualityTrendsDecoder =
-    Decode.map3 QualityTrends
-        (Decode.field "cover_trend" Decode.string)
-        (Decode.field "price_trend" Decode.string)
-        (Decode.field "review_trend" Decode.string)
+    Decode.map fromProtoQualityTrendRows
+        (Decode.list ProtoAdmin.decodeQualityTrendRow)
 
 
 {-| GET /api/metrics/quality-trends — fetch quality trend indicators.
@@ -1317,12 +1496,20 @@ type alias EnrichmentGaps =
     }
 
 
+{-| Adapter: proto EnrichmentGaps -> app EnrichmentGaps.
+Proto includes a status field which the app type does not need.
+-}
+fromProtoEnrichmentGaps : ProtoAdmin.EnrichmentGaps -> EnrichmentGaps
+fromProtoEnrichmentGaps proto =
+    { booksWithoutPrices = proto.booksWithoutPrices
+    , booksWithoutCovers = proto.booksWithoutCovers
+    , booksWithoutReviews = proto.booksWithoutReviews
+    }
+
+
 enrichmentGapsDecoder : Decoder EnrichmentGaps
 enrichmentGapsDecoder =
-    Decode.map3 EnrichmentGaps
-        (Decode.field "books_without_prices" Decode.int)
-        (Decode.field "books_without_covers" Decode.int)
-        (Decode.field "books_without_reviews" Decode.int)
+    Decode.map fromProtoEnrichmentGaps ProtoAdmin.decodeEnrichmentGaps
 
 
 {-| GET /api/metrics/enrichment-gaps — fetch enrichment gap counts.
