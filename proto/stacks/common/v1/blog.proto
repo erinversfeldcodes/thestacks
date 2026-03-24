@@ -33,8 +33,8 @@ enum BlogVisibility {
 // BookAssociation links a blog post to a book.
 // Matches the output of BlogController.serialize_association/2.
 //
-// JSON shape (non-owner): {id, book_id, confidence, source, visible}
-// JSON shape (owner):     {id, book_id, confidence, source, visible, reasoning}
+// JSON shape (non-owner): {id, book_id, confidence, source, visible, book_title, status}
+// JSON shape (owner):     {id, book_id, confidence, source, visible, reasoning, book_title, status}
 message BookAssociation {
   // UUID of the association record.
   string id = 1 [json_name = "id"];
@@ -53,6 +53,13 @@ message BookAssociation {
 
   // Reasoning for the association (only included for the post owner).
   string reasoning = 6 [json_name = "reasoning"];
+
+  // Title of the associated book (denormalized for display convenience).
+  string book_title = 7 [json_name = "book_title"];
+
+  // Association status: "pending", "confirmed", or "dismissed".
+  // Stored as a plain string to match the controller's wire format.
+  string status = 8 [json_name = "status"];
 }
 
 // BlogPost represents a user's reading journal entry or blog post.
