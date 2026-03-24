@@ -13,6 +13,9 @@ dev:
     just db-create 2>/dev/null || true
     just db-migrate
 
+    echo "==> Generating Elm proto decoders..."
+    bash scripts/gen-elm-proto.sh
+
     echo "==> Building assets (Elm + CSS via esbuild)..."
     (cd apps/core/assets && npm run deploy)
 
@@ -139,6 +142,14 @@ lint-sql:
 # dbt-checkpoint quality gates (requires dbt/target/manifest.json)
 lint-dbt:
     scripts/lint-dbt.sh
+
+# Generate Elm proto decoders from .proto files
+gen-elm-proto:
+    scripts/gen-elm-proto.sh
+
+# Check Elm proto decoders are up to date (CI)
+gen-elm-proto-check:
+    scripts/gen-elm-proto.sh --check
 
 # Auto-fix all fixable lint and formatting issues
 format:

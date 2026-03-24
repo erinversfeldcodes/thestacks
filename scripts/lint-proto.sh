@@ -31,3 +31,9 @@ fi
 if [ -f proto/persisted.exs ]; then
     (cd apps/core && mix proto.sync --check)
 fi
+
+# Elm proto decoder drift check — ensures generated Elm modules match proto specs.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -x "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
+    bash "$REPO_ROOT/scripts/gen-elm-proto.sh" --check
+fi
