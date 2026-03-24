@@ -8,18 +8,19 @@ defmodule StacksWeb.ListingController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Marketplace
   alias Stacks.Marketplace.Listing
+  alias StacksWeb.ProtoJSON
 
   @doc "GET /api/listings — list all active listings."
   def index(conn, _params) do
     listings = Marketplace.list_active_listings()
-    json(conn, %{listings: listings})
+    json(conn, %{listings: Enum.map(listings, &ProtoJSON.listing/1)})
   end
 
   @doc "GET /api/listings/:id — show a single listing."
   def show(conn, %{"id" => id}) do
     case Marketplace.get_listing(id) do
       nil -> {:error, :not_found}
-      listing -> json(conn, %{listing: listing})
+      listing -> json(conn, %{listing: ProtoJSON.listing(listing)})
     end
   end
 
@@ -27,7 +28,7 @@ defmodule StacksWeb.ListingController do
   def mine(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
     listings = Marketplace.list_user_listings(user.id)
-    json(conn, %{listings: listings})
+    json(conn, %{listings: Enum.map(listings, &ProtoJSON.listing/1)})
   end
 
   @doc "POST /api/listings — create a new draft listing."
@@ -37,7 +38,7 @@ defmodule StacksWeb.ListingController do
     with {:ok, listing} <- Marketplace.create_listing(user.id, params) do
       conn
       |> put_status(201)
-      |> json(%{listing: listing})
+      |> json(%{listing: ProtoJSON.listing(listing)})
     end
   end
 
@@ -47,7 +48,7 @@ defmodule StacksWeb.ListingController do
 
     with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
          {:ok, listing} <- Marketplace.activate_listing(listing, user.id) do
-      json(conn, %{listing: listing})
+      json(conn, %{listing: ProtoJSON.listing(listing)})
     end
   end
 
@@ -57,7 +58,7 @@ defmodule StacksWeb.ListingController do
 
     with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
          {:ok, listing} <- Marketplace.sold_listing(listing, user.id) do
-      json(conn, %{listing: listing})
+      json(conn, %{listing: ProtoJSON.listing(listing)})
     end
   end
 
@@ -67,7 +68,7 @@ defmodule StacksWeb.ListingController do
 
     with %Listing{} = listing <- Marketplace.get_listing(id) || {:error, :not_found},
          {:ok, listing} <- Marketplace.deactivate_listing(listing, user.id) do
-      json(conn, %{listing: listing})
+      json(conn, %{listing: ProtoJSON.listing(listing)})
     end
   end
 end

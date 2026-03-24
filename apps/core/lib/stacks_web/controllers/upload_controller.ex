@@ -9,6 +9,7 @@ defmodule StacksWeb.UploadController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
   alias Stacks.Shelving
+  alias StacksWeb.ProtoJSON
 
   @doc """
   POST /api/upload/identify — synchronously identifies candidate books from an image.
@@ -113,14 +114,17 @@ defmodule StacksWeb.UploadController do
         user = Guardian.Plug.current_resource(conn)
         is_duplicate = Enum.any?(effective_ids, &Shelving.book_on_any_shelf?(user.id, &1))
 
-        json(conn, %{
-          image_id: image_id,
-          status: status,
-          book_id: book_id_str,
-          book_ids: effective_ids,
-          rejection_reason: rejection_reason,
-          is_duplicate: is_duplicate
-        })
+        json(
+          conn,
+          ProtoJSON.poll_response(%{
+            image_id: image_id,
+            status: status,
+            book_id: book_id_str,
+            book_ids: effective_ids,
+            rejection_reason: rejection_reason,
+            is_duplicate: is_duplicate
+          })
+        )
     end
   end
 
