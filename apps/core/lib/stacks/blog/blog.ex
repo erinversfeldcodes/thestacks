@@ -274,7 +274,8 @@ defmodule Stacks.Blog do
   def list_associations(post_id) do
     from(a in PostBookAssociation,
       where: a.post_id == ^post_id,
-      order_by: [desc: a.confidence]
+      order_by: [desc: a.confidence],
+      preload: [:book]
     )
     |> Repo.all()
   end

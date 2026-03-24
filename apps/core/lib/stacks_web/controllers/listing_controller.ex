@@ -13,7 +13,8 @@ defmodule StacksWeb.ListingController do
   @doc "GET /api/listings — list all active listings."
   def index(conn, _params) do
     listings = Marketplace.list_active_listings()
-    json(conn, %{listings: Enum.map(listings, &ProtoJSON.listing/1)})
+    serialized = Enum.map(listings, &ProtoJSON.listing/1)
+    json(conn, %{listings: serialized, total: length(serialized)})
   end
 
   @doc "GET /api/listings/:id — show a single listing."
@@ -28,7 +29,8 @@ defmodule StacksWeb.ListingController do
   def mine(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
     listings = Marketplace.list_user_listings(user.id)
-    json(conn, %{listings: Enum.map(listings, &ProtoJSON.listing/1)})
+    serialized = Enum.map(listings, &ProtoJSON.listing/1)
+    json(conn, %{listings: serialized, total: length(serialized)})
   end
 
   @doc "POST /api/listings — create a new draft listing."

@@ -618,14 +618,13 @@ defmodule StacksWeb.ProtoJSONTest do
 
       result = ProtoJSON.blog_association(assoc, false)
 
-      assert result == %{
-               id: assoc.id,
-               book_id: assoc.book_id,
-               confidence: assoc.confidence,
-               source: assoc.source,
-               visible: assoc.visible
-             }
-
+      assert result.id == assoc.id
+      assert result.book_id == assoc.book_id
+      assert result.confidence == assoc.confidence
+      assert result.source == assoc.source
+      assert result.visible == assoc.visible
+      assert is_binary(result.book_title)
+      assert result.status in ["confirmed", "dismissed"]
       refute Map.has_key?(result, :reasoning)
     end
 
@@ -636,6 +635,8 @@ defmodule StacksWeb.ProtoJSONTest do
 
       assert result.reasoning == "Thematic overlap."
       assert Map.has_key?(result, :reasoning)
+      assert is_binary(result.book_title)
+      assert result.status in ["confirmed", "dismissed"]
     end
   end
 
