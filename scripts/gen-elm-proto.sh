@@ -49,6 +49,10 @@ generate_to() {
 
 if [[ "${1:-}" == "--check" ]]; then
     echo "==> Checking Elm proto gen is up to date..."
+    if [[ ! -d "$OUTPUT_DIR" ]]; then
+        echo "ERROR: $OUTPUT_DIR does not exist. Run: scripts/gen-elm-proto.sh" >&2
+        exit 1
+    fi
     TMPDIR_CHECK="$(mktemp -d)"
     trap 'rm -rf "$TMPDIR_CHECK"' EXIT
 
@@ -58,7 +62,7 @@ if [[ "${1:-}" == "--check" ]]; then
     build_descriptor "$DESC_FILE"
     generate_to "$GEN_DIR" "$DESC_FILE"
 
-    # Diff against checked-in output
+    # Diff against current output
     if diff -r --brief "$GEN_DIR" "$OUTPUT_DIR" >/dev/null 2>&1; then
         echo "==> Elm proto gen is up to date."
         exit 0
@@ -68,6 +72,30 @@ if [[ "${1:-}" == "--check" ]]; then
         echo "" >&2
         echo "Run: scripts/gen-elm-proto.sh" >&2
         exit 1
+    fi
+fi
+
+# ── Staleness check: skip regeneration if output is newer than all inputs ─────
+if [[ -d "$OUTPUT_DIR" ]] && [[ -n "$(ls -A "$OUTPUT_DIR" 2>/dev/null)" ]]; then
+    # Find the oldest generated file
+    OLDEST_GEN="$(find "$OUTPUT_DIR" -type f -name '*.elm' | head -1)"
+    if [[ -n "$OLDEST_GEN" ]]; then
+        STALE=false
+        # Check if any .proto file is newer than the oldest generated file
+        while IFS= read -r -d '' proto_file; do
+            if [[ "$proto_file" -nt "$OLDEST_GEN" ]]; then
+                STALE=true
+                break
+            fi
+        done < <(find "$REPO_ROOT/proto" -name '*.proto' -print0 2>/dev/null)
+        # Check if the generator script itself is newer
+        if [[ "$GENERATOR" -nt "$OLDEST_GEN" ]]; then
+            STALE=true
+        fi
+        if [[ "$STALE" == "false" ]]; then
+            echo "==> Elm proto gen is up to date (skipping regeneration)."
+            exit 0
+        fi
     fi
 fi
 
