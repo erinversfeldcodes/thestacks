@@ -1,0 +1,85 @@
+// admin.proto — Admin dashboard and metrics response types.
+// These messages define the shape of JSON responses for the admin panel.
+//
+// Note: MetricsDashboard is forward-looking. The actual MetricsController returns
+// opaque %{data: Metrics.dashboard()} where the dashboard() shape is defined in
+// Stacks.Admin.Metrics. This proto documents the intended contract; the Elixir
+// implementation may not yet serialize exactly this shape. Update this proto when
+// the serialization is formalized.
+//
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+import "google/protobuf/timestamp.proto";
+import "stacks/monitoring/v1/source_health_check.proto";
+
+// CostItem represents a single line item in the platform's operational cost breakdown.
+message CostItem {
+  // Human-readable label for this cost (e.g. "Fly.io compute", "Neon storage").
+  string label = 1 [json_name = "label"];
+
+  // Cost amount in South African Rand (ZAR), as a decimal string (e.g. "42.50").
+  string amount_zar = 2 [json_name = "amount_zar"];
+
+  // Category grouping for this cost (e.g. "infrastructure", "api", "storage").
+  string category = 3 [json_name = "category"];
+}
+
+// QualityTrends tracks data quality metrics over time.
+message QualityTrends {
+  // Percentage of books with verified ISBNs (0-100).
+  double isbn_coverage_pct = 1 [json_name = "isbn_coverage_pct"];
+
+  // Percentage of editions with cover images (0-100).
+  double cover_image_pct = 2 [json_name = "cover_image_pct"];
+
+  // Percentage of books with at least one subject tag (0-100).
+  double subject_tag_pct = 3 [json_name = "subject_tag_pct"];
+
+  // Timestamp when these metrics were last computed.
+  google.protobuf.Timestamp computed_at = 4 [json_name = "computed_at"];
+}
+
+// PlatformStats provides high-level platform usage counters.
+message PlatformStats {
+  // Total number of registered users.
+  int32 total_users = 1 [json_name = "total_users"];
+
+  // Total number of books (works) in the system.
+  int32 total_books = 2 [json_name = "total_books"];
+
+  // Total number of editions across all books.
+  int32 total_editions = 3 [json_name = "total_editions"];
+
+  // Total number of bookshelf placements.
+  int32 total_placements = 4 [json_name = "total_placements"];
+
+  // Total number of marketplace listings.
+  int32 total_listings = 5 [json_name = "total_listings"];
+
+  // Total number of uploaded images processed.
+  int32 total_uploads = 6 [json_name = "total_uploads"];
+}
+
+// MetricsDashboard is the top-level admin dashboard response.
+// Forward-looking: documents the intended contract for GET /api/metrics.
+// The actual controller returns %{data: Metrics.dashboard()} — the inner
+// shape should converge to this message as the admin panel matures.
+message MetricsDashboard {
+  // High-level platform usage statistics.
+  PlatformStats stats = 1 [json_name = "stats"];
+
+  // Operational cost breakdown for the current billing period.
+  repeated CostItem costs = 2 [json_name = "costs"];
+
+  // Health status of all monitored external data sources.
+  repeated stacks.monitoring.v1.SourceHealthCheck source_health = 3 [json_name = "source_health"];
+
+  // Data quality trend metrics.
+  QualityTrends quality = 4 [json_name = "quality"];
+
+  // Timestamp when this dashboard snapshot was generated.
+  google.protobuf.Timestamp generated_at = 5 [json_name = "generated_at"];
+}

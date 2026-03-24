@@ -1,0 +1,17 @@
+// auth_responses.proto — Authentication response types for The Stacks API.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+import "stacks/common/v1/user.proto";
+
+// AuthResponse is returned after successful authentication (login).
+// JSON shape: {token, user: {...}}
+message AuthResponse {
+  // JWT bearer token for subsequent authenticated requests.
+  string token = 1 [json_name = "token"];
+
+  // The authenticated user's profile.
+  stacks.common.v1.User user = 2 [json_name = "user"];
+}

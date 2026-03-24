@@ -1,0 +1,132 @@
+// listing.proto — Marketplace listing types for books available for sale or trade.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "ListingProto";
+option java_multiple_files = true;
+
+// Condition describes the physical condition of a listed book.
+// Wire values (strings): "new", "like_new", "good", "fair", "poor".
+//
+// Note: The Listing message uses string fields for condition, pricing_mode,
+// and status (matching the Jason.Encoder @derive output). These enums serve
+// as documentation of the valid values and are available for client-side
+// validation. They are not referenced as field types in the Listing message
+// because the controller serializes atoms as plain strings.
+enum Condition {
+  // Default unspecified value; should not be used in practice.
+  CONDITION_UNSPECIFIED = 0;
+
+  // Brand new, unread copy.
+  CONDITION_NEW = 1;
+
+  // Virtually indistinguishable from new.
+  CONDITION_LIKE_NEW = 2;
+
+  // Minor wear but fully functional; no major defects.
+  CONDITION_GOOD = 3;
+
+  // Noticeable wear; all pages intact and readable.
+  CONDITION_FAIR = 4;
+
+  // Significant wear; may have damage but still readable.
+  CONDITION_POOR = 5;
+}
+
+// PricingMode indicates how the seller wants to handle pricing.
+// Wire values (strings): "fixed", "offer".
+enum PricingMode {
+  // Default unspecified value; should not be used in practice.
+  PRICING_MODE_UNSPECIFIED = 0;
+
+  // Seller has set a fixed price.
+  PRICING_MODE_FIXED = 1;
+
+  // Seller is open to offers from buyers.
+  PRICING_MODE_OFFER = 2;
+}
+
+// ListingStatus tracks the lifecycle of a marketplace listing.
+// Wire values (strings): "draft", "active", "sold", "removed", "expired".
+enum ListingStatus {
+  // Default unspecified value; should not be used in practice.
+  LISTING_STATUS_UNSPECIFIED = 0;
+
+  // Listing is saved but not yet publicly visible.
+  LISTING_STATUS_DRAFT = 1;
+
+  // Listing is live and visible to other users.
+  LISTING_STATUS_ACTIVE = 2;
+
+  // The book has been sold through the platform.
+  LISTING_STATUS_SOLD = 3;
+
+  // The listing has expired after its visibility period ended.
+  LISTING_STATUS_EXPIRED = 4;
+
+  // The seller has manually removed the listing.
+  LISTING_STATUS_REMOVED = 5;
+}
+
+// Listing represents a book listed for sale or trade on the marketplace.
+// Serialized via Jason.Encoder @derive on Stacks.Marketplace.Listing.
+//
+// JSON shape: {id, status, pricing_mode, price_cents, currency, condition,
+//              description, contact_info, photo_urls, listed_at, expires_at,
+//              sold_at, created_at, updated_at, book, seller}
+message Listing {
+  // UUID of the listing record.
+  string id = 1 [json_name = "id"];
+
+  // Physical condition of the listed book (string on wire, e.g. "good").
+  string condition = 2 [json_name = "condition"];
+
+  // How the seller wants to handle pricing (string on wire, e.g. "fixed").
+  string pricing_mode = 3 [json_name = "pricing_mode"];
+
+  // Price in cents (the schema field is price_cents, not price_zar).
+  int32 price_cents = 4 [json_name = "price_cents"];
+
+  // Contact information for the seller (e.g. email, phone).
+  string contact_info = 5 [json_name = "contact_info"];
+
+  // Seller's description or notes about this listing.
+  string description = 6 [json_name = "description"];
+
+  // Current status of the listing in its lifecycle (string on wire, e.g. "active").
+  string status = 7 [json_name = "status"];
+
+  // When the listing was created.
+  string created_at = 8 [json_name = "created_at"];
+
+  // Reserved: field 9 was embedded book object — replaced with separate fields below.
+  reserved 9;
+
+  // Currency code (default "ZAR").
+  string currency = 10 [json_name = "currency"];
+
+  // URLs of listing photos.
+  repeated string photo_urls = 11 [json_name = "photo_urls"];
+
+  // When the listing became active (null if still draft).
+  string listed_at = 12 [json_name = "listed_at"];
+
+  // When the listing expires (null if no expiry).
+  string expires_at = 13 [json_name = "expires_at"];
+
+  // When the listing was sold (null if not sold).
+  string sold_at = 14 [json_name = "sold_at"];
+
+  // When the listing was last updated.
+  string updated_at = 15 [json_name = "updated_at"];
+
+  // The book being listed (embedded via Jason.Encoder if preloaded).
+  // This is the full book struct, not just an ID.
+  string book_id = 16 [json_name = "book_id"];
+
+  // The seller (embedded User struct via Jason.Encoder if preloaded).
+  string seller_id = 17 [json_name = "seller_id"];
+}

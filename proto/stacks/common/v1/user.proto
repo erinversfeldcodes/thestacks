@@ -1,0 +1,74 @@
+// user.proto — User identity and role types for authentication and authorization.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "UserProto";
+option java_multiple_files = true;
+
+// UserRole distinguishes platform owner from regular users.
+// Wire values (strings sent by AuthController): "owner", "user".
+// Mapping: "owner" -> OWNER (1), "user" -> USER (2).
+enum UserRole {
+  // Default unspecified value; should not be used in practice.
+  USER_ROLE_UNSPECIFIED = 0;
+
+  // Platform owner with full administrative privileges.
+  USER_ROLE_OWNER = 1;
+
+  // Standard registered user.
+  USER_ROLE_USER = 2;
+}
+
+// ProfileVisibility controls who can view a user's profile and activity.
+// Wire values (strings sent by AuthController): "owner", "group", "platform".
+// Mapping: "owner" -> OWNER (1), "group" -> GROUP (2), "platform" -> PLATFORM (3).
+enum ProfileVisibility {
+  // Default unspecified value; should not be used in practice.
+  PROFILE_VISIBILITY_UNSPECIFIED = 0;
+
+  // Profile visible only to the owning user.
+  PROFILE_VISIBILITY_OWNER = 1;
+
+  // Profile visible to members of the same reading group.
+  PROFILE_VISIBILITY_GROUP = 2;
+
+  // Profile visible to all platform users.
+  PROFILE_VISIBILITY_PLATFORM = 3;
+}
+
+// User represents a registered user of The Stacks platform.
+// Matches the output of AuthController.format_user/1.
+//
+// JSON shape: {id, email, display_name, role, profile_visibility,
+//              age_verified, consent_analytics, country_code, city}
+message User {
+  // UUID of the user record.
+  string id = 1 [json_name = "id"];
+
+  // User's email address (personal data, GDPR-classified).
+  string email = 2 [json_name = "email"];
+
+  // User-chosen display name shown on the platform.
+  string display_name = 3 [json_name = "display_name"];
+
+  // The user's role on the platform (string on wire, e.g. "owner", "user").
+  string role = 4 [json_name = "role"];
+
+  // ISO 3166-1 alpha-2 country code for the user's location.
+  string country_code = 5 [json_name = "country_code"];
+
+  // City name for the user's location.
+  string city = 6 [json_name = "city"];
+
+  // Whether the user has consented to analytics data collection.
+  bool consent_analytics = 7 [json_name = "consent_analytics"];
+
+  // Whether the user has verified their age for age-gated content.
+  bool age_verified = 8 [json_name = "age_verified"];
+
+  // Who can view this user's profile (string on wire, e.g. "owner", "group", "platform").
+  string profile_visibility = 9 [json_name = "profile_visibility"];
+}
