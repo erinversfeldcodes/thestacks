@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package stacks.common.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option java_package = "com.thestacks.common.v1";
 option java_outer_classname = "UserProto";
 option java_multiple_files = true;
@@ -71,4 +73,46 @@ message User {
 
   // Who can view this user's profile (string on wire, e.g. "owner", "group", "platform").
   string profile_visibility = 9 [json_name = "profile_visibility"];
+
+  // Argon2 hash of the user's password. DB-only — never sent on the wire.
+  string password_hash = 10 [json_name = "password_hash"];
+
+  // User's personal website URL.
+  string website_url = 11 [json_name = "website_url"];
+
+  // Timestamp of when analytics consent was granted or revoked.
+  google.protobuf.Timestamp consent_analytics_at = 12 [json_name = "consent_analytics_at"];
+
+  // Whether the user has completed onboarding.
+  bool onboarding_completed = 13 [json_name = "onboarding_completed"];
+
+  // Whether the user wants notifications for wishlist book availability.
+  bool notify_wishlist_availability = 14 [json_name = "notify_wishlist_availability"];
+
+  // Whether the user wants notifications for marketplace activity.
+  bool notify_marketplace = 15 [json_name = "notify_marketplace"];
+
+  // Whether the user wants notifications for group invitations.
+  bool notify_group_invitations = 16 [json_name = "notify_group_invitations"];
+
+  // Whether the user wants notifications for matching events.
+  bool notify_event_matches = 17 [json_name = "notify_event_matches"];
+
+  // Whether the user's email address has been confirmed.
+  bool email_confirmed = 18 [json_name = "email_confirmed"];
+
+  // Token used for email confirmation flow.
+  string email_confirmation_token = 19 [json_name = "email_confirmation_token"];
+
+  // Token used for password reset flow.
+  string password_reset_token = 20 [json_name = "password_reset_token"];
+
+  // When the password reset token was sent.
+  google.protobuf.Timestamp password_reset_sent_at = 21 [json_name = "password_reset_sent_at"];
+
+  // When this user account was created.
+  google.protobuf.Timestamp created_at = 22 [json_name = "created_at"];
+
+  // When this user account was last updated.
+  google.protobuf.Timestamp updated_at = 23 [json_name = "updated_at"];
 }

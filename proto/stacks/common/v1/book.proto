@@ -86,6 +86,15 @@ message Author {
 
   // Short biographical description of the author.
   string bio = 5 [json_name = "bio"];
+
+  // Open Library author identifier for cross-referencing.
+  string open_library_id = 6 [json_name = "open_library_id"];
+
+  // When this author record was created.
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
+
+  // When this author record was last updated.
+  google.protobuf.Timestamp updated_at = 8 [json_name = "updated_at"];
 }
 
 // Book represents a work (the abstract creative work, not a specific edition).
@@ -153,9 +162,9 @@ message Edition {
   // UUID of the edition record.
   string id = 1 [json_name = "id"];
 
-  // Reserved: field 2 was book_id — domain-internal, not sent on wire.
+  // Reserved: field number 2 was originally book_id on wire. Number preserved; name
+  // re-used at field 13 for DB-only persistence mapping.
   reserved 2;
-  reserved "book_id";
 
   // Verified ISBN string for this edition (plain string, e.g. "9780140449136").
   // The ISBN hard gate applies — no edition enters the system without verification.
@@ -183,4 +192,19 @@ message Edition {
 
   // Human-readable format label for API compatibility (e.g. "Hardcover", "Paperback").
   string format_label = 10 [json_name = "format_label"];
+
+  // Open Library edition identifier for cross-referencing.
+  string open_library_id = 11 [json_name = "open_library_id"];
+
+  // Google Books volume identifier for cross-referencing.
+  string google_books_id = 12 [json_name = "google_books_id"];
+
+  // Foreign key to the parent book (work). DB-only field for persistence mapping.
+  string book_id = 13 [json_name = "book_id"];
+
+  // When this edition record was created.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+
+  // When this edition record was last updated.
+  google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 }

@@ -60,6 +60,12 @@ message BookAssociation {
   // Association status: "pending", "confirmed", or "dismissed".
   // Stored as a plain string to match the controller's wire format.
   string status = 8 [json_name = "status"];
+
+  // Foreign key to the parent blog post. DB-only — not sent on API wire.
+  string post_id = 9 [json_name = "post_id"];
+
+  // When this association was created.
+  string created_at = 10 [json_name = "created_at"];
 }
 
 // BlogPost represents a user's reading journal entry or blog post.
@@ -103,6 +109,9 @@ message BlogPost {
 
   // When the blog post was last updated.
   string updated_at = 11 [json_name = "updated_at"];
+
+  // UUID of the group that can see this post (when visibility is "group").
+  string visibility_group_id = 12 [json_name = "visibility_group_id"];
 }
 
 // BlogPostSummary is a lightweight view of a blog post for list displays.
