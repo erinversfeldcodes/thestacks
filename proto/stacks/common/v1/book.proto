@@ -8,6 +8,8 @@ option java_package = "com.thestacks.common.v1";
 option java_outer_classname = "BookProto";
 option java_multiple_files = true;
 
+import "google/protobuf/timestamp.proto";
+
 // ISBNFormat distinguishes the two standard ISBN formats.
 enum ISBNFormat {
   // Default unspecified value; should not be used in practice.
@@ -102,9 +104,8 @@ message Book {
   // Title of the work.
   string title = 2 [json_name = "title"];
 
-  // Reserved: field 3 was author_id, removed — use embedded author instead.
-  reserved 3;
-  reserved "author_id";
+  // Foreign key to op.authors table. DB-only — API sends embedded author object.
+  string author_id = 3 [json_name = "author_id"];
 
   // Short description or blurb for the work.
   string description = 4 [json_name = "description"];
@@ -135,6 +136,12 @@ message Book {
 
   // BISAC subject codes for trade classification.
   repeated string bisac_codes = 13 [json_name = "bisac_codes"];
+
+  // When this book record was created in the database.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+
+  // When this book record was last modified.
+  google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 }
 
 // Edition represents a specific ISBN/format/publisher combination of a Book work.

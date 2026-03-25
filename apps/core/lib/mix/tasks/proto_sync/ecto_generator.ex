@@ -4,16 +4,52 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @doc """
-  Generates a read-only Ecto schema module from a manifest table entry and proto fields.
+  Generates an Ecto schema module from a manifest table entry and proto fields.
 
-  The generated schema has no changeset, no `@derive`, and no business logic.
-  Context modules own validation and changesets.
+  Supports:
+  - `skip: true` in field_overrides to exclude API-only fields
+  - `belongs_to: ModuleName` in field_overrides to generate belongs_to associations
+  - `associations: [{:has_many, name, module, opts}]` in table entry for has_many
+  - Standard field generation with type mapping and defaults
   """
   def generate(table, fields) do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = inspect(table.ecto_module)
+    ts_fields = timestamp_field_names(table)
 
-    field_lines = Enum.map_join(fields, "\n", fn field -> field_line(field, overrides) end)
+    # Partition fields into: belongs_to associations, regular fields, and skipped
+    {belongs_to_lines, field_lines} =
+      fields
+      |> Enum.reject(fn field ->
+        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+      end)
+      |> Enum.reduce({[], []}, fn field, {bt_acc, f_acc} ->
+        field_name = String.to_atom(field.name)
+        override = Map.get(overrides, field_name, %{})
+
+        case Map.get(override, :belongs_to) do
+          nil ->
+            {bt_acc, [field_line(field, overrides) | f_acc]}
+
+          assoc_module ->
+            # belongs_to: generate the association, skip the _id field
+            assoc_name = field.name |> String.replace_suffix("_id", "") |> String.to_atom()
+            line = "    belongs_to :#{assoc_name}, #{inspect(assoc_module)}, type: :binary_id"
+            {[line | bt_acc], f_acc}
+        end
+      end)
+
+    belongs_to_str = belongs_to_lines |> Enum.reverse() |> Enum.join("\n")
+    fields_str = field_lines |> Enum.reverse() |> Enum.join("\n")
+
+    # has_many associations from table-level config
+    has_many_lines = has_many_block(table)
+
+    # Combine: belongs_to first, then has_many, then fields
+    schema_body =
+      [belongs_to_str, has_many_lines, fields_str]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
 
     timestamps_line = timestamps_block(table)
 
@@ -32,7 +68,7 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
       @type t :: %__MODULE__{}
 
       schema "#{table.table_name}" do
-    #{field_lines}#{timestamps_line}
+    #{schema_body}#{timestamps_line}
       end
     end
     """
@@ -54,6 +90,17 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
   defp format_type({:array, inner}), do: "{:array, #{format_type(inner)}}"
   defp format_type(type) when is_atom(type), do: ":#{type}"
 
+  defp has_many_block(table) do
+    associations = Map.get(table, :associations, [])
+
+    associations
+    |> Enum.filter(fn {type, _, _, _} -> type == :has_many end)
+    |> Enum.map_join("\n", fn {:has_many, name, module, opts} ->
+      opts_str = Enum.map_join(opts, ", ", fn {k, v} -> "#{k}: :#{v}" end)
+      "    has_many :#{name}, #{inspect(module)}, #{opts_str}"
+    end)
+  end
+
   defp timestamps_block(%{timestamps: false}), do: ""
 
   defp timestamps_block(%{timestamps: :standard}) do
@@ -61,4 +108,14 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
   end
 
   defp timestamps_block(_), do: ""
+
+  defp skip_field?(field, overrides) do
+    field_name = String.to_atom(field.name)
+    override = Map.get(overrides, field_name, %{})
+    Map.get(override, :skip, false)
+  end
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end

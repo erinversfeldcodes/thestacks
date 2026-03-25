@@ -6,6 +6,7 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
 
   Output is a simple `select ... from {{ source(...) }}` view.
   Column order: id first, then proto fields by field number, then timestamps.
+  Skips API-only fields (skip: true) and belongs_to fields (use the _id directly).
   """
   def generate(table, fields) do
     columns = build_column_list(table, fields)
@@ -23,7 +24,15 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
   end
 
   defp build_column_list(table, fields) do
-    proto_columns = Enum.map(fields, fn field -> "    #{field.name}" end)
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
+
+    filtered =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+      end)
+
+    proto_columns = Enum.map(filtered, fn field -> "    #{field.name}" end)
     timestamp_columns = timestamp_cols(table)
 
     ["    id" | proto_columns] ++ timestamp_columns
@@ -31,4 +40,14 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
 
   defp timestamp_cols(%{timestamps: :standard}), do: ["    created_at", "    updated_at"]
   defp timestamp_cols(_), do: []
+
+  defp skip_field?(field, overrides) do
+    field_name = String.to_atom(field.name)
+    override = Map.get(overrides, field_name, %{})
+    Map.get(override, :skip, false)
+  end
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end
