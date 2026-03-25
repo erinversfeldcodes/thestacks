@@ -11,11 +11,125 @@ defmodule Stacks.Accounts do
   # chained call. This is a known false positive.
   @dialyzer :no_opaque
 
+  import Ecto.Changeset
+
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Events
   alias Stacks.Workers.VisibilityRecapJob
+
+  # ---------------------------------------------------------------------------
+  # Changeset functions (migrated from User schema for codegen compatibility)
+  # ---------------------------------------------------------------------------
+
+  @registration_required_fields [:email, :password]
+  @registration_optional_fields [:display_name, :role, :profile_visibility, :age_verified]
+
+  @doc "Changeset for registration."
+  def registration_changeset(user, attrs) do
+    user
+    |> cast(attrs, @registration_required_fields ++ @registration_optional_fields)
+    |> validate_required(@registration_required_fields)
+    |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> validate_inclusion(:role, ["owner", "user"])
+    |> validate_inclusion(:profile_visibility, ["owner", "group", "platform"])
+    |> unique_constraint(:email)
+    |> hash_password()
+  end
+
+  @doc "Changeset for consent updates."
+  def consent_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:consent_analytics, :consent_analytics_at])
+  end
+
+  @doc "Changeset for user settings (age verification)."
+  def settings_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:age_verified])
+  end
+
+  @doc "Changeset for profile update (display_name, website_url)."
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name, :website_url])
+    |> validate_length(:website_url, max: 500)
+  end
+
+  @doc "Changeset for email update. Requires current_password to be verified externally."
+  def email_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email])
+    |> validate_required([:email])
+    |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
+    |> unique_constraint(:email)
+  end
+
+  @doc "Changeset for location update (country_code, city)."
+  def location_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:country_code, :city])
+    |> validate_length(:country_code, is: 2)
+    |> validate_length(:city, max: 200)
+  end
+
+  @doc "Changeset for password change (new_password). Caller must verify current password externally."
+  def password_change_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> hash_password()
+  end
+
+  @doc "Changeset for notification preferences."
+  def notifications_changeset(user, attrs) do
+    user
+    |> cast(attrs, [
+      :notify_wishlist_availability,
+      :notify_marketplace,
+      :notify_group_invitations,
+      :notify_event_matches
+    ])
+  end
+
+  @doc "Changeset for profile visibility setting."
+  def profile_visibility_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:profile_visibility])
+    |> validate_inclusion(:profile_visibility, ["platform", "owner"])
+  end
+
+  @doc "Changeset for email confirmation token storage."
+  def email_confirmation_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email_confirmation_token, :email_confirmed])
+  end
+
+  @doc "Changeset for password reset token storage."
+  def password_reset_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password_reset_token, :password_reset_sent_at])
+  end
+
+  @doc "Changeset for completing a password reset. Validates the new plaintext password before hashing."
+  def password_update_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password, :password_reset_token, :password_reset_sent_at])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> hash_password()
+  end
+
+  defp hash_password(%Ecto.Changeset{valid?: true, changes: %{password: password}} = changeset) do
+    changeset
+    |> put_change(:password_hash, Argon2.hash_pwd_salt(password))
+    |> delete_change(:password)
+  end
+
+  defp hash_password(changeset), do: changeset
 
   @doc """
   Returns a user by ID, or nil if not found.
@@ -50,13 +164,13 @@ defmodule Stacks.Accounts do
     attrs = maybe_assign_owner_role(attrs)
 
     Multi.new()
-    |> Multi.insert(:user, User.registration_changeset(%User{}, attrs))
+    |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
       token =
         Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
       user
-      |> User.email_confirmation_changeset(%{
+      |> email_confirmation_changeset(%{
         email_confirmed: false,
         email_confirmation_token: token
       })
@@ -126,7 +240,7 @@ defmodule Stacks.Accounts do
   def update_age_verification(user_id, age_verified) when is_boolean(age_verified) do
     user_id
     |> get_user!()
-    |> User.settings_changeset(%{age_verified: age_verified})
+    |> settings_changeset(%{age_verified: age_verified})
     |> Repo.update()
   end
 
@@ -140,7 +254,7 @@ defmodule Stacks.Accounts do
     result =
       user_id
       |> get_user!()
-      |> User.profile_visibility_changeset(%{profile_visibility: visibility})
+      |> profile_visibility_changeset(%{profile_visibility: visibility})
       |> Repo.update()
 
     case result do
@@ -175,7 +289,7 @@ defmodule Stacks.Accounts do
       update_profile_with_email(user, attrs)
     else
       user
-      |> User.profile_changeset(attrs)
+      |> profile_changeset(attrs)
       |> Repo.update()
       |> tap_emit_profile_updated()
     end
@@ -184,9 +298,9 @@ defmodule Stacks.Accounts do
   defp update_profile_with_email(user, attrs) do
     with :ok <- verify_password(user, Map.get(attrs, "current_password")) do
       Multi.new()
-      |> Multi.update(:profile, User.profile_changeset(user, attrs))
+      |> Multi.update(:profile, profile_changeset(user, attrs))
       |> Multi.update(:email, fn %{profile: u} ->
-        User.email_changeset(u, %{"email" => attrs["email"]})
+        email_changeset(u, %{"email" => attrs["email"]})
       end)
       |> Multi.run(:emit_event, fn _repo, %{email: u} ->
         Events.emit_safe(%{
@@ -226,7 +340,7 @@ defmodule Stacks.Accounts do
   def update_location(%User{} = user, attrs) do
     result =
       user
-      |> User.location_changeset(attrs)
+      |> location_changeset(attrs)
       |> Repo.update()
 
     case result do
@@ -255,7 +369,7 @@ defmodule Stacks.Accounts do
     with :ok <- verify_password(user, current_password) do
       result =
         user
-        |> User.password_change_changeset(%{"password" => new_password})
+        |> password_change_changeset(%{"password" => new_password})
         |> Repo.update()
 
       case result do
@@ -282,7 +396,7 @@ defmodule Stacks.Accounts do
   def update_notifications(%User{} = user, attrs) do
     result =
       user
-      |> User.notifications_changeset(attrs)
+      |> notifications_changeset(attrs)
       |> Repo.update()
 
     case result do

@@ -78,8 +78,8 @@ message Author {
   string name = 2 [json_name = "name"];
 
   // Optional author website URL.
-  // Controller serializes author.website_url as JSON key "website".
-  string website = 3 [json_name = "website"];
+  // Proto field is website_url (matches DB column); wire JSON key is "website".
+  string website_url = 3 [json_name = "website"];
 
   // Optional RSS/Atom feed URL for the author's blog or newsletter.
   string rss_feed_url = 4 [json_name = "rss_feed_url"];

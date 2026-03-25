@@ -286,6 +286,13 @@ message ThirdSpace {
   // When the space was last known to be active.
   google.protobuf.Timestamp last_active_at = 11 [json_name = "last_active_at"];
 
+  // Whether the space has opted out of the platform.
+  // Note: fields 14-15 were added after created_at (12) and updated_at (13).
+  bool opted_out = 14 [json_name = "opted_out"];
+
+  // When the space opted out.
+  google.protobuf.Timestamp opted_out_at = 15 [json_name = "opted_out_at"];
+
   // When this record was created.
   google.protobuf.Timestamp created_at = 12 [json_name = "created_at"];
 

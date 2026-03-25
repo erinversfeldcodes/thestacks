@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.ProtoSync.Descriptor do
-  @moduledoc false
+  @moduledoc "Parses buf-built JSON FileDescriptorSet and extracts message fields."
 
   @doc """
   Parses a JSON FileDescriptorSet produced by `buf build`.

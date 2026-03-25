@@ -101,15 +101,24 @@ defmodule Mix.Tasks.Proto.Sync do
   end
 
   defp generate_create_migration(table, fields, migrations_dir) do
-    timestamp = MigrationGenerator.generate_timestamp()
+    already_exists =
+      File.dir?(migrations_dir) and
+        migrations_dir
+        |> File.ls!()
+        |> Enum.any?(&String.contains?(&1, "create_#{table.table_name}.exs"))
 
-    content = MigrationGenerator.generate_create_table(table, fields, timestamp)
+    if already_exists do
+      Mix.shell().info("Skipping migration for #{table.table_name} — already exists")
+    else
+      timestamp = MigrationGenerator.generate_timestamp()
+      content = MigrationGenerator.generate_create_table(table, fields, timestamp)
 
-    filename = "#{timestamp}_create_#{table.table_name}.exs"
-    path = Path.join(migrations_dir, filename)
-    File.mkdir_p!(migrations_dir)
-    File.write!(path, content)
-    Mix.shell().info("Generated migration #{path}")
+      filename = "#{timestamp}_create_#{table.table_name}.exs"
+      path = Path.join(migrations_dir, filename)
+      File.mkdir_p!(migrations_dir)
+      File.write!(path, content)
+      Mix.shell().info("Generated migration #{path}")
+    end
   end
 
   defp generate_delta_migration(table, fields, migrations_dir) do
@@ -119,7 +128,7 @@ defmodule Mix.Tasks.Proto.Sync do
     # Filter to only DB-column fields (exclude id, timestamps, skipped API-only fields)
     db_fields =
       Enum.reject(fields, fn field ->
-        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
       end)
 
     existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
@@ -151,13 +160,14 @@ defmodule Mix.Tasks.Proto.Sync do
     end
   end
 
-  defp skip_field?(field, overrides) do
+  defp api_only_field?(field, overrides) do
     field_name = String.to_atom(field.name)
     override = Map.get(overrides, field_name, %{})
-    Map.get(override, :skip, false)
+    Map.get(override, :api_only, false)
   end
 
   defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
   defp timestamp_field_names(%{timestamps: false}), do: []
   defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
@@ -219,7 +229,7 @@ defmodule Mix.Tasks.Proto.Sync do
     # Filter to only DB-column fields
     db_fields =
       Enum.reject(fields, fn field ->
-        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
       end)
 
     if migration_exists do

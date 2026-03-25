@@ -107,6 +107,16 @@ mix deps.get
 
 success "Elixir dependencies installed"
 
+# ── 4b. Generate Ecto schemas from proto ────────────────────────────────────
+step "Ecto proto schemas"
+if command -v buf &>/dev/null; then
+    info "Generating Ecto schemas + dbt models from .proto definitions..."
+    (cd apps/core && mix proto.sync)
+    success "Ecto schemas generated to apps/core/lib/stacks/gen/"
+else
+    warn "buf not installed — skipping proto.sync (run: brew install bufbuild/buf/buf)"
+fi
+
 # ── 5. Elm / Node tooling ─────────────────────────────────────────────────────
 step "Elm / Node"
 info "Installing npm packages in frontend/..."

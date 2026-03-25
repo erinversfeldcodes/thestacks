@@ -11,7 +11,7 @@ defmodule Stacks.AccountsPropertyTest do
 
   import Stacks.Factory
 
-  alias Stacks.Accounts.User
+  alias Stacks.Accounts
 
   describe "location_changeset/2" do
     property "never crashes on arbitrary country_code and city strings" do
@@ -21,7 +21,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 200
             ) do
         user = build(:user)
-        result = User.location_changeset(user, %{"country_code" => country, "city" => city})
+        result = Accounts.location_changeset(user, %{"country_code" => country, "city" => city})
         assert %Ecto.Changeset{} = result
       end
     end
@@ -32,7 +32,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 100
             ) do
         user = build(:user)
-        cs = User.location_changeset(user, %{"country_code" => country})
+        cs = Accounts.location_changeset(user, %{"country_code" => country})
         # No country_code error when length is exactly 2
         refute Map.has_key?(cs.errors |> Map.new(fn {k, _} -> {k, true} end), :country_code)
       end
@@ -46,7 +46,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 100
             ) do
         user = build(:user)
-        cs = User.location_changeset(user, %{"country_code" => country})
+        cs = Accounts.location_changeset(user, %{"country_code" => country})
         assert cs.errors[:country_code] != nil
       end
     end
@@ -60,7 +60,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 200
             ) do
         user = build(:user)
-        result = User.profile_changeset(user, %{"display_name" => name, "website_url" => url})
+        result = Accounts.profile_changeset(user, %{"display_name" => name, "website_url" => url})
         assert %Ecto.Changeset{} = result
       end
     end
@@ -71,7 +71,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 100
             ) do
         user = build(:user)
-        cs = User.profile_changeset(user, %{"website_url" => url})
+        cs = Accounts.profile_changeset(user, %{"website_url" => url})
         refute Map.has_key?(cs.errors |> Map.new(fn {k, _} -> {k, true} end), :website_url)
       end
     end
@@ -83,7 +83,7 @@ defmodule Stacks.AccountsPropertyTest do
             ) do
         url = String.duplicate("a", 500) <> extra
         user = build(:user)
-        cs = User.profile_changeset(user, %{"website_url" => url})
+        cs = Accounts.profile_changeset(user, %{"website_url" => url})
         assert cs.errors[:website_url] != nil
       end
     end
@@ -96,7 +96,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 200
             ) do
         user = build(:user)
-        result = User.password_change_changeset(user, %{"password" => pw})
+        result = Accounts.password_change_changeset(user, %{"password" => pw})
         assert %Ecto.Changeset{} = result
       end
     end
@@ -107,7 +107,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 100
             ) do
         user = build(:user)
-        cs = User.password_change_changeset(user, %{"password" => pw})
+        cs = Accounts.password_change_changeset(user, %{"password" => pw})
         refute Map.has_key?(cs.errors |> Map.new(fn {k, _} -> {k, true} end), :password)
       end
     end
@@ -118,7 +118,7 @@ defmodule Stacks.AccountsPropertyTest do
               max_runs: 100
             ) do
         user = build(:user)
-        cs = User.password_change_changeset(user, %{"password" => pw})
+        cs = Accounts.password_change_changeset(user, %{"password" => pw})
         assert cs.errors[:password] != nil
       end
     end

@@ -3,15 +3,19 @@ defmodule Stacks.Social.UserBlockTest do
 
   import Stacks.Factory
 
+  alias Stacks.Social
   alias Stacks.Social.UserBlock
 
-  describe "changeset/2" do
+  describe "user_block_changeset/2" do
     test "is valid with blocker and blocked" do
       blocker = insert(:user)
       blocked = insert(:user)
 
       changeset =
-        UserBlock.changeset(%UserBlock{}, %{blocker_id: blocker.id, blocked_id: blocked.id})
+        Social.user_block_changeset(%UserBlock{}, %{
+          blocker_id: blocker.id,
+          blocked_id: blocked.id
+        })
 
       assert changeset.valid?
     end
@@ -20,7 +24,7 @@ defmodule Stacks.Social.UserBlockTest do
       blocked = insert(:user)
 
       changeset =
-        UserBlock.changeset(%UserBlock{}, %{blocked_id: blocked.id})
+        Social.user_block_changeset(%UserBlock{}, %{blocked_id: blocked.id})
 
       refute changeset.valid?
       assert %{blocker_id: [_ | _]} = errors_on(changeset)
@@ -30,7 +34,7 @@ defmodule Stacks.Social.UserBlockTest do
       blocker = insert(:user)
 
       changeset =
-        UserBlock.changeset(%UserBlock{}, %{blocker_id: blocker.id})
+        Social.user_block_changeset(%UserBlock{}, %{blocker_id: blocker.id})
 
       refute changeset.valid?
       assert %{blocked_id: [_ | _]} = errors_on(changeset)

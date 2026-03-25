@@ -11,6 +11,7 @@ defmodule Stacks.Enrichment.Reviews do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Enrichment
   alias Stacks.Enrichment.ReviewSnapshot
 
   @doc """
@@ -22,7 +23,7 @@ defmodule Stacks.Enrichment.Reviews do
   @spec upsert_snapshot(map()) :: {:ok, ReviewSnapshot.t()} | {:error, Ecto.Changeset.t()}
   def upsert_snapshot(attrs) do
     %ReviewSnapshot{}
-    |> ReviewSnapshot.changeset(attrs)
+    |> Enrichment.review_snapshot_changeset(attrs)
     |> Repo.insert(
       on_conflict:
         {:replace,

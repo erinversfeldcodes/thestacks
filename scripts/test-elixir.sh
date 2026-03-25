@@ -7,6 +7,10 @@ source "$REPO_ROOT/scripts/lib/postgres.sh"
 
 ensure_postgres
 
+# Generate Ecto schemas from proto definitions (gen/ is gitignored).
+echo "==> Generating Ecto schemas from proto..."
+(cd "$REPO_ROOT/apps/core" && mix proto.sync)
+
 # Reset the test DB so migrations always run cleanly from a blank slate.
 MIX_ENV=test mix ecto.drop --quiet
 MIX_ENV=test mix ecto.create --quiet

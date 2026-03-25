@@ -71,6 +71,12 @@ message User {
   // Whether the user has verified their age for age-gated content.
   bool age_verified = 8 [json_name = "age_verified"];
 
+  // When the user's age was verified.
+  google.protobuf.Timestamp age_verified_at = 24 [json_name = "age_verified_at"];
+
+  // Provider used for age verification (e.g. "manual", "id_check").
+  string age_verification_provider = 25 [json_name = "age_verification_provider"];
+
   // Who can view this user's profile (string on wire, e.g. "owner", "group", "platform").
   string profile_visibility = 9 [json_name = "profile_visibility"];
 

@@ -10,6 +10,7 @@ defmodule Stacks.Discovery do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Enrichment
   alias Stacks.Enrichment.DiscoveredSource
   alias Stacks.Events
 
@@ -18,7 +19,7 @@ defmodule Stacks.Discovery do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Creates a new discovered source with `status: :pending_review` and
+  Creates a new discovered source with `status: "pending_review"` and
   `discovered_at` set to the current timestamp.
 
   Returns `{:error, :duplicate}` if a source with the same URL already exists.
@@ -34,11 +35,11 @@ defmodule Stacks.Discovery do
 
       attrs =
         attrs
-        |> Map.put_new(:status, :pending_review)
+        |> Map.put_new(:status, "pending_review")
         |> Map.put_new(:discovered_at, now)
 
       %DiscoveredSource{}
-      |> DiscoveredSource.changeset(attrs)
+      |> Enrichment.discovered_source_changeset(attrs)
       |> Repo.insert()
     end
   end
@@ -62,7 +63,7 @@ defmodule Stacks.Discovery do
   @doc "Returns all sources with `status: \"pending_review\"`."
   @spec pending_sources() :: [DiscoveredSource.t()]
   def pending_sources do
-    Repo.all(from(s in DiscoveredSource, where: s.status == :pending_review))
+    Repo.all(from(s in DiscoveredSource, where: s.status == "pending_review"))
   end
 
   @doc """
@@ -73,7 +74,7 @@ defmodule Stacks.Discovery do
   """
   @spec sources_for_location(String.t() | nil, String.t() | nil) :: [DiscoveredSource.t()]
   def sources_for_location(city, country_code) do
-    query = from(s in DiscoveredSource, where: s.status == :approved)
+    query = from(s in DiscoveredSource, where: s.status == "approved")
 
     query =
       if city do
@@ -129,25 +130,21 @@ defmodule Stacks.Discovery do
   defp maybe_filter_status(query, nil), do: query
 
   defp maybe_filter_status(query, status) when is_atom(status) do
-    from(s in query, where: s.status == ^status)
+    maybe_filter_status(query, to_string(status))
   end
 
   defp maybe_filter_status(query, status) when is_binary(status) do
-    maybe_filter_status(query, String.to_existing_atom(status))
-  rescue
-    ArgumentError -> query
+    from(s in query, where: s.status == ^status)
   end
 
   defp maybe_filter_type(query, nil), do: query
 
   defp maybe_filter_type(query, type) when is_atom(type) do
-    from(s in query, where: s.type == ^type)
+    maybe_filter_type(query, to_string(type))
   end
 
   defp maybe_filter_type(query, type) when is_binary(type) do
-    maybe_filter_type(query, String.to_existing_atom(type))
-  rescue
-    ArgumentError -> query
+    from(s in query, where: s.type == ^type)
   end
 
   defp parse_int(nil, default), do: default
@@ -181,7 +178,7 @@ defmodule Stacks.Discovery do
           {:ok, DiscoveredSource.t()} | {:error, Ecto.Changeset.t()}
   def update_source_status(%DiscoveredSource{} = source, attrs) do
     source
-    |> DiscoveredSource.status_changeset(attrs)
+    |> Enrichment.discovered_source_status_changeset(attrs)
     |> Repo.update()
   end
 
@@ -193,7 +190,7 @@ defmodule Stacks.Discovery do
   def update_confidence(%DiscoveredSource{} = source, confidence)
       when is_float(confidence) do
     source
-    |> DiscoveredSource.confidence_changeset(%{confidence: confidence})
+    |> Enrichment.discovered_source_confidence_changeset(%{confidence: confidence})
     |> Repo.update()
   end
 
@@ -202,7 +199,7 @@ defmodule Stacks.Discovery do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Approves a discovered source. Only sources with `status: :pending_review`
+  Approves a discovered source. Only sources with `status: "pending_review"`
   can be approved. Sets `approved_at` to the current timestamp.
 
   Emits a `source.approved` event on success.
@@ -210,11 +207,11 @@ defmodule Stacks.Discovery do
   @spec approve_source(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
   def approve_source(source_id) when is_binary(source_id) do
-    transition_source(source_id, :approved, "source.approved")
+    transition_source(source_id, "approved", "source.approved")
   end
 
   @doc """
-  Rejects a discovered source. Only sources with `status: :pending_review`
+  Rejects a discovered source. Only sources with `status: "pending_review"`
   can be rejected. Transitions status to `:dismissed`.
 
   Emits a `source.rejected` event on success.
@@ -222,7 +219,7 @@ defmodule Stacks.Discovery do
   @spec reject_source(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
   def reject_source(source_id) when is_binary(source_id) do
-    transition_source(source_id, :dismissed, "source.rejected")
+    transition_source(source_id, "dismissed", "source.rejected")
   end
 
   defp transition_source(source_id, target_status, event_type) do
@@ -230,11 +227,11 @@ defmodule Stacks.Discovery do
       nil ->
         {:error, :not_found}
 
-      %DiscoveredSource{status: :pending_review} = source ->
+      %DiscoveredSource{status: "pending_review"} = source ->
         attrs = %{status: target_status}
 
         attrs =
-          if target_status == :approved do
+          if target_status == "approved" do
             Map.put(attrs, :approved_at, DateTime.utc_now())
           else
             attrs
@@ -265,7 +262,7 @@ defmodule Stacks.Discovery do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Opts a source out by URL. Sets `status: :excluded`, `excluded_at`, and
+  Opts a source out by URL. Sets `status: "excluded"`, `excluded_at`, and
   `exclusion_email`. The URL must match an existing discovered source.
 
   Returns `{:error, :not_found}` if no source matches the URL.
@@ -281,7 +278,7 @@ defmodule Stacks.Discovery do
 
         source ->
           update_source_status(source, %{
-            status: :excluded,
+            status: "excluded",
             excluded_at: DateTime.utc_now(),
             exclusion_email: email
           })

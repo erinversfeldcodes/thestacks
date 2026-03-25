@@ -301,6 +301,16 @@ else
     exit 1
 fi
 
+# ── Generate Ecto schemas from proto ────────────────────────────────────────
+echo ""
+echo "==> Generating Ecto schemas from proto..."
+(cd "$REPO_ROOT/apps/core" && mix proto.sync) \
+    || { echo "FAIL deploy: mix proto.sync failed"; exit 1; }
+if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROOT/apps/core/lib/stacks/gen" 2>/dev/null)" ]]; then
+    echo "FAIL deploy: apps/core/lib/stacks/gen/ is empty after generation"; exit 1
+fi
+echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
+
 # ── Build frontend assets ─────────────────────────────────────────────────────
 echo ""
 echo "==> Rebuilding frontend assets via esbuild..."

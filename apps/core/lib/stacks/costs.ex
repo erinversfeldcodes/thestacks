@@ -8,6 +8,7 @@ defmodule Stacks.Costs do
   data is ever stored or exposed through this context.
   """
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
@@ -130,6 +131,35 @@ defmodule Stacks.Costs do
     ) || 0
   end
 
+  # ── Changesets ────────────────────────────────────────────────────────────
+
+  @platform_cost_valid_categories ~w(hosting compute database domain)
+
+  @doc "Changeset for creating or updating a platform cost line item."
+  def platform_cost_changeset(cost, attrs) do
+    cost
+    |> cast(attrs, [
+      :category,
+      :service,
+      :description,
+      :amount_cents,
+      :currency,
+      :period_start,
+      :period_end
+    ])
+    |> validate_required([
+      :category,
+      :service,
+      :amount_cents,
+      :currency,
+      :period_start,
+      :period_end
+    ])
+    |> validate_inclusion(:category, @platform_cost_valid_categories)
+    |> validate_number(:amount_cents, greater_than_or_equal_to: 0)
+    |> unique_constraint([:service, :period_start, :period_end])
+  end
+
   # ── Upsert ────────────────────────────────────────────────────────────────
 
   @doc """
@@ -140,7 +170,7 @@ defmodule Stacks.Costs do
   def upsert_cost(attrs) do
     result =
       %PlatformCost{}
-      |> PlatformCost.changeset(attrs)
+      |> platform_cost_changeset(attrs)
       |> Repo.insert(
         on_conflict: {:replace, [:amount_cents, :description, :updated_at]},
         conflict_target: [:service, :period_start, :period_end]
