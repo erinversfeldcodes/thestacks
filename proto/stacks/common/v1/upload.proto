@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package stacks.common.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option java_package = "com.thestacks.common.v1";
 option java_outer_classname = "UploadProto";
 option java_multiple_files = true;
@@ -64,4 +66,41 @@ message PollResponse {
 
   // Whether the uploaded image was detected as a duplicate of an existing upload.
   bool is_duplicate = 6 [json_name = "is_duplicate"];
+}
+
+// UploadedImage represents a user-uploaded image stored in the system.
+// Maps to op.uploaded_images table.
+message UploadedImage {
+  // UUID of the uploaded image record.
+  string id = 1 [json_name = "id"];
+
+  // Storage path or key for the image file.
+  string storage_path = 2 [json_name = "storage_path"];
+
+  // Processing status (e.g. "pending", "resolved", "rejected").
+  string status = 3 [json_name = "status"];
+
+  // Human-readable reason if the image was rejected.
+  string rejection_reason = 4 [json_name = "rejection_reason"];
+
+  // When the image was uploaded.
+  google.protobuf.Timestamp uploaded_at = 5 [json_name = "uploaded_at"];
+
+  // When the image expires under GDPR 30-day retention.
+  google.protobuf.Timestamp expires_at = 6 [json_name = "expires_at"];
+
+  // UUIDs of candidate books matched from this image.
+  repeated string book_ids = 7 [json_name = "book_ids"];
+
+  // Foreign key to the resolved book (single match).
+  string book_id = 8 [json_name = "book_id"];
+
+  // Foreign key to the resolved book edition.
+  string book_edition_id = 9 [json_name = "book_edition_id"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
 }
