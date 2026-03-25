@@ -63,11 +63,11 @@ module Api exposing
 import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
-import Json.Encode as Encode
 import Stacks.Api.V1.Admin as ProtoAdmin
 import Stacks.Api.V1.AuthResponses as ProtoAuth
 import Stacks.Api.V1.BookResponses as ProtoBookResp
 import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
+import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
 import Stacks.Common.V1.Upload as ProtoUpload
@@ -184,11 +184,11 @@ register body toMsg =
         { url = baseUrl ++ "/api/auth/register"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string body.email )
-                    , ( "password", Encode.string body.password )
-                    , ( "display_name", Encode.string body.displayName )
-                    ]
+                (Requests.encodeRegisterRequest
+                    { email = body.email
+                    , password = body.password
+                    , displayName = body.displayName
+                    }
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
         }
@@ -203,10 +203,10 @@ login body toMsg =
         { url = baseUrl ++ "/api/auth/login"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string body.email )
-                    , ( "password", Encode.string body.password )
-                    ]
+                (Requests.encodeLoginRequest
+                    { email = body.email
+                    , password = body.password
+                    }
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
         }
@@ -377,8 +377,8 @@ moveBook placementId targetBookshelf token toMsg =
         , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/move"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "bookshelf", Encode.string targetBookshelf ) ]
+                (Requests.encodeMoveBookRequest
+                    { bookshelf = targetBookshelf }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -415,7 +415,7 @@ saveConsent consent token toMsg =
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/gdpr/consent"
-        , body = Http.jsonBody (Encode.object [ ( "consent", Encode.bool consent ) ])
+        , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
@@ -434,7 +434,7 @@ updateAgeVerification verified token toMsg =
         { method = "PUT"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/settings/age_verification"
-        , body = Http.jsonBody (Encode.object [ ( "age_verified", Encode.bool verified ) ])
+        , body = Http.jsonBody (Requests.encodeAgeVerificationRequest { ageVerified = verified })
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
@@ -484,8 +484,8 @@ placeBook bookshelfName bookId token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/placements"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "book_id", Encode.string bookId ) ]
+                (Requests.encodePlaceBookRequest
+                    { bookId = bookId }
                 )
         , expect = Http.expectJson toMsg (Decode.field "placement" placementDecoder)
         , timeout = Nothing
@@ -579,11 +579,12 @@ updateProfile body token toMsg =
         , url = baseUrl ++ "/api/settings/profile"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "display_name", Encode.string body.displayName )
-                    , ( "email", Encode.string body.email )
-                    , ( "website_url", Encode.string body.websiteUrl )
-                    ]
+                (Requests.encodeUpdateProfileRequest
+                    { displayName = body.displayName
+                    , email = body.email
+                    , websiteUrl = body.websiteUrl
+                    , currentPassword = ""
+                    }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -605,10 +606,10 @@ updateLocation body token toMsg =
         , url = "/api/settings/location"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "country_code", Encode.string body.countryCode )
-                    , ( "city", Encode.string body.city )
-                    ]
+                (Requests.encodeUpdateLocationRequest
+                    { countryCode = body.countryCode
+                    , city = body.city
+                    }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -630,10 +631,10 @@ updatePassword body token toMsg =
         , url = baseUrl ++ "/api/settings/password"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "current_password", Encode.string body.currentPassword )
-                    , ( "new_password", Encode.string body.newPassword )
-                    ]
+                (Requests.encodeUpdatePasswordRequest
+                    { currentPassword = body.currentPassword
+                    , newPassword = body.newPassword
+                    }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -665,12 +666,12 @@ updateNotifications prefs token toMsg =
         , url = baseUrl ++ "/api/settings/notifications"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "price_drops", Encode.bool prefs.priceDrops )
-                    , ( "new_reviews", Encode.bool prefs.newReviews )
-                    , ( "author_updates", Encode.bool prefs.authorUpdates )
-                    , ( "event_alerts", Encode.bool prefs.eventAlerts )
-                    ]
+                (Requests.encodeUpdateNotificationsRequest
+                    { notifyWishlistAvailability = prefs.priceDrops
+                    , notifyMarketplace = prefs.newReviews
+                    , notifyGroupInvitations = prefs.authorUpdates
+                    , notifyEventMatches = prefs.eventAlerts
+                    }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -709,10 +710,10 @@ mergeFormat bookId body token toMsg =
         , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "isbn", Encode.string body.isbn )
-                    , ( "format_label", Encode.string body.formatLabel )
-                    ]
+                (Requests.encodeMergeFormatRequest
+                    { isbn = body.isbn
+                    , formatLabel = body.formatLabel
+                    }
                 )
         , expect = Http.expectJson toMsg mergeFormatResponseDecoder
         , timeout = Nothing
@@ -786,30 +787,20 @@ createListing :
     -> (Result Http.Error Listing -> msg)
     -> Cmd msg
 createListing params token toMsg =
-    let
-        priceField =
-            case params.priceZar of
-                Just price ->
-                    [ ( "price_zar", Encode.int price ) ]
-
-                Nothing ->
-                    []
-    in
     Http.request
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/listings"
         , body =
             Http.jsonBody
-                (Encode.object
-                    ([ ( "placement_id", Encode.string params.placementId )
-                     , ( "condition", Encode.string params.condition )
-                     , ( "pricing_mode", Encode.string params.pricingMode )
-                     , ( "contact_info", Encode.string params.contactInfo )
-                     , ( "description", Encode.string params.description )
-                     ]
-                        ++ priceField
-                    )
+                (Requests.encodeCreateListingRequest
+                    { placementId = params.placementId
+                    , condition = params.condition
+                    , pricingMode = params.pricingMode
+                    , priceZar = params.priceZar
+                    , contactInfo = params.contactInfo
+                    , description = params.description
+                    }
                 )
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
         , timeout = Nothing
@@ -960,11 +951,11 @@ createBlogPost postData token toMsg =
         , url = baseUrl ++ "/api/blog/posts"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "title", Encode.string postData.title )
-                    , ( "body", Encode.string postData.body )
-                    , ( "visibility", Encode.string postData.visibility )
-                    ]
+                (Requests.encodeCreateBlogPostRequest
+                    { title = postData.title
+                    , body = postData.body
+                    , visibility = postData.visibility
+                    }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
         , timeout = Nothing
@@ -987,11 +978,11 @@ updateBlogPost postId postData token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "title", Encode.string postData.title )
-                    , ( "body", Encode.string postData.body )
-                    , ( "visibility", Encode.string postData.visibility )
-                    ]
+                (Requests.encodeUpdateBlogPostRequest
+                    { title = postData.title
+                    , body = postData.body
+                    , visibility = postData.visibility
+                    }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
         , timeout = Nothing
@@ -1076,8 +1067,8 @@ updateProfileVisibility visibility token toMsg =
         , url = baseUrl ++ "/api/settings/profile_visibility"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "visibility", Encode.string visibility ) ]
+                (Requests.encodeUpdateProfileVisibilityRequest
+                    { profileVisibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
@@ -1100,8 +1091,8 @@ updateShelfVisibility shelfName visibility token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/visibility"
         , body =
             Http.jsonBody
-                (Encode.object
-                    [ ( "visibility", Encode.string visibility ) ]
+                (Requests.encodeUpdateShelfVisibilityRequest
+                    { visibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
