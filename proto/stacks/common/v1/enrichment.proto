@@ -1,0 +1,324 @@
+// enrichment.proto — Enrichment domain types for discovered sources, reviews, bookstores, prices, and events.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "EnrichmentProto";
+option java_multiple_files = true;
+
+// DiscoveredSourceType classifies the kind of source discovered via automated search.
+enum DiscoveredSourceType {
+  // Default unspecified value; should not be used in practice.
+  DISCOVERED_SOURCE_TYPE_UNSPECIFIED = 0;
+
+  // A bookshop source.
+  DISCOVERED_SOURCE_TYPE_BOOKSHOP = 1;
+
+  // A review aggregation site.
+  DISCOVERED_SOURCE_TYPE_REVIEW_SITE = 2;
+
+  // A community space or forum.
+  DISCOVERED_SOURCE_TYPE_COMMUNITY = 3;
+
+  // An event listing source.
+  DISCOVERED_SOURCE_TYPE_EVENT_SOURCE = 4;
+}
+
+// DiscoveredSourceStatus tracks the lifecycle of a discovered source.
+enum DiscoveredSourceStatus {
+  // Default unspecified value; should not be used in practice.
+  DISCOVERED_SOURCE_STATUS_UNSPECIFIED = 0;
+
+  // Source is awaiting owner review.
+  DISCOVERED_SOURCE_STATUS_PENDING_REVIEW = 1;
+
+  // Source has been approved for use.
+  DISCOVERED_SOURCE_STATUS_APPROVED = 2;
+
+  // Source was manually dismissed by the owner.
+  DISCOVERED_SOURCE_STATUS_DISMISSED = 3;
+
+  // Source was excluded via the opt-out endpoint.
+  DISCOVERED_SOURCE_STATUS_EXCLUDED = 4;
+}
+
+// ReviewSource classifies the origin of a review snapshot.
+enum ReviewSource {
+  // Default unspecified value; should not be used in practice.
+  REVIEW_SOURCE_UNSPECIFIED = 0;
+
+  // Reviews sourced from Goodreads.
+  REVIEW_SOURCE_GOODREADS = 1;
+
+  // Reviews sourced from Reddit.
+  REVIEW_SOURCE_REDDIT = 2;
+
+  // Reviews sourced from StoryGraph.
+  REVIEW_SOURCE_STORYGRAPH = 3;
+
+  // Reviews from an unclassified source.
+  REVIEW_SOURCE_OTHER = 4;
+}
+
+// ThirdSpaceType classifies the kind of community space.
+enum ThirdSpaceType {
+  // Default unspecified value; should not be used in practice.
+  THIRD_SPACE_TYPE_UNSPECIFIED = 0;
+
+  // A reading group or book club.
+  THIRD_SPACE_TYPE_READING_GROUP = 1;
+
+  // A cafe with a book-friendly atmosphere.
+  THIRD_SPACE_TYPE_CAFE = 2;
+
+  // A bookshop or independent bookseller.
+  THIRD_SPACE_TYPE_BOOKSHOP = 3;
+
+  // A literary festival or book fair.
+  THIRD_SPACE_TYPE_FESTIVAL = 4;
+
+  // A book market or pop-up sale.
+  THIRD_SPACE_TYPE_MARKET = 5;
+}
+
+// DiscoveredSource represents a bookshop, review site, community space, or event source
+// discovered via automated search or manual submission.
+message DiscoveredSource {
+  // UUID of the discovered source record.
+  string id = 1 [json_name = "id"];
+
+  // Human-readable name of the source.
+  string name = 2 [json_name = "name"];
+
+  // Classification of the discovered source.
+  string type = 3 [json_name = "type"];
+
+  // URL of the source website.
+  string url = 4 [json_name = "url"];
+
+  // Confidence score from 0.0 to 1.0 indicating discovery quality.
+  double confidence = 5 [json_name = "confidence"];
+
+  // How the source was discovered (e.g. "brave_search", "manual").
+  string discovered_via = 6 [json_name = "discovered_via"];
+
+  // When the source was first discovered.
+  google.protobuf.Timestamp discovered_at = 7 [json_name = "discovered_at"];
+
+  // Current lifecycle status of the source.
+  string status = 8 [json_name = "status"];
+
+  // When the source was approved by the owner.
+  google.protobuf.Timestamp approved_at = 9 [json_name = "approved_at"];
+
+  // Auto-generated scraper configuration (stored as JSONB).
+  string config_generated = 10 [json_name = "config_generated"];
+
+  // When the source was excluded via opt-out.
+  google.protobuf.Timestamp excluded_at = 11 [json_name = "excluded_at"];
+
+  // Email address used for the opt-out exclusion request.
+  string exclusion_email = 12 [json_name = "exclusion_email"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 13 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 14 [json_name = "updated_at"];
+}
+
+// ReviewSnapshot represents a scraped review summary for a book from an external source.
+message ReviewSnapshot {
+  // UUID of the review snapshot record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the book this review is about.
+  string book_id = 2 [json_name = "book_id"];
+
+  // Which review source this came from (string on wire, e.g. "goodreads").
+  string source = 3 [json_name = "source"];
+
+  // URL of the original review page.
+  string source_url = 4 [json_name = "source_url"];
+
+  // Sentiment analysis score from 0.0 to 1.0.
+  double sentiment_score = 5 [json_name = "sentiment_score"];
+
+  // Brief text summary of the review sentiment.
+  string summary = 6 [json_name = "summary"];
+
+  // Average rating from the review source.
+  double rating = 7 [json_name = "rating"];
+
+  // Number of ratings contributing to the average.
+  int32 rating_count = 8 [json_name = "rating_count"];
+
+  // When the review data was scraped.
+  google.protobuf.Timestamp scraped_at = 9 [json_name = "scraped_at"];
+
+  // When the review data should be considered stale.
+  google.protobuf.Timestamp stale_after = 10 [json_name = "stale_after"];
+}
+
+// Bookstore represents a bookshop whose prices we scrape.
+message Bookstore {
+  // UUID of the bookstore record.
+  string id = 1 [json_name = "id"];
+
+  // Display name of the bookstore.
+  string name = 2 [json_name = "name"];
+
+  // Website URL of the bookstore.
+  string website_url = 3 [json_name = "website_url"];
+
+  // URL template for searching books on this store.
+  string search_template = 4 [json_name = "search_template"];
+
+  // Whether this bookstore has a physical location.
+  bool has_physical = 5 [json_name = "has_physical"];
+
+  // ISO 3166-1 alpha-2 country code where this bookstore operates.
+  string country_code = 6 [json_name = "country_code"];
+
+  // Rust scraper module name for this bookstore.
+  string scraper_module = 7 [json_name = "scraper_module"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 8 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 9 [json_name = "updated_at"];
+}
+
+// PriceSnapshot represents a scraped price for a book at a store.
+message PriceSnapshot {
+  // UUID of the price snapshot record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the book being priced.
+  string book_id = 2 [json_name = "book_id"];
+
+  // Foreign key to the bookstore where the price was found.
+  string store_id = 3 [json_name = "store_id"];
+
+  // Price in cents.
+  int32 price_cents = 4 [json_name = "price_cents"];
+
+  // Currency code (default "ZAR").
+  string currency = 5 [json_name = "currency"];
+
+  // Whether the book is currently in stock at this store.
+  bool in_stock = 6 [json_name = "in_stock"];
+
+  // Direct URL to the book on the store's website.
+  string url = 7 [json_name = "url"];
+
+  // When the price was scraped.
+  google.protobuf.Timestamp scraped_at = 8 [json_name = "scraped_at"];
+}
+
+// BookstoreEvent represents an event listing scraped from a bookstore website.
+message BookstoreEvent {
+  // UUID of the bookstore event record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the bookstore hosting this event.
+  string store_id = 2 [json_name = "store_id"];
+
+  // Foreign key to the author appearing at this event.
+  string author_id = 3 [json_name = "author_id"];
+
+  // Title of the event.
+  string title = 4 [json_name = "title"];
+
+  // Description of the event.
+  string description = 5 [json_name = "description"];
+
+  // Scheduled date and time of the event.
+  google.protobuf.Timestamp event_date = 6 [json_name = "event_date"];
+
+  // Physical location or venue of the event.
+  string location = 7 [json_name = "location"];
+
+  // URL of the event listing page.
+  string url = 8 [json_name = "url"];
+
+  // When the event data was scraped.
+  google.protobuf.Timestamp scraped_at = 9 [json_name = "scraped_at"];
+}
+
+// ThirdSpace represents a community space like a cafe, reading group, or bookshop.
+message ThirdSpace {
+  // UUID of the third space record.
+  string id = 1 [json_name = "id"];
+
+  // Display name of the space.
+  string name = 2 [json_name = "name"];
+
+  // Classification of the space.
+  string type = 3 [json_name = "type"];
+
+  // City where the space is located.
+  string city = 4 [json_name = "city"];
+
+  // ISO 3166-1 alpha-2 country code.
+  string country_code = 5 [json_name = "country_code"];
+
+  // Instagram profile URL for the space.
+  string instagram_url = 6 [json_name = "instagram_url"];
+
+  // Website URL for the space.
+  string website_url = 7 [json_name = "website_url"];
+
+  // Description of the space.
+  string description = 8 [json_name = "description"];
+
+  // How this space was discovered.
+  string discovered_via = 9 [json_name = "discovered_via"];
+
+  // Whether the space has been verified by the platform owner.
+  bool verified = 10 [json_name = "verified"];
+
+  // When the space was last known to be active.
+  google.protobuf.Timestamp last_active_at = 11 [json_name = "last_active_at"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 12 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 13 [json_name = "updated_at"];
+}
+
+// ThirdSpaceEvent represents an event listing at a third space.
+message ThirdSpaceEvent {
+  // UUID of the event record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the third space hosting this event.
+  string space_id = 2 [json_name = "space_id"];
+
+  // Title of the event.
+  string title = 3 [json_name = "title"];
+
+  // Description of the event.
+  string description = 4 [json_name = "description"];
+
+  // Scheduled date and time of the event.
+  google.protobuf.Timestamp event_date = 5 [json_name = "event_date"];
+
+  // Recurrence pattern (e.g. "weekly", "monthly").
+  string recurrence = 6 [json_name = "recurrence"];
+
+  // Names of authors related to this event.
+  repeated string related_authors = 7 [json_name = "related_authors"];
+
+  // URL of the event listing page.
+  string source_url = 8 [json_name = "source_url"];
+
+  // When the event data was scraped.
+  google.protobuf.Timestamp scraped_at = 9 [json_name = "scraped_at"];
+}

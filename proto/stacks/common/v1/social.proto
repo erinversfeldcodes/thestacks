@@ -1,0 +1,170 @@
+// social.proto — Social domain types for groups, memberships, invitations, visibility grants, and blocks.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "SocialProto";
+option java_multiple_files = true;
+
+// GroupType classifies the kind of social group.
+enum GroupType {
+  // Default unspecified value; should not be used in practice.
+  GROUP_TYPE_UNSPECIFIED = 0;
+
+  // A small private group of close friends.
+  GROUP_TYPE_CLOSE_FRIENDS = 1;
+
+  // A one-to-many broadcast group.
+  GROUP_TYPE_BROADCAST = 2;
+
+  // A subscription-based group.
+  GROUP_TYPE_SUBSCRIPTION = 3;
+}
+
+// GroupVisibility controls who can discover and join a group.
+enum GroupVisibility {
+  // Default unspecified value; should not be used in practice.
+  GROUP_VISIBILITY_UNSPECIFIED = 0;
+
+  // Group is only joinable via invitation.
+  GROUP_VISIBILITY_INVITE_ONLY = 1;
+
+  // Group is discoverable by all platform users.
+  GROUP_VISIBILITY_PLATFORM = 2;
+}
+
+// GroupMemberRole indicates the role of a user within a group.
+enum GroupMemberRole {
+  // Default unspecified value; should not be used in practice.
+  GROUP_MEMBER_ROLE_UNSPECIFIED = 0;
+
+  // A standard group member.
+  GROUP_MEMBER_ROLE_MEMBER = 1;
+
+  // A moderator with elevated permissions.
+  GROUP_MEMBER_ROLE_MODERATOR = 2;
+}
+
+// InvitationStatus tracks the lifecycle of a group invitation.
+enum InvitationStatus {
+  // Default unspecified value; should not be used in practice.
+  INVITATION_STATUS_UNSPECIFIED = 0;
+
+  // Invitation is pending a response.
+  INVITATION_STATUS_PENDING = 1;
+
+  // Invitation was accepted by the invitee.
+  INVITATION_STATUS_ACCEPTED = 2;
+
+  // Invitation was declined by the invitee.
+  INVITATION_STATUS_DECLINED = 3;
+}
+
+// Group represents a named collection of users with a shared context.
+message Group {
+  // UUID of the group record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the user who owns this group.
+  string owner_id = 2 [json_name = "owner_id"];
+
+  // Display name of the group.
+  string name = 3 [json_name = "name"];
+
+  // Classification of the group.
+  string type = 4 [json_name = "type"];
+
+  // Who can discover and join this group (string on wire).
+  string visibility = 5 [json_name = "visibility"];
+
+  // When this group was created.
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
+
+  // When this group was last updated.
+  google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
+}
+
+// GroupMember represents a membership record linking a user to a group.
+message GroupMember {
+  // UUID of the membership record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the group.
+  string group_id = 2 [json_name = "group_id"];
+
+  // Foreign key to the member user.
+  string user_id = 3 [json_name = "user_id"];
+
+  // Role of the user within the group (string on wire, e.g. "member", "moderator").
+  string role = 4 [json_name = "role"];
+
+  // When the user joined the group.
+  google.protobuf.Timestamp joined_at = 5 [json_name = "joined_at"];
+
+  // When this membership record was created.
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
+}
+
+// GroupInvitation represents an invitation for a user to join a group.
+message GroupInvitation {
+  // UUID of the invitation record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the group.
+  string group_id = 2 [json_name = "group_id"];
+
+  // Foreign key to the user who sent the invitation.
+  string invited_by_id = 3 [json_name = "invited_by_id"];
+
+  // Foreign key to the user being invited.
+  string invited_user_id = 4 [json_name = "invited_user_id"];
+
+  // Current status of the invitation (string on wire).
+  string status = 5 [json_name = "status"];
+
+  // When the invitee responded to the invitation.
+  google.protobuf.Timestamp responded_at = 6 [json_name = "responded_at"];
+
+  // When this invitation was created.
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
+}
+
+// VisibilityGrant grants visibility of a resource to a specific user.
+message VisibilityGrant {
+  // UUID of the grant record.
+  string id = 1 [json_name = "id"];
+
+  // Type of the resource being granted (e.g. "bookshelf", "post").
+  string resource_type = 2 [json_name = "resource_type"];
+
+  // UUID of the resource being granted.
+  string resource_id = 3 [json_name = "resource_id"];
+
+  // Foreign key to the user receiving the grant.
+  string granted_to_id = 4 [json_name = "granted_to_id"];
+
+  // Foreign key to the user who created the grant.
+  string granted_by_id = 5 [json_name = "granted_by_id"];
+
+  // When this grant was created.
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
+}
+
+// UserBlock records a user blocking another user.
+message UserBlock {
+  // UUID of the block record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the user who initiated the block.
+  string blocker_id = 2 [json_name = "blocker_id"];
+
+  // Foreign key to the user being blocked.
+  string blocked_id = 3 [json_name = "blocked_id"];
+
+  // When this block was created.
+  google.protobuf.Timestamp created_at = 4 [json_name = "created_at"];
+}
