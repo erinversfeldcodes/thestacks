@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.ProtoJsonGenerator
   alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
   alias Mix.Tasks.ProtoSync.TypeMapper
 
@@ -1357,6 +1358,64 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert :ok == SchemaYmlGenerator.check_drift(tmp_path, generated_blocks)
 
       File.rm!(tmp_path)
+    end
+  end
+
+  describe "ProtoJsonGenerator" do
+    setup do
+      descriptor = Descriptor.parse!(@repo_root)
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      %{descriptor: descriptor, manifest: manifest}
+    end
+
+    test "generates module with one function per proto_json config entry", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      assert output =~ "defmodule StacksWeb.ProtoJSON.Gen do"
+
+      # One function per config entry
+      for config <- manifest.proto_json do
+        assert output =~ "def #{config.function_name}(struct) do"
+        assert output =~ "def #{config.function_name}(nil), do: nil"
+        assert output =~ "@spec #{config.function_name}(map() | nil) :: map() | nil"
+      end
+    end
+
+    test "author function maps website_url field to website json key", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      # Proto field is website_url with json_name="website" — Author uses the json_name
+      assert output =~ "website: struct.website_url"
+
+      # The Author function should NOT have "website_url:" as a map key (only "website:")
+      # Split output by function boundaries and check the author section
+      author_section =
+        output
+        |> String.split("@doc")
+        |> Enum.find(&String.contains?(&1, "def author(struct)"))
+
+      assert author_section != nil
+      refute author_section =~ ~r/^\s+website_url:/m
+    end
+
+    test "skipped fields are excluded from output", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      # Book skips author, editions, edition_count, primary_edition, community_read_count
+      refute output =~ "author: struct.author"
+      refute output =~ "edition_count: struct.edition_count"
+
+      # User skips password_hash
+      refute output =~ "password_hash: struct.password_hash"
     end
   end
 end

@@ -91,7 +91,7 @@ defmodule Mix.Tasks.Proto.Sync do
     # Generate ProtoJSON.Gen base serializer
     if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
       proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
-      proto_json_path = Path.join(core_root, "lib/stacks_web/proto_json_gen.ex")
+      proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
       File.mkdir_p!(Path.dirname(proto_json_path))
       File.write!(proto_json_path, proto_json_content)
       Mix.shell().info("Generated #{proto_json_path}")
@@ -221,7 +221,7 @@ defmodule Mix.Tasks.Proto.Sync do
     results =
       if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
         proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
-        proto_json_path = Path.join(core_root, "lib/stacks_web/proto_json_gen.ex")
+        proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
         proto_json_result = DriftChecker.check(proto_json_content, proto_json_path)
         results ++ List.wrap(proto_json_result)
       else

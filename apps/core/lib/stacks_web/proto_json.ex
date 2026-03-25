@@ -24,6 +24,19 @@ defmodule StacksWeb.ProtoJSON do
   alias Stacks.Books
   alias StacksWeb.ProtoJSON.Gen
 
+  # Shared user field lists — used by user/1 and listing_seller/1 for consistency.
+  @user_core_fields [
+    :id,
+    :email,
+    :display_name,
+    :role,
+    :profile_visibility,
+    :age_verified,
+    :consent_analytics
+  ]
+  @user_auth_fields @user_core_fields ++ [:country_code, :city]
+  @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
+
   # ---------------------------------------------------------------------------
   # Book (work)
   # ---------------------------------------------------------------------------
@@ -222,11 +235,8 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_detail(map()) :: map()
   def placement_detail(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :position, :formats, :personal_rating, :notes])
-    |> Map.merge(%{
-      placed_at: placement.placed_at,
-      book: bookshelf_book(placement.book)
-    })
+    |> Map.take([:id, :position, :placed_at, :formats, :personal_rating, :notes])
+    |> Map.put(:book, bookshelf_book(placement.book))
   end
 
   @doc """
@@ -237,11 +247,7 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_ref(map()) :: map()
   def placement_ref(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :bookshelf_id, :position])
-    |> Map.merge(%{
-      placed_at: placement.placed_at,
-      removed_at: placement.removed_at
-    })
+    |> Map.take([:id, :book_id, :bookshelf_id, :position, :placed_at, :removed_at])
   end
 
   @doc """
@@ -254,14 +260,12 @@ defmodule StacksWeb.ProtoJSON do
   def book_placement(nil), do: nil
 
   def book_placement(placement) do
-    %{
-      id: placement.id,
-      book_id: placement.book_id,
+    Gen.placement(placement)
+    |> Map.take([:id, :book_id, :personal_rating, :notes])
+    |> Map.merge(%{
       bookshelf_name: placement.bookshelf.name,
-      formats: placement.formats || [],
-      personal_rating: placement.personal_rating,
-      notes: placement.notes
-    }
+      formats: placement.formats || []
+    })
   end
 
   # ---------------------------------------------------------------------------
@@ -276,17 +280,7 @@ defmodule StacksWeb.ProtoJSON do
   @spec user(map()) :: map()
   def user(user_struct) do
     Gen.user(user_struct)
-    |> Map.take([
-      :id,
-      :email,
-      :display_name,
-      :role,
-      :profile_visibility,
-      :age_verified,
-      :consent_analytics,
-      :country_code,
-      :city
-    ])
+    |> Map.take(@user_auth_fields)
   end
 
   # ---------------------------------------------------------------------------
@@ -321,17 +315,14 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec blog_association(map(), boolean()) :: map()
   def blog_association(assoc, is_owner) do
-    base = %{
-      id: assoc.id,
-      book_id: assoc.book_id,
-      confidence: assoc.confidence,
-      source: assoc.source,
-      visible: assoc.visible,
-      book_title: association_book_title(assoc),
-      status: if(assoc.visible, do: "confirmed", else: "dismissed")
-    }
+    base =
+      Gen.book_association(assoc)
+      |> Map.merge(%{
+        book_title: association_book_title(assoc),
+        status: if(assoc.visible, do: "confirmed", else: "dismissed")
+      })
 
-    if is_owner, do: Map.put(base, :reasoning, assoc.reasoning), else: base
+    if is_owner, do: base, else: Map.delete(base, :reasoning)
   end
 
   # ---------------------------------------------------------------------------
@@ -492,12 +483,10 @@ defmodule StacksWeb.ProtoJSON do
       :language,
       :subjects,
       :bisac_codes,
-      :visibility_tier
+      :visibility_tier,
+      :created_at,
+      :updated_at
     ])
-    |> Map.merge(%{
-      created_at: book.created_at,
-      updated_at: book.updated_at
-    })
   end
 
   # Extracts the book title from a preloaded association, handling not-loaded and nil.
@@ -515,18 +504,6 @@ defmodule StacksWeb.ProtoJSON do
 
   defp listing_seller(seller) do
     Gen.user(seller)
-    |> Map.take([
-      :id,
-      :email,
-      :display_name,
-      :role,
-      :profile_visibility,
-      :age_verified,
-      :consent_analytics
-    ])
-    |> Map.merge(%{
-      created_at: seller.created_at,
-      updated_at: seller.updated_at
-    })
+    |> Map.take(@user_embed_fields)
   end
 end
