@@ -554,16 +554,19 @@ bookSuite =
                     original =
                         { id = "b-2"
                         , title = "If on a winter's night a traveler"
+                        , authorId = ""
                         , description = "A novel about reading"
                         , subjects = [ "fiction", "postmodern" ]
                         , visibilityTier = VisibilityTierUnlisted
-                        , author = { id = "a-2", name = "Italo Calvino", website = "", rssFeedUrl = "", bio = "" }
+                        , author = { id = "a-2", name = "Italo Calvino", websiteUrl = "", rssFeedUrl = "", bio = "", openLibraryId = "", createdAt = "", updatedAt = "" }
                         , editions = []
                         , editionCount = 0
                         , primaryEdition = defaultEdition
                         , communityReadCount = 7
                         , language = "it"
                         , bisacCodes = []
+                        , createdAt = ""
+                        , updatedAt = ""
                         }
 
                     result =
@@ -641,6 +644,11 @@ bookSuite =
                         , publisher = "Penguin"
                         , publicationYear = 1992
                         , formatLabel = "Paperback"
+                        , openLibraryId = ""
+                        , googleBooksId = ""
+                        , bookId = ""
+                        , createdAt = ""
+                        , updatedAt = ""
                         }
 
                     result =
@@ -722,7 +730,23 @@ userSuite =
                         , city = "London"
                         , consentAnalytics = False
                         , ageVerified = True
+                        , ageVerifiedAt = ""
+                        , ageVerificationProvider = ""
                         , profileVisibility = "owner"
+                        , passwordHash = ""
+                        , websiteUrl = ""
+                        , consentAnalyticsAt = ""
+                        , onboardingCompleted = False
+                        , notifyWishlistAvailability = False
+                        , notifyMarketplace = False
+                        , notifyGroupInvitations = False
+                        , notifyEventMatches = False
+                        , emailConfirmed = False
+                        , emailConfirmationToken = ""
+                        , passwordResetToken = ""
+                        , passwordResetSentAt = ""
+                        , createdAt = ""
+                        , updatedAt = ""
                         }
 
                     result =
@@ -833,16 +857,19 @@ placementSuite =
                         , book =
                             { id = "b-3"
                             , title = "Pale Fire"
+                            , authorId = ""
                             , description = ""
                             , subjects = []
                             , visibilityTier = VisibilityTierPublic
-                            , author = { id = "a-3", name = "Vladimir Nabokov", website = "", rssFeedUrl = "", bio = "" }
+                            , author = { id = "a-3", name = "Vladimir Nabokov", websiteUrl = "", rssFeedUrl = "", bio = "", openLibraryId = "", createdAt = "", updatedAt = "" }
                             , editions = []
                             , editionCount = 0
                             , primaryEdition = defaultEdition
                             , communityReadCount = 0
                             , language = ""
                             , bisacCodes = []
+                            , createdAt = ""
+                            , updatedAt = ""
                             }
                         }
 
@@ -1131,16 +1158,19 @@ responseSuite =
                         { book =
                             { id = "b-1"
                             , title = "The Secret History"
+                            , authorId = ""
                             , description = "A group of classics students"
                             , subjects = [ "fiction" ]
                             , visibilityTier = VisibilityTierPublic
-                            , author = { id = "a-1", name = "Donna Tartt", website = "", rssFeedUrl = "", bio = "" }
+                            , author = { id = "a-1", name = "Donna Tartt", websiteUrl = "", rssFeedUrl = "", bio = "", openLibraryId = "", createdAt = "", updatedAt = "" }
                             , editions = []
                             , editionCount = 0
                             , primaryEdition = defaultEdition
                             , communityReadCount = 42
                             , language = "en"
                             , bisacCodes = []
+                            , createdAt = ""
+                            , updatedAt = ""
                             }
                         , placement =
                             Just
@@ -1221,7 +1251,23 @@ responseSuite =
                             , city = "London"
                             , consentAnalytics = False
                             , ageVerified = True
+                            , ageVerifiedAt = ""
+                            , ageVerificationProvider = ""
                             , profileVisibility = "owner"
+                            , passwordHash = ""
+                            , websiteUrl = ""
+                            , consentAnalyticsAt = ""
+                            , onboardingCompleted = False
+                            , notifyWishlistAvailability = False
+                            , notifyMarketplace = False
+                            , notifyGroupInvitations = False
+                            , notifyEventMatches = False
+                            , emailConfirmed = False
+                            , emailConfirmationToken = ""
+                            , passwordResetToken = ""
+                            , passwordResetSentAt = ""
+                            , createdAt = ""
+                            , updatedAt = ""
                             }
                         }
 
@@ -1395,6 +1441,7 @@ blogSuite =
                         , publishedAt = "2026-03-21T00:00:00Z"
                         , createdAt = "2026-03-20T00:00:00Z"
                         , updatedAt = "2026-03-21T01:00:00Z"
+                        , visibilityGroupId = ""
                         }
 
                     result =
@@ -1456,6 +1503,8 @@ blogSuite =
                         , reasoning = "title mentioned"
                         , bookTitle = "Test Book"
                         , status = "confirmed"
+                        , postId = ""
+                        , createdAt = ""
                         }
 
                     result =
@@ -1679,6 +1728,7 @@ blogResponseSuite =
                             , publishedAt = "2026-03-21T00:00:00Z"
                             , createdAt = "2026-03-20T00:00:00Z"
                             , updatedAt = "2026-03-21T01:00:00Z"
+                            , visibilityGroupId = ""
                             }
                         }
 
@@ -1782,6 +1832,8 @@ blogResponseSuite =
                               , reasoning = "title mentioned"
                               , bookTitle = "Test Book"
                               , status = "confirmed"
+                              , postId = ""
+                              , createdAt = ""
                               }
                             ]
                         }
@@ -1844,6 +1896,8 @@ blogResponseSuite =
                             , reasoning = "user linked"
                             , bookTitle = "Another Book"
                             , status = "dismissed"
+                            , postId = ""
+                            , createdAt = ""
                             }
                         }
 

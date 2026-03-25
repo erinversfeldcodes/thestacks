@@ -86,7 +86,7 @@ fromProtoAuthor pa =
     { id = pa.id
     , name = pa.name
     , bio = emptyToNothing pa.bio
-    , website = emptyToNothing pa.website
+    , website = emptyToNothing pa.websiteUrl
     }
 
 
