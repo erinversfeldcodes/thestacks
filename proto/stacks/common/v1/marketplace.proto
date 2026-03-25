@@ -1,0 +1,176 @@
+// marketplace.proto — Marketplace negotiation and transaction types.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "MarketplaceProto";
+option java_multiple_files = true;
+
+// OfferThreadStatus tracks the lifecycle of a negotiation thread.
+enum OfferThreadStatus {
+  // Default unspecified value; should not be used in practice.
+  OFFER_THREAD_STATUS_UNSPECIFIED = 0;
+
+  // Thread is open for negotiation.
+  OFFER_THREAD_STATUS_OPEN = 1;
+
+  // An offer has been accepted.
+  OFFER_THREAD_STATUS_ACCEPTED = 2;
+
+  // The negotiation was declined.
+  OFFER_THREAD_STATUS_DECLINED = 3;
+
+  // The negotiation expired without resolution.
+  OFFER_THREAD_STATUS_EXPIRED = 4;
+}
+
+// OfferMessageType classifies the kind of message in a negotiation thread.
+enum OfferMessageType {
+  // Default unspecified value; should not be used in practice.
+  OFFER_MESSAGE_TYPE_UNSPECIFIED = 0;
+
+  // A plain text message.
+  OFFER_MESSAGE_TYPE_MESSAGE = 1;
+
+  // An initial offer from the buyer.
+  OFFER_MESSAGE_TYPE_OFFER = 2;
+
+  // A counter-offer from the seller.
+  OFFER_MESSAGE_TYPE_COUNTER = 3;
+
+  // Acceptance of an offer.
+  OFFER_MESSAGE_TYPE_ACCEPT = 4;
+
+  // Declining an offer.
+  OFFER_MESSAGE_TYPE_DECLINE = 5;
+}
+
+// PaymentStatus tracks the lifecycle of a transaction payment.
+enum PaymentStatus {
+  // Default unspecified value; should not be used in practice.
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+
+  // Payment is pending processing.
+  PAYMENT_STATUS_PENDING = 1;
+
+  // Payment has been successfully processed.
+  PAYMENT_STATUS_PAID = 2;
+
+  // Payment processing failed.
+  PAYMENT_STATUS_FAILED = 3;
+
+  // Payment was refunded to the buyer.
+  PAYMENT_STATUS_REFUNDED = 4;
+}
+
+// ShippingStatus tracks the delivery lifecycle of a transaction.
+enum ShippingStatus {
+  // Default unspecified value; should not be used in practice.
+  SHIPPING_STATUS_UNSPECIFIED = 0;
+
+  // Item is awaiting shipment.
+  SHIPPING_STATUS_PENDING = 1;
+
+  // Item has been shipped.
+  SHIPPING_STATUS_SHIPPED = 2;
+
+  // Item has been delivered to the buyer.
+  SHIPPING_STATUS_DELIVERED = 3;
+
+  // Item was returned to the seller.
+  SHIPPING_STATUS_RETURNED = 4;
+}
+
+// OfferThread represents a negotiation thread between a buyer and a seller.
+message OfferThread {
+  // UUID of the offer thread record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the placement being negotiated.
+  string placement_id = 2 [json_name = "placement_id"];
+
+  // Foreign key to the buyer initiating the thread.
+  string buyer_id = 3 [json_name = "buyer_id"];
+
+  // Current status of the negotiation (string on wire).
+  string status = 4 [json_name = "status"];
+
+  // When this thread was created.
+  google.protobuf.Timestamp created_at = 5 [json_name = "created_at"];
+
+  // When this thread was last updated.
+  google.protobuf.Timestamp updated_at = 6 [json_name = "updated_at"];
+}
+
+// OfferMessage represents a message or offer within a negotiation thread.
+message OfferMessage {
+  // UUID of the offer message record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the parent offer thread.
+  string thread_id = 2 [json_name = "thread_id"];
+
+  // Foreign key to the user who sent this message.
+  string sender_id = 3 [json_name = "sender_id"];
+
+  // Type of message (string on wire, e.g. "message", "offer", "counter").
+  string type = 4 [json_name = "type"];
+
+  // Text body of the message.
+  string body = 5 [json_name = "body"];
+
+  // Offer amount in cents (only for offer/counter types).
+  int32 amount_cents = 6 [json_name = "amount_cents"];
+
+  // When this message was created.
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
+}
+
+// Transaction represents a completed or in-progress sale transaction.
+message Transaction {
+  // UUID of the transaction record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the listing being transacted.
+  string listing_id = 2 [json_name = "listing_id"];
+
+  // UUID of the offer that led to this transaction (plain field, not FK).
+  string offer_id = 3 [json_name = "offer_id"];
+
+  // Foreign key to the buyer.
+  string buyer_id = 4 [json_name = "buyer_id"];
+
+  // Foreign key to the seller.
+  string seller_id = 5 [json_name = "seller_id"];
+
+  // Transaction amount in cents.
+  int32 amount_cents = 6 [json_name = "amount_cents"];
+
+  // Currency code (default "ZAR").
+  string currency = 7 [json_name = "currency"];
+
+  // External payment provider reference ID.
+  string payment_provider_ref = 8 [json_name = "payment_provider_ref"];
+
+  // Current payment status (string on wire).
+  string payment_status = 9 [json_name = "payment_status"];
+
+  // External shipping provider reference ID.
+  string shipping_provider_ref = 10 [json_name = "shipping_provider_ref"];
+
+  // Current shipping status (string on wire).
+  string shipping_status = 11 [json_name = "shipping_status"];
+
+  // Shipping cost in cents.
+  int32 shipping_cost_cents = 12 [json_name = "shipping_cost_cents"];
+
+  // When the transaction was completed.
+  google.protobuf.Timestamp completed_at = 13 [json_name = "completed_at"];
+
+  // When this transaction record was created.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+}
