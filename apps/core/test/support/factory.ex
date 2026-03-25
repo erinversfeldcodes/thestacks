@@ -20,6 +20,7 @@ defmodule Stacks.Factory do
     ThirdSpaceEvent
   }
 
+  alias Stacks.Costs.PlatformCost
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -244,6 +245,24 @@ defmodule Stacks.Factory do
       consecutive_failures: 0,
       total_successes: 10,
       total_failures: 0
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Costs
+  # ---------------------------------------------------------------------------
+
+  def platform_cost_factory do
+    now = DateTime.utc_now()
+
+    %PlatformCost{
+      category: "infrastructure",
+      service: sequence(:service_name, &"service-#{&1}"),
+      description: "Monthly hosting cost.",
+      amount_cents: 1500,
+      currency: "USD",
+      period_start: DateTime.add(now, -30, :day),
+      period_end: now
     }
   end
 
