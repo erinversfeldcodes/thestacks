@@ -113,20 +113,19 @@ defmodule Mix.Tasks.Proto.Sync do
   end
 
   defp generate_delta_migration(table, fields, migrations_dir) do
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
+
+    # Filter to only DB-column fields (exclude id, timestamps, skipped API-only fields)
+    db_fields =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+      end)
+
     existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
-    proto_field_names = Enum.map(fields, & &1.name)
+    proto_field_names = Enum.map(db_fields, & &1.name)
 
-    new_fields = Enum.filter(fields, fn field -> field.name not in existing end)
-
-    # Also exclude timestamp columns that are added by the timestamps() macro
-    new_fields =
-      case Map.get(table, :timestamps) do
-        :standard ->
-          Enum.reject(new_fields, fn f -> f.name in ~w(created_at updated_at inserted_at) end)
-
-        _ ->
-          new_fields
-      end
+    new_fields = Enum.filter(db_fields, fn field -> field.name not in existing end)
 
     if new_fields != [] do
       timestamp = MigrationGenerator.generate_timestamp()
@@ -151,6 +150,16 @@ defmodule Mix.Tasks.Proto.Sync do
       end)
     end
   end
+
+  defp skip_field?(field, overrides) do
+    field_name = String.to_atom(field.name)
+    override = Map.get(overrides, field_name, %{})
+    Map.get(override, :skip, false)
+  end
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp run_check(manifest, descriptor, repo_root) do
     core_root = Path.join(repo_root, "apps/core")
@@ -203,12 +212,20 @@ defmodule Mix.Tasks.Proto.Sync do
   end
 
   defp check_migration_drift(table, fields, migrations_dir) do
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
     migration_exists = Map.get(table, :migration_exists, false)
+
+    # Filter to only DB-column fields
+    db_fields =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or skip_field?(field, overrides)
+      end)
 
     if migration_exists do
       # For existing tables, check if any proto fields are missing from migrations
       existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
-      proto_field_names = Enum.map(fields, & &1.name)
+      proto_field_names = Enum.map(db_fields, & &1.name)
       missing = Enum.reject(proto_field_names, fn name -> name in existing end)
 
       if missing != [] do

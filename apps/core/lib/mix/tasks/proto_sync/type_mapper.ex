@@ -110,8 +110,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      other ->
-        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
+      # Non-WKT embedded messages: default to :map (JSONB).
+      # Use skip: true or belongs_to in field_overrides for most cases.
+      _other ->
+        :map
     end
   end
 
@@ -150,8 +152,8 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      other ->
-        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
+      _other ->
+        :map
     end
   end
 

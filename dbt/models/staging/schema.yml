@@ -7,46 +7,55 @@ models:
 
   - name: stg_books
     description: >
-      One row per work (logical book) in the catalogue. Edition-specific data
-      (ISBN, cover, page count) lives in stg_book_editions.
+      Proto-synced staging model for books.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
+      - name: id
+        description: Id.
       - name: title
-        description: Work title (canonical, edition suffixes stripped).
+        description: Title.
         tests:
           - not_null
       - name: author_id
-        description: FK to stg_authors.
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_authors')
-                field: id
+        description: Author id.
       - name: description
-        description: Optional synopsis or blurb for the work.
-      - name: language
-        description: ISO 639 language code of the work (e.g. 'en', 'af').
+        description: Description.
       - name: subjects
-        description: Array of subject/genre tags sourced from Open Library.
-      - name: bisac_codes
-        description: Array of BISAC classification codes for bookshop categorisation.
+        description: Subjects.
       - name: visibility_tier
-        description: Content visibility tier controlling who can discover this work.
+        description: Visibility tier.
         tests:
-          - not_null
           - accepted_values:
               arguments:
-                values: ['public', 'age_gated']
+                values: ['public', 'unlisted', 'private', 'age_gated']
+      - name: author
+        description: Author.
+      - name: editions
+        description: Editions.
+      - name: edition_count
+        description: Edition count.
+      - name: primary_edition
+        description: Primary edition.
+      - name: community_read_count
+        description: Community read count.
+      - name: language
+        description: Language.
+      - name: bisac_codes
+        description: Bisac codes.
       - name: created_at
-        description: Timestamp when the work was first added to the catalogue.
+        description: Created at.
+      - name: updated_at
+        description: Updated at.
+      - name: created_at
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this work record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 

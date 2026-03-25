@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "loads valid manifest" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       assert manifest.version == 1
-      assert [event_log, _] = manifest.tables
+      assert event_log = Enum.find(manifest.tables, &(&1.table_name == "event_log"))
       assert event_log.table_name == "event_log"
       assert event_log.proto_message == "EventEnvelope"
     end
@@ -218,9 +218,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      assert_raise RuntimeError, ~r/Unknown message type/, fn ->
-        TypeMapper.ecto_type(field)
-      end
+      # Non-WKT message types fall back to :map (JSONB) instead of raising
+      assert TypeMapper.ecto_type(field) == :map
     end
 
     test "default returns :none when no override" do
@@ -333,9 +332,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      assert_raise RuntimeError, ~r/Unknown message type/, fn ->
-        TypeMapper.migration_type(field)
-      end
+      # Non-WKT message types fall back to :map instead of raising
+      assert TypeMapper.migration_type(field) == :map
     end
 
     test "migration_type raises on completely unmapped type" do
@@ -438,7 +436,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates source_health_checks schema with timestamps" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -482,7 +480,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates source_health_checks staging model with timestamps" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -561,7 +559,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates CREATE TABLE migration with timestamps and unique index" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -1059,7 +1057,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       descriptor: descriptor
     } do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)

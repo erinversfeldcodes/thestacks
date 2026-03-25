@@ -54,6 +54,36 @@
         total_failures: %{default: 0, null: false},
         status: %{default: "healthy", null: false}
       }
+    },
+    %{
+      proto_file: "stacks/common/v1/book.proto",
+      proto_message: "Book",
+      table_name: "books",
+      schema_prefix: "op",
+      ecto_module: Stacks.Books.Book,
+      ecto_path: "lib/stacks/gen/books/book.ex",
+      dbt_path: "stg_books.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: true,
+      indexes: [],
+      associations: [
+        {:has_many, :editions, Stacks.Books.BookEdition, foreign_key: :book_id}
+      ],
+      field_overrides: %{
+        # DB fields
+        title: %{null: false},
+        author_id: %{belongs_to: Stacks.Books.Author},
+        subjects: %{ecto_type: {:array, :string}, default: []},
+        bisac_codes: %{ecto_type: {:array, :string}, default: []},
+        visibility_tier: %{default: "public"},
+        # API-only fields — not DB columns
+        author: %{skip: true},
+        editions: %{skip: true},
+        edition_count: %{skip: true},
+        primary_edition: %{skip: true},
+        community_read_count: %{skip: true}
+      }
     }
   ]
 }
