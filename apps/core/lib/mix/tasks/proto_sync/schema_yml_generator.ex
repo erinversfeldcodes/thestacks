@@ -1,7 +1,6 @@
 defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   @moduledoc "Generates and merges dbt schema.yml model blocks from proto definitions."
 
-  alias Mix.Tasks.ProtoSync.Descriptor
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @doc """
@@ -203,7 +202,7 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   defp timestamp_field_names(%{timestamps: false}), do: []
   defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
-  defp build_tests(field, override, _ecto_type, descriptor) do
+  defp build_tests(_field, override, _ecto_type, _descriptor) do
     tests = []
 
     # not_null for fields with null: false override

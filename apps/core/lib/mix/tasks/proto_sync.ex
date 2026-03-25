@@ -30,6 +30,7 @@ defmodule Mix.Tasks.Proto.Sync do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.ProtoJsonGenerator
   alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
 
   @shortdoc "Generate Ecto schemas, dbt models, and migrations from proto definitions"
@@ -85,6 +86,15 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Updated #{schema_yml_path}")
     else
       Mix.shell().info("Skipped schema.yml — file not found at #{schema_yml_path}")
+    end
+
+    # Generate ProtoJSON.Gen base serializer
+    if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
+      proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
+      proto_json_path = Path.join(core_root, "lib/stacks_web/proto_json_gen.ex")
+      File.mkdir_p!(Path.dirname(proto_json_path))
+      File.write!(proto_json_path, proto_json_content)
+      Mix.shell().info("Generated #{proto_json_path}")
     end
 
     Mix.shell().info("Proto sync complete.")
@@ -206,6 +216,17 @@ defmodule Mix.Tasks.Proto.Sync do
 
     schema_yml_result = SchemaYmlGenerator.check_drift(schema_yml_path, generated_blocks)
     results = results ++ List.wrap(schema_yml_result)
+
+    # ProtoJSON.Gen drift check
+    results =
+      if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
+        proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
+        proto_json_path = Path.join(core_root, "lib/stacks_web/proto_json_gen.ex")
+        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path)
+        results ++ List.wrap(proto_json_result)
+      else
+        results
+      end
 
     drifted = Enum.filter(results, &match?({:drift, _, _}, &1))
 
