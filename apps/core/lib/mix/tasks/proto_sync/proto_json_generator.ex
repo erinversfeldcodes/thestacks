@@ -28,9 +28,6 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
       @moduledoc "Proto-generated base serializers. Use StacksWeb.ProtoJSON for the public API."
 
     #{Enum.join(functions, "\n\n")}
-
-      defp format_datetime(nil), do: nil
-      defp format_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
     end
     """
   end
@@ -40,39 +37,39 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
     overrides = Map.get(config, :field_overrides, %{})
     skip_fields = Map.get(config, :skip_fields, [])
 
+    has_id = Enum.any?(fields, &(&1.name == "id"))
+
     # Build field lines: extract from struct, map to json_name
     field_lines =
       fields
-      |> Enum.reject(fn f -> f.name == "id" or String.to_atom(f.name) in skip_fields end)
+      |> Enum.reject(fn f ->
+        f.name == "id" or String.to_atom(f.name) in skip_fields
+      end)
       |> Enum.map(fn field ->
         field_atom = String.to_atom(field.name)
         override = Map.get(overrides, field_atom, %{})
 
-        # Ecto struct field name (may differ from proto via ecto_name)
         ecto_name = Map.get(override, :ecto_name, field_atom)
-        # JSON output key (from proto json_name, defaults to field name)
         json_key = field.json_name || field.name
-
         accessor = "struct.#{ecto_name}"
 
-        # Type coercion
-        value_expr =
-          case coerce_type(field) do
-            :datetime -> "format_datetime(#{accessor})"
-            :identity -> accessor
-          end
-
-        "      #{json_key}: #{value_expr}"
+        "      #{json_key}: #{accessor}"
       end)
 
     fn_name = config.function_name
-    id_line = "      id: struct.id"
-    all_lines = [id_line | field_lines] |> Enum.join(",\n")
+
+    all_lines =
+      if has_id do
+        ["      id: struct.id" | field_lines]
+      else
+        field_lines
+      end
+      |> Enum.join(",\n")
 
     """
       @doc "Base serializer for #{config.proto_message}. Returns a map with all proto fields."
+      @spec #{fn_name}(map() | nil) :: map() | nil
       def #{fn_name}(nil), do: nil
-
       def #{fn_name}(%Ecto.Association.NotLoaded{}), do: nil
 
       def #{fn_name}(struct) do
@@ -82,10 +79,4 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
       end
     """
   end
-
-  defp coerce_type(%{type: "TYPE_MESSAGE", type_name: "." <> name}) do
-    if String.ends_with?(name, "Timestamp"), do: :datetime, else: :identity
-  end
-
-  defp coerce_type(_), do: :identity
 end

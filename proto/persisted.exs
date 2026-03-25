@@ -790,9 +790,7 @@
       proto_message: "Author",
       function_name: :author,
       skip_fields: [],
-      field_overrides: %{
-        website: %{ecto_name: :website_url}
-      }
+      field_overrides: %{}
     },
     %{
       proto_file: "stacks/common/v1/book.proto",
