@@ -22,6 +22,7 @@ defmodule StacksWeb.ProtoJSON do
   """
 
   alias Stacks.Books
+  alias StacksWeb.ProtoJSON.Gen
 
   # ---------------------------------------------------------------------------
   # Book (work)
@@ -44,20 +45,23 @@ defmodule StacksWeb.ProtoJSON do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
-    %{
-      id: book.id,
-      title: book.title,
-      description: book.description,
-      language: book.language,
-      subjects: book.subjects,
-      bisac_codes: book.bisac_codes,
-      visibility_tier: book.visibility_tier,
+    Gen.book(book)
+    |> Map.take([
+      :id,
+      :title,
+      :description,
+      :language,
+      :subjects,
+      :bisac_codes,
+      :visibility_tier
+    ])
+    |> Map.merge(%{
       author: author(book.author),
       editions: editions,
       edition_count: length(editions),
       primary_edition: edition_or_nil(primary),
       community_read_count: community_read_count
-    }
+    })
   end
 
   @doc """
@@ -72,16 +76,14 @@ defmodule StacksWeb.ProtoJSON do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
-    %{
-      id: book.id,
-      title: book.title,
+    Gen.book(book)
+    |> Map.take([:id, :title, :subjects, :visibility_tier])
+    |> Map.merge(%{
       author: author_slim(book.author),
-      subjects: book.subjects,
-      visibility_tier: book.visibility_tier,
       editions: editions,
       edition_count: length(editions),
       primary_edition: edition_or_nil(primary)
-    }
+    })
   end
 
   @doc """
@@ -96,15 +98,14 @@ defmodule StacksWeb.ProtoJSON do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
-    %{
-      id: book.id,
-      title: book.title,
-      visibility_tier: book.visibility_tier,
+    Gen.book(book)
+    |> Map.take([:id, :title, :visibility_tier])
+    |> Map.merge(%{
       author: author_slim(book.author),
       editions: editions,
       edition_count: length(editions),
       primary_edition: edition_or_nil(primary)
-    }
+    })
   end
 
   @doc """
@@ -123,16 +124,14 @@ defmodule StacksWeb.ProtoJSON do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
-    %{
-      id: book.id,
-      title: book.title,
-      description: book.description,
-      visibility_tier: book.visibility_tier,
+    Gen.book(book)
+    |> Map.take([:id, :title, :description, :visibility_tier])
+    |> Map.merge(%{
       author: author_bookshelf(book.author),
       editions: editions,
       edition_count: length(editions),
       primary_edition: edition_or_nil(primary)
-    }
+    })
   end
 
   # ---------------------------------------------------------------------------
@@ -149,12 +148,7 @@ defmodule StacksWeb.ProtoJSON do
   def author(nil), do: nil
 
   def author(author_struct) do
-    %{
-      id: author_struct.id,
-      name: author_struct.name,
-      bio: author_struct.bio,
-      website: author_struct.website_url
-    }
+    Gen.author(author_struct) |> Map.take([:id, :name, :bio, :website])
   end
 
   @doc """
@@ -165,7 +159,7 @@ defmodule StacksWeb.ProtoJSON do
   @spec author_slim(map() | nil) :: map() | nil
   def author_slim(%Ecto.Association.NotLoaded{}), do: nil
   def author_slim(nil), do: nil
-  def author_slim(author_struct), do: %{id: author_struct.id, name: author_struct.name}
+  def author_slim(author_struct), do: Gen.author(author_struct) |> Map.take([:id, :name])
 
   @doc """
   Serializes an author as the bookshelf shape `{id, name, bio: nil}`.
@@ -179,7 +173,7 @@ defmodule StacksWeb.ProtoJSON do
   def author_bookshelf(nil), do: nil
 
   def author_bookshelf(author_struct),
-    do: %{id: author_struct.id, name: author_struct.name, bio: nil}
+    do: Gen.author(author_struct) |> Map.take([:id, :name]) |> Map.put(:bio, nil)
 
   # ---------------------------------------------------------------------------
   # Edition
@@ -193,16 +187,17 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec edition(map()) :: map()
   def edition(ed) do
-    %{
-      id: ed.id,
-      isbn: ed.isbn,
-      format_label: ed.format_label,
-      cover_image_url: ed.cover_image_url,
-      page_count: ed.page_count,
-      publisher: ed.publisher,
-      publication_year: ed.publication_year,
-      is_primary: ed.is_primary
-    }
+    Gen.edition(ed)
+    |> Map.take([
+      :id,
+      :isbn,
+      :format_label,
+      :cover_image_url,
+      :page_count,
+      :publisher,
+      :publication_year,
+      :is_primary
+    ])
   end
 
   # ---------------------------------------------------------------------------
@@ -226,15 +221,12 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec placement_detail(map()) :: map()
   def placement_detail(placement) do
-    %{
-      id: placement.id,
-      position: placement.position,
+    Gen.placement(placement)
+    |> Map.take([:id, :position, :formats, :personal_rating, :notes])
+    |> Map.merge(%{
       placed_at: placement.placed_at,
-      formats: placement.formats,
-      personal_rating: placement.personal_rating,
-      notes: placement.notes,
       book: bookshelf_book(placement.book)
-    }
+    })
   end
 
   @doc """
@@ -244,14 +236,12 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec placement_ref(map()) :: map()
   def placement_ref(placement) do
-    %{
-      id: placement.id,
-      book_id: placement.book_id,
-      bookshelf_id: placement.bookshelf_id,
-      position: placement.position,
+    Gen.placement(placement)
+    |> Map.take([:id, :book_id, :bookshelf_id, :position])
+    |> Map.merge(%{
       placed_at: placement.placed_at,
       removed_at: placement.removed_at
-    }
+    })
   end
 
   @doc """
@@ -285,17 +275,18 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec user(map()) :: map()
   def user(user_struct) do
-    %{
-      id: user_struct.id,
-      email: user_struct.email,
-      display_name: user_struct.display_name,
-      role: user_struct.role,
-      profile_visibility: user_struct.profile_visibility,
-      age_verified: user_struct.age_verified,
-      consent_analytics: user_struct.consent_analytics,
-      country_code: user_struct.country_code,
-      city: user_struct.city
-    }
+    Gen.user(user_struct)
+    |> Map.take([
+      :id,
+      :email,
+      :display_name,
+      :role,
+      :profile_visibility,
+      :age_verified,
+      :consent_analytics,
+      :country_code,
+      :city
+    ])
   end
 
   # ---------------------------------------------------------------------------
@@ -309,16 +300,17 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
-    %{
-      id: post.id,
-      user_id: post.user_id,
-      title: post.title,
-      body: post.body,
-      visibility: post.visibility,
-      published_at: post.published_at,
-      created_at: post.created_at,
-      updated_at: post.updated_at
-    }
+    Gen.blog_post(post)
+    |> Map.take([
+      :id,
+      :user_id,
+      :title,
+      :body,
+      :visibility,
+      :published_at,
+      :created_at,
+      :updated_at
+    ])
   end
 
   @doc """
@@ -384,24 +376,27 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec listing(map()) :: map()
   def listing(l) do
-    %{
-      id: l.id,
-      status: l.status,
-      pricing_mode: l.pricing_mode,
-      price_cents: l.price_cents,
-      currency: l.currency,
-      condition: l.condition,
-      description: l.description,
-      contact_info: l.contact_info,
-      photo_urls: l.photo_urls,
-      listed_at: l.listed_at,
-      expires_at: l.expires_at,
-      sold_at: l.sold_at,
-      created_at: l.created_at,
-      updated_at: l.updated_at,
+    Gen.listing(l)
+    |> Map.take([
+      :id,
+      :status,
+      :pricing_mode,
+      :price_cents,
+      :currency,
+      :condition,
+      :description,
+      :contact_info,
+      :photo_urls,
+      :listed_at,
+      :expires_at,
+      :sold_at,
+      :created_at,
+      :updated_at
+    ])
+    |> Map.merge(%{
       book: listing_book(l.book),
       seller: listing_seller(l.seller)
-    }
+    })
   end
 
   # ---------------------------------------------------------------------------
@@ -489,17 +484,20 @@ defmodule StacksWeb.ProtoJSON do
   defp listing_book(nil), do: nil
 
   defp listing_book(book) do
-    %{
-      id: book.id,
-      title: book.title,
-      description: book.description,
-      language: book.language,
-      subjects: book.subjects,
-      bisac_codes: book.bisac_codes,
-      visibility_tier: book.visibility_tier,
+    Gen.book(book)
+    |> Map.take([
+      :id,
+      :title,
+      :description,
+      :language,
+      :subjects,
+      :bisac_codes,
+      :visibility_tier
+    ])
+    |> Map.merge(%{
       created_at: book.created_at,
       updated_at: book.updated_at
-    }
+    })
   end
 
   # Extracts the book title from a preloaded association, handling not-loaded and nil.
@@ -516,16 +514,19 @@ defmodule StacksWeb.ProtoJSON do
   defp listing_seller(nil), do: nil
 
   defp listing_seller(seller) do
-    %{
-      id: seller.id,
-      email: seller.email,
-      display_name: seller.display_name,
-      role: seller.role,
-      profile_visibility: seller.profile_visibility,
-      age_verified: seller.age_verified,
-      consent_analytics: seller.consent_analytics,
+    Gen.user(seller)
+    |> Map.take([
+      :id,
+      :email,
+      :display_name,
+      :role,
+      :profile_visibility,
+      :age_verified,
+      :consent_analytics
+    ])
+    |> Map.merge(%{
       created_at: seller.created_at,
       updated_at: seller.updated_at
-    }
+    })
   end
 end

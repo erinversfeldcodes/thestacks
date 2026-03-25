@@ -769,5 +769,78 @@
         related_authors: %{ecto_type: {:array, :string}}
       }
     }
+  ],
+
+  # -------------------------------------------------------------------------
+  # ProtoJSON.Gen — base serializer functions generated from proto messages.
+  # Each entry produces a function in StacksWeb.ProtoJSON.Gen that extracts
+  # all proto fields from an Ecto struct. The hand-written ProtoJSON module
+  # composes these with business logic (field subsetting, computed fields).
+  # -------------------------------------------------------------------------
+  proto_json: [
+    %{
+      proto_file: "stacks/common/v1/book.proto",
+      proto_message: "Book",
+      function_name: :book,
+      skip_fields: [:author, :editions, :edition_count, :primary_edition, :community_read_count],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/book.proto",
+      proto_message: "Author",
+      function_name: :author,
+      skip_fields: [],
+      field_overrides: %{
+        website: %{ecto_name: :website_url}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/book.proto",
+      proto_message: "Edition",
+      function_name: :edition,
+      skip_fields: [:book_id],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/user.proto",
+      proto_message: "User",
+      function_name: :user,
+      skip_fields: [
+        :password_hash,
+        :email_confirmation_token,
+        :password_reset_token,
+        :password_reset_sent_at
+      ],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/placement.proto",
+      proto_message: "Placement",
+      function_name: :placement,
+      skip_fields: [],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "BlogPost",
+      function_name: :blog_post,
+      skip_fields: [:associations],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "BookAssociation",
+      function_name: :book_association,
+      # book_title, status, created_at are computed by ProtoJSON, not struct fields
+      skip_fields: [:post_id, :book_title, :status, :created_at],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/listing.proto",
+      proto_message: "Listing",
+      function_name: :listing,
+      skip_fields: [:book, :seller_id],
+      field_overrides: %{}
+    }
   ]
 }
