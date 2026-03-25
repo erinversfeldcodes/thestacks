@@ -1,0 +1,37 @@
+// audit.proto — Audit log entry for tracking user actions on the platform.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.internal.v1";
+option java_outer_classname = "AuditProto";
+option java_multiple_files = true;
+
+// AuditEntry records a user action in the audit.audit_log table.
+// INSERT-only — never updated or deleted.
+message AuditEntry {
+  // UUID of the user who performed the action.
+  string user_id = 1 [json_name = "user_id"];
+
+  // The action performed (e.g. "create", "update", "delete").
+  string action = 2 [json_name = "action"];
+
+  // Type of the resource acted upon (e.g. "book", "listing").
+  string resource_type = 3 [json_name = "resource_type"];
+
+  // UUID of the resource acted upon.
+  string resource_id = 4 [json_name = "resource_id"];
+
+  // IP address of the client that performed the action.
+  string ip_address = 5 [json_name = "ip_address"];
+
+  // Additional metadata about the action (stored as JSONB).
+  google.protobuf.Struct metadata = 6 [json_name = "metadata"];
+
+  // When the action occurred (UTC).
+  google.protobuf.Timestamp occurred_at = 7 [json_name = "occurred_at"];
+}

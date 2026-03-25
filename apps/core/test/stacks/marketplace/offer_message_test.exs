@@ -3,15 +3,16 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
   import Stacks.Factory
 
+  alias Stacks.Marketplace
   alias Stacks.Marketplace.OfferMessage
 
-  describe "changeset/2" do
+  describe "offer_message_changeset/2" do
     test "is valid with required fields" do
       thread = insert(:offer_thread)
       sender = insert(:user)
 
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           thread_id: thread.id,
           sender_id: sender.id,
           type: "message",
@@ -23,7 +24,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
     test "is invalid without thread_id" do
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           sender_id: Ecto.UUID.generate(),
           type: "message"
         })
@@ -34,7 +35,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
     test "is invalid without sender_id" do
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           thread_id: Ecto.UUID.generate(),
           type: "message"
         })
@@ -45,7 +46,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
     test "is invalid without type" do
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           thread_id: Ecto.UUID.generate(),
           sender_id: Ecto.UUID.generate()
         })
@@ -56,7 +57,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
     test "is invalid with an unknown type" do
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           thread_id: Ecto.UUID.generate(),
           sender_id: Ecto.UUID.generate(),
           type: "sticker"
@@ -69,7 +70,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
     test "accepts all valid types" do
       for type <- ~w(message offer counter accept decline) do
         changeset =
-          OfferMessage.changeset(%OfferMessage{}, %{
+          Marketplace.offer_message_changeset(%OfferMessage{}, %{
             thread_id: Ecto.UUID.generate(),
             sender_id: Ecto.UUID.generate(),
             type: type
@@ -81,7 +82,7 @@ defmodule Stacks.Marketplace.OfferMessageTest do
 
     test "allows nil amount_cents for non-offer messages" do
       changeset =
-        OfferMessage.changeset(%OfferMessage{}, %{
+        Marketplace.offer_message_changeset(%OfferMessage{}, %{
           thread_id: Ecto.UUID.generate(),
           sender_id: Ecto.UUID.generate(),
           type: "message",

@@ -11,6 +11,7 @@ defmodule Stacks.Enrichment.Prices do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Enrichment
   alias Stacks.Enrichment.{Bookstore, PriceSnapshot}
 
   # ── Snapshots ─────────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ defmodule Stacks.Enrichment.Prices do
   @spec upsert_snapshot(map()) :: {:ok, PriceSnapshot.t()} | {:error, Ecto.Changeset.t()}
   def upsert_snapshot(attrs) do
     %PriceSnapshot{}
-    |> PriceSnapshot.changeset(attrs)
+    |> Enrichment.price_snapshot_changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace, [:price_cents, :currency, :in_stock, :url, :scraped_at]},
       conflict_target: [:book_id, :store_id]

@@ -16,6 +16,7 @@ defmodule Stacks.Books do
 
   require Logger
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
@@ -25,6 +26,45 @@ defmodule Stacks.Books do
   alias Stacks.Events
   alias Stacks.Shelving
   alias Stacks.Workers.IdentifyBookJob
+
+  # ── Field lists for changesets (moved from schemas) ──────────────────────
+
+  @book_required_fields [:title]
+  @book_optional_fields [
+    :author_id,
+    :description,
+    :language,
+    :subjects,
+    :bisac_codes,
+    :visibility_tier
+  ]
+
+  @author_cast_fields [:name, :bio, :website_url, :rss_feed_url, :open_library_id]
+
+  @edition_required_fields [:isbn, :book_id]
+  @edition_optional_fields [
+    :format_label,
+    :cover_image_url,
+    :page_count,
+    :publisher,
+    :publication_year,
+    :open_library_id,
+    :google_books_id,
+    :is_primary
+  ]
+
+  @image_cast_fields [
+    :storage_path,
+    :status,
+    :rejection_reason,
+    :uploaded_at,
+    :expires_at,
+    :book_id,
+    :book_edition_id,
+    :book_ids
+  ]
+
+  @valid_image_statuses ~w(pending resolved rejected)
 
   @doc """
   Returns a book (work) by ID with the author and editions preloaded.
@@ -99,14 +139,14 @@ defmodule Stacks.Books do
   def create(attrs) do
     book_changeset =
       %Book{}
-      |> Book.changeset(attrs)
+      |> book_changeset(attrs)
       |> maybe_create_author(attrs)
 
     Multi.new()
     |> Multi.insert(:book, book_changeset)
     |> Multi.insert(:edition, fn %{book: book} ->
       %BookEdition{}
-      |> BookEdition.changeset(%{
+      |> book_edition_changeset(%{
         "isbn" => attrs["isbn"],
         "book_id" => book.id,
         "format_label" => attrs["format_label"],
@@ -161,7 +201,7 @@ defmodule Stacks.Books do
 
   defp validate_isbn_format(isbn) do
     cs =
-      BookEdition.changeset(%BookEdition{}, %{"isbn" => isbn, "book_id" => Ecto.UUID.generate()})
+      book_edition_changeset(%BookEdition{}, %{"isbn" => isbn, "book_id" => Ecto.UUID.generate()})
 
     if Keyword.has_key?(cs.errors, :isbn) do
       {:error, cs}
@@ -218,7 +258,7 @@ defmodule Stacks.Books do
     now = DateTime.utc_now()
 
     %UploadedImage{id: image_id}
-    |> UploadedImage.changeset(%{
+    |> uploaded_image_changeset(%{
       storage_path: storage_key,
       status: "pending",
       uploaded_at: now,
@@ -366,7 +406,7 @@ defmodule Stacks.Books do
 
       edition ->
         final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
-        changeset = BookEdition.changeset(edition, %{cover_image_url: final_url})
+        changeset = book_edition_changeset(edition, %{cover_image_url: final_url})
 
         case Repo.update(changeset) do
           {:ok, updated} ->
@@ -641,10 +681,10 @@ defmodule Stacks.Books do
       attrs = build_book_attrs(isbn, metadata, author)
 
       Multi.new()
-      |> Multi.insert(:book, %Book{} |> Book.changeset(attrs))
+      |> Multi.insert(:book, %Book{} |> book_changeset(attrs))
       |> Multi.insert(:edition, fn %{book: book} ->
         %BookEdition{}
-        |> BookEdition.changeset(%{
+        |> book_edition_changeset(%{
           "isbn" => isbn,
           "book_id" => book.id,
           "format_label" => metadata[:format_label],
@@ -711,7 +751,7 @@ defmodule Stacks.Books do
 
   defp insert_edition(book, isbn, format_label, work_id) do
     %BookEdition{}
-    |> BookEdition.changeset(%{
+    |> book_edition_changeset(%{
       "isbn" => isbn,
       "book_id" => book.id,
       "format_label" => format_label,
@@ -758,7 +798,7 @@ defmodule Stacks.Books do
     case Repo.get_by(Author, name: name) do
       nil ->
         %Author{}
-        |> Author.changeset(%{name: name})
+        |> author_changeset(%{name: name})
         |> Repo.insert()
 
       author ->
@@ -784,5 +824,87 @@ defmodule Stacks.Books do
       nil -> base
       author -> Map.put(base, "author_id", author.id)
     end
+  end
+
+  # ── Changeset functions (moved from schema modules) ────────────────────
+
+  @doc false
+  def book_changeset(book, attrs) do
+    book
+    |> cast(attrs, @book_required_fields ++ @book_optional_fields)
+    |> validate_required(@book_required_fields)
+    |> validate_inclusion(:visibility_tier, ["public", "age_gated"])
+  end
+
+  @doc false
+  def author_changeset(author, attrs) do
+    author
+    |> cast(attrs, @author_cast_fields)
+    |> validate_required([:name])
+  end
+
+  @doc false
+  def book_edition_changeset(edition, attrs) do
+    edition
+    |> cast(attrs, @edition_required_fields ++ @edition_optional_fields)
+    |> validate_required(@edition_required_fields)
+    |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
+    |> validate_isbn_checksum()
+    |> unique_constraint(:isbn)
+  end
+
+  @doc false
+  def uploaded_image_changeset(image, attrs) do
+    image
+    |> cast(attrs, @image_cast_fields)
+    |> validate_required([:status, :uploaded_at, :expires_at])
+    |> validate_inclusion(:status, @valid_image_statuses)
+  end
+
+  defp validate_isbn_checksum(changeset) do
+    validate_change(changeset, :isbn, fn :isbn, isbn ->
+      if valid_isbn_checksum?(isbn) do
+        []
+      else
+        [isbn: "has an invalid checksum"]
+      end
+    end)
+  end
+
+  defp valid_isbn_checksum?(isbn) do
+    if isbn =~ ~r/^\d{10}$|^\d{13}$/ do
+      digits = Enum.map(String.graphemes(isbn), &String.to_integer/1)
+
+      case length(digits) do
+        13 -> isbn13_valid?(digits)
+        10 -> isbn10_valid?(digits)
+        _ -> false
+      end
+    else
+      true
+    end
+  end
+
+  defp isbn13_valid?(digits) do
+    sum =
+      digits
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc ->
+        weight = if rem(i, 2) == 0, do: 1, else: 3
+        acc + d * weight
+      end)
+
+    rem(sum, 10) == 0
+  end
+
+  defp isbn10_valid?(digits) do
+    sum =
+      digits
+      |> Enum.take(9)
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
+
+    check = rem(11 - rem(sum, 11), 11)
+    check != 10 and check == Enum.at(digits, 9)
   end
 end

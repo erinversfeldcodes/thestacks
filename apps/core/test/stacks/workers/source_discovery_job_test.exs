@@ -86,7 +86,7 @@ defmodule Stacks.Workers.SourceDiscoveryJobTest do
       # Only the new source should have ScoreSourceJob enqueued
       new_source = Discovery.get_source_by_url("https://new-source.com")
       assert new_source != nil
-      assert new_source.status == :pending_review
+      assert new_source.status == "pending_review"
     end
 
     test "falls back to SearXNG when Brave budget exhausted" do
@@ -162,7 +162,7 @@ defmodule Stacks.Workers.SourceDiscoveryJobTest do
                })
 
       source = Discovery.get_source_by_url("https://bookclub.com")
-      assert source.type == :community
+      assert source.type == "community"
     end
   end
 end

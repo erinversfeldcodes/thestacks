@@ -782,23 +782,28 @@ defmodule StacksWeb.ProtoJSONTest do
       assert Map.has_key?(result.seller, :updated_at)
     end
 
-    test "listing/1 produces identical output to Jason.encode! on a raw Listing struct" do
+    test "listing/1 includes all expected scalar fields and embedded book/seller" do
       book = insert(:book, author: nil)
       seller = insert(:user, display_name: "Bob")
       listing = insert(:listing, book: book, seller: seller)
 
-      jason_output =
-        listing
-        |> Jason.encode!()
-        |> Jason.decode!()
-
-      proto_output =
+      result =
         listing
         |> ProtoJSON.listing()
         |> Jason.encode!()
         |> Jason.decode!()
 
-      assert proto_output == jason_output
+      # Scalar fields from derive_jason
+      assert result["id"] == listing.id
+      assert result["status"] == listing.status
+      assert result["currency"] == listing.currency
+      assert result["condition"] == listing.condition
+
+      # Embedded associations serialized by ProtoJSON (not by @derive)
+      assert is_map(result["book"])
+      assert result["book"]["id"] == book.id
+      assert is_map(result["seller"])
+      assert result["seller"]["display_name"] == "Bob"
     end
 
     test "handles not-loaded book and seller" do

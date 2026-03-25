@@ -26,7 +26,7 @@
         event_type: %{null: false},
         aggregate_type: %{null: false},
         payload: %{ecto_type: :map, null: false},
-        metadata: %{ecto_type: :map, null: false, default: {:fragment, "'{}'::jsonb"}},
+        metadata: %{ecto_type: :map},
         schema_version: %{default: 1, null: false},
         occurred_at: %{null: false, default: {:fragment, "NOW()"}}
       }
@@ -92,6 +92,18 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      virtual_fields: [password: :string],
+      derive_jason: [
+        :id,
+        :email,
+        :display_name,
+        :role,
+        :profile_visibility,
+        :age_verified,
+        :consent_analytics,
+        :created_at,
+        :updated_at
+      ],
       field_overrides: %{
         role: %{default: "user"},
         profile_visibility: %{default: "owner"},
@@ -103,7 +115,12 @@
         notify_marketplace: %{default: true},
         notify_group_invitations: %{default: true},
         notify_event_matches: %{default: false},
-        email_confirmed: %{default: false}
+        email_confirmed: %{default: false},
+        # Security-sensitive fields — exclude from dbt analytics
+        password_hash: %{dbt_exclude: true},
+        password_reset_token: %{dbt_exclude: true},
+        password_reset_sent_at: %{dbt_exclude: true},
+        email_confirmation_token: %{dbt_exclude: true}
       }
     },
 
@@ -122,6 +139,17 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :title,
+        :description,
+        :language,
+        :subjects,
+        :bisac_codes,
+        :visibility_tier,
+        :created_at,
+        :updated_at
+      ],
       associations: [
         {:has_many, :editions, Stacks.Books.BookEdition, foreign_key: :book_id}
       ],
@@ -132,12 +160,12 @@
         subjects: %{ecto_type: {:array, :string}, default: []},
         bisac_codes: %{ecto_type: {:array, :string}, default: []},
         visibility_tier: %{default: "public"},
-        # API-only fields — not DB columns
-        author: %{skip: true},
-        editions: %{skip: true},
-        edition_count: %{skip: true},
-        primary_edition: %{skip: true},
-        community_read_count: %{skip: true}
+        # API-only fields — no DB column, excluded from Ecto schema and dbt
+        author: %{api_only: true},
+        editions: %{api_only: true},
+        edition_count: %{api_only: true},
+        primary_edition: %{api_only: true},
+        community_read_count: %{api_only: true}
       }
     },
     %{
@@ -152,10 +180,7 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
-      field_overrides: %{
-        # Proto uses "website" but DB column is "website_url"
-        website: %{skip: true}
-      }
+      field_overrides: %{}
     },
     %{
       proto_file: "stacks/common/v1/book.proto",
@@ -169,6 +194,20 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :isbn,
+        :format_label,
+        :cover_image_url,
+        :page_count,
+        :publisher,
+        :publication_year,
+        :open_library_id,
+        :google_books_id,
+        :is_primary,
+        :created_at,
+        :updated_at
+      ],
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         is_primary: %{default: false}
@@ -271,6 +310,17 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :user_id,
+        :title,
+        :body,
+        :visibility,
+        :visibility_group_id,
+        :published_at,
+        :created_at,
+        :updated_at
+      ],
       associations: [
         {:has_many, :book_associations, Stacks.Blog.PostBookAssociation, foreign_key: :post_id}
       ],
@@ -278,8 +328,9 @@
         user_id: %{belongs_to: Stacks.Accounts.User},
         visibility: %{default: "owner"},
         visibility_group_id: %{belongs_to: Stacks.Social.Group},
-        # API-only fields — not DB columns
-        associations: %{skip: true}
+        published_at: %{ecto_type: :utc_datetime_usec},
+        # API-only fields — no DB column, excluded from Ecto schema and dbt
+        associations: %{api_only: true}
       }
     },
     %{
@@ -294,15 +345,24 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :post_id,
+        :book_id,
+        :confidence,
+        :reasoning,
+        :source,
+        :visible,
+        :created_at
+      ],
       field_overrides: %{
         post_id: %{belongs_to: Stacks.Blog.Post},
         book_id: %{belongs_to: Stacks.Books.Book},
         source: %{default: "llm"},
         visible: %{default: true},
-        # API-only fields — not DB columns
-        book_title: %{skip: true},
-        status: %{skip: true},
-        created_at: %{skip: true}
+        # API-only fields — no DB column, excluded from Ecto schema and dbt
+        book_title: %{api_only: true},
+        status: %{api_only: true}
       }
     },
 
@@ -341,6 +401,7 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [:id, :owner_id, :name, :type, :visibility, :created_at, :updated_at],
       associations: [
         {:has_many, :members, Stacks.Social.GroupMember, foreign_key: :group_id},
         {:has_many, :invitations, Stacks.Social.GroupInvitation, foreign_key: :group_id}
@@ -362,6 +423,7 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [:id, :group_id, :user_id, :role, :joined_at, :created_at],
       field_overrides: %{
         group_id: %{belongs_to: Stacks.Social.Group},
         user_id: %{belongs_to: Stacks.Accounts.User},
@@ -380,9 +442,18 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :group_id,
+        :invited_by_id,
+        :invited_user_id,
+        :status,
+        :responded_at,
+        :created_at
+      ],
       field_overrides: %{
         group_id: %{belongs_to: Stacks.Social.Group},
-        invited_by_id: %{belongs_to: Stacks.Accounts.User},
+        invited_by_id: %{belongs_to: Stacks.Accounts.User, assoc_name: :invited_by_user},
         invited_user_id: %{belongs_to: Stacks.Accounts.User},
         status: %{default: "pending"}
       }
@@ -399,6 +470,14 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :resource_type,
+        :resource_id,
+        :granted_to_id,
+        :granted_by_id,
+        :created_at
+      ],
       field_overrides: %{
         resource_id: %{ecto_type: :binary_id},
         granted_to_id: %{belongs_to: Stacks.Accounts.User},
@@ -417,6 +496,12 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :blocker_id,
+        :blocked_id,
+        :created_at
+      ],
       field_overrides: %{
         blocker_id: %{belongs_to: Stacks.Accounts.User},
         blocked_id: %{belongs_to: Stacks.Accounts.User}
@@ -438,14 +523,33 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :status,
+        :pricing_mode,
+        :price_cents,
+        :currency,
+        :condition,
+        :description,
+        :contact_info,
+        :photo_urls,
+        :listed_at,
+        :expires_at,
+        :sold_at,
+        :created_at,
+        :updated_at
+      ],
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         seller_id: %{belongs_to: Stacks.Accounts.User},
         status: %{default: "draft"},
         currency: %{default: "ZAR"},
         photo_urls: %{ecto_type: {:array, :string}, default: []},
-        # API-only fields — not DB columns
-        book: %{skip: true}
+        listed_at: %{ecto_type: :utc_datetime_usec},
+        expires_at: %{ecto_type: :utc_datetime_usec},
+        sold_at: %{ecto_type: :utc_datetime_usec},
+        # API-only fields — no DB column, excluded from Ecto schema and dbt
+        book: %{api_only: true}
       }
     },
     %{
@@ -460,6 +564,14 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :placement_id,
+        :buyer_id,
+        :status,
+        :created_at,
+        :updated_at
+      ],
       associations: [
         {:has_many, :messages, Stacks.Marketplace.OfferMessage, foreign_key: :thread_id}
       ],
@@ -481,6 +593,15 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :thread_id,
+        :sender_id,
+        :type,
+        :body,
+        :amount_cents,
+        :created_at
+      ],
       field_overrides: %{
         thread_id: %{belongs_to: Stacks.Marketplace.OfferThread},
         sender_id: %{belongs_to: Stacks.Accounts.User}
@@ -498,6 +619,22 @@
       migration_exists: true,
       dbt_grant: true,
       indexes: [],
+      derive_jason: [
+        :id,
+        :listing_id,
+        :offer_id,
+        :buyer_id,
+        :seller_id,
+        :amount_cents,
+        :currency,
+        :payment_provider_ref,
+        :payment_status,
+        :shipping_provider_ref,
+        :shipping_status,
+        :shipping_cost_cents,
+        :completed_at,
+        :created_at
+      ],
       field_overrides: %{
         listing_id: %{belongs_to: Stacks.Marketplace.Listing},
         offer_id: %{ecto_type: :binary_id},
@@ -524,7 +661,9 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        config_generated: %{ecto_type: :map}
+        config_generated: %{ecto_type: :map},
+        # PII — exclude from dbt analytics
+        exclusion_email: %{dbt_exclude: true}
       }
     },
     %{
@@ -609,7 +748,8 @@
       indexes: [],
       field_overrides: %{
         country_code: %{default: "ZA"},
-        verified: %{default: false}
+        verified: %{default: false},
+        opted_out: %{default: false}
       }
     },
     %{

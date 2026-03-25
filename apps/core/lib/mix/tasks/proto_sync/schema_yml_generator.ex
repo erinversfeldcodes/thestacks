@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
-  @moduledoc false
+  @moduledoc "Generates and merges dbt schema.yml model blocks from proto definitions."
 
   alias Mix.Tasks.ProtoSync.Descriptor
   alias Mix.Tasks.ProtoSync.TypeMapper
@@ -18,11 +18,24 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   @spec generate(map(), list(), map()) :: String.t()
   def generate(table, fields, descriptor) do
     overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
     model_name = "stg_#{table.table_name}"
+
+    # Filter out: id, timestamps (added separately), api_only/dbt_exclude fields
+    filtered_fields =
+      Enum.reject(fields, fn field ->
+        field_atom = String.to_atom(field.name)
+        override = Map.get(overrides, field_atom, %{})
+
+        field.name == "id" or
+          field.name in ts_fields or
+          Map.get(override, :api_only, false) or
+          Map.get(override, :dbt_exclude, false)
+      end)
 
     columns =
       [id_column()] ++
-        Enum.map(fields, fn field -> field_column(field, overrides, descriptor) end) ++
+        Enum.map(filtered_fields, fn field -> field_column(field, overrides, descriptor) end) ++
         timestamp_columns(table)
 
     column_yaml = Enum.map_join(columns, "\n", &render_column/1)
@@ -146,13 +159,14 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   defp field_column(field, overrides, descriptor) do
     field_atom = String.to_atom(field.name)
     override = Map.get(overrides, field_atom, %{})
+    col_name = Map.get(override, :ecto_name, field_atom) |> to_string()
     ecto_type = TypeMapper.ecto_type(field, overrides)
 
     tests = build_tests(field, override, ecto_type, descriptor)
 
     %{
-      name: field.name,
-      description: field_description(field),
+      name: col_name,
+      description: field_description(col_name),
       tests: tests
     }
   end
@@ -172,7 +186,22 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     ]
   end
 
+  defp timestamp_columns(%{timestamps: {:standard, updated_at: false}}) do
+    [
+      %{
+        name: "created_at",
+        description: "Timestamp when the record was created.",
+        tests: [:not_null]
+      }
+    ]
+  end
+
   defp timestamp_columns(_), do: []
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp build_tests(field, override, _ecto_type, descriptor) do
     tests = []
@@ -190,22 +219,16 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     # polymorphic references like aggregate_id). Add relationships tests manually
     # to intermediate/mart schema.yml where denormalised joins could produce orphans.
 
-    # accepted_values for enum fields
-    if field.type == "TYPE_ENUM" do
-      enum_values = Descriptor.extract_enum_values(descriptor, field.type_name)
-
-      if enum_values != [] do
-        tests ++ [{:accepted_values, enum_values}]
-      else
-        tests
-      end
-    else
-      tests
-    end
+    # accepted_values for enum fields: NOT auto-generated.
+    # Proto enums are additive (new values added before DB migration),
+    # so proto values may be a superset of DB enum values. Postgres enum
+    # constraints enforce valid values at the OLTP layer. Add accepted_values
+    # tests manually in intermediate/mart schema.yml if needed.
+    tests
   end
 
-  defp field_description(field) do
-    field.name
+  defp field_description(name) when is_binary(name) do
+    name
     |> String.replace("_", " ")
     |> String.capitalize()
     |> Kernel.<>(".")

@@ -3,8 +3,8 @@ defmodule StacksWeb.AuthControllerTest do
 
   import Stacks.Factory
 
+  alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
-  alias Stacks.Accounts.User
 
   describe "POST /api/auth/register" do
     test "creates user and returns confirmation_email_sent", %{conn: conn} do
@@ -176,7 +176,7 @@ defmodule StacksWeb.AuthControllerTest do
 
       {:ok, _} =
         user
-        |> User.email_confirmation_changeset(%{
+        |> Accounts.email_confirmation_changeset(%{
           email_confirmed: true,
           email_confirmation_token: nil
         })

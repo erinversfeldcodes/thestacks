@@ -17,8 +17,8 @@ defmodule StacksWeb.SourceAdminControllerTest do
   describe "GET /api/admin/sources" do
     test "returns paginated list of sources for owner", %{conn: conn} do
       owner = insert(:owner_user)
-      insert(:discovered_source, status: :pending_review)
-      insert(:discovered_source, status: :approved)
+      insert(:discovered_source, status: "pending_review")
+      insert(:discovered_source, status: "approved")
 
       conn =
         conn
@@ -31,8 +31,8 @@ defmodule StacksWeb.SourceAdminControllerTest do
 
     test "filters by status", %{conn: conn} do
       owner = insert(:owner_user)
-      insert(:discovered_source, status: :pending_review)
-      insert(:discovered_source, status: :approved, approved_at: DateTime.utc_now())
+      insert(:discovered_source, status: "pending_review")
+      insert(:discovered_source, status: "approved", approved_at: DateTime.utc_now())
 
       conn =
         conn
@@ -46,8 +46,8 @@ defmodule StacksWeb.SourceAdminControllerTest do
 
     test "filters by type", %{conn: conn} do
       owner = insert(:owner_user)
-      insert(:discovered_source, type: :bookshop)
-      insert(:discovered_source, type: :review_site)
+      insert(:discovered_source, type: "bookshop")
+      insert(:discovered_source, type: "review_site")
 
       conn =
         conn
@@ -78,7 +78,7 @@ defmodule StacksWeb.SourceAdminControllerTest do
   describe "PUT /api/admin/sources/:id/approve" do
     test "transitions pending_review to approved", %{conn: conn} do
       owner = insert(:owner_user)
-      source = insert(:discovered_source, status: :pending_review)
+      source = insert(:discovered_source, status: "pending_review")
 
       conn =
         conn
@@ -93,7 +93,7 @@ defmodule StacksWeb.SourceAdminControllerTest do
 
     test "returns 422 for already approved source", %{conn: conn} do
       owner = insert(:owner_user)
-      source = insert(:discovered_source, status: :approved, approved_at: DateTime.utc_now())
+      source = insert(:discovered_source, status: "approved", approved_at: DateTime.utc_now())
 
       conn =
         conn
@@ -116,7 +116,7 @@ defmodule StacksWeb.SourceAdminControllerTest do
 
     test "returns 403 for non-owner", %{conn: conn} do
       user = insert(:user, role: "user")
-      source = insert(:discovered_source, status: :pending_review)
+      source = insert(:discovered_source, status: "pending_review")
 
       conn =
         conn
@@ -130,7 +130,7 @@ defmodule StacksWeb.SourceAdminControllerTest do
   describe "PUT /api/admin/sources/:id/reject" do
     test "transitions pending_review to dismissed", %{conn: conn} do
       owner = insert(:owner_user)
-      source = insert(:discovered_source, status: :pending_review)
+      source = insert(:discovered_source, status: "pending_review")
 
       conn =
         conn
@@ -144,7 +144,7 @@ defmodule StacksWeb.SourceAdminControllerTest do
 
     test "returns 422 for already dismissed source", %{conn: conn} do
       owner = insert(:owner_user)
-      source = insert(:discovered_source, status: :dismissed)
+      source = insert(:discovered_source, status: "dismissed")
 
       conn =
         conn

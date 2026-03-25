@@ -13,6 +13,9 @@ dev:
     just db-create 2>/dev/null || true
     just db-migrate
 
+    echo "==> Generating Ecto schemas from proto..."
+    cd apps/core && mix proto.sync && cd ../..
+
     echo "==> Generating Elm proto decoders..."
     bash scripts/gen-elm-proto.sh
 

@@ -3,15 +3,16 @@ defmodule Stacks.Blog.PostBookAssociationTest do
 
   import Stacks.Factory
 
+  alias Stacks.Blog
   alias Stacks.Blog.PostBookAssociation
 
-  describe "changeset/2" do
+  describe "post_book_association_changeset/2" do
     test "is valid with post, book, confidence, and source" do
       post = insert(:post)
       book = insert(:book)
 
       changeset =
-        PostBookAssociation.changeset(%PostBookAssociation{}, %{
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
           post_id: post.id,
           book_id: book.id,
           confidence: 0.9,
@@ -27,7 +28,7 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       book = insert(:book)
 
       changeset =
-        PostBookAssociation.changeset(%PostBookAssociation{}, %{
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
           book_id: book.id,
           confidence: 0.9,
           source: "llm"
@@ -41,7 +42,7 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       post = insert(:post)
 
       changeset =
-        PostBookAssociation.changeset(%PostBookAssociation{}, %{
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
           post_id: post.id,
           confidence: 0.9,
           source: "llm"
@@ -56,7 +57,7 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       book = insert(:book)
 
       changeset =
-        PostBookAssociation.changeset(%PostBookAssociation{}, %{
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
           post_id: post.id,
           book_id: book.id,
           confidence: 0.9,
@@ -72,7 +73,7 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       book = insert(:book)
 
       changeset =
-        PostBookAssociation.changeset(%PostBookAssociation{}, %{
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
           post_id: post.id,
           book_id: book.id,
           confidence: 0.9,
