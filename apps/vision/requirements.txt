@@ -1,10 +1,7 @@
+-r ../../requirements/base.txt
 fastapi==0.135.1
 starlette==0.52.1
 uvicorn[standard]==0.41.0
-httpx==0.28.1
-pydantic==2.10.4
-pydantic-settings==2.7.1
-structlog==24.4.0
 modal>=0.73.0
 pyzbar>=0.1.9
 Pillow>=10.0.0
