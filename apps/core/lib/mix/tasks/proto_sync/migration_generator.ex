@@ -294,7 +294,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
 
     added =
       Enum.flat_map(blocks, fn [_, block] ->
-        ~r/^\s+add\s+:(\w+)/m
+        ~r/^\s+add(?:_if_not_exists)?\s+:(\w+)/m
         |> Regex.scan(block)
         |> Enum.map(fn [_, col] -> col end)
         |> Enum.reject(&(&1 == "id"))
