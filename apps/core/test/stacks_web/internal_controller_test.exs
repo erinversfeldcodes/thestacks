@@ -139,7 +139,24 @@ defmodule StacksWeb.InternalControllerTest do
       assert json_response(conn, 200)["ok"] == true
     end
 
-    test "valid HMAC + unknown status returns 200", %{conn: conn} do
+    test "valid HMAC + unknown status emits telemetry and returns 200", %{conn: conn} do
+      # Verifies the catch-all is observable — alerts fire when vision rolls back
+      # to a pre-enum wire format. See docs/runbooks/vision-service-rollback.md.
+      test_pid = self()
+
+      :telemetry.attach(
+        "test-unknown-status-#{inspect(test_pid)}",
+        [:stacks, :vision, :unknown_association_status],
+        fn _event, _measurements, metadata, _ ->
+          send(test_pid, {:telemetry_fired, metadata.status})
+        end,
+        nil
+      )
+
+      on_exit(fn ->
+        :telemetry.detach("test-unknown-status-#{inspect(test_pid)}")
+      end)
+
       conn =
         conn
         |> put_req_header("x-vision-signature", test_signature())
@@ -153,6 +170,7 @@ defmodule StacksWeb.InternalControllerTest do
         })
 
       assert json_response(conn, 200)["ok"] == true
+      assert_receive {:telemetry_fired, "ASSOCIATION_STATUS_UNSPECIFIED"}
     end
   end
 end
