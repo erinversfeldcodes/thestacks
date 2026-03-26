@@ -8,6 +8,7 @@ defmodule StacksWeb.UploadController do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
+  alias Stacks.Books.UploadedImage
   alias Stacks.Shelving
   alias StacksWeb.ProtoJSON
 
@@ -75,16 +76,16 @@ defmodule StacksWeb.UploadController do
 
   @doc "GET /api/upload/:image_id/status — poll the status of an uploaded image."
   def status(conn, %{"image_id" => image_id}) do
-    case Ecto.UUID.dump(image_id) do
-      {:ok, image_id_bin} -> render_status(conn, image_id, image_id_bin)
+    case Ecto.UUID.cast(image_id) do
+      {:ok, uuid} -> render_status(conn, uuid)
       :error -> conn |> put_status(422) |> json(%{error: "invalid image_id"})
     end
   end
 
-  defp render_status(conn, image_id, image_id_bin) do
+  defp render_status(conn, image_id) do
     result =
-      from(i in "uploaded_images",
-        where: i.id == ^image_id_bin,
+      from(i in UploadedImage,
+        where: i.id == ^image_id,
         select: %{
           status: i.status,
           book_id: i.book_id,
@@ -92,7 +93,7 @@ defmodule StacksWeb.UploadController do
           rejection_reason: i.rejection_reason
         }
       )
-      |> Repo.one(prefix: "op")
+      |> Repo.one()
 
     case result do
       nil ->

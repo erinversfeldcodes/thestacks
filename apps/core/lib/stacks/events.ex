@@ -50,17 +50,17 @@ defmodule Stacks.Events do
     event_id = Ecto.UUID.generate()
 
     params = %{
-      id: Ecto.UUID.dump!(event_id),
+      id: event_id,
       event_type: event.event_type,
       aggregate_type: event.aggregate_type,
-      aggregate_id: encode_uuid(to_string(event.aggregate_id)),
+      aggregate_id: to_string(event.aggregate_id),
       payload: Map.get(event, :payload, %{}),
       metadata: Map.get(event, :metadata, %{}),
       schema_version: Map.get(event, :schema_version, 1),
       occurred_at: now
     }
 
-    case Repo.insert_all("event_log", [params], prefix: "op") do
+    case Repo.insert_all(EventLog, [params]) do
       {1, _} ->
         enqueue_subscriber(event_id)
         {:ok, params}
@@ -91,13 +91,6 @@ defmodule Stacks.Events do
       )
 
       :ok
-  end
-
-  defp encode_uuid(uuid) when is_binary(uuid) do
-    case Ecto.UUID.dump(uuid) do
-      {:ok, binary} -> binary
-      :error -> nil
-    end
   end
 
   @doc """
