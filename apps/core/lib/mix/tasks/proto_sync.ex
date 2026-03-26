@@ -97,6 +97,10 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Generated #{proto_json_path}")
     end
 
+    # Format all generated Elixir files so they satisfy `mix format --check-formatted`.
+    gen_dir = Path.join(core_root, "lib/stacks/gen")
+    Mix.Task.run("format", [Path.join(gen_dir, "**/*.ex")])
+
     Mix.shell().info("Proto sync complete.")
   end
 
