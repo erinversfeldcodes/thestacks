@@ -16,8 +16,3 @@ type alias User =
     , countryCode : Maybe String
     , city : Maybe String
     }
-
-
-
--- MAPPING FROM PROTO
--- DECODERS

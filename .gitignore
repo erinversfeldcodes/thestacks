@@ -47,9 +47,14 @@ dbt/logs/
 # Protobuf generated — regenerated at build time. Never commit generated files.
 # Elm decoders: scripts/gen-elm-proto.sh
 # Ecto schemas + dbt models: mix proto.sync
+# Python Pydantic models: scripts/gen-python-proto.sh
+# Elixir inter-service structs: scripts/gen-elixir-proto.sh
+# Rust serde structs: scripts/gen-rust-proto.sh
 # CI validates with --check.
 proto/gen/
 apps/core/lib/stacks/gen/
+apps/vision/app/proto/gen/
+apps/scraper/src/proto/generated/
 
 # Node
 node_modules/
