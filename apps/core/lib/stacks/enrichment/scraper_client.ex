@@ -2,6 +2,9 @@ defmodule Stacks.Enrichment.ScraperClient do
   @moduledoc """
   HTTP client for calling the Rust scraper service.
 
+  Wire contract: `proto/stacks/internal/v1/scraper.proto`
+  (ScrapeRequest/Response, ConfigReloadResponse)
+
   The actual implementation is swappable via Application env:
     config :core, :scraper_client, Stacks.Enrichment.ScraperClient       # real HTTP
     config :core, :scraper_client, Stacks.Enrichment.MockScraperClient  # tests
@@ -16,7 +19,11 @@ defmodule Stacks.Enrichment.ScraperClient do
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
 
+  alias Stacks.Proto.Scraper.ScrapeRequest
+
   require Logger
+
+  @fuse_name :scraper_service
 
   @impl true
   def scrape(isbn, store_name) do
@@ -27,29 +34,77 @@ defmodule Stacks.Enrichment.ScraperClient do
   end
 
   defp do_scrape(isbn, store_name) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :ok -> make_scraper_request(isbn, store_name)
+      :blown -> {:error, :circuit_open}
+      # Fuse not yet installed (e.g. first startup before fuse is initialised)
+      {:error, :not_found} -> make_scraper_request(isbn, store_name)
+    end
+  end
+
+  defp build_scraper_request(isbn, store_name) do
     base_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
     path = "/scrape"
     url = "#{base_url}#{path}"
-    body = Jason.encode!(%{isbn: isbn, store: store_name})
+    body = Jason.encode!(%ScrapeRequest{isbn: isbn, store: store_name})
     token = auth_token("POST", path)
 
-    req =
-      Finch.build(
-        :post,
-        url,
-        [{"content-type", "application/json"}, {"x-internal-token", token}],
-        body
-      )
+    Finch.build(
+      :post,
+      url,
+      [{"content-type", "application/json"}, {"X-Internal-Token", token}],
+      body
+    )
+  end
+
+  defp make_scraper_request(isbn, store_name) do
+    req = build_scraper_request(isbn, store_name)
+    # Telemetry :start is emitted here (after fuse gate) so every :start has a
+    # matching :stop/:exception — necessary for handlers that track open spans.
+    start_time = System.monotonic_time()
+
+    :telemetry.execute(
+      [:stacks, :scraper, :request, :start],
+      %{system_time: System.system_time()},
+      %{isbn: isbn, store: store_name}
+    )
 
     case Finch.request(req, Stacks.Finch, receive_timeout: 30_000) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :scraper, :request, :stop],
+          %{duration: duration},
+          %{isbn: isbn, store: store_name, status: 200}
+        )
+
         Jason.decode(resp_body)
 
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :scraper, :request, :stop],
+          %{duration: duration},
+          %{isbn: isbn, store: store_name, status: status}
+        )
+
+        melt_fuse(@fuse_name)
         Logger.warning("ScraperClient: HTTP #{status} for isbn=#{isbn} store=#{store_name}")
         {:error, %{status: status, body: resp_body}}
 
       {:error, reason} ->
+        duration = System.monotonic_time() - start_time
+
+        :telemetry.execute(
+          [:stacks, :scraper, :request, :exception],
+          %{duration: duration},
+          %{isbn: isbn, store: store_name, kind: :error, reason: reason}
+        )
+
+        melt_fuse(@fuse_name)
+
         Logger.warning(
           "ScraperClient: request failed for isbn=#{isbn} store=#{store_name}: #{inspect(reason)}"
         )
@@ -64,6 +119,18 @@ defmodule Stacks.Enrichment.ScraperClient do
     message = "#{ts}.#{method}.#{path}"
     sig = :crypto.mac(:hmac, :sha256, secret, message) |> Base.encode16(case: :lower)
     "#{ts}.#{sig}"
+  end
+
+  defp melt_fuse(fuse_name) do
+    :fuse.melt(fuse_name)
+
+    case :fuse.ask(fuse_name, :sync) do
+      :blown ->
+        :telemetry.execute([:stacks, :fuse, :blown], %{}, %{fuse_name: fuse_name})
+
+      _ ->
+        :telemetry.execute([:stacks, :fuse, :melt], %{}, %{fuse_name: fuse_name})
+    end
   end
 
   defp configured_client do
