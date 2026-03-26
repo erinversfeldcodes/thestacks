@@ -4,52 +4,61 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
 
+  # Use per-test unique keys to avoid races with BookDetailCacheTest's
+  # invalidate_all() setup that runs concurrently (both modules are async: true).
   setup do
-    BookDetailCache.put("book-1", %{title: "Test Book"})
-    BookDetailCache.put("book-2", %{title: "Other Book"})
-    :ok
+    n = System.unique_integer([:positive])
+    id1 = "book-#{n}-1"
+    id2 = "book-#{n}-2"
+
+    BookDetailCache.put(id1, %{title: "Test Book"})
+    BookDetailCache.put(id2, %{title: "Other Book"})
+
+    {:ok, id1: id1, id2: id2}
   end
 
-  test "invalidates cache on book.created" do
-    event = %{event_type: "book.created", aggregate_id: "book-1", payload: %{}}
+  test "invalidates cache on book.created", %{id1: id1, id2: id2} do
+    event = %{event_type: "book.created", aggregate_id: id1, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event)
-    assert {:miss, "book-1"} = BookDetailCache.get("book-1")
-    assert {:ok, _} = BookDetailCache.get("book-2")
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
   end
 
-  test "invalidates cache on book.cover_confirmed" do
-    event = %{event_type: "book.cover_confirmed", aggregate_id: "book-2", payload: %{}}
+  test "invalidates cache on book.cover_confirmed", %{id1: _id1, id2: id2} do
+    event = %{event_type: "book.cover_confirmed", aggregate_id: id2, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event)
-    assert {:miss, "book-2"} = BookDetailCache.get("book-2")
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  test "invalidates multiple books on blog.associations_suggested with string keys" do
+  test "invalidates multiple books on blog.associations_suggested with string keys",
+       %{id1: id1, id2: id2} do
     event = %{
       event_type: "blog.associations_suggested",
       aggregate_id: "post-1",
-      payload: %{"book_ids" => ["book-1", "book-2"]}
+      payload: %{"book_ids" => [id1, id2]}
     }
 
     assert :ok = CacheInvalidationHandler.handle_event(event)
-    assert {:miss, "book-1"} = BookDetailCache.get("book-1")
-    assert {:miss, "book-2"} = BookDetailCache.get("book-2")
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  test "invalidates multiple books on blog.associations_suggested with atom keys" do
+  test "invalidates multiple books on blog.associations_suggested with atom keys",
+       %{id1: id1, id2: id2} do
     event = %{
       event_type: "blog.associations_suggested",
       aggregate_id: "post-1",
-      payload: %{book_ids: ["book-1"]}
+      payload: %{book_ids: [id1]}
     }
 
     assert :ok = CacheInvalidationHandler.handle_event(event)
-    assert {:miss, "book-1"} = BookDetailCache.get("book-1")
-    assert {:ok, _} = BookDetailCache.get("book-2")
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
   end
 
-  test "ignores unrelated events" do
+  test "ignores unrelated events", %{id1: id1} do
     event = %{event_type: "user.registered", aggregate_id: "user-1", payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event)
-    assert {:ok, _} = BookDetailCache.get("book-1")
+    assert {:ok, _} = BookDetailCache.get(id1)
   end
 end

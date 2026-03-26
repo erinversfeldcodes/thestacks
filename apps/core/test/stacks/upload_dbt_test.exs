@@ -518,7 +518,7 @@ defmodule Stacks.UploadDbtTest do
 
       # Attempting to insert a duplicate ISBN should fail with unique constraint
       duplicate =
-        BookEdition.changeset(%BookEdition{}, %{
+        Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => isbn,
           "book_id" => book.id,
           "is_primary" => false

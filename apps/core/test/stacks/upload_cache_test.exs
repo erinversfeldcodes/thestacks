@@ -129,6 +129,23 @@ defmodule Stacks.UploadCacheTest do
   # ---------------------------------------------------------------------------
 
   describe "BudgetTracker budget enforcement" do
+    # Reset the global BudgetTracker to a clean zero state before each test and
+    # restore original state after, so these tests don't bleed into each other or
+    # into other test modules that also use the singleton.
+    setup do
+      original = :sys.get_state(BudgetTracker)
+
+      :sys.replace_state(BudgetTracker, fn state ->
+        %{state | daily_total_cents: 0, monthly_total_cents: 0, providers: %{}}
+      end)
+
+      on_exit(fn ->
+        :sys.replace_state(BudgetTracker, fn _ -> original end)
+      end)
+
+      :ok
+    end
+
     @tag stories: ["US-1.1.1"], suite: :cache
     test "record_cost/2 increases daily spend" do
       assert :ok = BudgetTracker.record_cost(:modal, 50)
