@@ -286,7 +286,16 @@ bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
     Decode.map2 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        (Decode.maybe (Decode.field "placement" placementDecoder))
+        -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
+        -- decodes JSON null as a default struct (all fields empty/zero) because each
+        -- field uses `D.oneOf [D.field "..." ..., D.succeed default]`. Using
+        -- Decode.nullable ensures JSON null → Nothing; non-null → Just placement.
+        -- Decode.oneOf handles the case where the field is absent entirely.
+        (Decode.oneOf
+            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 {-| Lightweight placement summary for duplicate detection.

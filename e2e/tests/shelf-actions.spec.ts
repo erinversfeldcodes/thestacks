@@ -100,36 +100,56 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
   test("open an unplaced book detail overlay and add to collection", async ({
     page,
   }) => {
-    // Find an unplaced book via API (reliable, no UI race conditions)
+    // Register the placements response listener BEFORE navigating so we cannot miss it.
+    // Elm fetches /api/placements/mine on catalogue init; we must wait for it to complete
+    // before querying .catalogue__card-add, otherwise the race condition causes us to click
+    // a placed book that temporarily shows an add button while placements are still loading.
+    const placementsLoaded = page.waitForResponse(
+      (resp) =>
+        resp.url().includes("/api/placements/mine") && resp.status() === 200,
+      { timeout: 15000 }
+    );
+
     await page.goto("/catalogue");
-    const unplacedBookId = await page.evaluate(async () => {
+    await page.getByTestId("catalogue-grid").waitFor({ timeout: 10000 });
+
+    // Wait for Elm's placements fetch to complete so maybePlacement is accurate for all cards.
+    await placementsLoaded;
+
+    // Cross-reference the rendered DOM with a fresh API call to find a card that:
+    //   (a) Elm renders with .catalogue__card-add (maybePlacement = Nothing), AND
+    //   (b) the /api/placements/mine endpoint also reports as unplaced.
+    // This eliminates any residual inconsistency between the two data sources.
+    const unplacedHref = await page.evaluate(async () => {
       const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      const placementsResp = await fetch("/api/placements/mine", {
+      if (!auth.token) return null;
+      const resp = await fetch("/api/placements/mine", {
         headers: { Authorization: `Bearer ${auth.token}` },
       });
-      const placementsData = placementsResp.ok
-        ? await placementsResp.json()
-        : { placements: [] };
+      const data = resp.ok ? await resp.json() : { placements: [] };
       const placedIds = new Set(
-        placementsData.placements.map((p: any) => p.book_id)
+        (data.placements as Array<{ book_id: string }>).map((p) => p.book_id)
       );
-      const catResp = await fetch("/api/catalogue?per_page=200");
-      const catData = await catResp.json();
-      const book = catData.books.find((b: any) => !placedIds.has(b.id));
-      return book?.id ?? null;
+      const cards = document.querySelectorAll(
+        ".catalogue__card:has(.catalogue__card-add)"
+      );
+      for (const card of Array.from(cards)) {
+        const link = card.querySelector(
+          ".catalogue__card-link"
+        ) as HTMLAnchorElement | null;
+        if (!link) continue;
+        const href = link.getAttribute("href") ?? "";
+        const bookId = href.split("/books/")[1];
+        if (bookId && !placedIds.has(bookId)) return href;
+      }
+      return null;
     });
 
-    test.skip(!unplacedBookId, "No unplaced books available in catalogue");
+    test.skip(unplacedHref === null, "No unplaced books visible in catalogue");
 
-    // Open the unplaced book's detail via the catalogue overlay
-    await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
-    const cardLink = page.locator(`.catalogue__card-link[href="/books/${unplacedBookId}"]`).first();
-    if (await cardLink.count() > 0) {
-      await cardLink.click();
-    } else {
-      // Fallback: click any card link for an unplaced book
-      await page.locator(".catalogue__card-link").first().click();
-    }
+    await page
+      .locator(`.catalogue__card-link[href="${unplacedHref}"]`)
+      .click();
 
     const overlay = page.getByTestId('book-overlay');
     await expect(overlay).toBeVisible({ timeout: 10000 });
