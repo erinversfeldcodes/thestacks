@@ -20,6 +20,12 @@ defmodule StacksWeb.InternalController do
   @path "/api/internal/vision/associate"
   @replay_window_seconds 60
 
+  # Proto AssociationStatus enum wire-format strings.
+  # These MUST match the JSON names in stacks/internal/v1/vision.proto.
+  # See docs/runbooks/vision-service-rollback.md for deploy ordering.
+  @status_confirmed "ASSOCIATION_STATUS_CONFIRMED"
+  @status_rejected "ASSOCIATION_STATUS_REJECTED"
+
   @doc "POST /api/internal/vision/associate — receive async cover association result."
   def vision_associate(conn, params) do
     if valid_signature?(conn) do
@@ -68,13 +74,13 @@ defmodule StacksWeb.InternalController do
     do: {:error, "status is required"}
 
   defp validate_callback(%AssociateCallback{
-         status: "ASSOCIATION_STATUS_CONFIRMED",
+         status: @status_confirmed,
          cover_image_url: ""
        }),
        do: {:error, "cover_image_url is required for confirmed status"}
 
   defp validate_callback(%AssociateCallback{
-         status: "ASSOCIATION_STATUS_CONFIRMED",
+         status: @status_confirmed,
          cover_image_url: url
        })
        when is_binary(url) and byte_size(url) > 0 do
@@ -88,7 +94,7 @@ defmodule StacksWeb.InternalController do
   defp validate_callback(_callback), do: :ok
 
   defp dispatch_association(conn, %AssociateCallback{
-         status: "ASSOCIATION_STATUS_CONFIRMED",
+         status: @status_confirmed,
          edition_id: edition_id,
          cover_image_url: cover_url
        }) do
@@ -113,7 +119,7 @@ defmodule StacksWeb.InternalController do
   end
 
   defp dispatch_association(conn, %AssociateCallback{
-         status: "ASSOCIATION_STATUS_REJECTED",
+         status: @status_rejected,
          edition_id: edition_id,
          reason: reason
        }) do
@@ -128,6 +134,13 @@ defmodule StacksWeb.InternalController do
 
   defp dispatch_association(conn, %AssociateCallback{status: status}) do
     Logger.warning("InternalController: unknown status #{inspect(status)} received")
+
+    :telemetry.execute(
+      [:stacks, :vision, :unknown_association_status],
+      %{count: 1},
+      %{status: status}
+    )
+
     json(conn, %{ok: true})
   end
 
