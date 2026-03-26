@@ -16,6 +16,7 @@ defmodule Stacks.GDPR.ImageRetention do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books.UploadedImage
   alias Stacks.Events
   alias Stacks.Storage
 
@@ -32,10 +33,10 @@ defmodule Stacks.GDPR.ImageRetention do
     now = DateTime.utc_now()
 
     expired_rows =
-      "uploaded_images"
+      UploadedImage
       |> where([i], not is_nil(i.expires_at) and i.expires_at < ^now)
       |> select([i], %{id: i.id, storage_path: i.storage_path})
-      |> Repo.all(prefix: "op")
+      |> Repo.all()
 
     expired_ids = Enum.map(expired_rows, & &1.id)
 
@@ -43,13 +44,11 @@ defmodule Stacks.GDPR.ImageRetention do
     delete_storage_objects(expired_rows)
 
     {count, _} =
-      "uploaded_images"
+      UploadedImage
       |> where([i], i.id in ^expired_ids)
-      |> Repo.delete_all(prefix: "op")
+      |> Repo.delete_all()
 
-    Enum.each(expired_ids, fn id_bin ->
-      {:ok, image_id} = Ecto.UUID.load(id_bin)
-
+    Enum.each(expired_ids, fn image_id ->
       Events.emit_safe(%{
         event_type: "image.expired",
         aggregate_type: "image",
@@ -76,10 +75,10 @@ defmodule Stacks.GDPR.ImageRetention do
     threshold = DateTime.add(DateTime.utc_now(), -@stuck_threshold_hours * 3600, :second)
 
     stuck_rows =
-      "uploaded_images"
+      UploadedImage
       |> where([i], i.status == "pending" and i.uploaded_at < ^threshold)
       |> select([i], %{id: i.id, storage_path: i.storage_path})
-      |> Repo.all(prefix: "op")
+      |> Repo.all()
 
     stuck_ids = Enum.map(stuck_rows, & &1.id)
 
@@ -87,13 +86,11 @@ defmodule Stacks.GDPR.ImageRetention do
     delete_storage_objects(stuck_rows)
 
     {count, _} =
-      "uploaded_images"
+      UploadedImage
       |> where([i], i.id in ^stuck_ids)
-      |> Repo.delete_all(prefix: "op")
+      |> Repo.delete_all()
 
-    Enum.each(stuck_ids, fn id_bin ->
-      {:ok, image_id} = Ecto.UUID.load(id_bin)
-
+    Enum.each(stuck_ids, fn image_id ->
       Events.emit_safe(%{
         event_type: "image.expired",
         aggregate_type: "image",
@@ -122,8 +119,7 @@ defmodule Stacks.GDPR.ImageRetention do
     cutoff = DateTime.utc_now()
 
     query =
-      from(i in "uploaded_images",
-        prefix: "op",
+      from(i in UploadedImage,
         where: i.expires_at < ^cutoff,
         select: %{id: i.id, storage_path: i.storage_path}
       )
@@ -138,12 +134,7 @@ defmodule Stacks.GDPR.ImageRetention do
       )
     end
 
-    Enum.map(orphaned, fn %{id: id} ->
-      case Ecto.UUID.load(id) do
-        {:ok, uuid} -> uuid
-        _ -> inspect(id)
-      end
-    end)
+    Enum.map(orphaned, & &1.id)
   end
 
   defp delete_storage_objects(rows) do

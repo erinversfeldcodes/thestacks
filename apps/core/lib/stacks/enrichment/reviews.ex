@@ -11,6 +11,7 @@ defmodule Stacks.Enrichment.Reviews do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books.Book
   alias Stacks.Enrichment
   alias Stacks.Enrichment.ReviewSnapshot
 
@@ -62,8 +63,7 @@ defmodule Stacks.Enrichment.Reviews do
   def stale_books(days \\ 30) do
     cutoff = DateTime.add(DateTime.utc_now(), -days, :day)
 
-    from(b in "books",
-      prefix: "op",
+    from(b in Book,
       left_join: rs in ReviewSnapshot,
       on: rs.book_id == b.id,
       where:

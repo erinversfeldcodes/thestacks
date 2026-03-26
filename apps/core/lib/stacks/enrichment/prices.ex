@@ -11,6 +11,7 @@ defmodule Stacks.Enrichment.Prices do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books.BookEdition
   alias Stacks.Enrichment
   alias Stacks.Enrichment.{Bookstore, PriceSnapshot}
 
@@ -54,8 +55,7 @@ defmodule Stacks.Enrichment.Prices do
   def stale_isbns(days \\ 7) do
     cutoff = DateTime.add(DateTime.utc_now(), -days, :day)
 
-    from(be in "book_editions",
-      prefix: "op",
+    from(be in BookEdition,
       left_join: ps in PriceSnapshot,
       on: ps.book_id == be.book_id,
       where: is_nil(ps.id) or ps.scraped_at < ^cutoff,

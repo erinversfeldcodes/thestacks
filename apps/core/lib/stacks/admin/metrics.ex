@@ -7,7 +7,12 @@ defmodule Stacks.Admin.Metrics do
   have not been created yet (parallel development with Issue #052).
   """
 
+  import Ecto.Query
+
   alias Core.Repo
+  alias Stacks.Accounts.User
+  alias Stacks.Books.{Book, UploadedImage}
+  alias Stacks.Shelving.Placement
 
   require Logger
 
@@ -27,9 +32,9 @@ defmodule Stacks.Admin.Metrics do
       :fallback ->
         %{
           db_size_bytes: db_size_bytes(),
-          total_books: count_table("books"),
-          total_users: count_table("users"),
-          total_placements: count_table("bookshelf_placements"),
+          total_books: Repo.aggregate(Book, :count),
+          total_users: Repo.aggregate(User, :count),
+          total_placements: Repo.aggregate(Placement, :count),
           generated_at: DateTime.utc_now() |> DateTime.to_iso8601()
         }
     end
@@ -220,28 +225,16 @@ defmodule Stacks.Admin.Metrics do
     end
   end
 
-  @allowed_tables ~w(books users bookshelf_placements)
-
-  defp count_table(table_name) when table_name in @allowed_tables do
-    case Repo.query("SELECT count(*) FROM op.#{table_name}") do
-      {:ok, %{rows: [[count]]}} -> count
-      _ -> 0
-    end
-  end
-
   defp count_pending_images do
-    case Repo.query(
-           "SELECT count(*) FROM op.uploaded_images WHERE status = 'pending' AND expires_at < now()"
-         ) do
-      {:ok, %{rows: [[count]]}} -> count
-      _ -> 0
-    end
+    now = DateTime.utc_now()
+
+    Repo.aggregate(
+      from(i in UploadedImage, where: i.status == "pending" and i.expires_at < ^now),
+      :count
+    )
   end
 
   defp count_consented_users do
-    case Repo.query("SELECT count(*) FROM op.users WHERE consent_analytics = true") do
-      {:ok, %{rows: [[count]]}} -> count
-      _ -> 0
-    end
+    Repo.aggregate(from(u in User, where: u.consent_analytics == true), :count)
   end
 end
