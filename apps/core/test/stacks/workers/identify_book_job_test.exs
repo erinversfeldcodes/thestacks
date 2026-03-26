@@ -184,7 +184,13 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "not_book", "confidence" => 0.95, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
+           "confidence" => 0.95,
+           "model_used" => "mock"
+         }}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -194,7 +200,13 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do: {:ok, %{"books" => [], "model_used" => "mock"}}

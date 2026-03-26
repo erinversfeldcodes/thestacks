@@ -67,6 +67,12 @@ defmodule Stacks.Books do
   @valid_image_statuses ~w(pending resolved rejected)
 
   @doc """
+  Returns a book edition by ID, or nil if not found.
+  """
+  @spec get_edition(binary()) :: BookEdition.t() | nil
+  def get_edition(id), do: Repo.get(BookEdition, id)
+
+  @doc """
   Returns a book (work) by ID with the author and editions preloaded.
   """
   @spec get_book_detail(binary()) :: Book.t() | nil
