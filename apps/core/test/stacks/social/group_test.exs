@@ -3,14 +3,15 @@ defmodule Stacks.Social.GroupTest do
 
   import Stacks.Factory
 
+  alias Stacks.Social
   alias Stacks.Social.Group
 
-  describe "changeset/2" do
+  describe "group_changeset/2" do
     test "is valid with owner, name, and type" do
       owner = insert(:user)
 
       changeset =
-        Group.changeset(%Group{}, %{
+        Social.group_changeset(%Group{}, %{
           owner_id: owner.id,
           name: "My Reading Circle",
           type: "close_friends",
@@ -24,7 +25,7 @@ defmodule Stacks.Social.GroupTest do
       owner = insert(:user)
 
       changeset =
-        Group.changeset(%Group{}, %{
+        Social.group_changeset(%Group{}, %{
           owner_id: owner.id,
           type: "close_friends",
           visibility: "invite_only"
@@ -38,7 +39,7 @@ defmodule Stacks.Social.GroupTest do
       owner = insert(:user)
 
       changeset =
-        Group.changeset(%Group{}, %{
+        Social.group_changeset(%Group{}, %{
           owner_id: owner.id,
           name: "Bad Group",
           type: "unknown_type",
@@ -54,7 +55,7 @@ defmodule Stacks.Social.GroupTest do
 
       for type <- ["close_friends", "broadcast", "subscription"] do
         changeset =
-          Group.changeset(%Group{}, %{
+          Social.group_changeset(%Group{}, %{
             owner_id: owner.id,
             name: "Group #{type}",
             type: type,

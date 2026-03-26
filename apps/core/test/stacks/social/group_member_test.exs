@@ -3,15 +3,16 @@ defmodule Stacks.Social.GroupMemberTest do
 
   import Stacks.Factory
 
+  alias Stacks.Social
   alias Stacks.Social.GroupMember
 
-  describe "changeset/2" do
+  describe "group_member_changeset/2" do
     test "is valid with group, user, and role" do
       group = insert(:group)
       user = insert(:user)
 
       changeset =
-        GroupMember.changeset(%GroupMember{}, %{
+        Social.group_member_changeset(%GroupMember{}, %{
           group_id: group.id,
           user_id: user.id,
           role: "member"
@@ -25,7 +26,7 @@ defmodule Stacks.Social.GroupMemberTest do
       user = insert(:user)
 
       changeset =
-        GroupMember.changeset(%GroupMember{}, %{
+        Social.group_member_changeset(%GroupMember{}, %{
           group_id: group.id,
           user_id: user.id,
           role: "supreme_overlord"

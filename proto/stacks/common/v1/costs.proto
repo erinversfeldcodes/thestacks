@@ -1,0 +1,62 @@
+// costs.proto — Platform infrastructure cost tracking types.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "CostsProto";
+option java_multiple_files = true;
+
+// CostCategory classifies the type of platform cost.
+enum CostCategory {
+  // Default unspecified value; should not be used in practice.
+  COST_CATEGORY_UNSPECIFIED = 0;
+
+  // Web hosting and CDN costs.
+  COST_CATEGORY_HOSTING = 1;
+
+  // Compute instance costs (Fly.io machines, Modal, etc.).
+  COST_CATEGORY_COMPUTE = 2;
+
+  // Database hosting and storage costs.
+  COST_CATEGORY_DATABASE = 3;
+
+  // Domain registration and DNS costs.
+  COST_CATEGORY_DOMAIN = 4;
+}
+
+// PlatformCost represents an infrastructure cost line item for transparency reporting.
+message PlatformCost {
+  // UUID of the cost record.
+  string id = 1 [json_name = "id"];
+
+  // Cost category (string on wire, e.g. "hosting", "compute").
+  string category = 2 [json_name = "category"];
+
+  // Service name (e.g. "Fly.io core", "Neon database").
+  string service = 3 [json_name = "service"];
+
+  // Human-readable description of the cost line item.
+  string description = 4 [json_name = "description"];
+
+  // Cost amount in cents.
+  int32 amount_cents = 5 [json_name = "amount_cents"];
+
+  // Currency code (default "USD").
+  string currency = 6 [json_name = "currency"];
+
+  // Start of the billing period.
+  google.protobuf.Timestamp period_start = 7 [json_name = "period_start"];
+
+  // End of the billing period.
+  google.protobuf.Timestamp period_end = 8 [json_name = "period_end"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 9 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 10 [json_name = "updated_at"];
+}

@@ -6,6 +6,7 @@ defmodule Stacks.Blog do
   less restrictive than the author's `profile_visibility`.
   """
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
@@ -32,7 +33,7 @@ defmodule Stacks.Blog do
 
     with :ok <- validate_ceiling(requested_visibility, user.profile_visibility) do
       %Post{}
-      |> Post.changeset(attrs)
+      |> post_changeset(attrs)
       |> Repo.insert()
       |> tap_ok(fn post ->
         Events.emit_safe(%{
@@ -60,7 +61,7 @@ defmodule Stacks.Blog do
     with :ok <- check_ownership(post, user),
          :ok <- validate_ceiling(requested_visibility, user.profile_visibility) do
       post
-      |> Post.changeset(attrs)
+      |> post_changeset(attrs)
       |> Repo.update()
       |> tap_ok(fn updated_post ->
         Events.emit_safe(%{
@@ -87,7 +88,7 @@ defmodule Stacks.Blog do
   def publish_post(%Post{} = post, user) do
     with :ok <- check_ownership(post, user) do
       post
-      |> Post.changeset(%{published_at: DateTime.utc_now()})
+      |> post_changeset(%{published_at: DateTime.utc_now()})
       |> Repo.update()
       |> tap_ok(fn published_post ->
         Events.emit_safe(%{
@@ -110,7 +111,7 @@ defmodule Stacks.Blog do
   def unpublish_post(%Post{} = post, user) do
     with :ok <- check_ownership(post, user) do
       post
-      |> Post.changeset(%{published_at: nil})
+      |> post_changeset(%{published_at: nil})
       |> Repo.update()
     end
   end
@@ -232,7 +233,7 @@ defmodule Stacks.Blog do
     Repo.transaction(fn ->
       Enum.each(posts_to_tighten, fn post ->
         post
-        |> Post.changeset(%{visibility: new_profile_visibility})
+        |> post_changeset(%{visibility: new_profile_visibility})
         |> Repo.update!()
       end)
     end)
@@ -263,7 +264,7 @@ defmodule Stacks.Blog do
       )
 
     %PostBookAssociation{}
-    |> PostBookAssociation.changeset(attrs)
+    |> post_book_association_changeset(attrs)
     |> Repo.insert()
   end
 
@@ -274,7 +275,8 @@ defmodule Stacks.Blog do
   def list_associations(post_id) do
     from(a in PostBookAssociation,
       where: a.post_id == ^post_id,
-      order_by: [desc: a.confidence]
+      order_by: [desc: a.confidence],
+      preload: [:book]
     )
     |> Repo.all()
   end
@@ -294,7 +296,7 @@ defmodule Stacks.Blog do
 
       association ->
         association
-        |> PostBookAssociation.changeset(%{visible: true})
+        |> post_book_association_changeset(%{visible: true})
         |> Repo.update()
         |> tap_ok(fn assoc ->
           Events.emit_safe(%{
@@ -322,7 +324,7 @@ defmodule Stacks.Blog do
 
       association ->
         association
-        |> PostBookAssociation.changeset(%{visible: false})
+        |> post_book_association_changeset(%{visible: false})
         |> Repo.update()
         |> tap_ok(fn assoc ->
           Events.emit_safe(%{
@@ -354,6 +356,34 @@ defmodule Stacks.Blog do
       distinct: true
     )
     |> Repo.all()
+  end
+
+  # ---------------------------------------------------------------------------
+  # Changesets
+  # ---------------------------------------------------------------------------
+
+  @post_required_fields [:user_id, :title, :body]
+  @post_optional_fields [:visibility, :visibility_group_id, :published_at]
+  @post_valid_visibilities ~w(owner group platform)
+
+  @doc "Changeset for creating or updating a blog post."
+  def post_changeset(post, attrs) do
+    post
+    |> cast(attrs, @post_required_fields ++ @post_optional_fields)
+    |> validate_required(@post_required_fields)
+    |> validate_inclusion(:visibility, @post_valid_visibilities)
+  end
+
+  @assoc_required_fields [:post_id, :book_id, :confidence, :source]
+  @assoc_optional_fields [:reasoning, :visible]
+  @assoc_valid_sources ~w(llm manual)
+
+  @doc "Changeset for creating or updating a post-book association."
+  def post_book_association_changeset(assoc, attrs) do
+    assoc
+    |> cast(attrs, @assoc_required_fields ++ @assoc_optional_fields)
+    |> validate_required(@assoc_required_fields)
+    |> validate_inclusion(:source, @assoc_valid_sources)
   end
 
   # ---------------------------------------------------------------------------

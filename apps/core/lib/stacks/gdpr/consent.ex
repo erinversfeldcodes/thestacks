@@ -17,7 +17,7 @@ defmodule Stacks.GDPR.Consent do
     now = DateTime.utc_now()
 
     user
-    |> User.consent_changeset(%{consent_analytics: true, consent_analytics_at: now})
+    |> Accounts.consent_changeset(%{consent_analytics: true, consent_analytics_at: now})
     |> Repo.update()
   end
 
@@ -29,7 +29,7 @@ defmodule Stacks.GDPR.Consent do
     user = Accounts.get_user!(user_id)
 
     user
-    |> User.consent_changeset(%{consent_analytics: false})
+    |> Accounts.consent_changeset(%{consent_analytics: false})
     |> Repo.update()
   end
 

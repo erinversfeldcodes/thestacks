@@ -1,0 +1,42 @@
+// bookshelf_responses.proto — Bookshelf and placement response types for The Stacks API.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+import "stacks/common/v1/placement.proto";
+
+// BookshelfResponse is returned when viewing a bookshelf's contents (GET /api/bookshelves/:name).
+// JSON shape: {bookshelf: "library", count: 5, placements: [...]}
+message BookshelfResponse {
+  // Name of the bookshelf (e.g. "library", "antilibrary", "wishlist").
+  // Controller sends this as JSON key "bookshelf", not "bookshelf_name".
+  string bookshelf = 1 [json_name = "bookshelf"];
+
+  // Total number of placements on this bookshelf.
+  int32 count = 2 [json_name = "count"];
+
+  // Ordered list of book placements with embedded book data.
+  repeated stacks.common.v1.PlacementDetail placements = 3 [json_name = "placements"];
+}
+
+// PlacementRefResponse wraps a slim placement for create/move responses.
+// JSON shape: {placement: {id, book_id, bookshelf_id, position, placed_at, removed_at}}
+message PlacementRefResponse {
+  // The created or updated placement reference.
+  stacks.common.v1.PlacementRef placement = 1 [json_name = "placement"];
+}
+
+// PlacementFormatsResponse is returned by PUT /api/placements/:id/formats.
+// JSON shape: {placement: {id, formats}}
+message PlacementFormatsResponse {
+  // The updated placement with only id and formats fields populated.
+  stacks.common.v1.PlacementRef placement = 1 [json_name = "placement"];
+}
+
+// PlacementsMineResponse is returned by GET /api/placements/mine.
+// JSON shape: {placements: [{book_id, bookshelf_name}, ...]}
+message PlacementsMineResponse {
+  // Lightweight summary of all active placements for the current user.
+  repeated stacks.common.v1.PlacementSummary placements = 1 [json_name = "placements"];
+}

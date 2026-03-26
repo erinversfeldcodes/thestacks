@@ -8,6 +8,8 @@ option java_package = "com.thestacks.common.v1";
 option java_outer_classname = "BookProto";
 option java_multiple_files = true;
 
+import "google/protobuf/timestamp.proto";
+
 // ISBNFormat distinguishes the two standard ISBN formats.
 enum ISBNFormat {
   // Default unspecified value; should not be used in practice.
@@ -44,10 +46,15 @@ enum VisibilityTier {
   VISIBILITY_TIER_UNLISTED = 2;
   // Visible only to the owning user.
   VISIBILITY_TIER_PRIVATE = 3;
+
+  // Restricted to users who have verified their age.
+  VISIBILITY_TIER_AGE_GATED = 4;
 }
 
 // ISBN is a verified book identifier. The hard gate: no book enters the system
 // without a verified ISBN from Open Library or Google Books.
+// Note: this message is used for structured ISBN validation (e.g. partner ingestion).
+// API responses from Edition use a plain string isbn field for simplicity.
 message ISBN {
   // The raw ISBN value (digits only, no hyphens).
   string value = 1 [json_name = "value"];
@@ -57,6 +64,12 @@ message ISBN {
 }
 
 // Author represents a person who wrote or contributed to a book (work-level).
+//
+// JSON wire mapping (controllers send subsets of these fields; absent fields
+// default to proto3 zero values — empty string for strings):
+//   - BookController sends: {id, name, bio, website}
+//   - BookshelfController sends: {id, name, bio} (website absent, defaults to "")
+//   - SearchController/CatalogueController send: {id, name} (bio, website absent)
 message Author {
   // UUID of the author record.
   string id = 1 [json_name = "id"];
@@ -65,14 +78,34 @@ message Author {
   string name = 2 [json_name = "name"];
 
   // Optional author website URL.
-  string website_url = 3 [json_name = "website_url"];
+  // Proto field is website_url (matches DB column); wire JSON key is "website".
+  string website_url = 3 [json_name = "website"];
 
   // Optional RSS/Atom feed URL for the author's blog or newsletter.
   string rss_feed_url = 4 [json_name = "rss_feed_url"];
+
+  // Short biographical description of the author.
+  string bio = 5 [json_name = "bio"];
+
+  // Open Library author identifier for cross-referencing.
+  string open_library_id = 6 [json_name = "open_library_id"];
+
+  // When this author record was created.
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
+
+  // When this author record was last updated.
+  google.protobuf.Timestamp updated_at = 8 [json_name = "updated_at"];
 }
 
 // Book represents a work (the abstract creative work, not a specific edition).
 // A work may have many editions (different ISBNs, formats, publishers).
+//
+// This is the rich Book shape sent by all controllers:
+//   - BookController.format_book/2: all fields populated
+//   - SearchController: omits description, subjects, bisac_codes, language, community_read_count
+//   - CatalogueController: omits description, bisac_codes, language, community_read_count
+//   - BookshelfController: omits subjects, bisac_codes, language, community_read_count
+// Absent fields default to proto3 zero values (empty string, 0, empty list).
 message Book {
   // UUID of the book (work) record.
   string id = 1 [json_name = "id"];
@@ -80,7 +113,7 @@ message Book {
   // Title of the work.
   string title = 2 [json_name = "title"];
 
-  // UUID of the primary author.
+  // Foreign key to op.authors table. DB-only — API sends embedded author object.
   string author_id = 3 [json_name = "author_id"];
 
   // Short description or blurb for the work.
@@ -91,21 +124,56 @@ message Book {
 
   // Who can see this book on the platform.
   VisibilityTier visibility_tier = 6 [json_name = "visibility_tier"];
+
+  // The primary author of this work (embedded, not an ID reference).
+  Author author = 7 [json_name = "author"];
+
+  // All known editions of this book.
+  repeated Edition editions = 8 [json_name = "editions"];
+
+  // Total number of editions for this book (convenience, equals len(editions)).
+  int32 edition_count = 9 [json_name = "edition_count"];
+
+  // The preferred/canonical edition for display.
+  Edition primary_edition = 10 [json_name = "primary_edition"];
+
+  // Number of users across the platform who have read this book.
+  int32 community_read_count = 11 [json_name = "community_read_count"];
+
+  // BCP 47 language code for the work (e.g. "en", "af").
+  string language = 12 [json_name = "language"];
+
+  // BISAC subject codes for trade classification.
+  repeated string bisac_codes = 13 [json_name = "bisac_codes"];
+
+  // When this book record was created in the database.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+
+  // When this book record was last modified.
+  google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 }
 
 // Edition represents a specific ISBN/format/publisher combination of a Book work.
+//
+// Note: book_id (field 2) and format (field 4) were removed because
+// BookController.format_edition/1 does not send them on the wire.
+// They are domain-internal fields tracked in the database but not serialized.
 message Edition {
   // UUID of the edition record.
   string id = 1 [json_name = "id"];
 
-  // UUID of the parent Book (work).
-  string book_id = 2 [json_name = "book_id"];
+  // Reserved: field number 2 was originally book_id on wire. Number preserved; name
+  // re-used at field 13 for DB-only persistence mapping.
+  reserved 2;
 
-  // Verified ISBN for this edition. Required — the ISBN hard gate applies.
-  ISBN isbn = 3 [json_name = "isbn"];
+  // Verified ISBN string for this edition (plain string, e.g. "9780140449136").
+  // The ISBN hard gate applies — no edition enters the system without verification.
+  string isbn = 3 [json_name = "isbn"];
 
-  // Physical or digital format of this edition.
-  EditionFormat format = 4 [json_name = "format"];
+  // Reserved: field 4 was format (EditionFormat enum) — domain-internal, not sent on wire.
+  // The wire representation uses format_label (field 10) instead.
+  reserved 4;
+  reserved "format";
 
   // Whether this is the canonical/preferred edition for the work.
   bool is_primary = 5 [json_name = "is_primary"];
@@ -121,4 +189,22 @@ message Edition {
 
   // Year of publication for this edition (4-digit year, e.g. 2024).
   int32 publication_year = 9 [json_name = "publication_year"];
+
+  // Human-readable format label for API compatibility (e.g. "Hardcover", "Paperback").
+  string format_label = 10 [json_name = "format_label"];
+
+  // Open Library edition identifier for cross-referencing.
+  string open_library_id = 11 [json_name = "open_library_id"];
+
+  // Google Books volume identifier for cross-referencing.
+  string google_books_id = 12 [json_name = "google_books_id"];
+
+  // Foreign key to the parent book (work). DB-only field for persistence mapping.
+  string book_id = 13 [json_name = "book_id"];
+
+  // When this edition record was created.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+
+  // When this edition record was last updated.
+  google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 }

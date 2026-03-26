@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.ProtoSync.Manifest do
-  @moduledoc false
+  @moduledoc "Loads and validates the proto persistence manifest (persisted.exs)."
 
   @doc """
   Loads and validates the proto sync manifest from `proto/persisted.exs`.

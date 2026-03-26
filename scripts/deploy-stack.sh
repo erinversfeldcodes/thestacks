@@ -286,6 +286,31 @@ fly secrets set \
     ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
     --app "${CORE_APP}" --stage
 
+# ── Generate proto Elm decoders ───────────────────────────────────────────────
+echo ""
+echo "==> Generating Elm proto decoders..."
+if [[ -f "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
+    bash "$REPO_ROOT/scripts/gen-elm-proto.sh" \
+        || { echo "FAIL deploy: proto Elm generation failed"; exit 1; }
+    if [[ ! -d "$REPO_ROOT/proto/gen/elm" ]] || [[ -z "$(ls -A "$REPO_ROOT/proto/gen/elm" 2>/dev/null)" ]]; then
+        echo "FAIL deploy: proto/gen/elm/ is empty after generation"; exit 1
+    fi
+    echo "    proto/gen/elm/ generated"
+else
+    echo "FAIL deploy: scripts/gen-elm-proto.sh not found"
+    exit 1
+fi
+
+# ── Generate Ecto schemas from proto ────────────────────────────────────────
+echo ""
+echo "==> Generating Ecto schemas from proto..."
+(cd "$REPO_ROOT/apps/core" && mix proto.sync) \
+    || { echo "FAIL deploy: mix proto.sync failed"; exit 1; }
+if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROOT/apps/core/lib/stacks/gen" 2>/dev/null)" ]]; then
+    echo "FAIL deploy: apps/core/lib/stacks/gen/ is empty after generation"; exit 1
+fi
+echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
+
 # ── Build frontend assets ─────────────────────────────────────────────────────
 echo ""
 echo "==> Rebuilding frontend assets via esbuild..."

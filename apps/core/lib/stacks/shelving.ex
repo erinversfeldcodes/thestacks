@@ -11,6 +11,7 @@ defmodule Stacks.Shelving do
   # chained call. This is a known false positive.
   @dialyzer :no_opaque
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
@@ -18,6 +19,73 @@ defmodule Stacks.Shelving do
   alias Stacks.Audit
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+
+  # ── Bookshelf changeset constants ──────────────────────────────────
+  @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
+  @valid_visibilities ~w(owner group platform)
+
+  # ── Placement changeset constants ──────────────────────────────────
+  @placement_optional_fields [
+    :position,
+    :placed_at,
+    :removed_at,
+    :formats,
+    :personal_rating,
+    :notes,
+    :visibility,
+    :listing_mode,
+    :listing_status,
+    :listing_price_cents,
+    :listing_min_price_cents
+  ]
+
+  # ── Changeset functions (moved from schema modules) ────────────────
+
+  @doc "Changeset for creating or updating a bookshelf."
+  def bookshelf_changeset(bookshelf, attrs) do
+    bookshelf
+    |> cast(attrs, [:user_id, :name, :visibility, :visibility_group_id])
+    |> validate_required([:user_id, :name])
+    |> validate_inclusion(:name, @valid_bookshelf_names)
+    |> validate_inclusion(:visibility, @valid_visibilities)
+    |> unique_constraint([:user_id, :name])
+  end
+
+  @doc "Changeset for creating or updating a placement."
+  def placement_changeset(placement, attrs) do
+    placement
+    |> cast(attrs, [:book_id, :bookshelf_id | @placement_optional_fields])
+    |> validate_required([:book_id, :bookshelf_id])
+    |> validate_inclusion(:visibility, @valid_visibilities)
+    |> validate_number(:personal_rating, greater_than_or_equal_to: 1, less_than_or_equal_to: 5)
+    |> unique_constraint([:book_id, :bookshelf_id],
+      name: :bookshelf_placements_book_active_idx,
+      message: "book is already on this bookshelf"
+    )
+    |> put_placed_at()
+  end
+
+  @doc "Changeset for recording a bookshelf move."
+  def placement_history_changeset(history, attrs) do
+    history
+    |> cast(attrs, [:book_id, :from_bookshelf, :to_bookshelf, :moved_at])
+    |> validate_required([:book_id, :from_bookshelf, :to_bookshelf])
+    |> put_moved_at()
+  end
+
+  defp put_placed_at(%Ecto.Changeset{changes: changes} = changeset) do
+    case Map.get(changes, :placed_at) do
+      nil -> put_change(changeset, :placed_at, DateTime.utc_now())
+      _ -> changeset
+    end
+  end
+
+  defp put_moved_at(%Ecto.Changeset{changes: changes} = changeset) do
+    case Map.get(changes, :moved_at) do
+      nil -> put_change(changeset, :moved_at, DateTime.utc_now())
+      _ -> changeset
+    end
+  end
 
   @doc """
   Returns true if the user has at least one active (non-removed) placement for
@@ -31,7 +99,7 @@ defmodule Stacks.Shelving do
       on: s.id == p.bookshelf_id,
       where: s.user_id == ^user_id and p.book_id == ^book_id and is_nil(p.removed_at)
     )
-    |> Repo.exists?(prefix: "op")
+    |> Repo.exists?()
   end
 
   @doc """
@@ -74,7 +142,7 @@ defmodule Stacks.Shelving do
     Multi.new()
     |> Multi.insert(
       :placement,
-      Placement.changeset(%Placement{}, %{
+      placement_changeset(%Placement{}, %{
         book_id: book_id,
         bookshelf_id: bookshelf.id
       })
@@ -123,10 +191,10 @@ defmodule Stacks.Shelving do
       Multi.new()
       |> Multi.update(
         :placement,
-        Placement.changeset(placement, %{bookshelf_id: to_bookshelf.id})
+        placement_changeset(placement, %{bookshelf_id: to_bookshelf.id})
       )
       |> Multi.insert(:history, fn _ ->
-        PlacementHistory.changeset(%PlacementHistory{}, %{
+        placement_history_changeset(%PlacementHistory{}, %{
           book_id: placement.book_id,
           from_bookshelf: from_bookshelf.id,
           to_bookshelf: to_bookshelf.id,
@@ -179,13 +247,13 @@ defmodule Stacks.Shelving do
     Multi.new()
     |> Multi.insert(
       :placement,
-      Placement.changeset(%Placement{}, %{
+      placement_changeset(%Placement{}, %{
         book_id: placement.book_id,
         bookshelf_id: library_bookshelf.id
       })
     )
     |> Multi.insert(:history, fn _ ->
-      PlacementHistory.changeset(%PlacementHistory{}, %{
+      placement_history_changeset(%PlacementHistory{}, %{
         book_id: placement.book_id,
         from_bookshelf: original_bookshelf_id,
         to_bookshelf: library_bookshelf.id,
@@ -232,7 +300,7 @@ defmodule Stacks.Shelving do
       Multi.new()
       |> Multi.update(
         :placement,
-        Placement.changeset(placement, %{removed_at: DateTime.utc_now()})
+        placement_changeset(placement, %{removed_at: DateTime.utc_now()})
       )
       |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
         Events.emit_safe(%{
@@ -275,7 +343,7 @@ defmodule Stacks.Shelving do
       {:error, :unauthorized}
     else
       placement
-      |> Placement.changeset(%{formats: formats})
+      |> placement_changeset(%{formats: formats})
       |> Repo.update()
     end
   end
@@ -361,7 +429,7 @@ defmodule Stacks.Shelving do
 
       bookshelf ->
         bookshelf
-        |> Bookshelf.changeset(%{visibility: visibility})
+        |> bookshelf_changeset(%{visibility: visibility})
         |> Repo.update()
     end
   end
@@ -397,7 +465,7 @@ defmodule Stacks.Shelving do
              ) do
           :ok ->
             placement
-            |> Placement.changeset(%{visibility: visibility})
+            |> placement_changeset(%{visibility: visibility})
             |> Repo.update()
 
           {:error, reason} ->
@@ -410,7 +478,7 @@ defmodule Stacks.Shelving do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do
       nil ->
         %Bookshelf{}
-        |> Bookshelf.changeset(%{user_id: user_id, name: bookshelf_name})
+        |> bookshelf_changeset(%{user_id: user_id, name: bookshelf_name})
         |> Repo.insert!()
 
       bookshelf ->

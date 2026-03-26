@@ -158,7 +158,7 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  describe "GET /api/bookshelves/:bookshelf_name — format_placement" do
+  describe "GET /api/bookshelves/:bookshelf_name — placement serialization" do
     test "includes book editions in placement response", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")

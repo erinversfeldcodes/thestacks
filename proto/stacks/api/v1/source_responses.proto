@@ -1,0 +1,62 @@
+// source_responses.proto — Source admin and visibility response types for The Stacks API.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+// SourceAdminListResponse is returned by GET /api/admin/sources.
+// JSON shape: {sources: [...], total, page}
+message SourceAdminListResponse {
+  // List of discovered sources.
+  repeated DiscoveredSource sources = 1 [json_name = "sources"];
+
+  // Total number of sources matching the filter.
+  int32 total = 2 [json_name = "total"];
+
+  // Current page number.
+  int32 page = 3 [json_name = "page"];
+}
+
+// DiscoveredSource represents a discovered data source in the admin panel.
+// JSON shape: {id, name, type, url, confidence, discovered_via, discovered_at, status, approved_at, created_at}
+message DiscoveredSource {
+  // UUID of the source record.
+  string id = 1 [json_name = "id"];
+
+  // Human-readable name.
+  string name = 2 [json_name = "name"];
+
+  // Source type (e.g. "scraper_config", "review_source").
+  string type = 3 [json_name = "type"];
+
+  // URL of the source.
+  string url = 4 [json_name = "url"];
+
+  // Confidence score from discovery.
+  double confidence = 5 [json_name = "confidence"];
+
+  // How the source was discovered (e.g. "manual", "crawler").
+  string discovered_via = 6 [json_name = "discovered_via"];
+
+  // When the source was discovered.
+  string discovered_at = 7 [json_name = "discovered_at"];
+
+  // Current status (e.g. "pending", "approved", "rejected").
+  string status = 8 [json_name = "status"];
+
+  // When the source was approved (null if not yet approved).
+  string approved_at = 9 [json_name = "approved_at"];
+
+  // When the source record was created.
+  string created_at = 10 [json_name = "created_at"];
+}
+
+// VisibilityUpdateResponse is returned by bookshelf/placement visibility updates.
+// JSON shape: {id, visibility}
+message VisibilityUpdateResponse {
+  // UUID of the updated resource.
+  string id = 1 [json_name = "id"];
+
+  // The new visibility value (string, e.g. "public", "owner", "platform").
+  string visibility = 2 [json_name = "visibility"];
+}

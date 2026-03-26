@@ -1,0 +1,117 @@
+// book_responses.proto — Book-related response types for The Stacks API.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+import "stacks/common/v1/book.proto";
+import "stacks/common/v1/placement.proto";
+
+// BookDetailResponse is returned for a single book detail view (GET /api/books/:id).
+// The Book message now contains author, editions, primary_edition, community_read_count.
+// JSON shape: {book: {...}, placement: {...} | null, my_writing: [...]}
+message BookDetailResponse {
+  // The book (work) with full metadata including embedded author, editions, etc.
+  stacks.common.v1.Book book = 1 [json_name = "book"];
+
+  // Reserved: fields 2-6 moved into the Book message itself.
+  reserved 2, 3, 4, 5, 6;
+  reserved "author", "editions", "edition_count", "primary_edition", "community_read_count";
+
+  // The current user's placement of this book, if any (null when not placed).
+  optional stacks.common.v1.BookPlacement placement = 7 [json_name = "placement"];
+
+  // Blog posts the current user has written about this book.
+  repeated MyWritingSummary my_writing = 8 [json_name = "my_writing"];
+}
+
+// MyWritingSummary is a lightweight blog post reference shown on the book detail page.
+// JSON shape: {id, title, published_at}
+message MyWritingSummary {
+  // UUID of the blog post.
+  string id = 1 [json_name = "id"];
+
+  // Title of the blog post.
+  string title = 2 [json_name = "title"];
+
+  // When the post was published (null if still a draft).
+  string published_at = 3 [json_name = "published_at"];
+}
+
+// BookConfirmResponse is returned by POST /api/books/confirm.
+// JSON shape: {book: {...}, placement: {...} | null, source?: "catalogue" | "collection"}
+message BookConfirmResponse {
+  // The confirmed book with full metadata.
+  stacks.common.v1.Book book = 1 [json_name = "book"];
+
+  // The user's placement, if any.
+  optional stacks.common.v1.BookPlacement placement = 2 [json_name = "placement"];
+
+  // Origin hint: "catalogue" if book already existed, "collection" if already placed.
+  // Empty string on newly created books (proto3 string default).
+  string source = 3 [json_name = "source"];
+}
+
+// SearchResponse is returned for book search queries (GET /api/search?q=...).
+// JSON shape: {query, count, results: [...]}
+message SearchResponse {
+  // The original search query string.
+  string query = 1 [json_name = "query"];
+
+  // Total number of matching results.
+  int32 count = 2 [json_name = "count"];
+
+  // Matching books (with embedded author, editions, primary_edition).
+  repeated stacks.common.v1.Book results = 3 [json_name = "results"];
+}
+
+// CatalogueResponse is returned for paginated book catalogue views (GET /api/catalogue).
+// JSON shape: {books: [...], total, page, per_page}
+message CatalogueResponse {
+  // Total number of books matching the query across all pages.
+  int32 total = 1 [json_name = "total"];
+
+  // Current page number (1-based).
+  int32 page = 2 [json_name = "page"];
+
+  // Number of results per page.
+  int32 per_page = 3 [json_name = "per_page"];
+
+  // Books on this page of results.
+  repeated stacks.common.v1.Book books = 4 [json_name = "books"];
+}
+
+// MergeFormatResponse is returned after merging a new edition (POST /api/books/:id/merge-format).
+// JSON shape: {edition: {...}}
+message MergeFormatResponse {
+  // The newly created edition after the merge.
+  stacks.common.v1.Edition edition = 1 [json_name = "edition"];
+}
+
+// IdentifyResponse is returned by POST /api/upload/identify.
+// JSON shape: {status: "identified", candidates: [...]}
+message IdentifyResponse {
+  // Always "identified" on success.
+  // This is a plain string, not a PollStatus enum — the identify endpoint
+  // returns synchronously and uses a different status vocabulary than polling.
+  string status = 1 [json_name = "status"];
+
+  // Candidate book matches from the vision pipeline.
+  repeated CandidateMatch candidates = 2 [json_name = "candidates"];
+}
+
+// CandidateMatch represents a single book candidate from vision identification.
+// JSON shape: {isbn, title, author, open_library_work_id}
+message CandidateMatch {
+  // ISBN extracted from the image.
+  string isbn = 1 [json_name = "isbn"];
+
+  // Title resolved from ISBN metadata or vision extraction.
+  string title = 2 [json_name = "title"];
+
+  // Author name resolved from ISBN metadata or vision extraction.
+  string author = 3 [json_name = "author"];
+
+  // Open Library work ID if the ISBN was resolved against Open Library.
+  string open_library_work_id = 4 [json_name = "open_library_work_id"];
+}

@@ -27,6 +27,8 @@ import Html exposing (Html, div, h1, h2, h3, p, span, text)
 import Html.Attributes exposing (class)
 import Http
 import Json.Decode as Decode exposing (Decoder)
+import Stacks.Api.V1.Admin as ProtoAdmin
+import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -118,53 +120,59 @@ fetchCosts =
         }
 
 
+{-| Adapter: proto CostBreakdown -> app CostBreakdown.
+-}
+fromProtoCostBreakdown : ProtoAdmin.CostBreakdown -> CostBreakdown
+fromProtoCostBreakdown proto =
+    { totalCents = proto.totalCents
+    , currency = proto.currency
+    , costPerBook = proto.costPerBook
+    , categories = List.map fromProtoCostCategory proto.categories
+    , metrics = fromProtoUsageMetrics proto.metrics
+    , monthlyTotals = List.map fromProtoMonthlyTotal proto.monthlyTotals
+    , generatedAt = proto.generatedAt
+    }
+
+
+fromProtoCostCategory : ProtoAdmin.CostCategory -> CostCategory
+fromProtoCostCategory proto =
+    { category = proto.category
+    , totalCents = proto.totalCents
+    , items = List.map fromProtoCostItem proto.items
+    }
+
+
+fromProtoCostItem : ProtoAdmin.CostItem -> CostItem
+fromProtoCostItem proto =
+    { service = proto.service
+    , description = emptyToNothing proto.description
+    , amountCents = proto.amountCents
+    }
+
+
+fromProtoUsageMetrics : ProtoAdmin.UsageMetrics -> Metrics
+fromProtoUsageMetrics proto =
+    { books = proto.books
+    , uploads = proto.uploads
+    , placements = proto.placements
+    , dbSizeBytes = proto.dbSizeBytes
+    , avgUploadPayloadBytes = proto.avgUploadPayloadBytes
+    , visionJobsThisMonth = proto.visionJobsThisMonth
+    }
+
+
+fromProtoMonthlyTotal : ProtoAdmin.MonthlyTotal -> MonthlyTotal
+fromProtoMonthlyTotal proto =
+    { periodStart = proto.periodStart
+    , periodEnd = proto.periodEnd
+    , totalCents = proto.totalCents
+    }
+
+
 costBreakdownDecoder : Decoder CostBreakdown
 costBreakdownDecoder =
     Decode.field "data"
-        (Decode.map7 CostBreakdown
-            (Decode.field "total_cents" Decode.int)
-            (Decode.field "currency" Decode.string)
-            (Decode.field "cost_per_book" Decode.float)
-            (Decode.field "categories" (Decode.list categoryDecoder))
-            (Decode.field "metrics" metricsDecoder)
-            (Decode.field "monthly_totals" (Decode.list monthlyTotalDecoder))
-            (Decode.field "generated_at" Decode.string)
-        )
-
-
-categoryDecoder : Decoder CostCategory
-categoryDecoder =
-    Decode.map3 CostCategory
-        (Decode.field "category" Decode.string)
-        (Decode.field "total_cents" Decode.int)
-        (Decode.field "items" (Decode.list costItemDecoder))
-
-
-costItemDecoder : Decoder CostItem
-costItemDecoder =
-    Decode.map3 CostItem
-        (Decode.field "service" Decode.string)
-        (Decode.maybe (Decode.field "description" Decode.string))
-        (Decode.field "amount_cents" Decode.int)
-
-
-metricsDecoder : Decoder Metrics
-metricsDecoder =
-    Decode.map6 Metrics
-        (Decode.field "books" Decode.int)
-        (Decode.field "uploads" Decode.int)
-        (Decode.field "placements" Decode.int)
-        (Decode.field "db_size_bytes" Decode.int)
-        (Decode.field "avg_upload_payload_bytes" Decode.int)
-        (Decode.field "vision_jobs_this_month" Decode.int)
-
-
-monthlyTotalDecoder : Decoder MonthlyTotal
-monthlyTotalDecoder =
-    Decode.map3 MonthlyTotal
-        (Decode.field "period_start" Decode.string)
-        (Decode.field "period_end" Decode.string)
-        (Decode.field "total_cents" Decode.int)
+        (Decode.map fromProtoCostBreakdown ProtoAdmin.decodeCostBreakdown)
 
 
 

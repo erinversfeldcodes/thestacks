@@ -15,21 +15,21 @@ defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
 
   def up do
     alter table(:users, prefix: "op") do
-      add :onboarding_completed, :boolean, default: false, null: false
-      add :notify_wishlist_availability, :boolean, default: false, null: false
-      add :notify_marketplace, :boolean, default: true, null: false
-      add :notify_group_invitations, :boolean, default: true, null: false
-      add :notify_event_matches, :boolean, default: false, null: false
+      add_if_not_exists :onboarding_completed, :boolean, default: false, null: false
+      add_if_not_exists :notify_wishlist_availability, :boolean, default: false, null: false
+      add_if_not_exists :notify_marketplace, :boolean, default: true, null: false
+      add_if_not_exists :notify_group_invitations, :boolean, default: true, null: false
+      add_if_not_exists :notify_event_matches, :boolean, default: false, null: false
     end
 
     alter table(:third_spaces, prefix: "op") do
-      add :opted_out, :boolean, default: false, null: false
-      add :opted_out_at, :utc_datetime_usec
+      add_if_not_exists :opted_out, :boolean, default: false, null: false
+      add_if_not_exists :opted_out_at, :utc_datetime_usec
     end
 
     alter table(:discovered_sources, prefix: "op") do
-      add :excluded_at, :utc_datetime_usec
-      add :exclusion_email, :text
+      add_if_not_exists :excluded_at, :utc_datetime_usec
+      add_if_not_exists :exclusion_email, :text
     end
 
     execute("ALTER TYPE op.source_status ADD VALUE IF NOT EXISTS 'excluded'")

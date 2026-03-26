@@ -3,14 +3,15 @@ defmodule Stacks.Marketplace.TransactionTest do
 
   import Stacks.Factory
 
+  alias Stacks.Marketplace
   alias Stacks.Marketplace.Transaction
 
-  describe "changeset/2" do
+  describe "transaction_changeset/2" do
     test "is valid with required fields" do
       listing = insert(:listing)
 
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           listing_id: listing.id,
           amount_cents: 15_000,
           payment_status: "pending"
@@ -21,7 +22,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
     test "is invalid without listing_id" do
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           amount_cents: 15_000,
           payment_status: "pending"
         })
@@ -32,7 +33,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
     test "is invalid without amount_cents" do
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           listing_id: Ecto.UUID.generate(),
           payment_status: "pending"
         })
@@ -43,7 +44,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
     test "is invalid with an unknown payment_status" do
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           listing_id: Ecto.UUID.generate(),
           amount_cents: 15_000,
           payment_status: "disputed"
@@ -56,7 +57,7 @@ defmodule Stacks.Marketplace.TransactionTest do
     test "accepts all valid payment_statuses" do
       for status <- ~w(pending paid failed refunded) do
         changeset =
-          Transaction.changeset(%Transaction{}, %{
+          Marketplace.transaction_changeset(%Transaction{}, %{
             listing_id: Ecto.UUID.generate(),
             amount_cents: 15_000,
             payment_status: status
@@ -68,7 +69,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
     test "is invalid with an unknown shipping_status" do
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           listing_id: Ecto.UUID.generate(),
           amount_cents: 15_000,
           payment_status: "pending",
@@ -82,7 +83,7 @@ defmodule Stacks.Marketplace.TransactionTest do
     test "accepts all valid shipping_statuses" do
       for status <- ~w(pending shipped delivered returned) do
         changeset =
-          Transaction.changeset(%Transaction{}, %{
+          Marketplace.transaction_changeset(%Transaction{}, %{
             listing_id: Ecto.UUID.generate(),
             amount_cents: 15_000,
             payment_status: "pending",
@@ -95,7 +96,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
     test "allows nil shipping_status" do
       changeset =
-        Transaction.changeset(%Transaction{}, %{
+        Marketplace.transaction_changeset(%Transaction{}, %{
           listing_id: Ecto.UUID.generate(),
           amount_cents: 15_000,
           payment_status: "pending"
@@ -118,7 +119,7 @@ defmodule Stacks.Marketplace.TransactionTest do
 
       {:ok, txn} =
         %Transaction{}
-        |> Transaction.changeset(%{
+        |> Marketplace.transaction_changeset(%{
           listing_id: listing.id,
           amount_cents: 10_000,
           payment_status: "paid"

@@ -1,11 +1,13 @@
 defmodule Mix.Tasks.ProtoSync.DbtGenerator do
-  @moduledoc false
+  @moduledoc "Generates dbt staging model SQL views from proto manifest entries."
 
   @doc """
   Generates a dbt staging model SQL file from a manifest table entry and proto fields.
 
   Output is a simple `select ... from {{ source(...) }}` view.
   Column order: id first, then proto fields by field number, then timestamps.
+  Skips API-only fields (api_only: true), security-excluded fields (dbt_exclude: true),
+  and belongs_to FK columns (uses the _id directly from proto).
   """
   def generate(table, fields) do
     columns = build_column_list(table, fields)
@@ -23,12 +25,40 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
   end
 
   defp build_column_list(table, fields) do
-    proto_columns = Enum.map(fields, fn field -> "    #{field.name}" end)
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
+
+    filtered =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or excluded_field?(field, overrides)
+      end)
+
+    # Use ecto_name if present (e.g., proto "website" → DB "website_url")
+    proto_columns =
+      Enum.map(filtered, fn field ->
+        field_name = String.to_atom(field.name)
+        override = Map.get(overrides, field_name, %{})
+        col_name = Map.get(override, :ecto_name, field_name)
+        "    #{col_name}"
+      end)
+
     timestamp_columns = timestamp_cols(table)
 
     ["    id" | proto_columns] ++ timestamp_columns
   end
 
   defp timestamp_cols(%{timestamps: :standard}), do: ["    created_at", "    updated_at"]
+  defp timestamp_cols(%{timestamps: {:standard, updated_at: false}}), do: ["    created_at"]
   defp timestamp_cols(_), do: []
+
+  defp excluded_field?(field, overrides) do
+    field_name = String.to_atom(field.name)
+    override = Map.get(overrides, field_name, %{})
+    Map.get(override, :api_only, false) or Map.get(override, :dbt_exclude, false)
+  end
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end

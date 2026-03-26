@@ -5,8 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Maximum allowed age of an HMAC token in seconds.
+/// Maximum allowed age of an HMAC token in seconds (past direction).
 const MAX_TOKEN_AGE_SECS: u64 = 60;
+
+/// Maximum clock skew tolerated for future-dated tokens.
+/// Kept small (5 s) so a future-dated token cannot extend the replay window to
+/// MAX_TOKEN_AGE_SECS + MAX_FUTURE_SKEW_SECS = 65 s instead of the intended 60 s.
+const MAX_FUTURE_SKEW_SECS: u64 = 5;
 
 /// Validate an `X-Internal-Token` header value.
 ///
@@ -41,7 +46,7 @@ pub fn verify_token(
         .as_secs();
 
     if now.saturating_sub(timestamp) > MAX_TOKEN_AGE_SECS
-        || timestamp.saturating_sub(now) > MAX_TOKEN_AGE_SECS
+        || timestamp.saturating_sub(now) > MAX_FUTURE_SKEW_SECS
     {
         return Err(ScraperError::AuthFailed("token expired".to_string()));
     }
@@ -50,14 +55,13 @@ pub fn verify_token(
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|_| ScraperError::AuthFailed("invalid secret key".to_string()))?;
     mac.update(message.as_bytes());
-    let expected = hex::encode(mac.finalize().into_bytes());
 
-    // Constant-time comparison.
-    if !constant_time_eq(expected.as_bytes(), provided_hex.as_bytes()) {
-        return Err(ScraperError::AuthFailed("signature mismatch".to_string()));
-    }
-
-    Ok(())
+    // Decode the provided hex signature and verify using the HMAC crate's
+    // built-in constant-time comparison (mac.verify_slice).
+    let provided_bytes = hex::decode(provided_hex)
+        .map_err(|_| ScraperError::AuthFailed("invalid signature encoding".to_string()))?;
+    mac.verify_slice(&provided_bytes)
+        .map_err(|_| ScraperError::AuthFailed("signature mismatch".to_string()))
 }
 
 /// Generate a valid HMAC token for testing or client use.
@@ -74,18 +78,6 @@ pub fn generate_token(method: &str, path: &str, secret: &str) -> Result<String, 
     let sig = hex::encode(mac.finalize().into_bytes());
 
     Ok(format!("{timestamp}.{sig}"))
-}
-
-/// Constant-time byte comparison (avoids timing attacks).
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut result = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        result |= x ^ y;
-    }
-    result == 0
 }
 
 #[cfg(test)]
@@ -125,6 +117,26 @@ mod tests {
     fn test_malformed_token_rejected() {
         assert!(verify_token("notokenformat", "POST", "/scrape", SECRET).is_err());
         assert!(verify_token("", "POST", "/scrape", SECRET).is_err());
+    }
+
+    #[test]
+    fn test_future_dated_token_rejected() {
+        // Token with timestamp 30 s in the future — beyond MAX_FUTURE_SKEW_SECS (5 s).
+        let future_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 30;
+        let message = format!("{future_ts}.POST./scrape");
+        let mut mac = HmacSha256::new_from_slice(SECRET.as_bytes()).unwrap();
+        mac.update(message.as_bytes());
+        let sig = hex::encode(mac.finalize().into_bytes());
+        let token = format!("{future_ts}.{sig}");
+
+        let result = verify_token(&token, "POST", "/scrape", SECRET);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("expired"));
     }
 
     #[test]

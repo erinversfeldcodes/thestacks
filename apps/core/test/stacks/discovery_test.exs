@@ -18,9 +18,9 @@ defmodule Stacks.DiscoveryTest do
 
       assert {:ok, %DiscoveredSource{} = source} = Discovery.create_source(attrs)
       assert source.name == "Test Bookshop"
-      assert source.type == :bookshop
+      assert source.type == "bookshop"
       assert source.url == "https://testbookshop.com"
-      assert source.status == :pending_review
+      assert source.status == "pending_review"
       assert source.discovered_at != nil
     end
 
@@ -142,14 +142,14 @@ defmodule Stacks.DiscoveryTest do
       assert {:ok, updated} =
                Discovery.update_source_status(source, %{status: "approved", approved_at: now})
 
-      assert updated.status == :approved
+      assert updated.status == "approved"
       assert updated.approved_at != nil
     end
 
     test "updates status to dismissed" do
       source = insert(:discovered_source, status: "pending_review")
       assert {:ok, updated} = Discovery.update_source_status(source, %{status: "dismissed"})
-      assert updated.status == :dismissed
+      assert updated.status == "dismissed"
     end
   end
 
@@ -175,7 +175,7 @@ defmodule Stacks.DiscoveryTest do
       assert {:ok, updated} =
                Discovery.opt_out("https://optout.com", %{email: "owner@optout.com"})
 
-      assert updated.status == :excluded
+      assert updated.status == "excluded"
       assert updated.exclusion_email == "owner@optout.com"
       assert updated.excluded_at != nil
     end

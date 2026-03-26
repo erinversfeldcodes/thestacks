@@ -49,13 +49,13 @@ defmodule Stacks.Workers.VisibilityRecapJob do
       {bookshelf_count, _} =
         Bookshelf
         |> where([b], b.user_id == ^user_id and b.visibility in ^violating)
-        |> Repo.update_all([set: [visibility: new_visibility, updated_at: now]], prefix: "op")
+        |> Repo.update_all(set: [visibility: new_visibility, updated_at: now])
 
       {placement_count, _} =
         Placement
         |> join(:inner, [p], b in Bookshelf, on: p.bookshelf_id == b.id)
         |> where([p, b], b.user_id == ^user_id and p.visibility in ^violating)
-        |> Repo.update_all([set: [visibility: new_visibility, updated_at: now]], prefix: "op")
+        |> Repo.update_all(set: [visibility: new_visibility, updated_at: now])
 
       {:ok, posts_capped} = Blog.tighten_posts_to_ceiling(user_id, new_visibility)
 

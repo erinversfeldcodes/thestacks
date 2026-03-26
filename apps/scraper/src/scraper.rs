@@ -37,6 +37,8 @@ pub struct Engine {
     robots: RobotsChecker,
     /// Pre-loaded fixture HTML keyed by store ID (used when MOCK_HTTP=true).
     fixtures: HashMap<String, String>,
+    /// True when running in mock mode (no real HTTP calls).
+    mock: bool,
 }
 
 impl Engine {
@@ -52,20 +54,21 @@ impl Engine {
             client,
             rate_limiter: RateLimiter::new(),
             fixtures: HashMap::new(),
+            mock: false,
         })
     }
 
     /// Create an engine that serves HTML from a pre-loaded fixture map.
+    #[cfg(test)]
     pub fn new_mock(fixtures: HashMap<String, String>) -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .expect("failed to build mock reqwest client");
+        // Mock engine never makes real HTTP requests; use a minimal client for RobotsChecker API compat.
+        let client = reqwest::Client::new();
         Self {
             robots: RobotsChecker::new(client.clone()),
             client,
             rate_limiter: RateLimiter::new(),
             fixtures,
+            mock: true,
         }
     }
 
@@ -85,10 +88,15 @@ impl Engine {
             .check_and_record(&domain, config.rate_limit.requests_per_minute)?;
 
         // robots.txt check (skipped in mock mode).
-        if config.rate_limit.respect_robots_txt && self.fixtures.is_empty() {
-            let path = search_url
-                .strip_prefix(&config.source.url)
-                .unwrap_or(&search_url);
+        if config.rate_limit.respect_robots_txt && !self.mock {
+            // Normalise the base URL before stripping so a trailing slash doesn't
+            // cause strip_prefix to fail (e.g. "https://store.com/" vs "/search?q=…").
+            let base = config.source.url.trim_end_matches('/');
+            let path = search_url.strip_prefix(base).ok_or_else(|| {
+                ScraperError::InvalidConfig(format!(
+                    "search URL '{search_url}' does not begin with source URL '{base}'"
+                ))
+            })?;
             let allowed = self.robots.is_allowed(&config.source.url, path).await?;
             if !allowed {
                 return Err(ScraperError::RobotsDisallowed {
@@ -103,7 +111,7 @@ impl Engine {
 
     /// Fetch HTML — either from fixtures (mock mode) or real HTTP.
     async fn fetch_html(&self, store_id: &str, url: &str) -> Result<String, ScraperError> {
-        if !self.fixtures.is_empty() {
+        if self.mock {
             return self.fixtures.get(store_id).cloned().ok_or_else(|| {
                 ScraperError::ConfigNotFound(format!("no fixture for '{store_id}'"))
             });
@@ -116,6 +124,8 @@ impl Engine {
             .await
             .map_err(ScraperError::Http)?;
 
+        // Surface HTTP 4xx/5xx as errors so they don't silently produce empty results.
+        let response = response.error_for_status().map_err(ScraperError::Http)?;
         response.text().await.map_err(ScraperError::Http)
     }
 
@@ -196,9 +206,12 @@ impl Engine {
     }
 }
 
+#[cfg(test)]
 impl Default for Engine {
+    /// Convenience default for tests: mock mode with no fixtures.
+    /// Prefer `Engine::new_mock(fixtures)` when fixtures are needed.
     fn default() -> Self {
-        Self::new().expect("failed to build scrape engine")
+        Self::new_mock(HashMap::new())
     }
 }
 
@@ -214,9 +227,8 @@ fn selector_matches_any(html: &str, selector_str: &str) -> bool {
 }
 
 fn extract_domain(url: &str) -> Option<String> {
-    let after_scheme = url.split("://").nth(1)?;
-    let host = after_scheme.split('/').next()?;
-    let scheme = url.split("://").next()?;
+    let (scheme, rest) = url.split_once("://")?;
+    let host = rest.split('/').next()?;
     Some(format!("{scheme}://{host}"))
 }
 

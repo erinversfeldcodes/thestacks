@@ -59,7 +59,7 @@ This state machine demands robust UI state management. The primary risk in the f
 - `Animation/` — transitions (SlideTransition, RoomTransition)
 - `Api.elm` — HTTP client module
 
-**Decoders:** Elm JSON decoders are checked in (`proto/gen/elm/`). No runtime codegen. Generated from Protobuf schemas via `buf generate`.
+**Decoders:** Elm JSON decoders are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`. No runtime codegen. Generated from Protobuf schemas.
 
 **Build pipeline:** `elm make src/Main.elm --optimize` → esbuild bundles → `app.js`. The browser loads `app.js`, not a standalone `elm.js`. esbuild applies dead-code elimination on the compiled output.
 
@@ -86,7 +86,7 @@ This state machine demands robust UI state management. The primary risk in the f
 - Learning curve for contributors unfamiliar with functional programming or Elm specifically.
 - Interop with JavaScript libraries requires ports or web components — more boilerplate than React's `npm install anything`.
 - Elm's HTTP library does not support streaming responses — not a constraint for current features, but worth noting for future real-time capabilities.
-- Generated Protobuf decoders for Elm are checked in and must be kept in sync with `.proto` file changes (no runtime codegen). This is enforced by `buf lint` and `buf breaking` in CI.
+- Generated Protobuf decoders for Elm are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh` (no runtime codegen). CI enforces correctness via `scripts/gen-elm-proto.sh --check`, `buf lint`, and `buf breaking`.
 
 **Migration path:**
 - If Elm becomes a blocker (e.g., a required UI library has no Elm binding), individual sections can be migrated to Web Components or a separate React micro-frontend served at a distinct route. The Elm app would remain for the core shelving experience. This is a last resort — the architecture deliberately minimises JavaScript interop.

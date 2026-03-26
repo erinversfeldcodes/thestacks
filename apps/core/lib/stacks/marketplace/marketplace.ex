@@ -16,12 +16,14 @@ defmodule Stacks.Marketplace do
 
   @dialyzer :no_opaque
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Events
   alias Stacks.Marketplace.Listing
+  alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement}
 
   @valid_transitions %{
@@ -58,7 +60,7 @@ defmodule Stacks.Marketplace do
         placement -> {:ok, placement}
       end
     end)
-    |> Multi.insert(:listing, fn _ -> Listing.changeset(%Listing{}, attrs) end)
+    |> Multi.insert(:listing, fn _ -> listing_changeset(%Listing{}, attrs) end)
     |> Multi.run(:emit_event, fn _repo, %{listing: listing} ->
       Events.emit_safe(%{
         event_type: "listing.created",
@@ -136,7 +138,7 @@ defmodule Stacks.Marketplace do
         lock_and_validate_transition(repo, listing.id, "active")
       end)
       |> Multi.update(:listing, fn %{locked_listing: locked} ->
-        Listing.changeset(locked, %{
+        listing_changeset(locked, %{
           status: "active",
           listed_at: now,
           expires_at: expires_at
@@ -177,7 +179,7 @@ defmodule Stacks.Marketplace do
         lock_and_validate_transition(repo, listing.id, "removed")
       end)
       |> Multi.update(:listing, fn %{locked_listing: locked} ->
-        Listing.changeset(locked, %{status: "removed"})
+        listing_changeset(locked, %{status: "removed"})
       end)
       |> Multi.run(:denormalize, fn repo, %{listing: l} ->
         update_placement_listing_status(repo, user_id, l.book_id, nil)
@@ -216,7 +218,7 @@ defmodule Stacks.Marketplace do
         lock_and_validate_transition(repo, listing.id, "sold")
       end)
       |> Multi.update(:listing, fn %{locked_listing: locked} ->
-        Listing.changeset(locked, %{status: "sold", sold_at: now})
+        listing_changeset(locked, %{status: "sold", sold_at: now})
       end)
       |> Multi.run(:denormalize, fn repo, %{listing: l} ->
         update_placement_listing_status(repo, user_id, l.book_id, nil)
@@ -253,7 +255,7 @@ defmodule Stacks.Marketplace do
       lock_and_validate_transition(repo, listing.id, "expired")
     end)
     |> Multi.update(:listing, fn %{locked_listing: locked} ->
-      Listing.changeset(locked, %{status: "expired"})
+      listing_changeset(locked, %{status: "expired"})
     end)
     |> Multi.run(:denormalize, fn repo, %{listing: l} ->
       update_placement_listing_status(repo, l.seller_id, l.book_id, nil)
@@ -273,6 +275,92 @@ defmodule Stacks.Marketplace do
       {:error, :listing, changeset, _} -> {:error, changeset}
       {:error, _, reason, _} -> {:error, reason}
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Changesets
+  # ---------------------------------------------------------------------------
+
+  @listing_required_fields [:book_id, :seller_id, :pricing_mode, :price_cents, :condition]
+  @listing_optional_fields [
+    :status,
+    :currency,
+    :description,
+    :contact_info,
+    :photo_urls,
+    :listed_at,
+    :expires_at,
+    :sold_at
+  ]
+
+  @listing_valid_statuses ~w(draft active sold removed expired)
+  @listing_valid_pricing_modes ~w(fixed offer)
+  @listing_valid_conditions ~w(new like_new good fair poor)
+
+  @doc "Changeset for creating or updating a listing."
+  def listing_changeset(listing, attrs) do
+    listing
+    |> cast(attrs, @listing_required_fields ++ @listing_optional_fields)
+    |> validate_required(@listing_required_fields)
+    |> validate_inclusion(:status, @listing_valid_statuses)
+    |> validate_inclusion(:pricing_mode, @listing_valid_pricing_modes)
+    |> validate_inclusion(:condition, @listing_valid_conditions)
+    |> validate_number(:price_cents, greater_than: 0)
+    |> validate_length(:contact_info, max: 500)
+    |> unique_constraint([:book_id, :seller_id],
+      name: "listings_active_book_seller_idx",
+      message: "already has a draft or active listing for this book"
+    )
+  end
+
+  @offer_thread_required_fields [:placement_id, :buyer_id]
+  @offer_thread_optional_fields [:status]
+  @offer_thread_valid_statuses ~w(open accepted declined expired)
+
+  @doc "Changeset for creating or updating an offer thread."
+  def offer_thread_changeset(thread, attrs) do
+    thread
+    |> cast(attrs, @offer_thread_required_fields ++ @offer_thread_optional_fields)
+    |> validate_required(@offer_thread_required_fields)
+    |> validate_inclusion(:status, @offer_thread_valid_statuses)
+    |> unique_constraint([:placement_id, :buyer_id])
+  end
+
+  @offer_message_required_fields [:thread_id, :sender_id, :type]
+  @offer_message_optional_fields [:body, :amount_cents]
+  @offer_message_valid_types ~w(message offer counter accept decline)
+
+  @doc "Changeset for creating an offer message."
+  def offer_message_changeset(message, attrs) do
+    message
+    |> cast(attrs, @offer_message_required_fields ++ @offer_message_optional_fields)
+    |> validate_required(@offer_message_required_fields)
+    |> validate_inclusion(:type, @offer_message_valid_types)
+  end
+
+  @transaction_required_fields [:listing_id, :amount_cents, :payment_status]
+  @transaction_optional_fields [
+    :offer_id,
+    :buyer_id,
+    :seller_id,
+    :currency,
+    :payment_provider_ref,
+    :shipping_provider_ref,
+    :shipping_status,
+    :shipping_cost_cents,
+    :completed_at
+  ]
+
+  @transaction_valid_payment_statuses ~w(pending paid failed refunded)
+  @transaction_valid_shipping_statuses ~w(pending shipped delivered returned)
+
+  @doc "Changeset for creating or updating a transaction."
+  def transaction_changeset(transaction, attrs) do
+    transaction
+    |> cast(attrs, @transaction_required_fields ++ @transaction_optional_fields)
+    |> validate_required(@transaction_required_fields)
+    |> validate_inclusion(:payment_status, @transaction_valid_payment_statuses)
+    |> validate_inclusion(:shipping_status, @transaction_valid_shipping_statuses)
   end
 
   # ---------------------------------------------------------------------------
@@ -330,7 +418,7 @@ defmodule Stacks.Marketplace do
 
       placement ->
         placement
-        |> Placement.changeset(%{listing_status: status})
+        |> Shelving.placement_changeset(%{listing_status: status})
         |> repo.update()
     end
   end

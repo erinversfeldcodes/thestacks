@@ -37,7 +37,7 @@ All significant state changes emit events via `Stacks.Events.emit/1` to the `eve
 Partners (bookshops, reading groups, cafes) push data via JSON API validated against Protobuf-generated schemas. Partners never see user data. Platform owner approves all partners.
 
 ### Protobuf as Schema Contract
-`.proto` files in `proto/` are the single source of truth for structured data. `buf lint` and `buf breaking` run in CI. JSON on the wire. Elm decoders are checked in (no runtime codegen).
+`.proto` files in `proto/` are the single source of truth for structured data. `buf lint` and `buf breaking` run in CI. JSON on the wire. Elm decoders are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`.
 
 ### GDPR by Default
 4-tier data classification (public, personal, sensitive, external personal). Right to erasure, right to export. 30-day image retention. Consent with timestamps.

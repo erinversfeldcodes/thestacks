@@ -7,8 +7,7 @@ models:
 
   - name: stg_books
     description: >
-      One row per work (logical book) in the catalogue. Edition-specific data
-      (ISBN, cover, page count) lives in stg_book_editions.
+      Proto-synced staging model for books.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -16,44 +15,33 @@ models:
           - not_null
           - unique
       - name: title
-        description: Work title (canonical, edition suffixes stripped).
+        description: Title.
         tests:
           - not_null
       - name: author_id
-        description: FK to stg_authors.
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_authors')
-                field: id
+        description: Author id.
       - name: description
-        description: Optional synopsis or blurb for the work.
-      - name: language
-        description: ISO 639 language code of the work (e.g. 'en', 'af').
+        description: Description.
       - name: subjects
-        description: Array of subject/genre tags sourced from Open Library.
-      - name: bisac_codes
-        description: Array of BISAC classification codes for bookshop categorisation.
+        description: Subjects.
       - name: visibility_tier
-        description: Content visibility tier controlling who can discover this work.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['public', 'age_gated']
+        description: Visibility tier.
+      - name: language
+        description: Language.
+      - name: bisac_codes
+        description: Bisac codes.
       - name: created_at
-        description: Timestamp when the work was first added to the catalogue.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this work record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_authors
     description: >
-      One row per author. Populated automatically when a book is added via the
-      ISBN resolver; open_library_id links back to the canonical source.
+      Proto-synced staging model for authors.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -61,79 +49,65 @@ models:
           - not_null
           - unique
       - name: name
-        description: Author display name.
-        tests:
-          - not_null
+        description: Name.
       - name: website_url
-        description: Optional author website URL.
+        description: Website url.
       - name: rss_feed_url
-        description: Optional RSS feed URL for author updates.
-      - name: open_library_id
-        description: Open Library author identifier for canonical linking.
+        description: Rss feed url.
       - name: bio
-        description: Optional author biography text.
+        description: Bio.
+      - name: open_library_id
+        description: Open library id.
       - name: created_at
-        description: Timestamp when the author record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this author record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_book_editions
     description: >
-      One row per edition (specific ISBN/format) of a work. Each edition belongs
-      to exactly one work (stg_books). The is_primary flag marks the default edition.
+      Proto-synced staging model for book_editions.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: book_id
-        description: FK to the parent work.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
       - name: isbn
-        description: Verified ISBN-13 (or ISBN-10 for legacy entries).
-        tests:
-          - not_null
-          - unique
-      - name: format_label
-        description: Physical format of the edition (e.g. paperback, hardcover, ebook).
-      - name: cover_image_url
-        description: URL to the edition's cover image.
-      - name: page_count
-        description: Number of pages in this edition.
-      - name: publisher
-        description: Publisher name for this edition.
-      - name: publication_year
-        description: Year this edition was published.
-      - name: open_library_id
-        description: Open Library edition identifier for canonical linking.
-      - name: google_books_id
-        description: Google Books volume identifier for fallback lookups.
+        description: Isbn.
       - name: is_primary
-        description: Whether this is the default edition displayed for the work.
+        description: Is primary.
+      - name: cover_image_url
+        description: Cover image url.
+      - name: page_count
+        description: Page count.
+      - name: publisher
+        description: Publisher.
+      - name: publication_year
+        description: Publication year.
+      - name: format_label
+        description: Format label.
+      - name: open_library_id
+        description: Open library id.
+      - name: google_books_id
+        description: Google books id.
+      - name: book_id
+        description: Book id.
       - name: created_at
-        description: Timestamp when the edition record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this edition record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_users
     description: >
-      Platform users. Includes the single owner account and any registered
-      community users. PII (email, display_name) is encrypted at rest via Cloak.
-      Security columns (password_hash, tokens) are excluded from staging.
+      Proto-synced staging model for users.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -141,79 +115,53 @@ models:
           - not_null
           - unique
       - name: email
-        description: Unique login email (Cloak-encrypted in the op table).
-        tests:
-          - not_null
-          - unique
+        description: Email.
       - name: display_name
-        description: User-chosen display name shown on their profile.
+        description: Display name.
       - name: role
-        description: Platform role — owner has full admin access.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['owner', 'user']
-      - name: profile_visibility
-        description: Visibility of the user's public profile page.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['owner', 'group', 'platform']
-      - name: website_url
-        description: Optional personal website URL displayed on the user's profile.
-      - name: age_verified
-        description: Whether the user has completed age verification.
-      - name: age_verified_at
-        description: Timestamp when age verification was completed.
-      - name: age_verification_provider
-        description: Name of the provider used for age verification.
+        description: Role.
       - name: country_code
-        description: ISO 3166-1 alpha-2 country code (defaults to ZA).
+        description: Country code.
       - name: city
-        description: Optional city name for location-based features.
+        description: City.
       - name: consent_analytics
-        description: Whether the user has consented to analytics tracking.
+        description: Consent analytics.
+      - name: age_verified
+        description: Age verified.
+      - name: profile_visibility
+        description: Profile visibility.
+      - name: website_url
+        description: Website url.
       - name: consent_analytics_at
-        description: Timestamp when analytics consent was granted or revoked.
+        description: Consent analytics at.
       - name: onboarding_completed
-        description: Whether the user has finished the onboarding flow.
-        tests:
-          - not_null
+        description: Onboarding completed.
       - name: notify_wishlist_availability
-        description: Opt-in for notifications when wishlist books become available.
-        tests:
-          - not_null
+        description: Notify wishlist availability.
       - name: notify_marketplace
-        description: Opt-in for marketplace activity notifications.
-        tests:
-          - not_null
+        description: Notify marketplace.
       - name: notify_group_invitations
-        description: Opt-in for group invitation notifications.
-        tests:
-          - not_null
+        description: Notify group invitations.
       - name: notify_event_matches
-        description: Opt-in for event match notifications.
-        tests:
-          - not_null
+        description: Notify event matches.
       - name: email_confirmed
-        description: Whether the user has confirmed their email address.
-        tests:
-          - not_null
+        description: Email confirmed.
+      - name: age_verified_at
+        description: Age verified at.
+      - name: age_verification_provider
+        description: Age verification provider.
       - name: created_at
-        description: Timestamp when the user account was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this user record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_bookshelves
     description: >
-      Virtual bookshelves — named collections of books owned by a user.
-      Each user has exactly five bookshelves (one per name enum value).
+      Proto-synced staging model for bookshelves.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -221,47 +169,25 @@ models:
           - not_null
           - unique
       - name: user_id
-        description: FK to the owning user.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: User id.
       - name: name
-        description: Bookshelf category name (enum).
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['antilibrary', 'library', 'wishlist', 'reading_pile', 'looking_for_home']
+        description: Name.
       - name: visibility
-        description: Who can see this bookshelf.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['owner', 'group', 'platform']
+        description: Visibility.
       - name: visibility_group_id
-        description: FK to the group that can view this bookshelf when visibility = 'group'.
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_groups')
-                field: id
+        description: Visibility group id.
       - name: created_at
-        description: Timestamp when the bookshelf was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this bookshelf.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_bookshelf_placements
     description: >
-      A placement is a book's current position on a bookshelf. A book may appear
-      on at most one bookshelf at a time per user.
+      Proto-synced staging model for bookshelf_placements.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -269,68 +195,43 @@ models:
           - not_null
           - unique
       - name: book_id
-        description: FK to the placed book.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
+        description: Book id.
       - name: bookshelf_id
-        description: FK to the containing bookshelf.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_bookshelves')
-                field: id
+        description: Bookshelf id.
       - name: position
-        description: Sort order position within the bookshelf (nullable for unordered shelves).
+        description: Position.
       - name: placed_at
-        description: Timestamp when the book was placed on this bookshelf.
+        description: Placed at.
       - name: removed_at
-        description: Timestamp when the book was removed (soft delete; null if still placed).
+        description: Removed at.
       - name: formats
-        description: Array of owned format labels (e.g. paperback, hardcover) for this placement.
+        description: Formats.
       - name: personal_rating
-        description: User's personal rating for this book (nullable; scale TBD).
+        description: Personal rating.
       - name: notes
-        description: Free-text notes the user has attached to this placement.
+        description: Notes.
       - name: visibility
-        description: Visibility of this placement (may differ from bookshelf default).
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['owner', 'group', 'platform']
+        description: Visibility.
       - name: listing_mode
-        description: Marketplace listing type when the book is for sale (nullable).
-        tests:
-          - accepted_values:
-              arguments:
-                values: ['open_bid', 'closed_bid']
+        description: Listing mode.
       - name: listing_status
-        description: Current marketplace listing status (nullable).
-        tests:
-          - accepted_values:
-              arguments:
-                values: ['draft', 'active', 'sold', 'removed', 'expired']
+        description: Listing status.
       - name: listing_price_cents
-        description: Asking price in cents when the placement is listed for sale.
+        description: Listing price cents.
       - name: listing_min_price_cents
-        description: Minimum acceptable price in cents for bid-based listings.
+        description: Listing min price cents.
       - name: created_at
-        description: Timestamp when the placement record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this placement.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_bookshelf_placement_history
     description: >
-      Immutable audit trail of every bookshelf move. One row per move event.
+      Proto-synced staging model for bookshelf_placement_history.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -338,90 +239,51 @@ models:
           - not_null
           - unique
       - name: book_id
-        description: FK to the moved book.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
+        description: Book id.
       - name: from_bookshelf
-        description: FK to the bookshelf the book was moved from (null for initial placement).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_bookshelves')
-                field: id
+        description: From bookshelf.
       - name: to_bookshelf
-        description: FK to the bookshelf the book was moved to (null for removal).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_bookshelves')
-                field: id
+        description: To bookshelf.
       - name: moved_at
-        description: Timestamp of the move event.
-        tests:
-          - not_null
+        description: Moved at.
 
   - name: stg_uploaded_images
     description: >
-      User-uploaded book cover images. Images expire 30 days after upload
-      (GDPR retention policy); status tracks vision-model processing.
+      Proto-synced staging model for uploaded_images.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: book_id
-        description: FK to the book this image is associated with (legacy single-book link).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
       - name: storage_path
-        description: Object storage path to the uploaded image file.
+        description: Storage path.
       - name: status
-        description: Vision-model processing status.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['pending', 'resolved', 'rejected']
+        description: Status.
       - name: rejection_reason
-        description: Human-readable reason if the image was rejected by the vision model.
+        description: Rejection reason.
       - name: uploaded_at
-        description: Timestamp when the image was uploaded.
-        tests:
-          - not_null
+        description: Uploaded at.
       - name: expires_at
-        description: Timestamp when the image will be purged (30-day GDPR retention).
-        tests:
-          - not_null
+        description: Expires at.
+      - name: book_ids
+        description: Book ids.
+      - name: book_id
+        description: Book id.
+      - name: book_edition_id
+        description: Book edition id.
       - name: created_at
-        description: Timestamp when the image record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this image record.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
-      - name: book_ids
-        description: Array of book UUIDs resolved from a multi-spine upload.
-      - name: book_edition_id
-        description: FK to the specific edition matched by ISBN extraction.
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_book_editions')
-                field: id
 
   - name: stg_audit_log
     description: >
-      Append-only audit log for all significant platform events. Entries are
-      never deleted except for GDPR erasure of PII within the metadata payload.
+      Proto-synced staging model for audit_log.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -429,30 +291,19 @@ models:
           - not_null
           - unique
       - name: user_id
-        description: FK to the user who triggered the event (null for system events).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: User id.
       - name: action
-        description: Event action identifier (e.g. user.registered, book.placed).
-        tests:
-          - not_null
+        description: Action.
       - name: resource_type
-        description: The entity type that was acted upon.
-        tests:
-          - not_null
+        description: Resource type.
       - name: resource_id
-        description: UUID of the specific resource that was acted upon.
-      - name: metadata
-        description: Protobuf-encoded event metadata payload.
+        description: Resource id.
       - name: ip_address
-        description: IP address of the request that triggered the event.
+        description: Ip address.
+      - name: metadata
+        description: Metadata.
       - name: occurred_at
-        description: Timestamp when the event occurred.
-        tests:
-          - not_null
+        description: Occurred at.
 
   - name: stg_event_log
     description: >
@@ -485,8 +336,6 @@ models:
           - not_null
       - name: metadata
         description: Metadata.
-        tests:
-          - not_null
       - name: occurred_at
         description: Occurred at.
         tests:
@@ -500,8 +349,7 @@ models:
 
   - name: stg_user_blocks
     description: >
-      Records where one user has blocked another. Blocking is unidirectional:
-      the blocker cannot see the blocked user's content and vice versa.
+      Proto-synced staging model for user_blocks.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -509,30 +357,17 @@ models:
           - not_null
           - unique
       - name: blocker_id
-        description: FK to the user who initiated the block.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Blocker id.
       - name: blocked_id
-        description: FK to the user who was blocked.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Blocked id.
       - name: created_at
-        description: Timestamp when the block was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
   - name: stg_groups
     description: >
-      Named user groups that control content visibility. Groups can be
-      close-friends circles, broadcast lists, or subscription channels.
+      Proto-synced staging model for groups.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -540,44 +375,25 @@ models:
           - not_null
           - unique
       - name: owner_id
-        description: FK to the user who owns/administers the group.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Owner id.
       - name: name
-        description: Display name for the group.
-        tests:
-          - not_null
+        description: Name.
       - name: type
-        description: Group category controlling membership and interaction model.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['close_friends', 'broadcast', 'subscription']
+        description: Type.
       - name: visibility
-        description: Who can discover and request to join this group.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['invite_only', 'platform']
+        description: Visibility.
       - name: created_at
-        description: Timestamp when the group was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this group.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_group_members
     description: >
-      Membership records linking users to groups. Role determines what
-      moderation actions the member may perform within the group.
+      Proto-synced staging model for group_members.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -585,41 +401,21 @@ models:
           - not_null
           - unique
       - name: group_id
-        description: FK to the parent group.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_groups')
-                field: id
+        description: Group id.
       - name: user_id
-        description: FK to the group member.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: User id.
       - name: role
-        description: Member's role within the group.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['member', 'moderator']
+        description: Role.
       - name: joined_at
-        description: Timestamp when the user joined the group.
-        tests:
-          - not_null
+        description: Joined at.
       - name: created_at
-        description: Timestamp when the membership record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
   - name: stg_group_invitations
     description: >
-      Pending and historical invitations to join a group. Once responded_at
-      is set, the invitation is terminal (accepted or declined).
+      Proto-synced staging model for group_invitations.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -627,47 +423,23 @@ models:
           - not_null
           - unique
       - name: group_id
-        description: FK to the group the invitation is for.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_groups')
-                field: id
+        description: Group id.
       - name: invited_by_id
-        description: FK to the user who sent the invitation.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Invited by id.
       - name: invited_user_id
-        description: FK to the user who was invited.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Invited user id.
       - name: status
-        description: Current state of the invitation.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['pending', 'accepted', 'declined']
+        description: Status.
       - name: responded_at
-        description: Timestamp when the invitation was accepted or declined (null if pending).
+        description: Responded at.
       - name: created_at
-        description: Timestamp when the invitation was sent.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
   - name: stg_visibility_grants
     description: >
-      Fine-grained visibility overrides granting a specific user access to a
-      specific resource regardless of that resource's default visibility tier.
+      Proto-synced staging model for visibility_grants.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -675,31 +447,15 @@ models:
           - not_null
           - unique
       - name: resource_type
-        description: The entity type the grant applies to (e.g. bookshelf, blog_post).
-        tests:
-          - not_null
+        description: Resource type.
       - name: resource_id
-        description: UUID of the specific resource being granted.
-        tests:
-          - not_null
+        description: Resource id.
       - name: granted_to_id
-        description: FK to the user receiving access.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Granted to id.
       - name: granted_by_id
-        description: FK to the resource owner granting access.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Granted by id.
       - name: created_at
-        description: Timestamp when the visibility grant was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
@@ -709,101 +465,57 @@ models:
 
   - name: stg_blog_posts
     description: >
-      Long-form posts authored by users. Visibility controls who can read
-      the post; visibility_group_id is required when visibility = 'group'.
+      Proto-synced staging model for blog_posts.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: user_id
-        description: FK to the post author.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
       - name: title
-        description: Post title.
-        tests:
-          - not_null
+        description: Title.
       - name: body
-        description: Full post body content.
-        tests:
-          - not_null
+        description: Body.
       - name: visibility
-        description: Who can read this post.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['owner', 'group', 'platform']
-      - name: visibility_group_id
-        description: FK to the group that can view this post when visibility = 'group'.
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_groups')
-                field: id
+        description: Visibility.
+      - name: user_id
+        description: User id.
       - name: published_at
-        description: Timestamp when the post was published (null if draft).
+        description: Published at.
+      - name: visibility_group_id
+        description: Visibility group id.
       - name: created_at
-        description: Timestamp when the post record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this post.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_post_book_associations
     description: >
-      Links blog posts to books mentioned or reviewed within them. The
-      confidence and source columns record how the association was derived
-      (manual entry, AI extraction, etc.).
+      Proto-synced staging model for post_book_associations.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: post_id
-        description: FK to the parent blog post.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_blog_posts')
-                field: id
       - name: book_id
-        description: FK to the associated book.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
+        description: Book id.
       - name: confidence
-        description: Association confidence score (0.0 to 1.0).
-        tests:
-          - not_null
-      - name: reasoning
-        description: Explanation of how/why this association was derived.
+        description: Confidence.
       - name: source
-        description: How the association was created (e.g. llm, manual).
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['llm', 'manual']
+        description: Source.
       - name: visible
-        description: Whether this association is displayed publicly.
-        tests:
-          - not_null
+        description: Visible.
+      - name: reasoning
+        description: Reasoning.
+      - name: post_id
+        description: Post id.
       - name: created_at
-        description: Timestamp when the association was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
@@ -813,8 +525,7 @@ models:
 
   - name: stg_offer_threads
     description: >
-      A conversation thread between a buyer and the listing owner to
-      negotiate a sale. One thread per (placement, buyer) pair.
+      Proto-synced staging model for offer_threads.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -822,41 +533,23 @@ models:
           - not_null
           - unique
       - name: placement_id
-        description: FK to the bookshelf placement being negotiated.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_bookshelf_placements')
-                field: id
+        description: Placement id.
       - name: buyer_id
-        description: FK to the user interested in buying.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Buyer id.
       - name: status
-        description: Current state of the offer thread.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['open', 'accepted', 'declined', 'expired']
+        description: Status.
       - name: created_at
-        description: Timestamp when the offer thread was opened.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last activity on this thread.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_offer_messages
     description: >
-      Individual messages and offer bids within an offer thread. Monetary
-      offer types (offer, counter) carry an amount_cents value.
+      Proto-synced staging model for offer_messages.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -864,122 +557,67 @@ models:
           - not_null
           - unique
       - name: thread_id
-        description: FK to the parent offer thread.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_offer_threads')
-                field: id
+        description: Thread id.
       - name: sender_id
-        description: FK to the user who sent this message.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Sender id.
       - name: type
-        description: Message category.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['message', 'offer', 'counter', 'accept', 'decline']
+        description: Type.
       - name: body
-        description: Free-text message body (null for pure offer/counter messages).
+        description: Body.
       - name: amount_cents
-        description: Monetary amount in cents for offer/counter message types.
+        description: Amount cents.
       - name: created_at
-        description: Timestamp when the message was sent.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
   - name: stg_listings
     description: >
-      Formal marketplace listings created by sellers. A listing references a
-      book (not a placement) and may receive bids via offer_threads.
-      price_cents must be positive for fixed-price listings.
+      Proto-synced staging model for listings.
     columns:
       - name: id
         description: Surrogate UUID primary key.
         tests:
           - not_null
           - unique
-      - name: book_id
-        description: FK to the book being listed.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_books')
-                field: id
-      - name: seller_id
-        description: FK to the user selling the book.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
-      - name: status
-        description: Current listing lifecycle state.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['draft', 'active', 'sold', 'removed', 'expired']
-      - name: pricing_mode
-        description: Whether the price is fixed or open to offers.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['fixed', 'offer']
-      - name: price_cents
-        description: Asking price in cents (must be positive for fixed-price listings).
-        tests:
-          - not_null
-          - expression_is_true:
-              arguments:
-                expression: "price_cents > 0 or price_cents is null"
-      - name: currency
-        description: ISO 4217 currency code for the listing price (defaults to ZAR).
-        tests:
-          - not_null
       - name: condition
-        description: Physical condition of the listed book.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['new', 'like_new', 'good', 'fair', 'poor']
+        description: Condition.
+      - name: pricing_mode
+        description: Pricing mode.
+      - name: price_cents
+        description: Price cents.
+      - name: contact_info
+        description: Contact info.
       - name: description
-        description: Seller's free-text description of the listed book.
+        description: Description.
+      - name: status
+        description: Status.
+      - name: currency
+        description: Currency.
       - name: photo_urls
-        description: Array of URLs to listing photos.
-        tests:
-          - not_null
+        description: Photo urls.
       - name: listed_at
-        description: Timestamp when the listing went active (null if still draft).
+        description: Listed at.
       - name: expires_at
-        description: Timestamp when the listing will auto-expire.
+        description: Expires at.
       - name: sold_at
-        description: Timestamp when the listing was marked as sold.
+        description: Sold at.
+      - name: book_id
+        description: Book id.
+      - name: seller_id
+        description: Seller id.
       - name: created_at
-        description: Timestamp when the listing record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
       - name: updated_at
-        description: Timestamp of the last modification to this listing.
+        description: Timestamp of the last modification to this record.
         tests:
           - not_null
 
   - name: stg_transactions
     description: >
-      Completed or in-progress payment transactions. Records both payment
-      and shipping lifecycle state for each fulfilled listing. buyer_id and
-      seller_id are nullable due to GDPR erasure.
+      Proto-synced staging model for transactions.
     columns:
       - name: id
         description: Surrogate UUID primary key.
@@ -987,56 +625,31 @@ models:
           - not_null
           - unique
       - name: listing_id
-        description: FK to the listing that was transacted.
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('stg_listings')
-                field: id
+        description: Listing id.
       - name: offer_id
-        description: Soft reference to the accepted offer thread (nullable; no FK constraint).
+        description: Offer id.
       - name: buyer_id
-        description: FK to the purchasing user (nullable due to GDPR erasure).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Buyer id.
       - name: seller_id
-        description: FK to the selling user (nullable due to GDPR erasure).
-        tests:
-          - relationships:
-              arguments:
-                to: ref('stg_users')
-                field: id
+        description: Seller id.
       - name: amount_cents
-        description: Final agreed transaction amount in cents.
-        tests:
-          - not_null
+        description: Amount cents.
       - name: currency
-        description: ISO 4217 currency code for the transaction (defaults to ZAR).
-        tests:
-          - not_null
+        description: Currency.
       - name: payment_provider_ref
-        description: External payment provider reference/transaction ID.
+        description: Payment provider ref.
       - name: payment_status
-        description: Payment processing state.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['pending', 'paid', 'failed', 'refunded']
+        description: Payment status.
       - name: shipping_provider_ref
-        description: External shipping provider tracking reference.
+        description: Shipping provider ref.
       - name: shipping_status
-        description: Current shipping lifecycle state.
+        description: Shipping status.
       - name: shipping_cost_cents
-        description: Shipping cost in cents (nullable if not yet calculated).
+        description: Shipping cost cents.
       - name: completed_at
-        description: Timestamp when the transaction was fully completed.
+        description: Completed at.
       - name: created_at
-        description: Timestamp when the transaction record was created.
+        description: Timestamp when the record was created.
         tests:
           - not_null
 
@@ -1061,9 +674,6 @@ models:
         description: Source type.
         tests:
           - not_null
-          - accepted_values:
-              arguments:
-                values: ['scraper_config', 'review_source', 'rss_feed', 'event_source', 'llm_output']
       - name: last_success_at
         description: Last success at.
       - name: last_failure_at
@@ -1086,9 +696,252 @@ models:
         description: Status.
         tests:
           - not_null
-          - accepted_values:
-              arguments:
-                values: ['healthy', 'degraded', 'broken']
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_bookstore_events
+    description: >
+      Proto-synced staging model for bookstore_events.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: store_id
+        description: Store id.
+      - name: author_id
+        description: Author id.
+      - name: title
+        description: Title.
+      - name: description
+        description: Description.
+      - name: event_date
+        description: Event date.
+      - name: location
+        description: Location.
+      - name: url
+        description: Url.
+      - name: scraped_at
+        description: Scraped at.
+
+  - name: stg_bookstores
+    description: >
+      Proto-synced staging model for bookstores.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Name.
+      - name: website_url
+        description: Website url.
+      - name: search_template
+        description: Search template.
+      - name: has_physical
+        description: Has physical.
+      - name: country_code
+        description: Country code.
+      - name: scraper_module
+        description: Scraper module.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_discovered_sources
+    description: >
+      Proto-synced staging model for discovered_sources.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Name.
+      - name: type
+        description: Type.
+      - name: url
+        description: Url.
+      - name: confidence
+        description: Confidence.
+      - name: discovered_via
+        description: Discovered via.
+      - name: discovered_at
+        description: Discovered at.
+      - name: status
+        description: Status.
+      - name: approved_at
+        description: Approved at.
+      - name: config_generated
+        description: Config generated.
+      - name: excluded_at
+        description: Excluded at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_platform_costs
+    description: >
+      Proto-synced staging model for platform_costs.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: category
+        description: Category.
+      - name: service
+        description: Service.
+      - name: description
+        description: Description.
+      - name: amount_cents
+        description: Amount cents.
+      - name: currency
+        description: Currency.
+      - name: period_start
+        description: Period start.
+      - name: period_end
+        description: Period end.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_price_snapshots
+    description: >
+      Proto-synced staging model for price_snapshots.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        description: Book id.
+      - name: store_id
+        description: Store id.
+      - name: price_cents
+        description: Price cents.
+      - name: currency
+        description: Currency.
+      - name: in_stock
+        description: In stock.
+      - name: url
+        description: Url.
+      - name: scraped_at
+        description: Scraped at.
+
+  - name: stg_review_snapshots
+    description: >
+      Proto-synced staging model for review_snapshots.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: book_id
+        description: Book id.
+      - name: source
+        description: Source.
+      - name: source_url
+        description: Source url.
+      - name: sentiment_score
+        description: Sentiment score.
+      - name: summary
+        description: Summary.
+      - name: rating
+        description: Rating.
+      - name: rating_count
+        description: Rating count.
+      - name: scraped_at
+        description: Scraped at.
+      - name: stale_after
+        description: Stale after.
+
+  - name: stg_third_space_events
+    description: >
+      Proto-synced staging model for third_space_events.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: space_id
+        description: Space id.
+      - name: title
+        description: Title.
+      - name: description
+        description: Description.
+      - name: event_date
+        description: Event date.
+      - name: recurrence
+        description: Recurrence.
+      - name: related_authors
+        description: Related authors.
+      - name: source_url
+        description: Source url.
+      - name: scraped_at
+        description: Scraped at.
+
+  - name: stg_third_spaces
+    description: >
+      Proto-synced staging model for third_spaces.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Name.
+      - name: type
+        description: Type.
+      - name: city
+        description: City.
+      - name: country_code
+        description: Country code.
+      - name: instagram_url
+        description: Instagram url.
+      - name: website_url
+        description: Website url.
+      - name: description
+        description: Description.
+      - name: discovered_via
+        description: Discovered via.
+      - name: verified
+        description: Verified.
+      - name: last_active_at
+        description: Last active at.
+      - name: opted_out
+        description: Opted out.
+      - name: opted_out_at
+        description: Opted out at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

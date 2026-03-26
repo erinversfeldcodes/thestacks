@@ -163,7 +163,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "not_book", "confidence" => 0.95, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
+           "confidence" => 0.95,
+           "model_used" => "mock"
+         }}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -174,7 +180,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     # Returns empty books list — triggers :isbn_not_found
     def call_vision("extract_isbn", _payload),
@@ -189,7 +201,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
@@ -201,7 +219,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     # Returns a compound title with a direct ISBN so both expanded parts resolve immediately.
     def call_vision("extract_isbn", _payload) do
@@ -228,7 +252,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     # Returns a candidate with no ISBN and nil title — title_fallback returns immediately.
     def call_vision("extract_isbn", _payload) do
@@ -255,7 +285,13 @@ defmodule Stacks.ModerationTest do
 
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     # Returns a candidate with an empty string title.
     def call_vision("extract_isbn", _payload) do
