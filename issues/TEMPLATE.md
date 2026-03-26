@@ -1,8 +1,5 @@
 # Issue #NNN: [Title]
 
-## Priority
-[Optional prioritisation]
-
 ## Summary
 [1-2 sentence description of what needs to be done.]
 
