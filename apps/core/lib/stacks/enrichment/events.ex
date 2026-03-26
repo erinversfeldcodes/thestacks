@@ -11,6 +11,7 @@ defmodule Stacks.Enrichment.Events do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Enrichment
   alias Stacks.Enrichment.{BookstoreEvent, ThirdSpaceEvent}
 
   # ── Bookstore Events ────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ defmodule Stacks.Enrichment.Events do
   @spec upsert_event(map()) :: {:ok, BookstoreEvent.t()} | {:error, Ecto.Changeset.t()}
   def upsert_event(attrs) do
     %BookstoreEvent{}
-    |> BookstoreEvent.changeset(attrs)
+    |> Enrichment.bookstore_event_changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace, [:description, :location, :url, :author_id, :scraped_at]},
       conflict_target: [:store_id, :title, :event_date],
@@ -59,7 +60,7 @@ defmodule Stacks.Enrichment.Events do
           {:ok, ThirdSpaceEvent.t()} | {:error, Ecto.Changeset.t()}
   def upsert_third_space_event(attrs) do
     %ThirdSpaceEvent{}
-    |> ThirdSpaceEvent.changeset(attrs)
+    |> Enrichment.third_space_event_changeset(attrs)
     |> Repo.insert(
       on_conflict:
         {:replace, [:description, :recurrence, :related_authors, :source_url, :scraped_at]},

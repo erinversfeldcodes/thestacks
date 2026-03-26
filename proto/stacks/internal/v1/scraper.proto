@@ -1,0 +1,43 @@
+// scraper.proto — Inter-service contracts for the price scraper sidecar (Rust/Axum).
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+// POST /scrape — scrape a single book's price from a specific store.
+message ScrapeRequest {
+  // ISBN (digits only, no hyphens).
+  string isbn = 1 [json_name = "isbn"];
+  // Store identifier (e.g. "za/exclusive_books", "za/takealot").
+  string store = 2 [json_name = "store"];
+}
+
+// Response from POST /scrape.
+message ScrapeResponse {
+  // ISBN (echoed from request).
+  string isbn = 1 [json_name = "isbn"];
+  // Store identifier (echoed from request).
+  string store = 2 [json_name = "store"];
+  // Price in cents (absent if not found).
+  optional int64 price_cents = 3 [json_name = "price_cents"];
+  // ISO 4217 currency code (default "ZAR").
+  string currency = 4 [json_name = "currency"];
+  // Whether the book is in stock (absent if unknown).
+  optional bool in_stock = 5 [json_name = "in_stock"];
+  // Direct product URL at the store (absent if not found).
+  optional string url = 6 [json_name = "url"];
+  // Book title as found on the store page (absent if not found).
+  optional string title = 7 [json_name = "title"];
+  // CSS selector match confidence 0.0–1.0 (absent if not applicable).
+  optional double selector_match_rate = 8 [json_name = "selector_match_rate"];
+}
+
+// POST /config/reload — request body (empty; no parameters required).
+message ConfigReloadRequest {
+}
+
+// Response from POST /config/reload.
+message ConfigReloadResponse {
+  // Number of store configurations loaded.
+  int32 loaded = 1 [json_name = "loaded"];
+}

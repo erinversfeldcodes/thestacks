@@ -19,7 +19,7 @@ defmodule Stacks.Workers.FetchReviewsJobTest do
 
       snapshot = hd(reviews)
       assert snapshot.book_id == book.id
-      assert snapshot.source == :goodreads
+      assert snapshot.source == "goodreads"
       assert snapshot.summary != nil
       assert snapshot.stale_after != nil
     end

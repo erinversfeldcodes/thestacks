@@ -30,6 +30,7 @@ defmodule Mix.Tasks.Proto.Sync do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.ProtoJsonGenerator
   alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
 
   @shortdoc "Generate Ecto schemas, dbt models, and migrations from proto definitions"
@@ -87,6 +88,46 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Skipped schema.yml — file not found at #{schema_yml_path}")
     end
 
+    # Generate ProtoJSON.Gen base serializer
+    if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
+      proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
+      proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
+      File.mkdir_p!(Path.dirname(proto_json_path))
+      File.write!(proto_json_path, proto_json_content)
+      Mix.shell().info("Generated #{proto_json_path}")
+    end
+
+    # Format all generated Elixir files so they satisfy `mix format --check-formatted`.
+    # Uses Code.format_string!/1 directly rather than Mix.Task.run("format") to avoid
+    # Mix writing a manifest file (which fails in test environments due to CWD mismatch).
+    gen_dir = Path.join(core_root, "lib/stacks/gen")
+
+    ecto_locals = [
+      field: 1,
+      field: 2,
+      field: 3,
+      timestamps: 1,
+      belongs_to: 2,
+      belongs_to: 3,
+      has_one: 2,
+      has_one: 3,
+      has_many: 2,
+      has_many: 3
+    ]
+
+    gen_dir
+    |> Path.join("**/*.ex")
+    |> Path.wildcard()
+    |> Enum.each(fn path ->
+      formatted =
+        path
+        |> File.read!()
+        |> Code.format_string!(locals_without_parens: ecto_locals)
+        |> IO.iodata_to_binary()
+
+      File.write!(path, [formatted, "\n"])
+    end)
+
     Mix.shell().info("Proto sync complete.")
   end
 
@@ -101,32 +142,40 @@ defmodule Mix.Tasks.Proto.Sync do
   end
 
   defp generate_create_migration(table, fields, migrations_dir) do
-    timestamp = MigrationGenerator.generate_timestamp()
+    already_exists =
+      File.dir?(migrations_dir) and
+        migrations_dir
+        |> File.ls!()
+        |> Enum.any?(&String.contains?(&1, "create_#{table.table_name}.exs"))
 
-    content = MigrationGenerator.generate_create_table(table, fields, timestamp)
+    if already_exists do
+      Mix.shell().info("Skipping migration for #{table.table_name} — already exists")
+    else
+      timestamp = MigrationGenerator.generate_timestamp()
+      content = MigrationGenerator.generate_create_table(table, fields, timestamp)
 
-    filename = "#{timestamp}_create_#{table.table_name}.exs"
-    path = Path.join(migrations_dir, filename)
-    File.mkdir_p!(migrations_dir)
-    File.write!(path, content)
-    Mix.shell().info("Generated migration #{path}")
+      filename = "#{timestamp}_create_#{table.table_name}.exs"
+      path = Path.join(migrations_dir, filename)
+      File.mkdir_p!(migrations_dir)
+      File.write!(path, content)
+      Mix.shell().info("Generated migration #{path}")
+    end
   end
 
   defp generate_delta_migration(table, fields, migrations_dir) do
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
+
+    # Filter to only DB-column fields (exclude id, timestamps, skipped API-only fields)
+    db_fields =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+      end)
+
     existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
-    proto_field_names = Enum.map(fields, & &1.name)
+    proto_field_names = Enum.map(db_fields, & &1.name)
 
-    new_fields = Enum.filter(fields, fn field -> field.name not in existing end)
-
-    # Also exclude timestamp columns that are added by the timestamps() macro
-    new_fields =
-      case Map.get(table, :timestamps) do
-        :standard ->
-          Enum.reject(new_fields, fn f -> f.name in ~w(created_at updated_at inserted_at) end)
-
-        _ ->
-          new_fields
-      end
+    new_fields = Enum.filter(db_fields, fn field -> field.name not in existing end)
 
     if new_fields != [] do
       timestamp = MigrationGenerator.generate_timestamp()
@@ -151,6 +200,17 @@ defmodule Mix.Tasks.Proto.Sync do
       end)
     end
   end
+
+  defp api_only_field?(field, overrides) do
+    field_name = String.to_atom(field.name)
+    override = Map.get(overrides, field_name, %{})
+    Map.get(override, :api_only, false)
+  end
+
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp run_check(manifest, descriptor, repo_root) do
     core_root = Path.join(repo_root, "apps/core")
@@ -188,6 +248,17 @@ defmodule Mix.Tasks.Proto.Sync do
     schema_yml_result = SchemaYmlGenerator.check_drift(schema_yml_path, generated_blocks)
     results = results ++ List.wrap(schema_yml_result)
 
+    # ProtoJSON.Gen drift check
+    results =
+      if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
+        proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
+        proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
+        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path)
+        results ++ List.wrap(proto_json_result)
+      else
+        results
+      end
+
     drifted = Enum.filter(results, &match?({:drift, _, _}, &1))
 
     if drifted == [] do
@@ -203,12 +274,20 @@ defmodule Mix.Tasks.Proto.Sync do
   end
 
   defp check_migration_drift(table, fields, migrations_dir) do
+    overrides = Map.get(table, :field_overrides, %{})
+    ts_fields = timestamp_field_names(table)
     migration_exists = Map.get(table, :migration_exists, false)
+
+    # Filter to only DB-column fields
+    db_fields =
+      Enum.reject(fields, fn field ->
+        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+      end)
 
     if migration_exists do
       # For existing tables, check if any proto fields are missing from migrations
       existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
-      proto_field_names = Enum.map(fields, & &1.name)
+      proto_field_names = Enum.map(db_fields, & &1.name)
       missing = Enum.reject(proto_field_names, fn name -> name in existing end)
 
       if missing != [] do

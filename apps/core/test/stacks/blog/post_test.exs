@@ -3,14 +3,15 @@ defmodule Stacks.Blog.PostTest do
 
   import Stacks.Factory
 
+  alias Stacks.Blog
   alias Stacks.Blog.Post
 
-  describe "changeset/2" do
+  describe "post_changeset/2" do
     test "is valid with user, title, body, and visibility" do
       user = insert(:user)
 
       changeset =
-        Post.changeset(%Post{}, %{
+        Blog.post_changeset(%Post{}, %{
           user_id: user.id,
           title: "My First Post",
           body: "Some markdown body.",
@@ -24,7 +25,7 @@ defmodule Stacks.Blog.PostTest do
       user = insert(:user)
 
       changeset =
-        Post.changeset(%Post{}, %{
+        Blog.post_changeset(%Post{}, %{
           user_id: user.id,
           body: "Some markdown body.",
           visibility: "owner"
@@ -38,7 +39,7 @@ defmodule Stacks.Blog.PostTest do
       user = insert(:user)
 
       changeset =
-        Post.changeset(%Post{}, %{
+        Blog.post_changeset(%Post{}, %{
           user_id: user.id,
           title: "A Title",
           visibility: "owner"
@@ -52,7 +53,7 @@ defmodule Stacks.Blog.PostTest do
       user = insert(:user)
 
       changeset =
-        Post.changeset(%Post{}, %{
+        Blog.post_changeset(%Post{}, %{
           user_id: user.id,
           title: "A Title",
           body: "Some markdown body.",
@@ -67,7 +68,7 @@ defmodule Stacks.Blog.PostTest do
       user = insert(:user)
 
       changeset =
-        Post.changeset(%Post{}, %{
+        Blog.post_changeset(%Post{}, %{
           user_id: user.id,
           title: "Draft Post",
           body: "Body text.",

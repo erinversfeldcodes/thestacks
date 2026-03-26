@@ -20,6 +20,7 @@ defmodule Stacks.Factory do
     ThirdSpaceEvent
   }
 
+  alias Stacks.Costs.PlatformCost
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -248,6 +249,24 @@ defmodule Stacks.Factory do
   end
 
   # ---------------------------------------------------------------------------
+  # Costs
+  # ---------------------------------------------------------------------------
+
+  def platform_cost_factory do
+    now = DateTime.utc_now()
+
+    %PlatformCost{
+      category: "infrastructure",
+      service: sequence(:service_name, &"service-#{&1}"),
+      description: "Monthly hosting cost.",
+      amount_cents: 1500,
+      currency: "USD",
+      period_start: DateTime.add(now, -30, :day),
+      period_end: now
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Enrichment
   # ---------------------------------------------------------------------------
 
@@ -276,7 +295,7 @@ defmodule Stacks.Factory do
   def third_space_factory do
     %ThirdSpace{
       name: sequence(:space_name, &"Third Space #{&1}"),
-      type: :cafe,
+      type: "cafe",
       city: "Cape Town",
       country_code: "ZA",
       website_url: "https://example.com",
@@ -300,12 +319,12 @@ defmodule Stacks.Factory do
   def discovered_source_factory do
     %DiscoveredSource{
       name: sequence(:source_name, &"Discovered Source #{&1}"),
-      type: :bookshop,
+      type: "bookshop",
       url: sequence(:source_url, &"https://source-#{&1}.example.com"),
       confidence: nil,
       discovered_via: "search:bookshops",
       discovered_at: DateTime.utc_now(),
-      status: :pending_review
+      status: "pending_review"
     }
   end
 
@@ -323,7 +342,7 @@ defmodule Stacks.Factory do
 
   def review_snapshot_factory do
     %ReviewSnapshot{
-      source: :goodreads,
+      source: "goodreads",
       source_url: "https://goodreads.com/book/show/12345",
       sentiment_score: 0.78,
       summary: "Readers enjoyed this book.",

@@ -8,3 +8,10 @@ lint:
 breaking:
   use:
     - FILE
+  ignore_only:
+    # Intentional one-time migration: ClassifyResponse.classification and
+    # AssociateCallback.status changed from string to typed enum (2026-03-26).
+    # Both services updated atomically. Remove this exception after the next
+    # proto-breaking change window if no rollback has occurred.
+    FIELD_SAME_TYPE:
+      - stacks/internal/v1/vision.proto

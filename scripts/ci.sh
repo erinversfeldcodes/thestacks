@@ -76,6 +76,9 @@ if has_group elixir; then
     echo -e "\n${CYAN}${BOLD}=== elixir: deps ===${RESET}"
     mix deps.get
 
+    echo -e "\n${CYAN}${BOLD}=== elixir: proto.sync ===${RESET}"
+    (cd apps/core && mix proto.sync)
+
     if ! run_group "elixir: lint" bash scripts/lint-elixir.sh; then FAILED+=(elixir-lint); fi
     if ! run_group "elixir: test" bash scripts/test-elixir.sh; then FAILED+=(elixir-test); fi
 fi

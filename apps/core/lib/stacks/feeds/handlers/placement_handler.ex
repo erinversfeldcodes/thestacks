@@ -12,6 +12,8 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
 
   import Ecto.Query
 
+  alias Stacks.Shelving.Bookshelf
+  alias Stacks.Shelving.Placement
   alias Stacks.Workers.RegenerateFeedJob
 
   @placement_events ~w(placement.created placement.moved placement.removed)
@@ -74,10 +76,8 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
 
   defp lookup_user_id(placement_id) do
     query =
-      from(bp in "bookshelf_placements",
-        prefix: "op",
-        join: bs in "bookshelves",
-        prefix: "op",
+      from(bp in Placement,
+        join: bs in Bookshelf,
         on: bs.id == bp.bookshelf_id,
         where: bp.id == type(^placement_id, Ecto.UUID),
         select: type(bs.user_id, Ecto.UUID)

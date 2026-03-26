@@ -8,10 +8,15 @@ defmodule Stacks.Costs do
   data is ever stored or exposed through this context.
   """
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
+  alias Oban.Job
+  alias Stacks.Accounts.User
+  alias Stacks.Books.{Book, UploadedImage}
   alias Stacks.Costs.PlatformCost
+  alias Stacks.Shelving.Placement
 
   # ── Cost Queries ──────────────────────────────────────────────────────────
 
@@ -73,25 +78,25 @@ defmodule Stacks.Costs do
   @doc "Total books in the system."
   @spec book_count() :: non_neg_integer()
   def book_count do
-    Repo.one(from(b in "books", prefix: "op", select: count(b.id))) || 0
+    Repo.one(from(b in Book, select: count(b.id))) || 0
   end
 
   @doc "Total registered users."
   @spec user_count() :: non_neg_integer()
   def user_count do
-    Repo.one(from(u in "users", prefix: "op", select: count(u.id))) || 0
+    Repo.one(from(u in User, select: count(u.id))) || 0
   end
 
   @doc "Total uploaded images."
   @spec upload_count() :: non_neg_integer()
   def upload_count do
-    Repo.one(from(i in "uploaded_images", prefix: "op", select: count(i.id))) || 0
+    Repo.one(from(i in UploadedImage, select: count(i.id))) || 0
   end
 
   @doc "Total bookshelf placements."
   @spec placement_count() :: non_neg_integer()
   def placement_count do
-    Repo.one(from(p in "bookshelf_placements", prefix: "op", select: count(p.id))) || 0
+    Repo.one(from(p in Placement, select: count(p.id))) || 0
   end
 
   @doc "Database size in bytes (pg_database_size)."
@@ -108,7 +113,7 @@ defmodule Stacks.Costs do
   def avg_upload_payload_bytes do
     result =
       Repo.one(
-        from(j in "oban_jobs",
+        from(j in Job,
           where: j.queue == "vision",
           select: fragment("coalesce(avg(octet_length(?::text))::bigint, 0)", j.args)
         )
@@ -123,11 +128,40 @@ defmodule Stacks.Costs do
     month_start = beginning_of_month(DateTime.utc_now())
 
     Repo.one(
-      from(j in "oban_jobs",
+      from(j in Job,
         where: j.queue == "vision" and j.inserted_at >= ^month_start,
         select: count(j.id)
       )
     ) || 0
+  end
+
+  # ── Changesets ────────────────────────────────────────────────────────────
+
+  @platform_cost_valid_categories ~w(hosting compute database domain)
+
+  @doc "Changeset for creating or updating a platform cost line item."
+  def platform_cost_changeset(cost, attrs) do
+    cost
+    |> cast(attrs, [
+      :category,
+      :service,
+      :description,
+      :amount_cents,
+      :currency,
+      :period_start,
+      :period_end
+    ])
+    |> validate_required([
+      :category,
+      :service,
+      :amount_cents,
+      :currency,
+      :period_start,
+      :period_end
+    ])
+    |> validate_inclusion(:category, @platform_cost_valid_categories)
+    |> validate_number(:amount_cents, greater_than_or_equal_to: 0)
+    |> unique_constraint([:service, :period_start, :period_end])
   end
 
   # ── Upsert ────────────────────────────────────────────────────────────────
@@ -140,7 +174,7 @@ defmodule Stacks.Costs do
   def upsert_cost(attrs) do
     result =
       %PlatformCost{}
-      |> PlatformCost.changeset(attrs)
+      |> platform_cost_changeset(attrs)
       |> Repo.insert(
         on_conflict: {:replace, [:amount_cents, :description, :updated_at]},
         conflict_target: [:service, :period_start, :period_end]

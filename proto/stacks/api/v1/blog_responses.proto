@@ -1,0 +1,38 @@
+// blog_responses.proto — Blog post response types for The Stacks API.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+import "stacks/common/v1/blog.proto";
+
+// BlogPostResponse wraps a single blog post for CRUD responses.
+// JSON shape: {post: {...}}
+message BlogPostResponse {
+  // The blog post.
+  stacks.common.v1.BlogPost post = 1 [json_name = "post"];
+}
+
+// BlogPostListResponse is returned by GET /api/blog/posts?user_id=...
+// JSON shape: {posts: [...]}
+message BlogPostListResponse {
+  // List of blog posts.
+  repeated stacks.common.v1.BlogPost posts = 1 [json_name = "posts"];
+}
+
+// BlogPostShowResponse is returned by GET /api/blog/posts/:id.
+// JSON shape: {post: {...}, associations: [...]}
+message BlogPostShowResponse {
+  // The blog post with full content.
+  stacks.common.v1.BlogPost post = 1 [json_name = "post"];
+
+  // Book associations (filtered by ownership/visibility).
+  repeated stacks.common.v1.BookAssociation associations = 2 [json_name = "associations"];
+}
+
+// AssociationActionResponse is returned by confirm/dismiss association actions.
+// JSON shape: {association: {id, book_id, visible}}
+message AssociationActionResponse {
+  // The updated association (only id, book_id, visible fields populated).
+  stacks.common.v1.BookAssociation association = 1 [json_name = "association"];
+}

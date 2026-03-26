@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.ProtoSync.DriftChecker do
-  @moduledoc false
+  @moduledoc "Compares generated file content against disk for drift detection."
 
   @doc """
   Compares generated content against an existing file on disk.

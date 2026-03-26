@@ -37,12 +37,12 @@ defmodule Stacks.Acceptance.UploadBookTest do
       # Step 2: Place the pre-existing book on a bookshelf
       bookshelf =
         %Bookshelf{}
-        |> Bookshelf.changeset(%{user_id: user.id, name: "library"})
+        |> Shelving.bookshelf_changeset(%{user_id: user.id, name: "library"})
         |> Repo.insert!()
 
       {:ok, placement} =
         Repo.insert(
-          Placement.changeset(%Placement{}, %{
+          Shelving.placement_changeset(%Placement{}, %{
             book_id: book.id,
             bookshelf_id: bookshelf.id
           })

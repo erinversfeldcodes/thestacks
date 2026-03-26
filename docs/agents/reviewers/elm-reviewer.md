@@ -73,7 +73,7 @@ This section is mandatory. The human will decide what to act on.
 Load and check against:
 - `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `./docs/agents/standards/testing.md` — `elm-program-test` for pages, unit tests for decoders and components, Playwright only where a real browser is required
-- `./docs/agents/standards/protobuf.md` — Elm decoders checked in at `proto/gen/elm/`, consistent with proto definitions
+- `./docs/agents/standards/protobuf.md` — Elm decoders gitignored at `proto/gen/elm/`, regenerated at build time via `scripts/gen-elm-proto.sh`, consistent with proto definitions
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

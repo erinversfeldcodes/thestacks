@@ -11,6 +11,7 @@ defmodule StacksWeb.CatalogueController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
+  alias StacksWeb.ProtoJSON
 
   @doc """
   GET /api/catalogue — returns a paginated list of books.
@@ -41,7 +42,7 @@ defmodule StacksWeb.CatalogueController do
     {books, total} = Books.list_catalogue([{:viewer, viewer} | opts])
 
     json(conn, %{
-      books: Enum.map(books, &format_catalogue_book/1),
+      books: Enum.map(books, &ProtoJSON.catalogue_book/1),
       total: total,
       page: opts[:page],
       per_page: opts[:per_page]
@@ -59,46 +60,4 @@ defmodule StacksWeb.CatalogueController do
 
   defp parse_int(val, _default) when is_integer(val), do: val
   defp parse_int(_, default), do: default
-
-  defp format_catalogue_book(book) do
-    editions = format_editions(book)
-    primary = Books.primary_edition(book)
-
-    %{
-      id: book.id,
-      title: book.title,
-      author: format_author(book.author),
-      subjects: book.subjects,
-      visibility_tier: book.visibility_tier,
-      editions: editions,
-      edition_count: length(editions),
-      primary_edition: format_edition_or_nil(primary)
-    }
-  end
-
-  defp format_author(%Ecto.Association.NotLoaded{}), do: nil
-  defp format_author(nil), do: nil
-  defp format_author(author), do: %{id: author.id, name: author.name}
-
-  defp format_editions(%{editions: editions}) when is_list(editions) do
-    Enum.map(editions, &format_edition/1)
-  end
-
-  defp format_editions(_), do: []
-
-  defp format_edition(edition) do
-    %{
-      id: edition.id,
-      isbn: edition.isbn,
-      format_label: edition.format_label,
-      cover_image_url: edition.cover_image_url,
-      page_count: edition.page_count,
-      publisher: edition.publisher,
-      publication_year: edition.publication_year,
-      is_primary: edition.is_primary
-    }
-  end
-
-  defp format_edition_or_nil(nil), do: nil
-  defp format_edition_or_nil(edition), do: format_edition(edition)
 end

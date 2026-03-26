@@ -19,7 +19,7 @@ defmodule StacksWeb.OptOutControllerTest do
 
       # Verify the source was actually excluded
       source = Stacks.Discovery.get_source_by_url("https://mybookshop.com")
-      assert source.status == :excluded
+      assert source.status == "excluded"
       assert source.exclusion_email == "owner@mybookshop.com"
       assert source.excluded_at != nil
     end

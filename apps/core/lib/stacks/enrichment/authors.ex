@@ -9,6 +9,7 @@ defmodule Stacks.Enrichment.Authors do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books
   alias Stacks.Books.Author
 
   @doc """
@@ -23,7 +24,7 @@ defmodule Stacks.Enrichment.Authors do
           {:ok, Author.t()} | {:error, Ecto.Changeset.t()}
   def update_author_sources(%Author{} = author, attrs) do
     author
-    |> Author.changeset(attrs)
+    |> Books.author_changeset(attrs)
     |> Repo.update()
   end
 

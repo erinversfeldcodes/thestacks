@@ -1392,7 +1392,6 @@ dependencies = [
  "dashmap",
  "hex",
  "hmac",
- "parking_lot",
  "reqwest",
  "scraper",
  "serde",

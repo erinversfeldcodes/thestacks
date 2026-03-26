@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.ProtoSync.TypeMapper do
-  @moduledoc false
+  @moduledoc "Maps proto descriptor types to Ecto schema types and migration types."
 
   @doc """
   Maps a proto descriptor field type to an Ecto schema type.
@@ -18,7 +18,8 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         map_proto_type(field.type, field.type_name)
       end
 
-    if field.label == "LABEL_REPEATED" do
+    # Don't double-wrap: if the override already specifies {:array, _}, don't wrap again.
+    if field.label == "LABEL_REPEATED" and not match?({:array, _}, base_type) do
       {:array, base_type}
     else
       base_type
@@ -47,7 +48,7 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         true -> map_migration_type(field.type, field.type_name)
       end
 
-    if field.label == "LABEL_REPEATED" do
+    if field.label == "LABEL_REPEATED" and not match?({:array, _}, base_type) do
       {:array, base_type}
     else
       base_type
@@ -110,8 +111,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      other ->
-        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
+      # Non-WKT embedded messages: default to :map (JSONB).
+      # Use api_only: true or belongs_to in field_overrides for most cases.
+      _other ->
+        :map
     end
   end
 
@@ -150,8 +153,8 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      other ->
-        raise("Unknown message type: .#{other}. Add a field_override or update the type mapper.")
+      _other ->
+        :map
     end
   end
 
