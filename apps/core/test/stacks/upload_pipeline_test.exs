@@ -783,7 +783,7 @@ defmodule Stacks.UploadPipelineTest do
     @tag stories: ["US-1.1.2"], suite: :db
     test "BookEdition validates ISBN format" do
       cs =
-        BookEdition.changeset(%BookEdition{}, %{
+        Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => "invalid",
           "book_id" => Ecto.UUID.generate()
         })
@@ -796,7 +796,7 @@ defmodule Stacks.UploadPipelineTest do
     test "BookEdition validates ISBN-13 checksum" do
       # 9780306406158 has invalid checksum (correct is 9780306406157)
       cs =
-        BookEdition.changeset(%BookEdition{}, %{
+        Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => "9780306406158",
           "book_id" => Ecto.UUID.generate()
         })
@@ -1508,19 +1508,21 @@ defmodule Stacks.UploadPipelineTest do
     @tag stories: ["US-1.1.1"], suite: :external
     test "default MockClient returns book classification" do
       result = MockClient.call_vision("is_book", %{})
-      assert {:ok, %{"classification" => "book"}} = result
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} = result
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "NotABookClient returns not_book classification" do
       result = __MODULE__.NotABookClient.call_vision("is_book", %{})
-      assert {:ok, %{"classification" => "not_book"}} = result
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "AmbiguousClient returns ambiguous classification" do
       result = __MODULE__.AmbiguousClient.call_vision("is_book", %{})
-      assert {:ok, %{"classification" => "ambiguous", "confidence" => 0.5}} = result
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
+               result
     end
 
     @tag stories: ["US-1.1.1"], suite: :external
@@ -2218,7 +2220,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "not_book", "confidence" => 0.95, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
+           "confidence" => 0.95,
+           "model_used" => "mock"
+         }}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -2228,7 +2236,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do: {:ok, %{"books" => [], "model_used" => "mock"}}
@@ -2249,7 +2263,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "ambiguous", "confidence" => 0.5, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
+           "confidence" => 0.5,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do:
@@ -2282,7 +2302,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do:
@@ -2308,7 +2334,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do:
@@ -2334,7 +2366,13 @@ defmodule Stacks.UploadPipelineTest do
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
     def call_vision("is_book", _payload),
-      do: {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
 
     def call_vision("extract_isbn", _payload),
       do:
