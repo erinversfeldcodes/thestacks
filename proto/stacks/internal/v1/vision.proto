@@ -1,0 +1,115 @@
+// vision.proto — Inter-service contracts for the vision sidecar (Python/FastAPI).
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+// Classification result returned by the vision model for a cover image.
+enum ClassificationResult {
+  // Zero value — classification not set.
+  CLASSIFICATION_RESULT_UNSPECIFIED = 0;
+  // Image contains a book cover.
+  CLASSIFICATION_RESULT_BOOK = 1;
+  // Image does not contain a book cover.
+  CLASSIFICATION_RESULT_NOT_BOOK = 2;
+  // Classification is inconclusive.
+  CLASSIFICATION_RESULT_AMBIGUOUS = 3;
+}
+
+// Status of an async cover association job.
+enum AssociationStatus {
+  // Zero value — status not set.
+  ASSOCIATION_STATUS_UNSPECIFIED = 0;
+  // Cover image confirmed as a valid book cover.
+  ASSOCIATION_STATUS_CONFIRMED = 1;
+  // Cover image rejected (not a book cover or download failed).
+  ASSOCIATION_STATUS_REJECTED = 2;
+}
+
+// POST /classify — determine if an image contains a book cover.
+message ClassifyRequest {
+  // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
+  oneof input {
+    // Base64-encoded image data.
+    string image = 1 [json_name = "image"];
+    // URL of a remote image.
+    string image_url = 2 [json_name = "image_url"];
+  }
+}
+
+// Response from POST /classify.
+message ClassifyResponse {
+  // Classification result; see ClassificationResult enum.
+  ClassificationResult classification = 1 [json_name = "classification"];
+  // Confidence score (0.0–1.0).
+  double confidence = 2 [json_name = "confidence"];
+  // Name of the vision model used for inference.
+  string model_used = 3 [json_name = "model_used"];
+}
+
+// POST /extract — extract book metadata and ISBNs from images.
+message ExtractRequest {
+  // Base64-encoded images (1–3). Mutually exclusive with image_url.
+  repeated string images = 1 [json_name = "images"];
+  // URL of a remote image. Mutually exclusive with images.
+  optional string image_url = 2 [json_name = "image_url"];
+}
+
+// Response from POST /extract.
+message ExtractResponse {
+  // Extracted book candidates.
+  repeated ExtractedBook books = 1 [json_name = "books"];
+  // Name of the vision model used for inference.
+  string model_used = 2 [json_name = "model_used"];
+}
+
+// A book candidate extracted from an image by the vision model.
+message ExtractedBook {
+  // Book title (absent if not detected).
+  optional string title = 1 [json_name = "title"];
+  // Author name (absent if not detected).
+  optional string author = 2 [json_name = "author"];
+  // ISBN candidates found in the image.
+  repeated string potential_isbns = 3 [json_name = "potential_isbns"];
+  // Raw OCR text from the image region (absent if not extracted).
+  optional string raw_text = 4 [json_name = "raw_text"];
+  // Extraction confidence (0.0–1.0). Absent when model does not report a score.
+  optional double confidence = 5 [json_name = "confidence"];
+}
+
+// POST /associate — async cover classification with callback.
+message AssociateRequest {
+  // ISBN (digits only, no hyphens).
+  string isbn = 1 [json_name = "isbn"];
+  // UUID of the work record in the core database.
+  string book_id = 2 [json_name = "book_id"];
+  // UUID of the edition record (idempotency key).
+  string edition_id = 3 [json_name = "edition_id"];
+  // URL of the cover image to classify.
+  string cover_image_url = 4 [json_name = "cover_image_url"];
+}
+
+// Response from POST /associate (202 Accepted).
+message AssociateResponse {
+  // Unique job ID for tracking the async classification.
+  string job_id = 1 [json_name = "job_id"];
+}
+
+// Callback payload from vision → core when async classification completes.
+// POST /api/internal/vision/associate with X-Vision-Signature header.
+message AssociateCallback {
+  // ISBN (echoed from request).
+  string isbn = 1 [json_name = "isbn"];
+  // Book UUID (echoed from request).
+  string book_id = 2 [json_name = "book_id"];
+  // Edition UUID (echoed from request).
+  string edition_id = 3 [json_name = "edition_id"];
+  // Association result; see AssociationStatus enum.
+  AssociationStatus status = 4 [json_name = "status"];
+  // Job ID (echoed from AssociateResponse).
+  string job_id = 5 [json_name = "job_id"];
+  // Rejection reason (empty string or absent if status is "confirmed").
+  optional string reason = 6 [json_name = "reason"];
+  // Cover image URL (echoed from AssociateRequest).
+  string cover_image_url = 7 [json_name = "cover_image_url"];
+}
