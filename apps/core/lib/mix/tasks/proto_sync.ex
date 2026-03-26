@@ -98,8 +98,35 @@ defmodule Mix.Tasks.Proto.Sync do
     end
 
     # Format all generated Elixir files so they satisfy `mix format --check-formatted`.
+    # Uses Code.format_string!/1 directly rather than Mix.Task.run("format") to avoid
+    # Mix writing a manifest file (which fails in test environments due to CWD mismatch).
     gen_dir = Path.join(core_root, "lib/stacks/gen")
-    Mix.Task.run("format", [Path.join(gen_dir, "**/*.ex")])
+
+    ecto_locals = [
+      field: 1,
+      field: 2,
+      field: 3,
+      timestamps: 1,
+      belongs_to: 2,
+      belongs_to: 3,
+      has_one: 2,
+      has_one: 3,
+      has_many: 2,
+      has_many: 3
+    ]
+
+    gen_dir
+    |> Path.join("**/*.ex")
+    |> Path.wildcard()
+    |> Enum.each(fn path ->
+      formatted =
+        path
+        |> File.read!()
+        |> Code.format_string!(locals_without_parens: ecto_locals)
+        |> IO.iodata_to_binary()
+
+      File.write!(path, [formatted, "\n"])
+    end)
 
     Mix.shell().info("Proto sync complete.")
   end
