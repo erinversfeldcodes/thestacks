@@ -8,10 +8,6 @@ package stacks.internal.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option java_package = "com.thestacks.internal.v1";
-option java_outer_classname = "EventBusProto";
-option java_multiple_files = true;
-
 // EventEnvelope is the canonical contract for events written to op.event_log.
 // Stacks.Events.emit/1 structures payloads conforming to this schema.
 // Validation enforcement planned for a future issue.

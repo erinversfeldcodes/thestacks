@@ -1,10 +1,25 @@
 version: v2
-inputs:
-  - directory: stacks
-plugins:
-  - remote: buf.build/protocolbuffers/elixir
-    out: ../apps/core/lib/proto/gen
-  - remote: buf.build/protocolbuffers/python
-    out: ../apps/vision/app/proto/gen
-  - remote: buf.build/protocolbuffers/rust
-    out: ../apps/scraper/src/proto/gen
+# NOTE: `buf generate` is NOT the active codegen path for this project.
+#
+# We use a custom generator (scripts/gen_python_proto.py) that reads the
+# buf JSON descriptor and emits idiomatic output for each language:
+#   Python (Pydantic v2):  scripts/gen-python-proto.sh
+#   Rust (serde):          scripts/gen-rust-proto.sh
+#   Elixir (defstruct):    scripts/gen-elixir-proto.sh
+#
+# The custom pipeline avoids the Modal protobuf<7 conflict and produces
+# output that integrates cleanly with each service's existing conventions.
+#
+# This file is retained so `buf lint` and `buf breaking` continue to work.
+# The plugin entries below are intentionally commented out to prevent
+# accidental `buf generate` runs from producing files in the wrong locations.
+#
+# inputs:
+#   - directory: stacks
+# plugins:
+#   - remote: buf.build/protocolbuffers/elixir
+#     out: ../apps/core/lib/proto/gen
+#   - remote: buf.build/protocolbuffers/python
+#     out: ../apps/vision/app/proto/gen
+#   - remote: buf.build/protocolbuffers/rust
+#     out: ../apps/scraper/src/proto/gen

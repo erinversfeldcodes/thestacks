@@ -7,10 +7,6 @@ package stacks.internal.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option java_package = "com.thestacks.internal.v1";
-option java_outer_classname = "AuditProto";
-option java_multiple_files = true;
-
 // AuditEntry records a user action in the audit.audit_log table.
 // INSERT-only — never updated or deleted.
 message AuditEntry {
