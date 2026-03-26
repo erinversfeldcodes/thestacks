@@ -141,7 +141,15 @@ async def _run_associate(
         # Ambiguous classification is treated as rejection. Core can distinguish
         # this from a definitive non-book by checking reason == "not_a_book_cover"
         # vs a future "ambiguous_classification" reason if needed.
-        reason = None if is_book else "not_a_book_cover"
+        if is_book:
+            reason = None
+        elif clf == _CLF_AMBIGUOUS:
+            # Ambiguous: model was unsure. Distinct from definitive non-book.
+            # Product decision: treat as rejection; caller may retry.
+            # See docs/decisions/006-ambiguous-classification-as-rejection.md
+            reason = "ambiguous_classification"
+        else:
+            reason = "not_a_book_cover"
         log.info("associate: classification done", classification=clf, status=status)
     except HTTPException as exc:
         log.warning("associate: cover download failed", detail=exc.detail)

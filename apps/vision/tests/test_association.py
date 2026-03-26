@@ -226,7 +226,9 @@ async def test_run_associate_ambiguous_path() -> None:
     post_call = mock_httpx.return_value.post.call_args
     payload = json.loads(post_call.kwargs["content"])
     assert payload["status"] == "ASSOCIATION_STATUS_REJECTED"
-    assert payload["reason"] == "not_a_book_cover"
+    # Ambiguous is distinct from definitive non-book.
+    # See docs/decisions/006-ambiguous-classification-as-rejection.md
+    assert payload["reason"] == "ambiguous_classification"
 
 
 async def test_run_associate_redirect_sends_rejected_callback() -> None:
