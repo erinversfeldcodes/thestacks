@@ -95,7 +95,7 @@ defmodule Stacks.Shelving do
       on: s.id == p.bookshelf_id,
       where: s.user_id == ^user_id and p.book_id == ^book_id and is_nil(p.removed_at)
     )
-    |> Repo.exists?(prefix: "op")
+    |> Repo.exists?()
   end
 
   @doc """
