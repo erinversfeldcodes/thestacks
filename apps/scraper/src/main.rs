@@ -8,9 +8,12 @@ use axum::{
     response::{IntoResponse, Json, Response},
     routing::{get, post},
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use stacks_scraper::{scraper::Engine, stores::StoreRegistry};
+use stacks_scraper::{
+    proto::generated::scraper::{ConfigReloadResponse, ScrapeRequest, ScrapeResponse},
+    scraper::Engine,
+    stores::StoreRegistry,
+};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 // ---------------------------------------------------------------------------
@@ -22,7 +25,8 @@ struct AppState {
     engine: Arc<Engine>,
     registry: StoreRegistry,
     scrapers_dir: PathBuf,
-    hmac_secret: String,
+    // Arc<str> so Clone shares one allocation — raw secret bytes are not heap-copied per request.
+    hmac_secret: Arc<str>,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,9 +62,10 @@ async fn hmac_auth_middleware(
     };
 
     if let Err(e) = stacks_scraper::auth::verify_token(&token, &method, &path, &state.hmac_secret) {
+        tracing::warn!("auth failed: {}", e);
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({"error": e.to_string()})),
+            Json(json!({"error": "unauthorized"})),
         )
             .into_response();
     }
@@ -74,24 +79,6 @@ async fn hmac_auth_middleware(
 
 async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "service": "scraper"}))
-}
-
-#[derive(Debug, Deserialize)]
-struct ScrapeRequest {
-    isbn: String,
-    store: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ScrapeResponse {
-    isbn: String,
-    store: String,
-    price_cents: Option<i64>,
-    currency: String,
-    in_stock: Option<bool>,
-    url: Option<String>,
-    title: Option<String>,
-    selector_match_rate: Option<f64>,
 }
 
 async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest>) -> Response {
@@ -136,7 +123,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
 
 async fn config_reload(State(state): State<AppState>) -> Response {
     match state.registry.load_from_dir(&state.scrapers_dir) {
-        Ok(n) => Json(json!({"loaded": n})).into_response(),
+        Ok(n) => Json(ConfigReloadResponse { loaded: n as i32 }).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),
@@ -181,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
         engine,
         registry,
         scrapers_dir,
-        hmac_secret,
+        hmac_secret: hmac_secret.into(),
     };
 
     let authed_routes = Router::new()
@@ -257,7 +244,7 @@ respect_robots_txt = false
             engine: Arc::new(Engine::new().expect("failed to build engine")),
             registry,
             scrapers_dir: PathBuf::from("scrapers"),
-            hmac_secret: TEST_SECRET.to_string(),
+            hmac_secret: TEST_SECRET.into(),
         }
     }
 
