@@ -4,7 +4,7 @@
 Replace the hand-written `StacksWeb.ProtoJSON` module with a generated serializer that reads proto message definitions and produces Elixir JSON serialization functions. Currently ProtoJSON is manually kept in sync with proto — adding a field to a proto requires manually updating ProtoJSON.
 
 ## Goal
-`mix proto.json.sync` generates `StacksWeb.ProtoJSON` (or individual serializer modules) from the proto FileDescriptorSet. Adding a field to a `.proto` message automatically appears in the JSON response.
+`mix proto.sync` generates `StacksWeb.ProtoJSON.Gen` base serializer functions from the proto FileDescriptorSet. Adding a field to a `.proto` message automatically appears in the Gen base function; the hand-written ProtoJSON module controls which fields are exposed per API endpoint via `Map.take`.
 
 ## Technical Requirements
 
