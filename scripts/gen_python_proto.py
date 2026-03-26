@@ -322,15 +322,24 @@ def _resolve_field(
 def _get_real_oneof_groups(msg: dict) -> dict[int, tuple[str, list[str]]]:
     """Return {oneof_index: (oneof_name, [field_names])} for real (non-synthetic) oneofs.
 
-    Synthetic oneofs created by the proto3 `optional` keyword have names starting with '_'
-    and proto3Optional=true on the field. They are excluded — only real `oneof` blocks remain.
+    Synthetic oneofs are those created by the proto3 `optional` keyword. The canonical
+    machine-readable signal is `proto3Optional=true` on the field descriptor — this is
+    part of the protobuf spec (FieldDescriptorProto.proto3_optional). The `_` prefix
+    naming convention is a protoc implementation side-effect, not a spec guarantee.
+
+    Reference: https://github.com/protocolbuffers/protobuf/blob/main/docs/implementing_proto3_presence.md
     """
+    # Collect oneof indices that are synthetic (have at least one proto3Optional field).
+    synthetic_indices: set[int] = set()
+    for field in msg.get("field", []):
+        if field.get("proto3Optional") and "oneofIndex" in field:
+            synthetic_indices.add(field["oneofIndex"])
+
     oneof_decls = msg.get("oneofDecl", [])
     result: dict[int, tuple[str, list[str]]] = {}
     for i, decl in enumerate(oneof_decls):
-        name = decl.get("name", "")
-        if not name.startswith("_"):
-            result[i] = (name, [])
+        if i not in synthetic_indices:
+            result[i] = (decl.get("name", ""), [])
     for field in msg.get("field", []):
         idx = field.get("oneofIndex")
         if idx is not None and idx in result:
