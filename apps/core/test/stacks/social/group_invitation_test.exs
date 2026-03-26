@@ -3,16 +3,17 @@ defmodule Stacks.Social.GroupInvitationTest do
 
   import Stacks.Factory
 
+  alias Stacks.Social
   alias Stacks.Social.GroupInvitation
 
-  describe "changeset/2" do
+  describe "group_invitation_changeset/2" do
     test "is valid with required fields" do
       group = insert(:group)
       inviter = insert(:user)
       invitee = insert(:user)
 
       changeset =
-        GroupInvitation.changeset(%GroupInvitation{}, %{
+        Social.group_invitation_changeset(%GroupInvitation{}, %{
           group_id: group.id,
           invited_by_id: inviter.id,
           invited_user_id: invitee.id,
@@ -24,7 +25,7 @@ defmodule Stacks.Social.GroupInvitationTest do
 
     test "is invalid without group_id" do
       changeset =
-        GroupInvitation.changeset(%GroupInvitation{}, %{
+        Social.group_invitation_changeset(%GroupInvitation{}, %{
           invited_by_id: Ecto.UUID.generate(),
           invited_user_id: Ecto.UUID.generate(),
           status: "pending"
@@ -36,7 +37,7 @@ defmodule Stacks.Social.GroupInvitationTest do
 
     test "is invalid without invited_by_id" do
       changeset =
-        GroupInvitation.changeset(%GroupInvitation{}, %{
+        Social.group_invitation_changeset(%GroupInvitation{}, %{
           group_id: Ecto.UUID.generate(),
           invited_user_id: Ecto.UUID.generate(),
           status: "pending"
@@ -48,7 +49,7 @@ defmodule Stacks.Social.GroupInvitationTest do
 
     test "is invalid without invited_user_id" do
       changeset =
-        GroupInvitation.changeset(%GroupInvitation{}, %{
+        Social.group_invitation_changeset(%GroupInvitation{}, %{
           group_id: Ecto.UUID.generate(),
           invited_by_id: Ecto.UUID.generate(),
           status: "pending"
@@ -60,7 +61,7 @@ defmodule Stacks.Social.GroupInvitationTest do
 
     test "is invalid with an unknown status" do
       changeset =
-        GroupInvitation.changeset(%GroupInvitation{}, %{
+        Social.group_invitation_changeset(%GroupInvitation{}, %{
           group_id: Ecto.UUID.generate(),
           invited_by_id: Ecto.UUID.generate(),
           invited_user_id: Ecto.UUID.generate(),
@@ -74,7 +75,7 @@ defmodule Stacks.Social.GroupInvitationTest do
     test "accepts all valid statuses" do
       for status <- ~w(pending accepted declined) do
         changeset =
-          GroupInvitation.changeset(%GroupInvitation{}, %{
+          Social.group_invitation_changeset(%GroupInvitation{}, %{
             group_id: Ecto.UUID.generate(),
             invited_by_id: Ecto.UUID.generate(),
             invited_user_id: Ecto.UUID.generate(),

@@ -6,7 +6,7 @@ defmodule Stacks.AI.MockClientTest do
   describe "call_vision/2" do
     test "is_book returns book classification" do
       assert {:ok, result} = MockClient.call_vision("is_book", %{})
-      assert result["classification"] == "book"
+      assert result["classification"] == "CLASSIFICATION_RESULT_BOOK"
     end
 
     test "extract_isbn with default isbn" do

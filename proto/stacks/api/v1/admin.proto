@@ -1,0 +1,247 @@
+// admin.proto — Admin dashboard, metrics, and cost transparency response types.
+// These messages match the actual JSON shapes returned by MetricsController
+// and CostController. Field numbers are forever — never reuse a number.
+//
+// JSON on the wire.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+// ─── Admin Metrics Dashboard (GET /api/metrics) ─────────────────────────
+
+// SystemHealth mirrors Stacks.Admin.Metrics.system_health/0 fallback shape.
+message SystemHealth {
+  // PostgreSQL database size in bytes (pg_database_size).
+  int64 db_size_bytes = 1 [json_name = "db_size_bytes"];
+
+  // Total number of books (works) in the system.
+  int32 total_books = 2 [json_name = "total_books"];
+
+  // Total number of registered users.
+  int32 total_users = 3 [json_name = "total_users"];
+
+  // Total number of bookshelf placements.
+  int32 total_placements = 4 [json_name = "total_placements"];
+
+  // ISO 8601 timestamp when this snapshot was generated.
+  string generated_at = 5 [json_name = "generated_at"];
+}
+
+// JobStat is one row from the per-queue Oban job statistics.
+message JobStat {
+  // Oban queue name (e.g. "default", "vision").
+  string queue = 1 [json_name = "queue"];
+
+  // Job state (e.g. "available", "completed", "retryable").
+  string state = 2 [json_name = "state"];
+
+  // Number of jobs in this queue/state combination.
+  int32 count = 3 [json_name = "count"];
+}
+
+// DataFreshness mirrors Stacks.Admin.Metrics.data_freshness/0 fallback shape.
+message DataFreshness {
+  // Status indicator (e.g. "mart_not_available" when dbt mart does not exist).
+  string status = 1 [json_name = "status"];
+}
+
+// GdprCompliance mirrors Stacks.Admin.Metrics.gdpr_compliance/0 fallback shape.
+message GdprCompliance {
+  // Number of uploaded images past their retention window awaiting deletion.
+  int32 images_pending_deletion = 1 [json_name = "images_pending_deletion"];
+
+  // Number of users who have granted analytics consent.
+  int32 users_with_consent = 2 [json_name = "users_with_consent"];
+
+  // ISO 8601 timestamp when this snapshot was generated.
+  string generated_at = 3 [json_name = "generated_at"];
+}
+
+// QualityTrendRow is one row from wh.mart_data_quality_trend.
+// Columns match the dbt mart: snapshot_date, counts, and percentages.
+message QualityTrendRow {
+  // Date of the daily quality snapshot (YYYY-MM-DD).
+  string snapshot_date = 1 [json_name = "snapshot_date"];
+
+  // Total number of books at snapshot time.
+  int32 total_books = 2 [json_name = "total_books"];
+
+  // Number of books with a cover image URL.
+  int32 books_with_covers = 3 [json_name = "books_with_covers"];
+
+  // Number of books with at least one price record.
+  int32 books_with_prices = 4 [json_name = "books_with_prices"];
+
+  // Number of books with at least one review.
+  int32 books_with_reviews = 5 [json_name = "books_with_reviews"];
+
+  // Total number of monitored data sources.
+  int32 total_sources = 6 [json_name = "total_sources"];
+
+  // Number of sources in healthy status.
+  int32 healthy_sources = 7 [json_name = "healthy_sources"];
+
+  // Percentage of books with cover images (0-100).
+  double cover_pct = 8 [json_name = "cover_pct"];
+
+  // Percentage of books with price data (0-100).
+  double price_pct = 9 [json_name = "price_pct"];
+
+  // Percentage of books with review data (0-100).
+  double review_pct = 10 [json_name = "review_pct"];
+}
+
+// EnrichmentGaps mirrors Stacks.Admin.Metrics.enrichment_gaps/0 fallback shape.
+// When the mart is available, returns aggregate gap counts.
+message EnrichmentGaps {
+  // Status indicator (e.g. "mart_not_available" when dbt mart does not exist).
+  string status = 1 [json_name = "status"];
+
+  // Number of books missing price data.
+  int32 books_without_prices = 2 [json_name = "books_without_prices"];
+
+  // Number of books missing cover images.
+  int32 books_without_covers = 3 [json_name = "books_without_covers"];
+
+  // Number of books missing review data.
+  int32 books_without_reviews = 4 [json_name = "books_without_reviews"];
+}
+
+// SourceHealthRow is one row from the op.source_health_checks query.
+message SourceHealthRow {
+  // Human-readable source name.
+  string source_name = 1 [json_name = "source_name"];
+
+  // Source type (e.g. "scraper_config", "review_source", "rss_feed").
+  string source_type = 2 [json_name = "source_type"];
+
+  // Current health status (e.g. "healthy", "degraded", "broken").
+  string status = 3 [json_name = "status"];
+
+  // Number of consecutive check failures.
+  int32 consecutive_failures = 4 [json_name = "consecutive_failures"];
+
+  // Lifetime count of successful health checks.
+  int32 total_successes = 5 [json_name = "total_successes"];
+
+  // Lifetime count of failed health checks.
+  int32 total_failures = 6 [json_name = "total_failures"];
+}
+
+// MetricsDashboard is the top-level response for GET /api/metrics.
+// Matches Stacks.Admin.Metrics.dashboard/0 wrapped in %{data: ...}.
+message MetricsDashboard {
+  // System health counters (DB size, totals).
+  SystemHealth system_health = 1 [json_name = "system_health"];
+
+  // Per-queue Oban job statistics.
+  repeated JobStat job_stats = 2 [json_name = "job_stats"];
+
+  // Data freshness status from dbt mart.
+  DataFreshness data_freshness = 3 [json_name = "data_freshness"];
+
+  // Full cost breakdown (same shape as GET /api/costs response).
+  CostBreakdown costs = 4 [json_name = "costs"];
+
+  // GDPR compliance metrics.
+  GdprCompliance gdpr = 5 [json_name = "gdpr"];
+
+  // Quality trend sparkline rows (one per snapshot date).
+  repeated QualityTrendRow quality_trends = 6 [json_name = "quality_trends"];
+
+  // Per-source health status rows.
+  repeated SourceHealthRow source_health = 7 [json_name = "source_health"];
+
+  // Enrichment gap counts.
+  EnrichmentGaps enrichment_gaps = 8 [json_name = "enrichment_gaps"];
+
+  // ISO 8601 timestamp when this dashboard was assembled.
+  string generated_at = 9 [json_name = "generated_at"];
+}
+
+// ─── Cost Transparency (GET /api/costs) ─────────────────────────────────
+
+// CostItem is a single line item within a cost category.
+// Matches Stacks.Costs.serialize_cost/1.
+message CostItem {
+  // Service name (e.g. "fly_compute", "neon_storage").
+  string service = 1 [json_name = "service"];
+
+  // Human-readable description of this cost line item.
+  string description = 2 [json_name = "description"];
+
+  // Cost amount in US cents.
+  int32 amount_cents = 3 [json_name = "amount_cents"];
+}
+
+// CostCategory groups cost items by category.
+// Matches the by_category structure in Stacks.Costs.cost_breakdown/0.
+message CostCategory {
+  // Category name (e.g. "hosting", "compute", "database").
+  string category = 1 [json_name = "category"];
+
+  // Sum of amount_cents for all items in this category.
+  int32 total_cents = 2 [json_name = "total_cents"];
+
+  // Individual cost line items in this category.
+  repeated CostItem items = 3 [json_name = "items"];
+}
+
+// UsageMetrics mirrors Stacks.Costs.usage_metrics/0.
+message UsageMetrics {
+  // Total number of books in the system.
+  int32 books = 1 [json_name = "books"];
+
+  // Total number of uploaded images.
+  int32 uploads = 2 [json_name = "uploads"];
+
+  // Total number of bookshelf placements.
+  int32 placements = 3 [json_name = "placements"];
+
+  // PostgreSQL database size in bytes.
+  int64 db_size_bytes = 4 [json_name = "db_size_bytes"];
+
+  // Average size of vision job payloads in bytes.
+  int64 avg_upload_payload_bytes = 5 [json_name = "avg_upload_payload_bytes"];
+
+  // Number of vision inference jobs completed this calendar month.
+  int32 vision_jobs_this_month = 6 [json_name = "vision_jobs_this_month"];
+}
+
+// MonthlyTotal is one month's aggregate cost.
+// Matches Stacks.Costs.serialize_monthly_total/1.
+message MonthlyTotal {
+  // ISO 8601 start of the billing period.
+  string period_start = 1 [json_name = "period_start"];
+
+  // ISO 8601 end of the billing period.
+  string period_end = 2 [json_name = "period_end"];
+
+  // Total cost for this period in US cents.
+  int32 total_cents = 3 [json_name = "total_cents"];
+}
+
+// CostBreakdown is the top-level response for GET /api/costs.
+// Matches Stacks.Costs.cost_breakdown/0 wrapped in %{data: ...}.
+message CostBreakdown {
+  // Sum of all cost items for the current period in US cents.
+  int32 total_cents = 1 [json_name = "total_cents"];
+
+  // ISO 4217 currency code (always "USD").
+  string currency = 2 [json_name = "currency"];
+
+  // Total cost divided by number of books, in dollars.
+  double cost_per_book = 3 [json_name = "cost_per_book"];
+
+  // Cost items grouped by category, sorted by total descending.
+  repeated CostCategory categories = 4 [json_name = "categories"];
+
+  // Real usage metrics from the database.
+  UsageMetrics metrics = 5 [json_name = "metrics"];
+
+  // Monthly cost history (last 6 months).
+  repeated MonthlyTotal monthly_totals = 6 [json_name = "monthly_totals"];
+
+  // ISO 8601 timestamp when this breakdown was generated.
+  string generated_at = 7 [json_name = "generated_at"];
+}

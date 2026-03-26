@@ -37,7 +37,7 @@ def test_classify_returns_book_classification() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["classification"] == "book"
+    assert data["classification"] == "CLASSIFICATION_RESULT_BOOK"
     assert data["model_used"] == settings.model_name
 
 
@@ -59,7 +59,7 @@ def test_classify_returns_not_book_classification() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["classification"] == "not_book"
+    assert data["classification"] == "CLASSIFICATION_RESULT_NOT_BOOK"
 
 
 def test_classify_confidence_is_between_0_and_1() -> None:
@@ -131,7 +131,7 @@ def test_classify_screenshot_with_book_mention_returns_book() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["classification"] == "book"
+    assert data["classification"] == "CLASSIFICATION_RESULT_BOOK"
     assert data["confidence"] == 0.9
     assert data["model_used"] == settings.model_name
 
@@ -155,4 +155,4 @@ def test_classify_unknown_classification_falls_back_to_ambiguous() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["classification"] == "ambiguous"
+    assert data["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"

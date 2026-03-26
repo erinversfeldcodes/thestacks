@@ -4,17 +4,76 @@ defmodule Stacks.Social do
   group invitations, and visibility grants.
   """
 
+  import Ecto.Changeset
   import Ecto.Query
 
   alias Core.Repo
   alias Stacks.Accounts.User
   alias Stacks.Events
-  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
+  alias Stacks.Social.UserBlock
 
-  _ = Group
-  _ = GroupMember
-  _ = GroupInvitation
-  _ = VisibilityGrant
+  # ── Changeset functions (moved from schema modules) ──
+
+  @group_required_fields [:owner_id, :name, :type]
+  @group_optional_fields [:visibility]
+  @group_valid_types ~w(close_friends broadcast subscription)
+  @group_valid_visibilities ~w(invite_only platform)
+
+  @doc "Changeset for creating or updating a group."
+  def group_changeset(group, attrs) do
+    group
+    |> cast(attrs, @group_required_fields ++ @group_optional_fields)
+    |> validate_required(@group_required_fields)
+    |> validate_inclusion(:type, @group_valid_types)
+    |> validate_inclusion(:visibility, @group_valid_visibilities)
+  end
+
+  @group_member_required_fields [:group_id, :user_id, :role]
+  @group_member_optional_fields [:joined_at]
+  @group_member_valid_roles ~w(member moderator)
+
+  @doc "Changeset for adding a member to a group."
+  def group_member_changeset(member, attrs) do
+    member
+    |> cast(attrs, @group_member_required_fields ++ @group_member_optional_fields)
+    |> validate_required(@group_member_required_fields)
+    |> validate_inclusion(:role, @group_member_valid_roles)
+    |> unique_constraint([:group_id, :user_id])
+  end
+
+  @group_invitation_required_fields [:group_id, :invited_by_id, :invited_user_id, :status]
+  @group_invitation_optional_fields [:responded_at]
+  @group_invitation_valid_statuses ~w(pending accepted declined)
+
+  @doc "Changeset for creating or updating a group invitation."
+  def group_invitation_changeset(invitation, attrs) do
+    invitation
+    |> cast(attrs, @group_invitation_required_fields ++ @group_invitation_optional_fields)
+    |> validate_required(@group_invitation_required_fields)
+    |> validate_inclusion(:status, @group_invitation_valid_statuses)
+  end
+
+  @visibility_grant_required_fields [:resource_type, :resource_id, :granted_to_id, :granted_by_id]
+  @visibility_grant_optional_fields []
+
+  @doc "Changeset for creating a visibility grant."
+  def visibility_grant_changeset(grant, attrs) do
+    grant
+    |> cast(attrs, @visibility_grant_required_fields ++ @visibility_grant_optional_fields)
+    |> validate_required(@visibility_grant_required_fields)
+    |> unique_constraint([:resource_type, :resource_id, :granted_to_id])
+  end
+
+  @user_block_required_fields [:blocker_id, :blocked_id]
+  @user_block_optional_fields []
+
+  @doc "Changeset for creating a user block."
+  def user_block_changeset(user_block, attrs) do
+    user_block
+    |> cast(attrs, @user_block_required_fields ++ @user_block_optional_fields)
+    |> validate_required(@user_block_required_fields)
+    |> unique_constraint([:blocker_id, :blocked_id])
+  end
 
   @doc """
   Blocks a user. Inserts a row into op.user_blocks and emits a
@@ -27,7 +86,7 @@ defmodule Stacks.Social do
   def block_user(blocker_id, blocked_id) do
     result =
       %UserBlock{}
-      |> UserBlock.changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
+      |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
       |> Repo.insert()
 
     case result do

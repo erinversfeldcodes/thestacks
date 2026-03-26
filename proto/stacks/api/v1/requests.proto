@@ -1,0 +1,143 @@
+// requests.proto — Request body messages for all POST/PUT API endpoints.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.api.v1;
+
+// POST /api/auth/register
+message RegisterRequest {
+  // User's email address.
+  string email = 1 [json_name = "email"];
+  // Plain-text password (hashed server-side).
+  string password = 2 [json_name = "password"];
+  // Public display name for the user.
+  string display_name = 3 [json_name = "display_name"];
+}
+
+// POST /api/auth/login
+message LoginRequest {
+  // User's email address.
+  string email = 1 [json_name = "email"];
+  // Plain-text password.
+  string password = 2 [json_name = "password"];
+}
+
+// PUT /api/placements/:id/move
+message MoveBookRequest {
+  // Target bookshelf name (e.g. "library", "antilibrary", "wishlist").
+  string bookshelf = 1 [json_name = "bookshelf"];
+}
+
+// POST /api/gdpr/consent
+message ConsentRequest {
+  // Whether the user consents to analytics data collection.
+  bool consent = 1 [json_name = "consent"];
+}
+
+// PUT /api/settings/age_verification
+message AgeVerificationRequest {
+  // Whether the user has verified their age.
+  bool age_verified = 1 [json_name = "age_verified"];
+}
+
+// POST /api/bookshelves/:name/placements
+message PlaceBookRequest {
+  // UUID of the book to place on the bookshelf.
+  string book_id = 1 [json_name = "book_id"];
+}
+
+// PUT /api/settings/profile
+message UpdateProfileRequest {
+  // Updated display name.
+  string display_name = 1 [json_name = "display_name"];
+  // Updated email address.
+  string email = 2 [json_name = "email"];
+  // Updated personal website URL.
+  string website_url = 3 [json_name = "website_url"];
+  // Current password, required when changing email.
+  string current_password = 4 [json_name = "current_password"];
+}
+
+// PUT /api/settings/location
+message UpdateLocationRequest {
+  // ISO 3166-1 alpha-2 country code.
+  string country_code = 1 [json_name = "country_code"];
+  // City name.
+  string city = 2 [json_name = "city"];
+}
+
+// PUT /api/settings/password
+message UpdatePasswordRequest {
+  // Current password for verification.
+  string current_password = 1 [json_name = "current_password"];
+  // New password to set.
+  string new_password = 2 [json_name = "new_password"];
+}
+
+// PUT /api/settings/notifications
+message UpdateNotificationsRequest {
+  // Notify when wishlisted books become available.
+  bool notify_wishlist_availability = 1 [json_name = "notify_wishlist_availability"];
+  // Notify on marketplace activity (offers, messages).
+  bool notify_marketplace = 2 [json_name = "notify_marketplace"];
+  // Notify on group invitations.
+  bool notify_group_invitations = 3 [json_name = "notify_group_invitations"];
+  // Notify on matching local events.
+  bool notify_event_matches = 4 [json_name = "notify_event_matches"];
+}
+
+// POST /api/books/:id/merge-format
+message MergeFormatRequest {
+  // ISBN of the edition to merge.
+  string isbn = 1 [json_name = "isbn"];
+  // Human-readable format label (e.g. "Hardcover", "Paperback").
+  string format_label = 2 [json_name = "format_label"];
+}
+
+// POST /api/listings
+message CreateListingRequest {
+  // UUID of the bookshelf placement being listed.
+  string placement_id = 1 [json_name = "placement_id"];
+  // Book condition (e.g. "like_new", "good", "fair").
+  string condition = 2 [json_name = "condition"];
+  // Pricing mode: "fixed" or "offer".
+  string pricing_mode = 3 [json_name = "pricing_mode"];
+  // Price in ZAR cents. Omit for "offer" pricing mode.
+  optional int32 price_zar = 4 [json_name = "price_zar"];
+  // Seller contact information.
+  string contact_info = 5 [json_name = "contact_info"];
+  // Description of the listing.
+  string description = 6 [json_name = "description"];
+}
+
+// POST /api/blog/posts
+message CreateBlogPostRequest {
+  // Post title.
+  string title = 1 [json_name = "title"];
+  // Post body content (markdown).
+  string body = 2 [json_name = "body"];
+  // Visibility: "owner", "group", or "platform".
+  string visibility = 3 [json_name = "visibility"];
+}
+
+// PUT /api/settings/profile_visibility
+message UpdateProfileVisibilityRequest {
+  // New profile visibility (e.g. "owner", "group", "platform").
+  string profile_visibility = 1 [json_name = "profile_visibility"];
+}
+
+// PUT /api/bookshelves/:id/visibility
+message UpdateShelfVisibilityRequest {
+  // New shelf visibility (e.g. "owner", "group", "platform").
+  string visibility = 1 [json_name = "visibility"];
+}
+
+// PUT /api/blog/posts/:id
+message UpdateBlogPostRequest {
+  // Updated post title.
+  string title = 1 [json_name = "title"];
+  // Updated post body content (markdown).
+  string body = 2 [json_name = "body"];
+  // Updated visibility.
+  string visibility = 3 [json_name = "visibility"];
+}

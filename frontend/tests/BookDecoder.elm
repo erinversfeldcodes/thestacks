@@ -132,18 +132,18 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
-        , test "fails on invalid visibility tier" <|
+        , test "unknown visibility tier defaults to Public (proto3 resilience)" <|
             \_ ->
                 let
                     result =
                         Decode.decodeString bookDecoder invalidVisibilityJson
                 in
                 case result of
-                    Ok _ ->
-                        Expect.fail "Expected decode failure for unknown visibility tier"
+                    Ok book ->
+                        Expect.equal Public book.visibilityTier
 
-                    Err _ ->
-                        Expect.pass
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "author name is decoded correctly" <|
             \_ ->
                 let
@@ -156,7 +156,7 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
-        , test "fails when required field title is missing" <|
+        , test "missing title defaults to empty string (proto3 resilience)" <|
             \_ ->
                 let
                     json =
@@ -177,11 +177,11 @@ suite =
                         Decode.decodeString bookDecoder json
                 in
                 case result of
-                    Ok _ ->
-                        Expect.fail "Expected decode failure when title is missing"
+                    Ok book ->
+                        Expect.equal "" book.title
 
-                    Err _ ->
-                        Expect.pass
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "decodes age_gated visibility tier" <|
             \_ ->
                 let

@@ -3,6 +3,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Generate proto Elm decoders (required before elm-review can compile)
+if [[ -f "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
+    bash "$REPO_ROOT/scripts/gen-elm-proto.sh"
+fi
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 

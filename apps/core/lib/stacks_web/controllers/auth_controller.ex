@@ -11,6 +11,7 @@ defmodule StacksWeb.AuthController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Audit
   alias Stacks.Email
+  alias StacksWeb.ProtoJSON
 
   @doc "POST /api/auth/register — create a new user account and send confirmation email."
   def register(conn, params) do
@@ -45,7 +46,7 @@ defmodule StacksWeb.AuthController do
 
         {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
-        json(conn, %{token: token, user: format_user(user)})
+        json(conn, %{token: token, user: ProtoJSON.user(user)})
 
       {:error, :email_unconfirmed} ->
         conn
@@ -123,21 +124,7 @@ defmodule StacksWeb.AuthController do
   @doc "GET /api/auth/me — return the current authenticated user."
   def me(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
-    json(conn, %{user: format_user(user)})
-  end
-
-  defp format_user(user) do
-    %{
-      id: user.id,
-      email: user.email,
-      display_name: user.display_name,
-      role: user.role,
-      profile_visibility: user.profile_visibility,
-      age_verified: user.age_verified,
-      consent_analytics: user.consent_analytics,
-      country_code: user.country_code,
-      city: user.city
-    }
+    json(conn, %{user: ProtoJSON.user(user)})
   end
 
   defp get_ip(conn) do

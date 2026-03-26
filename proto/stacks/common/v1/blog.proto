@@ -1,0 +1,137 @@
+// blog.proto — Blog post and book association types for the reading journal feature.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "BlogProto";
+option java_multiple_files = true;
+
+// BlogVisibility controls who can view a blog post.
+// These string values match ProfileVisibility semantically but are kept as a
+// separate enum because blog visibility is stored on the blog_posts table and
+// may diverge from profile visibility in the future (e.g. adding "public" or
+// "unlisted" tiers for blog posts but not profiles).
+//
+// Wire values (strings sent by the controller): "owner", "group", "platform".
+// Map to enum: OWNER=1, GROUP=2, PLATFORM=3.
+enum BlogVisibility {
+  // Default unspecified value; should not be used in practice.
+  BLOG_VISIBILITY_UNSPECIFIED = 0;
+
+  // Visible only to the owning user.
+  BLOG_VISIBILITY_OWNER = 1;
+
+  // Visible to members of the same reading group.
+  BLOG_VISIBILITY_GROUP = 2;
+
+  // Visible to all platform users.
+  BLOG_VISIBILITY_PLATFORM = 3;
+}
+
+// BookAssociation links a blog post to a book.
+// Matches the output of BlogController.serialize_association/2.
+//
+// JSON shape (non-owner): {id, book_id, confidence, source, visible, book_title, status}
+// JSON shape (owner):     {id, book_id, confidence, source, visible, reasoning, book_title, status}
+message BookAssociation {
+  // UUID of the association record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the associated book.
+  string book_id = 2 [json_name = "book_id"];
+
+  // Confidence score of the association (0.0 to 1.0).
+  double confidence = 3 [json_name = "confidence"];
+
+  // How the association was discovered (e.g. "nlp", "manual").
+  string source = 4 [json_name = "source"];
+
+  // Whether this association is visible to non-owners.
+  bool visible = 5 [json_name = "visible"];
+
+  // Reasoning for the association (only included for the post owner).
+  string reasoning = 6 [json_name = "reasoning"];
+
+  // Title of the associated book (denormalized for display convenience).
+  string book_title = 7 [json_name = "book_title"];
+
+  // Association status: "pending", "confirmed", or "dismissed".
+  // Stored as a plain string to match the controller's wire format.
+  string status = 8 [json_name = "status"];
+
+  // Foreign key to the parent blog post. DB-only — not sent on API wire.
+  string post_id = 9 [json_name = "post_id"];
+
+  // When this association was created.
+  string created_at = 10 [json_name = "created_at"];
+}
+
+// BlogPost represents a user's reading journal entry or blog post.
+// Matches the output of BlogController.format_post/1.
+//
+// JSON shape: {id, user_id, title, body, visibility, published_at, created_at, updated_at}
+message BlogPost {
+  // UUID of the blog post record.
+  string id = 1 [json_name = "id"];
+
+  // Title of the blog post.
+  string title = 2 [json_name = "title"];
+
+  // Full body content of the blog post (Markdown).
+  string body = 3 [json_name = "body"];
+
+  // Who can view this blog post.
+  // Wire value is a string ("owner", "group", "platform").
+  BlogVisibility visibility = 4 [json_name = "visibility"];
+
+  // Reserved: field 5 was "published" bool — the controller does not send this field.
+  // Publication state is determined by whether published_at is set.
+  reserved 5;
+  reserved "published";
+
+  // UUID of the user who authored this post.
+  string user_id = 6 [json_name = "user_id"];
+
+  // Books associated with this blog post.
+  repeated BookAssociation associations = 7 [json_name = "associations"];
+
+  // Reserved: field 8 was "inserted_at" — renamed to created_at.
+  reserved 8;
+  reserved "inserted_at";
+
+  // When the blog post was published (null/empty if still a draft).
+  string published_at = 9 [json_name = "published_at"];
+
+  // When the blog post was first created.
+  string created_at = 10 [json_name = "created_at"];
+
+  // When the blog post was last updated.
+  string updated_at = 11 [json_name = "updated_at"];
+
+  // UUID of the group that can see this post (when visibility is "group").
+  string visibility_group_id = 12 [json_name = "visibility_group_id"];
+}
+
+// BlogPostSummary is a lightweight view of a blog post for list displays.
+// Used when listing posts (BlogController.index returns full BlogPost, but this
+// message is available for future list-optimized endpoints).
+message BlogPostSummary {
+  // UUID of the blog post record.
+  string id = 1 [json_name = "id"];
+
+  // Title of the blog post.
+  string title = 2 [json_name = "title"];
+
+  // Reserved: field 3 was "published" bool — not sent by controller.
+  reserved 3;
+  reserved "published";
+
+  // Who can view this blog post.
+  BlogVisibility visibility = 4 [json_name = "visibility"];
+
+  // When the blog post was first created.
+  // Named created_at to match controller output (not inserted_at).
+  string created_at = 5 [json_name = "created_at"];
+}

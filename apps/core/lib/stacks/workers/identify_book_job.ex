@@ -15,6 +15,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books.UploadedImage
   alias Stacks.Events
   alias Stacks.Moderation
   alias Stacks.Storage
@@ -101,24 +102,17 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
-    {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
-    book_id_bins = Enum.map(book_ids, fn id -> elem(Ecto.UUID.dump(id), 1) end)
-    first_book_id_bin = List.first(book_id_bins)
-
-    query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
+    query = from(i in UploadedImage, where: i.id == ^image_id)
 
     {count, _} =
       Repo.update_all(
         query,
-        [
-          set: [
-            status: "resolved",
-            book_id: first_book_id_bin,
-            book_ids: book_id_bins,
-            updated_at: DateTime.utc_now()
-          ]
-        ],
-        prefix: "op"
+        set: [
+          status: "resolved",
+          book_id: List.first(book_ids),
+          book_ids: book_ids,
+          updated_at: DateTime.utc_now()
+        ]
       )
 
     if count > 0 do
@@ -139,21 +133,16 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   defp mark_rejected(image_id, reason) do
-    {:ok, image_id_bin} = Ecto.UUID.dump(image_id)
-
-    query = from(i in "uploaded_images", where: i.id == ^image_id_bin)
+    query = from(i in UploadedImage, where: i.id == ^image_id)
 
     {count, _} =
       Repo.update_all(
         query,
-        [
-          set: [
-            status: "rejected",
-            rejection_reason: reason,
-            updated_at: DateTime.utc_now()
-          ]
-        ],
-        prefix: "op"
+        set: [
+          status: "rejected",
+          rejection_reason: reason,
+          updated_at: DateTime.utc_now()
+        ]
       )
 
     if count > 0 do

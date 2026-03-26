@@ -31,7 +31,7 @@ proto/
 
 ### Generated Code (in `proto/gen/`)
 - `proto/gen/elixir/` — Generated at build time, gitignored
-- `proto/gen/elm/` — **Checked in** (Elm has no runtime codegen). JSON decoders/encoders.
+- `proto/gen/elm/` — **Gitignored** — regenerated at build time via `scripts/gen-elm-proto.sh`. JSON decoders/encoders.
 - `proto/gen/rust/` — Generated at build time, gitignored
 - `proto/gen/python/` — Generated at build time, gitignored
 
@@ -65,7 +65,7 @@ All Protobuf messages are serialised as JSON (not binary). This means:
 - Binary Protobuf is reserved for future optimisation if needed
 
 ### Elm decoder generation
-Since Elm has no Protobuf runtime, we generate Elm `Json.Decode` / `Json.Encode` modules from `.proto` files via a custom script. These are checked into `proto/gen/elm/` because Elm builds must be reproducible without running codegen.
+Since Elm has no Protobuf runtime, we generate Elm `Json.Decode` / `Json.Encode` modules from `.proto` files via `scripts/gen-elm-proto.sh`. These are gitignored and regenerated at build time (`just setup`, `just dev`, `scripts/deploy-stack.sh`). CI runs `--check` mode to verify the generator output matches.
 
 ### Event upcasting
 Old events in `event_log` may have older schema versions. The `Stacks.Events.Upcaster` module (Elixir) transforms old event shapes to current on read:
@@ -102,7 +102,7 @@ Each version bump is an explicit, testable function clause. Same pattern as Comm
 ## Integration Handoffs
 - **All agents:** Proto changes affect all services. Coordinate via Orchestrator.
 - **elixir-agent:** Elixir generated types + upcaster must be updated together
-- **elm-agent:** Regenerate and check in Elm decoders after any proto change
+- **elm-agent:** Elm decoders are regenerated at build time; verify with `scripts/gen-elm-proto.sh --check` after any proto change
 - **rust-agent:** Rust generated types auto-rebuilt on `cargo build`
 - **python-agent:** Python generated types auto-rebuilt
 - **platform-agent:** `buf lint` + `buf breaking` in CI pipeline
@@ -137,11 +137,11 @@ Before submitting your completion report:
 1. Run `buf lint proto/` and confirm no lint errors.
 2. Run `buf breaking proto/ --against '.git#branch=main'` and confirm no unintended breaking changes.
 3. Run `buf generate proto/` and confirm code generation succeeds for all targets.
-4. Confirm the checked-in Elm decoders in `proto/gen/elm/` are updated to match any schema changes.
+4. Run `scripts/gen-elm-proto.sh` and confirm the generated Elm decoders in `proto/gen/elm/` match the current schema.
 5. If upcaster functions were added, trace through the upcast chain with a representative old event payload and confirm the output matches the current schema.
 6. If any step fails, fix it before submitting.
 
-Do not submit a completion report with buf lint failures, breaking changes without justification, or stale Elm decoders.
+Do not submit a completion report with buf lint failures, breaking changes without justification, or a failing `scripts/gen-elm-proto.sh --check`.
 
 ### Test-First Protocol
 

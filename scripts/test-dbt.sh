@@ -28,6 +28,10 @@ export DBT_DBNAME="${DBT_DBNAME:-stacks_dev}"
 
 ensure_postgres
 
+# Generate Ecto schemas from proto definitions (gen/ is gitignored).
+echo "==> Generating Ecto schemas from proto..."
+(cd "$REPO_ROOT/apps/core" && mix proto.sync)
+
 # Terminate any open connections before dropping so this is safe to run after
 # other test suites (e.g. test-elixir) that leave DB pool connections alive.
 _pg_bin="$(_find_pg_isready)"; _pg_bin="${_pg_bin%pg_isready}"

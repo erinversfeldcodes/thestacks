@@ -148,7 +148,7 @@ We evaluated three workarounds:
 - **Remove struct pattern matching** — replace `%SourceHealthCheck{}` guards with bare variables. Degrades code quality and removes compile-time type safety.
 - **Minimal stub files checked in** — commit trivial schema files that define the module name only. Fragile: any field reference in business code would still fail.
 
-**Resolution:** Generated schemas are checked into git as bootstrap files. `mix proto.sync --check` runs in CI to ensure they match the proto definitions. This follows the same pattern as Elm decoders in the project ("checked in, no runtime codegen"). The tradeoff is that generated files appear in pull request diffs (~25 lines per schema), but they are clearly marked with "DO NOT EDIT MANUALLY" headers.
+**Resolution:** Generated schemas are checked into git as bootstrap files. `mix proto.sync --check` runs in CI to ensure they match the proto definitions. (Note: Elm decoders follow a different pattern — they are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`.) The tradeoff is that generated Ecto/dbt files appear in pull request diffs (~25 lines per schema), but they are clearly marked with "DO NOT EDIT MANUALLY" headers.
 
 ### Migration generation scope
 

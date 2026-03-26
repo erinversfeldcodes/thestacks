@@ -80,7 +80,7 @@ defmodule Stacks.Workers.SourceDiscoveryJob do
       type: infer_type(result),
       url: result.url,
       discovered_via: discovered_via,
-      status: :pending_review
+      status: "pending_review"
     })
   end
 
@@ -89,19 +89,19 @@ defmodule Stacks.Workers.SourceDiscoveryJob do
 
     cond do
       String.contains?(text, "bookshop") or String.contains?(text, "bookstore") ->
-        :bookshop
+        "bookshop"
 
       String.contains?(text, "book club") or String.contains?(text, "reading group") ->
-        :community
+        "community"
 
       String.contains?(text, "review") ->
-        :review_site
+        "review_site"
 
       String.contains?(text, "event") or String.contains?(text, "festival") ->
-        :event_source
+        "event_source"
 
       true ->
-        :bookshop
+        "bookshop"
     end
   end
 

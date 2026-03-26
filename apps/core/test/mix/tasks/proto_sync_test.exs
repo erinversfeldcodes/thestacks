@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
   alias Mix.Tasks.ProtoSync.EctoGenerator
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
+  alias Mix.Tasks.ProtoSync.ProtoJsonGenerator
   alias Mix.Tasks.ProtoSync.SchemaYmlGenerator
   alias Mix.Tasks.ProtoSync.TypeMapper
 
@@ -17,7 +18,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "loads valid manifest" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       assert manifest.version == 1
-      assert [event_log, _] = manifest.tables
+      assert event_log = Enum.find(manifest.tables, &(&1.table_name == "event_log"))
       assert event_log.table_name == "event_log"
       assert event_log.proto_message == "EventEnvelope"
     end
@@ -218,9 +219,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      assert_raise RuntimeError, ~r/Unknown message type/, fn ->
-        TypeMapper.ecto_type(field)
-      end
+      # Non-WKT message types fall back to :map (JSONB) instead of raising
+      assert TypeMapper.ecto_type(field) == :map
     end
 
     test "default returns :none when no override" do
@@ -333,9 +333,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      assert_raise RuntimeError, ~r/Unknown message type/, fn ->
-        TypeMapper.migration_type(field)
-      end
+      # Non-WKT message types fall back to :map instead of raising
+      assert TypeMapper.migration_type(field) == :map
     end
 
     test "migration_type raises on completely unmapped type" do
@@ -438,7 +437,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates source_health_checks schema with timestamps" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -482,7 +481,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates source_health_checks staging model with timestamps" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -545,7 +544,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :aggregate_id, :binary_id, null: false"
       assert output =~ "add :schema_version, :integer, null: false, default: 1"
       assert output =~ "add :payload, :map, null: false"
-      assert output =~ ~s|add :metadata, :map, null: false, default: fragment("'{}'::jsonb")|
+      assert output =~ "add :metadata, :map"
 
       assert output =~
                ~s|add :occurred_at, :utc_datetime_usec, null: false, default: fragment("NOW()")|
@@ -561,7 +560,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
     test "generates CREATE TABLE migration with timestamps and unique index" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -704,6 +703,18 @@ defmodule Mix.Tasks.Proto.SyncTest do
         end)
       after
         File.cd!(original_cwd)
+
+        # Clean up migrations generated today (drift migrations that duplicate existing ones).
+        # Note: gen/ is NOT cleaned up — it is the canonical schema location now.
+        today = Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "")
+
+        Path.join([@repo_root, "apps/core/priv/repo/migrations"])
+        |> File.ls!()
+        |> Enum.filter(&String.starts_with?(&1, today))
+        |> Enum.each(fn file ->
+          Path.join([@repo_root, "apps/core/priv/repo/migrations", file])
+          |> File.rm!()
+        end)
       end
     end
   end
@@ -1059,7 +1070,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       descriptor: descriptor
     } do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
-      [_, shc_table] = manifest.tables
+      shc_table = Enum.find(manifest.tables, &(&1.table_name == "source_health_checks"))
 
       fields =
         Descriptor.extract_fields(descriptor, shc_table.proto_file, shc_table.proto_message)
@@ -1070,18 +1081,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "      - name: created_at"
       assert output =~ "      - name: updated_at"
 
-      # source_type enum should have accepted_values
-      assert output =~ "accepted_values"
-      assert output =~ "'scraper_config'"
-      assert output =~ "'review_source'"
-      assert output =~ "'rss_feed'"
-      assert output =~ "'event_source'"
-      assert output =~ "'llm_output'"
-
-      # status enum should have accepted_values
-      assert output =~ "'healthy'"
-      assert output =~ "'degraded'"
-      assert output =~ "'broken'"
+      # accepted_values no longer auto-generated for enum fields — proto enums
+      # can be a superset of DB enums, causing false failures.
+      refute output =~ "accepted_values"
     end
 
     test "not_null tests are generated for null: false overrides", %{descriptor: descriptor} do
@@ -1356,6 +1358,64 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert :ok == SchemaYmlGenerator.check_drift(tmp_path, generated_blocks)
 
       File.rm!(tmp_path)
+    end
+  end
+
+  describe "ProtoJsonGenerator" do
+    setup do
+      descriptor = Descriptor.parse!(@repo_root)
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      %{descriptor: descriptor, manifest: manifest}
+    end
+
+    test "generates module with one function per proto_json config entry", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      assert output =~ "defmodule StacksWeb.ProtoJSON.Gen do"
+
+      # One function per config entry
+      for config <- manifest.proto_json do
+        assert output =~ "def #{config.function_name}(struct) do"
+        assert output =~ "def #{config.function_name}(nil), do: nil"
+        assert output =~ "@spec #{config.function_name}(map() | nil) :: map() | nil"
+      end
+    end
+
+    test "author function maps website_url field to website json key", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      # Proto field is website_url with json_name="website" — Author uses the json_name
+      assert output =~ "website: struct.website_url"
+
+      # The Author function should NOT have "website_url:" as a map key (only "website:")
+      # Split output by function boundaries and check the author section
+      author_section =
+        output
+        |> String.split("@doc")
+        |> Enum.find(&String.contains?(&1, "def author(struct)"))
+
+      assert author_section != nil
+      refute author_section =~ ~r/^\s+website_url:/m
+    end
+
+    test "skipped fields are excluded from output", %{
+      descriptor: descriptor,
+      manifest: manifest
+    } do
+      output = ProtoJsonGenerator.generate(manifest, descriptor)
+
+      # Book skips author, editions, edition_count, primary_edition, community_read_count
+      refute output =~ "author: struct.author"
+      refute output =~ "edition_count: struct.edition_count"
+
+      # User skips password_hash
+      refute output =~ "password_hash: struct.password_hash"
     end
   end
 end

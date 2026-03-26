@@ -2,6 +2,9 @@ defmodule Stacks.AI.Client do
   @moduledoc """
   HTTP client for calling the Modal vision service.
 
+  Wire contract: `proto/stacks/internal/v1/vision.proto`
+  (ClassifyRequest/Response, ExtractRequest/Response, AssociateRequest/Response/Callback)
+
   The actual implementation is swappable via Application env:
     config :core, :vision_client, Stacks.AI.Client      # real HTTP client
     config :core, :vision_client, Stacks.AI.MockClient  # for tests
@@ -20,6 +23,8 @@ defmodule Stacks.AI.Client do
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.ClientBehaviour
+  alias Stacks.Proto.Vision.AssociateRequest
+  alias Stacks.Proto.Vision.ExtractRequest
 
   @behaviour ClientBehaviour
 
@@ -33,8 +38,7 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  @doc false
-  def do_call_vision(endpoint, payload) do
+  defp do_call_vision(endpoint, payload) do
     case BudgetTracker.check_budget(:modal) do
       :ok ->
         case :fuse.ask(@fuse_name, :sync) do
@@ -52,13 +56,20 @@ defmodule Stacks.AI.Client do
   @doc """
   POST /associate — asks the vision service to associate a known ISBN with a cover image.
   Returns {:ok, job_id} on success, {:error, reason} on failure.
-  This is an async fire-and-forget from the vision service's perspective;
-  the result arrives later via the InternalController callback.
+
+  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
+  Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
+  The result arrives later via the InternalController callback (`AssociateCallback`).
   """
   @spec associate_isbn(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def associate_isbn(isbn, book_id, edition_id, cover_url) do
-    payload = %{isbn: isbn, book_id: book_id, edition_id: edition_id, cover_url: cover_url}
+  def associate_isbn(isbn, book_id, edition_id, cover_image_url) do
+    payload = %AssociateRequest{
+      isbn: isbn,
+      book_id: book_id,
+      edition_id: edition_id,
+      cover_image_url: cover_image_url
+    }
 
     case call_vision("associate", payload) do
       {:ok, %{"job_id" => job_id}} -> {:ok, job_id}
@@ -69,12 +80,15 @@ defmodule Stacks.AI.Client do
 
   @doc """
   POST /extract — extract ISBNs from a book cover image at a URL.
-  Accepts an image URL instead of a file upload.
-  Returns {:ok, result_map} or {:error, reason}.
+  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
   """
   @spec extract_from_url(String.t()) :: {:ok, map()} | {:error, term()}
   def extract_from_url(image_url) do
-    call_vision("extract_isbn", %{image_url: image_url})
+    case call_vision("extract_isbn", %ExtractRequest{image_url: image_url}) do
+      {:ok, %{"books" => _} = resp} -> {:ok, resp}
+      {:ok, other} -> {:error, {:unexpected_response, other}}
+      {:error, _} = err -> err
+    end
   end
 
   defp auth_token(method, path) do
@@ -88,7 +102,10 @@ defmodule Stacks.AI.Client do
   defp endpoint_path("is_book"), do: "classify"
   defp endpoint_path("extract_isbn"), do: "extract"
   defp endpoint_path("associate"), do: "associate"
-  defp endpoint_path(other), do: other
+
+  defp endpoint_path(other) do
+    raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"
+  end
 
   @doc false
   def build_vision_request(path, payload) do
@@ -104,8 +121,7 @@ defmodule Stacks.AI.Client do
     )
   end
 
-  @doc false
-  def make_vision_request(endpoint, payload) do
+  defp make_vision_request(endpoint, payload) do
     path = "/#{endpoint_path(endpoint)}"
     req = build_vision_request(path, payload)
 

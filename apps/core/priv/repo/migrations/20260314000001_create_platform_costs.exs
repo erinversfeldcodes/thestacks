@@ -18,5 +18,22 @@ defmodule Core.Repo.Migrations.CreatePlatformCosts do
     create index(:platform_costs, [:category], prefix: "op")
     create index(:platform_costs, [:period_start, :period_end], prefix: "op")
     create unique_index(:platform_costs, [:service, :period_start, :period_end], prefix: "op")
+
+    execute(
+      """
+      DO $$ BEGIN
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
+          GRANT SELECT ON op.platform_costs TO stacks_dbt;
+        END IF;
+      END $$;
+      """,
+      """
+      DO $$ BEGIN
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
+          REVOKE SELECT ON op.platform_costs FROM stacks_dbt;
+        END IF;
+      END $$;
+      """
+    )
   end
 end

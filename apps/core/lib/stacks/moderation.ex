@@ -9,7 +9,7 @@ defmodule Stacks.Moderation do
   4. store_with_tier — stores books with appropriate visibility_tier
 
   Sidecar API contract:
-  - POST /classify  → %{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}
+  - POST /classify  → %{"classification" => "CLASSIFICATION_RESULT_BOOK"|"CLASSIFICATION_RESULT_NOT_BOOK"|"CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => float, "model_used" => str}
   - POST /extract   → %{"books" => [%{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "confidence" => float}], "model_used" => str}
 
   The pipeline accepts either `image_b64` (base64-encoded) or `image_url`
@@ -59,7 +59,7 @@ defmodule Stacks.Moderation do
 
   defp check_is_book_url(image_url) do
     case AIClient.call_vision("is_book", %{image_url: image_url}) do
-      {:ok, %{"classification" => "book"}} -> {:ok, :is_book}
+      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} -> {:ok, :is_book}
       {:ok, %{"classification" => _}} -> {:error, :not_a_book}
       error -> error
     end
@@ -83,7 +83,7 @@ defmodule Stacks.Moderation do
 
   defp check_is_book(image_b64) do
     case AIClient.call_vision("is_book", %{image: image_b64}) do
-      {:ok, %{"classification" => "book"}} -> {:ok, :is_book}
+      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} -> {:ok, :is_book}
       {:ok, %{"classification" => _}} -> {:error, :not_a_book}
       error -> error
     end
