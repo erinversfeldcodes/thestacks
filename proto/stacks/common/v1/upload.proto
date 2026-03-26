@@ -1,0 +1,106 @@
+// upload.proto — Image upload and vision processing poll types.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "UploadProto";
+option java_multiple_files = true;
+
+// PollStatus indicates the current state of a vision processing job.
+// Used by the PollResponse message for the polling endpoint.
+// Note: UploadAccepted.status is a plain string ("accepted"), NOT this enum —
+// the initial upload response and the polling response use different status vocabularies.
+enum PollStatus {
+  // Default unspecified value; should not be used in practice.
+  POLL_STATUS_UNSPECIFIED = 0;
+
+  // The image is queued or actively being processed by the vision sidecar.
+  POLL_STATUS_PENDING = 1;
+
+  // Processing completed successfully and a book match was found.
+  POLL_STATUS_RESOLVED = 2;
+
+  // Processing completed but the image was rejected (not a book, unreadable, etc.).
+  POLL_STATUS_REJECTED = 3;
+}
+
+// UploadAccepted is the immediate response after a successful image upload
+// (POST /api/upload, status 202).
+//
+// JSON shape: {status: "accepted", image_id: "uuid"}
+// Note: status is a plain string literal "accepted", not a PollStatus enum value.
+// The upload endpoint returns a simple acknowledgment; use PollResponse for status polling.
+message UploadAccepted {
+  // Processing status — always the string "accepted" on initial upload.
+  // This is intentionally a plain string, not a PollStatus enum.
+  string status = 1 [json_name = "status"];
+
+  // UUID of the uploaded image for subsequent polling.
+  string image_id = 2 [json_name = "image_id"];
+}
+
+// PollResponse is returned when the client polls for vision processing results
+// (GET /api/upload/:image_id/status).
+//
+// JSON shape: {image_id, status, book_id, book_ids, rejection_reason, is_duplicate}
+// Note: status on the wire is a string from the database (e.g. "pending", "resolved", "rejected").
+message PollResponse {
+  // UUID of the uploaded image being polled.
+  string image_id = 1 [json_name = "image_id"];
+
+  // Current processing status (string on wire, e.g. "pending", "resolved", "rejected").
+  string status = 2 [json_name = "status"];
+
+  // UUID of the matched book, if a single match was found (resolved only).
+  string book_id = 3 [json_name = "book_id"];
+
+  // UUIDs of candidate books when multiple matches are found (resolved only).
+  repeated string book_ids = 4 [json_name = "book_ids"];
+
+  // Human-readable reason for rejection (rejected only).
+  string rejection_reason = 5 [json_name = "rejection_reason"];
+
+  // Whether the uploaded image was detected as a duplicate of an existing upload.
+  bool is_duplicate = 6 [json_name = "is_duplicate"];
+}
+
+// UploadedImage represents a user-uploaded image stored in the system.
+// Maps to op.uploaded_images table.
+message UploadedImage {
+  // UUID of the uploaded image record.
+  string id = 1 [json_name = "id"];
+
+  // Storage path or key for the image file.
+  string storage_path = 2 [json_name = "storage_path"];
+
+  // Processing status (e.g. "pending", "resolved", "rejected").
+  string status = 3 [json_name = "status"];
+
+  // Human-readable reason if the image was rejected.
+  string rejection_reason = 4 [json_name = "rejection_reason"];
+
+  // When the image was uploaded.
+  google.protobuf.Timestamp uploaded_at = 5 [json_name = "uploaded_at"];
+
+  // When the image expires under GDPR 30-day retention.
+  google.protobuf.Timestamp expires_at = 6 [json_name = "expires_at"];
+
+  // UUIDs of candidate books matched from this image.
+  repeated string book_ids = 7 [json_name = "book_ids"];
+
+  // Foreign key to the resolved book (single match).
+  string book_id = 8 [json_name = "book_id"];
+
+  // Foreign key to the resolved book edition.
+  string book_edition_id = 9 [json_name = "book_edition_id"];
+
+  // When this record was created.
+  google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
+
+  // When this record was last updated.
+  google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
+}

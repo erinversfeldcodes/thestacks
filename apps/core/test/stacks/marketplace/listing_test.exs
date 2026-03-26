@@ -3,15 +3,16 @@ defmodule Stacks.Marketplace.ListingTest do
 
   import Stacks.Factory
 
+  alias Stacks.Marketplace
   alias Stacks.Marketplace.Listing
 
-  describe "changeset/2" do
+  describe "listing_changeset/2" do
     test "is valid with all required fields" do
       book = insert(:book)
       seller = insert(:user)
 
       changeset =
-        Listing.changeset(%Listing{}, %{
+        Marketplace.listing_changeset(%Listing{}, %{
           book_id: book.id,
           seller_id: seller.id,
           status: "draft",
@@ -30,7 +31,7 @@ defmodule Stacks.Marketplace.ListingTest do
       seller = insert(:user)
 
       changeset =
-        Listing.changeset(%Listing{}, %{
+        Marketplace.listing_changeset(%Listing{}, %{
           book_id: book.id,
           seller_id: seller.id,
           status: "draft",
@@ -49,7 +50,7 @@ defmodule Stacks.Marketplace.ListingTest do
       seller = insert(:user)
 
       changeset =
-        Listing.changeset(%Listing{}, %{
+        Marketplace.listing_changeset(%Listing{}, %{
           book_id: book.id,
           seller_id: seller.id,
           status: "limbo",
@@ -69,7 +70,7 @@ defmodule Stacks.Marketplace.ListingTest do
       seller = insert(:user)
 
       changeset =
-        Listing.changeset(%Listing{}, %{
+        Marketplace.listing_changeset(%Listing{}, %{
           book_id: book.id,
           seller_id: seller.id,
           status: "draft",
@@ -89,7 +90,7 @@ defmodule Stacks.Marketplace.ListingTest do
       seller = insert(:user)
 
       changeset =
-        Listing.changeset(%Listing{}, %{
+        Marketplace.listing_changeset(%Listing{}, %{
           book_id: book.id,
           seller_id: seller.id,
           status: "draft",

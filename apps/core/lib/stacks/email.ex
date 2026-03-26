@@ -33,7 +33,7 @@ defmodule Stacks.Email do
       Repo.transaction(fn ->
         user =
           user
-          |> User.email_confirmation_changeset(%{email_confirmation_token: token})
+          |> Accounts.email_confirmation_changeset(%{email_confirmation_token: token})
           |> Repo.update!()
 
         EmailDeliveryJob.new(%{
@@ -109,7 +109,7 @@ defmodule Stacks.Email do
 
       Repo.transaction(fn ->
         user
-        |> User.password_reset_changeset(%{
+        |> Accounts.password_reset_changeset(%{
           password_reset_token: token,
           password_reset_sent_at: now
         })
@@ -131,7 +131,7 @@ defmodule Stacks.Email do
 
   defp do_confirm_email(user) do
     case user
-         |> User.email_confirmation_changeset(%{
+         |> Accounts.email_confirmation_changeset(%{
            email_confirmed: true,
            email_confirmation_token: nil
          })
@@ -145,7 +145,7 @@ defmodule Stacks.Email do
 
   defp do_reset_password(user, new_password) do
     case user
-         |> User.password_update_changeset(%{
+         |> Accounts.password_update_changeset(%{
            password: new_password,
            password_reset_token: nil,
            password_reset_sent_at: nil

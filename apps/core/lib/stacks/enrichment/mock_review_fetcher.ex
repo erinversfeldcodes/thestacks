@@ -12,7 +12,7 @@ defmodule Stacks.Enrichment.MockReviewFetcher do
   def fetch_reviews(book_id) do
     [
       %{
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/#{book_id}",
         review_text:
           "Readers found this book engaging and well-written. The plot was compelling with strong character development.",

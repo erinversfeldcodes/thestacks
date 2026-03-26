@@ -18,6 +18,7 @@ defmodule Stacks.Events.SubscriberWorker do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Events.EventLog
   alias Stacks.Events.Registry
   alias Stacks.Events.Upcaster
 
@@ -37,11 +38,9 @@ defmodule Stacks.Events.SubscriberWorker do
   end
 
   defp fetch_event(event_id) do
-    {:ok, event_id_bin} = Ecto.UUID.dump(event_id)
-
     query =
-      from(e in "event_log",
-        where: e.id == ^event_id_bin,
+      from(e in EventLog,
+        where: e.id == ^event_id,
         select: %{
           id: e.id,
           event_type: e.event_type,
@@ -54,7 +53,7 @@ defmodule Stacks.Events.SubscriberWorker do
         }
       )
 
-    case Repo.one(query, prefix: "op") do
+    case Repo.one(query) do
       nil -> {:error, :not_found}
       event -> {:ok, event}
     end
@@ -62,9 +61,8 @@ defmodule Stacks.Events.SubscriberWorker do
 
   defp mark_published(id_bin) do
     Repo.update_all(
-      from(e in "event_log", where: e.id == ^id_bin),
-      [set: [published_at: DateTime.utc_now()]],
-      prefix: "op"
+      from(e in EventLog, where: e.id == ^id_bin),
+      set: [published_at: DateTime.utc_now()]
     )
   end
 

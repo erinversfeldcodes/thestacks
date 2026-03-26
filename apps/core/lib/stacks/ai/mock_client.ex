@@ -8,7 +8,12 @@ defmodule Stacks.AI.MockClient do
 
   @impl true
   def call_vision("is_book", _payload) do
-    {:ok, %{"classification" => "book", "confidence" => 0.9, "model_used" => "mock"}}
+    {:ok,
+     %{
+       "classification" => "CLASSIFICATION_RESULT_BOOK",
+       "confidence" => 0.9,
+       "model_used" => "mock"
+     }}
   end
 
   def call_vision("extract_isbn", payload) do

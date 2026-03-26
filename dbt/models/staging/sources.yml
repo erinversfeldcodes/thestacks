@@ -631,6 +631,8 @@ sources:
             description: Seller description of the book's condition.
           - name: photo_urls
             description: Array of photo URLs for the listed book.
+          - name: contact_info
+            description: Seller contact information (email or phone, encrypted at rest).
           - name: listed_at
             description: Timestamp when the listing went live.
           - name: expires_at

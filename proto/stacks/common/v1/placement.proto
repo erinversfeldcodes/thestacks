@@ -1,0 +1,214 @@
+// placement.proto — Bookshelf placement types for tracking which books are on which shelves.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+import "stacks/common/v1/book.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "PlacementProto";
+option java_multiple_files = true;
+
+// PlacementFormat represents the format a user owns for a given placement.
+enum PlacementFormat {
+  // Default unspecified value; should not be used in practice.
+  PLACEMENT_FORMAT_UNSPECIFIED = 0;
+
+  // A physical copy of the book.
+  PLACEMENT_FORMAT_PHYSICAL = 1;
+
+  // A digital e-book copy.
+  PLACEMENT_FORMAT_EBOOK = 2;
+
+  // An audiobook copy.
+  PLACEMENT_FORMAT_AUDIOBOOK = 3;
+}
+
+// PlacementDetail is the rich placement shape returned by BookshelfController.show.
+// Includes an embedded Book with full metadata for rendering bookshelf views.
+//
+// Source: BookshelfController.format_placement/1
+// JSON shape: {id, position, placed_at, formats, personal_rating, notes, book: {...}}
+message PlacementDetail {
+  // UUID of the placement record.
+  string id = 1 [json_name = "id"];
+
+  // Position of the book within the bookshelf (for ordering).
+  int32 position = 2 [json_name = "position"];
+
+  // When the book was placed on this bookshelf.
+  google.protobuf.Timestamp placed_at = 3 [json_name = "placed_at"];
+
+  // Formats the user owns for this placement (string array on wire, e.g. ["physical", "ebook"]).
+  repeated string formats = 4 [json_name = "formats"];
+
+  // User's personal rating of the book (0 if unrated).
+  int32 personal_rating = 5 [json_name = "personal_rating"];
+
+  // User's personal notes about this book.
+  string notes = 6 [json_name = "notes"];
+
+  // The book associated with this placement (embedded with author, editions, primary_edition).
+  Book book = 7 [json_name = "book"];
+}
+
+// PlacementRef is the slim placement shape returned by BookshelfPlacementController
+// for create/move operations. Does NOT include the embedded book.
+//
+// Source: BookshelfPlacementController.format_placement/1
+// JSON shape: {id, book_id, bookshelf_id, position, placed_at, removed_at}
+message PlacementRef {
+  // UUID of the placement record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the book this placement is for.
+  string book_id = 2 [json_name = "book_id"];
+
+  // UUID of the bookshelf this placement belongs to.
+  string bookshelf_id = 3 [json_name = "bookshelf_id"];
+
+  // Position of the book within the bookshelf (for ordering).
+  int32 position = 4 [json_name = "position"];
+
+  // When the book was placed on this bookshelf.
+  google.protobuf.Timestamp placed_at = 5 [json_name = "placed_at"];
+
+  // When the book was removed from the bookshelf (null if still active).
+  google.protobuf.Timestamp removed_at = 6 [json_name = "removed_at"];
+}
+
+// PlacementSummary is the lightweight shape returned by BookshelfPlacementController.mine.
+// Used for quick lookups of which books are on which shelves.
+//
+// Source: Shelving.get_user_placements_summary/1
+// JSON shape: {book_id, bookshelf_name}
+message PlacementSummary {
+  // UUID of the book.
+  string book_id = 1 [json_name = "book_id"];
+
+  // Name of the bookshelf (e.g. "library", "antilibrary").
+  string bookshelf_name = 2 [json_name = "bookshelf_name"];
+}
+
+// BookPlacement is the shape returned by BookController for the current user's placement
+// of a specific book. Used in book detail and confirm responses.
+//
+// Source: BookController.format_placement_or_nil/1
+// JSON shape: {id, book_id, bookshelf_name, formats, personal_rating, notes}
+message BookPlacement {
+  // UUID of the placement record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the book this placement is for.
+  string book_id = 2 [json_name = "book_id"];
+
+  // Name of the bookshelf (e.g. "library", "antilibrary").
+  string bookshelf_name = 3 [json_name = "bookshelf_name"];
+
+  // Formats the user owns (string array on wire, e.g. ["physical", "ebook"]).
+  repeated string formats = 4 [json_name = "formats"];
+
+  // User's personal rating of the book (0 if unrated).
+  int32 personal_rating = 5 [json_name = "personal_rating"];
+
+  // User's personal notes about this book.
+  string notes = 6 [json_name = "notes"];
+}
+
+// Bookshelf represents a named virtual collection of books for a user.
+// Maps to op.bookshelves table.
+message Bookshelf {
+  // UUID of the bookshelf record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the owning user.
+  string user_id = 2 [json_name = "user_id"];
+
+  // Name of the bookshelf (e.g. "library", "antilibrary", "wishlist").
+  string name = 3 [json_name = "name"];
+
+  // Who can see this bookshelf (string on wire, e.g. "owner", "group", "platform").
+  string visibility = 4 [json_name = "visibility"];
+
+  // UUID of the group that can see this bookshelf (when visibility is "group").
+  string visibility_group_id = 5 [json_name = "visibility_group_id"];
+
+  // When this bookshelf was created.
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
+
+  // When this bookshelf was last updated.
+  google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
+}
+
+// Placement represents a book placed on a bookshelf — the canonical DB-backed record.
+// Maps to op.bookshelf_placements table.
+message Placement {
+  // UUID of the placement record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the book.
+  string book_id = 2 [json_name = "book_id"];
+
+  // Foreign key to the bookshelf.
+  string bookshelf_id = 3 [json_name = "bookshelf_id"];
+
+  // Position of the book within the bookshelf (for ordering).
+  int32 position = 4 [json_name = "position"];
+
+  // When the book was placed on this bookshelf.
+  google.protobuf.Timestamp placed_at = 5 [json_name = "placed_at"];
+
+  // When the book was removed from the bookshelf (null if still active).
+  google.protobuf.Timestamp removed_at = 6 [json_name = "removed_at"];
+
+  // Formats the user owns for this placement (string array, e.g. ["physical", "ebook"]).
+  repeated string formats = 7 [json_name = "formats"];
+
+  // User's personal rating of the book (1-5, 0 if unrated).
+  int32 personal_rating = 8 [json_name = "personal_rating"];
+
+  // User's personal notes about this book.
+  string notes = 9 [json_name = "notes"];
+
+  // Who can see this placement (string on wire, e.g. "owner", "group", "platform").
+  string visibility = 10 [json_name = "visibility"];
+
+  // Listing mode for marketplace (e.g. "fixed", "offer").
+  string listing_mode = 11 [json_name = "listing_mode"];
+
+  // Current listing status (e.g. "draft", "active").
+  string listing_status = 12 [json_name = "listing_status"];
+
+  // Listing price in cents.
+  int32 listing_price_cents = 13 [json_name = "listing_price_cents"];
+
+  // Minimum acceptable price in cents for offer-based listings.
+  int32 listing_min_price_cents = 14 [json_name = "listing_min_price_cents"];
+
+  // When this placement record was created.
+  google.protobuf.Timestamp created_at = 15 [json_name = "created_at"];
+
+  // When this placement record was last updated.
+  google.protobuf.Timestamp updated_at = 16 [json_name = "updated_at"];
+}
+
+// PlacementHistory records a book movement between bookshelves.
+// Maps to op.bookshelf_placement_history table.
+message PlacementHistory {
+  // UUID of the history record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the book that was moved.
+  string book_id = 2 [json_name = "book_id"];
+
+  // UUID of the source bookshelf.
+  string from_bookshelf = 3 [json_name = "from_bookshelf"];
+
+  // UUID of the destination bookshelf.
+  string to_bookshelf = 4 [json_name = "to_bookshelf"];
+
+  // When the book was moved.
+  google.protobuf.Timestamp moved_at = 5 [json_name = "moved_at"];
+}

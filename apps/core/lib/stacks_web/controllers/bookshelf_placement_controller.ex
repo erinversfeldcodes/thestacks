@@ -9,6 +9,7 @@ defmodule StacksWeb.BookshelfPlacementController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement}
+  alias StacksWeb.ProtoJSON
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
@@ -28,7 +29,7 @@ defmodule StacksWeb.BookshelfPlacementController do
         {:ok, placement} ->
           conn
           |> put_status(201)
-          |> json(%{placement: format_placement(placement)})
+          |> json(%{placement: ProtoJSON.placement_ref(placement)})
 
         {:error, changeset} ->
           conn
@@ -54,7 +55,7 @@ defmodule StacksWeb.BookshelfPlacementController do
 
     case Shelving.move_book(placement_id, user.id, to_bookshelf) do
       {:ok, %{placement: placement}} ->
-        json(conn, %{placement: format_placement(placement)})
+        json(conn, %{placement: ProtoJSON.placement_ref(placement)})
 
       {:error, :unauthorized} ->
         conn
@@ -81,7 +82,7 @@ defmodule StacksWeb.BookshelfPlacementController do
 
     case Shelving.update_placement_formats(placement_id, user.id, formats) do
       {:ok, placement} ->
-        json(conn, %{placement: %{id: placement.id, formats: placement.formats}})
+        json(conn, %{placement: ProtoJSON.placement_formats(placement)})
 
       {:error, :unauthorized} ->
         conn
@@ -107,7 +108,7 @@ defmodule StacksWeb.BookshelfPlacementController do
 
     case Shelving.update_placement_visibility(placement_id, user.id, visibility) do
       {:ok, placement} ->
-        json(conn, %{id: placement.id, visibility: placement.visibility})
+        json(conn, ProtoJSON.visibility_update(placement))
 
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "not_found"})
@@ -161,16 +162,5 @@ defmodule StacksWeb.BookshelfPlacementController do
             |> json(%{errors: format_errors(changeset)})
         end
     end
-  end
-
-  defp format_placement(placement) do
-    %{
-      id: placement.id,
-      book_id: placement.book_id,
-      bookshelf_id: placement.bookshelf_id,
-      position: placement.position,
-      placed_at: placement.placed_at,
-      removed_at: placement.removed_at
-    }
   end
 end

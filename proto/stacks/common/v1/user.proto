@@ -1,0 +1,124 @@
+// user.proto — User identity and role types for authentication and authorization.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "UserProto";
+option java_multiple_files = true;
+
+// UserRole distinguishes platform owner from regular users.
+// Wire values (strings sent by AuthController): "owner", "user".
+// Mapping: "owner" -> OWNER (1), "user" -> USER (2).
+enum UserRole {
+  // Default unspecified value; should not be used in practice.
+  USER_ROLE_UNSPECIFIED = 0;
+
+  // Platform owner with full administrative privileges.
+  USER_ROLE_OWNER = 1;
+
+  // Standard registered user.
+  USER_ROLE_USER = 2;
+}
+
+// ProfileVisibility controls who can view a user's profile and activity.
+// Wire values (strings sent by AuthController): "owner", "group", "platform".
+// Mapping: "owner" -> OWNER (1), "group" -> GROUP (2), "platform" -> PLATFORM (3).
+enum ProfileVisibility {
+  // Default unspecified value; should not be used in practice.
+  PROFILE_VISIBILITY_UNSPECIFIED = 0;
+
+  // Profile visible only to the owning user.
+  PROFILE_VISIBILITY_OWNER = 1;
+
+  // Profile visible to members of the same reading group.
+  PROFILE_VISIBILITY_GROUP = 2;
+
+  // Profile visible to all platform users.
+  PROFILE_VISIBILITY_PLATFORM = 3;
+}
+
+// User represents a registered user of The Stacks platform.
+// Matches the output of AuthController.format_user/1.
+//
+// JSON shape: {id, email, display_name, role, profile_visibility,
+//              age_verified, consent_analytics, country_code, city}
+message User {
+  // UUID of the user record.
+  string id = 1 [json_name = "id"];
+
+  // User's email address (personal data, GDPR-classified).
+  string email = 2 [json_name = "email"];
+
+  // User-chosen display name shown on the platform.
+  string display_name = 3 [json_name = "display_name"];
+
+  // The user's role on the platform (string on wire, e.g. "owner", "user").
+  string role = 4 [json_name = "role"];
+
+  // ISO 3166-1 alpha-2 country code for the user's location.
+  string country_code = 5 [json_name = "country_code"];
+
+  // City name for the user's location.
+  string city = 6 [json_name = "city"];
+
+  // Whether the user has consented to analytics data collection.
+  bool consent_analytics = 7 [json_name = "consent_analytics"];
+
+  // Whether the user has verified their age for age-gated content.
+  bool age_verified = 8 [json_name = "age_verified"];
+
+  // When the user's age was verified.
+  google.protobuf.Timestamp age_verified_at = 24 [json_name = "age_verified_at"];
+
+  // Provider used for age verification (e.g. "manual", "id_check").
+  string age_verification_provider = 25 [json_name = "age_verification_provider"];
+
+  // Who can view this user's profile (string on wire, e.g. "owner", "group", "platform").
+  string profile_visibility = 9 [json_name = "profile_visibility"];
+
+  // Argon2 hash of the user's password. DB-only — never sent on the wire.
+  string password_hash = 10 [json_name = "password_hash"];
+
+  // User's personal website URL.
+  string website_url = 11 [json_name = "website_url"];
+
+  // Timestamp of when analytics consent was granted or revoked.
+  google.protobuf.Timestamp consent_analytics_at = 12 [json_name = "consent_analytics_at"];
+
+  // Whether the user has completed onboarding.
+  bool onboarding_completed = 13 [json_name = "onboarding_completed"];
+
+  // Whether the user wants notifications for wishlist book availability.
+  bool notify_wishlist_availability = 14 [json_name = "notify_wishlist_availability"];
+
+  // Whether the user wants notifications for marketplace activity.
+  bool notify_marketplace = 15 [json_name = "notify_marketplace"];
+
+  // Whether the user wants notifications for group invitations.
+  bool notify_group_invitations = 16 [json_name = "notify_group_invitations"];
+
+  // Whether the user wants notifications for matching events.
+  bool notify_event_matches = 17 [json_name = "notify_event_matches"];
+
+  // Whether the user's email address has been confirmed.
+  bool email_confirmed = 18 [json_name = "email_confirmed"];
+
+  // Token used for email confirmation flow.
+  string email_confirmation_token = 19 [json_name = "email_confirmation_token"];
+
+  // Token used for password reset flow.
+  string password_reset_token = 20 [json_name = "password_reset_token"];
+
+  // When the password reset token was sent.
+  google.protobuf.Timestamp password_reset_sent_at = 21 [json_name = "password_reset_sent_at"];
+
+  // When this user account was created.
+  google.protobuf.Timestamp created_at = 22 [json_name = "created_at"];
+
+  // When this user account was last updated.
+  google.protobuf.Timestamp updated_at = 23 [json_name = "updated_at"];
+}

@@ -3,16 +3,17 @@ defmodule Stacks.Social.VisibilityGrantTest do
 
   import Stacks.Factory
 
+  alias Stacks.Social
   alias Stacks.Social.VisibilityGrant
 
-  describe "changeset/2" do
+  describe "visibility_grant_changeset/2" do
     test "is valid with resource_type, resource_id, granted_to, and granted_by" do
       granted_to = insert(:user)
       granted_by = insert(:user)
       resource_id = Ecto.UUID.generate()
 
       changeset =
-        VisibilityGrant.changeset(%VisibilityGrant{}, %{
+        Social.visibility_grant_changeset(%VisibilityGrant{}, %{
           resource_type: "bookshelf",
           resource_id: resource_id,
           granted_to_id: granted_to.id,
@@ -27,7 +28,7 @@ defmodule Stacks.Social.VisibilityGrantTest do
       granted_by = insert(:user)
 
       changeset =
-        VisibilityGrant.changeset(%VisibilityGrant{}, %{
+        Social.visibility_grant_changeset(%VisibilityGrant{}, %{
           resource_id: Ecto.UUID.generate(),
           granted_to_id: granted_to.id,
           granted_by_id: granted_by.id

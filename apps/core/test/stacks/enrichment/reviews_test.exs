@@ -12,7 +12,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       attrs = %{
         book_id: book.id,
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/123",
         rating: 4.2,
         rating_count: 1250,
@@ -24,7 +24,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       assert {:ok, %ReviewSnapshot{} = snapshot} = Reviews.upsert_snapshot(attrs)
       assert snapshot.book_id == book.id
-      assert snapshot.source == :goodreads
+      assert snapshot.source == "goodreads"
       assert snapshot.summary == "A great read."
       assert snapshot.rating == 4.2
     end
@@ -35,7 +35,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       attrs = %{
         book_id: book.id,
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/123",
         rating: 4.0,
         rating_count: 100,
@@ -46,7 +46,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       updated_attrs = %{
         book_id: book.id,
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/123-updated",
         rating: 4.5,
         rating_count: 200,
@@ -76,7 +76,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       attrs = %{
         book_id: book.id,
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/123",
         summary: long_summary,
         scraped_at: DateTime.utc_now()
@@ -93,14 +93,14 @@ defmodule Stacks.Enrichment.ReviewsTest do
 
       goodreads = %{
         book_id: book.id,
-        source: :goodreads,
+        source: "goodreads",
         source_url: "https://goodreads.com/book/show/123",
         scraped_at: now
       }
 
       reddit = %{
         book_id: book.id,
-        source: :reddit,
+        source: "reddit",
         source_url: "https://reddit.com/r/books/123",
         scraped_at: now
       }
@@ -116,7 +116,7 @@ defmodule Stacks.Enrichment.ReviewsTest do
   describe "latest_reviews/1" do
     test "returns all review snapshots for a book" do
       book = insert(:book)
-      _snapshot = insert(:review_snapshot, book: book, source: :goodreads)
+      _snapshot = insert(:review_snapshot, book: book, source: "goodreads")
 
       reviews = Reviews.latest_reviews(book.id)
       assert length(reviews) == 1
