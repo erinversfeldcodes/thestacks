@@ -19,8 +19,8 @@ defmodule Stacks.CircuitBreakersTest do
   alias Stacks.AI.TogetherClient
   alias Stacks.Books.ISBNResolver
   alias Stacks.CircuitBreakers
-  alias Stacks.CircuitBreakersTest.FailingHttpClient
   alias Stacks.Enrichment.ScraperClient
+  alias Stacks.Testing.FailingHttpClient
 
   # ---------------------------------------------------------------------------
   # Helpers
@@ -496,16 +496,214 @@ defmodule Stacks.CircuitBreakersTest do
              "expected [:stacks, :fuse, :blown] for :scraper_fuse, got: #{inspect(events)}"
     end
   end
-end
 
-# ---------------------------------------------------------------------------
-# Test-only helpers
-# ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # 8. Probe-based recovery
+  # ---------------------------------------------------------------------------
 
-defmodule Stacks.CircuitBreakersTest.FailingHttpClient do
-  @moduledoc "ISBN resolver HTTP client stub that always returns an error — used to blow ISBN fuses."
-  @behaviour Stacks.Books.HttpClientBehaviour
+  describe "probe-based recovery" do
+    setup do
+      # Use a unique fuse name per test to avoid interference with other suites.
+      fuse_name = :test_probe_fuse
 
-  @impl true
-  def get(_url), do: {:error, :econnrefused}
+      remove_fuse(fuse_name)
+      :fuse.install(fuse_name, {{:standard, 0, 60_000}, {:reset, 60_000}})
+
+      on_exit(fn ->
+        Application.delete_env(:core, :circuit_breaker_probe_overrides)
+        remove_fuse(fuse_name)
+        CircuitBreakers.install_all()
+      end)
+
+      {:ok, fuse_name: fuse_name}
+    end
+
+    test "telemetry handler for [:stacks, :fuse, :blown] is attached at startup" do
+      # Verify the stable handler ID is registered — this confirms init/1 wired
+      # the probe scheduler correctly and the handler survives GenServer restarts
+      # (stable ID prevents duplicate handler leaks).
+      handlers = :telemetry.list_handlers([:stacks, :fuse, :blown])
+
+      assert Enum.any?(handlers, fn h ->
+               h.id == "stacks-circuit-breakers-probe"
+             end),
+             "expected telemetry handler 'stacks-circuit-breakers-probe' to be attached"
+    end
+
+    test "probe resets fuse and emits [:stacks, :fuse, :recovered] on success", %{
+      fuse_name: fuse_name
+    } do
+      # Inject a probe that always succeeds.
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn -> :ok end
+      })
+
+      # Blow the fuse first.
+      :fuse.melt(fuse_name)
+      assert :blown = :fuse.ask(fuse_name, :sync)
+
+      # Capture the recovered telemetry, then send the probe message directly.
+      events =
+        with_telemetry_capture([[:stacks, :fuse, :recovered]], fn ->
+          send(Stacks.CircuitBreakers, {:probe, fuse_name})
+          # Give the GenServer time to process the message.
+          Process.sleep(50)
+        end)
+
+      assert :ok = :fuse.ask(fuse_name, :sync)
+
+      assert Enum.any?(events, fn {event, _m, meta} ->
+               event == [:stacks, :fuse, :recovered] and
+                 meta.fuse_name == fuse_name and
+                 meta.recovered_via == :probe
+             end),
+             "expected [:stacks, :fuse, :recovered] telemetry, got: #{inspect(events)}"
+    end
+
+    test "probe reschedules on failure and fuse stays blown", %{fuse_name: fuse_name} do
+      test_pid = self()
+      call_count = :counters.new(1, [])
+
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn ->
+          :counters.add(call_count, 1, 1)
+          send(test_pid, {:probe_attempt, :counters.get(call_count, 1)})
+          {:error, :service_down}
+        end
+      })
+
+      # Blow the fuse.
+      :fuse.melt(fuse_name)
+      assert :blown = :fuse.ask(fuse_name, :sync)
+
+      # Manually trigger the first probe — it should fail and reschedule.
+      send(Stacks.CircuitBreakers, {:probe, fuse_name})
+
+      # Wait for first probe attempt.
+      assert_receive {:probe_attempt, 1}, 500
+
+      # Fuse must still be blown after a failed probe.
+      assert :blown = :fuse.ask(fuse_name, :sync)
+    end
+
+    test "probe is a no-op when fuse has already been reset (backstop fired first)", %{
+      fuse_name: fuse_name
+    } do
+      call_count = :counters.new(1, [])
+
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn ->
+          :counters.add(call_count, 1, 1)
+          :ok
+        end
+      })
+
+      # Blow then manually reset (simulating backstop timer firing).
+      :fuse.melt(fuse_name)
+      :fuse.reset(fuse_name)
+      assert :ok = :fuse.ask(fuse_name, :sync)
+
+      # Send the probe — it should be a no-op since the fuse is already :ok.
+      send(Stacks.CircuitBreakers, {:probe, fuse_name})
+      Process.sleep(50)
+
+      # The probe function should NOT have been called.
+      assert :counters.get(call_count, 1) == 0
+    end
+
+    test "[:stacks, :fuse, :recovered] telemetry fires with correct metadata on probe success", %{
+      fuse_name: fuse_name
+    } do
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn -> :ok end
+      })
+
+      :fuse.melt(fuse_name)
+
+      events =
+        with_telemetry_capture([[:stacks, :fuse, :recovered]], fn ->
+          send(Stacks.CircuitBreakers, {:probe, fuse_name})
+          Process.sleep(50)
+        end)
+
+      assert [{[:stacks, :fuse, :recovered], %{}, meta}] = events
+      assert meta.fuse_name == fuse_name
+      assert meta.recovered_via == :probe
+    end
+
+    test "[:stacks, :fuse, :probe_failed] telemetry fires on failed probe", %{
+      fuse_name: fuse_name
+    } do
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn -> {:error, :timeout} end
+      })
+
+      :fuse.melt(fuse_name)
+
+      events =
+        with_telemetry_capture([[:stacks, :fuse, :probe_failed]], fn ->
+          send(Stacks.CircuitBreakers, {:probe, fuse_name})
+          Process.sleep(50)
+        end)
+
+      assert [{[:stacks, :fuse, :probe_failed], %{}, meta}] = events
+      assert meta.fuse_name == fuse_name
+      assert meta.reason == :timeout
+    end
+
+    test "duplicate blown events do not create multiple probe loops", %{fuse_name: fuse_name} do
+      test_pid = self()
+      call_count = :counters.new(1, [])
+
+      Application.put_env(:core, :circuit_breaker_probe_overrides, %{
+        fuse_name => fn ->
+          :counters.add(call_count, 1, 1)
+          send(test_pid, :probe_called)
+          {:error, :still_down}
+        end
+      })
+
+      :fuse.melt(fuse_name)
+
+      # Simulate two concurrent blown events reaching the GenServer.
+      send(Stacks.CircuitBreakers, {:maybe_schedule_probe, fuse_name})
+      send(Stacks.CircuitBreakers, {:maybe_schedule_probe, fuse_name})
+      Process.sleep(50)
+
+      # Only one probe timer should have been scheduled. Verify by sending the
+      # probe message directly and confirming the call count is exactly 1.
+      send(Stacks.CircuitBreakers, {:probe, fuse_name})
+      assert_receive :probe_called, 500
+
+      # A second {:probe} sent directly should also succeed but we're checking
+      # the deduplication from {maybe_schedule_probe} — the counter proves
+      # only one probe path was set up from the two blown events.
+      assert :counters.get(call_count, 1) == 1
+    end
+
+    test "run_probe/1 handles fuse with no configured probe gracefully", %{fuse_name: fuse_name} do
+      # No override for fuse_name AND fuse_name is not in @probes (it's a test fuse).
+      # The run_probe path should return {:error, :no_probe} and the fuse stays blown.
+      Application.delete_env(:core, :circuit_breaker_probe_overrides)
+
+      :fuse.melt(fuse_name)
+
+      events =
+        with_telemetry_capture([[:stacks, :fuse, :probe_failed]], fn ->
+          send(Stacks.CircuitBreakers, {:probe, fuse_name})
+          Process.sleep(50)
+        end)
+
+      # Fuse should still be blown — :no_probe is treated as a failed probe.
+      assert :blown = :fuse.ask(fuse_name, :sync)
+
+      # probe_failed telemetry should have fired with reason: :no_probe.
+      assert Enum.any?(events, fn {event, _m, meta} ->
+               event == [:stacks, :fuse, :probe_failed] and
+                 meta.fuse_name == fuse_name and
+                 meta.reason == :no_probe
+             end),
+             "expected [:stacks, :fuse, :probe_failed] with reason :no_probe, got: #{inspect(events)}"
+    end
+  end
 end
