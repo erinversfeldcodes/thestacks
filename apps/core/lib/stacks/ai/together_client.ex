@@ -15,7 +15,7 @@ defmodule Stacks.AI.TogetherClient do
 
   ## Circuit Breaker
 
-  Protected by `:together_ai_fuse` — 3 failures in 2 minutes blows the circuit.
+  Protected by `:together_ai_fuse` — managed by `Stacks.CircuitBreakers`.
   When blown, callers should persist snapshots without a summary.
   """
 
@@ -35,11 +35,8 @@ defmodule Stacks.AI.TogetherClient do
 
   defp do_summarize(review_text, book_context) do
     case :fuse.ask(@fuse_name, :sync) do
-      :blown ->
-        {:error, :circuit_open}
-
-      fuse_result when fuse_result in [:ok, {:error, :not_found}] ->
-        make_request(review_text, book_context)
+      :blown -> {:error, :circuit_open}
+      :ok -> make_request(review_text, book_context)
     end
   end
 
@@ -56,7 +53,7 @@ defmodule Stacks.AI.TogetherClient do
 
   defp send_request(review_text, book_context, api_key) do
     body = build_request_body(review_text, book_context)
-    url = "https://api.together.xyz/v1/chat/completions"
+    url = "#{base_url()}/v1/chat/completions"
 
     req =
       Finch.build(
@@ -106,13 +103,13 @@ defmodule Stacks.AI.TogetherClient do
 
   defp handle_response({:ok, %Finch.Response{status: status, body: resp_body}}) do
     Logger.warning("TogetherClient: HTTP #{status}: #{resp_body}")
-    :fuse.melt(@fuse_name)
+    Stacks.CircuitBreakers.melt(@fuse_name)
     {:error, %{status: status, body: resp_body}}
   end
 
   defp handle_response({:error, reason}) do
     Logger.warning("TogetherClient: request failed: #{inspect(reason)}")
-    :fuse.melt(@fuse_name)
+    Stacks.CircuitBreakers.melt(@fuse_name)
     {:error, reason}
   end
 
@@ -123,7 +120,7 @@ defmodule Stacks.AI.TogetherClient do
 
       {:ok, other} ->
         Logger.warning("TogetherClient: unexpected response shape: #{inspect(other)}")
-        :fuse.melt(@fuse_name)
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, {:unexpected_response, other}}
     end
   end
@@ -138,11 +135,8 @@ defmodule Stacks.AI.TogetherClient do
 
   defp do_complete(prompt, opts) do
     case :fuse.ask(@fuse_name, :sync) do
-      :blown ->
-        {:error, :circuit_open}
-
-      fuse_result when fuse_result in [:ok, {:error, :not_found}] ->
-        make_completion_request(prompt, opts)
+      :blown -> {:error, :circuit_open}
+      :ok -> make_completion_request(prompt, opts)
     end
   end
 
@@ -166,7 +160,7 @@ defmodule Stacks.AI.TogetherClient do
 
         Finch.build(
           :post,
-          "https://api.together.xyz/v1/chat/completions",
+          "#{base_url()}/v1/chat/completions",
           [
             {"content-type", "application/json"},
             {"authorization", "Bearer #{api_key}"}
@@ -180,5 +174,9 @@ defmodule Stacks.AI.TogetherClient do
 
   defp configured_client do
     Application.get_env(:core, :together_client, __MODULE__)
+  end
+
+  defp base_url do
+    Application.get_env(:core, :together_ai_base_url, "https://api.together.xyz")
   end
 end
