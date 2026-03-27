@@ -5274,6 +5274,60 @@ Currently, dbt staging SQL files are committed to the repo and consumed directly
 
 This decouples the data pipeline from the application build. The proto remains the source of truth, CI is the build system, and dbt gets pre-built SQL. Tracked for implementation when dbt is deployed to a production warehouse.
 
+### Proto-First Context Interfaces (ADR 014)
+
+The current proto codegen pipeline is **asymmetric**: outbound responses are fully
+proto-governed (generated serializers, CI drift detection), but inbound requests are not
+(controllers pattern-match raw params maps; `requests.proto` is decorative only).
+
+ADR 014 (`docs/decisions/014-proto-first-context-interfaces.md`) closes this gap in three
+phases:
+
+**Phase 1 — Inbound request decoding (extends `mix proto.sync`)**
+
+Generate a `ProtoJSON.Decode` module (mirror of `ProtoJSON.Gen`) with one decoder per
+request message in `requests.proto`. A `DecodeRequest` plug validates inbound JSON before
+the controller action runs and stores the typed struct in `conn.assigns.request`. Eliminates
+manual param pattern matching and `@valid_*` guard lists in controllers.
+
+**Phase 2 — Proto-typed context function signatures**
+
+Context functions accept proto request structs as input and return proto response structs
+as output. Serialization (currently scattered across controllers via `ProtoJSON.*` calls)
+moves into context modules, which own both the data and the output shape. Controllers
+become thin dispatchers: extract request, call context, return response.
+
+```
+# Before (controller owns serialization)
+ProtoJSON.placement(placement)  # called in controller
+
+# After (context owns serialization)
+Shelving.place_book(%PlaceBookRequest{...}, user)  # returns proto-shaped map
+```
+
+**Phase 3 — Service definitions (long-term)**
+
+Add `service` blocks to API proto files. `mix proto.sync` generates router entries and
+controller stubs from them. Breaking change detection via `buf breaking` covers the full
+API surface — adding or removing an endpoint is a proto-tracked event.
+
+**Updated codegen diagram (post-Phase 2):**
+
+```
+proto/*.proto (source of truth)
+    │
+    ├── mix proto.sync ──► Ecto schemas (gen/)
+    │                  ──► dbt staging SQL + schema.yml
+    │                  ──► ProtoJSON.Gen (response serializers)
+    │                  ──► ProtoJSON.Decode (request decoders)  ← Phase 1
+    │                  ──► Migration drift detection
+    │
+    └── gen-elm-proto.sh ──► Elm decoders + encoders (proto/gen/elm/)
+```
+
+**Current state:** Phase 1 and 2 not yet implemented. This section documents the target
+architecture. The existing `ProtoJSON` + controller pattern remains in use until migration.
+
 ### Event Upcasting
 
 Old events in `event_log` are upcasted to the current schema version on read:
