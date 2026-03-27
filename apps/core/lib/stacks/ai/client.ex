@@ -19,6 +19,11 @@ defmodule Stacks.AI.Client do
     - Value: `<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded)
     - Replay window: ±60 seconds (enforced by the Modal service)
     - Secret: `VISION_HMAC_SECRET` env var (shared between core and Modal vision service)
+
+  ## Circuit Breaker
+
+  Protected by `:vision_fuse` — managed by `Stacks.CircuitBreakers`.
+  When blown, `call_vision/2` returns `{:error, :circuit_open}`.
   """
 
   alias Stacks.AI.BudgetTracker
@@ -28,7 +33,7 @@ defmodule Stacks.AI.Client do
 
   @behaviour ClientBehaviour
 
-  @fuse_name :vision_service
+  @fuse_name :vision_fuse
 
   @impl true
   def call_vision(endpoint, payload) do
@@ -44,8 +49,6 @@ defmodule Stacks.AI.Client do
         case :fuse.ask(@fuse_name, :sync) do
           :ok -> make_vision_request(endpoint, payload)
           :blown -> {:error, :circuit_open}
-          # Fuse not yet installed (e.g. first startup before fuse is initialised)
-          {:error, :not_found} -> make_vision_request(endpoint, payload)
         end
 
       {:error, reason} ->
@@ -155,7 +158,7 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: status}
         )
 
-        melt_fuse(@fuse_name)
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, %{status: status, body: resp_body}}
 
       {:error, reason} ->
@@ -167,20 +170,8 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, kind: :error, reason: reason}
         )
 
-        melt_fuse(@fuse_name)
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, reason}
-    end
-  end
-
-  defp melt_fuse(fuse_name) do
-    :fuse.melt(fuse_name)
-
-    case :fuse.ask(fuse_name, :sync) do
-      :blown ->
-        :telemetry.execute([:stacks, :fuse, :blown], %{}, %{fuse_name: fuse_name})
-
-      _ ->
-        :telemetry.execute([:stacks, :fuse, :melt], %{}, %{fuse_name: fuse_name})
     end
   end
 

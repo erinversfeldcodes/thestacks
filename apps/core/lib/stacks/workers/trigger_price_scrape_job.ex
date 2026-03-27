@@ -9,7 +9,10 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   - **Batch:** `%{batch: true}` — finds all stale ISBNs and scrapes them.
 
   Results are pushed to `PricePipeline` (Broadway) for batched persistence.
-  A Fuse circuit breaker (`:scraper_fuse`) protects against scraper downtime.
+
+  Circuit breaker protection is handled at the `ScraperClient` level (`:scraper_fuse`).
+  When the circuit is open, `ScraperClient.scrape/2` returns `{:error, :circuit_open}`,
+  which is treated the same as any other scrape failure by this worker.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 3
@@ -19,8 +22,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   alias Stacks.Enrichment.PricePipeline
   alias Stacks.Enrichment.Prices
   alias Stacks.Monitoring
-
-  @fuse_name :scraper_fuse
 
   @impl true
   def perform(%Oban.Job{args: %{"batch" => true}}) do
@@ -57,16 +58,9 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   end
 
   defp scrape_all(isbn_entries, stores) do
-    case :fuse.ask(@fuse_name, :sync) do
-      :blown ->
-        Logger.warning("TriggerPriceScrapeJob: circuit breaker open, skipping scrape")
-        {:error, :circuit_open}
-
-      fuse_result when fuse_result in [:ok, {:error, :not_found}] ->
-        results = do_scrape_all(isbn_entries, stores)
-        push_successful_results(results)
-        evaluate_outcome(results)
-    end
+    results = do_scrape_all(isbn_entries, stores)
+    push_successful_results(results)
+    evaluate_outcome(results)
   end
 
   defp push_successful_results(results) do
@@ -116,7 +110,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
            }}
 
         {:error, reason} ->
-          :fuse.melt(@fuse_name)
           Monitoring.record_failure(store_name, "scraper_config", inspect(reason))
 
           Logger.warning(
