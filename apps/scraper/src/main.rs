@@ -14,7 +14,7 @@ use stacks_scraper::{
     scraper::Engine,
     stores::StoreRegistry,
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 // ---------------------------------------------------------------------------
 // Shared application state
@@ -184,10 +184,13 @@ async fn main() -> anyhow::Result<()> {
         .merge(authed_routes)
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Bind to [::] (dual-stack) so the scraper accepts both IPv4 and IPv6 connections.
+    // Fly.io's private 6PN network routes .internal DNS to IPv6 addresses; binding to
+    // 0.0.0.0 (IPv4 only) would make the scraper unreachable from other Fly machines.
+    let addr = format!("[::]:{port}");
     tracing::info!("scraper listening on {}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr)
+    let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("failed to bind to {addr}"))?;
 

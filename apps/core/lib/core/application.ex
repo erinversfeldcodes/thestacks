@@ -27,16 +27,17 @@ defmodule Core.Application do
 
   # Fly's internal .internal hostnames resolve to IPv6 (6PN) addresses only.
   # Without :inet6, Erlang's gen_tcp defaults to :inet (IPv4) and cannot dial
-  # them. We detect internal URLs at startup and configure the pool accordingly.
+  # them. We detect internal URLs at startup and configure pools accordingly.
   defp finch_spec do
     vision_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
+    scraper_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
+
+    inet6_pool = [conn_opts: [transport_opts: [inet6: true]]]
 
     pools =
-      if String.contains?(vision_url, ".internal") do
-        %{vision_url => [conn_opts: [transport_opts: [inet6: true]]]}
-      else
-        %{}
-      end
+      [vision_url, scraper_url]
+      |> Enum.filter(&String.contains?(&1, ".internal"))
+      |> Map.new(&{&1, inet6_pool})
 
     {Finch, name: Stacks.Finch, pools: pools}
   end
