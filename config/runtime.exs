@@ -74,6 +74,13 @@ else
   if searxng_url = System.get_env("SEARXNG_URL") do
     config :core, :searxng_url, searxng_url
   end
+
+  # Enable the circuit breaker smoke endpoint on preview/dev deployments.
+  # Never set SMOKE_TESTS_ENABLED in production — the endpoint blows all fuses
+  # and waits 30s for probe-driven recovery. Default: false.
+  if System.get_env("SMOKE_TESTS_ENABLED") in ~w(true 1) do
+    config :core, :smoke_tests_enabled, true
+  end
 end
 
 # ── Prod-only (release) ───────────────────────────────────────────────────────
