@@ -139,6 +139,21 @@ else
     echo "WARN deploy: warmup skipped — could not authenticate"
 fi
 
+# ── Circuit breaker smoke test ────────────────────────────────────────────────
+echo ""
+echo "==> Running circuit breaker smoke test against ${CORE_URL}..."
+if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+    if SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}" \
+       bash "${REPO_ROOT}/scripts/smoke-circuit-breakers.sh" "${CORE_URL}"; then
+        echo "PASS deploy: circuit breaker smoke test passed"
+    else
+        echo "FAIL deploy: circuit breaker smoke test failed"
+        e2e_failed=1
+    fi
+else
+    echo "SKIP: SCRAPER_HMAC_SECRET not set — skipping circuit breaker smoke test"
+fi
+
 # ── Playwright E2E ────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running Playwright E2E against ${CORE_URL}..."
