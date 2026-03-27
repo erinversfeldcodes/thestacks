@@ -448,17 +448,21 @@ end
 
 ### Circuit Breakers
 
-All external HTTP calls (AI providers, Open Library, scraped sites) are wrapped in circuit breakers using the `Fuse` library:
+All external HTTP calls (AI providers, Open Library, scraped sites) are wrapped in circuit breakers using the `:fuse` Erlang library. All fuses are installed at application startup by `Stacks.CircuitBreakers` and use the `_fuse` atom suffix convention.
 
 ```elixir
-# If 5 failures in 60 seconds, open circuit for 5 minutes
-Fuse.install(:together_ai, {{:standard, 5, 60_000}, {:reset, 300_000}})
+# Installed once at startup via Stacks.CircuitBreakers.install_all/0
+# 5 failures in 60 seconds → open for 5 minutes
+:fuse.install(:together_ai_fuse, {{:standard, 5, 60_000}, {:reset, 300_000}})
 
-# Before calling:
-case Fuse.ask(:together_ai) do
-  :ok -> make_request()
+# Before every external call:
+case :fuse.ask(:together_ai_fuse, :sync) do
+  :ok    -> make_request()
   :blown -> {:error, :circuit_open}  # Oban job retries later
 end
+
+# On failure — always via the shared helper (emits telemetry):
+Stacks.CircuitBreakers.melt(:together_ai_fuse)
 ```
 
 ### Output Validation
@@ -4765,14 +4769,16 @@ Application
 
 Every external HTTP call is wrapped in a `Fuse` circuit breaker:
 
-| Service | Fuse Config | Behaviour When Open |
-|---------|------------|---------------------|
-| Modal vision service | 5 failures in 60s → open 5 min | Oban job retries with backoff |
-| Open Library API | 5 failures in 60s → open 5 min | Fallback to Google Books API |
-| Google Books API | 5 failures in 60s → open 5 min | Book identification fails gracefully |
-| Brave Search API | 3 failures in 60s → open 10 min | Fallback to SearXNG |
-| Bookshop scrapers (per-store) | 3 failures in 60s → open 15 min | Skip store, try next scrape cycle |
-| Stitch Money (future) | 2 failures in 30s → open 5 min | Payment UI shows "temporarily unavailable" |
+| Service | Fuse atom | Fuse Config | Behaviour When Open |
+|---------|-----------|------------|---------------------|
+| Modal vision service | `:vision_fuse` | 5 failures in 60s → open 5 min | Oban job retries with backoff |
+| Together AI LLM API | `:together_ai_fuse` | 5 failures in 60s → open 5 min | Review summaries skipped; snapshots persisted without summary |
+| Open Library API | `:open_library_fuse` | 5 failures in 60s → open 5 min | Fallback to Google Books API |
+| Google Books API | `:google_books_fuse` | 5 failures in 60s → open 5 min | Book identification fails gracefully |
+| Brave Search API | `:brave_search_fuse` (deferred) | 3 failures in 60s → open 10 min | Fallback to SearXNG |
+| Bookshop scrapers | `:scraper_fuse` | 3 failures in 60s → open 15 min | Skip all stores, try next scrape cycle |
+| Bookshop scrapers (per-store) | per-store fuses (deferred) | 3 failures in 60s → open 15 min | Skip that store, try others |
+| Stitch Money (future) | `:stitch_money_fuse` | 2 failures in 30s → open 5 min | Payment UI shows "temporarily unavailable" |
 
 ### Oban Retry Strategy
 
