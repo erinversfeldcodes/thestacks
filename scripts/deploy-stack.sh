@@ -203,7 +203,8 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
             --app "${SCRAPER_APP}" \
             --config "${REPO_ROOT}/deploy/fly.scraper.toml" \
             --image-label "pr-${SANITISED}" \
-            --no-cache); then
+            --no-cache \
+            --depot=false); then
         echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
     else
         echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
@@ -332,7 +333,8 @@ if ! (cd "$REPO_ROOT" && fly deploy \
         --app "${CORE_APP}" \
         --config "${REPO_ROOT}/deploy/fly.core.toml" \
         --image-label "pr-${SANITISED}" \
-        --no-cache); then
+        --no-cache \
+        --depot=false); then
     echo "FAIL deploy: core app deployment failed"
     exit 1
 fi
