@@ -465,6 +465,20 @@ end
 Stacks.CircuitBreakers.melt(:together_ai_fuse)
 ```
 
+Telemetry events emitted by `Stacks.CircuitBreakers`:
+
+| Event | When | Metadata |
+|-------|------|----------|
+| `[:stacks, :fuse, :melt]` | Failure recorded, circuit still closed | `%{fuse_name: atom()}` |
+| `[:stacks, :fuse, :blown]` | Failure threshold exceeded, circuit opened | `%{fuse_name: atom()}` |
+| `[:stacks, :fuse, :recovered]` | Probe confirmed service is up, circuit closed | `%{fuse_name: atom(), recovered_via: :probe}` |
+| `[:stacks, :fuse, :probe_failed]` | Probe attempt failed; next probe rescheduled | `%{fuse_name: atom(), reason: term()}` |
+
+When a fuse blows, `Stacks.CircuitBreakers` schedules a lightweight probe (HTTP health
+check) every 15 seconds. The moment the probe succeeds, `:fuse.reset/1` is called to
+close the circuit immediately — without waiting for the full `{:reset, Ms}` backstop
+timer. The backstop timer remains in place as the worst-case ceiling.
+
 ### Output Validation
 
 **Vision model output:**

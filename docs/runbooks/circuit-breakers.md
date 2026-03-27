@@ -103,10 +103,26 @@ ORDER BY attempted_at DESC LIMIT 20;
 
 ## Response
 
-### Normal case — wait for auto-reset
+### Normal case — probe-driven recovery (typical)
 
-Circuits reset automatically after the configured window (5 or 15 minutes). If the underlying
-service has recovered, **no action is required** — the circuit will close on its next probe.
+`Stacks.CircuitBreakers` actively probes each blown fuse every **15 seconds**. The moment
+a probe succeeds (HTTP 200 from the service's health endpoint), the circuit is closed
+immediately via `:fuse.reset/1`. Typical recovery time is 15–30 seconds after the
+underlying service comes back up.
+
+**No operator action is required.** The circuit will close automatically as soon as the
+service recovers. Observable via the `[:stacks, :fuse, :recovered]` telemetry event
+(metadata: `%{fuse_name: atom(), recovered_via: :probe}`).
+
+While a fuse is blown and probing, each failed probe emits `[:stacks, :fuse, :probe_failed]`
+(metadata: `%{fuse_name: atom(), reason: term()}`). Repeated probe failures are expected
+during an outage — they do not require operator action, but can be used to alert on
+"fuse blown and failing probes for >N minutes" in a metrics system.
+
+The `{:reset, Ms}` backstop timer (5 or 15 minutes depending on the fuse) remains in
+place as the worst-case ceiling. If probes never succeed within that window, the circuit
+opens once on the backstop and the next real request will re-melt it if the service is
+still down.
 
 Do not manually cancel Oban jobs. Jobs in `retrying` state will resume automatically.
 
@@ -141,7 +157,12 @@ The service is still degraded. Do not keep manually resetting. Instead:
 
 ## Recovery
 
-Circuit auto-closes when the reset timer fires AND the next `:fuse.ask` succeeds. Verify:
+Circuits typically close within 15–30 seconds of service recovery via probe-based recovery
+(see "Normal case" above). The `[:stacks, :fuse, :recovered]` telemetry event fires when
+this happens. If probes are failing for longer than expected, the underlying service is
+still degraded — follow the diagnosis steps above.
+
+Circuit auto-closes at the latest when the backstop reset timer fires. Verify:
 
 ```elixir
 iex> :fuse.ask(:vision_fuse, :sync)
@@ -168,5 +189,5 @@ Retrying jobs will pick up and execute on their next attempt schedule.
 - If the same fuse has blown 3+ times in 7 days: the threshold or reset config may need
   tuning, or the underlying service needs investigation. Threshold configs are in
   `apps/core/lib/stacks/circuit_breakers.ex`.
-- If `:scraper_fuse` is frequently open: per-store fuses (deferred, tracked in Issue #137)
+- If `:scraper_fuse` is frequently open: per-store fuses (deferred to a follow-on issue)
   would isolate individual store failures from the whole scraper circuit.

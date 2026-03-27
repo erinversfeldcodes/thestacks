@@ -284,6 +284,7 @@ fly secrets set \
     ${SCRAPER_INTERNAL_URL:+SCRAPER_SERVICE_URL="${SCRAPER_INTERNAL_URL}"} \
     ${SEARXNG_INTERNAL_URL:+SEARXNG_URL="${SEARXNG_INTERNAL_URL}"} \
     ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
+    SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 
 # ── Generate proto Elm decoders ───────────────────────────────────────────────
