@@ -128,6 +128,38 @@ defmodule StacksWeb.BookshelfPlacementController do
     conn |> put_status(422) |> json(%{error: "visibility is required"})
   end
 
+  @doc "PUT /api/placements/:id/progress — update reading status and/or current page."
+  def update_progress(conn, %{"id" => placement_id, "reading_status" => _} = params) do
+    user = Guardian.Plug.current_resource(conn)
+    attrs = Map.take(params, ["reading_status", "current_page"])
+
+    case Shelving.update_reading_progress(placement_id, user.id, attrs) do
+      {:ok, placement} ->
+        json(conn, %{placement: ProtoJSON.reading_progress(placement)})
+
+      {:error, :unauthorized} ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "forbidden"})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "not found"})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def update_progress(conn, _params) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "reading_status is required"})
+  end
+
   @doc "DELETE /api/placements/:id — soft-delete (remove) a placement."
   def delete(conn, %{"id" => placement_id}) do
     user = Guardian.Plug.current_resource(conn)

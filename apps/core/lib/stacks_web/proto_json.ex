@@ -406,6 +406,27 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Reading progress
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a placement's reading progress update response.
+
+  Matches the shape returned by
+  `BookshelfPlacementController.update_progress/2`.
+  """
+  @spec reading_progress(map()) :: map()
+  def reading_progress(placement) do
+    %{
+      id: placement.id,
+      reading_status: placement.reading_status,
+      current_page: placement.current_page,
+      started_at: placement.started_at,
+      finished_at: placement.finished_at
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Visibility update
   # ---------------------------------------------------------------------------
 

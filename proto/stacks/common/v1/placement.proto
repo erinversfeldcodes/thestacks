@@ -192,6 +192,18 @@ message Placement {
 
   // When this placement record was last updated.
   google.protobuf.Timestamp updated_at = 16 [json_name = "updated_at"];
+
+  // Reading lifecycle status: to_read, reading, completed, abandoned.
+  string reading_status = 17 [json_name = "reading_status"];
+
+  // Current page the user is on (non-negative integer, nullable).
+  int32 current_page = 18 [json_name = "current_page"];
+
+  // When the user first started reading this placement.
+  google.protobuf.Timestamp started_at = 19 [json_name = "started_at"];
+
+  // When the user finished reading this placement.
+  google.protobuf.Timestamp finished_at = 20 [json_name = "finished_at"];
 }
 
 // PlacementHistory records a book movement between bookshelves.
