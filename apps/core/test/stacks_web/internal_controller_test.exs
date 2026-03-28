@@ -16,6 +16,60 @@ defmodule StacksWeb.InternalControllerTest do
     "#{ts}.#{sig}"
   end
 
+  # Generates a valid X-Internal-Token for the smoke endpoint (scraper HMAC scheme).
+  defp test_internal_token do
+    ts = System.os_time(:second) |> Integer.to_string()
+    secret = Application.fetch_env!(:core, :scraper_hmac_secret)
+    message = "#{ts}.POST./api/internal/smoke/circuit_breakers"
+    sig = :crypto.mac(:hmac, :sha256, secret, message) |> Base.encode16(case: :lower)
+    "#{ts}.#{sig}"
+  end
+
+  describe "POST /api/internal/smoke/circuit_breakers" do
+    test "returns 404 when smoke_tests_enabled is false (production default)", %{conn: conn} do
+      # smoke_tests_enabled defaults to false in test env — endpoint should be invisible.
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post("/api/internal/smoke/circuit_breakers", %{})
+
+      assert json_response(conn, 404)
+    end
+
+    test "returns 401 when smoke_tests_enabled is true but token is absent", %{conn: conn} do
+      original = Application.get_env(:core, :smoke_tests_enabled)
+      Application.put_env(:core, :smoke_tests_enabled, true)
+
+      on_exit(fn -> Application.put_env(:core, :smoke_tests_enabled, original) end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post("/api/internal/smoke/circuit_breakers", %{})
+
+      assert json_response(conn, 401)
+    end
+
+    test "returns 401 when smoke_tests_enabled is true but token is tampered", %{conn: conn} do
+      original = Application.get_env(:core, :smoke_tests_enabled)
+      Application.put_env(:core, :smoke_tests_enabled, true)
+
+      on_exit(fn -> Application.put_env(:core, :smoke_tests_enabled, original) end)
+
+      conn =
+        conn
+        |> put_req_header("x-internal-token", "1234567890.deadbeefdeadbeef")
+        |> put_req_header("content-type", "application/json")
+        |> post("/api/internal/smoke/circuit_breakers", %{})
+
+      assert json_response(conn, 401)
+    end
+
+    # Full blow-and-recover integration is covered by scripts/smoke-circuit-breakers.sh
+    # (deploy-time check). Running it here would mutate global Application env for 30s
+    # while async tests in other modules are in flight.
+  end
+
   describe "POST /api/internal/vision/associate" do
     test "valid HMAC + status confirmed updates cover_image_url", %{conn: conn} do
       edition = insert(:book_edition)

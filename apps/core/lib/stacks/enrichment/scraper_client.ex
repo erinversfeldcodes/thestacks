@@ -15,6 +15,11 @@ defmodule Stacks.Enrichment.ScraperClient do
     - Header: `X-Internal-Token`
     - Value: `<unix_ts>.<HMAC-SHA256(secret, "<ts>.POST./scrape")>` (hex-encoded)
     - Secret: `SCRAPER_HMAC_SECRET` env var
+
+  ## Circuit Breaker
+
+  Protected by `:scraper_fuse` — managed by `Stacks.CircuitBreakers`.
+  When blown, `scrape/2` returns `{:error, :circuit_open}`.
   """
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
@@ -23,7 +28,7 @@ defmodule Stacks.Enrichment.ScraperClient do
 
   require Logger
 
-  @fuse_name :scraper_service
+  @fuse_name :scraper_fuse
 
   @impl true
   def scrape(isbn, store_name) do
@@ -37,8 +42,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     case :fuse.ask(@fuse_name, :sync) do
       :ok -> make_scraper_request(isbn, store_name)
       :blown -> {:error, :circuit_open}
-      # Fuse not yet installed (e.g. first startup before fuse is initialised)
-      {:error, :not_found} -> make_scraper_request(isbn, store_name)
     end
   end
 
@@ -90,7 +93,7 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, status: status}
         )
 
-        melt_fuse(@fuse_name)
+        Stacks.CircuitBreakers.melt(@fuse_name)
         Logger.warning("ScraperClient: HTTP #{status} for isbn=#{isbn} store=#{store_name}")
         {:error, %{status: status, body: resp_body}}
 
@@ -103,7 +106,7 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, kind: :error, reason: reason}
         )
 
-        melt_fuse(@fuse_name)
+        Stacks.CircuitBreakers.melt(@fuse_name)
 
         Logger.warning(
           "ScraperClient: request failed for isbn=#{isbn} store=#{store_name}: #{inspect(reason)}"
@@ -119,18 +122,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     message = "#{ts}.#{method}.#{path}"
     sig = :crypto.mac(:hmac, :sha256, secret, message) |> Base.encode16(case: :lower)
     "#{ts}.#{sig}"
-  end
-
-  defp melt_fuse(fuse_name) do
-    :fuse.melt(fuse_name)
-
-    case :fuse.ask(fuse_name, :sync) do
-      :blown ->
-        :telemetry.execute([:stacks, :fuse, :blown], %{}, %{fuse_name: fuse_name})
-
-      _ ->
-        :telemetry.execute([:stacks, :fuse, :melt], %{}, %{fuse_name: fuse_name})
-    end
   end
 
   defp configured_client do
