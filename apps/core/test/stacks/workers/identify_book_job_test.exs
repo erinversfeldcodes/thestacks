@@ -48,6 +48,38 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
+  describe "perform/1 — multi-book path" do
+    test "marks image resolved with all book_ids when pipeline returns multiple books", %{
+      user: user,
+      image: image,
+      book: book
+    } do
+      book2 = insert(:book)
+      insert(:book_edition, book: book2, isbn: "9780385333481")
+
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.MultiBookClient)
+
+        assert :ok =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
+
+        resolved = Repo.get!(Stacks.Books.UploadedImage, image.id)
+        assert resolved.status == "resolved"
+        assert book.id in resolved.book_ids
+        assert book2.id in resolved.book_ids
+        assert length(resolved.book_ids) == 2
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   describe "perform/1 — not_a_book path" do
     test "returns {:cancel, reason} when vision model says image is not a book", %{
       user: user,
@@ -220,5 +252,44 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @impl true
     def call_vision("is_book", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
+  end
+
+  defmodule MultiBookClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("is_book", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.95,
+           "model_used" => "mock"
+         }}
+
+    def call_vision("extract_isbn", _payload),
+      do:
+        {:ok,
+         %{
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             },
+             %{
+               "title" => nil,
+               "author" => nil,
+               "potential_isbns" => ["9780385333481"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ],
+           "model_used" => "mock"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end
