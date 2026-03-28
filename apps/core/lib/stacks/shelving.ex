@@ -62,6 +62,7 @@ defmodule Stacks.Shelving do
       name: :bookshelf_placements_book_active_idx,
       message: "book is already on this bookshelf"
     )
+    |> foreign_key_constraint(:book_id, message: "book does not exist")
     |> put_placed_at()
   end
 
