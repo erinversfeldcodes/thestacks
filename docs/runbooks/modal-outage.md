@@ -16,7 +16,7 @@
 **Operator sees:**
 - Oban `vision` queue depth growing in `oban_jobs` table
 - Jobs in `scheduled` or `retrying` state with `Stacks.AI.Client` errors in logs
-- Circuit breaker `:vision_service` may be blown — check `Fuse.status(:vision_service)`
+- Circuit breaker `:vision_fuse` may be blown — check `:fuse.ask(:vision_fuse, :sync)`
 - Phoenix logs: `[error] Vision service unreachable: connection refused / timeout`
 - Metrics dashboard: identification success rate dropping toward 0%
 
@@ -70,12 +70,18 @@ Via IEx on the running instance:
 fly ssh console -a thestacks-core
 ```
 ```elixir
-iex> Fuse.ask(:vision_service)
-# :ok = circuit is closed (requests flowing)
+iex> :fuse.ask(:vision_fuse, :sync)
+# :ok    = circuit is closed (requests flowing)
 # :blown = circuit is open (requests blocked, system is protecting itself)
+# {:error, :not_found} = fuse not installed (Stacks.CircuitBreakers not started — reboot the app)
 ```
 
 If `:blown`, the circuit opened automatically after 5 failures in 60 seconds. Vision jobs are snoozing and will retry when the circuit resets (every 5 minutes by default).
+
+To reset the circuit manually (after confirming Modal has recovered):
+```elixir
+iex> :fuse.reset(:vision_fuse)
+```
 
 ### Step 4: Verify HMAC configuration is intact
 
@@ -144,7 +150,7 @@ After updating, deploy both services to pick up the new secret.
 
 **Self-healing (most common case):**
 - Modal resolves the outage.
-- Circuit breaker resets automatically every 5 minutes (checks `:vision_service` health).
+- Circuit breaker resets automatically every 5 minutes (`:vision_fuse` resets via `{:reset, 300_000}` config).
 - Oban jobs in `retrying` state resume automatically on their next scheduled retry.
 - No operator action required beyond monitoring.
 

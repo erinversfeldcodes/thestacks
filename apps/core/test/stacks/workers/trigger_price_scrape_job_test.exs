@@ -58,21 +58,24 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
     end
   end
 
-  describe "circuit breaker" do
-    test "returns error when fuse is blown" do
+  describe "circuit breaker propagation" do
+    test "returns error when ScraperClient reports circuit open" do
+      # The `:scraper_fuse` is now owned by ScraperClient. The job no longer has
+      # its own fuse guard — it treats {:error, :circuit_open} from the client
+      # the same as any other scrape failure.
       book = insert(:book)
-      _store = insert(:bookstore)
+      store = insert(:bookstore)
 
-      # Install and blow the fuse
-      :fuse.install(:scraper_fuse, {{:standard, 1, 1_000}, {:reset, 60_000}})
-      :fuse.melt(:scraper_fuse)
-      :fuse.melt(:scraper_fuse)
+      MockScraperClient.put_response(
+        "9780743273565",
+        store.scraper_module,
+        {:error, :circuit_open}
+      )
 
       job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
-      assert {:error, :circuit_open} = perform_job(TriggerPriceScrapeJob, job.changes.args)
 
-      # Clean up
-      :fuse.remove(:scraper_fuse)
+      assert {:error, "all scrape requests failed"} =
+               perform_job(TriggerPriceScrapeJob, job.changes.args)
     end
   end
 

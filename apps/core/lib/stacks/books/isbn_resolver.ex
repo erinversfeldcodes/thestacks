@@ -11,8 +11,8 @@ defmodule Stacks.Books.ISBNResolver do
   @open_library_search_url "https://openlibrary.org/search.json"
   @google_books_url "https://www.googleapis.com/books/v1/volumes"
 
-  @open_library_fuse :isbn_resolver_open_library
-  @google_books_fuse :isbn_resolver_google_books
+  @open_library_fuse :open_library_fuse
+  @google_books_fuse :google_books_fuse
 
   @doc """
   Resolves an ISBN to book metadata. Tries Open Library first, then falls back
@@ -176,21 +176,29 @@ defmodule Stacks.Books.ISBNResolver do
   # so store_book can skip the secondary ISBN lookup (which often fails for
   # obscure editions). Prefers ISBN-13 over ISBN-10.
   defp open_library_title_search(title, author) do
-    params =
-      [
-        {"title", title},
-        {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
-        {"limit", "5"}
-      ]
-      |> then(fn p ->
-        if author && author != "", do: p ++ [{"author", author}], else: p
-      end)
+    case :fuse.ask(@open_library_fuse, :sync) do
+      :blown -> {:error, :circuit_open}
+      :ok -> do_open_library_title_search(title, author)
+    end
+  end
 
+  defp do_open_library_title_search(title, author) do
+    base = [
+      {"title", title},
+      {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
+      {"limit", "5"}
+    ]
+
+    params = if author && author != "", do: base ++ [{"author", author}], else: base
     url = "#{@open_library_search_url}?#{URI.encode_query(params)}"
 
     case make_request(url) do
       {:ok, %{"docs" => docs}} when is_list(docs) ->
         Enum.find_value(docs, {:error, :not_found}, &build_ol_metadata/1)
+
+      {:error, _} ->
+        Stacks.CircuitBreakers.melt(@open_library_fuse)
+        {:error, :not_found}
 
       _ ->
         {:error, :not_found}
@@ -221,6 +229,13 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp google_books_search(title, author) do
+    case :fuse.ask(@google_books_fuse, :sync) do
+      :blown -> {:error, :circuit_open}
+      :ok -> do_google_books_search(title, author)
+    end
+  end
+
+  defp do_google_books_search(title, author) do
     query =
       if author && author != "" do
         "intitle:#{URI.encode(title)}+inauthor:#{URI.encode(author)}"
@@ -232,38 +247,46 @@ defmodule Stacks.Books.ISBNResolver do
 
     case make_request(url) do
       {:ok, %{"items" => [item | _]}} ->
-        info = item["volumeInfo"] || %{}
+        parse_google_books_search_item(item)
 
-        isbn =
-          (info["industryIdentifiers"] || [])
-          |> Enum.find_value(fn
-            %{"type" => "ISBN_13", "identifier" => id} -> id
-            %{"type" => "ISBN_10", "identifier" => id} -> id
-            _ -> nil
-          end)
-
-        if isbn do
-          authors = info |> Map.get("authors", []) |> Enum.join(", ")
-
-          {:ok, isbn,
-           %{
-             title: info["title"],
-             author: authors,
-             description: info["description"],
-             cover_image_url: get_in(info, ["imageLinks", "thumbnail"]),
-             publisher: info["publisher"],
-             publication_year: parse_year(info["publishedDate"]),
-             page_count: info["pageCount"],
-             subjects: info["categories"] || [],
-             google_books_id: item["id"],
-             source: :google_books
-           }}
-        else
-          {:error, :not_found}
-        end
+      {:error, _} ->
+        Stacks.CircuitBreakers.melt(@google_books_fuse)
+        {:error, :not_found}
 
       _ ->
         {:error, :not_found}
+    end
+  end
+
+  defp parse_google_books_search_item(item) do
+    info = item["volumeInfo"] || %{}
+
+    isbn =
+      (info["industryIdentifiers"] || [])
+      |> Enum.find_value(fn
+        %{"type" => "ISBN_13", "identifier" => id} -> id
+        %{"type" => "ISBN_10", "identifier" => id} -> id
+        _ -> nil
+      end)
+
+    if isbn do
+      authors = info |> Map.get("authors", []) |> Enum.join(", ")
+
+      {:ok, isbn,
+       %{
+         title: info["title"],
+         author: authors,
+         description: info["description"],
+         cover_image_url: get_in(info, ["imageLinks", "thumbnail"]),
+         publisher: info["publisher"],
+         publication_year: parse_year(info["publishedDate"]),
+         page_count: info["pageCount"],
+         subjects: info["categories"] || [],
+         google_books_id: item["id"],
+         source: :google_books
+       }}
+    else
+      {:error, :not_found}
     end
   end
 
@@ -271,8 +294,6 @@ defmodule Stacks.Books.ISBNResolver do
     case :fuse.ask(@open_library_fuse, :sync) do
       :ok -> do_open_library_request(isbn)
       :blown -> {:error, :circuit_open}
-      # Fuse not yet installed (e.g. test env without full OTP startup)
-      {:error, :not_found} -> do_open_library_request(isbn)
     end
   end
 
@@ -284,7 +305,7 @@ defmodule Stacks.Books.ISBNResolver do
         parse_open_library(body, isbn)
 
       {:error, reason} ->
-        :fuse.melt(@open_library_fuse)
+        Stacks.CircuitBreakers.melt(@open_library_fuse)
         {:error, reason}
     end
   end
@@ -293,8 +314,6 @@ defmodule Stacks.Books.ISBNResolver do
     case :fuse.ask(@google_books_fuse, :sync) do
       :ok -> do_google_books_request(isbn)
       :blown -> {:error, :circuit_open}
-      # Fuse not yet installed (e.g. test env without full OTP startup)
-      {:error, :not_found} -> do_google_books_request(isbn)
     end
   end
 
@@ -306,7 +325,7 @@ defmodule Stacks.Books.ISBNResolver do
         parse_google_books(body)
 
       {:error, reason} ->
-        :fuse.melt(@google_books_fuse)
+        Stacks.CircuitBreakers.melt(@google_books_fuse)
         {:error, reason}
     end
   end

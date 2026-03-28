@@ -10,3 +10,8 @@ apps/scraper/target/
 
 # Python venv — third-party libraries, no project secrets
 apps/vision/\.venv/
+
+# Claude Code session state — stores history of allowed bash commands, which
+# may include credentials passed as env vars or CLI args in prior sessions.
+# This directory is gitignored and not part of the project source.
+\.claude/
