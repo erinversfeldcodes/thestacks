@@ -21,6 +21,7 @@ config :core, CoreWeb.Endpoint,
   ]
 
 config :core, :rate_limiting_enabled, false
+config :core, :smoke_tests_enabled, true
 
 config :logger, :console, format: "[$level] $message\n"
 config :phoenix, :stacktrace_depth, 20

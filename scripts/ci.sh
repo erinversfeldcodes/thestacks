@@ -55,9 +55,9 @@ run_group() {
 # Determine which groups to run (default: all).
 # NOTE: Do NOT use GROUPS — it is a bash built-in read-only variable (user GIDs).
 if [[ $# -eq 0 ]]; then
-    # e2e is excluded from the default run — it requires all services to be live,
-    # depends on vision model timing, and is covered by deploy-preview.sh smoke tests.
-    # Run explicitly with: scripts/ci.sh e2e
+    # e2e and smoke are excluded from the default run — they require a live deployed
+    # stack. Run explicitly with: scripts/ci.sh e2e  or  scripts/ci.sh smoke
+    # smoke requires SMOKE_URL and SCRAPER_HMAC_SECRET to be set.
     CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
 else
     CI_GROUPS=("$@")
@@ -148,6 +148,24 @@ fi
 # ── E2E ───────────────────────────────────────────────────────────────────────
 if has_group e2e; then
     if ! run_group "e2e: playwright" bash scripts/test-e2e.sh; then FAILED+=(e2e); fi
+fi
+
+# ── Smoke (circuit breakers) ──────────────────────────────────────────────────
+# Requires a live deployed stack. Set SMOKE_URL and SCRAPER_HMAC_SECRET.
+# Example: SMOKE_URL=https://my-app.fly.dev scripts/ci.sh smoke
+if has_group smoke; then
+    if [[ -z "${SMOKE_URL:-}" ]]; then
+        echo -e "${RED}${BOLD}ERROR${RESET} smoke: SMOKE_URL is not set"
+        FAILED+=(smoke)
+    elif [[ -z "${SCRAPER_HMAC_SECRET:-}" ]]; then
+        echo -e "${RED}${BOLD}ERROR${RESET} smoke: SCRAPER_HMAC_SECRET is not set"
+        FAILED+=(smoke)
+    else
+        if ! run_group "smoke: circuit breakers" \
+            bash scripts/smoke-circuit-breakers.sh "${SMOKE_URL}"; then
+            FAILED+=(smoke)
+        fi
+    fi
 fi
 
 # ── Licenses ──────────────────────────────────────────────────────────────────
