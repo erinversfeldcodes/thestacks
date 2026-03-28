@@ -448,18 +448,36 @@ end
 
 ### Circuit Breakers
 
-All external HTTP calls (AI providers, Open Library, scraped sites) are wrapped in circuit breakers using the `Fuse` library:
+All external HTTP calls (AI providers, Open Library, scraped sites) are wrapped in circuit breakers using the `:fuse` Erlang library. All fuses are installed at application startup by `Stacks.CircuitBreakers` and use the `_fuse` atom suffix convention.
 
 ```elixir
-# If 5 failures in 60 seconds, open circuit for 5 minutes
-Fuse.install(:together_ai, {{:standard, 5, 60_000}, {:reset, 300_000}})
+# Installed once at startup via Stacks.CircuitBreakers.install_all/0
+# 5 failures in 60 seconds → open for 5 minutes
+:fuse.install(:together_ai_fuse, {{:standard, 5, 60_000}, {:reset, 300_000}})
 
-# Before calling:
-case Fuse.ask(:together_ai) do
-  :ok -> make_request()
+# Before every external call:
+case :fuse.ask(:together_ai_fuse, :sync) do
+  :ok    -> make_request()
   :blown -> {:error, :circuit_open}  # Oban job retries later
 end
+
+# On failure — always via the shared helper (emits telemetry):
+Stacks.CircuitBreakers.melt(:together_ai_fuse)
 ```
+
+Telemetry events emitted by `Stacks.CircuitBreakers`:
+
+| Event | When | Metadata |
+|-------|------|----------|
+| `[:stacks, :fuse, :melt]` | Failure recorded, circuit still closed | `%{fuse_name: atom()}` |
+| `[:stacks, :fuse, :blown]` | Failure threshold exceeded, circuit opened | `%{fuse_name: atom()}` |
+| `[:stacks, :fuse, :recovered]` | Probe confirmed service is up, circuit closed | `%{fuse_name: atom(), recovered_via: :probe}` |
+| `[:stacks, :fuse, :probe_failed]` | Probe attempt failed; next probe rescheduled | `%{fuse_name: atom(), reason: term()}` |
+
+When a fuse blows, `Stacks.CircuitBreakers` schedules a lightweight probe (HTTP health
+check) every 15 seconds. The moment the probe succeeds, `:fuse.reset/1` is called to
+close the circuit immediately — without waiting for the full `{:reset, Ms}` backstop
+timer. The backstop timer remains in place as the worst-case ceiling.
 
 ### Output Validation
 
@@ -4765,14 +4783,16 @@ Application
 
 Every external HTTP call is wrapped in a `Fuse` circuit breaker:
 
-| Service | Fuse Config | Behaviour When Open |
-|---------|------------|---------------------|
-| Modal vision service | 5 failures in 60s → open 5 min | Oban job retries with backoff |
-| Open Library API | 5 failures in 60s → open 5 min | Fallback to Google Books API |
-| Google Books API | 5 failures in 60s → open 5 min | Book identification fails gracefully |
-| Brave Search API | 3 failures in 60s → open 10 min | Fallback to SearXNG |
-| Bookshop scrapers (per-store) | 3 failures in 60s → open 15 min | Skip store, try next scrape cycle |
-| Stitch Money (future) | 2 failures in 30s → open 5 min | Payment UI shows "temporarily unavailable" |
+| Service | Fuse atom | Fuse Config | Behaviour When Open |
+|---------|-----------|------------|---------------------|
+| Modal vision service | `:vision_fuse` | 5 failures in 60s → open 5 min | Oban job retries with backoff |
+| Together AI LLM API | `:together_ai_fuse` | 5 failures in 60s → open 5 min | Review summaries skipped; snapshots persisted without summary |
+| Open Library API | `:open_library_fuse` | 5 failures in 60s → open 5 min | Fallback to Google Books API |
+| Google Books API | `:google_books_fuse` | 5 failures in 60s → open 5 min | Book identification fails gracefully |
+| Brave Search API | `:brave_search_fuse` (deferred) | 3 failures in 60s → open 10 min | Fallback to SearXNG |
+| Bookshop scrapers | `:scraper_fuse` | 3 failures in 60s → open 15 min | Skip all stores, try next scrape cycle |
+| Bookshop scrapers (per-store) | per-store fuses (deferred) | 3 failures in 60s → open 15 min | Skip that store, try others |
+| Stitch Money (future) | `:stitch_money_fuse` | 2 failures in 30s → open 5 min | Payment UI shows "temporarily unavailable" |
 
 ### Oban Retry Strategy
 
@@ -5253,6 +5273,60 @@ Currently, dbt staging SQL files are committed to the repo and consumed directly
 3. dbt pipeline consumes pre-built artifacts — no dependency on the Elixir toolchain
 
 This decouples the data pipeline from the application build. The proto remains the source of truth, CI is the build system, and dbt gets pre-built SQL. Tracked for implementation when dbt is deployed to a production warehouse.
+
+### Proto-First Context Interfaces (ADR 014)
+
+The current proto codegen pipeline is **asymmetric**: outbound responses are fully
+proto-governed (generated serializers, CI drift detection), but inbound requests are not
+(controllers pattern-match raw params maps; `requests.proto` is decorative only).
+
+ADR 014 (`docs/decisions/014-proto-first-context-interfaces.md`) closes this gap in three
+phases:
+
+**Phase 1 — Inbound request decoding (extends `mix proto.sync`)**
+
+Generate a `ProtoJSON.Decode` module (mirror of `ProtoJSON.Gen`) with one decoder per
+request message in `requests.proto`. A `DecodeRequest` plug validates inbound JSON before
+the controller action runs and stores the typed struct in `conn.assigns.request`. Eliminates
+manual param pattern matching and `@valid_*` guard lists in controllers.
+
+**Phase 2 — Proto-typed context function signatures**
+
+Context functions accept proto request structs as input and return proto response structs
+as output. Serialization (currently scattered across controllers via `ProtoJSON.*` calls)
+moves into context modules, which own both the data and the output shape. Controllers
+become thin dispatchers: extract request, call context, return response.
+
+```
+# Before (controller owns serialization)
+ProtoJSON.placement(placement)  # called in controller
+
+# After (context owns serialization)
+Shelving.place_book(%PlaceBookRequest{...}, user)  # returns proto-shaped map
+```
+
+**Phase 3 — Service definitions (long-term)**
+
+Add `service` blocks to API proto files. `mix proto.sync` generates router entries and
+controller stubs from them. Breaking change detection via `buf breaking` covers the full
+API surface — adding or removing an endpoint is a proto-tracked event.
+
+**Updated codegen diagram (post-Phase 2):**
+
+```
+proto/*.proto (source of truth)
+    │
+    ├── mix proto.sync ──► Ecto schemas (gen/)
+    │                  ──► dbt staging SQL + schema.yml
+    │                  ──► ProtoJSON.Gen (response serializers)
+    │                  ──► ProtoJSON.Decode (request decoders)  ← Phase 1
+    │                  ──► Migration drift detection
+    │
+    └── gen-elm-proto.sh ──► Elm decoders + encoders (proto/gen/elm/)
+```
+
+**Current state:** Phase 1 and 2 not yet implemented. This section documents the target
+architecture. The existing `ProtoJSON` + controller pattern remains in use until migration.
 
 ### Event Upcasting
 
