@@ -220,6 +220,14 @@ models:
         description: Listing price cents.
       - name: listing_min_price_cents
         description: Listing min price cents.
+      - name: reading_status
+        description: Reading status.
+      - name: current_page
+        description: Current page.
+      - name: started_at
+        description: Started at.
+      - name: finished_at
+        description: Finished at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

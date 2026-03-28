@@ -120,6 +120,7 @@ defmodule CoreWeb.Router do
     get "/placements/mine", BookshelfPlacementController, :mine
     put "/placements/:id/move", BookshelfPlacementController, :move
     put "/placements/:id/formats", BookshelfPlacementController, :update_formats
+    put "/placements/:id/progress", BookshelfPlacementController, :update_progress
     delete "/placements/:id", BookshelfPlacementController, :delete
 
     put "/settings/age_verification", UserSettingsController, :update_age_verification

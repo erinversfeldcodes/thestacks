@@ -94,6 +94,10 @@ defmodule Stacks.Factory do
       placed_at: DateTime.utc_now(),
       formats: [],
       visibility: "owner",
+      reading_status: "to_read",
+      current_page: nil,
+      started_at: nil,
+      finished_at: nil,
       book: build(:book),
       bookshelf: build(:bookshelf)
     }

@@ -38,7 +38,7 @@ defmodule Stacks.FactoryProtoValidationTest do
     bookshelf: {Stacks.Shelving.Bookshelf, ~w(visibility_group_id)a},
     placement:
       {Stacks.Shelving.Placement,
-       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents)a},
+       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents current_page started_at finished_at)a},
     placement_history: {Stacks.Shelving.PlacementHistory, ~w()a},
     post: {Stacks.Blog.Post, ~w(published_at visibility_group_id)a},
     post_book_association: {Stacks.Blog.PostBookAssociation, ~w()a},

@@ -25,6 +25,8 @@ defmodule Stacks.Shelving do
   @valid_visibilities ~w(owner group platform)
 
   # ── Placement changeset constants ──────────────────────────────────
+  @valid_reading_statuses ~w(to_read reading completed abandoned)
+
   @placement_optional_fields [
     :position,
     :placed_at,
@@ -36,7 +38,11 @@ defmodule Stacks.Shelving do
     :listing_mode,
     :listing_status,
     :listing_price_cents,
-    :listing_min_price_cents
+    :listing_min_price_cents,
+    :reading_status,
+    :current_page,
+    :started_at,
+    :finished_at
   ]
 
   # ── Changeset functions (moved from schema modules) ────────────────
@@ -58,7 +64,18 @@ defmodule Stacks.Shelving do
     |> validate_required([:book_id, :bookshelf_id])
     |> validate_inclusion(:visibility, @valid_visibilities)
     |> validate_number(:personal_rating, greater_than_or_equal_to: 1, less_than_or_equal_to: 5)
+    |> validate_inclusion(:reading_status, @valid_reading_statuses)
+    |> validate_number(:current_page, greater_than_or_equal_to: 0)
     |> put_placed_at()
+  end
+
+  @doc "Changeset for updating reading progress fields only."
+  def reading_progress_changeset(placement, attrs) do
+    placement
+    |> cast(attrs, [:reading_status, :current_page, :started_at, :finished_at])
+    |> validate_required([:reading_status])
+    |> validate_inclusion(:reading_status, @valid_reading_statuses)
+    |> validate_number(:current_page, greater_than_or_equal_to: 0)
   end
 
   @doc "Changeset for recording a bookshelf move."
@@ -469,6 +486,105 @@ defmodule Stacks.Shelving do
         end
     end
   end
+
+  @doc """
+  Updates the reading progress for a placement. Verifies ownership.
+
+  Auto-sets `started_at` on the first transition to `:reading` (will not overwrite
+  if already set). Auto-sets `finished_at` on transition to `:completed`.
+
+  Emits `placement.reading_started` on the first `:reading` transition, and
+  `placement.reading_completed` on the `:completed` transition.
+
+  Returns `{:ok, placement}` or `{:error, :unauthorized | :not_found | changeset}`.
+  """
+  @spec update_reading_progress(binary(), binary(), map()) ::
+          {:ok, Placement.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def update_reading_progress(placement_id, user_id, attrs) do
+    placement =
+      case Repo.get(Placement, placement_id) do
+        nil -> nil
+        p -> Repo.preload(p, :bookshelf)
+      end
+
+    case placement do
+      nil -> {:error, :not_found}
+      %Placement{bookshelf: %Bookshelf{user_id: id}} when id != user_id -> {:error, :unauthorized}
+      %Placement{} -> do_update_reading_progress(placement, attrs)
+    end
+  end
+
+  defp do_update_reading_progress(placement, attrs) do
+    # Normalise to atom keys so that maybe_set_* helpers produce a
+    # consistent key type regardless of whether attrs came from a
+    # controller (string keys) or a context test (atom keys).
+    atom_attrs =
+      for {k, v} <- attrs, into: %{} do
+        {if(is_atom(k), do: k, else: String.to_existing_atom(k)), v}
+      end
+
+    new_status = Map.get(atom_attrs, :reading_status)
+    is_first_reading = new_status == "reading" && is_nil(placement.started_at)
+    is_completing = new_status == "completed"
+
+    progress_attrs =
+      atom_attrs
+      |> maybe_set_started_at(is_first_reading)
+      |> maybe_set_finished_at(is_completing)
+
+    Multi.new()
+    |> Multi.update(:placement, reading_progress_changeset(placement, progress_attrs))
+    |> Multi.run(:emit_events, fn _repo, %{placement: updated} ->
+      emit_reading_events(updated, is_first_reading, is_completing)
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{placement: updated}} -> {:ok, updated}
+      {:error, :placement, cs, _} -> {:error, cs}
+      {:error, _, reason, _} -> {:error, reason}
+    end
+  end
+
+  defp emit_reading_events(placement, is_first_reading, is_completing) do
+    if is_first_reading do
+      Events.emit_safe(%{
+        event_type: "placement.reading_started",
+        aggregate_type: "placement",
+        aggregate_id: placement.id,
+        payload: %{book_id: placement.book_id}
+      })
+    end
+
+    if is_completing do
+      Events.emit_safe(%{
+        event_type: "placement.reading_completed",
+        aggregate_type: "placement",
+        aggregate_id: placement.id,
+        payload: %{book_id: placement.book_id}
+      })
+    end
+
+    {:ok, placement}
+  end
+
+  @doc """
+  Returns all active placements for a user with `reading_status = 'reading'`,
+  ordered by `updated_at DESC`.
+  """
+  @spec list_in_progress(binary()) :: [Placement.t()]
+  def list_in_progress(user_id) do
+    Placement
+    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
+    |> where([p], p.reading_status == "reading" and is_nil(p.removed_at))
+    |> order_by([p], desc: p.updated_at)
+    |> Repo.all()
+  end
+
+  defp maybe_set_started_at(attrs, true), do: Map.put(attrs, :started_at, DateTime.utc_now())
+  defp maybe_set_started_at(attrs, false), do: attrs
+
+  defp maybe_set_finished_at(attrs, true), do: Map.put(attrs, :finished_at, DateTime.utc_now())
+  defp maybe_set_finished_at(attrs, false), do: attrs
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do
