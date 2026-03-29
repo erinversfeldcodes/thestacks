@@ -319,8 +319,20 @@ Delegate implementation to the specialist. The prompt must include:
 
 ### 2A-iv — Completion Report Reception Gate ⛔ HARD GATE
 
-**This is the first action you take upon receiving a completion report. Do not write any summary,
-proceed to any 2B gate, or acknowledge completion until this gate passes.**
+**This gate fires in two situations — not just one:**
+
+1. **Specialist completion report received** — an agent sends a structured completion message.
+2. **Orchestrator performed direct implementation work** — the orchestrator fixed something
+   itself (e.g., a bug, a generator issue, a test failure) without delegating to a specialist.
+   Treat the orchestrator's own work as if it were a specialist's report and run this gate
+   against it before writing any summary or declaring phase completion.
+
+**Idle notification ≠ completion report.** If an agent sends only an `idle_notification`
+without a completion summary, the orchestrator must explicitly ask for a completion report
+before proceeding. Do not proceed to 2B on an idle notification alone.
+
+**This is the first action you take upon receiving a completion report or finishing direct work.
+Do not write any summary, proceed to any 2B gate, or acknowledge completion until this gate passes.**
 
 The orchestrator independently verifies the specialist's work in two steps:
 
@@ -406,7 +418,16 @@ phase state file and proceed to the 2B gate sequence.
 
 ## Phase 2B: Gate Sequence
 
-**You may not delegate to a reviewer (2C) until every applicable gate below shows ✅.**
+**You may not use any of the following language until every applicable gate shows ✅:**
+- "ready to commit"
+- "group into commits"
+- "proceeding to Phase N"
+- "Issue #N is complete"
+- any language that implies the phase is done
+
+**Gates must be run sequentially in order: 2B-i → 2B-ii → 2B-iia → 2B-iii.** Do not run them
+in parallel. Each gate can block the next. Running a later gate before an earlier one passes is
+a protocol violation.
 
 Write this checklist into the phase state file before starting the gate sequence. Tick each gate
 as it completes. Any unticked gate blocks progress to 2C.
