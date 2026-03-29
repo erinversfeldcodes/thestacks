@@ -224,6 +224,11 @@ models:
         description: Listing min price cents.
       - name: reading_status
         description: Reading status.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['to_read', 'reading', 'completed', 'abandoned']
       - name: current_page
         description: Current page.
       - name: started_at

@@ -139,6 +139,14 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+          - name: reading_status
+            description: Reading lifecycle status (to_read, reading, completed, abandoned).
+          - name: current_page
+            description: Current page the user is on (null if not reading).
+          - name: started_at
+            description: Timestamp when the user first started reading (null if not started).
+          - name: finished_at
+            description: Timestamp when the user finished reading (null if not completed).
 
       - name: bookshelf_placement_history
         description: Immutable log of book movements between bookshelves.
@@ -216,7 +224,9 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
           - name: onboarding_completed
-            description: Whether the user completed onboarding flow.
+            description: Whether the user completed onboarding flow (computed from onboarding_steps).
+          - name: onboarding_steps
+            description: JSONB map of per-step completion state for the onboarding flow.
           - name: notify_wishlist_availability
             description: Opt-in for wishlist availability notifications.
           - name: notify_marketplace

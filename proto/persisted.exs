@@ -275,7 +275,13 @@
         book_id: %{belongs_to: Stacks.Books.Book},
         bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf},
         formats: %{ecto_type: {:array, :string}, default: []},
-        visibility: %{default: "owner"}
+        visibility: %{default: "owner"},
+        reading_status: %{
+          dbt_tests: [
+            :not_null,
+            {:accepted_values, ["to_read", "reading", "completed", "abandoned"]}
+          ]
+        }
       }
     },
     %{

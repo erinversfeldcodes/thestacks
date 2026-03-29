@@ -235,7 +235,18 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_detail(map()) :: map()
   def placement_detail(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :position, :placed_at, :formats, :personal_rating, :notes])
+    |> Map.take([
+      :id,
+      :position,
+      :placed_at,
+      :formats,
+      :personal_rating,
+      :notes,
+      :reading_status,
+      :current_page,
+      :started_at,
+      :finished_at
+    ])
     |> Map.put(:book, bookshelf_book(placement.book))
   end
 
