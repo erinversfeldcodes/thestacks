@@ -3,9 +3,17 @@ module Types.BlogPost exposing
     , BlogPost
     , BlogPostSummary
     , BookAssociation
+    , Comment(..)
     , Visibility(..)
     , blogPostDecoder
     , blogPostSummaryDecoder
+    , commentAuthorId
+    , commentBody
+    , commentCreatedAt
+    , commentDecoder
+    , commentId
+    , commentParentId
+    , commentReplies
     , visibilityToString
     )
 
@@ -49,6 +57,48 @@ type alias BookAssociation =
     , reasoning : String
     , status : AssociationStatus
     }
+
+
+type Comment
+    = Comment
+        { id : String
+        , postId : String
+        , authorId : String
+        , parentId : Maybe String
+        , body : String
+        , createdAt : String
+        , replies : List Comment
+        }
+
+
+commentId : Comment -> String
+commentId (Comment c) =
+    c.id
+
+
+commentAuthorId : Comment -> String
+commentAuthorId (Comment c) =
+    c.authorId
+
+
+commentParentId : Comment -> Maybe String
+commentParentId (Comment c) =
+    c.parentId
+
+
+commentBody : Comment -> String
+commentBody (Comment c) =
+    c.body
+
+
+commentCreatedAt : Comment -> String
+commentCreatedAt (Comment c) =
+    c.createdAt
+
+
+commentReplies : Comment -> List Comment
+commentReplies (Comment c) =
+    c.replies
 
 
 type AssociationStatus
@@ -167,11 +217,40 @@ blogPostDecoder =
     Decode.map fromProtoBlogPost Proto.decodeBlogPost
 
 
+{-| Decode a Comment from JSON. Replies are recursive via Decode.lazy.
+-}
+commentDecoder : Decoder Comment
+commentDecoder =
+    Decode.map7
+        (\id postId authorId parentId body createdAt replies ->
+            Comment
+                { id = id
+                , postId = postId
+                , authorId = authorId
+                , parentId = parentId
+                , body = body
+                , createdAt = createdAt
+                , replies = replies
+                }
+        )
+        (Decode.field "id" Decode.string)
+        (Decode.field "postId" Decode.string)
+        (Decode.field "authorId" Decode.string)
+        (Decode.field "parentId" (Decode.nullable Decode.string))
+        (Decode.field "body" Decode.string)
+        (Decode.field "createdAt" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "replies" (Decode.list (Decode.lazy (\_ -> commentDecoder)))
+            , Decode.succeed []
+            ]
+        )
+
+
 {-| Decode a BlogPostSummary from JSON.
 
 Delegates to the proto BlogPostSummary decoder, then derives the published
 flag from the published\_at timestamp (non-empty means published).
-The proto BlogPostSummary has no body or published fields — published is a
+The proto BlogPostSummary has no body or published fields -- published is a
 reserved field in the proto and is never sent by the controller.
 
 -}

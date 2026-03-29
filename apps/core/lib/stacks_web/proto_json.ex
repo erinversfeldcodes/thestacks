@@ -359,6 +359,28 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Comment
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a blog post comment.
+
+  Handles the virtual `:replies` key added by `Blog.list_comments/2`.
+  """
+  @spec comment(map()) :: map()
+  def comment(comment) do
+    %{
+      id: comment.id,
+      post_id: comment.post_id,
+      author_id: comment.author_id,
+      parent_id: comment.parent_id,
+      body: comment.body,
+      created_at: comment.created_at,
+      replies: Map.get(comment, :replies, []) |> Enum.map(&comment/1)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Upload / Poll
   # ---------------------------------------------------------------------------
 

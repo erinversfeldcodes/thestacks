@@ -373,6 +373,34 @@
         status: %{api_only: true}
       }
     },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "PostComment",
+      table_name: "post_comments",
+      schema_prefix: "op",
+      ecto_module: Stacks.Blog.PostComment,
+      ecto_path: "lib/stacks/gen/blog/post_comment.ex",
+      dbt_path: "stg_post_comments.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        post_id: %{
+          belongs_to: Stacks.Blog.Post,
+          references_table: :blog_posts,
+          on_delete: :delete_all,
+          null: false
+        },
+        author_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        },
+        parent_id: %{ecto_type: :binary_id},
+        created_at: %{ecto_type: :utc_datetime_usec, default: {:fragment, "NOW()"}}
+      }
+    },
 
     # -------------------------------------------------------------------------
     # Costs

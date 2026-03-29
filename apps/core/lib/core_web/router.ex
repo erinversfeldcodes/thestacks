@@ -137,6 +137,9 @@ defmodule CoreWeb.Router do
     put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
 
+    post "/posts/:post_id/comments", CommentController, :create
+    delete "/comments/:id", CommentController, :delete
+
     post "/blog/posts", BlogController, :create
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete

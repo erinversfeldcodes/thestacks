@@ -562,6 +562,22 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
+      - name: post_comments
+        description: Reader comments on blog posts (one level of threading via parent_id).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: post_id
+            description: FK to blog_posts.
+          - name: author_id
+            description: FK to users.
+          - name: parent_id
+            description: FK to post_comments (null for top-level comments).
+          - name: body
+            description: Comment body text (1–2000 characters).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: post_book_associations
         description: AI-detected or manual associations between blog posts and books.
         columns:
