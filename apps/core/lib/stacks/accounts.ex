@@ -464,6 +464,9 @@ defmodule Stacks.Accounts do
       updated = Map.put(current, step, true)
 
       case user |> onboarding_steps_changeset(%{onboarding_steps: updated}) |> Repo.update() do
+        # Repo.reload! is required: onboarding_completed is a GENERATED ALWAYS AS column.
+        # Ecto does not fetch generated columns automatically after an update — we must
+        # reload to get the DB-computed value in the returned struct.
         {:ok, saved} -> {:ok, Repo.reload!(saved)}
         error -> error
       end
@@ -486,6 +489,9 @@ defmodule Stacks.Accounts do
          |> get_user!()
          |> onboarding_steps_changeset(%{onboarding_steps: empty})
          |> Repo.update() do
+      # Repo.reload! is required: onboarding_completed is a GENERATED ALWAYS AS column.
+      # Ecto does not fetch generated columns automatically after an update — we must
+      # reload to get the DB-computed value in the returned struct.
       {:ok, saved} -> {:ok, Repo.reload!(saved)}
       error -> error
     end

@@ -518,6 +518,10 @@ placementStub =
     , personalRating = Nothing
     , notes = Nothing
     , bookshelfName = Nothing
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }
 
 

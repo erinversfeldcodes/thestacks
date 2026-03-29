@@ -90,6 +90,10 @@ testPlacement =
     , personalRating = Nothing
     , notes = Nothing
     , bookshelfName = Just "library"
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }
 
 

@@ -52,6 +52,18 @@ message PlacementDetail {
 
   // The book associated with this placement (embedded with author, editions, primary_edition).
   Book book = 7 [json_name = "book"];
+
+  // Reading lifecycle status: to_read, reading, completed, abandoned.
+  string reading_status = 8 [json_name = "reading_status"];
+
+  // Current page the user is on (non-negative integer, 0 if not set).
+  int32 current_page = 9 [json_name = "current_page"];
+
+  // When the user first started reading this placement (RFC3339).
+  string started_at = 10 [json_name = "started_at"];
+
+  // When the user finished reading this placement (RFC3339).
+  string finished_at = 11 [json_name = "finished_at"];
 }
 
 // PlacementRef is the slim placement shape returned by BookshelfPlacementController

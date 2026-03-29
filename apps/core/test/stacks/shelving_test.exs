@@ -669,6 +669,46 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Migration default value (Issue #148-W1)
+  # ---------------------------------------------------------------------------
+
+  describe "DB-level DEFAULT for reading_status" do
+    test "reading_status defaults to 'to_read' at the database level when not supplied" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      Repo.insert_all(
+        {"bookshelf_placements", Stacks.Shelving.Placement},
+        [
+          %{
+            id: Ecto.UUID.generate(),
+            book_id: book.id,
+            bookshelf_id: bookshelf.id,
+            position: 1,
+            placed_at: now,
+            formats: [],
+            visibility: "owner",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      )
+
+      placement =
+        Repo.one!(
+          from(p in Stacks.Shelving.Placement,
+            where: p.book_id == ^book.id and p.bookshelf_id == ^bookshelf.id
+          )
+        )
+
+      assert placement.reading_status == "to_read"
+    end
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
