@@ -212,7 +212,22 @@ defmodule Stacks.VisibilityTest do
   # ---------------------------------------------------------------------------
 
   describe "resolve_visibility/2 — group visibility" do
-    test "group visibility + platform_user viewer → :hidden (group check not yet implemented)" do
+    test "group visibility + viewer with grant → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      insert(:visibility_grant,
+        resource_type: "bookshelf",
+        resource_id: bookshelf.id,
+        granted_to: viewer,
+        granted_by: owner
+      )
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
+    end
+
+    test "group visibility + viewer without grant → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
       viewer = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -220,11 +235,44 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end
 
+    test "group visibility + owner → :visible (owner check applies before group)" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, owner.id})
+    end
+
     test "group visibility + unauthenticated viewer → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "placement with group visibility + viewer with grant → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner)
+      viewer = insert(:user)
+
+      insert(:visibility_grant,
+        resource_type: "bookshelf",
+        resource_id: bookshelf.id,
+        granted_to: viewer,
+        granted_by: owner
+      )
+
+      placement = insert(:placement, bookshelf: bookshelf, visibility: "group")
+
+      assert :visible = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
+
+    test "placement with group visibility + viewer without grant → :hidden" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner)
+      viewer = insert(:user)
+      placement = insert(:placement, bookshelf: bookshelf, visibility: "group")
+
+      assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
   end
 
