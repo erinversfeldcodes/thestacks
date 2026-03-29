@@ -417,6 +417,25 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Visibility Grant
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a visibility grant struct.
+  """
+  @spec visibility_grant(map()) :: map()
+  def visibility_grant(grant) do
+    %{
+      id: grant.id,
+      resource_type: grant.resource_type,
+      resource_id: grant.resource_id,
+      granted_to_id: grant.granted_to_id,
+      granted_by_id: grant.granted_by_id,
+      created_at: grant.created_at
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Upload / Poll
   # ---------------------------------------------------------------------------
 

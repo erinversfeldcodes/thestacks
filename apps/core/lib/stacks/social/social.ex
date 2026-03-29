@@ -11,7 +11,8 @@ defmodule Stacks.Social do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Events
-  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock}
+  alias Stacks.Shelving.Bookshelf
+  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   # ── Changeset functions (moved from schema modules) ──
 
@@ -62,6 +63,7 @@ defmodule Stacks.Social do
     grant
     |> cast(attrs, @visibility_grant_required_fields ++ @visibility_grant_optional_fields)
     |> validate_required(@visibility_grant_required_fields)
+    |> validate_inclusion(:resource_type, ["bookshelf"])
     |> unique_constraint([:resource_type, :resource_id, :granted_to_id])
   end
 
@@ -511,6 +513,112 @@ defmodule Stacks.Social do
           {:error, :unauthorized}
         end
     end
+  end
+
+  # ── Visibility Grants ──
+
+  @doc """
+  Grants visibility to a user for a group-visibility bookshelf.
+  Returns {:error, :not_applicable} if bookshelf visibility != "group".
+  Returns {:error, :unauthorized} if caller does not own the bookshelf.
+  Returns {:error, :already_granted} if grant already exists.
+  """
+  def grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Bookshelf{user_id: user_id} when user_id != caller_id ->
+        {:error, :unauthorized}
+
+      %Bookshelf{visibility: visibility} when visibility != "group" ->
+        {:error, :not_applicable}
+
+      %Bookshelf{} ->
+        result =
+          %VisibilityGrant{}
+          |> visibility_grant_changeset(%{
+            resource_type: "bookshelf",
+            resource_id: bookshelf_id,
+            granted_to_id: grantee_user_id,
+            granted_by_id: caller_id
+          })
+          |> Repo.insert()
+
+        case result do
+          {:ok, grant} -> {:ok, grant}
+          {:error, _changeset} -> {:error, :already_granted}
+        end
+    end
+  end
+
+  @doc """
+  Revokes a visibility grant. Returns {:error, :unauthorized} if caller doesn't own the bookshelf.
+  Returns {:error, :not_found} if no grant exists.
+  """
+  def revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Bookshelf{user_id: user_id} when user_id != caller_id ->
+        {:error, :unauthorized}
+
+      %Bookshelf{} ->
+        query =
+          from(g in VisibilityGrant,
+            where:
+              g.resource_type == "bookshelf" and
+                g.resource_id == ^bookshelf_id and
+                g.granted_to_id == ^grantee_user_id
+          )
+
+        case Repo.one(query) do
+          nil ->
+            {:error, :not_found}
+
+          grant ->
+            Repo.delete(grant)
+            :ok
+        end
+    end
+  end
+
+  @doc """
+  Lists all visibility grants for a bookshelf. Returns {:error, :unauthorized} if caller doesn't own bookshelf.
+  """
+  def list_visibility_grants(bookshelf_id, caller_id) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Bookshelf{user_id: user_id} when user_id != caller_id ->
+        {:error, :unauthorized}
+
+      %Bookshelf{} ->
+        grants =
+          from(g in VisibilityGrant,
+            where: g.resource_type == "bookshelf" and g.resource_id == ^bookshelf_id,
+            order_by: [desc: g.created_at]
+          )
+          |> Repo.all()
+
+        {:ok, grants}
+    end
+  end
+
+  @doc """
+  Returns true if viewer_id has an explicit visibility grant for the given bookshelf_id.
+  """
+  def has_visibility_grant?(bookshelf_id, viewer_id) do
+    Repo.exists?(
+      from(g in VisibilityGrant,
+        where:
+          g.resource_type == "bookshelf" and
+            g.resource_id == ^bookshelf_id and
+            g.granted_to_id == ^viewer_id
+      )
+    )
   end
 
   # ── Private Helpers ──

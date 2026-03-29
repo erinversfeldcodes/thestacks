@@ -175,6 +175,9 @@ defmodule Stacks.Visibility do
       {"owner", _} ->
         :hidden
 
+      {"group", {:platform_user, vid}} when vid == owner_id ->
+        :ok
+
       {"group", {:platform_user, vid}} ->
         check_group_visibility(resource, vid)
 
@@ -189,7 +192,13 @@ defmodule Stacks.Visibility do
   defp check_default_visibility(owner_id, viewer_id) when owner_id == viewer_id, do: :ok
   defp check_default_visibility(_owner_id, _viewer_id), do: :hidden
 
-  defp check_group_visibility(_resource, _viewer_id), do: :hidden
+  defp check_group_visibility(%Placement{bookshelf_id: bookshelf_id}, viewer_id) do
+    if Social.has_visibility_grant?(bookshelf_id, viewer_id), do: :ok, else: :hidden
+  end
+
+  defp check_group_visibility(%{id: bookshelf_id}, viewer_id) do
+    if Social.has_visibility_grant?(bookshelf_id, viewer_id), do: :ok, else: :hidden
+  end
 
   # ---------------------------------------------------------------------------
   # Marketplace exception

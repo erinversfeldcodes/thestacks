@@ -614,6 +614,137 @@ defmodule Stacks.SocialTest do
   end
 
   # ---------------------------------------------------------------------------
+  # grant_visibility/3
+  # ---------------------------------------------------------------------------
+
+  describe "grant_visibility/3" do
+    test "happy path: grant created for group-visibility bookshelf" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert {:ok, grant} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+      assert grant.resource_type == "bookshelf"
+      assert grant.resource_id == bookshelf.id
+      assert grant.granted_to_id == grantee.id
+      assert grant.granted_by_id == owner.id
+    end
+
+    test ":unauthorized when caller doesn't own bookshelf" do
+      owner = insert(:user)
+      other = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert {:error, :unauthorized} = Social.grant_visibility(bookshelf.id, other.id, grantee.id)
+    end
+
+    test ":not_applicable when bookshelf visibility != group" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
+
+      assert {:error, :not_applicable} =
+               Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+    end
+
+    test ":already_granted on duplicate" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+
+      assert {:error, :already_granted} =
+               Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # revoke_visibility/3
+  # ---------------------------------------------------------------------------
+
+  describe "revoke_visibility/3" do
+    test "happy path: grant deleted" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+      {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+
+      assert :ok = Social.revoke_visibility(bookshelf.id, owner.id, grantee.id)
+      refute Social.has_visibility_grant?(bookshelf.id, grantee.id)
+    end
+
+    test ":unauthorized for non-owner" do
+      owner = insert(:user)
+      other = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+      {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+
+      assert {:error, :unauthorized} =
+               Social.revoke_visibility(bookshelf.id, other.id, grantee.id)
+    end
+
+    test ":not_found when no grant exists" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert {:error, :not_found} =
+               Social.revoke_visibility(bookshelf.id, owner.id, grantee.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # list_visibility_grants/2
+  # ---------------------------------------------------------------------------
+
+  describe "list_visibility_grants/2" do
+    test "returns grants for bookshelf owner" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+      {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+
+      assert {:ok, grants} = Social.list_visibility_grants(bookshelf.id, owner.id)
+      assert length(grants) == 1
+      assert hd(grants).granted_to_id == grantee.id
+    end
+
+    test ":unauthorized for non-owner" do
+      owner = insert(:user)
+      other = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      assert {:error, :unauthorized} = Social.list_visibility_grants(bookshelf.id, other.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # has_visibility_grant?/2
+  # ---------------------------------------------------------------------------
+
+  describe "has_visibility_grant?/2" do
+    test "returns true when grant exists" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+      {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
+
+      assert Social.has_visibility_grant?(bookshelf.id, grantee.id)
+    end
+
+    test "returns false when no grant exists" do
+      owner = insert(:user)
+      grantee = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+
+      refute Social.has_visibility_grant?(bookshelf.id, grantee.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # list_group_members/2
   # ---------------------------------------------------------------------------
 

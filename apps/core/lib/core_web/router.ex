@@ -140,6 +140,10 @@ defmodule CoreWeb.Router do
     post "/posts/:post_id/comments", CommentController, :create
     delete "/comments/:id", CommentController, :delete
 
+    post "/bookshelves/:bookshelf_id/grants", VisibilityGrantController, :create
+    get "/bookshelves/:bookshelf_id/grants", VisibilityGrantController, :index
+    delete "/bookshelves/:bookshelf_id/grants/:user_id", VisibilityGrantController, :delete
+
     post "/groups", GroupController, :create
     get "/groups/:id", GroupController, :show
 
