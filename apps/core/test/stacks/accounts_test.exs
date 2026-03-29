@@ -371,6 +371,134 @@ defmodule Stacks.AccountsTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Onboarding context functions
+  # ---------------------------------------------------------------------------
+
+  describe "onboarding_status/1" do
+    test "fresh user has all steps false and next_step = profile" do
+      user = insert(:user)
+
+      assert %{steps: steps, completed: false, next_step: "profile"} =
+               Accounts.onboarding_status(user.id)
+
+      assert steps == %{"profile" => false, "age_verification" => false, "privacy" => false}
+    end
+
+    test "partially-completed user returns correct next_step" do
+      user = insert(:user, onboarding_steps: %{"profile" => true})
+      status = Accounts.onboarding_status(user.id)
+      assert status.next_step == "age_verification"
+      assert status.steps["profile"] == true
+      assert status.steps["age_verification"] == false
+    end
+
+    test "fully-completed user has next_step = nil and completed = true" do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      status = Accounts.onboarding_status(user.id)
+      assert status.next_step == nil
+      assert status.completed == true
+    end
+  end
+
+  describe "complete_onboarding_step/2" do
+    test "marks a valid step as completed" do
+      user = insert(:user)
+      assert {:ok, updated} = Accounts.complete_onboarding_step(user.id, "profile")
+      assert updated.onboarding_steps["profile"] == true
+    end
+
+    test "is idempotent — completing an already-done step returns ok" do
+      user = insert(:user, onboarding_steps: %{"profile" => true})
+      assert {:ok, updated} = Accounts.complete_onboarding_step(user.id, "profile")
+      assert updated.onboarding_steps["profile"] == true
+    end
+
+    test "completing all three steps sets onboarding_completed to true" do
+      user = insert(:user)
+      {:ok, _} = Accounts.complete_onboarding_step(user.id, "profile")
+      {:ok, _} = Accounts.complete_onboarding_step(user.id, "age_verification")
+      {:ok, updated} = Accounts.complete_onboarding_step(user.id, "privacy")
+      reloaded = Repo.reload!(updated)
+      assert reloaded.onboarding_completed == true
+    end
+
+    test "returns error for invalid step" do
+      user = insert(:user)
+      assert {:error, :invalid_step} = Accounts.complete_onboarding_step(user.id, "invalid")
+    end
+
+    test "completes age_verification step" do
+      user = insert(:user)
+
+      assert {:ok, updated} =
+               Accounts.complete_onboarding_step(user.id, "age_verification")
+
+      assert updated.onboarding_steps["age_verification"] == true
+    end
+
+    test "completes privacy step" do
+      user = insert(:user)
+      assert {:ok, updated} = Accounts.complete_onboarding_step(user.id, "privacy")
+      assert updated.onboarding_steps["privacy"] == true
+    end
+  end
+
+  describe "reset_onboarding/1" do
+    test "resets all steps to false" do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      assert {:ok, updated} = Accounts.reset_onboarding(user.id)
+      assert updated.onboarding_steps["profile"] == false
+      assert updated.onboarding_steps["age_verification"] == false
+      assert updated.onboarding_steps["privacy"] == false
+    end
+
+    test "reloaded user has onboarding_completed = false after reset" do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      {:ok, updated} = Accounts.reset_onboarding(user.id)
+      reloaded = Repo.reload!(updated)
+      assert reloaded.onboarding_completed == false
+    end
+
+    test "next_step returns profile after reset" do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      Accounts.reset_onboarding(user.id)
+      assert %{next_step: "profile"} = Accounts.onboarding_status(user.id)
+    end
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),

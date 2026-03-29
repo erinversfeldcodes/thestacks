@@ -123,6 +123,10 @@ defmodule CoreWeb.Router do
     put "/placements/:id/progress", BookshelfPlacementController, :update_progress
     delete "/placements/:id", BookshelfPlacementController, :delete
 
+    get "/onboarding/status", OnboardingController, :status
+    put "/onboarding/step/:step", OnboardingController, :complete_step
+    post "/onboarding/reset", OnboardingController, :reset
+
     put "/settings/age_verification", UserSettingsController, :update_age_verification
     put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility
     put "/settings/profile", UserSettingsController, :update_profile

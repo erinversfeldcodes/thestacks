@@ -29,7 +29,7 @@ defmodule Stacks.FactoryProtoValidationTest do
   @factories %{
     user:
       {Stacks.Accounts.User,
-       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at email_confirmation_token password_reset_token password_reset_sent_at)a},
+       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed)a},
     author: {Stacks.Books.Author, ~w(website_url rss_feed_url open_library_id)a},
     book: {Stacks.Books.Book, ~w()a},
     book_edition:

@@ -110,7 +110,9 @@
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
-        onboarding_completed: %{default: false},
+        # generated_always: true suppresses default and cast — Postgres generates this column.
+        onboarding_completed: %{generated_always: true},
+        onboarding_steps: %{ecto_type: :map, default: %{}},
         notify_wishlist_availability: %{default: false},
         notify_marketplace: %{default: true},
         notify_group_invitations: %{default: true},

@@ -150,6 +150,8 @@ models:
         description: Age verified at.
       - name: age_verification_provider
         description: Age verification provider.
+      - name: onboarding_steps
+        description: Onboarding steps.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
