@@ -45,6 +45,7 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       cond do
         Map.has_key?(override, :migration_type) -> override.migration_type
         Map.has_key?(override, :ecto_type) -> override.ecto_type
+        Map.has_key?(override, :belongs_to) -> :binary_id
         true -> map_migration_type(field.type, field.type_name)
       end
 
