@@ -381,6 +381,42 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Group
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a group struct.
+  """
+  @spec group(map()) :: map()
+  def group(g) do
+    %{
+      id: g.id,
+      owner_id: g.owner_id,
+      name: g.name,
+      type: g.type,
+      visibility: g.visibility,
+      created_at: g.created_at,
+      updated_at: g.updated_at
+    }
+  end
+
+  @doc """
+  Serializes a group invitation struct.
+  """
+  @spec group_invitation(map()) :: map()
+  def group_invitation(invitation) do
+    %{
+      id: invitation.id,
+      group_id: invitation.group_id,
+      invited_by_id: invitation.invited_by_id,
+      invited_user_id: invitation.invited_user_id,
+      status: invitation.status,
+      responded_at: invitation.responded_at,
+      created_at: invitation.created_at
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Upload / Poll
   # ---------------------------------------------------------------------------
 

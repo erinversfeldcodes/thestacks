@@ -140,6 +140,15 @@ defmodule CoreWeb.Router do
     post "/posts/:post_id/comments", CommentController, :create
     delete "/comments/:id", CommentController, :delete
 
+    post "/groups", GroupController, :create
+    get "/groups/:id", GroupController, :show
+
+    post "/groups/:group_id/invitations", GroupMemberController, :invite
+    post "/groups/:group_id/invitations/:id/accept", GroupMemberController, :accept
+    post "/groups/:group_id/invitations/:id/decline", GroupMemberController, :decline
+    delete "/groups/:group_id/members/:user_id", GroupMemberController, :remove
+    delete "/groups/:group_id/leave", GroupMemberController, :leave
+
     post "/blog/posts", BlogController, :create
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
