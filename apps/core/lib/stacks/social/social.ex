@@ -8,9 +8,10 @@ defmodule Stacks.Social do
   import Ecto.Query
 
   alias Core.Repo
+  alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Events
-  alias Stacks.Social.UserBlock
+  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock}
 
   # ── Changeset functions (moved from schema modules) ──
 
@@ -207,6 +208,337 @@ defmodule Stacks.Social do
     Repo.exists?(
       from(b in UserBlock,
         where: b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id
+      )
+    )
+  end
+
+  # ── Group CRUD ──
+
+  @doc """
+  Creates a group and inserts the owner as the first member.
+  Emits a `group.created` event.
+  """
+  def create_group(owner_id, attrs) do
+    attrs = Map.merge(attrs, %{owner_id: owner_id})
+    group_cs = group_changeset(%Group{}, attrs)
+
+    result =
+      Multi.new()
+      |> Multi.insert(:group, group_cs)
+      |> Multi.insert(:member, fn %{group: group} ->
+        group_member_changeset(%GroupMember{}, %{
+          group_id: group.id,
+          user_id: owner_id,
+          role: "member",
+          joined_at: DateTime.utc_now()
+        })
+      end)
+      |> Repo.transaction()
+
+    case result do
+      {:ok, %{group: group}} ->
+        Events.emit_safe(%{
+          event_type: "group.created",
+          aggregate_type: "group",
+          aggregate_id: group.id,
+          payload: %{owner_id: owner_id}
+        })
+
+        {:ok, group}
+
+      {:error, :group, changeset, _} ->
+        {:error, changeset}
+
+      {:error, :member, changeset, _} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Returns a group if the viewer is authorized to see it.
+  Platform-visible groups are accessible to any viewer; invite-only groups only to members.
+  """
+  def get_group(group_id, viewer_id) do
+    case Repo.get(Group, group_id) do
+      nil ->
+        nil
+
+      group ->
+        if group.visibility == "platform" or member?(group.id, viewer_id) do
+          group
+        else
+          nil
+        end
+    end
+  end
+
+  @doc "Returns all groups where user is a member."
+  def list_user_groups(user_id) do
+    from(g in Group,
+      join: m in GroupMember,
+      on: m.group_id == g.id,
+      where: m.user_id == ^user_id,
+      order_by: [desc: g.created_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc "Updates group attrs. Only the owner may update."
+  def update_group(group_id, caller_id, attrs) do
+    case Repo.get(Group, group_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Group{owner_id: ^caller_id} = group ->
+        group
+        |> group_changeset(attrs)
+        |> Repo.update()
+
+      _group ->
+        {:error, :unauthorized}
+    end
+  end
+
+  @doc "Deletes a group. Only the owner may delete."
+  def delete_group(group_id, caller_id) do
+    case Repo.get(Group, group_id) do
+      nil -> {:error, :not_found}
+      %Group{owner_id: ^caller_id} = group -> Repo.delete(group)
+      _group -> {:error, :unauthorized}
+    end
+  end
+
+  # ── Invitation Flow ──
+
+  @doc """
+  Invites a user to a group by email or display_name.
+  Emits `group.invitation_sent` event.
+  """
+  def invite_member(group_id, inviter_id, invitee_identifier) do
+    with :ok <- if(member?(group_id, inviter_id), do: :ok, else: {:error, :unauthorized}),
+         {:ok, invitee} <- resolve_invitee(invitee_identifier),
+         :ok <- if(member?(group_id, invitee.id), do: {:error, :already_member}, else: :ok),
+         :ok <-
+           if(pending_invitation?(group_id, invitee.id),
+             do: {:error, :already_invited},
+             else: :ok
+           ) do
+      result =
+        %GroupInvitation{}
+        |> group_invitation_changeset(%{
+          group_id: group_id,
+          invited_by_id: inviter_id,
+          invited_user_id: invitee.id,
+          status: "pending"
+        })
+        |> Repo.insert()
+
+      case result do
+        {:ok, invitation} ->
+          Events.emit_safe(%{
+            event_type: "group.invitation_sent",
+            aggregate_type: "group",
+            aggregate_id: group_id,
+            payload: %{invited_user_id: invitee.id, invited_by_id: inviter_id}
+          })
+
+          {:ok, invitation}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    end
+  end
+
+  @doc """
+  Accepts a pending invitation. Atomically creates a GroupMember and updates invitation status.
+  Emits `group.member_joined` event.
+  """
+  def accept_invitation(invitation_id, user_id) do
+    case Repo.get(GroupInvitation, invitation_id) do
+      nil ->
+        {:error, :not_found}
+
+      %GroupInvitation{invited_user_id: invited_id} when invited_id != user_id ->
+        {:error, :unauthorized}
+
+      %GroupInvitation{status: "pending"} = invitation ->
+        now = DateTime.utc_now()
+
+        result =
+          Multi.new()
+          |> Multi.update(
+            :invitation,
+            group_invitation_changeset(invitation, %{status: "accepted", responded_at: now})
+          )
+          |> Multi.insert(
+            :member,
+            group_member_changeset(%GroupMember{}, %{
+              group_id: invitation.group_id,
+              user_id: user_id,
+              role: "member",
+              joined_at: now
+            })
+          )
+          |> Repo.transaction()
+
+        case result do
+          {:ok, %{invitation: updated_invitation}} ->
+            Events.emit_safe(%{
+              event_type: "group.member_joined",
+              aggregate_type: "group",
+              aggregate_id: invitation.group_id,
+              payload: %{user_id: user_id}
+            })
+
+            {:ok, updated_invitation}
+
+          {:error, _step, changeset, _changes} ->
+            {:error, changeset}
+        end
+
+      _non_pending ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc "Declines a pending invitation."
+  def decline_invitation(invitation_id, user_id) do
+    case Repo.get(GroupInvitation, invitation_id) do
+      nil ->
+        {:error, :not_found}
+
+      %GroupInvitation{invited_user_id: invited_id} when invited_id != user_id ->
+        {:error, :unauthorized}
+
+      %GroupInvitation{status: "pending"} = invitation ->
+        invitation
+        |> group_invitation_changeset(%{status: "declined", responded_at: DateTime.utc_now()})
+        |> Repo.update()
+
+      _non_pending ->
+        {:error, :not_found}
+    end
+  end
+
+  # ── Member Management ──
+
+  @doc "Removes caller from group. Owner cannot leave."
+  def leave_group(group_id, caller_id) do
+    group = Repo.get(Group, group_id)
+
+    cond do
+      is_nil(group) ->
+        {:error, :not_member}
+
+      group.owner_id == caller_id ->
+        {:error, :is_owner}
+
+      true ->
+        case get_membership(group_id, caller_id) do
+          nil ->
+            {:error, :not_member}
+
+          membership ->
+            Repo.delete!(membership)
+
+            Events.emit_safe(%{
+              event_type: "group.member_left",
+              aggregate_type: "group",
+              aggregate_id: group_id,
+              payload: %{user_id: caller_id}
+            })
+
+            {:ok, :left}
+        end
+    end
+  end
+
+  @doc "Owner removes another member. Emits `group.member_removed` event."
+  def remove_member(group_id, caller_id, member_user_id) do
+    case Repo.get(Group, group_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Group{owner_id: ^caller_id} ->
+        case get_membership(group_id, member_user_id) do
+          nil ->
+            {:error, :not_found}
+
+          membership ->
+            Repo.delete!(membership)
+
+            Events.emit_safe(%{
+              event_type: "group.member_removed",
+              aggregate_type: "group",
+              aggregate_id: group_id,
+              payload: %{removed_user_id: member_user_id, removed_by_id: caller_id}
+            })
+
+            {:ok, :removed}
+        end
+
+      _group ->
+        {:error, :unauthorized}
+    end
+  end
+
+  @doc "Returns members list. Checks viewer authorization."
+  def list_group_members(group_id, viewer_id) do
+    case Repo.get(Group, group_id) do
+      nil ->
+        {:error, :not_found}
+
+      group ->
+        if group.visibility == "platform" or member?(group.id, viewer_id) do
+          members =
+            from(m in GroupMember,
+              where: m.group_id == ^group_id,
+              join: u in User,
+              on: u.id == m.user_id,
+              select: %{
+                user_id: m.user_id,
+                role: m.role,
+                display_name: u.display_name,
+                joined_at: m.joined_at
+              },
+              order_by: [asc: m.joined_at]
+            )
+            |> Repo.all()
+
+          {:ok, members}
+        else
+          {:error, :unauthorized}
+        end
+    end
+  end
+
+  # ── Private Helpers ──
+
+  defp member?(group_id, user_id) do
+    Repo.exists?(from(m in GroupMember, where: m.group_id == ^group_id and m.user_id == ^user_id))
+  end
+
+  defp get_membership(group_id, user_id) do
+    Repo.one(from(m in GroupMember, where: m.group_id == ^group_id and m.user_id == ^user_id))
+  end
+
+  defp resolve_invitee(identifier) do
+    # Prioritise exact email match; fall back to display_name.
+    user =
+      Repo.one(from(u in User, where: u.email == ^identifier, limit: 1)) ||
+        Repo.one(from(u in User, where: u.display_name == ^identifier, limit: 1))
+
+    case user do
+      nil -> {:error, :user_not_found}
+      user -> {:ok, user}
+    end
+  end
+
+  defp pending_invitation?(group_id, user_id) do
+    Repo.exists?(
+      from(i in GroupInvitation,
+        where: i.group_id == ^group_id and i.invited_user_id == ^user_id and i.status == "pending"
       )
     )
   end
