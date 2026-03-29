@@ -179,10 +179,12 @@ init flags url key =
       }
     , Cmd.batch
         [ cmd
-        , requestOnboardingStatus ()
         , case maybeAuth of
             Just auth ->
-                Api.getMyPlacements auth.token GotPlacementCheck
+                Cmd.batch
+                    [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
+                    , Api.getMyPlacements auth.token GotPlacementCheck
+                    ]
 
             Nothing ->
                 Cmd.none
@@ -1283,22 +1285,34 @@ update msg model =
 
         OnboardingMsg subMsg ->
             let
-                ( newOnboarding, outMsg ) =
+                ( newOnboarding, subCmd, outMsg ) =
                     OnboardingOverlay.update subMsg model.onboarding
+
+                -- When the user clicks Next, record the completed step via the API
+                apiCmd =
+                    case ( subMsg, model.auth ) of
+                        ( OnboardingOverlay.NextStep, Just auth ) ->
+                            Cmd.map OnboardingMsg
+                                (OnboardingOverlay.completeStep auth.token model.onboarding.step)
+
+                        _ ->
+                            Cmd.none
             in
             case outMsg of
                 OnboardingOverlay.SkipCompleted ->
                     ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , saveOnboardingCompleted ()
+                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
                     )
 
                 OnboardingOverlay.FinishCompleted ->
                     ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , saveOnboardingCompleted ()
+                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
                     )
 
                 OnboardingOverlay.NoOut ->
-                    ( { model | onboarding = newOnboarding }, Cmd.none )
+                    ( { model | onboarding = newOnboarding }
+                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, apiCmd ]
+                    )
 
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
