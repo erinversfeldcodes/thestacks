@@ -43,6 +43,7 @@ result
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+logs/
 
 # Protobuf generated — regenerated at build time. Never commit generated files.
 # Elm decoders: scripts/gen-elm-proto.sh
