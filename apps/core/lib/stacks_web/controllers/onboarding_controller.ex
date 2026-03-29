@@ -39,8 +39,16 @@ defmodule StacksWeb.OnboardingController do
   @doc "POST /api/onboarding/reset — reset all steps to allow re-entry from Settings."
   def reset(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
-    {:ok, _user} = Accounts.reset_onboarding(user.id)
-    status = Accounts.onboarding_status(user.id)
-    json(conn, ProtoJSON.onboarding_status(status))
+
+    case Accounts.reset_onboarding(user.id) do
+      {:ok, _user} ->
+        status = Accounts.onboarding_status(user.id)
+        json(conn, ProtoJSON.onboarding_status(status))
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "reset failed", details: inspect(changeset)})
+    end
   end
 end

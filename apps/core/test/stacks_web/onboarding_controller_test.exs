@@ -178,6 +178,14 @@ defmodule StacksWeb.OnboardingControllerTest do
       assert body["user"]["next_onboarding_step"] == "profile"
     end
 
+    test "fresh user has onboarding_completed = false", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert body["user"]["onboarding_completed"] == false
+    end
+
     test "next_onboarding_step is nil when all steps done", %{conn: conn} do
       user =
         insert(:user,
@@ -192,6 +200,22 @@ defmodule StacksWeb.OnboardingControllerTest do
       body = json_response(conn, 200)
 
       assert body["user"]["next_onboarding_step"] == nil
+    end
+
+    test "fully-completed user has onboarding_completed = true", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert body["user"]["onboarding_completed"] == true
     end
   end
 end
