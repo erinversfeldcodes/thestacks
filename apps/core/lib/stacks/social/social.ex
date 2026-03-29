@@ -184,6 +184,19 @@ defmodule Stacks.Social do
   end
 
   @doc """
+  Returns the IDs of all users blocked by the given user.
+  """
+  @spec blocked_user_ids(binary()) :: [binary()]
+  def blocked_user_ids(user_id) do
+    Repo.all(
+      from(b in UserBlock,
+        where: b.blocker_id == ^user_id,
+        select: b.blocked_id
+      )
+    )
+  end
+
+  @doc """
   Returns true only if the viewer has blocked the owner (one direction).
 
   `blocked_by?(viewer_id, owner_id)` returns true if viewer is the blocker

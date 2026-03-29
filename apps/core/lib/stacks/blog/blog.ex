@@ -10,8 +10,9 @@ defmodule Stacks.Blog do
   import Ecto.Query
 
   alias Core.Repo
-  alias Stacks.Blog.{Post, PostBookAssociation}
+  alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Events
+  alias Stacks.Social
   alias Stacks.Visibility
 
   # ---------------------------------------------------------------------------
@@ -359,6 +360,93 @@ defmodule Stacks.Blog do
   end
 
   # ---------------------------------------------------------------------------
+  # Comments
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Lists all comments for a post, with replies nested one level deep.
+  Comments from users the viewer has blocked are silently excluded.
+  """
+  @spec list_comments(binary(), binary() | nil) :: [map()]
+  def list_comments(post_id, viewer_id) do
+    blocked_ids = if viewer_id, do: Social.blocked_user_ids(viewer_id), else: []
+
+    all_comments =
+      Repo.all(
+        from(c in PostComment,
+          where: c.post_id == ^post_id,
+          where: c.author_id not in ^blocked_ids,
+          order_by: [asc: c.created_at]
+        )
+      )
+
+    top_level = Enum.filter(all_comments, &is_nil(&1.parent_id))
+    replies_by_parent = Enum.group_by(Enum.filter(all_comments, & &1.parent_id), & &1.parent_id)
+
+    Enum.map(top_level, fn comment ->
+      Map.put(comment, :replies, Map.get(replies_by_parent, comment.id, []))
+    end)
+  end
+
+  @doc """
+  Creates a comment on a published post.
+  Returns `{:error, :post_not_found}` if the post doesn't exist or is not published.
+  Returns `{:error, :parent_not_found}` if `parent_id` is given but doesn't exist on this post.
+  """
+  @spec create_comment(binary(), binary(), map()) ::
+          {:ok, PostComment.t()}
+          | {:error, :post_not_found | :parent_not_found | Ecto.Changeset.t()}
+  def create_comment(post_id, author_id, attrs) do
+    with {:post, %Post{published_at: pub} = _post} when not is_nil(pub) <-
+           {:post, Repo.get(Post, post_id)},
+         :ok <- validate_parent(attrs[:parent_id] || attrs["parent_id"], post_id) do
+      attrs =
+        attrs
+        |> Map.new(fn {k, v} -> {to_string(k), v} end)
+        |> Map.merge(%{"post_id" => post_id, "author_id" => author_id})
+
+      changeset = comment_changeset(%PostComment{}, attrs)
+
+      case Repo.insert(changeset) do
+        {:ok, comment} ->
+          Events.emit_safe(%{
+            aggregate_id: post_id,
+            aggregate_type: "blog_post",
+            event_type: "post.comment_created",
+            payload: %{comment_id: comment.id, author_id: author_id}
+          })
+
+          {:ok, comment}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      {:post, _} -> {:error, :post_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Deletes a comment. Post authors may delete any comment on their post.
+  Commenters may delete their own comment.
+  """
+  @spec delete_comment(binary(), binary()) :: :ok | {:error, :not_found | :unauthorized}
+  def delete_comment(comment_id, requester_id) do
+    with %PostComment{} = comment <- Repo.get(PostComment, comment_id),
+         %Post{} = post <- Repo.get(Post, comment.post_id) do
+      if comment.author_id == requester_id or post.user_id == requester_id do
+        Repo.delete!(comment)
+        :ok
+      else
+        {:error, :unauthorized}
+      end
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Changesets
   # ---------------------------------------------------------------------------
 
@@ -400,6 +488,22 @@ defmodule Stacks.Blog do
     case Visibility.validate_visibility_ceiling(child_visibility, parent_visibility, :post) do
       :ok -> :ok
       {:error, _reason} -> {:error, :visibility_ceiling}
+    end
+  end
+
+  defp comment_changeset(comment, attrs) do
+    comment
+    |> cast(attrs, [:post_id, :author_id, :parent_id, :body])
+    |> validate_required([:post_id, :author_id, :body])
+    |> validate_length(:body, min: 1, max: 2000)
+  end
+
+  defp validate_parent(nil, _post_id), do: :ok
+
+  defp validate_parent(parent_id, post_id) do
+    case Repo.get(PostComment, parent_id) do
+      %PostComment{post_id: ^post_id} -> :ok
+      _ -> {:error, :parent_not_found}
     end
   end
 

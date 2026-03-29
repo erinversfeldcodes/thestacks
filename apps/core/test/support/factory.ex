@@ -7,7 +7,7 @@ defmodule Stacks.Factory do
   use ExMachina.Ecto, repo: Core.Repo
 
   alias Stacks.Accounts.User
-  alias Stacks.Blog.{Post, PostBookAssociation}
+  alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
 
   alias Stacks.Enrichment.{
@@ -176,6 +176,14 @@ defmodule Stacks.Factory do
       title: sequence(:post_title, &"Post #{&1}"),
       body: "Some markdown body.",
       visibility: "owner"
+    }
+  end
+
+  def post_comment_factory do
+    %PostComment{
+      post: build(:post),
+      author: build(:user),
+      body: sequence(:comment_body, &"Comment #{&1}")
     }
   end
 

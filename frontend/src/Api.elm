@@ -20,8 +20,10 @@ module Api exposing
     , completeOnboardingStep
     , confirmAssociation
     , createBlogPost
+    , createComment
     , createListing
     , deactivateListing
+    , deleteComment
     , dismissAssociation
     , getAdminSources
     , getBlogPost
@@ -35,6 +37,7 @@ module Api exposing
     , getMyListings
     , getMyPlacements
     , getOnboardingStatus
+    , getPostComments
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
@@ -77,7 +80,7 @@ import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
 import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
-import Types.BlogPost exposing (BlogPost, BlogPostSummary, blogPostDecoder, blogPostSummaryDecoder)
+import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
@@ -1056,6 +1059,84 @@ dismissAssociation postId associationId token toMsg =
         { method = "PUT"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/dismiss"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/posts/:post\_id/comments — fetch comments for a post.
+-}
+getPostComments :
+    String
+    -> Maybe String
+    -> (Result Http.Error (List Comment) -> msg)
+    -> Cmd msg
+getPostComments postId maybeToken toMsg =
+    Http.request
+        { method = "GET"
+        , headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/posts/:post\_id/comments — create a comment or reply.
+-}
+createComment :
+    String
+    -> String
+    -> Maybe String
+    -> String
+    -> (Result Http.Error Comment -> msg)
+    -> Cmd msg
+createComment postId body maybeParentId token toMsg =
+    let
+        parentField =
+            case maybeParentId of
+                Just pid ->
+                    [ ( "parent_id", Encode.string pid ) ]
+
+                Nothing ->
+                    []
+    in
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    ([ ( "body", Encode.string body ) ] ++ parentField)
+                )
+        , expect = Http.expectJson toMsg (Decode.field "comment" commentDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/comments/:id — delete a comment.
+-}
+deleteComment :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+deleteComment commentId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/comments/" ++ commentId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing

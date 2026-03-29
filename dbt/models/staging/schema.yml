@@ -965,3 +965,25 @@ models:
         description: Timestamp of the last modification to this record.
         tests:
           - not_null
+
+  - name: stg_post_comments
+    description: >
+      Proto-synced staging model for post_comments.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: post_id
+        description: Post id.
+        tests:
+          - not_null
+      - name: author_id
+        description: Author id.
+      - name: parent_id
+        description: Parent id.
+      - name: body
+        description: Body.
+      - name: created_at
+        description: Created at.
