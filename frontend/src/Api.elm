@@ -9,6 +9,7 @@ module Api exposing
     , MergeFormatResponse
     , MetricsDashboard
     , NotificationPreferences
+    , OnboardingStatus
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
@@ -16,6 +17,7 @@ module Api exposing
     , SourceHealth
     , activateListing
     , approveSource
+    , completeOnboardingStep
     , confirmAssociation
     , createBlogPost
     , createListing
@@ -32,6 +34,7 @@ module Api exposing
     , getMetrics
     , getMyListings
     , getMyPlacements
+    , getOnboardingStatus
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
@@ -56,6 +59,7 @@ module Api exposing
     , updatePassword
     , updateProfile
     , updateProfileVisibility
+    , updateReadingProgress
     , updateShelfVisibility
     , uploadImage
     )
@@ -63,6 +67,7 @@ module Api exposing
 import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode
 import Stacks.Api.V1.Admin as ProtoAdmin
 import Stacks.Api.V1.AuthResponses as ProtoAuth
 import Stacks.Api.V1.BookResponses as ProtoBookResp
@@ -1525,6 +1530,99 @@ getEnrichmentGaps token toMsg =
         , url = baseUrl ++ "/api/metrics/enrichment-gaps"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg enrichmentGapsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/placements/:id/progress — update reading status and current page.
+-}
+updateReadingProgress :
+    String
+    -> { readingStatus : String, currentPage : Maybe Int }
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+updateReadingProgress placementId body token toMsg =
+    let
+        fields =
+            [ ( "reading_status", Encode.string body.readingStatus ) ]
+                ++ (case body.currentPage of
+                        Just page ->
+                            [ ( "current_page", Encode.int page ) ]
+
+                        Nothing ->
+                            []
+                   )
+    in
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
+        , body = Http.jsonBody (Encode.object fields)
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Onboarding status response from GET /api/onboarding/status.
+-}
+type alias OnboardingStatus =
+    { completed : Bool
+    , nextStep : Maybe String
+    }
+
+
+onboardingStatusDecoder : Decoder OnboardingStatus
+onboardingStatusDecoder =
+    Decode.map2 OnboardingStatus
+        (Decode.oneOf [ Decode.field "completed" Decode.bool, Decode.succeed False ])
+        (Decode.maybe (Decode.field "next_step" Decode.string)
+            |> Decode.map
+                (\ms ->
+                    case ms of
+                        Just "" ->
+                            Nothing
+
+                        other ->
+                            other
+                )
+        )
+
+
+{-| GET /api/onboarding/status — fetch current step completion state.
+-}
+getOnboardingStatus :
+    String
+    -> (Result Http.Error OnboardingStatus -> msg)
+    -> Cmd msg
+getOnboardingStatus token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/onboarding/status"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg onboardingStatusDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/onboarding/step/:step — mark a step as complete. Returns updated status.
+-}
+completeOnboardingStep :
+    String
+    -> String
+    -> (Result Http.Error OnboardingStatus -> msg)
+    -> Cmd msg
+completeOnboardingStep step token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/onboarding/step/" ++ step
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg onboardingStatusDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

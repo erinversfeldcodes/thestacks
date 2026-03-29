@@ -3,7 +3,7 @@ module PlacementDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Placement exposing (Format(..), placementDecoder)
+import Types.Placement exposing (Format(..), ReadingStatus(..), placementDecoder)
 
 
 minimalPlacementJson : String
@@ -73,6 +73,20 @@ missingRequiredFieldJson =
     """
 
 
+placementWithReadingProgressJson : String
+placementWithReadingProgressJson =
+    """
+    {
+        "id": "placement-005",
+        "position": 3,
+        "placed_at": "2024-04-01T08:00:00Z",
+        "reading_status": "reading",
+        "current_page": 120,
+        "started_at": "2024-04-02T09:00:00Z"
+    }
+    """
+
+
 suite : Test
 suite =
     describe "Placement JSON decoder"
@@ -93,6 +107,10 @@ suite =
                             , \p -> Expect.equal Nothing p.personalRating
                             , \p -> Expect.equal Nothing p.notes
                             , \p -> Expect.equal Nothing p.bookshelfName
+                            , \p -> Expect.equal Nothing p.readingStatus
+                            , \p -> Expect.equal Nothing p.currentPage
+                            , \p -> Expect.equal Nothing p.startedAt
+                            , \p -> Expect.equal Nothing p.finishedAt
                             ]
                             placement
 
@@ -167,6 +185,25 @@ suite =
                 case result of
                     Ok placement ->
                         Expect.equal "" placement.id
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "decodes reading progress fields" <|
+            \_ ->
+                let
+                    result =
+                        Decode.decodeString placementDecoder placementWithReadingProgressJson
+                in
+                case result of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal "placement-005" p.id
+                            , \p -> Expect.equal (Just Reading) p.readingStatus
+                            , \p -> Expect.equal (Just 120) p.currentPage
+                            , \p -> Expect.equal (Just "2024-04-02T09:00:00Z") p.startedAt
+                            , \p -> Expect.equal Nothing p.finishedAt
+                            ]
+                            placement
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)

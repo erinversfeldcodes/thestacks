@@ -499,6 +499,18 @@ defmodule Stacks.AccountsTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Generated column: onboarding_completed (Issue #149-W1)
+  # ---------------------------------------------------------------------------
+
+  describe "onboarding_completed generated column" do
+    test "empty onboarding_steps map produces onboarding_completed = false at DB level" do
+      user = insert(:user, onboarding_steps: %{})
+      reloaded = Repo.get!(Stacks.Accounts.User, user.id)
+      assert reloaded.onboarding_completed == false
+    end
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
