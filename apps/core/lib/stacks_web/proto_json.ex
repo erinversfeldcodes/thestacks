@@ -34,7 +34,7 @@ defmodule StacksWeb.ProtoJSON do
     :age_verified,
     :consent_analytics
   ]
-  @user_auth_fields @user_core_fields ++ [:country_code, :city]
+  @user_auth_fields @user_core_fields ++ [:country_code, :city, :onboarding_completed]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   # ---------------------------------------------------------------------------
@@ -279,8 +279,30 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec user(map()) :: map()
   def user(user_struct) do
-    Gen.user(user_struct)
-    |> Map.take(@user_auth_fields)
+    base = Gen.user(user_struct) |> Map.take(@user_auth_fields)
+    steps = user_struct.onboarding_steps || %{}
+    step_order = ~w(profile age_verification privacy)
+
+    next_step =
+      Enum.find(step_order, fn step ->
+        not (Map.get(steps, step, false) == true)
+      end)
+
+    Map.put(base, :next_onboarding_step, next_step)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Onboarding
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes the onboarding status map from `Accounts.onboarding_status/1`.
+
+  Returns `%{steps: %{...}, completed: bool, next_step: step | nil}`.
+  """
+  @spec onboarding_status(map()) :: map()
+  def onboarding_status(%{steps: steps, completed: completed, next_step: next_step}) do
+    %{steps: steps, completed: completed, next_step: next_step}
   end
 
   # ---------------------------------------------------------------------------

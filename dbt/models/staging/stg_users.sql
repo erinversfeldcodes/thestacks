@@ -22,6 +22,7 @@ select
     email_confirmed,
     age_verified_at,
     age_verification_provider,
+    onboarding_steps,
     created_at,
     updated_at
 from {{ source('op', 'users') }}

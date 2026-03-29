@@ -26,6 +26,9 @@ defmodule Stacks.Accounts do
   @registration_required_fields [:email, :password]
   @registration_optional_fields [:display_name, :role, :profile_visibility, :age_verified]
 
+  @valid_onboarding_steps ~w(profile age_verification privacy)
+  @onboarding_step_order ~w(profile age_verification privacy)
+
   @doc "Changeset for registration."
   def registration_changeset(user, attrs) do
     user
@@ -100,6 +103,12 @@ defmodule Stacks.Accounts do
     user
     |> cast(attrs, [:profile_visibility])
     |> validate_inclusion(:profile_visibility, ["platform", "owner"])
+  end
+
+  @doc "Changeset for updating onboarding_steps JSONB map."
+  def onboarding_steps_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:onboarding_steps])
   end
 
   @doc "Changeset for email confirmation token storage."
@@ -418,6 +427,76 @@ defmodule Stacks.Accounts do
       error ->
         error
     end
+  end
+
+  @doc """
+  Returns the current onboarding status for a user.
+
+  Returns `%{steps: %{profile: bool, age_verification: bool, privacy: bool},
+              completed: bool, next_step: step_name | nil}`.
+  """
+  @spec onboarding_status(binary()) :: map()
+  def onboarding_status(user_id) do
+    user = get_user!(user_id)
+    steps = normalize_steps(user.onboarding_steps)
+    completed = Enum.all?(@valid_onboarding_steps, &Map.get(steps, &1, false))
+
+    next =
+      Enum.find(@onboarding_step_order, fn step ->
+        not Map.get(steps, step, false)
+      end)
+
+    %{steps: steps, completed: completed, next_step: next}
+  end
+
+  @doc """
+  Marks a single onboarding step as completed for a user. Idempotent — completing
+  an already-completed step is a no-op and returns `{:ok, user}`.
+
+  Returns `{:ok, user}` or `{:error, :invalid_step}`.
+  """
+  @spec complete_onboarding_step(binary(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid_step}
+  def complete_onboarding_step(user_id, step) when is_binary(step) do
+    if step in @valid_onboarding_steps do
+      user = get_user!(user_id)
+      current = normalize_steps(user.onboarding_steps)
+      updated = Map.put(current, step, true)
+
+      case user |> onboarding_steps_changeset(%{onboarding_steps: updated}) |> Repo.update() do
+        {:ok, saved} -> {:ok, Repo.reload!(saved)}
+        error -> error
+      end
+    else
+      {:error, :invalid_step}
+    end
+  end
+
+  @doc """
+  Resets all onboarding steps to false, allowing the user to re-enter the
+  onboarding flow from Settings.
+
+  Returns `{:ok, user}`.
+  """
+  @spec reset_onboarding(binary()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def reset_onboarding(user_id) do
+    empty = Map.new(@valid_onboarding_steps, fn step -> {step, false} end)
+
+    case user_id
+         |> get_user!()
+         |> onboarding_steps_changeset(%{onboarding_steps: empty})
+         |> Repo.update() do
+      {:ok, saved} -> {:ok, Repo.reload!(saved)}
+      error -> error
+    end
+  end
+
+  defp normalize_steps(nil), do: Map.new(@valid_onboarding_steps, &{&1, false})
+
+  defp normalize_steps(steps) when is_map(steps) do
+    Map.new(@valid_onboarding_steps, fn step ->
+      {step, Map.get(steps, step, false) == true}
+    end)
   end
 
   defp verify_password(%User{password_hash: hash}, current_password)

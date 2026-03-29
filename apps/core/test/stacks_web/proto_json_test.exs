@@ -561,7 +561,9 @@ defmodule StacksWeb.ProtoJSONTest do
                age_verified: true,
                consent_analytics: true,
                country_code: "ZA",
-               city: "Cape Town"
+               city: "Cape Town",
+               onboarding_completed: nil,
+               next_onboarding_step: "profile"
              }
     end
 
