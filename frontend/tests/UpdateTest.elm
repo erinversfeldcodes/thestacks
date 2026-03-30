@@ -46,6 +46,7 @@ bookDetailInit =
     , showAgeGate = False
     , entryAnimationActive = False
     , isAuthenticated = True
+    , availability = NotAsked
     }
 
 

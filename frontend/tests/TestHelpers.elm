@@ -757,18 +757,45 @@ bookDetailInitEffects : String -> Maybe String -> SimulatedEffect BookDetail.Msg
 bookDetailInitEffects bookId maybeToken =
     case maybeToken of
         Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/books/" ++ bookId
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded decodeBookDetailResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            SimulatedEffect.Cmd.batch
+                [ SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/books/" ++ bookId
+                    , body = SimulatedEffect.Http.emptyBody
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded decodeBookDetailResponse
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                , SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/books/" ++ bookId ++ "/availability"
+                    , body = SimulatedEffect.Http.emptyBody
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded decodeAvailabilityResponse
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                ]
 
         Nothing ->
             SimulatedEffect.Cmd.none
+
+
+{-| Decode an availability response. Mirrors BookDetail.availabilityDecoder.
+-}
+decodeAvailabilityResponse : Decode.Decoder (List BookDetail.AvailabilityItem)
+decodeAvailabilityResponse =
+    Decode.field "availability"
+        (Decode.list
+            (Decode.map5 BookDetail.AvailabilityItem
+                (Decode.field "partner_name" Decode.string)
+                (Decode.field "price_cents" Decode.int)
+                (Decode.field "condition" Decode.string)
+                (Decode.field "quantity" Decode.int)
+                (Decode.field "isbn" Decode.string)
+            )
+        )
 
 
 
