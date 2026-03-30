@@ -436,7 +436,7 @@ defmodule Stacks.Blog do
     with %PostComment{} = comment <- Repo.get(PostComment, comment_id),
          %Post{} = post <- Repo.get(Post, comment.post_id) do
       if comment.author_id == requester_id or post.user_id == requester_id do
-        Repo.delete!(comment)
+        {:ok, _} = Repo.delete(comment)
         :ok
       else
         {:error, :unauthorized}

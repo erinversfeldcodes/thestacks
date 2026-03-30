@@ -69,7 +69,10 @@ defmodule Stacks.FactoryProtoValidationTest do
     third_space:
       {Stacks.Enrichment.ThirdSpace,
        ~w(instagram_url description discovered_via last_active_at opted_out_at)a},
-    third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a}
+    third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a},
+    partner:
+      {Stacks.Partners.Partner,
+       ~w(api_key_prefix hmac_secret approved_by_id approved_at website_url)a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.

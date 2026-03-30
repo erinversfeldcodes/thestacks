@@ -45,10 +45,10 @@ defmodule StacksWeb.OnboardingController do
         status = Accounts.onboarding_status(user.id)
         json(conn, ProtoJSON.onboarding_status(status))
 
-      {:error, changeset} ->
+      {:error, _changeset} ->
         conn
         |> put_status(:internal_server_error)
-        |> json(%{error: "reset failed", details: inspect(changeset)})
+        |> json(%{error: "reset failed"})
     end
   end
 end

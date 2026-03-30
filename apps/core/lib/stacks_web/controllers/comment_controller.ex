@@ -8,6 +8,12 @@ defmodule StacksWeb.CommentController do
 
   action_fallback CoreWeb.FallbackController
 
+  def index(conn, %{"post_id" => post_id}) do
+    user = Guardian.Plug.current_resource(conn)
+    comments = Blog.list_comments(post_id, user.id)
+    json(conn, %{comments: Enum.map(comments, &ProtoJSON.comment/1)})
+  end
+
   def create(conn, %{"post_id" => post_id} = params) do
     user = Guardian.Plug.current_resource(conn)
     attrs = Map.take(params, ["body", "parent_id"])

@@ -518,9 +518,16 @@ defmodule Stacks.Shelving do
     # Normalise to atom keys so that maybe_set_* helpers produce a
     # consistent key type regardless of whether attrs came from a
     # controller (string keys) or a context test (atom keys).
+    key_map = %{
+      "reading_status" => :reading_status,
+      "current_page" => :current_page,
+      "started_at" => :started_at,
+      "finished_at" => :finished_at
+    }
+
     atom_attrs =
       for {k, v} <- attrs, into: %{} do
-        {if(is_atom(k), do: k, else: String.to_existing_atom(k)), v}
+        {if(is_atom(k), do: k, else: Map.get(key_map, k, k)), v}
       end
 
     new_status = Map.get(atom_attrs, :reading_status)

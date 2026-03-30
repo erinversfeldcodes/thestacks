@@ -10,8 +10,8 @@ defmodule Stacks.Partners do
   alias Core.Repo
   alias Stacks.Partners.Partner
 
-  @key_prefix "sk_partner_"
-  @key_hex_length 40
+  @key_prefix "stacks_pk_"
+  @key_hex_length 64
 
   @partner_required_fields [:name, :business_type, :contact_email]
   @partner_optional_fields [:website_url]

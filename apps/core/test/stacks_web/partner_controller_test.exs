@@ -69,7 +69,7 @@ defmodule StacksWeb.PartnerControllerTest do
       {conn, _owner} = owner_conn(conn)
       conn = put(conn, "/api/admin/partners/#{partner.id}/approve")
       assert %{"data" => %{"api_key" => key}} = json_response(conn, 200)
-      assert String.starts_with?(key, "sk_partner_")
+      assert String.starts_with?(key, "stacks_pk_")
     end
 
     test "returns 403 for non-owner", %{conn: conn} do
@@ -99,7 +99,7 @@ defmodule StacksWeb.PartnerControllerTest do
   describe "PartnerAuthPlug" do
     test "returns :invalid for wrong key" do
       assert {:error, :invalid} =
-               Partners.authenticate_partner("sk_partner_" <> String.duplicate("0", 40))
+               Partners.authenticate_partner("stacks_pk_" <> String.duplicate("0", 64))
     end
   end
 end

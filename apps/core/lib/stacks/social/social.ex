@@ -129,7 +129,7 @@ defmodule Stacks.Social do
         {:error, :not_found}
 
       block ->
-        Repo.delete!(block)
+        {:ok, _} = Repo.delete(block)
 
         Events.emit_safe(%{
           event_type: "social.user_unblocked",
@@ -218,6 +218,8 @@ defmodule Stacks.Social do
 
   # ── Group CRUD ──
 
+  # Dialyzer false positive: Ecto.Multi callback form confuses opaque MapSet tracking.
+  @dialyzer {:no_opaque, create_group: 2}
   @doc """
   Creates a group and inserts the owner as the first member.
   Emits a `group.created` event.
@@ -354,6 +356,8 @@ defmodule Stacks.Social do
     end
   end
 
+  # Dialyzer false positive: Ecto.Multi callback form confuses opaque MapSet tracking.
+  @dialyzer {:no_opaque, accept_invitation: 2}
   @doc """
   Accepts a pending invitation. Atomically creates a GroupMember and updates invitation status.
   Emits `group.member_joined` event.
@@ -444,7 +448,7 @@ defmodule Stacks.Social do
             {:error, :not_member}
 
           membership ->
-            Repo.delete!(membership)
+            {:ok, _} = Repo.delete(membership)
 
             Events.emit_safe(%{
               event_type: "group.member_left",
@@ -470,7 +474,7 @@ defmodule Stacks.Social do
             {:error, :not_found}
 
           membership ->
-            Repo.delete!(membership)
+            {:ok, _} = Repo.delete(membership)
 
             Events.emit_safe(%{
               event_type: "group.member_removed",
@@ -644,20 +648,22 @@ defmodule Stacks.Social do
 
       _group ->
         if member?(group_id, viewer_id) do
-          build_feed(group_id, opts)
+          build_feed(group_id, viewer_id, opts)
         else
           {:error, :unauthorized}
         end
     end
   end
 
-  defp build_feed(group_id, opts) do
+  defp build_feed(group_id, viewer_id, opts) do
     limit = min(Keyword.get(opts, :limit, 20), 50)
     before_dt = Keyword.get(opts, :before)
+    blocked_ids = blocked_user_ids(viewer_id)
 
     member_ids =
       from(m in GroupMember, where: m.group_id == ^group_id, select: m.user_id)
       |> Repo.all()
+      |> Enum.reject(&(&1 in blocked_ids))
 
     if member_ids == [] do
       {:ok, []}
@@ -742,9 +748,12 @@ defmodule Stacks.Social do
 
   # ── Private Helpers ──
 
-  defp member?(group_id, user_id) do
+  @doc "Returns true if user_id is a member of group_id."
+  def group_member?(group_id, user_id) do
     Repo.exists?(from(m in GroupMember, where: m.group_id == ^group_id and m.user_id == ^user_id))
   end
+
+  defp member?(group_id, user_id), do: group_member?(group_id, user_id)
 
   defp get_membership(group_id, user_id) do
     Repo.one(from(m in GroupMember, where: m.group_id == ^group_id and m.user_id == ^user_id))
