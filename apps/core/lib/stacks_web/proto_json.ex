@@ -601,6 +601,29 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Partner
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a partner struct for API responses.
+  Omits hmac_secret — security-sensitive, never serialized.
+  """
+  @spec partner(map()) :: map()
+  def partner(p) do
+    %{
+      id: p.id,
+      name: p.name,
+      business_type: p.business_type,
+      contact_email: p.contact_email,
+      website_url: p.website_url,
+      status: p.status,
+      api_key_prefix: p.api_key_prefix,
+      approved_by_id: p.approved_by_id,
+      created_at: p.created_at && DateTime.to_iso8601(p.created_at)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
 
