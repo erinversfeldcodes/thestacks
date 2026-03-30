@@ -10,8 +10,10 @@ defmodule Stacks.Social do
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Accounts.User
+  alias Stacks.Blog.Post
+  alias Stacks.Books.Book
   alias Stacks.Events
-  alias Stacks.Shelving.Bookshelf
+  alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   # ── Changeset functions (moved from schema modules) ──
@@ -619,6 +621,123 @@ defmodule Stacks.Social do
             g.granted_to_id == ^viewer_id
       )
     )
+  end
+
+  # ── Group Content Feed ──
+
+  @doc """
+  Returns a reverse-chronological feed of activity from group members.
+
+  Combines placements and blog posts visible at the "group" or "platform" level.
+  Supports cursor-based pagination via the `:before` option (DateTime) and
+  `:limit` (integer, default 20, max 50).
+
+  Returns `{:error, :not_found}` if the group does not exist,
+  `{:error, :unauthorized}` if the viewer is not a member.
+  """
+  @spec feed_for_group(String.t(), String.t(), keyword()) ::
+          {:ok, list(map())} | {:error, :not_found | :unauthorized}
+  def feed_for_group(group_id, viewer_id, opts \\ []) do
+    case Repo.get(Group, group_id) do
+      nil ->
+        {:error, :not_found}
+
+      _group ->
+        if member?(group_id, viewer_id) do
+          build_feed(group_id, opts)
+        else
+          {:error, :unauthorized}
+        end
+    end
+  end
+
+  defp build_feed(group_id, opts) do
+    limit = min(Keyword.get(opts, :limit, 20), 50)
+    before_dt = Keyword.get(opts, :before)
+
+    member_ids =
+      from(m in GroupMember, where: m.group_id == ^group_id, select: m.user_id)
+      |> Repo.all()
+
+    if member_ids == [] do
+      {:ok, []}
+    else
+      placement_items = feed_placements(member_ids, before_dt, limit)
+      post_items = feed_posts(member_ids, before_dt, limit)
+
+      items =
+        (placement_items ++ post_items)
+        |> Enum.sort_by(& &1.occurred_at, {:desc, DateTime})
+        |> Enum.take(limit)
+
+      {:ok, items}
+    end
+  end
+
+  defp feed_placements(member_ids, before_dt, limit) do
+    base =
+      from(p in Placement,
+        join: bs in Bookshelf,
+        on: p.bookshelf_id == bs.id,
+        join: b in Book,
+        on: p.book_id == b.id,
+        join: u in User,
+        on: bs.user_id == u.id,
+        where: bs.user_id in ^member_ids,
+        where: p.visibility in ["group", "platform"],
+        where: is_nil(p.removed_at),
+        order_by: [desc: p.placed_at],
+        limit: ^limit,
+        select: %{
+          type: :placement_created,
+          placement_id: p.id,
+          book_id: b.id,
+          book_title: b.title,
+          user_id: u.id,
+          user_display_name: u.display_name,
+          occurred_at: p.placed_at
+        }
+      )
+
+    base =
+      if before_dt do
+        from [p, ...] in base, where: p.placed_at < ^before_dt
+      else
+        base
+      end
+
+    Repo.all(base)
+  end
+
+  defp feed_posts(member_ids, before_dt, limit) do
+    base =
+      from(post in Post,
+        join: u in User,
+        on: post.user_id == u.id,
+        where: post.user_id in ^member_ids,
+        where: post.visibility in ["group", "platform"],
+        where: not is_nil(post.published_at),
+        order_by: [desc: post.published_at],
+        limit: ^limit,
+        select: %{
+          type: :blog_post,
+          post_id: post.id,
+          post_title: post.title,
+          post_visibility: post.visibility,
+          user_id: u.id,
+          user_display_name: u.display_name,
+          occurred_at: post.published_at
+        }
+      )
+
+    base =
+      if before_dt do
+        from [post, ...] in base, where: post.published_at < ^before_dt
+      else
+        base
+      end
+
+    Repo.all(base)
   end
 
   # ── Private Helpers ──

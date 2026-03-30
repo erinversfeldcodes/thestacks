@@ -1,11 +1,13 @@
-module Page.Groups.Detail exposing (InviteState(..), Model, Msg(..), OutMsg(..), init, update, view)
+module Page.Groups.Detail exposing (InviteState(..), Model, Msg(..), OutMsg(..), Tab(..), init, update, view)
 
 import Api
+import Components.FeedItem
 import Html exposing (Html, button, div, h1, input, p, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Navigation.Route exposing (Route(..))
+import Types.FeedItem exposing (FeedResponse)
 import Types.Group exposing (Group, GroupInvitation)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -17,6 +19,11 @@ type InviteState
     | InviteFailed String
 
 
+type Tab
+    = MembersTab
+    | FeedTab
+
+
 type alias Model =
     { groupId : String
     , group : RemoteData Http.Error Group
@@ -24,6 +31,9 @@ type alias Model =
     , inviteState : InviteState
     , currentUserId : String
     , token : String
+    , activeTab : Tab
+    , feed : RemoteData Http.Error FeedResponse
+    , loadingMoreFeed : Bool
     }
 
 
@@ -36,6 +46,10 @@ type Msg
     | MemberRemoved String (Result Http.Error ())
     | LeaveGroup
     | LeftGroup (Result Http.Error ())
+    | TabChanged Tab
+    | FeedLoaded (Result Http.Error FeedResponse)
+    | LoadMoreFeed
+    | MoreFeedLoaded (Result Http.Error FeedResponse)
 
 
 type OutMsg
@@ -51,6 +65,9 @@ init groupId userId token =
       , inviteState = InviteIdle
       , currentUserId = userId
       , token = token
+      , activeTab = MembersTab
+      , feed = NotAsked
+      , loadingMoreFeed = False
       }
     , Api.getGroup groupId token GroupLoaded
     )
@@ -110,6 +127,63 @@ update msg model =
         LeftGroup (Err _) ->
             ( model, Cmd.none, NoOut )
 
+        TabChanged FeedTab ->
+            case model.feed of
+                NotAsked ->
+                    ( { model | activeTab = FeedTab, feed = Loading }
+                    , Api.getGroupFeed model.groupId model.token Nothing FeedLoaded
+                    , NoOut
+                    )
+
+                _ ->
+                    ( { model | activeTab = FeedTab }, Cmd.none, NoOut )
+
+        TabChanged MembersTab ->
+            ( { model | activeTab = MembersTab }, Cmd.none, NoOut )
+
+        FeedLoaded (Ok resp) ->
+            ( { model | feed = Success resp }, Cmd.none, NoOut )
+
+        FeedLoaded (Err e) ->
+            ( { model | feed = Failure e }, Cmd.none, NoOut )
+
+        LoadMoreFeed ->
+            case model.feed of
+                Success resp ->
+                    case resp.nextCursor of
+                        Just _ ->
+                            ( { model | loadingMoreFeed = True }
+                            , Api.getGroupFeed model.groupId model.token resp.nextCursor MoreFeedLoaded
+                            , NoOut
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none, NoOut )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        MoreFeedLoaded (Ok newResp) ->
+            case model.feed of
+                Success oldResp ->
+                    ( { model
+                        | feed =
+                            Success
+                                { data = oldResp.data ++ newResp.data
+                                , nextCursor = newResp.nextCursor
+                                }
+                        , loadingMoreFeed = False
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                _ ->
+                    ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
+
+        MoreFeedLoaded (Err _) ->
+            ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -126,17 +200,48 @@ view model =
 
             Success group ->
                 [ h1 [] [ text group.name ]
-                , viewMembers group
-                , if group.ownerId == model.currentUserId then
-                    viewInviteForm model
+                , div [ class "groups-detail__tabs" ]
+                    [ button
+                        [ onClick (TabChanged MembersTab)
+                        , class
+                            (if model.activeTab == MembersTab then
+                                "tab tab--active"
 
-                  else
-                    text ""
-                , if group.ownerId /= model.currentUserId then
-                    button [ class "groups-detail__leave", onClick LeaveGroup ] [ text "Leave Group" ]
+                             else
+                                "tab"
+                            )
+                        ]
+                        [ text "Members" ]
+                    , button
+                        [ onClick (TabChanged FeedTab)
+                        , class
+                            (if model.activeTab == FeedTab then
+                                "tab tab--active"
 
-                  else
-                    text ""
+                             else
+                                "tab"
+                            )
+                        ]
+                        [ text "Feed" ]
+                    ]
+                , case model.activeTab of
+                    MembersTab ->
+                        div []
+                            [ viewMembers group
+                            , if group.ownerId == model.currentUserId then
+                                viewInviteForm model
+
+                              else
+                                text ""
+                            , if group.ownerId /= model.currentUserId then
+                                button [ class "groups-detail__leave", onClick LeaveGroup ] [ text "Leave Group" ]
+
+                              else
+                                text ""
+                            ]
+
+                    FeedTab ->
+                        viewFeed model
                 ]
         )
 
@@ -174,3 +279,43 @@ viewInviteForm model =
             _ ->
                 text ""
         ]
+
+
+viewFeed : Model -> Html Msg
+viewFeed model =
+    div [ class "groups-detail__feed" ]
+        (case model.feed of
+            NotAsked ->
+                [ p [] [ text "Select the Feed tab to load activity." ] ]
+
+            Loading ->
+                [ p [] [ text "Loading feed..." ] ]
+
+            Failure _ ->
+                [ p [] [ text "Could not load feed." ] ]
+
+            Success resp ->
+                if List.isEmpty resp.data then
+                    [ p [ class "groups-detail__feed-empty" ] [ text "No activity yet." ] ]
+
+                else
+                    List.map Components.FeedItem.view resp.data
+                        ++ [ if resp.nextCursor /= Nothing then
+                                button
+                                    [ class "groups-detail__load-more"
+                                    , onClick LoadMoreFeed
+                                    , disabled model.loadingMoreFeed
+                                    ]
+                                    [ text
+                                        (if model.loadingMoreFeed then
+                                            "Loading..."
+
+                                         else
+                                            "Load more"
+                                        )
+                                    ]
+
+                             else
+                                text ""
+                           ]
+        )
