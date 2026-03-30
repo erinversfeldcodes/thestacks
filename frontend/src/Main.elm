@@ -29,6 +29,8 @@ import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
+import Page.Groups as Groups
+import Page.Groups.Detail as GroupsDetail
 import Page.Login as Login
 import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
@@ -117,6 +119,8 @@ type Page
     | PageAdminSourceApproval AdminSourceApproval.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminMetrics AdminMetrics.Model
+    | PageGroups Groups.Model
+    | PageGroupsDetail GroupsDetail.Model
     | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
@@ -491,6 +495,26 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             else
                 ( PageNotFound, Cmd.none )
 
+        Groups ->
+            let
+                auth =
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }, token = "" } maybeAuth
+
+                ( m, cmd ) =
+                    Groups.init auth.user.id auth.token
+            in
+            ( PageGroups m, Cmd.map GroupsMsg cmd )
+
+        GroupDetail groupId ->
+            let
+                auth =
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }, token = "" } maybeAuth
+
+                ( m, cmd ) =
+                    GroupsDetail.init groupId auth.user.id auth.token
+            in
+            ( PageGroupsDetail m, Cmd.map GroupsDetailMsg cmd )
+
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
@@ -542,6 +566,8 @@ type Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminMetricsMsg AdminMetrics.Msg
+    | GroupsMsg Groups.Msg
+    | GroupsDetailMsg GroupsDetail.Msg
     | UserMenuMsg UserMenu.Msg
     | LogoutCompleted
     | SettingsMobileNavChanged String
@@ -1184,6 +1210,54 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        GroupsMsg subMsg ->
+            case model.page of
+                PageGroups subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Groups.update subMsg subModel
+                    in
+                    case outMsg of
+                        Groups.NoOut ->
+                            ( { model | page = PageGroups newSubModel }
+                            , Cmd.map GroupsMsg subCmd
+                            )
+
+                        Groups.NavigateTo route ->
+                            ( { model | page = PageGroups newSubModel }
+                            , Cmd.batch
+                                [ Cmd.map GroupsMsg subCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GroupsDetailMsg subMsg ->
+            case model.page of
+                PageGroupsDetail subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            GroupsDetail.update subMsg subModel
+                    in
+                    case outMsg of
+                        GroupsDetail.NoOut ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.map GroupsDetailMsg subCmd
+                            )
+
+                        GroupsDetail.NavigateTo route ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.batch
+                                [ Cmd.map GroupsDetailMsg subCmd
+                                , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
         OverlayBookDetailMsg subMsg ->
             case model.bookDetailOverlay of
                 Just overlay ->
@@ -1550,6 +1624,12 @@ pageTitle route =
         Route.AdminMetrics ->
             "Metrics — The Stacks"
 
+        Groups ->
+            "My Groups — The Stacks"
+
+        GroupDetail _ ->
+            "Group — The Stacks"
+
         ConfirmEmail EmailConfirmed ->
             "Email Confirmed — The Stacks"
 
@@ -1762,6 +1842,12 @@ viewPage model =
 
         PageAdminMetrics subModel ->
             Html.map AdminMetricsMsg (AdminMetrics.view subModel)
+
+        PageGroups subModel ->
+            Html.map GroupsMsg (Groups.view subModel)
+
+        PageGroupsDetail subModel ->
+            Html.map GroupsDetailMsg (GroupsDetail.view subModel)
 
         PageConfirmEmail status ->
             viewConfirmEmail status

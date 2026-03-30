@@ -15,14 +15,17 @@ module Api exposing
     , PollStatus(..)
     , QualityTrends
     , SourceHealth
+    , acceptInvitation
     , activateListing
     , approveSource
     , completeOnboardingStep
     , confirmAssociation
     , createBlogPost
     , createComment
+    , createGroup
     , createListing
     , deactivateListing
+    , declineInvitation
     , deleteComment
     , dismissAssociation
     , getAdminSources
@@ -32,6 +35,7 @@ module Api exposing
     , getBookshelf
     , getCatalogue
     , getEnrichmentGaps
+    , getGroup
     , getListings
     , getMetrics
     , getMyListings
@@ -41,6 +45,8 @@ module Api exposing
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
+    , inviteToGroup
+    , leaveGroup
     , login
     , logout
     , lookupByIsbn
@@ -52,6 +58,7 @@ module Api exposing
     , register
     , rejectSource
     , removeBook
+    , removeMember
     , saveConsent
     , searchBooks
     , soldListing
@@ -82,6 +89,7 @@ import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
+import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
@@ -1704,6 +1712,140 @@ completeOnboardingStep step token toMsg =
         , url = baseUrl ++ "/api/onboarding/step/" ++ step
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+createGroup :
+    String
+    -> String
+    -> (Result Http.Error Group -> msg)
+    -> Cmd msg
+createGroup name token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "name", Encode.string name )
+                    , ( "type", Encode.string "close_friends" )
+                    ]
+                )
+        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+getGroup :
+    String
+    -> String
+    -> (Result Http.Error Group -> msg)
+    -> Cmd msg
+getGroup groupId token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+inviteToGroup :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error GroupInvitation -> msg)
+    -> Cmd msg
+inviteToGroup groupId identifier token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "identifier", Encode.string identifier )
+                    ]
+                )
+        , expect = Http.expectJson toMsg (Decode.field "invitation" groupInvitationDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+acceptInvitation :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+acceptInvitation groupId invitationId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+declineInvitation :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+declineInvitation groupId invitationId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+removeMember :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+removeMember groupId userId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ userId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+leaveGroup :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+leaveGroup groupId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
