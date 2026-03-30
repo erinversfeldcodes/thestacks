@@ -24,7 +24,7 @@ defmodule Stacks.Factory do
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Partners.{InventoryItem, Partner}
-  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   def user_factory do
@@ -89,6 +89,13 @@ defmodule Stacks.Factory do
     }
   end
 
+  def shelf_factory do
+    %Shelf{
+      bookshelf: build(:bookshelf),
+      position: 0
+    }
+  end
+
   def placement_factory do
     %Placement{
       position: 1,
@@ -100,7 +107,8 @@ defmodule Stacks.Factory do
       started_at: nil,
       finished_at: nil,
       book: build(:book),
-      bookshelf: build(:bookshelf)
+      bookshelf: build(:bookshelf),
+      shelf: build(:shelf)
     }
   end
 

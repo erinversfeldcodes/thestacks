@@ -679,6 +679,7 @@ defmodule Stacks.ShelvingTest do
       bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
 
+      shelf = insert(:shelf, bookshelf: bookshelf)
       now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
       Repo.insert_all(
@@ -688,6 +689,7 @@ defmodule Stacks.ShelvingTest do
             id: Ecto.UUID.generate(),
             book_id: book.id,
             bookshelf_id: bookshelf.id,
+            shelf_id: shelf.id,
             position: 1,
             placed_at: now,
             formats: [],

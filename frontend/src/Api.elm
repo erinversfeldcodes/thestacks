@@ -17,6 +17,7 @@ module Api exposing
     , SourceHealth
     , acceptInvitation
     , activateListing
+    , addShelf
     , approveSource
     , completeOnboardingStep
     , confirmAssociation
@@ -95,6 +96,7 @@ import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitati
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
+import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
 import Url.Builder
 
 
@@ -377,7 +379,7 @@ searchBooks query token toMsg =
 getBookshelf :
     String
     -> String
-    -> (Result Http.Error (List Placement) -> msg)
+    -> (Result Http.Error (List Shelf) -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
     Http.request
@@ -385,7 +387,24 @@ getBookshelf shelfName token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementDecoder))
+        , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+addShelf :
+    String
+    -> String
+    -> (Result Http.Error Shelf -> msg)
+    -> Cmd msg
+addShelf shelfName token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/shelves"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg shelfDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

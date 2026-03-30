@@ -235,6 +235,8 @@ models:
         description: Started at.
       - name: finished_at
         description: Finished at.
+      - name: shelf_id
+        description: Shelf id.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -1067,3 +1069,19 @@ models:
         description: Timestamp of the last modification to this record.
         tests:
           - not_null
+
+  - name: stg_shelves
+    description: >
+      Proto-synced staging model for shelves.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: bookshelf_id
+        description: Bookshelf id.
+      - name: position
+        description: Position.
+      - name: created_at
+        description: Created at.

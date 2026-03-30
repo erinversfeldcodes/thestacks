@@ -128,7 +128,13 @@ defmodule CoreWeb.Router do
     put "/placements/:id/move", BookshelfPlacementController, :move
     put "/placements/:id/formats", BookshelfPlacementController, :update_formats
     put "/placements/:id/progress", BookshelfPlacementController, :update_progress
+    put "/placements/:id/shelf", BookshelfPlacementController, :move_to_shelf
     delete "/placements/:id", BookshelfPlacementController, :delete
+
+    get "/bookshelves/:bookshelf_name/shelves", ShelfController, :index
+    post "/bookshelves/:bookshelf_name/shelves", ShelfController, :create
+    delete "/shelves/:id", ShelfController, :delete
+    put "/bookshelves/:bookshelf_name/shelves/reorder", ShelfController, :reorder
 
     get "/onboarding/status", OnboardingController, :status
     put "/onboarding/step/:step", OnboardingController, :complete_step

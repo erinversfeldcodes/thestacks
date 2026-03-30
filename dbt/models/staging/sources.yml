@@ -104,6 +104,18 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
+      - name: shelves
+        description: Physical horizontal shelves within a bookshelf.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: bookshelf_id
+            description: FK to bookshelves.
+          - name: position
+            description: Zero-based display order within the bookshelf.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: bookshelf_placements
         description: Junction between books and bookshelves, with per-placement metadata.
         columns:
@@ -147,6 +159,8 @@ sources:
             description: Timestamp when the user first started reading (null if not started).
           - name: finished_at
             description: Timestamp when the user finished reading (null if not completed).
+          - name: shelf_id
+            description: FK to shelves (the physical shelf within the bookshelf).
 
       - name: bookshelf_placement_history
         description: Immutable log of book movements between bookshelves.

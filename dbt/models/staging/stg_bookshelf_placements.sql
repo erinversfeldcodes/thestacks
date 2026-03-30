@@ -21,6 +21,7 @@ select
     current_page,
     started_at,
     finished_at,
+    shelf_id,
     created_at,
     updated_at
 from {{ source('op', 'bookshelf_placements') }}

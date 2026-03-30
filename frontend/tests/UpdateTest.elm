@@ -18,7 +18,7 @@ import Types.RemoteData exposing (RemoteData(..))
 
 libraryInit : Bookshelf.Model
 libraryInit =
-    { books = Loading
+    { shelves = Loading
     , showAgeGate = False
     , config = Bookshelf.libraryConfig
     , userId = "test-user-id"
@@ -26,6 +26,7 @@ libraryInit =
     , rssLink = { showUrl = False }
     , viewMode = SpineView
     , sortState = { column = BookList.Title, direction = BookList.Asc }
+    , token = Nothing
     }
 
 
@@ -81,43 +82,43 @@ suite : Test
 suite =
     describe "Update"
         [ describe "Library"
-            [ test "BooksLoaded 403 sets showAgeGate = True and books = Failure" <|
+            [ test "ShelvesLoaded 403 sets showAgeGate = True and shelves = Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.BooksLoaded (Err (Http.BadStatus 403)))
+                                (Bookshelf.ShelvesLoaded (Err (Http.BadStatus 403)))
                                 libraryInit
                     in
                     Expect.all
                         [ \m -> Expect.equal True m.showAgeGate
-                        , \m -> Expect.equal (Failure (Http.BadStatus 403)) m.books
+                        , \m -> Expect.equal (Failure (Http.BadStatus 403)) m.shelves
                         ]
                         model
-            , test "BooksLoaded NetworkError sets showAgeGate = False and books = Failure" <|
+            , test "ShelvesLoaded NetworkError sets showAgeGate = False and shelves = Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.BooksLoaded (Err Http.NetworkError))
+                                (Bookshelf.ShelvesLoaded (Err Http.NetworkError))
                                 libraryInit
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
-                        , \m -> Expect.equal (Failure Http.NetworkError) m.books
+                        , \m -> Expect.equal (Failure Http.NetworkError) m.shelves
                         ]
                         model
-            , test "BooksLoaded Ok sets showAgeGate = False and books = Success" <|
+            , test "ShelvesLoaded Ok sets showAgeGate = False and shelves = Success" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.BooksLoaded (Ok []))
+                                (Bookshelf.ShelvesLoaded (Ok []))
                                 libraryInit
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
-                        , \m -> Expect.equal (Success []) m.books
+                        , \m -> Expect.equal (Success []) m.shelves
                         ]
                         model
             , test "VerifyAge produces NavigateTo SettingsAgeVerification" <|

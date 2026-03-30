@@ -18,7 +18,7 @@ defmodule Stacks.Shelving do
   alias Ecto.Multi
   alias Stacks.Audit
   alias Stacks.Events
-  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
 
   # ── Bookshelf changeset constants ──────────────────────────────────
   @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
@@ -42,7 +42,8 @@ defmodule Stacks.Shelving do
     :reading_status,
     :current_page,
     :started_at,
-    :finished_at
+    :finished_at,
+    :shelf_id
   ]
 
   # ── Changeset functions (moved from schema modules) ────────────────
@@ -152,12 +153,15 @@ defmodule Stacks.Shelving do
   def place_book(user_id, book_id, bookshelf_name) do
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
+    default_shelf = get_or_create_default_shelf(bookshelf.id)
+
     Multi.new()
     |> Multi.insert(
       :placement,
       placement_changeset(%Placement{}, %{
         book_id: book_id,
-        bookshelf_id: bookshelf.id
+        bookshelf_id: bookshelf.id,
+        shelf_id: default_shelf.id
       })
     )
     |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
@@ -256,13 +260,15 @@ defmodule Stacks.Shelving do
     user_id = placement.bookshelf.user_id
     original_bookshelf_id = placement.bookshelf.id
     library_bookshelf = get_or_create_bookshelf(user_id, "library")
+    default_shelf = get_or_create_default_shelf(library_bookshelf.id)
 
     Multi.new()
     |> Multi.insert(
       :placement,
       placement_changeset(%Placement{}, %{
         book_id: placement.book_id,
-        bookshelf_id: library_bookshelf.id
+        bookshelf_id: library_bookshelf.id,
+        shelf_id: default_shelf.id
       })
     )
     |> Multi.insert(:history, fn _ ->
@@ -592,6 +598,199 @@ defmodule Stacks.Shelving do
 
   defp maybe_set_finished_at(attrs, true), do: Map.put(attrs, :finished_at, DateTime.utc_now())
   defp maybe_set_finished_at(attrs, false), do: attrs
+
+  # ── Shelf functions ──────────────────────────────────────────────────
+
+  @doc "Returns all shelves for a bookshelf in ascending position order."
+  @spec list_shelves(binary()) :: [Shelf.t()]
+  def list_shelves(bookshelf_id) do
+    Shelf
+    |> where([s], s.bookshelf_id == ^bookshelf_id)
+    |> order_by([s], s.position)
+    |> Repo.all()
+  end
+
+  @doc "Creates a new shelf on a bookshelf at the next available position."
+  @spec create_shelf(binary(), binary()) :: {:ok, Shelf.t()} | {:error, :unauthorized}
+  def create_shelf(bookshelf_id, user_id) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :unauthorized}
+
+      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+        {:error, :unauthorized}
+
+      _bookshelf ->
+        max_pos = shelf_max_position(bookshelf_id)
+
+        %Shelf{}
+        |> shelf_changeset(%{bookshelf_id: bookshelf_id, position: max_pos + 1})
+        |> Repo.insert()
+    end
+  end
+
+  @doc "Deletes a shelf if empty. Returns :not_empty if it has active placements."
+  @spec delete_shelf(binary(), binary()) ::
+          :ok | {:error, :unauthorized | :not_found | :not_empty}
+  def delete_shelf(shelf_id, user_id) do
+    shelf = Repo.get(Shelf, shelf_id) |> Repo.preload(:bookshelf)
+
+    cond do
+      is_nil(shelf) ->
+        {:error, :not_found}
+
+      shelf.bookshelf.user_id != user_id ->
+        {:error, :unauthorized}
+
+      shelf_has_active_placements?(shelf_id) ->
+        {:error, :not_empty}
+
+      true ->
+        Repo.delete!(shelf)
+        :ok
+    end
+  end
+
+  @doc "Reorders shelves to match the given list of IDs."
+  @spec reorder_shelves(binary(), binary(), [binary()]) ::
+          :ok | {:error, :unauthorized | :invalid_ids}
+  def reorder_shelves(bookshelf_id, user_id, shelf_ids_in_order) do
+    case Repo.get(Bookshelf, bookshelf_id) do
+      nil ->
+        {:error, :unauthorized}
+
+      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+        {:error, :unauthorized}
+
+      _bookshelf ->
+        do_reorder_shelves(bookshelf_id, shelf_ids_in_order)
+    end
+  end
+
+  @doc "Moves a placement to a different shelf within the same bookshelf."
+  @spec move_placement_to_shelf(binary(), binary(), binary()) ::
+          {:ok, Placement.t()} | {:error, :unauthorized | :wrong_bookshelf}
+  def move_placement_to_shelf(placement_id, shelf_id, user_id) do
+    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    shelf = Repo.get!(Shelf, shelf_id)
+
+    cond do
+      placement.bookshelf.user_id != user_id ->
+        {:error, :unauthorized}
+
+      shelf.bookshelf_id != placement.bookshelf_id ->
+        {:error, :wrong_bookshelf}
+
+      true ->
+        placement
+        |> placement_changeset(%{shelf_id: shelf_id})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Returns shelves with preloaded placements for a bookshelf."
+  @spec get_bookshelf_shelves(binary(), String.t()) :: [Shelf.t()]
+  def get_bookshelf_shelves(user_id, bookshelf_name) do
+    Shelf
+    |> join(:inner, [s], bs in Bookshelf,
+      on: s.bookshelf_id == bs.id and bs.user_id == ^user_id and bs.name == ^bookshelf_name
+    )
+    |> order_by([s], s.position)
+    |> preload(placements: ^active_placements_query())
+    |> Repo.all()
+  end
+
+  defp active_placements_query do
+    from(p in Placement,
+      where: is_nil(p.removed_at),
+      order_by: [p.position, p.placed_at],
+      preload: [book: [:author, :editions]]
+    )
+  end
+
+  defp shelf_changeset(shelf, attrs) do
+    shelf
+    |> cast(attrs, [:bookshelf_id, :position, :created_at])
+    |> validate_required([:bookshelf_id, :position])
+    |> put_created_at()
+  end
+
+  defp put_created_at(%Ecto.Changeset{changes: changes} = changeset) do
+    case Map.get(changes, :created_at) do
+      nil -> put_change(changeset, :created_at, DateTime.utc_now())
+      _ -> changeset
+    end
+  end
+
+  defp shelf_max_position(bookshelf_id) do
+    Shelf
+    |> where([s], s.bookshelf_id == ^bookshelf_id)
+    |> Repo.aggregate(:max, :position) || -1
+  end
+
+  defp shelf_has_active_placements?(shelf_id) do
+    Placement
+    |> where([p], p.shelf_id == ^shelf_id and is_nil(p.removed_at))
+    |> Repo.exists?()
+  end
+
+  defp do_reorder_shelves(bookshelf_id, shelf_ids_in_order) do
+    existing_ids =
+      Shelf
+      |> where([s], s.bookshelf_id == ^bookshelf_id)
+      |> select([s], s.id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    given_ids = MapSet.new(shelf_ids_in_order)
+
+    if MapSet.equal?(existing_ids, given_ids) do
+      n = length(shelf_ids_in_order)
+
+      result =
+        Repo.transaction(fn ->
+          # Phase 1: shift all positions up by n to vacate the 0..n-1 range,
+          # preventing unique-constraint conflicts during sequential updates.
+          Repo.update_all(
+            from(s in Shelf, where: s.bookshelf_id == ^bookshelf_id),
+            inc: [position: n]
+          )
+
+          # Phase 2: set each shelf to its final position.
+          apply_shelf_positions(shelf_ids_in_order)
+        end)
+
+      case result do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :invalid_ids}
+    end
+  end
+
+  defp apply_shelf_positions(shelf_ids_in_order) do
+    Enum.each(Enum.with_index(shelf_ids_in_order), fn {id, pos} ->
+      Repo.update_all(from(s in Shelf, where: s.id == ^id), set: [position: pos])
+    end)
+  end
+
+  defp get_or_create_default_shelf(bookshelf_id) do
+    case Repo.get_by(Shelf, bookshelf_id: bookshelf_id, position: 0) do
+      nil ->
+        changeset =
+          %Shelf{}
+          |> shelf_changeset(%{bookshelf_id: bookshelf_id, position: 0})
+
+        case Repo.insert(changeset) do
+          {:ok, shelf} -> shelf
+          {:error, _} -> Repo.get_by!(Shelf, bookshelf_id: bookshelf_id, position: 0)
+        end
+
+      shelf ->
+        shelf
+    end
+  end
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do

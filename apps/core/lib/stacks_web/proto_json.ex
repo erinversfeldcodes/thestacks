@@ -258,7 +258,7 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_ref(map()) :: map()
   def placement_ref(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :bookshelf_id, :position, :placed_at, :removed_at])
+    |> Map.take([:id, :book_id, :bookshelf_id, :shelf_id, :position, :placed_at, :removed_at])
   end
 
   @doc """
@@ -503,6 +503,22 @@ defmodule StacksWeb.ProtoJSON do
   # ---------------------------------------------------------------------------
   # Placement formats
   # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a shelf with its placements, filtering by visibility.
+
+  Used by BookshelfController to build the `shelves` response shape.
+  Each shelf includes its position and the placements visible to the viewer.
+  """
+  @spec shelf_with_placements(map(), term()) :: map()
+  def shelf_with_placements(shelf, viewer) do
+    visible_placements =
+      shelf.placements
+      |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
+      |> Enum.map(&placement_detail/1)
+
+    %{id: shelf.id, position: shelf.position, placements: visible_placements}
+  end
 
   @doc """
   Serializes a placement's format update response.
