@@ -36,6 +36,7 @@ module Api exposing
     , getCatalogue
     , getEnrichmentGaps
     , getGroup
+    , getGroupFeed
     , getListings
     , getMetrics
     , getMyListings
@@ -89,6 +90,7 @@ import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
+import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
@@ -1752,6 +1754,33 @@ getGroup groupId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+getGroupFeed :
+    String
+    -> String
+    -> Maybe String
+    -> (Result Http.Error FeedResponse -> msg)
+    -> Cmd msg
+getGroupFeed groupId token maybeCursor toMsg =
+    let
+        url =
+            case maybeCursor of
+                Nothing ->
+                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed"
+
+                Just cursor ->
+                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed?before=" ++ cursor
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = url
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg feedResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

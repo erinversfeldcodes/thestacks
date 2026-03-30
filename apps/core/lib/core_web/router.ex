@@ -146,6 +146,7 @@ defmodule CoreWeb.Router do
 
     post "/groups", GroupController, :create
     get "/groups/:id", GroupController, :show
+    get "/groups/:id/feed", GroupFeedController, :index
 
     post "/groups/:group_id/invitations", GroupMemberController, :invite
     post "/groups/:group_id/invitations/:id/accept", GroupMemberController, :accept

@@ -568,6 +568,39 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   # ---------------------------------------------------------------------------
+  # Feed items
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a feed item (placement or blog post) for the group content feed.
+  """
+  @spec feed_item(map()) :: map()
+  def feed_item(%{type: :placement_created} = item) do
+    %{
+      type: "placement_created",
+      placement_id: item.placement_id,
+      book_id: item.book_id,
+      book_title: item.book_title,
+      book_cover_url: nil,
+      user_id: item.user_id,
+      user_display_name: item.user_display_name,
+      occurred_at: DateTime.to_iso8601(item.occurred_at)
+    }
+  end
+
+  def feed_item(%{type: :blog_post} = item) do
+    %{
+      type: "blog_post",
+      post_id: item.post_id,
+      post_title: item.post_title,
+      post_visibility: item.post_visibility,
+      user_id: item.user_id,
+      user_display_name: item.user_display_name,
+      occurred_at: DateTime.to_iso8601(item.occurred_at)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
 
