@@ -42,6 +42,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RequireRole, role: "owner"
   end
 
+  pipeline :partner_auth do
+    plug StacksWeb.PartnerAuthPlug
+  end
+
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
@@ -202,6 +206,19 @@ defmodule CoreWeb.Router do
     get "/admin/partners", PartnerController, :index
     put "/admin/partners/:id/approve", PartnerController, :approve
     put "/admin/partners/:id/reject", PartnerController, :reject
+  end
+
+  # Partner API — authenticated via API key, no user auth
+  scope "/api/partner", StacksWeb do
+    pipe_through [:api, :partner_auth]
+
+    post "/inventory", PartnerInventoryController, :sync
+    post "/inventory/import", PartnerInventoryController, :import
+    get "/inventory", PartnerInventoryController, :index
+
+    post "/events", PartnerEventController, :create
+    get "/events", PartnerEventController, :index
+    delete "/events/:id", PartnerEventController, :delete
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

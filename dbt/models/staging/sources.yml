@@ -622,10 +622,35 @@ sources:
             description: Timestamp when the partner was approved or rejected.
           - name: hmac_secret
             description: Argon2 hash of the API key. DB-only — never exposed in API responses.
+          - name: third_space_id
+            description: FK to third_spaces — optional link for partners who manage a third space.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Row update timestamp (UTC).
+
+      - name: partner_inventory
+        description: Inventory items pushed by approved partners (bookshops, cafes).
+        freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: partner_id
+            description: FK to partners.
+          - name: book_edition_id
+            description: FK to book_editions.
+          - name: price_cents
+            description: Price in minor currency units (cents).
+          - name: condition
+            description: Item condition (new, like_new, good, acceptable).
+          - name: quantity
+            description: Number of copies available.
+          - name: synced_at
+            description: Timestamp of last inventory sync from partner.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
 
       # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads

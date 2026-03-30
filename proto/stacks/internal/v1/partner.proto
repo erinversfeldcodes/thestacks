@@ -44,4 +44,37 @@ message Partner {
 
   // Argon2 hash of the API key. DB-only — never serialized over the wire.
   string hmac_secret = 12 [json_name = "hmac_secret"];
+
+  // Optional link to the partner's third space for event management.
+  string third_space_id = 13 [json_name = "third_space_id"];
+}
+
+// PartnerInventoryItem represents a book in a partner's stock.
+message PartnerInventoryItem {
+  // Unique identifier.
+  string id = 1 [json_name = "id"];
+
+  // Partner who owns this inventory item.
+  string partner_id = 2 [json_name = "partner_id"];
+
+  // Edition (ISBN) this item refers to.
+  string book_edition_id = 3 [json_name = "book_edition_id"];
+
+  // Price in cents (must be > 0).
+  int32 price_cents = 4 [json_name = "price_cents"];
+
+  // Condition: new, like_new, good, fair, poor.
+  string condition = 5 [json_name = "condition"];
+
+  // Quantity available.
+  int32 quantity = 6 [json_name = "quantity"];
+
+  // When this item was last synced.
+  google.protobuf.Timestamp synced_at = 7 [json_name = "synced_at"];
+
+  // Record creation time.
+  google.protobuf.Timestamp created_at = 8 [json_name = "created_at"];
+
+  // Record update time.
+  google.protobuf.Timestamp updated_at = 9 [json_name = "updated_at"];
 }

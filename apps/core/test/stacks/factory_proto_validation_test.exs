@@ -72,7 +72,8 @@ defmodule Stacks.FactoryProtoValidationTest do
     third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a},
     partner:
       {Stacks.Partners.Partner,
-       ~w(api_key_prefix hmac_secret approved_by_id approved_at website_url)a}
+       ~w(api_key_prefix hmac_secret approved_by_id approved_at website_url third_space_id)a},
+    partner_inventory_item: {Stacks.Partners.InventoryItem, ~w()a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.
