@@ -718,9 +718,9 @@ update msg model =
                             Bookshelf.update subMsg subModel
 
                         hasPlacements =
-                            case newSubModel.books of
-                                Types.RemoteData.Success placements ->
-                                    not (List.isEmpty placements)
+                            case newSubModel.shelves of
+                                Types.RemoteData.Success shelves ->
+                                    List.any (\s -> not (List.isEmpty s.placements)) shelves
 
                                 _ ->
                                     model.hasAnyPlacements

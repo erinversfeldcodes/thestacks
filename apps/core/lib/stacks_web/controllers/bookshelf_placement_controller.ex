@@ -160,6 +160,26 @@ defmodule StacksWeb.BookshelfPlacementController do
     |> json(%{error: "reading_status is required"})
   end
 
+  @doc "PUT /api/placements/:id/shelf — move a placement to a different shelf."
+  def move_to_shelf(conn, %{"id" => placement_id, "shelf_id" => shelf_id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.move_placement_to_shelf(placement_id, shelf_id, user.id) do
+      {:ok, placement} ->
+        json(conn, %{placement: ProtoJSON.placement_ref(placement)})
+
+      {:error, :unauthorized} ->
+        conn |> put_status(403) |> json(%{error: "forbidden"})
+
+      {:error, :wrong_bookshelf} ->
+        conn |> put_status(422) |> json(%{error: "shelf belongs to a different bookshelf"})
+    end
+  end
+
+  def move_to_shelf(conn, _params) do
+    conn |> put_status(422) |> json(%{error: "shelf_id is required"})
+  end
+
   @doc "DELETE /api/placements/:id — soft-delete (remove) a placement."
   def delete(conn, %{"id" => placement_id}) do
     user = Guardian.Plug.current_resource(conn)

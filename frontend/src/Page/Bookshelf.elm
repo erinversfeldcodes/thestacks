@@ -17,14 +17,14 @@ import Components.BookList as BookList
 import Components.RSSLink as RSSLink
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, div, p, text)
+import Html exposing (Html, button, div, p, text)
 import Html.Attributes exposing (attribute, class)
+import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers
     exposing
-        ( groupIntoRows
-        , minShelfRows
+        ( minShelfRows
         , viewBookcase
         , viewEmptyShelfMessage
         , viewShelfLabel
@@ -33,6 +33,7 @@ import Page.Bookshelf.Helpers
 import Types.Book exposing (Book)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (Shelf, shelvesResponseDecoder)
 import Util.TestId exposing (testId)
 
 
@@ -87,7 +88,7 @@ wishListConfig =
 
 
 type alias Model =
-    { books : RemoteData Http.Error (List Placement)
+    { shelves : RemoteData Http.Error (List Shelf)
     , showAgeGate : Bool
     , config : Config
     , userId : String
@@ -95,6 +96,7 @@ type alias Model =
     , rssLink : RSSLink.Model
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
+    , token : Maybe String
     }
 
 
@@ -104,7 +106,9 @@ type OutMsg
 
 
 type Msg
-    = BooksLoaded (Result Http.Error (List Placement))
+    = ShelvesLoaded (Result Http.Error (List Shelf))
+    | AddShelf
+    | ShelfAdded (Result Http.Error Shelf)
     | VerifyAge
     | DismissAgeGate
     | BookClicked Book
@@ -119,12 +123,12 @@ init config maybeToken userId =
         apiCmd =
             case maybeToken of
                 Just token ->
-                    Api.getBookshelf config.apiName token BooksLoaded
+                    Api.getBookshelf config.apiName token ShelvesLoaded
 
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading
+    ( { shelves = Loading
       , showAgeGate = False
       , config = config
       , userId = userId
@@ -132,6 +136,7 @@ init config maybeToken userId =
       , rssLink = RSSLink.init
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
+      , token = maybeToken
       }
     , apiCmd
     )
@@ -144,19 +149,44 @@ init config maybeToken userId =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
-        BooksLoaded result ->
+        ShelvesLoaded result ->
             case result of
-                Ok placements ->
-                    ( { model | books = Success placements }
+                Ok shelves ->
+                    ( { model | shelves = Success shelves }
                     , Cmd.none
                     , NoOut
                     )
 
                 Err (Http.BadStatus 403) ->
-                    ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+                    ( { model | shelves = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | books = Failure err }, Cmd.none, NoOut )
+                    ( { model | shelves = Failure err }, Cmd.none, NoOut )
+
+        AddShelf ->
+            let
+                cmd =
+                    case model.token of
+                        Just token ->
+                            Api.addShelf model.config.apiName token ShelfAdded
+
+                        Nothing ->
+                            Cmd.none
+            in
+            ( model, cmd, NoOut )
+
+        ShelfAdded result ->
+            case result of
+                Ok shelf ->
+                    case model.shelves of
+                        Success shelves ->
+                            ( { model | shelves = Success (shelves ++ [ shelf ]) }, Cmd.none, NoOut )
+
+                        _ ->
+                            ( { model | shelves = Success [ shelf ] }, Cmd.none, NoOut )
+
+                Err _ ->
+                    ( model, Cmd.none, NoOut )
 
         VerifyAge ->
             ( model, Cmd.none, NavigateTo SettingsAgeVerification )
@@ -224,23 +254,27 @@ view model =
 
               else
                 div [ attribute "aria-live" "polite" ]
-                    [ case model.books of
+                    [ case model.shelves of
                         NotAsked ->
-                            viewBookshelf model []
+                            viewBookshelfFromShelves model []
 
                         Loading ->
-                            viewBookshelf model []
+                            viewBookshelfFromShelves model []
 
                         Failure _ ->
                             p [ class "error" ]
                                 [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
 
-                        Success placements ->
-                            if List.isEmpty placements then
+                        Success shelves ->
+                            let
+                                allPlacements =
+                                    List.concatMap .placements shelves
+                            in
+                            if List.isEmpty allPlacements then
                                 viewEmptyBookshelf model
 
                             else
-                                viewBookshelf model placements
+                                viewBookshelfFromShelves model shelves
                     ]
             ]
         ]
@@ -251,25 +285,44 @@ viewEmptyBookshelf model =
     div [ class "bookshelf", testId "bookshelf-empty" ]
         [ viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
+        , viewAddShelfButton
         ]
 
 
-viewBookshelf : Model -> List Placement -> Html Msg
-viewBookshelf model placements =
+viewBookshelfFromShelves : Model -> List Shelf -> Html Msg
+viewBookshelfFromShelves model shelves =
     case model.viewMode of
         ListView ->
+            let
+                allPlacements =
+                    List.concatMap .placements shelves
+            in
             div [ class "bookshelf bookshelf--list-view" ]
-                [ BookList.view model.sortState SortColumnClicked BookClicked placements
+                [ BookList.view model.sortState SortColumnClicked BookClicked allPlacements
                 ]
 
         SpineView ->
             let
-                rows =
-                    groupIntoRows 990 placements
-
                 shelfViews =
-                    List.map (viewShelfRowClickable model.config.wearLevel BookClicked) rows
+                    List.map (viewShelf model.config.wearLevel) shelves
             in
             div [ class "bookshelf" ]
                 [ viewBookcase (minShelfRows 4 shelfViews)
+                , viewAddShelfButton
                 ]
+
+
+viewShelf : WearLevel -> Shelf -> Html Msg
+viewShelf wearLevel shelf =
+    div
+        [ class "bookcase__shelf"
+        , attribute "data-shelf-id" shelf.id
+        ]
+        [ viewShelfRowClickable wearLevel BookClicked shelf.placements
+        ]
+
+
+viewAddShelfButton : Html Msg
+viewAddShelfButton =
+    button [ class "bookshelf__add-shelf", onClick AddShelf ]
+        [ text "Add shelf" ]

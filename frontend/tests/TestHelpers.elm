@@ -41,6 +41,7 @@ import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (shelfDecoder, shelvesResponseDecoder)
 
 
 
@@ -310,14 +311,22 @@ simulatePollResponse status maybeBookId isDuplicate =
 
 
 {-| Create an HTTP response for a bookshelf listing.
+Wraps placements in a single default shelf within the shelves response shape.
 -}
 simulateBookshelfResponse : List Placement -> Http.Response String
 simulateBookshelfResponse placements =
     let
+        shelfJson =
+            Encode.object
+                [ ( "id", Encode.string "shelf-default" )
+                , ( "position", Encode.int 0 )
+                , ( "placements", Encode.list encodePlacement placements )
+                ]
+
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "placements", Encode.list encodePlacement placements ) ]
+                    [ ( "shelves", Encode.list identity [ shelfJson ] ) ]
                 )
     in
     Http.GoodStatus_
@@ -618,9 +627,29 @@ uploadEffects msg model maybeToken =
 
 {-| Translate Bookshelf page Cmds into SimulatedEffects.
 -}
-libraryEffects : SimulatedEffect Bookshelf.Msg
-libraryEffects =
-    SimulatedEffect.Cmd.none
+libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> Maybe String -> SimulatedEffect Bookshelf.Msg
+libraryEffects msg model maybeToken =
+    case msg of
+        Bookshelf.AddShelf ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/bookshelves/" ++ model.config.apiName ++ "/shelves"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectJson Bookshelf.ShelfAdded
+                                Types.Shelf.shelfDecoder
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
+        _ ->
+            SimulatedEffect.Cmd.none
 
 
 {-| Translate Bookshelf init Cmds into SimulatedEffects.
@@ -635,8 +664,8 @@ libraryInitEffects maybeToken =
                 , url = "/api/bookshelves/library"
                 , body = SimulatedEffect.Http.emptyBody
                 , expect =
-                    SimulatedEffect.Http.expectJson Bookshelf.BooksLoaded
-                        (Decode.field "placements" (Decode.list placementDecoder))
+                    SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+                        shelvesResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -838,7 +867,7 @@ libraryProgram maybeToken =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects )
+                ( newModel, libraryEffects msg model maybeToken )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity

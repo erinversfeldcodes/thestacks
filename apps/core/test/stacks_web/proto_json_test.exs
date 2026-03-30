@@ -459,6 +459,7 @@ defmodule StacksWeb.ProtoJSONTest do
                id: placement.id,
                book_id: placement.book_id,
                bookshelf_id: placement.bookshelf_id,
+               shelf_id: placement.shelf_id,
                position: placement.position,
                placed_at: placement.placed_at,
                removed_at: placement.removed_at

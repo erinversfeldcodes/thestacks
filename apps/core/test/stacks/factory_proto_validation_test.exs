@@ -36,6 +36,7 @@ defmodule Stacks.FactoryProtoValidationTest do
       {Stacks.Books.BookEdition, ~w(cover_image_url open_library_id google_books_id)a},
     uploaded_image: {Stacks.Books.UploadedImage, ~w(storage_path rejection_reason book_ids)a},
     bookshelf: {Stacks.Shelving.Bookshelf, ~w(visibility_group_id)a},
+    shelf: {Stacks.Shelving.Shelf, ~w()a},
     placement:
       {Stacks.Shelving.Placement,
        ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents current_page started_at finished_at)a},

@@ -286,6 +286,26 @@
     # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/placement.proto",
+      proto_message: "Shelf",
+      table_name: "shelves",
+      schema_prefix: "op",
+      ecto_module: Stacks.Shelving.Shelf,
+      ecto_path: "lib/stacks/gen/shelving/shelf.ex",
+      dbt_path: "stg_shelves.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      associations: [
+        {:belongs_to, :bookshelf, Stacks.Shelving.Bookshelf, foreign_key: :bookshelf_id},
+        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :shelf_id}
+      ],
+      field_overrides: %{
+        bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/placement.proto",
       proto_message: "Bookshelf",
       table_name: "bookshelves",
       schema_prefix: "op",
@@ -297,7 +317,8 @@
       dbt_grant: true,
       indexes: [],
       associations: [
-        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :bookshelf_id}
+        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :bookshelf_id},
+        {:has_many, :shelves, Stacks.Shelving.Shelf, foreign_key: :bookshelf_id}
       ],
       field_overrides: %{
         user_id: %{belongs_to: Stacks.Accounts.User},
@@ -320,6 +341,7 @@
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf},
+        shelf_id: %{belongs_to: Stacks.Shelving.Shelf},
         formats: %{ecto_type: {:array, :string}, default: []},
         visibility: %{default: "owner"},
         reading_status: %{
