@@ -1,8 +1,10 @@
 defmodule StacksWeb.PartnerInventoryControllerTest do
   use CoreWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Partners
 
   setup %{conn: conn} do
@@ -126,6 +128,27 @@ defmodule StacksWeb.PartnerInventoryControllerTest do
         |> post("/api/partner/inventory", %{"inventory" => []})
 
       assert json_response(conn, 401)["error"] =~ "Invalid"
+    end
+
+    test "emits partner.inventory_synced event", %{conn: conn, partner: partner, edition: edition} do
+      body = %{
+        "inventory" => [
+          %{"isbn" => edition.isbn, "price_cents" => 1500, "condition" => "good", "quantity" => 1}
+        ]
+      }
+
+      conn |> post("/api/partner/inventory", body) |> json_response(200)
+
+      count =
+        Repo.one(
+          from(e in "event_log",
+            where: e.event_type == "partner.inventory_synced" and e.aggregate_id == ^partner.id,
+            select: count(e.id)
+          ),
+          prefix: "op"
+        )
+
+      assert count >= 1
     end
   end
 
