@@ -1,8 +1,10 @@
 defmodule StacksWeb.PartnerEventControllerTest do
   use CoreWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Partners
 
   setup %{conn: conn} do
@@ -182,6 +184,52 @@ defmodule StacksWeb.PartnerEventControllerTest do
         |> json_response(404)
 
       assert resp["error"] == "not_found"
+    end
+  end
+
+  describe "event emission" do
+    test "emits partner.event_created after create", %{
+      conn: conn,
+      future: future,
+      future_end: future_end
+    } do
+      body = %{"title" => "Emit Test", "starts_at" => future, "ends_at" => future_end}
+      create_resp = conn |> post("/api/partner/events", body) |> json_response(201)
+      event_id = create_resp["event"]["id"]
+
+      count =
+        Repo.one(
+          from(e in "event_log",
+            where: e.event_type == "partner.event_created" and e.aggregate_id == ^event_id,
+            select: count(e.id)
+          ),
+          prefix: "op"
+        )
+
+      assert count >= 1
+    end
+
+    test "emits partner.event_deleted after delete", %{
+      conn: conn,
+      future: future,
+      future_end: future_end
+    } do
+      body = %{"title" => "Delete Emit", "starts_at" => future, "ends_at" => future_end}
+      create_resp = conn |> post("/api/partner/events", body) |> json_response(201)
+      event_id = create_resp["event"]["id"]
+
+      conn |> delete("/api/partner/events/#{event_id}") |> json_response(200)
+
+      count =
+        Repo.one(
+          from(e in "event_log",
+            where: e.event_type == "partner.event_deleted" and e.aggregate_id == ^event_id,
+            select: count(e.id)
+          ),
+          prefix: "op"
+        )
+
+      assert count >= 1
     end
   end
 end
