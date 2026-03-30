@@ -44,9 +44,9 @@ defmodule Stacks.PartnersTest do
 
       assert {:ok, {approved, raw_key}} = Partners.approve_partner(partner.id, admin.id)
       assert approved.status == "approved"
-      assert String.starts_with?(raw_key, "sk_partner_")
-      # "sk_partner_" (11) + 40 hex
-      assert String.length(raw_key) == 51
+      assert String.starts_with?(raw_key, "stacks_pk_")
+      # "stacks_pk_" (10) + 64 hex
+      assert String.length(raw_key) == 74
     end
 
     test "key can authenticate partner" do
@@ -94,12 +94,12 @@ defmodule Stacks.PartnersTest do
       Partners.approve_partner(partner.id, admin.id)
 
       assert {:error, :invalid} =
-               Partners.authenticate_partner("sk_partner_" <> String.duplicate("0", 40))
+               Partners.authenticate_partner("stacks_pk_" <> String.duplicate("0", 40))
     end
 
     test "returns :invalid for non-existent prefix" do
       assert {:error, :invalid} =
-               Partners.authenticate_partner("sk_partner_" <> String.duplicate("f", 40))
+               Partners.authenticate_partner("stacks_pk_" <> String.duplicate("f", 40))
     end
   end
 

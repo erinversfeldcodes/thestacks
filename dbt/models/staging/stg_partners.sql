@@ -12,7 +12,6 @@ select
     api_key_prefix,
     approved_by_id,
     approved_at,
-    hmac_secret,
     created_at,
     updated_at
 from {{ source('op', 'partners') }}

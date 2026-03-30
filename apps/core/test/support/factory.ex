@@ -23,6 +23,7 @@ defmodule Stacks.Factory do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
+  alias Stacks.Partners.Partner
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
@@ -363,6 +364,20 @@ defmodule Stacks.Factory do
       scraped_at: DateTime.utc_now(),
       stale_after: DateTime.add(DateTime.utc_now(), 30, :day),
       book: build(:book)
+    }
+  end
+
+  def partner_factory do
+    %Partner{
+      name: "The Corner Bookshop",
+      business_type: "bookshop",
+      contact_email: sequence(:partner_email, &"partner#{&1}@example.com"),
+      website_url: "https://cornerbookshop.example.com",
+      status: "pending",
+      api_key_prefix: nil,
+      hmac_secret: nil,
+      approved_by_id: nil,
+      approved_at: nil
     }
   end
 end

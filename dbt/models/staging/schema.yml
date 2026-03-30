@@ -1013,8 +1013,6 @@ models:
         description: Approved by id.
       - name: approved_at
         description: Approved at.
-      - name: hmac_secret
-        description: Hmac secret.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

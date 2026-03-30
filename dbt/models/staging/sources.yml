@@ -598,6 +598,35 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
+      # ── Partner tables (Issue #145) ──────────────────────────────────
+      - name: partners
+        description: Third-space businesses (bookshops, cafes, reading groups) registered as platform partners.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Display name of the business.
+          - name: business_type
+            description: Business category (bookshop, cafe, reading_group, other).
+          - name: contact_email
+            description: Primary contact email (unique).
+          - name: website_url
+            description: Optional website URL.
+          - name: status
+            description: Lifecycle status (pending, approved, rejected).
+          - name: api_key_prefix
+            description: First 8 chars of the API key for display.
+          - name: approved_by_id
+            description: FK to users — admin who approved or rejected.
+          - name: approved_at
+            description: Timestamp when the partner was approved or rejected.
+          - name: hmac_secret
+            description: Argon2 hash of the API key. DB-only — never exposed in API responses.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Row update timestamp (UTC).
+
       # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads
         description: Conversation threads between buyer and seller for a placement listing.

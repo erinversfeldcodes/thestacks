@@ -25,5 +25,22 @@ defmodule Core.Repo.Migrations.Partners20260330035921 do
     create unique_index(:partners, [:contact_email], prefix: "op")
     create index(:partners, [:status], prefix: "op")
     create index(:partners, [:approved_by_id], prefix: "op")
+
+    execute(
+      """
+      DO $$ BEGIN
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
+          GRANT SELECT ON op.partners TO stacks_dbt;
+        END IF;
+      END $$;
+      """,
+      """
+      DO $$ BEGIN
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
+          REVOKE SELECT ON op.partners FROM stacks_dbt;
+        END IF;
+      END $$;
+      """
+    )
   end
 end

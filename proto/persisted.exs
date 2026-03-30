@@ -90,7 +90,8 @@
       dbt_path: "stg_partners.sql",
       timestamps: :standard,
       field_overrides: %{
-        approved_by_id: %{ecto_type: :binary_id}
+        approved_by_id: %{ecto_type: :binary_id},
+        hmac_secret: %{dbt_exclude: true}
       }
     },
 
