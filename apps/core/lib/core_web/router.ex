@@ -52,6 +52,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
     post "/opt-out", OptOutController, :create
+    post "/partners/register", PartnerRegistrationController, :create
   end
 
   # Authenticated listing routes — must be before optional_auth `:id` catch-all
@@ -196,6 +197,10 @@ defmodule CoreWeb.Router do
     get "/admin/sources", SourceAdminController, :index
     put "/admin/sources/:id/approve", SourceAdminController, :approve
     put "/admin/sources/:id/reject", SourceAdminController, :reject
+
+    get "/admin/partners", PartnerController, :index
+    put "/admin/partners/:id/approve", PartnerController, :approve
+    put "/admin/partners/:id/reject", PartnerController, :reject
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

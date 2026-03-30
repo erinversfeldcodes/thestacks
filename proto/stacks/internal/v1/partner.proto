@@ -1,0 +1,47 @@
+// partner.proto — Partner entity for third-space integrations.
+// Partners are bookshops, cafes, and reading groups that push inventory/events.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Partner represents a registered third-space business.
+message Partner {
+  // Unique identifier.
+  string id = 1 [json_name = "id"];
+
+  // Display name of the business.
+  string name = 2 [json_name = "name"];
+
+  // Business type: bookshop, cafe, reading_group, other.
+  string business_type = 3 [json_name = "business_type"];
+
+  // Primary contact email (unique).
+  string contact_email = 4 [json_name = "contact_email"];
+
+  // Optional website URL.
+  string website_url = 5 [json_name = "website_url"];
+
+  // Lifecycle status: pending, approved, rejected.
+  string status = 6 [json_name = "status"];
+
+  // First 8 chars of the API key for display (e.g. "sk_partn").
+  string api_key_prefix = 7 [json_name = "api_key_prefix"];
+
+  // Admin who approved or rejected this partner.
+  string approved_by_id = 8 [json_name = "approved_by_id"];
+
+  // When the partner was approved or rejected.
+  google.protobuf.Timestamp approved_at = 9 [json_name = "approved_at"];
+
+  // Record creation time.
+  google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
+
+  // Record update time.
+  google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
+
+  // Argon2 hash of the API key. DB-only — never serialized over the wire.
+  string hmac_secret = 12 [json_name = "hmac_secret"];
+}

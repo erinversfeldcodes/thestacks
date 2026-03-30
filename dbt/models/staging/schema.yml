@@ -987,3 +987,39 @@ models:
         description: Body.
       - name: created_at
         description: Created at.
+
+  - name: stg_partners
+    description: >
+      Proto-synced staging model for partners.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Name.
+      - name: business_type
+        description: Business type.
+      - name: contact_email
+        description: Contact email.
+      - name: website_url
+        description: Website url.
+      - name: status
+        description: Status.
+      - name: api_key_prefix
+        description: Api key prefix.
+      - name: approved_by_id
+        description: Approved by id.
+      - name: approved_at
+        description: Approved at.
+      - name: hmac_secret
+        description: Hmac secret.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
