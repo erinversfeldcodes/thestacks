@@ -13,10 +13,8 @@ defmodule StacksWeb.PartnerInventoryController do
   def sync(conn, %{"inventory" => items}) when is_list(items) do
     partner = conn.assigns[:current_partner]
 
-    case Partners.sync_inventory(partner, items) do
-      {:ok, result} ->
-        json(conn, %{synced: result.synced, unresolved: result.unresolved})
-    end
+    {:ok, result} = Partners.sync_inventory(partner, items)
+    json(conn, %{synced: result.synced, unresolved: result.unresolved})
   end
 
   def sync(conn, _params) do
@@ -43,10 +41,8 @@ defmodule StacksWeb.PartnerInventoryController do
           }
         end)
 
-      case Partners.sync_inventory(partner, items) do
-        {:ok, result} ->
-          json(conn, %{synced: result.synced, unresolved: result.unresolved})
-      end
+      {:ok, result} = Partners.sync_inventory(partner, items)
+      json(conn, %{synced: result.synced, unresolved: result.unresolved})
     else
       {:error, :too_many_rows} ->
         conn
@@ -63,10 +59,10 @@ defmodule StacksWeb.PartnerInventoryController do
         |> put_status(:unprocessable_entity)
         |> json(%{error: "Malformed CSV data"})
 
-      {:error, reason} ->
+      {:error, _reason} ->
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{error: "CSV import failed: #{inspect(reason)}"})
+        |> json(%{error: "CSV import failed"})
     end
   end
 

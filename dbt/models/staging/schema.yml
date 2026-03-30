@@ -923,6 +923,8 @@ models:
         description: Source url.
       - name: scraped_at
         description: Scraped at.
+      - name: ends_at
+        description: Ends at.
 
   - name: stg_third_spaces
     description: >

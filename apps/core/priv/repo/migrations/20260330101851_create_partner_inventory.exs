@@ -29,7 +29,11 @@ defmodule Core.Repo.Migrations.CreatePartnerInventory do
       timestamps(type: :utc_datetime_usec)
     end
 
-    create unique_index(:partner_inventory, [:partner_id, :book_edition_id], prefix: "op")
+    create unique_index(:partner_inventory, [:partner_id, :book_edition_id],
+             prefix: "op",
+             name: "partner_inventory_partner_edition_uniq"
+           )
+
     create index(:partner_inventory, [:book_edition_id], prefix: "op")
 
     create constraint(:partner_inventory, :price_cents_positive,

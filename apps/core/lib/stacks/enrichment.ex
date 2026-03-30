@@ -138,7 +138,13 @@ defmodule Stacks.Enrichment do
   # ── ThirdSpaceEvent ────────────────────────────────────────────────────────
 
   @third_space_event_required_fields [:space_id, :title, :event_date, :scraped_at]
-  @third_space_event_optional_fields [:description, :recurrence, :related_authors, :source_url]
+  @third_space_event_optional_fields [
+    :description,
+    :recurrence,
+    :related_authors,
+    :source_url,
+    :ends_at
+  ]
 
   @doc "Changeset for creating or updating a third space event."
   @spec third_space_event_changeset(ThirdSpaceEvent.t(), map()) :: Ecto.Changeset.t()
