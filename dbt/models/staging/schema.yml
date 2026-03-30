@@ -1013,6 +1013,50 @@ models:
         description: Approved by id.
       - name: approved_at
         description: Approved at.
+      - name: third_space_id
+        description: Third space id.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_partner_inventory
+    description: >
+      Proto-synced staging model for partner_inventory.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: partner_id
+        description: Partner id.
+        tests:
+          - not_null
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - not_null
+      - name: price_cents
+        description: Price cents.
+        tests:
+          - not_null
+      - name: condition
+        description: Condition.
+        tests:
+          - not_null
+      - name: quantity
+        description: Quantity.
+        tests:
+          - not_null
+      - name: synced_at
+        description: Synced at.
+        tests:
+          - not_null
       - name: created_at
         description: Timestamp when the record was created.
         tests:

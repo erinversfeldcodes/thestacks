@@ -23,7 +23,7 @@ defmodule Stacks.Factory do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
-  alias Stacks.Partners.Partner
+  alias Stacks.Partners.{InventoryItem, Partner}
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
@@ -378,6 +378,17 @@ defmodule Stacks.Factory do
       hmac_secret: nil,
       approved_by_id: nil,
       approved_at: nil
+    }
+  end
+
+  def partner_inventory_item_factory do
+    %InventoryItem{
+      partner: build(:partner),
+      book_edition: build(:book_edition),
+      price_cents: 1500,
+      condition: "good",
+      quantity: 1,
+      synced_at: DateTime.utc_now()
     }
   end
 end

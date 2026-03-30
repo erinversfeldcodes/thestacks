@@ -91,7 +91,35 @@
       timestamps: :standard,
       field_overrides: %{
         approved_by_id: %{ecto_type: :binary_id},
-        hmac_secret: %{dbt_exclude: true}
+        hmac_secret: %{dbt_exclude: true},
+        third_space_id: %{belongs_to: Stacks.Enrichment.ThirdSpace}
+      }
+    },
+    %{
+      proto_file: "stacks/internal/v1/partner.proto",
+      proto_message: "PartnerInventoryItem",
+      table_name: "partner_inventory",
+      schema_prefix: "op",
+      ecto_module: Stacks.Partners.InventoryItem,
+      ecto_path: "lib/stacks/gen/partners/inventory_item.ex",
+      dbt_path: "stg_partner_inventory.sql",
+      timestamps: :standard,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [
+        %{
+          name: "partner_inventory_partner_edition_uniq",
+          columns: [:partner_id, :book_edition_id],
+          unique: true
+        }
+      ],
+      field_overrides: %{
+        partner_id: %{belongs_to: Stacks.Partners.Partner, null: false},
+        book_edition_id: %{belongs_to: Stacks.Books.BookEdition, null: false},
+        price_cents: %{null: false},
+        condition: %{null: false},
+        quantity: %{default: 1, null: false},
+        synced_at: %{null: false, default: {:fragment, "NOW()"}}
       }
     },
 
