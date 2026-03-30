@@ -317,10 +317,13 @@ defmodule Stacks.Factory do
   end
 
   def third_space_event_factory do
+    starts_at = DateTime.add(DateTime.utc_now(), 7, :day)
+
     %ThirdSpaceEvent{
       title: sequence(:space_event_title, &"Space Event #{&1}"),
       description: "A community gathering.",
-      event_date: DateTime.add(DateTime.utc_now(), 7, :day),
+      event_date: starts_at,
+      ends_at: DateTime.add(starts_at, 2, :hour),
       recurrence: nil,
       related_authors: [],
       source_url: "https://example.com/events",

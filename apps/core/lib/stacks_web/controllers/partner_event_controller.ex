@@ -19,6 +19,7 @@ defmodule StacksWeb.PartnerEventController do
             title: event.title,
             description: event.description,
             starts_at: event.event_date && DateTime.to_iso8601(event.event_date),
+            ends_at: event.ends_at && DateTime.to_iso8601(event.ends_at),
             space_id: event.space_id
           }
         })
@@ -63,6 +64,7 @@ defmodule StacksWeb.PartnerEventController do
             title: e.title,
             description: e.description,
             starts_at: e.event_date && DateTime.to_iso8601(e.event_date),
+            ends_at: e.ends_at && DateTime.to_iso8601(e.ends_at),
             space_id: e.space_id
           }
         end)
@@ -88,10 +90,11 @@ defmodule StacksWeb.PartnerEventController do
   end
 
   defp translate_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
+    Ecto.Changeset.traverse_errors(changeset, &interpolate_error/1)
+  end
+
+  defp interpolate_error({msg, opts}) do
+    opts_map = Enum.into(opts, %{}, fn {k, v} -> {Atom.to_string(k), v} end)
+    Regex.replace(~r"%{(\w+)}", msg, fn _, key -> to_string(Map.get(opts_map, key, key)) end)
   end
 end

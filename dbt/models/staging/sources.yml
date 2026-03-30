@@ -427,6 +427,8 @@ sources:
             description: URL where the event was found.
           - name: scraped_at
             description: Timestamp when the event was scraped.
+          - name: ends_at
+            description: Timestamp when the event ends (optional).
 
       - name: event_log
         description: Immutable append-only event log for all significant state changes.

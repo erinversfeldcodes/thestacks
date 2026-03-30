@@ -11,5 +11,6 @@ select
     recurrence,
     related_authors,
     source_url,
-    scraped_at
+    scraped_at,
+    ends_at
 from {{ source('op', 'third_space_events') }}

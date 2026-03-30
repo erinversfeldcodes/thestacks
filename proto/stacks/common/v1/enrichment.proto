@@ -328,4 +328,7 @@ message ThirdSpaceEvent {
 
   // When the event data was scraped.
   google.protobuf.Timestamp scraped_at = 9 [json_name = "scraped_at"];
+
+  // When the event ends (optional; stored when provided by the partner API).
+  google.protobuf.Timestamp ends_at = 10 [json_name = "ends_at"];
 }

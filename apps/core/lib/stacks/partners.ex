@@ -11,6 +11,7 @@ defmodule Stacks.Partners do
   alias Core.Repo
   alias Stacks.Books.BookEdition
   alias Stacks.Enrichment.ThirdSpaceEvent
+  alias Stacks.Events
   alias Stacks.Partners.{InventoryItem, Partner}
 
   @key_prefix "stacks_pk_"
@@ -199,7 +200,16 @@ defmodule Stacks.Partners do
         sync_single_item(item, partner_id, now, {s, u})
       end)
 
-    {:ok, %{synced: synced, unresolved: Enum.reverse(unresolved)}}
+    result = %{synced: synced, unresolved: Enum.reverse(unresolved)}
+
+    Events.emit_safe(%{
+      event_type: "partner.inventory_synced",
+      aggregate_type: "partner",
+      aggregate_id: partner_id,
+      payload: %{synced: synced, unresolved_count: length(result.unresolved)}
+    })
+
+    {:ok, result}
   end
 
   defp sync_single_item(item, partner_id, now, {s, u}) do
@@ -277,13 +287,27 @@ defmodule Stacks.Partners do
         title: attrs["title"],
         description: attrs["description"],
         event_date: starts_at,
+        ends_at: ends_at,
         source_url: attrs["location"],
         scraped_at: DateTime.utc_now()
       }
 
-      %ThirdSpaceEvent{}
-      |> Stacks.Enrichment.third_space_event_changeset(event_attrs)
-      |> Repo.insert()
+      case %ThirdSpaceEvent{}
+           |> Stacks.Enrichment.third_space_event_changeset(event_attrs)
+           |> Repo.insert() do
+        {:ok, event} = result ->
+          Events.emit_safe(%{
+            event_type: "partner.event_created",
+            aggregate_type: "third_space_event",
+            aggregate_id: event.id,
+            payload: %{space_id: space_id, title: event.title}
+          })
+
+          result
+
+        error ->
+          error
+      end
     end
   end
 
@@ -315,8 +339,24 @@ defmodule Stacks.Partners do
            from e in ThirdSpaceEvent,
              where: e.id == ^event_id and e.space_id == ^space_id
          ) do
-      nil -> {:error, :not_found}
-      event -> Repo.delete(event)
+      nil ->
+        {:error, :not_found}
+
+      event ->
+        case Repo.delete(event) do
+          {:ok, _} = result ->
+            Events.emit_safe(%{
+              event_type: "partner.event_deleted",
+              aggregate_type: "third_space_event",
+              aggregate_id: event_id,
+              payload: %{space_id: space_id}
+            })
+
+            result
+
+          error ->
+            error
+        end
     end
   end
 
