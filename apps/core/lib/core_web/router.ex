@@ -42,6 +42,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RequireRole, role: "owner"
   end
 
+  pipeline :partner_auth do
+    plug StacksWeb.PartnerAuthPlug
+  end
+
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
@@ -52,6 +56,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
     post "/opt-out", OptOutController, :create
+    post "/partners/register", PartnerRegistrationController, :create
   end
 
   # Authenticated listing routes — must be before optional_auth `:id` catch-all
@@ -69,6 +74,8 @@ defmodule CoreWeb.Router do
   # Public with optional auth — returns extra data when authenticated
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth]
+    get "/third-spaces", ThirdSpaceController, :index
+    get "/books/:id/availability", BookAvailabilityController, :show
     get "/books/:id", BookController, :show
     get "/catalogue", CatalogueController, :index
     get "/listings", ListingController, :index
@@ -120,7 +127,18 @@ defmodule CoreWeb.Router do
     get "/placements/mine", BookshelfPlacementController, :mine
     put "/placements/:id/move", BookshelfPlacementController, :move
     put "/placements/:id/formats", BookshelfPlacementController, :update_formats
+    put "/placements/:id/progress", BookshelfPlacementController, :update_progress
+    put "/placements/:id/shelf", BookshelfPlacementController, :move_to_shelf
     delete "/placements/:id", BookshelfPlacementController, :delete
+
+    get "/bookshelves/:bookshelf_name/shelves", ShelfController, :index
+    post "/bookshelves/:bookshelf_name/shelves", ShelfController, :create
+    delete "/shelves/:id", ShelfController, :delete
+    put "/bookshelves/:bookshelf_name/shelves/reorder", ShelfController, :reorder
+
+    get "/onboarding/status", OnboardingController, :status
+    put "/onboarding/step/:step", OnboardingController, :complete_step
+    post "/onboarding/reset", OnboardingController, :reset
 
     put "/settings/age_verification", UserSettingsController, :update_age_verification
     put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility
@@ -131,6 +149,24 @@ defmodule CoreWeb.Router do
 
     put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
+
+    get "/posts/:post_id/comments", CommentController, :index
+    post "/posts/:post_id/comments", CommentController, :create
+    delete "/comments/:id", CommentController, :delete
+
+    post "/bookshelves/:bookshelf_id/grants", VisibilityGrantController, :create
+    get "/bookshelves/:bookshelf_id/grants", VisibilityGrantController, :index
+    delete "/bookshelves/:bookshelf_id/grants/:user_id", VisibilityGrantController, :delete
+
+    post "/groups", GroupController, :create
+    get "/groups/:id", GroupController, :show
+    get "/groups/:id/feed", GroupFeedController, :index
+
+    post "/groups/:group_id/invitations", GroupMemberController, :invite
+    post "/groups/:group_id/invitations/:id/accept", GroupMemberController, :accept
+    post "/groups/:group_id/invitations/:id/decline", GroupMemberController, :decline
+    delete "/groups/:group_id/members/:user_id", GroupMemberController, :remove
+    delete "/groups/:group_id/leave", GroupMemberController, :leave
 
     post "/blog/posts", BlogController, :create
     put "/blog/posts/:id", BlogController, :update
@@ -174,6 +210,23 @@ defmodule CoreWeb.Router do
     get "/admin/sources", SourceAdminController, :index
     put "/admin/sources/:id/approve", SourceAdminController, :approve
     put "/admin/sources/:id/reject", SourceAdminController, :reject
+
+    get "/admin/partners", PartnerController, :index
+    put "/admin/partners/:id/approve", PartnerController, :approve
+    put "/admin/partners/:id/reject", PartnerController, :reject
+  end
+
+  # Partner API — authenticated via API key, no user auth
+  scope "/api/partner", StacksWeb do
+    pipe_through [:api, :partner_auth]
+
+    post "/inventory", PartnerInventoryController, :sync
+    post "/inventory/import", PartnerInventoryController, :import
+    get "/inventory", PartnerInventoryController, :index
+
+    post "/events", PartnerEventController, :create
+    get "/events", PartnerEventController, :index
+    delete "/events/:id", PartnerEventController, :delete
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

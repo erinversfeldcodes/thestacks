@@ -459,6 +459,7 @@ defmodule StacksWeb.ProtoJSONTest do
                id: placement.id,
                book_id: placement.book_id,
                bookshelf_id: placement.bookshelf_id,
+               shelf_id: placement.shelf_id,
                position: placement.position,
                placed_at: placement.placed_at,
                removed_at: placement.removed_at
@@ -561,7 +562,9 @@ defmodule StacksWeb.ProtoJSONTest do
                age_verified: true,
                consent_analytics: true,
                country_code: "ZA",
-               city: "Cape Town"
+               city: "Cape Town",
+               onboarding_completed: nil,
+               next_onboarding_step: "profile"
              }
     end
 

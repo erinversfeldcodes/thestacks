@@ -9,17 +9,25 @@ module Api exposing
     , MergeFormatResponse
     , MetricsDashboard
     , NotificationPreferences
+    , OnboardingStatus
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
     , QualityTrends
     , SourceHealth
+    , acceptInvitation
     , activateListing
+    , addShelf
     , approveSource
+    , completeOnboardingStep
     , confirmAssociation
     , createBlogPost
+    , createComment
+    , createGroup
     , createListing
     , deactivateListing
+    , declineInvitation
+    , deleteComment
     , dismissAssociation
     , getAdminSources
     , getBlogPost
@@ -28,13 +36,19 @@ module Api exposing
     , getBookshelf
     , getCatalogue
     , getEnrichmentGaps
+    , getGroup
+    , getGroupFeed
     , getListings
     , getMetrics
     , getMyListings
     , getMyPlacements
+    , getOnboardingStatus
+    , getPostComments
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
+    , inviteToGroup
+    , leaveGroup
     , login
     , logout
     , lookupByIsbn
@@ -63,6 +77,7 @@ module Api exposing
 import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode
 import Stacks.Api.V1.Admin as ProtoAdmin
 import Stacks.Api.V1.AuthResponses as ProtoAuth
 import Stacks.Api.V1.BookResponses as ProtoBookResp
@@ -72,11 +87,14 @@ import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
 import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
-import Types.BlogPost exposing (BlogPost, BlogPostSummary, blogPostDecoder, blogPostSummaryDecoder)
+import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
+import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
+import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
+import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
 import Url.Builder
 
 
@@ -359,7 +377,7 @@ searchBooks query token toMsg =
 getBookshelf :
     String
     -> String
-    -> (Result Http.Error (List Placement) -> msg)
+    -> (Result Http.Error (List Shelf) -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
     Http.request
@@ -367,7 +385,24 @@ getBookshelf shelfName token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementDecoder))
+        , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+addShelf :
+    String
+    -> String
+    -> (Result Http.Error Shelf -> msg)
+    -> Cmd msg
+addShelf shelfName token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/shelves"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg shelfDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -1058,6 +1093,84 @@ dismissAssociation postId associationId token toMsg =
         }
 
 
+{-| GET /api/posts/:post\_id/comments — fetch comments for a post.
+-}
+getPostComments :
+    String
+    -> Maybe String
+    -> (Result Http.Error (List Comment) -> msg)
+    -> Cmd msg
+getPostComments postId maybeToken toMsg =
+    Http.request
+        { method = "GET"
+        , headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/posts/:post\_id/comments — create a comment or reply.
+-}
+createComment :
+    String
+    -> String
+    -> Maybe String
+    -> String
+    -> (Result Http.Error Comment -> msg)
+    -> Cmd msg
+createComment postId body maybeParentId token toMsg =
+    let
+        parentField =
+            case maybeParentId of
+                Just pid ->
+                    [ ( "parent_id", Encode.string pid ) ]
+
+                Nothing ->
+                    []
+    in
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    ([ ( "body", Encode.string body ) ] ++ parentField)
+                )
+        , expect = Http.expectJson toMsg (Decode.field "comment" commentDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/comments/:id — delete a comment.
+-}
+deleteComment :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+deleteComment commentId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/comments/" ++ commentId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 
 -- PRIVACY / VISIBILITY
 
@@ -1525,6 +1638,211 @@ getEnrichmentGaps token toMsg =
         , url = baseUrl ++ "/api/metrics/enrichment-gaps"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg enrichmentGapsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Onboarding status response from GET /api/onboarding/status.
+-}
+type alias OnboardingStatus =
+    { completed : Bool
+    , nextStep : Maybe String
+    }
+
+
+onboardingStatusDecoder : Decoder OnboardingStatus
+onboardingStatusDecoder =
+    Decode.map2 OnboardingStatus
+        (Decode.oneOf [ Decode.field "completed" Decode.bool, Decode.succeed False ])
+        (Decode.maybe (Decode.field "next_step" Decode.string)
+            |> Decode.map
+                (\ms ->
+                    case ms of
+                        Just "" ->
+                            Nothing
+
+                        other ->
+                            other
+                )
+        )
+
+
+{-| GET /api/onboarding/status — fetch current step completion state.
+-}
+getOnboardingStatus :
+    String
+    -> (Result Http.Error OnboardingStatus -> msg)
+    -> Cmd msg
+getOnboardingStatus token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/onboarding/status"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg onboardingStatusDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/onboarding/step/:step — mark a step as complete. Returns updated status.
+-}
+completeOnboardingStep :
+    String
+    -> String
+    -> (Result Http.Error OnboardingStatus -> msg)
+    -> Cmd msg
+completeOnboardingStep step token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/onboarding/step/" ++ step
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg onboardingStatusDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+createGroup :
+    String
+    -> String
+    -> (Result Http.Error Group -> msg)
+    -> Cmd msg
+createGroup name token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "name", Encode.string name )
+                    , ( "type", Encode.string "close_friends" )
+                    ]
+                )
+        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+getGroup :
+    String
+    -> String
+    -> (Result Http.Error Group -> msg)
+    -> Cmd msg
+getGroup groupId token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+getGroupFeed :
+    String
+    -> String
+    -> Maybe String
+    -> (Result Http.Error FeedResponse -> msg)
+    -> Cmd msg
+getGroupFeed groupId token maybeCursor toMsg =
+    let
+        url =
+            case maybeCursor of
+                Nothing ->
+                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed"
+
+                Just cursor ->
+                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed?before=" ++ cursor
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = url
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg feedResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+inviteToGroup :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error GroupInvitation -> msg)
+    -> Cmd msg
+inviteToGroup groupId identifier token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "identifier", Encode.string identifier )
+                    ]
+                )
+        , expect = Http.expectJson toMsg (Decode.field "invitation" groupInvitationDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+acceptInvitation :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+acceptInvitation groupId invitationId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+declineInvitation :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+declineInvitation groupId invitationId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+leaveGroup :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+leaveGroup groupId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }

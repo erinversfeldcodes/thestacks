@@ -29,18 +29,20 @@ defmodule Stacks.FactoryProtoValidationTest do
   @factories %{
     user:
       {Stacks.Accounts.User,
-       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at email_confirmation_token password_reset_token password_reset_sent_at)a},
+       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed)a},
     author: {Stacks.Books.Author, ~w(website_url rss_feed_url open_library_id)a},
     book: {Stacks.Books.Book, ~w()a},
     book_edition:
       {Stacks.Books.BookEdition, ~w(cover_image_url open_library_id google_books_id)a},
     uploaded_image: {Stacks.Books.UploadedImage, ~w(storage_path rejection_reason book_ids)a},
     bookshelf: {Stacks.Shelving.Bookshelf, ~w(visibility_group_id)a},
+    shelf: {Stacks.Shelving.Shelf, ~w()a},
     placement:
       {Stacks.Shelving.Placement,
-       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents)a},
+       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents current_page started_at finished_at)a},
     placement_history: {Stacks.Shelving.PlacementHistory, ~w()a},
     post: {Stacks.Blog.Post, ~w(published_at visibility_group_id)a},
+    post_comment: {Stacks.Blog.PostComment, ~w(parent_id created_at)a},
     post_book_association: {Stacks.Blog.PostBookAssociation, ~w()a},
     platform_cost: {Stacks.Costs.PlatformCost, ~w()a},
     group: {Stacks.Social.Group, ~w()a},
@@ -68,7 +70,11 @@ defmodule Stacks.FactoryProtoValidationTest do
     third_space:
       {Stacks.Enrichment.ThirdSpace,
        ~w(instagram_url description discovered_via last_active_at opted_out_at)a},
-    third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a}
+    third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a},
+    partner:
+      {Stacks.Partners.Partner,
+       ~w(api_key_prefix hmac_secret approved_by_id approved_at website_url third_space_id)a},
+    partner_inventory_item: {Stacks.Partners.InventoryItem, ~w()a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.

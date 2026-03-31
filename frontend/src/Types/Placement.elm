@@ -1,6 +1,7 @@
 module Types.Placement exposing
     ( Format(..)
     , Placement
+    , ReadingStatus(..)
     , placementDecoder
     )
 
@@ -16,6 +17,13 @@ type Format
     | Audiobook
 
 
+type ReadingStatus
+    = ToRead
+    | Reading
+    | Completed
+    | Abandoned
+
+
 type alias Placement =
     { id : String
     , book : Maybe Book
@@ -25,6 +33,10 @@ type alias Placement =
     , personalRating : Maybe Int
     , notes : Maybe String
     , bookshelfName : Maybe String
+    , readingStatus : Maybe ReadingStatus
+    , currentPage : Maybe Int
+    , startedAt : Maybe String
+    , finishedAt : Maybe String
     }
 
 
@@ -43,6 +55,25 @@ parseFormat s =
 
         "audiobook" ->
             Just Audiobook
+
+        _ ->
+            Nothing
+
+
+parseReadingStatus : String -> Maybe ReadingStatus
+parseReadingStatus s =
+    case s of
+        "to_read" ->
+            Just ToRead
+
+        "reading" ->
+            Just Reading
+
+        "completed" ->
+            Just Completed
+
+        "abandoned" ->
+            Just Abandoned
 
         _ ->
             Nothing
@@ -100,6 +131,10 @@ placementWithBookDecoder =
             , personalRating = zeroToNothing detail.personalRating
             , notes = emptyToNothing detail.notes
             , bookshelfName = bsName
+            , readingStatus = parseReadingStatus detail.readingStatus
+            , currentPage = zeroToNothing detail.currentPage
+            , startedAt = emptyToNothing detail.startedAt
+            , finishedAt = emptyToNothing detail.finishedAt
             }
         )
         Proto.decodePlacementDetail
@@ -137,6 +172,10 @@ fromProtoBookPlacement bp =
     , personalRating = zeroToNothing bp.personalRating
     , notes = emptyToNothing bp.notes
     , bookshelfName = emptyToNothing bp.bookshelfName
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }
 
 
@@ -152,4 +191,8 @@ fromProtoPlacementRef pr =
     , personalRating = Nothing
     , notes = Nothing
     , bookshelfName = Nothing
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }

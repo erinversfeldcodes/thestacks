@@ -20,6 +20,7 @@ import Page.Bookshelf.Helpers exposing (pickTexture)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (Shelf)
 import Util.TestId exposing (testId)
 
 
@@ -36,7 +37,7 @@ type OutMsg
 
 
 type Msg
-    = BooksLoaded (Result Http.Error (List Placement))
+    = BooksLoaded (Result Http.Error (List Shelf))
     | VerifyAge
     | DismissAgeGate
     | BookHovered String
@@ -63,8 +64,8 @@ update msg model =
     case msg of
         BooksLoaded result ->
             case result of
-                Ok placements ->
-                    ( { model | books = Success placements }, Cmd.none, NoOut )
+                Ok shelves ->
+                    ( { model | books = Success (List.concatMap .placements shelves) }, Cmd.none, NoOut )
 
                 Err (Http.BadStatus 403) ->
                     ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )

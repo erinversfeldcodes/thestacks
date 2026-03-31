@@ -34,7 +34,7 @@ defmodule StacksWeb.ProtoJSON do
     :age_verified,
     :consent_analytics
   ]
-  @user_auth_fields @user_core_fields ++ [:country_code, :city]
+  @user_auth_fields @user_core_fields ++ [:country_code, :city, :onboarding_completed]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   # ---------------------------------------------------------------------------
@@ -235,7 +235,18 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_detail(map()) :: map()
   def placement_detail(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :position, :placed_at, :formats, :personal_rating, :notes])
+    |> Map.take([
+      :id,
+      :position,
+      :placed_at,
+      :formats,
+      :personal_rating,
+      :notes,
+      :reading_status,
+      :current_page,
+      :started_at,
+      :finished_at
+    ])
     |> Map.put(:book, bookshelf_book(placement.book))
   end
 
@@ -247,7 +258,7 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_ref(map()) :: map()
   def placement_ref(placement) do
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :bookshelf_id, :position, :placed_at, :removed_at])
+    |> Map.take([:id, :book_id, :bookshelf_id, :shelf_id, :position, :placed_at, :removed_at])
   end
 
   @doc """
@@ -279,8 +290,30 @@ defmodule StacksWeb.ProtoJSON do
   """
   @spec user(map()) :: map()
   def user(user_struct) do
-    Gen.user(user_struct)
-    |> Map.take(@user_auth_fields)
+    base = Gen.user(user_struct) |> Map.take(@user_auth_fields)
+    steps = user_struct.onboarding_steps || %{}
+    step_order = ~w(profile age_verification privacy)
+
+    next_step =
+      Enum.find(step_order, fn step ->
+        not (Map.get(steps, step, false) == true)
+      end)
+
+    Map.put(base, :next_onboarding_step, next_step)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Onboarding
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes the onboarding status map from `Accounts.onboarding_status/1`.
+
+  Returns `%{steps: %{...}, completed: bool, next_step: step | nil}`.
+  """
+  @spec onboarding_status(map()) :: map()
+  def onboarding_status(%{steps: steps, completed: completed, next_step: next_step}) do
+    %{steps: steps, completed: completed, next_step: next_step}
   end
 
   # ---------------------------------------------------------------------------
@@ -323,6 +356,83 @@ defmodule StacksWeb.ProtoJSON do
       })
 
     if is_owner, do: base, else: Map.delete(base, :reasoning)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Comment
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a blog post comment.
+
+  Handles the virtual `:replies` key added by `Blog.list_comments/2`.
+  """
+  @spec comment(map()) :: map()
+  def comment(comment) do
+    %{
+      id: comment.id,
+      post_id: comment.post_id,
+      author_id: comment.author_id,
+      parent_id: comment.parent_id,
+      body: comment.body,
+      created_at: comment.created_at,
+      replies: Map.get(comment, :replies, []) |> Enum.map(&comment/1)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Group
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a group struct.
+  """
+  @spec group(map()) :: map()
+  def group(g) do
+    %{
+      id: g.id,
+      owner_id: g.owner_id,
+      name: g.name,
+      type: g.type,
+      visibility: g.visibility,
+      created_at: g.created_at,
+      updated_at: g.updated_at
+    }
+  end
+
+  @doc """
+  Serializes a group invitation struct.
+  """
+  @spec group_invitation(map()) :: map()
+  def group_invitation(invitation) do
+    %{
+      id: invitation.id,
+      group_id: invitation.group_id,
+      invited_by_id: invitation.invited_by_id,
+      invited_user_id: invitation.invited_user_id,
+      status: invitation.status,
+      responded_at: invitation.responded_at,
+      created_at: invitation.created_at
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Visibility Grant
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a visibility grant struct.
+  """
+  @spec visibility_grant(map()) :: map()
+  def visibility_grant(grant) do
+    %{
+      id: grant.id,
+      resource_type: grant.resource_type,
+      resource_id: grant.resource_id,
+      granted_to_id: grant.granted_to_id,
+      granted_by_id: grant.granted_by_id,
+      created_at: grant.created_at
+    }
   end
 
   # ---------------------------------------------------------------------------
@@ -395,6 +505,22 @@ defmodule StacksWeb.ProtoJSON do
   # ---------------------------------------------------------------------------
 
   @doc """
+  Serializes a shelf with its placements, filtering by visibility.
+
+  Used by BookshelfController to build the `shelves` response shape.
+  Each shelf includes its position and the placements visible to the viewer.
+  """
+  @spec shelf_with_placements(map(), term()) :: map()
+  def shelf_with_placements(shelf, viewer) do
+    visible_placements =
+      shelf.placements
+      |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
+      |> Enum.map(&placement_detail/1)
+
+    %{id: shelf.id, position: shelf.position, placements: visible_placements}
+  end
+
+  @doc """
   Serializes a placement's format update response.
 
   Matches the `%{id, formats}` shape returned by
@@ -403,6 +529,27 @@ defmodule StacksWeb.ProtoJSON do
   @spec placement_formats(map()) :: map()
   def placement_formats(placement) do
     %{id: placement.id, formats: placement.formats}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Reading progress
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a placement's reading progress update response.
+
+  Matches the shape returned by
+  `BookshelfPlacementController.update_progress/2`.
+  """
+  @spec reading_progress(map()) :: map()
+  def reading_progress(placement) do
+    %{
+      id: placement.id,
+      reading_status: placement.reading_status,
+      current_page: placement.current_page,
+      started_at: placement.started_at,
+      finished_at: placement.finished_at
+    }
   end
 
   # ---------------------------------------------------------------------------
@@ -434,6 +581,62 @@ defmodule StacksWeb.ProtoJSON do
   @spec association_action(map()) :: map()
   def association_action(assoc) do
     %{id: assoc.id, book_id: assoc.book_id, visible: assoc.visible}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Feed items
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a feed item (placement or blog post) for the group content feed.
+  """
+  @spec feed_item(map()) :: map()
+  def feed_item(%{type: :placement_created} = item) do
+    %{
+      type: "placement_created",
+      placement_id: item.placement_id,
+      book_id: item.book_id,
+      book_title: item.book_title,
+      book_cover_url: nil,
+      user_id: item.user_id,
+      user_display_name: item.user_display_name,
+      occurred_at: DateTime.to_iso8601(item.occurred_at)
+    }
+  end
+
+  def feed_item(%{type: :blog_post} = item) do
+    %{
+      type: "blog_post",
+      post_id: item.post_id,
+      post_title: item.post_title,
+      post_visibility: item.post_visibility,
+      user_id: item.user_id,
+      user_display_name: item.user_display_name,
+      occurred_at: DateTime.to_iso8601(item.occurred_at)
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Partner
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Serializes a partner struct for API responses.
+  Omits hmac_secret — security-sensitive, never serialized.
+  """
+  @spec partner(map()) :: map()
+  def partner(p) do
+    %{
+      id: p.id,
+      name: p.name,
+      business_type: p.business_type,
+      contact_email: p.contact_email,
+      website_url: p.website_url,
+      status: p.status,
+      api_key_prefix: p.api_key_prefix,
+      approved_by_id: p.approved_by_id,
+      created_at: p.created_at && DateTime.to_iso8601(p.created_at)
+    }
   end
 
   # ---------------------------------------------------------------------------

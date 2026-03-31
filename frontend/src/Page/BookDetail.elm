@@ -1,5 +1,6 @@
 module Page.BookDetail exposing
-    ( Model
+    ( AvailabilityItem
+    , Model
     , Msg(..)
     , OutMsg(..)
     , init
@@ -16,15 +17,25 @@ import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
-import Html exposing (Html, a, button, div, h1, h2, h3, img, option, p, section, select, span, text)
+import Html exposing (Html, a, button, div, h1, h2, h3, img, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Types.Book exposing (Book, Edition, authorName)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
+
+
+type alias AvailabilityItem =
+    { partnerName : String
+    , priceCents : Int
+    , condition : String
+    , quantity : Int
+    , isbn : String
+    }
 
 
 type alias Model =
@@ -43,6 +54,7 @@ type alias Model =
     , showAgeGate : Bool
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
+    , availability : RemoteData Http.Error (List AvailabilityItem)
     }
 
 
@@ -70,13 +82,17 @@ type Msg
     | VerifyAge
     | DismissAgeGate
     | CloseOverlay
+    | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
 init bookId maybeToken maybePreviousRoute =
     let
-        cmd =
+        bookCmd =
             Api.getBook bookId maybeToken BookLoaded
+
+        availabilityCmd =
+            fetchAvailability bookId maybeToken
     in
     ( { book = Loading
       , placement = Nothing
@@ -93,9 +109,46 @@ init bookId maybeToken maybePreviousRoute =
       , showAgeGate = False
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
+      , availability = Loading
       }
-    , cmd
+    , Cmd.batch [ bookCmd, availabilityCmd ]
     )
+
+
+fetchAvailability : String -> Maybe String -> Cmd Msg
+fetchAvailability bookId maybeToken =
+    let
+        headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+    in
+    Http.request
+        { method = "GET"
+        , headers = headers
+        , url = "/api/books/" ++ bookId ++ "/availability"
+        , body = Http.emptyBody
+        , expect = Http.expectJson AvailabilityLoaded availabilityDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+availabilityDecoder : Decode.Decoder (List AvailabilityItem)
+availabilityDecoder =
+    Decode.field "availability"
+        (Decode.list
+            (Decode.map5 AvailabilityItem
+                (Decode.field "partner_name" Decode.string)
+                (Decode.field "price_cents" Decode.int)
+                (Decode.field "condition" Decode.string)
+                (Decode.field "quantity" Decode.int)
+                (Decode.field "isbn" Decode.string)
+            )
+        )
 
 
 routeToBookshelf : Maybe Route -> String
@@ -289,6 +342,12 @@ update msg model maybeToken =
                 Err err ->
                     ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
+        AvailabilityLoaded (Ok items) ->
+            ( { model | availability = Success items }, Cmd.none, NoOut )
+
+        AvailabilityLoaded (Err err) ->
+            ( { model | availability = Failure err }, Cmd.none, NoOut )
+
         ToggleFormat format ->
             let
                 newFormats =
@@ -357,6 +416,7 @@ viewBook model book =
          , viewAboutSection book
          , viewReviewsSection
          , viewPricesSection
+         , viewAvailabilitySection model
          , viewAuthorSection book
          , viewWritingSection
          ]
@@ -567,6 +627,48 @@ Currently passes NotAsked since the API does not yet provide per-book prices.
 viewPricesSection : Html Msg
 viewPricesSection =
     PriceInfo.view NotAsked
+
+
+viewAvailabilitySection : Model -> Html Msg
+viewAvailabilitySection model =
+    case model.availability of
+        Success (first :: rest) ->
+            section [ class "book-detail__section book-detail__availability", attribute "role" "region", attribute "aria-labelledby" "section-availability" ]
+                [ h3 [ class "book-detail__section-title", id "section-availability" ] [ text "Available at" ]
+                , ul [ class "book-detail__availability-list" ]
+                    (List.map viewAvailabilityRow (first :: rest))
+                ]
+
+        _ ->
+            text ""
+
+
+viewAvailabilityRow : AvailabilityItem -> Html Msg
+viewAvailabilityRow item =
+    li [ class "book-detail__availability-row" ]
+        [ span [ class "book-detail__availability-partner" ] [ text item.partnerName ]
+        , span [ class "book-detail__availability-condition" ] [ text item.condition ]
+        , span [ class "book-detail__availability-price" ] [ text (formatPrice item.priceCents) ]
+        ]
+
+
+formatPrice : Int -> String
+formatPrice cents =
+    let
+        major =
+            cents // 100
+
+        minor =
+            modBy 100 cents
+
+        minorStr =
+            if minor < 10 then
+                "0" ++ String.fromInt minor
+
+            else
+                String.fromInt minor
+    in
+    "R" ++ String.fromInt major ++ "." ++ minorStr
 
 
 {-| Author card section — delegates to the AuthorCard component.

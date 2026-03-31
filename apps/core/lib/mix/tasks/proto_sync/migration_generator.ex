@@ -13,9 +13,12 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = migration_module_name(table.table_name, timestamp)
 
+    ts_fields = timestamp_field_names(table)
+
     column_lines =
       fields
-      |> Enum.map_join("\n", fn field -> column_line(field, overrides) end)
+      |> Enum.reject(fn field -> field.name == "id" or field.name in ts_fields end)
+      |> Enum.map_join("\n", fn field -> column_line(field, overrides, table.schema_prefix) end)
 
     timestamps_line = timestamps_block(table)
     index_lines = index_block(table)
@@ -54,7 +57,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
 
     column_lines =
       new_fields
-      |> Enum.map_join("\n", fn field -> column_line(field, overrides) end)
+      |> Enum.map_join("\n", fn field -> column_line(field, overrides, table.schema_prefix) end)
 
     down_lines =
       Enum.map_join(new_fields, "\n", fn field ->
@@ -132,13 +135,23 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
 
   # --- Private helpers ---
 
-  defp column_line(field, overrides) do
+  defp column_line(field, overrides, schema_prefix) do
     field_name = String.to_atom(field.name)
     override = Map.get(overrides, field_name, %{})
     col_name = Map.get(override, :ecto_name, field_name)
 
-    type = TypeMapper.migration_type(field, overrides)
-    type_str = format_migration_type(type)
+    type_str =
+      case Map.get(override, :references_table) do
+        nil ->
+          type = TypeMapper.migration_type(field, overrides)
+          format_migration_type(type)
+
+        ref_table ->
+          on_delete = Map.get(override, :on_delete, :nothing)
+
+          "references(:#{ref_table}, type: :binary_id, prefix: \"#{schema_prefix}\", on_delete: :#{on_delete})"
+      end
+
     opts = column_opts(field, overrides)
     opts_str = if opts == "", do: "", else: ", #{opts}"
 
@@ -176,6 +189,11 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     raise "Unsupported migration type: #{inspect(type)}. Add handling in MigrationGenerator.format_migration_type/1."
   end
 
+  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
+  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
+  defp timestamp_field_names(%{timestamps: false}), do: []
+  defp timestamp_field_names(_), do: ~w(created_at updated_at)
+
   defp timestamps_block(%{timestamps: false}), do: ""
 
   defp timestamps_block(%{timestamps: :standard}) do
@@ -185,14 +203,27 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   defp timestamps_block(_), do: ""
 
   defp index_block(table) do
-    indexes = Map.get(table, :indexes, [])
+    overrides = Map.get(table, :field_overrides, %{})
 
-    if indexes == [] do
+    fk_lines =
+      overrides
+      |> Enum.filter(fn {_, override} -> Map.has_key?(override, :references_table) end)
+      |> Enum.sort_by(fn {field_name, _} -> field_name end)
+      |> Enum.map_join("\n", fn {field_name, _} ->
+        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\")"
+      end)
+
+    explicit_lines =
+      table
+      |> Map.get(:indexes, [])
+      |> Enum.map_join("\n", &format_index_line(&1, table))
+
+    all_lines = [fk_lines, explicit_lines] |> Enum.reject(&(&1 == "")) |> Enum.join("\n")
+
+    if all_lines == "" do
       ""
     else
-      lines = Enum.map_join(indexes, "\n", &format_index_line(&1, table))
-
-      "\n#{lines}\n"
+      "\n#{all_lines}\n"
     end
   end
 

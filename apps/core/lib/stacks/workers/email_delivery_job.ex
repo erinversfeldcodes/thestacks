@@ -21,7 +21,10 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     "marketplace_sale" => :marketplace_sale,
     "gdpr_export_ready" => :gdpr_export_ready,
     "wishlist_availability" => :wishlist_availability,
-    "opt_out_confirmation" => :opt_out_confirmation
+    "opt_out_confirmation" => :opt_out_confirmation,
+    "group_invitation" => :group_invitation,
+    "new_offer" => :new_offer,
+    "wishlist_available" => :wishlist_available
   }
 
   # Templates that bypass user notification preferences
@@ -62,7 +65,10 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   defp should_send?(_user, template) when template in @bypass_prefs, do: true
   defp should_send?(user, :wishlist_availability), do: user.notify_wishlist_availability
+  defp should_send?(user, :wishlist_available), do: user.notify_wishlist_availability
   defp should_send?(user, :marketplace_sale), do: user.notify_marketplace
+  defp should_send?(user, :new_offer), do: user.notify_marketplace
+  defp should_send?(user, :group_invitation), do: user.notify_group_invitations
   # Unknown templates default to false — new opt-in notifications must be
   # explicitly listed above to avoid sending unintended emails.
   defp should_send?(_user, _template), do: false
@@ -119,5 +125,47 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.from({"The Stacks", "noreply@thestacks.app"})
     |> Swoosh.Email.subject("Removal request received — The Stacks")
     |> Swoosh.Email.html_body(Templates.opt_out_confirmation())
+  end
+
+  defp build_email(user, :group_invitation, %{
+         "inviter_name" => inviter_name,
+         "group_name" => group_name,
+         "accept_url" => accept_url
+       }) do
+    Swoosh.Email.new()
+    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.from({"The Stacks", "noreply@thestacks.app"})
+    |> Swoosh.Email.subject("You've been invited to a group — The Stacks")
+    |> Swoosh.Email.html_body(Templates.group_invitation(inviter_name, group_name, accept_url))
+  end
+
+  defp build_email(user, :new_offer, %{
+         "buyer_name" => buyer_name,
+         "listing_title" => listing_title,
+         "offer_amount_zar" => offer_amount_zar,
+         "offer_url" => offer_url
+       }) do
+    Swoosh.Email.new()
+    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.from({"The Stacks", "noreply@thestacks.app"})
+    |> Swoosh.Email.subject("New offer on your listing — The Stacks")
+    |> Swoosh.Email.html_body(
+      Templates.new_offer(buyer_name, listing_title, offer_amount_zar, offer_url)
+    )
+  end
+
+  defp build_email(user, :wishlist_available, %{
+         "book_title" => book_title,
+         "author_name" => author_name,
+         "price_zar" => price_zar,
+         "seller_name" => seller_name
+       }) do
+    Swoosh.Email.new()
+    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.from({"The Stacks", "noreply@thestacks.app"})
+    |> Swoosh.Email.subject("A book on your WishList is available — The Stacks")
+    |> Swoosh.Email.html_body(
+      Templates.wishlist_available(book_title, author_name, price_zar, seller_name)
+    )
   end
 end
