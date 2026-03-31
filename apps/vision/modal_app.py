@@ -19,6 +19,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import modal
 
@@ -37,7 +38,7 @@ def _download_model() -> None:
     """
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-    AutoProcessor.from_pretrained(MODEL_NAME)
+    AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
     Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
 
 
@@ -57,16 +58,23 @@ image = (
 app = modal.App(MODAL_APP_NAME)
 
 _CLASSIFY_PROMPT = (
-    "Does this image contain enough information to identify a book?\n\n"
-    'Answer "book" if: the image shows a physical book (cover, spine, back, or barcode), '
-    "OR the image is a screenshot or photo of text that mentions a specific book title or "
-    "author.\n\n"
-    'Answer "not_book" if: the image has no book-related content whatsoever '
-    "(a pet, food, a landscape, a selfie with no book context).\n\n"
-    'Answer "ambiguous" if: there is some possible book-related content but not enough '
-    "to attempt identification.\n\n"
+    "Does this image contain enough information to identify a specific book?\n\n"
+    'Answer "book" if ANY of the following are true:\n'
+    "  - The image shows a physical book: cover with readable title/author, spine, or barcode.\n"
+    "  - The image is a screenshot or photo of text (message, post, article, reading list)\n"
+    "    that explicitly names a specific book title or author.\n\n"
+    'Answer "not_book" if the image does NOT meet the above criteria. Examples:\n'
+    "  - A photo or illustration of an animal, food, a person, or a landscape.\n"
+    "  - Artwork, geometric shapes, patterns, logos, or abstract designs without book text.\n"
+    "  - A screenshot of text that does not name a specific title or author.\n"
+    "  - An image resembling a book cover in composition (rectangle, colours, shapes) but\n"
+    "    with no readable title, author name, or ISBN — this is NOT a book.\n\n"
+    'Answer "ambiguous" only when the image might show book content but you genuinely\n'
+    "cannot tell — e.g. a blurred or cropped image where something rectangular is\n"
+    "partially visible but no text is legible.\n\n"
     "Respond with ONLY valid JSON — no explanation, no code fences:\n"
-    '{"classification": "book", "confidence": 0.95}'
+    '{"classification": "book", "confidence": 0.95,'
+    ' "reasoning": "one sentence explaining your decision"}'
 )
 
 _EXTRACT_PROMPT = (
@@ -99,7 +107,7 @@ class VisionModel:
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)
+        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.bfloat16,
@@ -107,16 +115,16 @@ class VisionModel:
         )
 
     @modal.method()
-    def classify(self, image_b64: str) -> dict:
+    def classify(self, image_b64: str) -> dict[str, Any]:
         return self._infer(image_b64, _CLASSIFY_PROMPT)
 
     @modal.method()
-    def extract(self, images_b64: list[str]) -> dict:
+    def extract(self, images_b64: list[str]) -> dict[str, Any]:
         if not images_b64:
             return {"books": []}
         return self._infer(images_b64[0], _EXTRACT_PROMPT)
 
-    def _infer(self, image_b64: str, prompt: str) -> dict:
+    def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import torch
         from qwen_vl_utils import process_vision_info
 
@@ -158,23 +166,23 @@ class VisionModel:
         return _parse_json(response)
 
 
-def _parse_json(text: str) -> dict:
+def _parse_json(text: str) -> dict[str, Any]:
     """Extract a JSON object from model output, handling code fence wrapping."""
     try:
-        return json.loads(text)
+        return json.loads(text)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
     stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
     try:
-        return json.loads(stripped)
+        return json.loads(stripped)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group())
+            return json.loads(match.group())  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
@@ -222,7 +230,7 @@ _fastapi_image = (
     scaledown_window=300,
 )
 @modal.asgi_app()
-def vision_api():
+def vision_api() -> Any:
     import sys
 
     sys.path.insert(0, "/app")
