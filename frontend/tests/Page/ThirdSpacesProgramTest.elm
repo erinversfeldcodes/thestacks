@@ -9,7 +9,7 @@ simulated user interactions and HTTP responses.
 
 import Json.Decode as Decode
 import Json.Encode as Encode
-import Page.ThirdSpaces as ThirdSpaces exposing (Msg(..), ThirdSpace)
+import Page.ThirdSpaces as ThirdSpaces exposing (ThirdSpace)
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http

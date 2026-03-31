@@ -18,8 +18,7 @@ import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (libraryProgram, testPlacement)
-import Types.Shelf exposing (Shelf)
+import TestHelpers exposing (libraryProgram)
 
 
 {-| Helper to start a library program with an auth token.
