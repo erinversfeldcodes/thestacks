@@ -36,8 +36,12 @@ export default defineConfig({
       testMatch: /upload-pipeline\.spec\.ts/,
     },
     // Real upload tests: serial execution (GPU constraint)
+    // 300s project-level timeout: cold GPU start (~30s) + classify (~20s) +
+    // extract (~20s) + Open Library lookup + polling headroom.
+    // test.setTimeout() inside tests can reduce this for faster paths.
     {
       name: "upload",
+      timeout: 300_000,
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
       testMatch: /upload\.spec\.ts$/,
