@@ -52,6 +52,18 @@ message PlacementDetail {
 
   // The book associated with this placement (embedded with author, editions, primary_edition).
   Book book = 7 [json_name = "book"];
+
+  // Reading lifecycle status: to_read, reading, completed, abandoned.
+  string reading_status = 8 [json_name = "reading_status"];
+
+  // Current page the user is on (non-negative integer, 0 if not set).
+  int32 current_page = 9 [json_name = "current_page"];
+
+  // When the user first started reading this placement (RFC3339).
+  string started_at = 10 [json_name = "started_at"];
+
+  // When the user finished reading this placement (RFC3339).
+  string finished_at = 11 [json_name = "finished_at"];
 }
 
 // PlacementRef is the slim placement shape returned by BookshelfPlacementController
@@ -115,6 +127,22 @@ message BookPlacement {
 
   // User's personal notes about this book.
   string notes = 6 [json_name = "notes"];
+}
+
+// Shelf represents a physical horizontal shelf within a bookshelf.
+// Maps to op.shelves table.
+message Shelf {
+  // UUID of the shelf record.
+  string id = 1 [json_name = "id"];
+
+  // Foreign key to the owning bookshelf.
+  string bookshelf_id = 2 [json_name = "bookshelf_id"];
+
+  // Position of the shelf within the bookshelf (for ordering).
+  int32 position = 3 [json_name = "position"];
+
+  // When this shelf was created.
+  google.protobuf.Timestamp created_at = 4 [json_name = "created_at"];
 }
 
 // Bookshelf represents a named virtual collection of books for a user.
@@ -192,6 +220,21 @@ message Placement {
 
   // When this placement record was last updated.
   google.protobuf.Timestamp updated_at = 16 [json_name = "updated_at"];
+
+  // Reading lifecycle status: to_read, reading, completed, abandoned.
+  string reading_status = 17 [json_name = "reading_status"];
+
+  // Current page the user is on (non-negative integer, nullable).
+  int32 current_page = 18 [json_name = "current_page"];
+
+  // When the user first started reading this placement.
+  google.protobuf.Timestamp started_at = 19 [json_name = "started_at"];
+
+  // When the user finished reading this placement.
+  google.protobuf.Timestamp finished_at = 20 [json_name = "finished_at"];
+
+  // Foreign key to the physical shelf within the bookshelf.
+  string shelf_id = 21 [json_name = "shelf_id"];
 }
 
 // PlacementHistory records a book movement between bookshelves.

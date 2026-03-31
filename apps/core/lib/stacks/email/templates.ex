@@ -111,6 +111,69 @@ defmodule Stacks.Email.Templates do
     """
   end
 
+  @doc "Group invitation notification."
+  def group_invitation(inviter_name, group_name, accept_url) do
+    """
+    <html>
+    <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
+      <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
+        <h1 style="color: #2c1810; font-size: 24px;">You've been invited to a group</h1>
+        <p>You've been invited to join <strong>#{group_name}</strong> by <strong>#{inviter_name}</strong>.</p>
+        <p>
+          <a href="#{accept_url}"
+             style="background: #2c1810; color: #f5f0e8; padding: 12px 24px; text-decoration: none; display: inline-block;">
+            Accept invitation
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #7a6b5d;">
+          You are receiving this because you have group invitation notifications enabled.
+        </p>
+      </div>
+    </body>
+    </html>
+    """
+  end
+
+  @doc "New offer notification for a seller."
+  def new_offer(buyer_name, listing_title, offer_amount_zar, offer_url) do
+    """
+    <html>
+    <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
+      <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
+        <h1 style="color: #2c1810; font-size: 24px;">You have a new offer</h1>
+        <p>You have a new offer on <em>#{listing_title}</em> from <strong>#{buyer_name}</strong> for <strong>R#{offer_amount_zar}</strong>.</p>
+        <p>
+          <a href="#{offer_url}"
+             style="background: #2c1810; color: #f5f0e8; padding: 12px 24px; text-decoration: none; display: inline-block;">
+            View offer
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #7a6b5d;">
+          You are receiving this because you have marketplace notifications enabled.
+        </p>
+      </div>
+    </body>
+    </html>
+    """
+  end
+
+  @doc "Wishlist availability notification with full listing details."
+  def wishlist_available(book_title, author_name, price_zar, seller_name) do
+    """
+    <html>
+    <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
+      <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
+        <h1 style="color: #2c1810; font-size: 24px;">A book on your WishList is available</h1>
+        <p><em>#{book_title}</em> by <strong>#{author_name}</strong> is now available for <strong>R#{price_zar}</strong> from <strong>#{seller_name}</strong>.</p>
+        <p style="font-size: 12px; color: #7a6b5d;">
+          Log in to view the listing. You are receiving this because you have WishList notifications enabled.
+        </p>
+      </div>
+    </body>
+    </html>
+    """
+  end
+
   @doc "Opt-out / account deletion confirmation."
   def opt_out_confirmation do
     """

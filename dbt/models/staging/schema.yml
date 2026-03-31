@@ -150,6 +150,8 @@ models:
         description: Age verified at.
       - name: age_verification_provider
         description: Age verification provider.
+      - name: onboarding_steps
+        description: Onboarding steps.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -220,6 +222,21 @@ models:
         description: Listing price cents.
       - name: listing_min_price_cents
         description: Listing min price cents.
+      - name: reading_status
+        description: Reading status.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['to_read', 'reading', 'completed', 'abandoned']
+      - name: current_page
+        description: Current page.
+      - name: started_at
+        description: Started at.
+      - name: finished_at
+        description: Finished at.
+      - name: shelf_id
+        description: Shelf id.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -908,6 +925,8 @@ models:
         description: Source url.
       - name: scraped_at
         description: Scraped at.
+      - name: ends_at
+        description: Ends at.
 
   - name: stg_third_spaces
     description: >
@@ -950,3 +969,119 @@ models:
         description: Timestamp of the last modification to this record.
         tests:
           - not_null
+
+  - name: stg_post_comments
+    description: >
+      Proto-synced staging model for post_comments.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: post_id
+        description: Post id.
+        tests:
+          - not_null
+      - name: author_id
+        description: Author id.
+      - name: parent_id
+        description: Parent id.
+      - name: body
+        description: Body.
+      - name: created_at
+        description: Created at.
+
+  - name: stg_partners
+    description: >
+      Proto-synced staging model for partners.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: Name.
+      - name: business_type
+        description: Business type.
+      - name: contact_email
+        description: Contact email.
+      - name: website_url
+        description: Website url.
+      - name: status
+        description: Status.
+      - name: api_key_prefix
+        description: Api key prefix.
+      - name: approved_by_id
+        description: Approved by id.
+      - name: approved_at
+        description: Approved at.
+      - name: third_space_id
+        description: Third space id.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_partner_inventory
+    description: >
+      Proto-synced staging model for partner_inventory.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: partner_id
+        description: Partner id.
+        tests:
+          - not_null
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - not_null
+      - name: price_cents
+        description: Price cents.
+        tests:
+          - not_null
+      - name: condition
+        description: Condition.
+        tests:
+          - not_null
+      - name: quantity
+        description: Quantity.
+        tests:
+          - not_null
+      - name: synced_at
+        description: Synced at.
+        tests:
+          - not_null
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_shelves
+    description: >
+      Proto-synced staging model for shelves.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: bookshelf_id
+        description: Bookshelf id.
+      - name: position
+        description: Position.
+      - name: created_at
+        description: Created at.

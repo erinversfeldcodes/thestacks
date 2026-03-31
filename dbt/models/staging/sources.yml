@@ -104,6 +104,18 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
+      - name: shelves
+        description: Physical horizontal shelves within a bookshelf.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: bookshelf_id
+            description: FK to bookshelves.
+          - name: position
+            description: Zero-based display order within the bookshelf.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: bookshelf_placements
         description: Junction between books and bookshelves, with per-placement metadata.
         columns:
@@ -139,6 +151,16 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+          - name: reading_status
+            description: Reading lifecycle status (to_read, reading, completed, abandoned).
+          - name: current_page
+            description: Current page the user is on (null if not reading).
+          - name: started_at
+            description: Timestamp when the user first started reading (null if not started).
+          - name: finished_at
+            description: Timestamp when the user finished reading (null if not completed).
+          - name: shelf_id
+            description: FK to shelves (the physical shelf within the bookshelf).
 
       - name: bookshelf_placement_history
         description: Immutable log of book movements between bookshelves.
@@ -216,7 +238,9 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
           - name: onboarding_completed
-            description: Whether the user completed onboarding flow.
+            description: Whether the user completed onboarding flow (computed from onboarding_steps).
+          - name: onboarding_steps
+            description: JSONB map of per-step completion state for the onboarding flow.
           - name: notify_wishlist_availability
             description: Opt-in for wishlist availability notifications.
           - name: notify_marketplace
@@ -417,6 +441,8 @@ sources:
             description: URL where the event was found.
           - name: scraped_at
             description: Timestamp when the event was scraped.
+          - name: ends_at
+            description: Timestamp when the event ends (optional).
 
       - name: event_log
         description: Immutable append-only event log for all significant state changes.
@@ -552,6 +578,22 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
+      - name: post_comments
+        description: Reader comments on blog posts (one level of threading via parent_id).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: post_id
+            description: FK to blog_posts.
+          - name: author_id
+            description: FK to users.
+          - name: parent_id
+            description: FK to post_comments (null for top-level comments).
+          - name: body
+            description: Comment body text (1–2000 characters).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+
       - name: post_book_associations
         description: AI-detected or manual associations between blog posts and books.
         columns:
@@ -571,6 +613,60 @@ sources:
             description: Whether the association is shown to readers.
           - name: created_at
             description: Row creation timestamp (UTC).
+
+      # ── Partner tables (Issue #145) ──────────────────────────────────
+      - name: partners
+        description: Third-space businesses (bookshops, cafes, reading groups) registered as platform partners.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: name
+            description: Display name of the business.
+          - name: business_type
+            description: Business category (bookshop, cafe, reading_group, other).
+          - name: contact_email
+            description: Primary contact email (unique).
+          - name: website_url
+            description: Optional website URL.
+          - name: status
+            description: Lifecycle status (pending, approved, rejected).
+          - name: api_key_prefix
+            description: First 8 chars of the API key for display.
+          - name: approved_by_id
+            description: FK to users — admin who approved or rejected.
+          - name: approved_at
+            description: Timestamp when the partner was approved or rejected.
+          - name: hmac_secret
+            description: Argon2 hash of the API key. DB-only — never exposed in API responses.
+          - name: third_space_id
+            description: FK to third_spaces — optional link for partners who manage a third space.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Row update timestamp (UTC).
+
+      - name: partner_inventory
+        description: Inventory items pushed by approved partners (bookshops, cafes).
+        freshness: null
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: partner_id
+            description: FK to partners.
+          - name: book_edition_id
+            description: FK to book_editions.
+          - name: price_cents
+            description: Price in minor currency units (cents).
+          - name: condition
+            description: Item condition (new, like_new, good, acceptable).
+          - name: quantity
+            description: Number of copies available.
+          - name: synced_at
+            description: Timestamp of last inventory sync from partner.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
 
       # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads

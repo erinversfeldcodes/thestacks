@@ -72,7 +72,8 @@ defmodule Core.MixProject do
       {:ex_aws_s3, "~> 2.5"},
       {:ex_machina, "~> 2.8", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
-      {:timex, "~> 3.7"}
+      {:timex, "~> 3.7"},
+      {:nimble_csv, "~> 1.2"}
     ]
   end
 

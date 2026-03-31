@@ -7,6 +7,7 @@
 #   user@thestacks.app  / dev-password-456  (user role — for IDOR/E2E tests)
 
 alias Core.Repo
+import Ecto.Query, only: [from: 2]
 
 defmodule Seeds do
   @doc "Generate a deterministic UUID from a zero-padded integer suffix."
@@ -656,6 +657,58 @@ e2e_bookshelf_rows =
 
 Repo.insert_all("bookshelves", e2e_bookshelf_rows, prefix: "op", on_conflict: :nothing)
 
+# ── Shelves (one default shelf per bookshelf) ────────────────────────────
+# Shelf UUID index = bookshelf UUID index + 3000. This mapping is stable and
+# referenced by placement rows below.
+
+shelf_rows =
+  Enum.flat_map([{1, 301}, {2, 306}], fn {_user_n, start_idx} ->
+    Enum.with_index(bookshelf_names, fn _name, i ->
+      bs_idx = start_idx + i
+
+      %{
+        id: Seeds.uuid(bs_idx + 3000),
+        bookshelf_id: Seeds.uuid(bs_idx),
+        position: 0,
+        created_at: jan_01
+      }
+    end)
+  end)
+
+e2e_shelf_rows =
+  Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
+    shelf_base = 400 + (user_idx - 10) * 10
+
+    Enum.with_index(bookshelf_names, fn _name, i ->
+      bs_idx = shelf_base + i
+
+      %{
+        id: Seeds.uuid(bs_idx + 3000),
+        bookshelf_id: Seeds.uuid(bs_idx),
+        position: 0,
+        created_at: jan_01
+      }
+    end)
+  end)
+
+Repo.insert_all("shelves", shelf_rows ++ e2e_shelf_rows, prefix: "op", on_conflict: :nothing)
+
+# Build lookup: bookshelf_id (binary) → actual shelf_id (binary).
+# In deployed environments, shelves may already exist from migration back-fill with
+# random UUIDs. on_conflict: :nothing skips our deterministic IDs in that case, so
+# we must query the actual IDs from the DB rather than computing Seeds.uuid(n+3000).
+all_bookshelf_ids = Enum.map(bookshelf_rows ++ e2e_bookshelf_rows, & &1.id)
+
+shelf_id_by_bookshelf =
+  Repo.all(
+    from(s in "shelves",
+      where: s.bookshelf_id in ^all_bookshelf_ids and s.position == 0,
+      select: {s.bookshelf_id, s.id}
+    ),
+    prefix: "op"
+  )
+  |> Map.new()
+
 # ── E2E user placements ──────────────────────────────────────────────────
 # Each E2E user gets 5 books on library, 3 on antilibrary, 2 on reading_pile.
 # Uses works from the seed data. Placement UUID range: 5000+.
@@ -667,9 +720,12 @@ e2e_placement_rows =
   Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
     shelf_base = 400 + (user_idx - 10) * 10
     place_base = 5000 + (user_idx - 10) * 20
-    # Each user gets a different slice of works so they don't collide
+    # Each user gets a different slice of works so they don't collide.
+    # Use circular indexing so high-idx users still get 10 works even when
+    # offset exceeds the total number of unique works.
     offset = (user_idx - 10) * 10
-    user_works = Enum.slice(all_work_indices, offset, 10)
+    n = length(all_work_indices)
+    user_works = Enum.map(0..9, fn i -> Enum.at(all_work_indices, rem(offset + i, n)) end)
 
     library_works = Enum.take(user_works, 5)
     antilibrary_works = Enum.slice(user_works, 5, 3)
@@ -679,12 +735,17 @@ e2e_placement_rows =
     antilibrary_shelf = Seeds.uuid(shelf_base)
     reading_pile_shelf = Seeds.uuid(shelf_base + 3)
 
+    library_shelf_id = Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_base + 1))
+    antilibrary_shelf_id = Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_base))
+    reading_pile_shelf_id = Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_base + 3))
+
     library_placements =
       Enum.with_index(library_works, fn work_idx, i ->
         %{
           id: Seeds.uuid(place_base + i),
           book_id: Seeds.uuid(work_idx),
           bookshelf_id: library_shelf,
+          shelf_id: library_shelf_id,
           position: i + 1,
           placed_at: jan_10,
           formats: ["paperback"],
@@ -700,6 +761,7 @@ e2e_placement_rows =
           id: Seeds.uuid(place_base + 10 + i),
           book_id: Seeds.uuid(work_idx),
           bookshelf_id: antilibrary_shelf,
+          shelf_id: antilibrary_shelf_id,
           position: i + 1,
           placed_at: jan_15,
           formats: ["paperback"],
@@ -715,6 +777,7 @@ e2e_placement_rows =
           id: Seeds.uuid(place_base + 15 + i),
           book_id: Seeds.uuid(work_idx),
           bookshelf_id: reading_pile_shelf,
+          shelf_id: reading_pile_shelf_id,
           position: i + 1,
           placed_at: mar_01,
           formats: ["paperback"],
@@ -762,6 +825,7 @@ placement_groups = [
           id: Seeds.uuid(idx),
           book_id: Seeds.uuid(work_idx),
           bookshelf_id: Seeds.uuid(shelf_idx),
+          shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_idx)),
           position: position,
           placed_at: placed_at,
           visibility: "owner",
@@ -828,6 +892,7 @@ user2_placements =
       id: Seeds.uuid(next_place_idx + i),
       book_id: Seeds.uuid(work_idx),
       bookshelf_id: Seeds.uuid(307),
+      shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(307)),
       position: i + 1,
       placed_at: jan_05,
       formats: ["paperback"],
@@ -848,6 +913,7 @@ user2_placements =
             )
           ),
         bookshelf_id: Seeds.uuid(306),
+        shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(306)),
         position: 1,
         placed_at: jan_05,
         formats: ["paperback"],
