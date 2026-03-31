@@ -70,9 +70,6 @@ port clearAuth : () -> Cmd msg
 port saveOnboardingCompleted : () -> Cmd msg
 
 
-port requestOnboardingStatus : () -> Cmd msg
-
-
 port onOnboardingStatus : (Bool -> msg) -> Sub msg
 
 

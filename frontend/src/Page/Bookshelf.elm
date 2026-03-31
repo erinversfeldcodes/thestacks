@@ -31,9 +31,8 @@ import Page.Bookshelf.Helpers
         , viewShelfRowClickable
         )
 import Types.Book exposing (Book)
-import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
-import Types.Shelf exposing (Shelf, shelvesResponseDecoder)
+import Types.Shelf exposing (Shelf)
 import Util.TestId exposing (testId)
 
 

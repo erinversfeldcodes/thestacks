@@ -1,4 +1,4 @@
-module Types.FeedItem exposing (FeedItem(..), FeedResponse, feedItemDecoder, feedResponseDecoder)
+module Types.FeedItem exposing (FeedItem(..), FeedResponse, feedResponseDecoder)
 
 import Json.Decode as Decode exposing (Decoder)
 

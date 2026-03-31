@@ -13,7 +13,7 @@ import Html.Attributes exposing (class, disabled, href, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route exposing (Route(..))
-import Types.BlogPost exposing (BlogPost, Comment, commentAuthorId, commentBody, commentCreatedAt, commentId, commentParentId, commentReplies)
+import Types.BlogPost exposing (BlogPost, Comment, commentAuthorId, commentBody, commentCreatedAt, commentId, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -42,7 +42,7 @@ type Msg
     | SubmitReply String
     | CommentSubmitted (Result Http.Error Comment)
     | DeleteComment String
-    | CommentDeleted String (Result Http.Error ())
+    | CommentDeleted (Result Http.Error ())
 
 
 init : String -> Maybe String -> Maybe String -> ( Model, Cmd Msg )
@@ -172,12 +172,12 @@ update msg model maybeToken =
         DeleteComment commentId ->
             case maybeToken of
                 Just token ->
-                    ( model, Api.deleteComment commentId token (CommentDeleted commentId) )
+                    ( model, Api.deleteComment commentId token CommentDeleted )
 
                 Nothing ->
                     ( model, Cmd.none )
 
-        CommentDeleted _ result ->
+        CommentDeleted result ->
             case result of
                 Ok _ ->
                     ( model, Api.getPostComments model.postId maybeToken CommentsLoaded )
@@ -206,7 +206,7 @@ view model =
                 in
                 div []
                     [ viewPost post isOwner
-                    , viewComments model post
+                    , viewComments model
                     ]
         ]
 
@@ -238,8 +238,8 @@ viewPost post isOwner =
         ]
 
 
-viewComments : Model -> BlogPost -> Html Msg
-viewComments model _ =
+viewComments : Model -> Html Msg
+viewComments model =
     div [ class "blog-post__comments" ]
         [ h2 [ class "comments__heading" ] [ text "Comments" ]
         , case model.comments of
