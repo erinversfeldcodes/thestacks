@@ -8,22 +8,29 @@ import { suiteAuthFile } from "./helpers";
 /** Ensure at least one active listing exists for the current user.
  *  Reuses an existing active listing or creates+activates a new one.
  *  Must be called after page.goto() so localStorage is accessible.
- *  Returns the listing ID (existing or newly created). */
+ *  Returns the listing ID (existing or newly created).
+ *
+ *  Parallel-safe: if a concurrent test wins the create race (unique constraint
+ *  violation on book_id), we wait briefly and re-check /api/listings/mine so
+ *  the parallel test's activated listing is returned instead. */
 async function createActiveListing(page: import("@playwright/test").Page): Promise<string> {
   const listing = await page.evaluate(async () => {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
     const token: string = auth?.token ?? auth?.jwt ?? "";
 
-    // If the user already has an active listing, reuse it (avoids unique constraint
-    // violations when parallel tests share the same catalogue user auth state).
-    const mineResp = await fetch("/api/listings/mine", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (mineResp.ok) {
+    const getActiveListing = async (): Promise<string> => {
+      const mineResp = await fetch("/api/listings/mine", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!mineResp.ok) return "";
       const mineData = await mineResp.json();
       const active = (mineData?.listings ?? []).find((l: any) => l.status === "active");
-      if (active) return active.id;
-    }
+      return active?.id ?? "";
+    };
+
+    // If the user already has an active listing, reuse it.
+    const existingId = await getActiveListing();
+    if (existingId) return existingId;
 
     // Use a book the user already has on a shelf — create_listing requires a placement
     const placementsResp = await fetch("/api/placements/mine", {
@@ -50,6 +57,13 @@ async function createActiveListing(page: import("@playwright/test").Page): Promi
     });
     const createData = await createResp.json();
     const listingId: string = createData?.listing?.id ?? "";
+
+    if (!listingId) {
+      // A parallel test likely won the create race (unique constraint on book_id).
+      // Wait briefly for it to activate, then return its listing.
+      await new Promise((r) => setTimeout(r, 1500));
+      return await getActiveListing();
+    }
 
     // Activate
     await fetch(`/api/listings/${listingId}/activate`, {
