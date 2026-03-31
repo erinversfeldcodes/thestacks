@@ -60,7 +60,7 @@ type Msg
     | NextStep
     | SkipOnboarding
     | FinishOnboarding
-    | FocusResult (Result Browser.Dom.Error ())
+    | FocusResult
 
 
 {-| Create the initial model. Call `initCmd` with the auth token to load the
@@ -117,7 +117,7 @@ update msg model =
 
         NextStep ->
             ( { model | step = nextStep model.step, loading = True }
-            , Task.attempt FocusResult (Browser.Dom.focus "onboarding-overlay-container")
+            , Task.attempt (\_ -> FocusResult) (Browser.Dom.focus "onboarding-overlay-container")
             , NoOut
             )
 
@@ -127,7 +127,7 @@ update msg model =
         FinishOnboarding ->
             ( { model | visible = False }, Cmd.none, FinishCompleted )
 
-        FocusResult _ ->
+        FocusResult ->
             ( model, Cmd.none, NoOut )
 
 

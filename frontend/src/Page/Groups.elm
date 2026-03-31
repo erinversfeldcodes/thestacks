@@ -27,9 +27,7 @@ type alias Model =
 
 
 type Msg
-    = GroupsLoaded (Result Http.Error (List Group))
-    | InvitationsLoaded (Result Http.Error (List GroupInvitation))
-    | NameChanged String
+    = NameChanged String
     | SubmitCreate
     | GroupCreated (Result Http.Error Group)
     | AcceptInvitation String String
@@ -62,12 +60,6 @@ init userId token =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
-        GroupsLoaded _ ->
-            ( model, Cmd.none, NoOut )
-
-        InvitationsLoaded _ ->
-            ( model, Cmd.none, NoOut )
-
         NameChanged name ->
             let
                 oldForm =

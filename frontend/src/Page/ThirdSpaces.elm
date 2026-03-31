@@ -1,7 +1,7 @@
 module Page.ThirdSpaces exposing
     ( Model
     , Msg(..)
-    , OutMsg(..)
+    , OutMsg
     , ThirdSpace
     , ThirdSpaceEvent
     , init
@@ -44,8 +44,7 @@ type alias Model =
 
 
 type Msg
-    = NoOp
-    | SpacesLoaded (Result Http.Error (List ThirdSpace))
+    = SpacesLoaded (Result Http.Error (List ThirdSpace))
     | SelectSpace ThirdSpace
     | CloseDetail
 
@@ -107,9 +106,6 @@ thirdSpaceEventDecoder =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
-        NoOp ->
-            ( model, Cmd.none, NoOut )
-
         SpacesLoaded (Ok spaces) ->
             ( { model | spaces = Success spaces }, Cmd.none, NoOut )
 

@@ -42,8 +42,6 @@ type Msg
     | InviteInputChanged String
     | SubmitInvite
     | InviteSent (Result Http.Error GroupInvitation)
-    | RemoveMember String
-    | MemberRemoved String (Result Http.Error ())
     | LeaveGroup
     | LeftGroup (Result Http.Error ())
     | TabChanged Tab
@@ -99,21 +97,6 @@ update msg model =
             , Cmd.none
             , NoOut
             )
-
-        RemoveMember userId ->
-            ( model
-            , Api.removeMember model.groupId userId model.token (MemberRemoved userId)
-            , NoOut
-            )
-
-        MemberRemoved _ (Ok ()) ->
-            ( model
-            , Api.getGroup model.groupId model.token GroupLoaded
-            , NoOut
-            )
-
-        MemberRemoved _ (Err _) ->
-            ( model, Cmd.none, NoOut )
 
         LeaveGroup ->
             ( model

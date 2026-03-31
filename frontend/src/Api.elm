@@ -60,7 +60,6 @@ module Api exposing
     , register
     , rejectSource
     , removeBook
-    , removeMember
     , saveConsent
     , searchBooks
     , soldListing
@@ -71,7 +70,6 @@ module Api exposing
     , updatePassword
     , updateProfile
     , updateProfileVisibility
-    , updateReadingProgress
     , updateShelfVisibility
     , uploadImage
     )
@@ -1645,37 +1643,6 @@ getEnrichmentGaps token toMsg =
         }
 
 
-{-| PUT /api/placements/:id/progress — update reading status and current page.
--}
-updateReadingProgress :
-    String
-    -> { readingStatus : String, currentPage : Maybe Int }
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-updateReadingProgress placementId body token toMsg =
-    let
-        fields =
-            [ ( "reading_status", Encode.string body.readingStatus ) ]
-                ++ (case body.currentPage of
-                        Just page ->
-                            [ ( "current_page", Encode.int page ) ]
-
-                        Nothing ->
-                            []
-                   )
-    in
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
-        , body = Http.jsonBody (Encode.object fields)
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
 {-| Onboarding status response from GET /api/onboarding/status.
 -}
 type alias OnboardingStatus =
@@ -1857,24 +1824,6 @@ declineInvitation groupId invitationId token toMsg =
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-removeMember :
-    String
-    -> String
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-removeMember groupId userId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ userId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing

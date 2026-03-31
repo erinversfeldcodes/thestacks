@@ -12,7 +12,6 @@ module Types.BlogPost exposing
     , commentCreatedAt
     , commentDecoder
     , commentId
-    , commentParentId
     , commentReplies
     , visibilityToString
     )
@@ -79,11 +78,6 @@ commentId (Comment c) =
 commentAuthorId : Comment -> String
 commentAuthorId (Comment c) =
     c.authorId
-
-
-commentParentId : Comment -> Maybe String
-commentParentId (Comment c) =
-    c.parentId
 
 
 commentBody : Comment -> String

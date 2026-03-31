@@ -15,7 +15,7 @@ Updates are emitted via OutMsg so the parent can call the API.
 -}
 
 import Html exposing (Html, button, div, input, label, option, select, span, text)
-import Html.Attributes exposing (attribute, class, disabled, placeholder, selected, type_, value)
+import Html.Attributes exposing (attribute, class, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Types.Placement exposing (Placement, ReadingStatus(..))
 import Util.TestId exposing (testId)
@@ -31,7 +31,7 @@ type alias Model =
 
 type OutMsg
     = NoOut
-    | ProgressUpdateRequested { readingStatus : String, currentPage : Maybe Int }
+    | ProgressUpdateRequested
 
 
 type Msg
@@ -64,15 +64,8 @@ update msg model =
             ( { model | draftPage = s }, NoOut )
 
         SaveClicked ->
-            let
-                maybePage =
-                    String.toInt model.draftPage
-            in
             ( { model | editing = False }
             , ProgressUpdateRequested
-                { readingStatus = readingStatusToString model.draftStatus
-                , currentPage = maybePage
-                }
             )
 
         CancelClicked ->
@@ -221,22 +214,6 @@ viewEditForm model =
 
 
 -- HELPERS
-
-
-readingStatusToString : ReadingStatus -> String
-readingStatusToString status =
-    case status of
-        ToRead ->
-            "to_read"
-
-        Reading ->
-            "reading"
-
-        Completed ->
-            "completed"
-
-        Abandoned ->
-            "abandoned"
 
 
 readingStatusFromString : String -> ReadingStatus
