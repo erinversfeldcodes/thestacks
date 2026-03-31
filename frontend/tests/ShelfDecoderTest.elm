@@ -13,7 +13,7 @@ shelfDecoder and shelvesResponseDecoder are implemented.
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (shelvesResponseDecoder)
 
 
 suite : Test

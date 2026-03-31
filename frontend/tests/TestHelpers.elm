@@ -41,7 +41,7 @@ import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData exposing (RemoteData(..))
-import Types.Shelf exposing (shelfDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (shelvesResponseDecoder)
 
 
 

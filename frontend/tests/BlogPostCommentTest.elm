@@ -8,7 +8,7 @@ import Page.Blog.Post as Post exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import Types.BlogPost exposing (BlogPost, Comment(..), Visibility(..), commentDecoder, commentReplies)
+import Types.BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
 
