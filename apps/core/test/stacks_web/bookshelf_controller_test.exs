@@ -14,27 +14,35 @@ defmodule StacksWeb.BookshelfControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
+  # Flatten placements across all shelves for assertions that care about placement content.
+  defp all_placements(resp) do
+    resp
+    |> Map.get("shelves", [])
+    |> Enum.flat_map(& &1["placements"])
+  end
+
   describe "GET /api/bookshelves/:bookshelf_name" do
-    test "returns 200 with placements when bookshelf has books", %{conn: conn} do
+    test "returns 200 with shelves when bookshelf has books", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
-      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"bookshelf" => "library", "count" => count, "placements" => placements} =
-               json_response(conn, 200)
-
-      assert count >= 1
+      resp = json_response(conn, 200)
+      assert resp["bookshelf"] == "library"
+      assert resp["count"] >= 1
+      placements = all_placements(resp)
       assert placements != []
       assert hd(placements)["book"]["id"] == book.id
     end
 
-    test "returns 200 with empty list when bookshelf has no books", %{conn: conn} do
+    test "returns 200 with empty shelves when bookshelf has no books", %{conn: conn} do
       user = insert(:user)
 
       conn =
@@ -42,8 +50,10 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(user)
         |> get("/api/bookshelves/wishlist")
 
-      assert %{"bookshelf" => "wishlist", "count" => 0, "placements" => []} =
-               json_response(conn, 200)
+      resp = json_response(conn, 200)
+      assert resp["bookshelf"] == "wishlist"
+      assert resp["count"] == 0
+      assert all_placements(resp) == []
     end
 
     test "returns 404 for invalid bookshelf name", %{conn: conn} do
@@ -66,22 +76,28 @@ defmodule StacksWeb.BookshelfControllerTest do
       user = insert(:user)
       other_user = insert(:user)
       other_bookshelf = insert(:bookshelf, user: other_user, name: "library")
+      other_shelf = insert(:shelf, bookshelf: other_bookshelf)
       book = insert(:book)
-      _other_placement = insert(:placement, bookshelf: other_bookshelf, book: book)
+
+      _other_placement =
+        insert(:placement, bookshelf: other_bookshelf, shelf: other_shelf, book: book)
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"count" => 0, "placements" => []} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      assert resp["count"] == 0
+      assert all_placements(resp) == []
     end
 
     test "does not include removed placements", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
-      placement = insert(:placement, bookshelf: bookshelf, book: book)
+      placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
       Stacks.Shelving.remove_book(placement.id, user.id)
 
       conn =
@@ -89,7 +105,9 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"count" => 0, "placements" => []} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      assert resp["count"] == 0
+      assert all_placements(resp) == []
     end
   end
 
@@ -105,7 +123,9 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> get("/api/bookshelves/library")
 
       # Other user gets an empty response (their own non-existent library), not the owner's
-      assert %{"count" => 0, "placements" => []} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      assert resp["count"] == 0
+      assert all_placements(resp) == []
     end
   end
 
@@ -115,11 +135,23 @@ defmodule StacksWeb.BookshelfControllerTest do
     } do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book_visible = insert(:book)
       book_hidden = insert(:book)
 
-      insert(:placement, bookshelf: bookshelf, book: book_visible, visibility: "platform")
-      insert(:placement, bookshelf: bookshelf, book: book_hidden, visibility: "owner")
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: book_visible,
+        visibility: "platform"
+      )
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: book_hidden,
+        visibility: "owner"
+      )
 
       conn =
         conn
@@ -134,8 +166,9 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "owner sees their own bookshelf even with owner visibility", %{conn: conn} do
       user = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
-      insert(:placement, bookshelf: bookshelf, book: book, visibility: "owner")
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book, visibility: "owner")
 
       conn =
         conn
@@ -145,7 +178,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert %{"count" => 1} = json_response(conn, 200)
     end
 
-    test "returns empty placements list when bookshelf does not exist yet", %{conn: conn} do
+    test "returns empty shelves list when bookshelf does not exist yet", %{conn: conn} do
       user = insert(:user)
 
       conn =
@@ -153,8 +186,10 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(user)
         |> get("/api/bookshelves/antilibrary")
 
-      assert %{"bookshelf" => "antilibrary", "count" => 0, "placements" => []} =
-               json_response(conn, 200)
+      resp = json_response(conn, 200)
+      assert resp["bookshelf"] == "antilibrary"
+      assert resp["count"] == 0
+      assert resp["shelves"] == []
     end
   end
 
@@ -162,16 +197,18 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "includes book editions in placement response", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
       _edition = insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
-      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"placements" => [placement]} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
       assert placement["book"]["editions"] != nil
       assert is_list(placement["book"]["editions"])
     end
@@ -179,43 +216,49 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "includes primary_edition when book has editions", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
       edition = insert(:book_edition, book: book, is_primary: true)
-      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"placements" => [placement]} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
       assert placement["book"]["primary_edition"]["id"] == edition.id
     end
 
     test "includes author in book response", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       author = insert(:author, name: "Test Author")
       book = insert(:book, author: author)
-      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
         conn
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"placements" => [placement]} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
       assert placement["book"]["author"]["name"] == "Test Author"
     end
 
     test "returns placement fields: position, formats, personal_rating, notes", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
 
       _placement =
         insert(:placement,
           bookshelf: bookshelf,
+          shelf: shelf,
           book: book,
           position: 3,
           formats: ["paperback"],
@@ -228,7 +271,8 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      assert %{"placements" => [placement]} = json_response(conn, 200)
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
       assert placement["position"] == 3
       assert placement["formats"] == ["paperback"]
       assert placement["personal_rating"] == 5

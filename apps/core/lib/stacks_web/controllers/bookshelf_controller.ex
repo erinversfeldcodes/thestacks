@@ -58,7 +58,7 @@ defmodule StacksWeb.BookshelfController do
   defp render_bookshelf(conn, user, bookshelf_name, viewer) do
     case Shelving.get_bookshelf(user.id, bookshelf_name) do
       nil ->
-        json(conn, %{bookshelf: bookshelf_name, count: 0, placements: []})
+        json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
 
       bookshelf ->
         render_visible_bookshelf(conn, user, bookshelf_name, bookshelf, viewer)
@@ -69,15 +69,14 @@ defmodule StacksWeb.BookshelfController do
     if Visibility.resolve_visibility(bookshelf, viewer) == :hidden do
       conn |> put_status(404) |> json(%{error: "not_found"})
     else
-      placements =
-        user.id
-        |> Shelving.get_bookshelf_books(bookshelf_name)
-        |> Enum.filter(&(Visibility.resolve_visibility(&1, viewer) == :visible))
+      shelves = Shelving.get_bookshelf_shelves(user.id, bookshelf_name)
+      shelf_json = Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer))
+      placement_count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
 
       json(conn, %{
         bookshelf: bookshelf_name,
-        count: length(placements),
-        placements: Enum.map(placements, &ProtoJSON.placement_detail/1)
+        count: placement_count,
+        shelves: shelf_json
       })
     end
   end

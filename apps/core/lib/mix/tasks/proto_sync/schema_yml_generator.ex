@@ -218,11 +218,14 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     # polymorphic references like aggregate_id). Add relationships tests manually
     # to intermediate/mart schema.yml where denormalised joins could produce orphans.
 
-    # accepted_values for enum fields: NOT auto-generated.
-    # Proto enums are additive (new values added before DB migration),
-    # so proto values may be a superset of DB enum values. Postgres enum
-    # constraints enforce valid values at the OLTP layer. Add accepted_values
-    # tests manually in intermediate/mart schema.yml if needed.
+    # accepted_values: not auto-inferred from proto (proto enums are additive
+    # and may lead the DB). Opt-in per field via dbt_tests in field_overrides.
+    tests =
+      case Map.get(override, :dbt_tests) do
+        nil -> tests
+        extra -> tests ++ extra
+      end
+
     tests
   end
 

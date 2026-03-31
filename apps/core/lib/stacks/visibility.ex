@@ -175,6 +175,9 @@ defmodule Stacks.Visibility do
       {"owner", _} ->
         :hidden
 
+      {"group", {:platform_user, vid}} when vid == owner_id ->
+        :ok
+
       {"group", {:platform_user, vid}} ->
         check_group_visibility(resource, vid)
 
@@ -188,6 +191,23 @@ defmodule Stacks.Visibility do
 
   defp check_default_visibility(owner_id, viewer_id) when owner_id == viewer_id, do: :ok
   defp check_default_visibility(_owner_id, _viewer_id), do: :hidden
+
+  # Group visibility: membership in the shelf's target group is the access grant.
+  # The visibility_group_id on the bookshelf identifies which group has access.
+  # visibility_grants is reserved for "specific people" grants (future tier).
+  defp check_group_visibility(
+         %Placement{bookshelf: %Bookshelf{visibility_group_id: gid}},
+         viewer_id
+       )
+       when not is_nil(gid) do
+    if Social.group_member?(gid, viewer_id), do: :ok, else: :hidden
+  end
+
+  defp check_group_visibility(%Placement{}, _viewer_id), do: :hidden
+
+  defp check_group_visibility(%{visibility_group_id: gid}, viewer_id) when not is_nil(gid) do
+    if Social.group_member?(gid, viewer_id), do: :ok, else: :hidden
+  end
 
   defp check_group_visibility(_resource, _viewer_id), do: :hidden
 

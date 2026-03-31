@@ -46,6 +46,8 @@ type Route
     | AdminSourceApproval
     | AdminScraperConfig
     | AdminMetrics
+    | Groups
+    | GroupDetail String
     | ConfirmEmail ConfirmStatus
     | NotFound
 
@@ -83,6 +85,8 @@ parser =
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminMetrics (s "admin" </> s "metrics")
+        , Parser.map GroupDetail (s "groups" </> string)
+        , Parser.map Groups (s "groups")
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         ]
@@ -186,6 +190,12 @@ toPath route =
 
         AdminMetrics ->
             "/admin/metrics"
+
+        Groups ->
+            "/groups"
+
+        GroupDetail groupId ->
+            "/groups/" ++ groupId
 
         ConfirmEmail EmailConfirmed ->
             "/confirm-email/success"

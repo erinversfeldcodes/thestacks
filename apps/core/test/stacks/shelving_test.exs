@@ -417,6 +417,300 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Reading Progress Tracking (Issue #148)
+  # ---------------------------------------------------------------------------
+
+  describe "update_reading_progress/3" do
+    setup :setup_user_bookshelf_book
+
+    test "transitions status from to_read to reading", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading"
+               })
+
+      assert updated.reading_status == "reading"
+    end
+
+    test "transitions status from reading to completed", %{user: user, placement: placement} do
+      {:ok, _} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "completed"
+               })
+
+      assert updated.reading_status == "completed"
+    end
+
+    test "transitions status to abandoned", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "abandoned"
+               })
+
+      assert updated.reading_status == "abandoned"
+    end
+
+    test "sets started_at on first transition to reading", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading"
+               })
+
+      assert updated.started_at != nil
+    end
+
+    test "does not overwrite started_at on subsequent reading transitions", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, first} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      original_started_at = first.started_at
+
+      # Simulate going back to to_read and re-reading
+      {:ok, _} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "to_read"})
+
+      {:ok, second} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      assert second.started_at == original_started_at
+    end
+
+    test "sets finished_at on transition to completed", %{user: user, placement: placement} do
+      {:ok, _} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "completed"
+               })
+
+      assert updated.finished_at != nil
+    end
+
+    test "does not set finished_at for non-completed transitions", %{
+      user: user,
+      placement: placement
+    } do
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading"
+               })
+
+      assert updated.finished_at == nil
+    end
+
+    test "updates current_page when provided", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 124
+               })
+
+      assert updated.current_page == 124
+    end
+
+    test "rejects negative current_page", %{user: user, placement: placement} do
+      assert {:error, changeset} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: -1
+               })
+
+      assert %{current_page: [_]} = errors_on(changeset)
+    end
+
+    test "returns :unauthorized when user does not own placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.update_reading_progress(placement.id, other_user.id, %{
+                 reading_status: "reading"
+               })
+    end
+
+    test "returns :not_found for nonexistent placement id", %{user: user} do
+      assert {:error, :not_found} =
+               Shelving.update_reading_progress(Ecto.UUID.generate(), user.id, %{
+                 reading_status: "reading"
+               })
+    end
+
+    test "rejects invalid reading_status value", %{user: user, placement: placement} do
+      assert {:error, changeset} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "invalid_status"
+               })
+
+      assert %{reading_status: [_]} = errors_on(changeset)
+    end
+
+    test "emits placement.reading_started event on first reading transition", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = event_count("placement.reading_started")
+
+      Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      assert event_count("placement.reading_started") == before_count + 1
+    end
+
+    test "does not emit placement.reading_started again on second reading transition", %{
+      user: user,
+      placement: placement
+    } do
+      # Start reading (sets started_at)
+      {:ok, reading_placement} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      # Put back to to_read (started_at already set)
+      {:ok, _} =
+        Shelving.update_reading_progress(reading_placement.id, user.id, %{
+          reading_status: "to_read"
+        })
+
+      before_count = event_count("placement.reading_started")
+
+      # Re-transition to reading — started_at already set, no new event
+      Shelving.update_reading_progress(reading_placement.id, user.id, %{
+        reading_status: "reading"
+      })
+
+      assert event_count("placement.reading_started") == before_count
+    end
+
+    test "emits placement.reading_completed event on completed transition", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} =
+        Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "reading"})
+
+      before_count = event_count("placement.reading_completed")
+
+      Shelving.update_reading_progress(placement.id, user.id, %{reading_status: "completed"})
+
+      assert event_count("placement.reading_completed") == before_count + 1
+    end
+  end
+
+  describe "list_in_progress/1" do
+    test "returns only placements with reading_status = reading" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book1 = insert(:book)
+      book2 = insert(:book)
+      book3 = insert(:book)
+
+      p_reading = insert(:placement, bookshelf: bookshelf, book: book1)
+      _p_to_read = insert(:placement, bookshelf: bookshelf, book: book2)
+      _p_completed = insert(:placement, bookshelf: bookshelf, book: book3)
+
+      Shelving.update_reading_progress(p_reading.id, user.id, %{reading_status: "reading"})
+
+      in_progress = Shelving.list_in_progress(user.id)
+
+      ids = Enum.map(in_progress, & &1.id)
+      assert p_reading.id in ids
+      refute Enum.any?(ids, &(&1 != p_reading.id))
+    end
+
+    test "returns empty list when user has no in-progress placements" do
+      user = insert(:user)
+      assert [] == Shelving.list_in_progress(user.id)
+    end
+
+    test "returns placements ordered by updated_at DESC" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book1 = insert(:book)
+      book2 = insert(:book)
+
+      p1 = insert(:placement, bookshelf: bookshelf, book: book1)
+      p2 = insert(:placement, bookshelf: bookshelf, book: book2)
+
+      {:ok, _} =
+        Shelving.update_reading_progress(p1.id, user.id, %{reading_status: "reading"})
+
+      {:ok, _} =
+        Shelving.update_reading_progress(p2.id, user.id, %{reading_status: "reading"})
+
+      in_progress = Shelving.list_in_progress(user.id)
+
+      # p2 was updated last so it should be first
+      assert hd(in_progress).id == p2.id
+    end
+
+    test "excludes placements belonging to other users" do
+      user1 = insert(:user)
+      user2 = insert(:user)
+      bookshelf1 = insert(:bookshelf, user: user1, name: "library")
+      bookshelf2 = insert(:bookshelf, user: user2, name: "library")
+      book = insert(:book)
+
+      p1 = insert(:placement, bookshelf: bookshelf1, book: book)
+      p2 = insert(:placement, bookshelf: bookshelf2, book: book)
+
+      Shelving.update_reading_progress(p1.id, user1.id, %{reading_status: "reading"})
+      Shelving.update_reading_progress(p2.id, user2.id, %{reading_status: "reading"})
+
+      user1_in_progress = Shelving.list_in_progress(user1.id)
+      ids = Enum.map(user1_in_progress, & &1.id)
+
+      assert p1.id in ids
+      refute p2.id in ids
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Migration default value (Issue #148-W1)
+  # ---------------------------------------------------------------------------
+
+  describe "DB-level DEFAULT for reading_status" do
+    test "reading_status defaults to 'to_read' at the database level when not supplied" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      Repo.insert_all(
+        {"bookshelf_placements", Stacks.Shelving.Placement},
+        [
+          %{
+            id: Ecto.UUID.generate(),
+            book_id: book.id,
+            bookshelf_id: bookshelf.id,
+            shelf_id: shelf.id,
+            position: 1,
+            placed_at: now,
+            formats: [],
+            visibility: "owner",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      )
+
+      placement =
+        Repo.one!(
+          from(p in Stacks.Shelving.Placement,
+            where: p.book_id == ^book.id and p.bookshelf_id == ^bookshelf.id
+          )
+        )
+
+      assert placement.reading_status == "to_read"
+    end
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),

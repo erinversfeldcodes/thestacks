@@ -68,6 +68,15 @@ defmodule Stacks.Events.Registry do
     ],
     "source_health.recorded" => [
       Stacks.Workers.DbtRefreshHandler
+    ],
+    "group.invitation_sent" => [
+      Stacks.Notifications.GroupInvitationHandler
+    ],
+    "offer.opened" => [
+      Stacks.Notifications.OfferNotificationHandler
+    ],
+    "listing.activated" => [
+      Stacks.Notifications.WishlistAvailabilityHandler
     ]
   }
 

@@ -78,6 +78,52 @@
     },
 
     # -------------------------------------------------------------------------
+    # Partners
+    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/internal/v1/partner.proto",
+      proto_message: "Partner",
+      table_name: "partners",
+      schema_prefix: "op",
+      ecto_module: Stacks.Partners.Partner,
+      ecto_path: "lib/stacks/gen/partners/partner.ex",
+      dbt_path: "stg_partners.sql",
+      timestamps: :standard,
+      field_overrides: %{
+        approved_by_id: %{ecto_type: :binary_id},
+        hmac_secret: %{dbt_exclude: true},
+        third_space_id: %{belongs_to: Stacks.Enrichment.ThirdSpace}
+      }
+    },
+    %{
+      proto_file: "stacks/internal/v1/partner.proto",
+      proto_message: "PartnerInventoryItem",
+      table_name: "partner_inventory",
+      schema_prefix: "op",
+      ecto_module: Stacks.Partners.InventoryItem,
+      ecto_path: "lib/stacks/gen/partners/inventory_item.ex",
+      dbt_path: "stg_partner_inventory.sql",
+      timestamps: :standard,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [
+        %{
+          name: "partner_inventory_partner_edition_uniq",
+          columns: [:partner_id, :book_edition_id],
+          unique: true
+        }
+      ],
+      field_overrides: %{
+        partner_id: %{belongs_to: Stacks.Partners.Partner, null: false},
+        book_edition_id: %{belongs_to: Stacks.Books.BookEdition, null: false},
+        price_cents: %{null: false},
+        condition: %{null: false},
+        quantity: %{default: 1, null: false},
+        synced_at: %{null: false, default: {:fragment, "NOW()"}}
+      }
+    },
+
+    # -------------------------------------------------------------------------
     # Accounts
     # -------------------------------------------------------------------------
     %{
@@ -110,7 +156,9 @@
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
-        onboarding_completed: %{default: false},
+        # generated_always: true suppresses default and cast — Postgres generates this column.
+        onboarding_completed: %{generated_always: true},
+        onboarding_steps: %{ecto_type: :map, default: %{}},
         notify_wishlist_availability: %{default: false},
         notify_marketplace: %{default: true},
         notify_group_invitations: %{default: true},
@@ -238,6 +286,26 @@
     # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/placement.proto",
+      proto_message: "Shelf",
+      table_name: "shelves",
+      schema_prefix: "op",
+      ecto_module: Stacks.Shelving.Shelf,
+      ecto_path: "lib/stacks/gen/shelving/shelf.ex",
+      dbt_path: "stg_shelves.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      associations: [
+        {:belongs_to, :bookshelf, Stacks.Shelving.Bookshelf, foreign_key: :bookshelf_id},
+        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :shelf_id}
+      ],
+      field_overrides: %{
+        bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/placement.proto",
       proto_message: "Bookshelf",
       table_name: "bookshelves",
       schema_prefix: "op",
@@ -249,7 +317,8 @@
       dbt_grant: true,
       indexes: [],
       associations: [
-        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :bookshelf_id}
+        {:has_many, :placements, Stacks.Shelving.Placement, foreign_key: :bookshelf_id},
+        {:has_many, :shelves, Stacks.Shelving.Shelf, foreign_key: :bookshelf_id}
       ],
       field_overrides: %{
         user_id: %{belongs_to: Stacks.Accounts.User},
@@ -272,8 +341,15 @@
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf},
+        shelf_id: %{belongs_to: Stacks.Shelving.Shelf},
         formats: %{ecto_type: {:array, :string}, default: []},
-        visibility: %{default: "owner"}
+        visibility: %{default: "owner"},
+        reading_status: %{
+          dbt_tests: [
+            :not_null,
+            {:accepted_values, ["to_read", "reading", "completed", "abandoned"]}
+          ]
+        }
       }
     },
     %{
@@ -363,6 +439,34 @@
         # API-only fields — no DB column, excluded from Ecto schema and dbt
         book_title: %{api_only: true},
         status: %{api_only: true}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "PostComment",
+      table_name: "post_comments",
+      schema_prefix: "op",
+      ecto_module: Stacks.Blog.PostComment,
+      ecto_path: "lib/stacks/gen/blog/post_comment.ex",
+      dbt_path: "stg_post_comments.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        post_id: %{
+          belongs_to: Stacks.Blog.Post,
+          references_table: :blog_posts,
+          on_delete: :delete_all,
+          null: false
+        },
+        author_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        },
+        parent_id: %{ecto_type: :binary_id},
+        created_at: %{ecto_type: :utc_datetime_usec, default: {:fragment, "NOW()"}}
       }
     },
 

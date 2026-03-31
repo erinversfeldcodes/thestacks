@@ -17,6 +17,11 @@ select
     listing_status,
     listing_price_cents,
     listing_min_price_cents,
+    reading_status,
+    current_page,
+    started_at,
+    finished_at,
+    shelf_id,
     created_at,
     updated_at
 from {{ source('op', 'bookshelf_placements') }}
