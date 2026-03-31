@@ -164,7 +164,8 @@ test.describe("Marketplace — authenticated", () => {
       timeout: 10000,
     });
 
-    await createActiveListing(page);
+    const listingId = await createActiveListing(page);
+    expect(listingId).not.toBe("");
     await page.goto("/marketplace");
     await expect(page.locator(".marketplace__grid")).toBeVisible({
       timeout: 15000,
