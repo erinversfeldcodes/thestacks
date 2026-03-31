@@ -48,7 +48,9 @@ async function findPlacedBookId(page: Page): Promise<string | null> {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    return data.placements?.[0]?.book?.id ?? null;
+    // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
+    const allPlacements = (data.shelves ?? []).flatMap((s: any) => s.placements ?? []);
+    return allPlacements[0]?.book?.id ?? null;
   });
 }
 
