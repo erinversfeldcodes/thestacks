@@ -66,7 +66,9 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
     });
     if (!shelfResp.ok) return false;
     const shelfData = await shelfResp.json();
-    if (shelfData.placements && shelfData.placements.length > 0) return true;
+    // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
+    const allPlacements = (shelfData.shelves ?? []).flatMap((s: any) => s.placements ?? []);
+    if (allPlacements.length > 0) return true;
 
     // Library is empty — find an unplaced book and place it
     const mineResp = await fetch("/api/placements/mine", {
@@ -119,7 +121,9 @@ export async function ensureBookOnShelf(
       });
       if (!shelfResp.ok) return false;
       const shelfData = await shelfResp.json();
-      if (shelfData.placements && shelfData.placements.length > 0) return true;
+      // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
+      const allPlacements = (shelfData.shelves ?? []).flatMap((s: any) => s.placements ?? []);
+      if (allPlacements.length > 0) return true;
 
       // Shelf is empty — find an unplaced book and place it
       const mineResp = await fetch("/api/placements/mine", {
