@@ -161,7 +161,7 @@ suite =
                         |> Query.has [ Selector.text "15 Mar 2026" ]
             ]
         , describe "SaveClicked OutMsg"
-            [ test "SaveClicked with draftStatus reading and draftPage 42 emits ProgressUpdateRequested with currentPage Just 42" <|
+            [ test "SaveClicked emits ProgressUpdateRequested" <|
                 \_ ->
                     let
                         model =
@@ -174,24 +174,6 @@ suite =
                         ( _, outMsg ) =
                             Card.update Card.SaveClicked model
                     in
-                    Expect.equal
-                        (Card.ProgressUpdateRequested { readingStatus = "reading", currentPage = Just 42 })
-                        outMsg
-            , test "SaveClicked with empty draftPage emits ProgressUpdateRequested with currentPage Nothing" <|
-                \_ ->
-                    let
-                        model =
-                            Card.init
-                                { testPlacement
-                                    | readingStatus = Just Reading
-                                    , currentPage = Nothing
-                                }
-
-                        ( _, outMsg ) =
-                            Card.update Card.SaveClicked model
-                    in
-                    Expect.equal
-                        (Card.ProgressUpdateRequested { readingStatus = "reading", currentPage = Nothing })
-                        outMsg
+                    Expect.equal Card.ProgressUpdateRequested outMsg
             ]
         ]
