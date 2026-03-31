@@ -1,7 +1,7 @@
 # Build stage
 FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0 nodejs=22.15.1-r0 npm=10.9.1-r0
+RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0
 
 WORKDIR /app
 
@@ -17,6 +17,10 @@ RUN mix deps.get --only prod && mix deps.compile
 # Config and priv — changes here re-run compile+release, not deps.
 # Priv (migrations) is placed before lib because it changes less often
 # than app code, so a code-only change doesn't bust the priv layer.
+# NOTE: priv/static/assets/ must be pre-built locally before running
+# fly deploy — the deploy script (scripts/deploy-stack.sh) handles this
+# via `node build.js --production`. Building Elm inside Docker is unreliable
+# because the Elm compiler times out fetching packages from package.elm-lang.org.
 COPY config/config.exs config/config.exs
 COPY config/prod.exs config/prod.exs
 COPY config/runtime.exs config/runtime.exs
@@ -25,29 +29,6 @@ COPY apps/core/priv apps/core/priv
 
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
-
-# Asset pipeline: install npm deps (cached layer, changes only when package.json changes)
-COPY apps/core/assets/package.json apps/core/assets/package-lock.json* apps/core/assets/
-WORKDIR /app/apps/core/assets
-RUN npm ci
-
-# Copy asset build infrastructure (no symlinks — those are local dev only)
-WORKDIR /app
-COPY apps/core/assets/build.js apps/core/assets/build.js
-COPY apps/core/assets/js apps/core/assets/js
-
-# Copy frontend sources directly into the paths build.js expects.
-# elm.json source-directories includes "../proto/gen/elm" which resolves
-# to apps/core/assets/proto/gen/elm when Elm compiles from the elm/ CWD.
-COPY frontend/src apps/core/assets/elm/src
-COPY frontend/elm.json apps/core/assets/elm/elm.json
-COPY proto/gen/elm apps/core/assets/proto/gen/elm
-COPY frontend/css apps/core/assets/css
-COPY frontend/public apps/core/assets/static
-
-# Build assets via esbuild + esbuild-plugin-elm, then generate digest manifest
-WORKDIR /app/apps/core/assets
-RUN node build.js --production
 
 # Compile Elixir, fingerprint static assets, build release
 WORKDIR /app
