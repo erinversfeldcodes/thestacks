@@ -71,10 +71,13 @@ if command -v dockle &>/dev/null; then
     if command -v docker &>/dev/null; then
         echo "Running dockle CIS benchmark..."
         docker build -q -t stacks-dockle-core -f deploy/Dockerfile.core . && \
-            dockle --exit-code 1 --exit-level WARN stacks-dockle-core
+            docker save stacks-dockle-core -o /tmp/stacks-dockle-core.tar && \
+            dockle --exit-code 1 --exit-level WARN --input /tmp/stacks-dockle-core.tar
         docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper . && \
-            dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
+            docker save stacks-dockle-scraper -o /tmp/stacks-dockle-scraper.tar && \
+            dockle --exit-code 1 --exit-level WARN --input /tmp/stacks-dockle-scraper.tar
         docker rmi stacks-dockle-core stacks-dockle-scraper 2>/dev/null || true
+        rm -f /tmp/stacks-dockle-core.tar /tmp/stacks-dockle-scraper.tar
     else
         echo "SKIP: docker not available — cannot run dockle (dockle requires a built image)"
     fi

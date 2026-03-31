@@ -114,6 +114,23 @@ message BlogPost {
   string visibility_group_id = 12 [json_name = "visibility_group_id"];
 }
 
+// PostComment represents a user comment on a blog post.
+// Supports single-level nesting via parent_id for reply threads.
+message PostComment {
+  // Unique identifier for this comment.
+  string id = 1 [json_name = "id"];
+  // ID of the blog post this comment belongs to.
+  string post_id = 2 [json_name = "post_id"];
+  // ID of the user who wrote this comment.
+  string author_id = 3 [json_name = "author_id"];
+  // ID of the parent comment for replies; empty for top-level comments.
+  string parent_id = 4 [json_name = "parent_id"];
+  // Comment body text (1-2000 characters).
+  string body = 5 [json_name = "body"];
+  // When the comment was created (ISO 8601 string on the wire).
+  string created_at = 6 [json_name = "created_at"];
+}
+
 // BlogPostSummary is a lightweight view of a blog post for list displays.
 // Used when listing posts (BlogController.index returns full BlogPost, but this
 // message is available for future list-optimized endpoints).

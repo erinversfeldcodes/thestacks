@@ -359,4 +359,90 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/placements/:id/progress  (Issue #148)
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/placements/:id/progress — update_progress" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      %{
+        conn: auth_conn(conn, user),
+        user: user,
+        placement: placement
+      }
+    end
+
+    test "returns 200 with updated placement on valid reading_status", %{
+      conn: conn,
+      placement: placement
+    } do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{reading_status: "reading"})
+
+      assert %{"placement" => updated} = json_response(conn, 200)
+      assert updated["reading_status"] == "reading"
+    end
+
+    test "returns 200 and updates current_page along with status", %{
+      conn: conn,
+      placement: placement
+    } do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{
+          reading_status: "reading",
+          current_page: 75
+        })
+
+      assert %{"placement" => updated} = json_response(conn, 200)
+      assert updated["current_page"] == 75
+    end
+
+    test "returns 403 when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      conn =
+        build_conn()
+        |> auth_conn(other_user)
+        |> put("/api/placements/#{placement.id}/progress", %{reading_status: "reading"})
+
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+
+    test "returns 422 for invalid reading_status", %{conn: conn, placement: placement} do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{reading_status: "nope"})
+
+      assert %{"errors" => _} = json_response(conn, 422)
+    end
+
+    test "returns 422 for negative current_page", %{conn: conn, placement: placement} do
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{
+          reading_status: "reading",
+          current_page: -5
+        })
+
+      assert %{"errors" => _} = json_response(conn, 422)
+    end
+
+    test "returns 422 when reading_status is missing", %{conn: conn, placement: placement} do
+      conn = put(conn, "/api/placements/#{placement.id}/progress", %{})
+
+      assert json_response(conn, 422)
+    end
+
+    test "returns 401 when not authenticated", %{placement: placement} do
+      conn =
+        build_conn()
+        |> put("/api/placements/#{placement.id}/progress", %{reading_status: "reading"})
+
+      assert json_response(conn, 401)
+    end
+  end
 end

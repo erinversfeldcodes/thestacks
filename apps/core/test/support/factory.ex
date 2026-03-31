@@ -7,7 +7,7 @@ defmodule Stacks.Factory do
   use ExMachina.Ecto, repo: Core.Repo
 
   alias Stacks.Accounts.User
-  alias Stacks.Blog.{Post, PostBookAssociation}
+  alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
 
   alias Stacks.Enrichment.{
@@ -23,7 +23,8 @@ defmodule Stacks.Factory do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
-  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Partners.{InventoryItem, Partner}
+  alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   def user_factory do
@@ -88,14 +89,26 @@ defmodule Stacks.Factory do
     }
   end
 
+  def shelf_factory do
+    %Shelf{
+      bookshelf: build(:bookshelf),
+      position: 0
+    }
+  end
+
   def placement_factory do
     %Placement{
       position: 1,
       placed_at: DateTime.utc_now(),
       formats: [],
       visibility: "owner",
+      reading_status: "to_read",
+      current_page: nil,
+      started_at: nil,
+      finished_at: nil,
       book: build(:book),
-      bookshelf: build(:bookshelf)
+      bookshelf: build(:bookshelf),
+      shelf: build(:shelf)
     }
   end
 
@@ -172,6 +185,14 @@ defmodule Stacks.Factory do
       title: sequence(:post_title, &"Post #{&1}"),
       body: "Some markdown body.",
       visibility: "owner"
+    }
+  end
+
+  def post_comment_factory do
+    %PostComment{
+      post: build(:post),
+      author: build(:user),
+      body: sequence(:comment_body, &"Comment #{&1}")
     }
   end
 
@@ -304,10 +325,13 @@ defmodule Stacks.Factory do
   end
 
   def third_space_event_factory do
+    starts_at = DateTime.add(DateTime.utc_now(), 7, :day)
+
     %ThirdSpaceEvent{
       title: sequence(:space_event_title, &"Space Event #{&1}"),
       description: "A community gathering.",
-      event_date: DateTime.add(DateTime.utc_now(), 7, :day),
+      event_date: starts_at,
+      ends_at: DateTime.add(starts_at, 2, :hour),
       recurrence: nil,
       related_authors: [],
       source_url: "https://example.com/events",
@@ -351,6 +375,31 @@ defmodule Stacks.Factory do
       scraped_at: DateTime.utc_now(),
       stale_after: DateTime.add(DateTime.utc_now(), 30, :day),
       book: build(:book)
+    }
+  end
+
+  def partner_factory do
+    %Partner{
+      name: "The Corner Bookshop",
+      business_type: "bookshop",
+      contact_email: sequence(:partner_email, &"partner#{&1}@example.com"),
+      website_url: "https://cornerbookshop.example.com",
+      status: "pending",
+      api_key_prefix: nil,
+      hmac_secret: nil,
+      approved_by_id: nil,
+      approved_at: nil
+    }
+  end
+
+  def partner_inventory_item_factory do
+    %InventoryItem{
+      partner: build(:partner),
+      book_edition: build(:book_edition),
+      price_cents: 1500,
+      condition: "good",
+      quantity: 1,
+      synced_at: DateTime.utc_now()
     }
   end
 end

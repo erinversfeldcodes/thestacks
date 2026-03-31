@@ -317,14 +317,141 @@ Delegate implementation to the specialist. The prompt must include:
 
 **State update:** When the completion report is received, update `last_action` in the state file.
 
-### 2B-i — Automated Regression Gate
+### 2A-iv — Completion Report Reception Gate ⛔ HARD GATE
 
-After receiving the specialist's completion report, run the automated test suite before any manual checks:
+**This gate fires in two situations — not just one:**
+
+1. **Specialist completion report received** — an agent sends a structured completion message.
+2. **Orchestrator performed direct implementation work** — the orchestrator fixed something
+   itself (e.g., a bug, a generator issue, a test failure) without delegating to a specialist.
+   Treat the orchestrator's own work as if it were a specialist's report and run this gate
+   against it before writing any summary or declaring phase completion.
+
+**Idle notification ≠ completion report.** If an agent sends only an `idle_notification`
+without a completion summary, the orchestrator must explicitly ask for a completion report
+before proceeding. Do not proceed to 2B on an idle notification alone.
+
+**This is the first action you take upon receiving a completion report or finishing direct work.
+Do not write any summary, proceed to any 2B gate, or acknowledge completion until this gate passes.**
+
+The orchestrator independently verifies the specialist's work in two steps:
+
+#### Step 1 — Build the DoD Evidence Table (independently)
+
+Do **not** read the specialist's DoD list from their completion report first. Open the issue file
+yourself and extract every `- [ ]` item from the **Definition of Done** section. Then examine the
+diff to locate evidence of each item.
+
+For each DoD item, you must find:
+- File path + line number of the implementation in the diff
+- File path + line number of at least one test that exercises it (new or modified in this diff)
+- For Elm items: the updated/created `.elm` file AND a new/modified `elm-test` spec
+
+Build the DoD Evidence Table:
+
+```
+| DoD Item             | Impl file:line | Test file:line | Status |
+|----------------------|----------------|----------------|--------|
+| (copy from issue)    |                |                | ✅ / ❌ |
+```
+
+**Vacuous-pass rule:** "Tests pass" or "just verify passes" is never evidence. A DoD item is ✅
+only when you can point to a specific test that would *fail* if the feature were removed.
+
+**Elm rule:** A DoD item describing UI behaviour requires an `elm-test` spec that is new or
+modified in this diff. A pre-existing passing test suite proves nothing about new behaviour.
+
+If any row is ❌: **BLOCKED.** Do not proceed. Return to the specialist:
+
+```
+COMPLETION REPORT REJECTED — DoD Evidence Incomplete
+
+The following DoD items have no implementation or test evidence in the diff:
+
+[list each ❌ item with what is missing: impl / test / both]
+
+Return a revised completion report with file:line evidence for every item.
+This counts as revision cycle N of 2.
+```
+
+#### Step 2 — Delegate to Testing Coordinator
+
+Once the DoD Evidence Table is fully ✅, immediately delegate to the `testing-coordinator`:
+
+```
+You are The Stacks testing-coordinator.
+Load: docs/agents/testing-coordinator-agent.md
+
+Issue: #[N] — [title]
+Issue file: issues/[filename].md
+
+The orchestrator has independently built this DoD Evidence Table from the diff:
+
+[paste DoD Evidence Table]
+
+Your task:
+1. For each DoD item, read the cited test file:line and verify:
+   a. The test exists at that location.
+   b. The test would fail if the feature were removed (no vacuous assertions).
+   c. The test covers the described behaviour, not just that the code runs.
+2. Check for missing test layers per docs/agents/standards/testing.md:
+   - Happy path + sad/opt-out path
+   - Idempotency claims (where the issue states an operation is idempotent)
+   - Unique constraint enforcement
+3. For Elm DoD items: confirm the elm-test spec is new or modified in the current diff.
+4. Return a signed-off test report:
+
+   | DoD Item | Test file:line | Verdict | Notes |
+   |----------|---------------|---------|-------|
+   Verdict: PASS | WEAK (vacuous assertion) | MISSING
+
+5. If any item is WEAK or MISSING: list exactly which tests need to be added or strengthened.
+```
+
+If the testing coordinator returns WEAK or MISSING for any item: **BLOCKED.** Return to the
+specialist with the TC's findings as the targeted prompt. This counts as a revision cycle.
+
+If the testing coordinator returns PASS for all items: record the signed-off test report in the
+phase state file and proceed to the 2B gate sequence.
+
+---
+
+## Phase 2B: Gate Sequence
+
+**You may not use any of the following language until every applicable gate shows ✅:**
+- "ready to commit"
+- "group into commits"
+- "proceeding to Phase N"
+- "Issue #N is complete"
+- any language that implies the phase is done
+
+**Gates must be run sequentially in order: 2B-i → 2B-ii → 2B-iia → 2B-iii.** Do not run them
+in parallel. Each gate can block the next. Running a later gate before an earlier one passes is
+a protocol violation.
+
+Write this checklist into the phase state file before starting the gate sequence. Tick each gate
+as it completes. Any unticked gate blocks progress to 2C.
+
+```
+Gate Checklist — Phase N (Issue #NNN)
+[ ] 2B-i   Regression Gate          (automated — always required)
+[ ] 2B-ii  Spec Coverage Gate       (orchestrator — always required)
+[ ] 2B-iia Fresh Database Gate      (automated — required if migrations/schema changed)
+[ ] 2B-iii Deploy Preview + E2E     (automated — skip only if no deployed-env changes)
+```
+
+No gate may be marked ✅ based on the specialist's self-report. Each gate produces its own
+evidence. Gates skipped without the explicit skip condition being met are a protocol violation.
+
+### 2B-i — Automated Regression Gate ⛔ HARD GATE (always required)
+
+After the 2A-iv Reception Gate passes, run the automated test suite. Do this before any other
+2B gates. **Do not proceed to 2B-ii if this gate fails.**
 
 1. Identify the domain(s) from the phase's agent assignment (elixir, elm, rust, python).
 2. Call `mcp__project-tools__run_test_suite(domain)` for each relevant domain.
-3. **If all suites pass:** proceed to 2B-ii (Spec Coverage Gate).
-4. **If any suite fails:** return the failure to the specialist WITHOUT invoking the reviewer. Use this format:
+3. **If all suites pass:** mark ✅ on the Gate Checklist and proceed to 2B-ii.
+4. **If any suite fails:** **BLOCKED.** Return the failure to the specialist. Do not invoke the reviewer.
 
 ```
 REGRESSION GATE FAILED: [domain] test suite
@@ -336,31 +463,61 @@ Fix the above failures and resubmit your completion report.
 This counts as revision cycle N of 2.
 ```
 
-This counts as a revision cycle. If revision cycle limit (2) is reached, stop and consult the human.
+If the revision cycle limit (2) is reached: stop and consult the human.
 
-This gate is automated and objective — no orchestrator judgment required.
+This gate is automated and objective — no orchestrator judgment required. A passing gate
+produces a specific pass count (e.g., "312 tests, 0 failures"). Record it in the state file.
 
-### 2B-ii — Spec Coverage Gate (before review)
+### 2B-ii — Spec Coverage Gate ⛔ HARD GATE (always required)
 
-Before delegating to the reviewer, **you** must verify the agent's Spec Coverage Matrix:
+**Do not use the specialist's Spec Coverage Matrix as the source of truth. Build the requirements
+list yourself from the issue file, then check the diff for evidence.**
 
-1. Extract the full list of required items from the issue's Technical Requirements section.
-2. Compare against the Spec Coverage Matrix in the agent's completion report.
-3. If any required item has ❌ with **no justification** in the matrix — or is **absent from the
-   matrix entirely** — return to 2A with a targeted prompt to fill the gap. Do not proceed to
-   review with unjustified gaps.
-4. If all ❌ rows have explicit justifications (deferred, blocked, out-of-scope), proceed to
-   review, including the matrix in the reviewer prompt so the reviewer can independently verify.
+Steps:
+
+1. Open the issue file. Extract every item from the **Technical Requirements** section yourself.
+2. For each item, check the diff directly — does the changed code implement this requirement?
+3. Build your own coverage table:
+
+   ```
+   | Technical Requirement     | In diff? | Evidence (file:line) | Status |
+   |---------------------------|----------|----------------------|--------|
+   | (copy from issue)         | yes/no   |                      | ✅ / ❌ |
+   ```
+
+4. **Only after building your own table**: read the specialist's Spec Coverage Matrix. Use it
+   solely to understand *why* they marked something ❌ (deferral justifications, blockers,
+   explicit out-of-scope decisions). Their ✅ marks are not evidence.
+
+5. If any item is ❌ with no justification: **BLOCKED.**
+
+   ```
+   SPEC COVERAGE GATE FAILED
+
+   The following Technical Requirements have no implementation evidence in the diff:
+
+   [list each ❌ item]
+
+   Provide implementation and resubmit your completion report.
+   This counts as revision cycle N of 2.
+   ```
+
+6. If all ❌ items have explicit justifications (deferred/blocked/out-of-scope): proceed, and
+   include your coverage table in the reviewer prompt.
 
 This gate exists because the reviewer audits code quality; coverage completeness is your
-responsibility as Orchestrator.
+responsibility as Orchestrator. The reviewer must not be the first person to notice a missing
+requirement.
 
-### 2B-iia — Fresh Database Verification Gate (conditional)
+### 2B-iia — Fresh Database Verification Gate ⚠️ CONDITIONAL
 
 **Trigger:** Run this gate if the diff includes migration files, Ecto schema changes, dbt model
-changes, or modifications to `proto/persisted.exs`.
+changes, or modifications to `proto/persisted.exs`. Mark ✅ on the Gate Checklist on pass.
 
-**Skip** if the phase has no database-touching changes.
+**Skip condition:** No database-touching changes in the diff. Record `"fresh_db_skipped": true`
+and `"fresh_db_skip_reason": "no migrations or schema changes"` in the state file.
+
+**There is no other valid skip condition.** If the trigger condition is met, this gate runs.
 
 Steps:
 1. `mix ecto.drop` — drop the development database
@@ -371,16 +528,19 @@ Steps:
 6. `scripts/test-dbt.sh` — verify dbt run + test passes
 7. `scripts/lint-dbt.sh` — verify dbt-checkpoint quality gates pass
 
-If any step fails, the migration or schema change has a problem. Fix before proceeding to review.
+**BLOCKED** if any step fails. Fix the migration or schema change before proceeding to review.
+This counts as a revision cycle.
 
-### 2B-iii — Deploy Preview + E2E Gate (optional)
+### 2B-iii — Deploy Preview + E2E Gate ⚠️ CONDITIONAL
 
-**Skip this step** if the phase is documentation-only, touches only agent prompts or plan files,
-or does not modify any code that runs in the deployed environment (Elixir, Elm, Rust, Python,
-migrations, Dockerfiles, Fly configs). When skipping, record `"e2e_skipped": true` and
-`"e2e_skip_reason": "<reason>"` in the phase's state file entry and proceed directly to 2C.
+**Skip condition:** The phase is documentation-only, or does not modify any code that runs in
+the deployed environment (Elixir, Elm, Rust, Python, migrations, Dockerfiles, Fly configs).
+When skipping, record `"e2e_skipped": true` and `"e2e_skip_reason": "<reason>"` in the state
+file. Mark ✅ on the Gate Checklist.
 
-After the spec coverage gate passes, deploy a preview environment and run E2E tests:
+**There is no other valid skip condition.** If the phase ships deployed code, this gate runs.
+
+After all prior 2B gates pass, deploy a preview environment and run E2E tests:
 
 1. Call `mcp__project-tools__run_e2e_gate(issue_number)` with the current issue number.
    The tool:
@@ -392,11 +552,10 @@ After the spec coverage gate passes, deploy a preview environment and run E2E te
 
 2. **State update:** Record `preview_url` in the phase's state file entry.
 
-3. **If E2E gate passes:** proceed to 2C (Delegate Review). Include the E2E results and
+3. **If E2E gate passes:** mark ✅ on the Gate Checklist. Include the E2E results and
    preview URL in the reviewer prompt.
 
-4. **If E2E gate fails:** return the failure to the specialist with the preview URL for debugging.
-   The specialist can check logs via `fly logs --app <preview-app>`. Use this format:
+4. **If E2E gate fails:** **BLOCKED.** Return the failure to the specialist. Do not invoke the reviewer.
 
 ```
 E2E GATE FAILED
@@ -409,9 +568,9 @@ Diagnose and fix the above E2E failures, then resubmit your completion report.
 This counts as revision cycle N of 2.
 ```
 
-This counts as a revision cycle. If revision cycle limit (2) is reached, stop and consult the human.
+If the revision cycle limit (2) is reached: stop and consult the human.
 
-E2E failures that are clearly environmental (flaky network, cold start timeouts) should be retried
+E2E failures that are clearly environmental (flaky network, cold start timeouts) may be retried
 once before counting as a revision cycle. The orchestrator makes this judgment call.
 
 ### 2B-iv — Preview Cleanup
@@ -425,8 +584,10 @@ On issue completion (Phase 3), ensure all preview resources are cleaned up.
 
 ### 2C — Delegate Review
 
-After the spec coverage gate (and E2E gate, if applicable) passes, delegate to the **stack-specific
-reviewer** via Agent tool. Use the Reviewer Routing table in `AGENTS.md` to select the correct
+**Precondition:** All applicable gates in the Phase 2B Gate Checklist must be ✅ before this step.
+If the checklist is not fully ticked, do not proceed to review.
+
+Delegate to the **stack-specific reviewer** via Agent tool. Use the Reviewer Routing table in `AGENTS.md` to select the correct
 reviewer(s). If a phase touches multiple stacks, invoke multiple reviewers in parallel.
 
 - Embed full content of the relevant reviewer `.md` file from `docs/agents/reviewers/`

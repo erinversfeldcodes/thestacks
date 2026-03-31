@@ -150,7 +150,12 @@ async def _run_associate(
             reason = "ambiguous_classification"
         else:
             reason = "not_a_book_cover"
-        log.info("associate: classification done", classification=clf, status=status)
+        log.info(
+            "associate: classification done",
+            classification=clf,
+            status=status,
+            reasoning=parsed.get("reasoning"),
+        )
     except HTTPException as exc:
         log.warning("associate: cover download failed", detail=exc.detail)
         status = _STATUS_REJECTED
@@ -368,7 +373,12 @@ async def classify(request: Request, body: ClassifyRequest) -> ClassifyResponse:
     confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
     confidence = max(0.0, min(1.0, confidence))
 
-    log.info("classification complete", classification=classification)
+    reasoning = parsed.get("reasoning")
+    log.info(
+        "classification complete",
+        classification=classification,
+        reasoning=reasoning,
+    )
     return ClassifyResponse(
         classification=classification,
         confidence=confidence,

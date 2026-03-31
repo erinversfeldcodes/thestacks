@@ -1,0 +1,221 @@
+defmodule StacksWeb.OnboardingControllerTest do
+  @moduledoc """
+  Tests for:
+  - GET  /api/onboarding/status
+  - PUT  /api/onboarding/step/:step
+  - POST /api/onboarding/reset
+  """
+
+  use CoreWeb.ConnCase, async: true
+
+  import Stacks.Factory
+
+  alias Stacks.Accounts.Guardian
+
+  defp auth_conn(conn, user) do
+    {:ok, token, _} = Guardian.encode_and_sign(user)
+    put_req_header(conn, "authorization", "Bearer #{token}")
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /api/onboarding/status
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/onboarding/status — status" do
+    test "returns all steps false for a fresh user", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> get("/api/onboarding/status")
+
+      assert %{
+               "steps" => %{
+                 "profile" => false,
+                 "age_verification" => false,
+                 "privacy" => false
+               },
+               "completed" => false,
+               "next_step" => "profile"
+             } = json_response(conn, 200)
+    end
+
+    test "returns correct next_step for partially completed user", %{conn: conn} do
+      user = insert(:user, onboarding_steps: %{"profile" => true})
+      conn = conn |> auth_conn(user) |> get("/api/onboarding/status")
+      body = json_response(conn, 200)
+
+      assert body["next_step"] == "age_verification"
+      assert body["steps"]["profile"] == true
+      assert body["steps"]["age_verification"] == false
+    end
+
+    test "returns completed true when all steps done", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> get("/api/onboarding/status")
+      body = json_response(conn, 200)
+
+      assert body["completed"] == true
+      assert body["next_step"] == nil
+    end
+
+    test "returns 401 when unauthenticated", %{conn: conn} do
+      conn = get(conn, "/api/onboarding/status")
+      assert json_response(conn, 401)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/onboarding/step/:step
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/onboarding/step/:step — complete_step" do
+    test "marks profile step as complete", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> put("/api/onboarding/step/profile")
+      body = json_response(conn, 200)
+
+      assert body["steps"]["profile"] == true
+      assert body["next_step"] == "age_verification"
+    end
+
+    test "marks age_verification step as complete", %{conn: conn} do
+      user = insert(:user, onboarding_steps: %{"profile" => true})
+      conn = conn |> auth_conn(user) |> put("/api/onboarding/step/age_verification")
+      body = json_response(conn, 200)
+
+      assert body["steps"]["age_verification"] == true
+      assert body["next_step"] == "privacy"
+    end
+
+    test "completing final step returns completed true", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> put("/api/onboarding/step/privacy")
+      body = json_response(conn, 200)
+
+      assert body["completed"] == true
+      assert body["next_step"] == nil
+    end
+
+    test "is idempotent — completing already-done step returns 200", %{conn: conn} do
+      user = insert(:user, onboarding_steps: %{"profile" => true})
+      conn = conn |> auth_conn(user) |> put("/api/onboarding/step/profile")
+      body = json_response(conn, 200)
+
+      assert body["steps"]["profile"] == true
+    end
+
+    test "returns 422 for invalid step name", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> put("/api/onboarding/step/invalid_step")
+      body = json_response(conn, 422)
+
+      assert body["error"] == "invalid_step"
+      assert "profile" in body["valid_steps"]
+    end
+
+    test "returns 401 when unauthenticated", %{conn: conn} do
+      conn = put(conn, "/api/onboarding/step/profile")
+      assert json_response(conn, 401)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # POST /api/onboarding/reset
+  # ---------------------------------------------------------------------------
+
+  describe "POST /api/onboarding/reset — reset" do
+    test "resets all steps to false", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> post("/api/onboarding/reset")
+      body = json_response(conn, 200)
+
+      assert body["steps"]["profile"] == false
+      assert body["steps"]["age_verification"] == false
+      assert body["steps"]["privacy"] == false
+      assert body["completed"] == false
+      assert body["next_step"] == "profile"
+    end
+
+    test "returns 401 when unauthenticated", %{conn: conn} do
+      conn = post(conn, "/api/onboarding/reset")
+      assert json_response(conn, 401)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /api/auth/me — onboarding fields
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/auth/me — onboarding fields" do
+    test "includes onboarding_completed and next_onboarding_step", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert Map.has_key?(body["user"], "onboarding_completed")
+      assert Map.has_key?(body["user"], "next_onboarding_step")
+      assert body["user"]["next_onboarding_step"] == "profile"
+    end
+
+    test "fresh user has onboarding_completed = false", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert body["user"]["onboarding_completed"] == false
+    end
+
+    test "next_onboarding_step is nil when all steps done", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert body["user"]["next_onboarding_step"] == nil
+    end
+
+    test "fully-completed user has onboarding_completed = true", %{conn: conn} do
+      user =
+        insert(:user,
+          onboarding_steps: %{
+            "profile" => true,
+            "age_verification" => true,
+            "privacy" => true
+          }
+        )
+
+      conn = conn |> auth_conn(user) |> get("/api/auth/me")
+      body = json_response(conn, 200)
+
+      assert body["user"]["onboarding_completed"] == true
+    end
+  end
+end

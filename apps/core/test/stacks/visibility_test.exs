@@ -212,7 +212,30 @@ defmodule Stacks.VisibilityTest do
   # ---------------------------------------------------------------------------
 
   describe "resolve_visibility/2 — group visibility" do
-    test "group visibility + platform_user viewer → :hidden (group check not yet implemented)" do
+    test "group visibility + viewer is group member → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      group = insert(:group, owner: owner)
+      insert(:group_member, group: group, user: viewer)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
+    end
+
+    test "group visibility + viewer not a group member → :hidden" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      group = insert(:group, owner: owner)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
+
+      assert :hidden = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
+    end
+
+    test "group visibility + no visibility_group_id set → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
       viewer = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -220,11 +243,51 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end
 
+    test "group visibility + owner → :visible (owner check applies before group)" do
+      owner = insert(:user, profile_visibility: "platform")
+      group = insert(:group, owner: owner)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, owner.id})
+    end
+
     test "group visibility + unauthenticated viewer → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
-      bookshelf = insert(:bookshelf, user: owner, visibility: "group")
+      group = insert(:group, owner: owner)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
 
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "placement with group visibility + viewer is group member → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      group = insert(:group, owner: owner)
+      insert(:group_member, group: group, user: viewer)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
+
+      placement = insert(:placement, bookshelf: bookshelf, visibility: "group")
+
+      assert :visible = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
+
+    test "placement with group visibility + viewer not a group member → :hidden" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      group = insert(:group, owner: owner)
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "group", visibility_group_id: group.id)
+
+      placement = insert(:placement, bookshelf: bookshelf, visibility: "group")
+
+      assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
   end
 

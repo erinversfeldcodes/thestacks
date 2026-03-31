@@ -258,7 +258,12 @@ update msg model maybeToken =
                                     ( { model | result = NotABook }, Cmd.none, NoOut )
 
                         Rejected ->
-                            ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                            case response.rejectionReason of
+                                Just "not_a_book" ->
+                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+
+                                _ ->
+                                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
                         Pending ->
                             ( model, sleepThenPoll, NoOut )
@@ -518,6 +523,10 @@ placementStub =
     , personalRating = Nothing
     , notes = Nothing
     , bookshelfName = Nothing
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }
 
 

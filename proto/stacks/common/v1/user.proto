@@ -121,4 +121,8 @@ message User {
 
   // When this user account was last updated.
   google.protobuf.Timestamp updated_at = 23 [json_name = "updated_at"];
+
+  // Per-step onboarding completion flags (JSON object, e.g. {"profile": true, ...}).
+  // DB-only — not sent on the wire directly; use onboarding_status endpoint instead.
+  string onboarding_steps = 26 [json_name = "onboarding_steps"];
 }
