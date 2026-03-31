@@ -16,6 +16,7 @@ defmodule Stacks.Shelving do
 
   alias Core.Repo
   alias Ecto.Multi
+  alias Stacks.Accounts.User
   alias Stacks.Audit
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
@@ -142,6 +143,20 @@ defmodule Stacks.Shelving do
     |> order_by([p], [p.position, p.placed_at])
     |> preload(book: [:author, :editions])
     |> Repo.all()
+  end
+
+  @doc "Returns all users who have the given book on their wishlist."
+  @spec users_with_book_on_wishlist(binary()) :: [User.t()]
+  def users_with_book_on_wishlist(book_id) do
+    from(u in User,
+      join: bs in Bookshelf,
+      on: bs.user_id == u.id and bs.name == "wishlist",
+      join: p in Placement,
+      on: p.bookshelf_id == bs.id and p.book_id == ^book_id,
+      where: is_nil(p.removed_at),
+      distinct: true
+    )
+    |> Repo.all(prefix: "op")
   end
 
   @doc """

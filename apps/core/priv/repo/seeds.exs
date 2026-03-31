@@ -720,9 +720,12 @@ e2e_placement_rows =
   Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
     shelf_base = 400 + (user_idx - 10) * 10
     place_base = 5000 + (user_idx - 10) * 20
-    # Each user gets a different slice of works so they don't collide
+    # Each user gets a different slice of works so they don't collide.
+    # Use circular indexing so high-idx users still get 10 works even when
+    # offset exceeds the total number of unique works.
     offset = (user_idx - 10) * 10
-    user_works = Enum.slice(all_work_indices, offset, 10)
+    n = length(all_work_indices)
+    user_works = Enum.map(0..9, fn i -> Enum.at(all_work_indices, rem(offset + i, n)) end)
 
     library_works = Enum.take(user_works, 5)
     antilibrary_works = Enum.slice(user_works, 5, 3)
