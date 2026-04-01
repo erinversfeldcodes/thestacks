@@ -87,7 +87,12 @@ defmodule Stacks.Events.Registry do
   """
   @spec handlers_for(String.t()) :: [module()]
   def handlers_for(event_type) when is_binary(event_type) do
-    Map.get(@registry, event_type, [])
+    overrides = Application.get_env(:core, :test_handler_overrides, %{})
+
+    case Map.get(overrides, event_type) do
+      nil -> Map.get(@registry, event_type, [])
+      handlers -> handlers
+    end
   end
 
   @doc """
