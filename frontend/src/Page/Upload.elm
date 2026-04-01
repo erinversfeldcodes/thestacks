@@ -717,6 +717,8 @@ viewNotABook =
                 "We couldn't detect a book in that image. Please try a photo of a book cover."
             ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Again" ]
+        , button [ class "btn btn--secondary", onClick EnterManualMode ]
+            [ text "Enter ISBN Manually" ]
         ]
 
 
