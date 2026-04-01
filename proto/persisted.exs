@@ -207,7 +207,10 @@
         author_id: %{belongs_to: Stacks.Books.Author},
         subjects: %{ecto_type: {:array, :string}, default: []},
         bisac_codes: %{ecto_type: {:array, :string}, default: []},
-        visibility_tier: %{default: "public"},
+        visibility_tier: %{
+          default: "public",
+          dbt_tests: [{:accepted_values, ["public", "age_gated"]}]
+        },
         # API-only fields — no DB column, excluded from Ecto schema and dbt
         author: %{api_only: true},
         editions: %{api_only: true},
@@ -274,10 +277,25 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        status: %{default: "pending"},
-        book_ids: %{ecto_type: {:array, :binary_id}, default: []},
+        status: %{
+          default: "pending",
+          null: false,
+          dbt_tests: [
+            :not_null,
+            {:accepted_values, ["pending", "resolved", "rejected"]}
+          ]
+        },
+        storage_path: %{
+          dbt_tests: [:not_null]
+        },
+        book_ids: %{
+          ecto_type: {:array, :binary_id},
+          default: [],
+          dbt_tests: [{:not_null, "status = 'resolved'"}]
+        },
         book_id: %{belongs_to: Stacks.Books.Book},
-        book_edition_id: %{belongs_to: Stacks.Books.BookEdition}
+        book_edition_id: %{belongs_to: Stacks.Books.BookEdition},
+        user_id: %{ecto_type: :binary_id, null: false, belongs_to: Stacks.Accounts.User}
       }
     },
 
