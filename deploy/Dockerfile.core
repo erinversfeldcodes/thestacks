@@ -34,10 +34,13 @@ COPY apps/core/priv apps/core/priv
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
 
-# Compile Elixir, fingerprint static assets, build release
+# Compile Elixir, fingerprint static assets, build release.
+# NOTE: _build cache is intentionally NOT mounted here — a shared cache can
+# serve stale .beam files when source files change between deploys (the cache
+# key is the mount path, not a content hash). deps cache is safe to share
+# because deps.get + deps.compile always runs first and is content-addressed.
 WORKDIR /app
 RUN --mount=type=cache,target=/app/deps \
-    --mount=type=cache,target=/app/_build \
     mix compile && mix phx.digest && mix release core && \
     cp -r /app/_build/prod/rel/core /app/release
 
