@@ -627,10 +627,10 @@ defmodule Stacks.UploadTelemetryTest do
 
   describe "Suite 11 — router_dispatch telemetry for GET /api/upload/:id/status" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "200 pending status emits telemetry", %{conn: conn, token: token} do
+    test "200 pending status emits telemetry", %{conn: conn, token: token, user: user} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      image = insert(:uploaded_image, status: "pending")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn =
         conn
@@ -647,10 +647,15 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "200 resolved status emits telemetry", %{conn: conn, token: token, book: book} do
+    test "200 resolved status emits telemetry", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      image = insert(:uploaded_image, status: "pending")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       # Mark image as resolved with a book_id
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
@@ -1232,7 +1237,7 @@ defmodule Stacks.UploadTelemetryTest do
       Stacks.Shelving.place_book(user.id, book.id, "library")
 
       # Create uploaded image marked as resolved with this book
-      image = insert(:uploaded_image, status: "pending")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
 
@@ -1268,7 +1273,8 @@ defmodule Stacks.UploadTelemetryTest do
     @tag stories: ["US-1.1.7"], suite: :telemetry
     test "status endpoint with multiple book_ids emits telemetry", %{
       conn: conn,
-      token: token
+      token: token,
+      user: user
     } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -1277,7 +1283,7 @@ defmodule Stacks.UploadTelemetryTest do
       book2 = insert(:book, title: "Multi Book Two")
       insert(:book_edition, book: book2, isbn: "9780141439525")
 
-      image = insert(:uploaded_image, status: "pending")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
       {:ok, book1_bin} = Ecto.UUID.dump(book1.id)
       {:ok, book2_bin} = Ecto.UUID.dump(book2.id)
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
