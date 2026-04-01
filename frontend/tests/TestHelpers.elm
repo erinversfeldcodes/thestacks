@@ -10,6 +10,7 @@ module TestHelpers exposing
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
+    , simulateMergeFormatResponse
     , simulatePollResponse
     , testBook
     , testPlacement
@@ -24,6 +25,7 @@ simulators, and test data builders.
 -}
 
 import Api exposing (AuthResponse, BookDetailResponse, PollResponse, PollStatus(..))
+import Components.ISBNInput
 import Dict
 import Http
 import Json.Decode as Decode
@@ -351,6 +353,35 @@ simulateBookshelfErrorResponse statusCode =
         ""
 
 
+{-| Create an HTTP response for a successful merge-format call.
+Parameters: bookId, editionId, isbn, formatLabel.
+-}
+simulateMergeFormatResponse : String -> String -> String -> String -> Http.Response String
+simulateMergeFormatResponse bookId editionId isbn formatLabel =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "edition"
+                      , Encode.object
+                            [ ( "id", Encode.string editionId )
+                            , ( "isbn", Encode.string isbn )
+                            , ( "is_primary", Encode.bool False )
+                            , ( "format_label", Encode.string formatLabel )
+                            ]
+                      )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId ++ "/merge-format"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
 {-| Create a successful auth HTTP response.
 Parameters: token, userId, email, displayName.
 -}
@@ -605,6 +636,42 @@ uploadEffects msg model maybeToken =
                 Rejected ->
                     SimulatedEffect.Cmd.none
 
+        Upload.SubmitManualIsbn ->
+            if Components.ISBNInput.isValidISBN model.manualIsbn then
+                case maybeToken of
+                    Just token ->
+                        SimulatedEffect.Http.request
+                            { method = "GET"
+                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                            , url = "/api/books/isbn/" ++ model.manualIsbn
+                            , body = SimulatedEffect.Http.emptyBody
+                            , expect = SimulatedEffect.Http.expectJson Upload.IsbnLookupResult decodeBookDetailResponse
+                            , timeout = Nothing
+                            , tracker = Nothing
+                            }
+
+                    Nothing ->
+                        SimulatedEffect.Cmd.none
+
+            else
+                SimulatedEffect.Cmd.none
+
+        Upload.ConfirmMergeFormat bookId ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/books/" ++ bookId ++ "/merge-format"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect = SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted decodeMergeFormatResponse
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
         Upload.GotFile _ ->
             case maybeToken of
                 Just token ->
@@ -778,6 +845,36 @@ decodeBookDetailResponse =
     Decode.map2 BookDetailResponse
         (Decode.field "book" bookDecoder)
         (Decode.maybe (Decode.field "placement" placementDecoder))
+
+
+{-| Decode a MergeFormatResponse. Mirrors Api.mergeFormatResponseDecoder which is not exposed.
+-}
+decodeMergeFormatResponse : Decode.Decoder Api.MergeFormatResponse
+decodeMergeFormatResponse =
+    Decode.map (\ed -> { edition = ed })
+        (Decode.field "edition"
+            (Decode.map8
+                (\id isbn isPrimary formatLabel coverImageUrl pageCount publisher publicationYear ->
+                    { id = id
+                    , isbn = isbn
+                    , isPrimary = isPrimary
+                    , formatLabel = formatLabel
+                    , coverImageUrl = coverImageUrl
+                    , pageCount = pageCount
+                    , publisher = publisher
+                    , publicationYear = publicationYear
+                    }
+                )
+                (Decode.field "id" Decode.string)
+                (Decode.field "isbn" Decode.string)
+                (Decode.field "is_primary" Decode.bool)
+                (Decode.maybe (Decode.field "format_label" Decode.string))
+                (Decode.maybe (Decode.field "cover_image_url" Decode.string))
+                (Decode.maybe (Decode.field "page_count" Decode.int))
+                (Decode.maybe (Decode.field "publisher" Decode.string))
+                (Decode.maybe (Decode.field "publication_year" Decode.int))
+            )
+        )
 
 
 {-| Translate BookDetail init Cmds into SimulatedEffects.

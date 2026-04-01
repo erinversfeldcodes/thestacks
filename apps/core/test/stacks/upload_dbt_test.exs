@@ -29,7 +29,7 @@ defmodule Stacks.UploadDbtTest do
   - mart_cost_tracking: requires dbt role grant and platform_costs table.
   """
 
-  use Core.DataCase, async: true
+  use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
@@ -42,6 +42,7 @@ defmodule Stacks.UploadDbtTest do
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Workers.DbtRefreshHandler
   alias Stacks.Workers.DbtRefreshJob
+  alias Stacks.Workers.IdentifyBookJob
 
   # ---------------------------------------------------------------------------
   # Helpers
@@ -379,15 +380,26 @@ defmodule Stacks.UploadDbtTest do
 
     @tag stories: ["US-1.1.2"], suite: :dbt
     test "no books or editions created on ISBN rejection" do
-      book_count_before = Repo.aggregate(Book, :count)
-      edition_count_before = Repo.aggregate(BookEdition, :count)
+      book_count_before = Repo.aggregate(Book, :count, :id)
 
-      # Simulate rejection — only image record changes, no book/edition inserts
-      image = insert(:uploaded_image, status: "rejected", rejection_reason: "isbn_not_found")
+      user = insert(:user)
+      image = insert(:uploaded_image, status: "pending")
 
-      assert image.status == "rejected"
-      assert Repo.aggregate(Book, :count) == book_count_before
-      assert Repo.aggregate(BookEdition, :count) == edition_count_before
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
+
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => Base.encode64("fake image bytes for testing")
+        })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+
+      assert Repo.aggregate(Book, :count, :id) == book_count_before
     end
 
     @tag stories: ["US-1.1.2"], suite: :dbt
@@ -751,7 +763,7 @@ defmodule Stacks.UploadDbtTest do
     #   TEST_TARGET=deployed mix test --only deployed_only
     @moduletag :deployed_only
 
-    @tag stories: ["US-1.1.4"], suite: :dbt, deployed_only: true
+    @tag stories: ["US-1.1.4"], suite: :dbt
     test "stg_books view exposes book with correct visibility_tier" do
       {_user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
@@ -772,7 +784,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt, deployed_only: true
+    @tag stories: ["US-1.1.1"], suite: :dbt
     test "stg_book_editions view exposes edition with ISBN" do
       {_user, _book, edition, _author} = create_user_with_book()
 
@@ -792,7 +804,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt, deployed_only: true
+    @tag stories: ["US-1.1.2"], suite: :dbt
     test "stg_uploaded_images view exposes rejected image with reason" do
       image =
         insert(:uploaded_image, status: "rejected", rejection_reason: "isbn_not_found")
@@ -813,7 +825,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt, deployed_only: true
+    @tag stories: ["US-1.1.1"], suite: :dbt
     test "stg_bookshelf_placements view exposes placement with bookshelf_id" do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, placement} = Shelving.place_book(user.id, book.id, "antilibrary")
@@ -833,7 +845,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt, deployed_only: true
+    @tag stories: ["US-1.1.1"], suite: :dbt
     test "mart_community_read_count reflects placement after dbt refresh" do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
@@ -845,5 +857,24 @@ defmodule Stacks.UploadDbtTest do
       # In non-deployed, community_read_count returns 0 (graceful fallback)
       assert is_integer(count)
     end
+  end
+
+  defmodule NoIsbnClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("is_book", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
+
+    def call_vision("extract_isbn", _payload),
+      do: {:ok, %{"books" => [], "model_used" => "mock"}}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end

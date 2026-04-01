@@ -84,9 +84,9 @@ async function mockUploadAccept(page: Page) {
   await page.route("**/api/upload", (route) => {
     if (route.request().method() === "POST") {
       route.fulfill({
-        status: 200,
+        status: 202,
         contentType: "application/json",
-        body: JSON.stringify({ image_id: FAKE_IMAGE_ID }),
+        body: JSON.stringify({ status: "accepted", image_id: FAKE_IMAGE_ID }),
       });
     } else {
       route.continue();
@@ -171,6 +171,32 @@ async function mockPollRejected(page: Page) {
         is_duplicate: null,
       }),
     });
+  });
+}
+
+/** Mock GET /api/upload/:id/status to return HTTP 500. */
+async function mockPollServerError(page: Page) {
+  await page.route(`**/api/upload/*/status`, (route) => {
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Internal server error" }),
+    });
+  });
+}
+
+/** Mock GET /api/books/:id to return HTTP 500. */
+async function mockGetBookServerError(page: Page, bookId: string) {
+  await page.route(`**/api/books/${bookId}`, (route) => {
+    if (route.request().method() === "GET") {
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Internal server error" }),
+      });
+    } else {
+      route.continue();
+    }
   });
 }
 
@@ -368,7 +394,7 @@ async function triggerDragAndDrop(page: Page) {
 // HAPPY PATHS
 // ===========================================================================
 
-test.describe("Happy paths", () => {
+test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
   // US-1.1.1 | Suite 1: Playwright
   test("single photo drag-and-drop: drop -> processing -> verify -> shelf pick -> success", async ({
     page,
@@ -562,9 +588,9 @@ test.describe("Happy paths", () => {
 // SAD PATHS
 // ===========================================================================
 
-test.describe("Sad paths", () => {
+test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () => {
   // US-1.1.1 | Suite 1: Playwright
-  test("upload HTTP failure (500) -> error -> retry", async ({ page }) => {
+  test("upload HTTP failure (500) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
     await mockUploadFailure(page);
 
     await page.goto("/upload");
@@ -597,7 +623,7 @@ test.describe("Sad paths", () => {
   });
 
   // US-1.1.1 | Suite 1: Playwright
-  test("poll timeout -> Could Not Identify -> manual ISBN / retry", async ({
+  test("poll timeout -> Could Not Identify -> manual ISBN / retry", { tag: ["@US-1.1.1"] }, async ({
     page,
   }) => {
     // This test would take too long if we waited for 150 polls at 2s each.
@@ -639,7 +665,7 @@ test.describe("Sad paths", () => {
   });
 
   // US-1.1.2 | Suite 1: Playwright
-  test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", async ({
+  test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", { tag: ["@US-1.1.2"] }, async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -666,7 +692,7 @@ test.describe("Sad paths", () => {
   });
 
   // US-1.1.3 | Suite 1: Playwright
-  test("non-book rejection -> Doesn't Look Like a Book -> retry", async ({
+  test("non-book rejection -> Doesn't Look Like a Book -> retry", { tag: ["@US-1.1.3"] }, async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -690,7 +716,7 @@ test.describe("Sad paths", () => {
   });
 
   // US-1.1.1 | Suite 1: Playwright
-  test("placement API failure (422) -> error -> retry", async ({ page }) => {
+  test("placement API failure (422) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
     await mockGetBook(page);
@@ -733,7 +759,33 @@ test.describe("Sad paths", () => {
   });
 
   // US-1.1.1 | Suite 1: Playwright
-  test("unauthenticated -> shows auth gate or redirects", async ({
+  test("poll returns HTTP 500 -> IdentificationFailed error view shown -> retry available", { tag: ["@US-1.1.1"] }, async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollServerError(page);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    // Error view should appear with identification failure text
+    await expect(page.getByTestId("upload-error")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByTestId("upload-error")).toContainText(
+      "Could Not Identify"
+    );
+
+    // Retry options should be available
+    await expect(
+      page
+        .getByRole("button", { name: /Try Another Photo/ })
+        .or(page.getByRole("button", { name: /Try Again/ }))
+    ).toBeVisible();
+  });
+
+  // US-1.1.1 | Suite 1: Playwright
+  test("unauthenticated -> shows auth gate or redirects", { tag: ["@US-1.1.1"] }, async ({
     browser,
     baseURL,
   }) => {
@@ -763,7 +815,7 @@ test.describe("Sad paths", () => {
 // MANUAL ISBN ENTRY (US-1.1.5)
 // ===========================================================================
 
-test.describe("Manual ISBN entry", () => {
+test.describe("Manual ISBN entry", { tag: ["@US-1.1.5"] }, () => {
   // US-1.1.5 | Suite 1: Playwright
   test("invalid ISBN -> error message", async ({ page }) => {
     await page.goto("/upload");
@@ -914,7 +966,7 @@ test.describe("Manual ISBN entry", () => {
 // DUPLICATE DETECTION (US-1.1.6)
 // ===========================================================================
 
-test.describe("Duplicate detection", () => {
+test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
   async function setupDuplicateFlow(page: Page) {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -985,6 +1037,26 @@ test.describe("Duplicate detection", () => {
   });
 
   // US-1.1.6 | Suite 1: Playwright
+  test("duplicate detection — GET /api/books/:id returns 500 -> error view shown", async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollResolved(page, { isDuplicate: true, bookId: FAKE_BOOK_ID });
+    await mockGetBookServerError(page, FAKE_BOOK_ID);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    // Error view should appear — not the "Already in Your Library" duplicate view
+    await expect(page.getByTestId("upload-error")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByText("Already in Your Library")
+    ).not.toBeVisible();
+  });
+
+  // US-1.1.6 | Suite 1: Playwright
   test("'View Book' links to book detail", async ({ page }) => {
     await setupDuplicateFlow(page);
 
@@ -1002,7 +1074,7 @@ test.describe("Duplicate detection", () => {
 // MULTI-FORMAT MERGE (US-1.1.8)
 // ===========================================================================
 
-test.describe("Multi-format merge", () => {
+test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
   // US-1.1.8 | Suite 1: Playwright
   test("merge success shows edition count", async ({ page }) => {
     await mockUploadAccept(page);
@@ -1072,7 +1144,35 @@ test.describe("Multi-format merge", () => {
 // MULTI-BOOK (US-1.1.7)
 // ===========================================================================
 
-test.describe("Multi-book extraction", () => {
+test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
+  // US-1.1.7 | Suite 1: Playwright
+  test("multi-book: one book returns 500 -> remaining books still shown", async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollResolved(page, {
+      bookIds: [FAKE_BOOK_ID, FAKE_BOOK_ID_2, FAKE_BOOK_ID_3],
+    });
+    await mockGetBook(page, FAKE_BOOK_ID, fakeBook());
+    await mockGetBook(page, FAKE_BOOK_ID_2, fakeBook2());
+    await mockGetBookServerError(page, FAKE_BOOK_ID_3);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    // Wait for the multi-book view to appear
+    await expect(page.getByText("Books Identified!")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The two successful book titles should be visible
+    await expect(page.getByText("The Name of the Rose")).toBeVisible();
+    await expect(page.getByText("Foucault's Pendulum")).toBeVisible();
+
+    // The page should not show a full error state — partial failure is handled gracefully
+    await expect(page.getByTestId("upload-error")).not.toBeVisible();
+  });
+
   // US-1.1.7 | Suite 1: Playwright
   test("multiple books rendered in verification view", async ({ page }) => {
     await mockUploadAccept(page);
@@ -1106,7 +1206,7 @@ test.describe("Multi-book extraction", () => {
 // AGE-GATED CONTENT (US-1.1.4)
 // ===========================================================================
 
-test.describe("Age-gated content (US-1.1.4)", () => {
+test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
   // US-1.1.4 | Suite 1: Playwright
   test("age-gated book flows through upload normally — gating happens on book detail", async ({
     page,
@@ -1173,7 +1273,7 @@ test.describe("Age-gated content (US-1.1.4)", () => {
 // ARIA / ACCESSIBILITY
 // ===========================================================================
 
-test.describe("ARIA and accessibility", () => {
+test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
   // US-1.1.1 | Suite 1: Playwright
   test("aria-live='polite' on status region", async ({ page }) => {
     await page.goto("/upload");

@@ -6,6 +6,7 @@ defmodule Stacks.BooksTest do
 
   alias Core.Repo
   alias Stacks.Books
+  alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
 
@@ -398,9 +399,21 @@ defmodule Stacks.BooksTest do
             "number_of_pages" => 180,
             "subjects" => [],
             "key" => "/works/OL468431W"
+          },
+          "ISBN:9780316769174" => %{
+            "title" => "The Catcher in the Rye",
+            "authors" => [%{"name" => "J.D. Salinger"}],
+            "publish_date" => "1951",
+            "number_of_pages" => 277,
+            "subjects" => [],
+            "key" => "/works/OL15290W"
           }
         }
       })
+
+      original_http = Application.get_env(:core, :isbn_http_client)
+      Application.put_env(:core, :isbn_http_client, MockHttpClient)
+      on_exit(fn -> Application.put_env(:core, :isbn_http_client, original_http) end)
 
       :ok
     end
@@ -441,6 +454,31 @@ defmodule Stacks.BooksTest do
       Books.merge_edition(book.id, %{isbn: "9780451524935", format_label: "Paperback"})
 
       assert event_count("books.edition_merged") == before_count + 1
+    end
+
+    @tag stories: ["US-1.1.8"], suite: :events
+    test "books.edition_merged event aggregate_id matches the new edition's id" do
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+
+      assert {:ok, %BookEdition{} = edition} =
+               Books.merge_edition(book.id, %{isbn: "9780316769174", format_label: "Paperback"})
+
+      events =
+        Repo.all(
+          from(e in "event_log",
+            prefix: "op",
+            where: e.event_type == "books.edition_merged",
+            order_by: [desc: e.occurred_at],
+            limit: 1,
+            select: %{aggregate_id: e.aggregate_id}
+          )
+        )
+
+      assert [%{aggregate_id: raw_id}] = events
+
+      {:ok, event_aggregate_id} = Ecto.UUID.load(raw_id)
+      assert event_aggregate_id == edition.id
     end
   end
 
@@ -549,6 +587,74 @@ defmodule Stacks.BooksTest do
       }
 
       assert {:error, _reason} = Books.store_upload(user.id, upload)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Gap 2 — Books.create_from_isbn/1 (US-1.1.5 new-book path)
+  # ---------------------------------------------------------------------------
+
+  describe "create_from_isbn/1" do
+    setup do
+      original_http = Application.get_env(:core, :isbn_http_client)
+      Application.put_env(:core, :isbn_http_client, MockHttpClient)
+      on_exit(fn -> Application.put_env(:core, :isbn_http_client, original_http) end)
+      :ok
+    end
+
+    test "returns {:ok, book} with correct title/author/edition when Open Library resolves ISBN" do
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780743273565" => %{
+             "title" => "The Great Gatsby",
+             "authors" => [%{"name" => "F. Scott Fitzgerald"}],
+             "publish_date" => "1925",
+             "number_of_pages" => 180,
+             "subjects" => ["American fiction"],
+             "key" => "/works/OL468431W"
+           }
+         }}
+      )
+
+      assert {:ok, book} = Books.create_from_isbn("9780743273565")
+      assert book.title == "The Great Gatsby"
+      assert [edition] = book.editions
+      assert edition.isbn == "9780743273565"
+    end
+
+    test "returns {:error, :not_found} when both Open Library and Google Books return 404" do
+      # MockHttpClient returns {:ok, %{}} for unmatched URLs (empty body = not found)
+      # Both openlibrary.org and googleapis.com will get an empty response here.
+      # ISBNResolver treats an empty body as not found and falls through to {:error, :not_found}.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, _} = Books.create_from_isbn("9780743273565")
+    end
+
+    test "emits book.created event when create_from_isbn succeeds" do
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780451524935" => %{
+             "title" => "Nineteen Eighty-Four",
+             "authors" => [%{"name" => "George Orwell"}],
+             "publish_date" => "1949",
+             "number_of_pages" => 328,
+             "subjects" => ["Dystopian fiction"],
+             "key" => "/works/OL1168007W"
+           }
+         }}
+      )
+
+      before_count = event_count("book.created")
+
+      assert {:ok, _book} = Books.create_from_isbn("9780451524935")
+
+      assert event_count("book.created") == before_count + 1
     end
   end
 

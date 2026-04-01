@@ -24,6 +24,27 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:ok, _} = BookDetailCache.get(id2)
   end
 
+  @tag stories: ["US-1.1.7"], suite: :cache
+  test "two book.created events each invalidate their own cache entry", %{id1: id1, id2: id2} do
+    # Both primed in setup already
+    assert {:ok, _} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
+
+    # Invalidate id1 only
+    event1 = %{event_type: "book.created", aggregate_id: id1, payload: %{}}
+    assert :ok = CacheInvalidationHandler.handle_event(event1)
+
+    # id1 gone, id2 still present
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
+
+    # Now invalidate id2
+    event2 = %{event_type: "book.created", aggregate_id: id2, payload: %{}}
+    assert :ok = CacheInvalidationHandler.handle_event(event2)
+
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+  end
+
   test "invalidates cache on book.cover_confirmed", %{id1: _id1, id2: id2} do
     event = %{event_type: "book.cover_confirmed", aggregate_id: id2, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event)

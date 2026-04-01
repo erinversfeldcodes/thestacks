@@ -1,3 +1,32 @@
+defmodule Stacks.UploadTelemetryTest.FailingHandler do
+  @behaviour Stacks.Events.Handler
+  def handle_event(_event), do: {:error, :test_induced_failure}
+end
+
+defmodule Stacks.UploadTelemetryTest.RaisingHandler do
+  @behaviour Stacks.Events.Handler
+  def handle_event(_event), do: raise("test-induced crash")
+end
+
+defmodule Stacks.UploadTelemetryTest.NoIsbnClient do
+  @moduledoc false
+  @behaviour Stacks.AI.ClientBehaviour
+  @impl true
+  def call_vision("is_book", _payload),
+    do:
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
+         "model_used" => "mock"
+       }}
+
+  def call_vision("extract_isbn", _payload),
+    do: {:ok, %{"books" => [], "model_used" => "mock"}}
+
+  def call_vision(_endpoint, _payload), do: {:ok, %{}}
+end
+
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
   Suite 11 — Metrics & Telemetry tests for the upload pipeline (Issue #111).
@@ -97,14 +126,22 @@ defmodule Stacks.UploadTelemetryTest do
   # ============================================================================
 
   describe "Suite 11 — handler_error telemetry from SubscriberWorker" do
+    # Use a test-only event type wired to deterministic failing handlers via
+    # Application.put_env so we don't rely on production handlers returning errors.
+    setup do
+      on_exit(fn -> Application.delete_env(:core, :test_handler_overrides) end)
+      :ok
+    end
+
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "emits [:stacks, :events, :handler_error] when handler returns {:error, reason}",
          %{user: user} do
       attach_telemetry([:stacks, :events, :handler_error])
 
-      # Insert a raw event into event_log with a broken payload. The registered
-      # "book.created" handlers (BookCreatedHandler, AuthorDiscoveryHandler) will
-      # fail when they try to process it, triggering handler_error telemetry.
+      Application.put_env(:core, :test_handler_overrides, %{
+        "test.returns_error" => [Stacks.UploadTelemetryTest.FailingHandler]
+      })
+
       event_id = Ecto.UUID.generate()
 
       Core.Repo.insert_all(
@@ -112,49 +149,11 @@ defmodule Stacks.UploadTelemetryTest do
         [
           %{
             id: elem(Ecto.UUID.dump(event_id), 1),
-            event_type: "book.created",
-            aggregate_type: "book",
+            event_type: "test.returns_error",
+            aggregate_type: "test",
             aggregate_id: elem(Ecto.UUID.dump(user.id), 1),
             schema_version: 1,
-            payload: %{"deliberately" => "broken_payload"},
-            metadata: %{},
-            occurred_at: DateTime.utc_now()
-          }
-        ],
-        prefix: "op"
-      )
-
-      # Run the SubscriberWorker to dispatch this event to the registered handlers.
-      # The BookCreatedHandler / AuthorDiscoveryHandler should fail on the broken
-      # payload and trigger handler_error telemetry.
-      perform_job(SubscriberWorker, %{"event_id" => event_id})
-
-      # If a handler returns {:error, reason} or raises, telemetry fires
-      assert_receive {:telemetry, [:stacks, :events, :handler_error], %{count: 1}, metadata},
-                     2_000
-
-      assert is_binary(metadata.handler)
-      assert metadata.event_type == "book.created"
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "emits [:stacks, :events, :handler_error] when handler raises", %{user: _user} do
-      attach_telemetry([:stacks, :events, :handler_error])
-
-      # Insert an event with a type that has handlers, using a payload missing
-      # required fields to provoke a crash in handler code.
-      event_id = Ecto.UUID.generate()
-
-      Core.Repo.insert_all(
-        "event_log",
-        [
-          %{
-            id: elem(Ecto.UUID.dump(event_id), 1),
-            event_type: "book.created",
-            aggregate_type: "book",
-            aggregate_id: elem(Ecto.UUID.dump(Ecto.UUID.generate()), 1),
-            schema_version: 1,
-            payload: %{"missing_all_fields" => true},
+            payload: %{},
             metadata: %{},
             occurred_at: DateTime.utc_now()
           }
@@ -168,12 +167,16 @@ defmodule Stacks.UploadTelemetryTest do
                      2_000
 
       assert is_binary(metadata.handler)
-      assert metadata.event_type == "book.created"
+      assert metadata.event_type == "test.returns_error"
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "handler_error metadata includes handler name and event_type" do
+    test "emits [:stacks, :events, :handler_error] when handler raises", %{user: user} do
       attach_telemetry([:stacks, :events, :handler_error])
+
+      Application.put_env(:core, :test_handler_overrides, %{
+        "test.raises" => [Stacks.UploadTelemetryTest.RaisingHandler]
+      })
 
       event_id = Ecto.UUID.generate()
 
@@ -182,11 +185,47 @@ defmodule Stacks.UploadTelemetryTest do
         [
           %{
             id: elem(Ecto.UUID.dump(event_id), 1),
-            event_type: "book.created",
-            aggregate_type: "book",
-            aggregate_id: elem(Ecto.UUID.dump(Ecto.UUID.generate()), 1),
+            event_type: "test.raises",
+            aggregate_type: "test",
+            aggregate_id: elem(Ecto.UUID.dump(user.id), 1),
             schema_version: 1,
-            payload: %{"corrupt" => true},
+            payload: %{},
+            metadata: %{},
+            occurred_at: DateTime.utc_now()
+          }
+        ],
+        prefix: "op"
+      )
+
+      perform_job(SubscriberWorker, %{"event_id" => event_id})
+
+      assert_receive {:telemetry, [:stacks, :events, :handler_error], %{count: 1}, metadata},
+                     2_000
+
+      assert is_binary(metadata.handler)
+      assert metadata.event_type == "test.raises"
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :telemetry
+    test "handler_error metadata includes handler name and event_type", %{user: user} do
+      attach_telemetry([:stacks, :events, :handler_error])
+
+      Application.put_env(:core, :test_handler_overrides, %{
+        "test.metadata_check" => [Stacks.UploadTelemetryTest.FailingHandler]
+      })
+
+      event_id = Ecto.UUID.generate()
+
+      Core.Repo.insert_all(
+        "event_log",
+        [
+          %{
+            id: elem(Ecto.UUID.dump(event_id), 1),
+            event_type: "test.metadata_check",
+            aggregate_type: "test",
+            aggregate_id: elem(Ecto.UUID.dump(user.id), 1),
+            schema_version: 1,
+            payload: %{},
             metadata: %{},
             occurred_at: DateTime.utc_now()
           }
@@ -200,10 +239,8 @@ defmodule Stacks.UploadTelemetryTest do
                      2_000
 
       assert measurements == %{count: 1}
-      assert metadata.event_type == "book.created"
-
-      # Handler name should be an inspect-ed module name
-      assert metadata.handler =~ "Handler"
+      assert metadata.event_type == "test.metadata_check"
+      assert metadata.handler =~ "FailingHandler"
     end
   end
 
@@ -309,6 +346,40 @@ defmodule Stacks.UploadTelemetryTest do
       Oban.drain_queue(queue: :vision)
 
       # The job will either stop or get an exception; either way telemetry fires
+      assert_receive {:telemetry, [:oban, :job, :stop], measurements, metadata}, 5_000
+      assert metadata.job.worker == "Stacks.Workers.IdentifyBookJob"
+      assert is_integer(measurements.duration)
+    end
+
+    @tag stories: ["US-1.1.2"], suite: :telemetry
+    test "[:oban, :job, :stop] fires for IdentifyBookJob cancellation (isbn_not_found — US-1.1.2)",
+         %{user: user} do
+      attach_telemetry_filtered(
+        [:oban, :job, :stop],
+        &(&1.job.worker == "Stacks.Workers.IdentifyBookJob")
+      )
+
+      image = insert(:uploaded_image, status: "pending")
+
+      original = Application.get_env(:core, :vision_client)
+
+      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+
+      Application.put_env(:core, :vision_client, Stacks.UploadTelemetryTest.NoIsbnClient)
+
+      # NoIsbnClient classifies the image as a book but returns no ISBNs,
+      # causing IdentifyBookJob to return {:cancel, "isbn_not_found"}.
+      {:ok, _job} =
+        Oban.insert(
+          IdentifyBookJob.new(%{
+            "user_id" => user.id,
+            "image_id" => image.id,
+            "image_b64" => @image_b64
+          })
+        )
+
+      Oban.drain_queue(queue: :vision)
+
       assert_receive {:telemetry, [:oban, :job, :stop], measurements, metadata}, 5_000
       assert metadata.job.worker == "Stacks.Workers.IdentifyBookJob"
       assert is_integer(measurements.duration)
@@ -1013,18 +1084,24 @@ defmodule Stacks.UploadTelemetryTest do
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "AI.Client returns {:error, :circuit_open} when fuse is blown" do
-      # Install fuse if not already present, then blow it
-      :fuse.install(:vision_service, {{:standard, 1, 1_000}, {:reset, 60_000}})
-      :fuse.melt(:vision_service)
-      :fuse.melt(:vision_service)
+      # Force the real client (not mock) so the fuse check in do_call_vision runs.
+      original = Application.get_env(:core, :vision_client)
+      Application.put_env(:core, :vision_client, Stacks.AI.Client)
+      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
 
-      # The real client (not mock) checks fuse state before making requests
-      result = Client.do_call_vision("extract_isbn", %{image_b64: "test"})
+      # Reinstall :vision_fuse with a low threshold, then blow it.
+      # :vision_fuse is the name used by AI.Client (@fuse_name).
+      :fuse.reset(:vision_fuse)
+      :fuse.install(:vision_fuse, {{:standard, 1, 1_000}, {:reset, 60_000}})
+      :fuse.melt(:vision_fuse)
+      :fuse.melt(:vision_fuse)
+
+      result = Client.call_vision("extract_isbn", %{image_b64: "test"})
 
       assert result == {:error, :circuit_open}
 
-      # Reset the fuse so other tests aren't affected
-      :fuse.reset(:vision_service)
+      # Reset so other tests aren't affected
+      :fuse.reset(:vision_fuse)
     end
   end
 
