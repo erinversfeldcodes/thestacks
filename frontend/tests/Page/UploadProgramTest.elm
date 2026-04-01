@@ -9,10 +9,9 @@ simulated user interactions and HTTP responses.
 
 import Api exposing (PollStatus(..))
 import Dict
-import Expect
 import Http
 import Json.Encode as Encode
-import Page.Upload as Upload exposing (Msg(..), UploadResult(..))
+import Page.Upload as Upload exposing (Msg(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
@@ -413,10 +412,3 @@ uploadDragOver =
                 |> ProgramTest.update DragOver
                 |> ProgramTest.expectViewHas
                     [ Selector.class "upload-area--dragging" ]
-
-
-{-| Helper for model assertions inside expectModel.
--}
-expectEqual : a -> a -> Expect.Expectation
-expectEqual expected actual =
-    actual |> Expect.equal expected
