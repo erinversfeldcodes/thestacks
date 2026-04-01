@@ -8,13 +8,15 @@ simulated user interactions and HTTP responses.
 -}
 
 import Api exposing (PollStatus(..))
+import Dict
 import Expect
 import Http
+import Json.Encode as Encode
 import Page.Upload as Upload exposing (Msg(..), UploadResult(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (simulateBookResponse, simulatePollResponse, uploadProgram)
+import TestHelpers exposing (simulateBookResponse, simulateMergeFormatResponse, simulatePollResponse, uploadProgram)
 
 
 {-| Helper to start an upload program with an auth token.
@@ -22,6 +24,68 @@ import TestHelpers exposing (simulateBookResponse, simulatePollResponse, uploadP
 startUpload : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUpload =
     ProgramTest.start () (uploadProgram (Just "test-token"))
+
+
+{-| Build a poll response that resolves with multiple book IDs.
+-}
+simulateMultiBookPollResponse : List String -> Http.Response String
+simulateMultiBookPollResponse bookIds =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "image_id", Encode.string "img-test-001" )
+                    , ( "status", Encode.string "resolved" )
+                    , ( "is_duplicate", Encode.bool False )
+                    , ( "book_ids", Encode.list Encode.string bookIds )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/upload/img-test-001/status"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| Build a book HTTP response with a specific edition count.
+Allows testing edition count logic after merge.
+-}
+simulateBookWithEditionCount : String -> String -> String -> Int -> Http.Response String
+simulateBookWithEditionCount bookId title authorName editionCount =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book"
+                      , Encode.object
+                            [ ( "id", Encode.string bookId )
+                            , ( "title", Encode.string title )
+                            , ( "author"
+                              , Encode.object
+                                    [ ( "id", Encode.string "author-1" )
+                                    , ( "name", Encode.string authorName )
+                                    ]
+                              )
+                            , ( "editions", Encode.list identity [] )
+                            , ( "edition_count", Encode.int editionCount )
+                            , ( "subjects", Encode.list Encode.string [] )
+                            , ( "visibility_tier", Encode.string "public" )
+                            ]
+                      )
+                    , ( "placement", Encode.null )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
 
 
 {-| Simulate a file being selected and upload accepted.
@@ -43,9 +107,13 @@ suite =
         , uploadIsbnRejection
         , uploadNotABook
         , uploadPollTimeout
+        , uploadPollTimeoutViaLimit
         , uploadDuplicateDetected
         , uploadManualIsbnEntry
         , uploadManualIsbnValidation
+        , uploadMultiBook
+        , uploadMergeFormatSuccess
+        , uploadMergeFormatFailure
         , uploadReset
         , uploadDragOver
         ]
@@ -136,6 +204,46 @@ uploadPollTimeout =
                     [ Selector.text "Could Not Identify Book" ]
 
 
+uploadPollTimeoutViaLimit : Test
+uploadPollTimeoutViaLimit =
+    test "upload_poll_timeout_via_limit: CheckStatus guard pollCount >= maxPollCount -> IdentificationFailed without HTTP error" <|
+        \() ->
+            let
+                -- After 3 real poll cycles pollCount == 3. We need pollCount == 150 to
+                -- trigger the CheckStatus guard (pollCount >= maxPollCount). Send
+                -- CheckStatus directly 147 more times to reach pollCount 150, then one
+                -- final CheckStatus hits the >= guard and sets result = IdentificationFailed.
+                --
+                -- Each intermediate CheckStatus issues a simulated HTTP request that is
+                -- never responded to (uploadEffects returns Cmd.none once pollCount >= 150,
+                -- and the terminal expectViewHas does not require pending effects to be
+                -- handled). This path exercises the real timeout guard in CheckStatus,
+                -- NOT the error handler in StatusReceived.
+                sendCheckStatusTimes n pt =
+                    List.foldl (\_ acc -> ProgramTest.update CheckStatus acc) pt (List.repeat n ())
+
+                advanceAndRespondPending pt =
+                    pt
+                        |> ProgramTest.advanceTime 2000
+                        |> ProgramTest.simulateHttpResponse "GET"
+                            "/api/upload/img-test-001/status"
+                            (simulatePollResponse Pending Nothing False)
+            in
+            startUpload
+                |> simulateUploadAccepted
+                -- 3 real poll cycles: pollCount reaches 3, confirming the polling path works
+                |> advanceAndRespondPending
+                |> advanceAndRespondPending
+                |> advanceAndRespondPending
+                -- Advance pollCount from 3 to 150 via direct CheckStatus messages (147 calls).
+                -- Each call increments pollCount by 1 and queues an HTTP request we ignore.
+                |> sendCheckStatusTimes 147
+                -- pollCount is now 150; this final CheckStatus fires the >= maxPollCount guard.
+                |> ProgramTest.update CheckStatus
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Could Not Identify Book" ]
+
+
 uploadDuplicateDetected : Test
 uploadDuplicateDetected =
     test "upload_duplicate_detected: poll returns isDuplicate=True -> shows duplicate card with shelf selector" <|
@@ -159,7 +267,7 @@ uploadDuplicateDetected =
 
 uploadManualIsbnEntry : Test
 uploadManualIsbnEntry =
-    test "upload_manual_isbn_entry: click manual mode -> enter valid ISBN -> submit -> shows ManualISBNEntry state" <|
+    test "upload_manual_isbn_entry: click manual mode -> enter valid ISBN -> submit -> mock lookup response -> verify step shows book title" <|
         \() ->
             startUpload
                 |> ProgramTest.clickButton "Enter ISBN manually instead"
@@ -167,11 +275,97 @@ uploadManualIsbnEntry =
                     [ Selector.text "Enter ISBN Manually" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "isbn-input" ]
-                -- Send a valid ISBN-13 via update (ISBNInput lacks label/id for fillIn)
                 |> ProgramTest.update (ManualIsbnChanged "9780141988511")
                 |> ProgramTest.update SubmitManualIsbn
-                |> ProgramTest.expectModel
-                    (\model -> model.result |> expectEqual ManualISBNEntry)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/isbn/9780141988511"
+                    (simulateBookResponse "book-isbn-1" "Crime and Punishment" "Fyodor Dostoevsky")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "We think this is…" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Crime and Punishment" ]
+
+
+uploadMultiBook : Test
+uploadMultiBook =
+    test "upload_multi_book: poll resolves with 3 bookIds -> fetch all 3 books -> shows Books Identified! and all titles" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.advanceTime 2000
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/upload/img-test-001/status"
+                    (simulateMultiBookPollResponse [ "book-a", "book-b", "book-c" ])
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-a"
+                    (simulateBookResponse "book-a" "First Book" "Author One")
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-b"
+                    (simulateBookResponse "book-b" "Second Book" "Author Two")
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-c"
+                    (simulateBookResponse "book-c" "Third Book" "Author Three")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Books Identified!" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "First Book" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Second Book" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Third Book" ]
+
+
+uploadMergeFormatSuccess : Test
+uploadMergeFormatSuccess =
+    test "upload_merge_format_success: duplicate detected -> click Yes merge -> mock 200 response -> shows edition count" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.advanceTime 2000
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/upload/img-test-001/status"
+                    (simulatePollResponse Resolved (Just "book-1") True)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookWithEditionCount "book-1" "Duplicate Book" "Dupe Author" 1)
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Already in Your Library" ]
+                |> ProgramTest.clickButton "Yes, merge"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/book-1/merge-format"
+                    (simulateMergeFormatResponse "book-1" "edition-new-1" "9780141988511" "Hardback")
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "2 editions" ]
+
+
+uploadMergeFormatFailure : Test
+uploadMergeFormatFailure =
+    test "upload_merge_format_failure: duplicate detected -> click Yes merge -> mock 500 response -> shows merge failed" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.advanceTime 2000
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/upload/img-test-001/status"
+                    (simulatePollResponse Resolved (Just "book-1") True)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Duplicate Book" "Dupe Author")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Already in Your Library" ]
+                |> ProgramTest.clickButton "Yes, merge"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/book-1/merge-format"
+                    (Http.BadStatus_
+                        { url = "/api/books/book-1/merge-format"
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Merge failed" ]
 
 
 uploadManualIsbnValidation : Test

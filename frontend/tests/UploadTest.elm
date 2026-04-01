@@ -117,6 +117,10 @@ dummyPlacement =
     , personalRating = Nothing
     , notes = Nothing
     , bookshelfName = Nothing
+    , readingStatus = Nothing
+    , currentPage = Nothing
+    , startedAt = Nothing
+    , finishedAt = Nothing
     }
 
 
@@ -207,10 +211,21 @@ suite =
               test "Rejected sets result to IdentificationFailed" <|
                 \_ ->
                     let
+                        withPending =
+                            { init_
+                                | pendingBookIds = [ "book-1" ]
+                                , collectedBooks = [ dummyBook ]
+                            }
+
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok rejectedPoll)) Upload.init (Just "tok")
+                            Upload.update (StatusReceived (Ok rejectedPoll)) withPending (Just "tok")
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal IdentificationFailed
+                        , \m -> m.pendingBookIds |> Expect.equal [ "book-1" ]
+                        , \m -> m.collectedBooks |> Expect.equal [ dummyBook ]
+                        ]
+                        model
             , -- US-1.1.3 | Suite 10: Elm
               test "Resolved without bookId sets result to NotABook" <|
                 \_ ->
@@ -242,6 +257,40 @@ suite =
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Err Http.NetworkError)) Upload.init (Just "tok")
+                    in
+                    model.result |> Expect.equal IdentificationFailed
+            , -- US-1.1.2 | Suite 10: Elm
+              test "Http error during rejected poll sets result to IdentificationFailed" <|
+                \_ ->
+                    let
+                        polling =
+                            { init_
+                                | uploadState = Success "img-1"
+                                , pendingBookIds = [ "book-1" ]
+                                , collectedBooks = []
+                            }
+
+                        ( model, _, _ ) =
+                            Upload.update (StatusReceived (Err Http.NetworkError)) polling (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal IdentificationFailed
+                        , \m -> m.pendingBookIds |> Expect.equal [ "book-1" ]
+                        ]
+                        model
+            , -- US-1.1.3 | Suite 10: Elm
+              test "Http error when expecting not-a-book sets result to IdentificationFailed" <|
+                \_ ->
+                    let
+                        polling =
+                            { init_
+                                | uploadState = Success "img-1"
+                                , pendingBookIds = []
+                                , collectedBooks = []
+                            }
+
+                        ( model, _, _ ) =
+                            Upload.update (StatusReceived (Err Http.NetworkError)) polling (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
             ]
