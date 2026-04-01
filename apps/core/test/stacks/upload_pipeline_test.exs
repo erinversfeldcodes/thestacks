@@ -211,8 +211,12 @@ defmodule Stacks.UploadPipelineTest do
 
   describe "Suite 2 — GET /api/upload/:image_id/status" do
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns pending status for a new uploaded image", %{conn: conn, token: token} do
-      image = insert(:uploaded_image, status: "pending")
+    test "returns pending status for a new uploaded image", %{
+      conn: conn,
+      token: token,
+      user: user
+    } do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn =
         conn
@@ -223,12 +227,18 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns resolved status with book_ids", %{conn: conn, token: token, book: book} do
+    test "returns resolved status with book_ids", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
       image =
         insert(:uploaded_image,
           status: "resolved",
           book_id: book.id,
-          book_ids: [book.id]
+          book_ids: [book.id],
+          user_id: user.id
         )
 
       conn =
@@ -243,11 +253,12 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.3"], suite: :api
-    test "returns rejected status with rejection_reason", %{conn: conn, token: token} do
+    test "returns rejected status with rejection_reason", %{conn: conn, token: token, user: user} do
       image =
         insert(:uploaded_image,
           status: "rejected",
-          rejection_reason: "not_a_book"
+          rejection_reason: "not_a_book",
+          user_id: user.id
         )
 
       conn =
@@ -296,7 +307,8 @@ defmodule Stacks.UploadPipelineTest do
         insert(:uploaded_image,
           status: "resolved",
           book_id: book.id,
-          book_ids: [book.id]
+          book_ids: [book.id],
+          user_id: user.id
         )
 
       conn =
@@ -311,7 +323,8 @@ defmodule Stacks.UploadPipelineTest do
     @tag stories: ["US-1.1.7"], suite: :api
     test "returns multiple book_ids for multi-book resolution (US-1.1.7)", %{
       conn: conn,
-      token: token
+      token: token,
+      user: user
     } do
       book1 = insert(:book, title: "Multi Book 1")
       book2 = insert(:book, title: "Multi Book 2")
@@ -321,7 +334,8 @@ defmodule Stacks.UploadPipelineTest do
         insert(:uploaded_image,
           status: "resolved",
           book_id: book1.id,
-          book_ids: [book1.id, book2.id, book3.id]
+          book_ids: [book1.id, book2.id, book3.id],
+          user_id: user.id
         )
 
       conn =
@@ -338,43 +352,10 @@ defmodule Stacks.UploadPipelineTest do
       assert book3.id in resp["book_ids"]
     end
 
-    # P1 #2 — Status endpoint does NOT enforce ownership (uploaded_images has
-    # no user_id column). Any authenticated user can poll any image_id.
-    # Gap: uploaded_images needs user_id column + filter in UploadController.status/2
-    # to prevent information leakage. Tracked as a follow-up.
     @tag stories: ["US-1.1.1"], suite: :api
-    test "status endpoint returns image data to any authenticated user (no ownership check)", %{
-      conn: conn,
-      book: book
-    } do
-      user_b = insert(:user)
-      {:ok, token_b, _} = Guardian.encode_and_sign(user_b)
-
-      image =
-        insert(:uploaded_image,
-          status: "resolved",
-          book_id: book.id,
-          book_ids: [book.id]
-        )
-
-      conn =
-        conn
-        |> auth_conn(token_b)
-        |> get("/api/upload/#{image.id}/status")
-
-      # Currently returns 200 for any authenticated user — ownership not enforced.
-      assert %{"status" => "resolved"} = json_response(conn, 200)
-    end
-
-    # Gap 3 — US-1.1.1 security: explicit documentation of the ownership gap.
-    # uploaded_images has no user_id column, so the status endpoint cannot reject
-    # requests from non-owners. This test canonises the current broken behaviour
-    # so the gap is visible in CI and traceable in history.
-    @tag :security_gap
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "status endpoint should reject requests from non-owners (currently NOT enforced — ownership gap)",
+    test "status endpoint returns 403 for non-owner of the image",
          %{conn: conn, book: book} do
-      # Create a second user who does not own the image
+      owner = insert(:user)
       other_user = insert(:user)
       {:ok, other_token, _} = Guardian.encode_and_sign(other_user)
 
@@ -382,7 +363,8 @@ defmodule Stacks.UploadPipelineTest do
         insert(:uploaded_image,
           status: "resolved",
           book_id: book.id,
-          book_ids: [book.id]
+          book_ids: [book.id],
+          user_id: owner.id
         )
 
       response =
@@ -390,10 +372,7 @@ defmodule Stacks.UploadPipelineTest do
         |> auth_conn(other_token)
         |> get("/api/upload/#{image.id}/status")
 
-      # Currently returns 200 — ownership not enforced (uploaded_images has no user_id column).
-      # When fixed: UploadController.status/2 should filter by owner and return 403/404.
-      # Change this assertion to `assert json_response(response, 403)` once the gap is closed.
-      assert json_response(response, 200)
+      assert json_response(response, 403)
     end
 
     @tag stories: ["US-1.1.1"], suite: :api

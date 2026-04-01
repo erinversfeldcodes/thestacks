@@ -83,6 +83,9 @@ defmodule StacksWeb.UploadController do
   end
 
   defp render_status(conn, image_id) do
+    user = Guardian.Plug.current_resource(conn)
+    requester_id = user.id
+
     result =
       from(i in UploadedImage,
         where: i.id == ^image_id,
@@ -90,7 +93,8 @@ defmodule StacksWeb.UploadController do
           status: i.status,
           book_id: i.book_id,
           book_ids: i.book_ids,
-          rejection_reason: i.rejection_reason
+          rejection_reason: i.rejection_reason,
+          user_id: i.user_id
         }
       )
       |> Repo.one()
@@ -98,6 +102,9 @@ defmodule StacksWeb.UploadController do
     case result do
       nil ->
         conn |> put_status(404) |> json(%{error: "not found"})
+
+      %{user_id: owner_id} when not is_nil(owner_id) and owner_id != requester_id ->
+        conn |> put_status(403) |> json(%{error: "forbidden"})
 
       %{
         status: status,

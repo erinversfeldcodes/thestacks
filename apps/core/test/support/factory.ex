@@ -116,7 +116,8 @@ defmodule Stacks.Factory do
     %UploadedImage{
       status: "pending",
       uploaded_at: DateTime.utc_now(),
-      expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      expires_at: DateTime.add(DateTime.utc_now(), 30, :day),
+      user_id: Ecto.UUID.generate()
     }
   end
 
