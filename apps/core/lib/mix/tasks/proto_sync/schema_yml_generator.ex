@@ -252,6 +252,11 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   defp render_test(:not_null), do: "          - not_null"
   defp render_test(:unique), do: "          - unique"
 
+  defp render_test({:not_null, where}) when is_binary(where) do
+    "          - not_null:\n" <>
+      "              where: \"#{where}\""
+  end
+
   defp render_test({:relationships, ref_model}) do
     "          - relationships:\n" <>
       "              arguments:\n" <>

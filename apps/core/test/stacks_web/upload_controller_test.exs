@@ -137,14 +137,18 @@ defmodule StacksWeb.UploadControllerTest do
       assert json_response(conn, 401)
     end
 
-    test "returns book_ids for a resolved image with book_ids populated", %{conn: conn} do
+    test "returns book_ids for a resolved image with book_ids populated", %{
+      conn: conn,
+      user: user
+    } do
       book = insert(:book)
 
       image =
         insert(:uploaded_image,
           status: "resolved",
           book_id: book.id,
-          book_ids: [book.id]
+          book_ids: [book.id],
+          user_id: user.id
         )
 
       conn2 = get(conn, "/api/upload/#{image.id}/status")
@@ -153,9 +157,16 @@ defmodule StacksWeb.UploadControllerTest do
       assert book.id in data["book_ids"]
     end
 
-    test "returns book_id as singleton when book_ids is empty", %{conn: conn} do
+    test "returns book_id as singleton when book_ids is empty", %{conn: conn, user: user} do
       book = insert(:book)
-      image = insert(:uploaded_image, status: "resolved", book_id: book.id, book_ids: [])
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          book_id: book.id,
+          book_ids: [],
+          user_id: user.id
+        )
 
       conn2 = get(conn, "/api/upload/#{image.id}/status")
       data = json_response(conn2, 200)

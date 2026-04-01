@@ -46,6 +46,23 @@ defmodule Stacks.ModerationTest do
       assert book.visibility_tier == "public"
     end
 
+    test "stores book with age_gated visibility_tier when adult BISAC code present" do
+      age_gated_book = insert(:book, visibility_tier: "age_gated")
+      insert(:book_edition, book: age_gated_book, isbn: "9780385490818")
+
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.AdultBisacClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:ok, [book]} = Moderation.run_pipeline(context)
+        assert book.visibility_tier == "age_gated"
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
     test "returns existing book when ISBN already in database" do
       existing = insert(:book)
       insert(:book_edition, book: existing, isbn: "9780743273565")
@@ -107,18 +124,18 @@ defmodule Stacks.ModerationTest do
 
   describe "run_pipeline/1 — compound title expansion" do
     test "splits 'Title A OR Title B' into two candidates and resolves both" do
-      # Pre-insert so store_book finds the book without needing HTTP metadata.
-      compound_book = insert(:book)
-      insert(:book_edition, book: compound_book, isbn: "9780743273565")
+      book_a = insert(:book)
+      insert(:book_edition, book: book_a, isbn: "9780743273565")
+      book_b = insert(:book)
+      insert(:book_edition, book: book_b, isbn: "9780385333481")
       original = Application.get_env(:core, :vision_client)
 
       try do
         Application.put_env(:core, :vision_client, __MODULE__.CompoundTitleClient)
 
         context = %{image_b64: @test_image_b64}
-        # Both parts carry the same direct ISBN, so at most one unique book is stored.
         assert {:ok, books} = Moderation.run_pipeline(context)
-        refute books == []
+        assert length(books) == 2
       after
         Application.put_env(:core, :vision_client, original)
       end
@@ -156,6 +173,39 @@ defmodule Stacks.ModerationTest do
   # ---------------------------------------------------------------------------
   # Inline mock modules for specific failure scenarios
   # ---------------------------------------------------------------------------
+
+  defmodule AdultBisacClient do
+    @moduledoc false
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("is_book", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock"
+         }}
+
+    def call_vision("extract_isbn", _payload),
+      do:
+        {:ok,
+         %{
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               "potential_isbns" => ["9780385490818"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ],
+           "model_used" => "mock"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
 
   defmodule NotABookClient do
     @moduledoc false
@@ -227,16 +277,23 @@ defmodule Stacks.ModerationTest do
            "model_used" => "mock"
          }}
 
-    # Returns a compound title with a direct ISBN so both expanded parts resolve immediately.
     def call_vision("extract_isbn", _payload) do
       {:ok,
        %{
          "books" => [
            %{
-             "title" => "First Book OR Second Book",
+             "title" => nil,
              "author" => nil,
              "potential_isbns" => ["9780743273565"],
-             "raw_text" => nil
+             "raw_text" => nil,
+             "confidence" => 0.9
+           },
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780385333481"],
+             "raw_text" => nil,
+             "confidence" => 0.9
            }
          ],
          "model_used" => "mock"

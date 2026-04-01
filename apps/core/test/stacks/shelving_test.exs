@@ -60,6 +60,21 @@ defmodule Stacks.ShelvingTest do
 
       assert event_count("placement.created") == before_count + 1
     end
+
+    test "returns changeset error when book does not exist" do
+      user = insert(:user)
+      nonexistent_book_id = Ecto.UUID.generate()
+      assert {:error, changeset} = Shelving.place_book(user.id, nonexistent_book_id, "library")
+      assert %{book_id: [_]} = errors_on(changeset)
+    end
+
+    test "returns changeset error when book already on the same shelf" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+      assert {:error, changeset} = Shelving.place_book(user.id, book.id, "library")
+      assert %{book_id: ["book is already on this bookshelf"]} = errors_on(changeset)
+    end
   end
 
   describe "move_book/3" do

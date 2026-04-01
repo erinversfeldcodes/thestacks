@@ -26,6 +26,10 @@ models:
         description: Subjects.
       - name: visibility_tier
         description: Visibility tier.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['public', 'age_gated']
       - name: language
         description: Language.
       - name: bisac_codes
@@ -275,8 +279,15 @@ models:
           - unique
       - name: storage_path
         description: Storage path.
+        tests:
+          - not_null
       - name: status
         description: Status.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['pending', 'resolved', 'rejected']
       - name: rejection_reason
         description: Rejection reason.
       - name: uploaded_at
@@ -285,10 +296,15 @@ models:
         description: Expires at.
       - name: book_ids
         description: Book ids.
+        tests:
+          - not_null:
+              where: "status = 'resolved'"
       - name: book_id
         description: Book id.
       - name: book_edition_id
         description: Book edition id.
+      - name: user_id
+        description: User id.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

@@ -12,6 +12,7 @@ select
     book_ids,
     book_id,
     book_edition_id,
+    user_id,
     created_at,
     updated_at
 from {{ source('op', 'uploaded_images') }}
