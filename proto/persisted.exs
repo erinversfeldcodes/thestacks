@@ -281,7 +281,6 @@
           default: "pending",
           null: false,
           dbt_tests: [
-            :not_null,
             {:accepted_values, ["pending", "resolved", "rejected"]}
           ]
         },
@@ -295,7 +294,7 @@
         },
         book_id: %{belongs_to: Stacks.Books.Book},
         book_edition_id: %{belongs_to: Stacks.Books.BookEdition},
-        user_id: %{ecto_type: :binary_id, null: false, belongs_to: Stacks.Accounts.User}
+        user_id: %{ecto_type: :binary_id, belongs_to: Stacks.Accounts.User}
       }
     },
 

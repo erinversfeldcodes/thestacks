@@ -285,7 +285,6 @@ models:
         description: Status.
         tests:
           - not_null
-          - not_null
           - accepted_values:
               arguments:
                 values: ['pending', 'resolved', 'rejected']
@@ -306,8 +305,6 @@ models:
         description: Book edition id.
       - name: user_id
         description: User id.
-        tests:
-          - not_null
       - name: created_at
         description: Timestamp when the record was created.
         tests:
