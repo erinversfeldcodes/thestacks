@@ -128,8 +128,10 @@ defmodule Stacks.Books do
   """
   @spec find_existing(String.t()) :: Book.t() | nil
   def find_existing(isbn) do
+    isbn13 = to_isbn13(isbn)
+
     BookEdition
-    |> where([e], e.isbn == ^isbn)
+    |> where([e], e.isbn == ^isbn13)
     |> preload(book: [:author, :editions])
     |> Repo.one()
     |> case do
@@ -915,4 +917,21 @@ defmodule Stacks.Books do
     check = rem(11 - rem(sum, 11), 11)
     check != 10 and check == Enum.at(digits, 9)
   end
+
+  # Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use
+  # the canonical form. ISBN-13s (and anything else) are returned unchanged.
+  defp to_isbn13(<<a, b, c, d, e, f, g, h, i, _check>>) do
+    nine = [a - ?0, b - ?0, c - ?0, d - ?0, e - ?0, f - ?0, g - ?0, h - ?0, i - ?0]
+    prefix = [9, 7, 8 | nine]
+    weights = [1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3]
+
+    sum =
+      Enum.zip(prefix, weights)
+      |> Enum.reduce(0, fn {d, w}, acc -> acc + d * w end)
+
+    check = rem(10 - rem(sum, 10), 10)
+    "978" <> <<a, b, c, d, e, f, g, h, i>> <> Integer.to_string(check)
+  end
+
+  defp to_isbn13(isbn), do: isbn
 end

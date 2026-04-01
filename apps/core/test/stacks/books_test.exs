@@ -104,6 +104,14 @@ defmodule Stacks.BooksTest do
     test "returns nil when isbn not found" do
       assert nil == Books.find_existing("9999999999999")
     end
+
+    test "finds a book by ISBN-10 when the edition is stored as ISBN-13" do
+      book = insert(:book)
+      # Stored as ISBN-13; ISBN-10 equivalent is 0743273567
+      insert(:book_edition, book: book, isbn: "9780743273565")
+      assert found = Books.find_existing("0743273567")
+      assert found.id == book.id
+    end
   end
 
   describe "get_book_detail/1" do
