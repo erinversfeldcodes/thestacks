@@ -103,4 +103,7 @@ message UploadedImage {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
+
+  // UUID of the user who uploaded this image. Used for ownership enforcement.
+  string user_id = 12 [json_name = "user_id"];
 }

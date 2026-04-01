@@ -51,7 +51,12 @@ fi
 
 # Syft + Grype — SBOM generation and CVE scanning
 if command -v syft &>/dev/null && command -v grype &>/dev/null; then
-    syft . -o cyclonedx-json > /tmp/stacks-sbom.json
+    syft . -o cyclonedx-json \
+        --exclude ./apps/scraper/target \
+        --exclude ./apps/vision/.venv \
+        --exclude ./_build \
+        --exclude ./.claude/worktrees \
+        2>/dev/null > /tmp/stacks-sbom.json
     grype sbom:/tmp/stacks-sbom.json --fail-on high
     rm -f /tmp/stacks-sbom.json
 else

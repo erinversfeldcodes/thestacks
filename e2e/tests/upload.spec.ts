@@ -402,3 +402,101 @@ test.describe("Upload pipeline", () => {
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// Manual ISBN entry (real service — no mocks)
+// ---------------------------------------------------------------------------
+
+test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, () => {
+  // Client-side checksum validation — no network call needed.
+  test("invalid ISBN shows checksum error", async ({ page }) => {
+    test.setTimeout(15_000);
+
+    await page.goto("/upload");
+    await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+
+    const isbnInput = page.getByTestId("upload-manual-isbn-input");
+    await expect(isbnInput).toBeVisible();
+
+    await isbnInput.fill("1234567890");
+    await page.getByTestId("upload-manual-isbn-submit").click();
+
+    await expect(page.getByText("Invalid ISBN checksum")).toBeVisible();
+  });
+
+  // Real internal DB lookup — uses a seeded book so no external API dependency.
+  // 0061470767 = The Dispossessed by Ursula K. Le Guin (seeded in all environments).
+  test("valid ISBN-10 resolves to real book in verify view", async ({ page }) => {
+    test.setTimeout(15_000);
+
+    await page.goto("/upload");
+    await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+
+    const isbnInput = page.getByTestId("upload-manual-isbn-input");
+    await isbnInput.fill("0061470767");
+    await page.getByTestId("upload-manual-isbn-submit").click();
+
+    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
+    await expect(page.getByTestId("upload-confirm-btn")).toBeVisible();
+    await expect(page.getByTestId("upload-reject-btn")).toBeVisible();
+  });
+
+  // Same book, ISBN-13 format — verifies both input formats are accepted end-to-end.
+  // 9780061470769 = The Dispossessed ISBN-13 (seeded).
+  test("valid ISBN-13 resolves to real book in verify view", async ({ page }) => {
+    test.setTimeout(15_000);
+
+    await page.goto("/upload");
+    await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+
+    const isbnInput = page.getByTestId("upload-manual-isbn-input");
+    await isbnInput.fill("9780061470769");
+    await page.getByTestId("upload-manual-isbn-submit").click();
+
+    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
+  });
+
+  // Full recovery flow: real non-book image triggers rejection, then the user
+  // switches to manual ISBN entry and completes a real book lookup.
+  // Tests the Elm UploadError → ManualEntry state transition against live services.
+  test(
+    "recovery: rejected upload → Enter ISBN Manually → real book found",
+    async ({ page }) => {
+      // Extra 30s buffer beyond pipeline timeout for the manual ISBN steps after rejection.
+      test.setTimeout(PIPELINE_TIMEOUT + 30_000);
+
+      await page.goto("/upload");
+
+      const fileChooserPromise = page.waitForEvent("filechooser");
+      await page.click("button.btn--primary");
+      const fileChooser = await fileChooserPromise;
+      await fileChooser.setFiles(
+        path.join(__dirname, "../../images/not_a_book.jpg")
+      );
+
+      await expect(page.getByTestId("upload-loading").locator("p")).toHaveText(
+        "Processing image...",
+        { timeout: 30_000 }
+      );
+
+      await expect(page.getByTestId("upload-error")).toBeVisible({
+        timeout: PIPELINE_TIMEOUT,
+      });
+
+      await page.getByRole("button", { name: /Enter ISBN Manually/i }).click();
+      await expect(page.getByTestId("upload-manual-isbn-input")).toBeVisible();
+
+      await page.getByTestId("upload-manual-isbn-input").fill("9780061470769");
+      await page.getByTestId("upload-manual-isbn-submit").click();
+
+      await expect(page.getByTestId("upload-verify")).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(page.getByTestId("upload-verify")).toContainText(
+        /Dispossessed|Le Guin/i
+      );
+    }
+  );
+});

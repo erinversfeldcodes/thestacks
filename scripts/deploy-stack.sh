@@ -188,7 +188,20 @@ fi
 SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
 SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
 
-if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+# Detect whether scraper source changed relative to main — if not, skip the
+# 820s Rust build. FORCE_SCRAPER=1 overrides the check (e.g. dep bumps).
+SCRAPER_CHANGED=true
+if [[ -z "${FORCE_SCRAPER:-}" ]]; then
+    BASE_REF="${GITHUB_BASE_REF:-main}"
+    if git fetch origin "${BASE_REF}" --quiet 2>/dev/null && \
+       git diff --quiet "origin/${BASE_REF}...HEAD" -- apps/scraper/ deploy/Dockerfile.scraper 2>/dev/null; then
+        SCRAPER_CHANGED=false
+        echo "    INFO: no scraper changes vs origin/${BASE_REF} — skipping scraper build (set FORCE_SCRAPER=1 to override)"
+        SCRAPER_INTERNAL_URL=""
+    fi
+fi
+
+if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]] && [[ "$SCRAPER_CHANGED" == "true" ]]; then
     echo ""
     echo "==> Deploying scraper (app: ${SCRAPER_APP})..."
     fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
@@ -203,14 +216,13 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
             --app "${SCRAPER_APP}" \
             --config "${REPO_ROOT}/deploy/fly.scraper.toml" \
             --image-label "pr-${SANITISED}" \
-            --no-cache \
             --depot=false); then
         echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
     else
         echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
         SCRAPER_INTERNAL_URL=""
     fi
-else
+elif [[ -z "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo "WARN: SCRAPER_HMAC_SECRET not set — skipping scraper deploy."
     SCRAPER_INTERNAL_URL=""
 fi
@@ -333,7 +345,6 @@ if ! (cd "$REPO_ROOT" && fly deploy \
         --app "${CORE_APP}" \
         --config "${REPO_ROOT}/deploy/fly.core.toml" \
         --image-label "pr-${SANITISED}" \
-        --no-cache \
         --depot=false); then
     echo "FAIL deploy: core app deployment failed"
     exit 1

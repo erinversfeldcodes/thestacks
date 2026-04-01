@@ -61,7 +61,8 @@ defmodule Stacks.Books do
     :expires_at,
     :book_id,
     :book_edition_id,
-    :book_ids
+    :book_ids,
+    :user_id
   ]
 
   @valid_image_statuses ~w(pending resolved rejected)
@@ -127,8 +128,10 @@ defmodule Stacks.Books do
   """
   @spec find_existing(String.t()) :: Book.t() | nil
   def find_existing(isbn) do
+    isbn13 = to_isbn13(isbn)
+
     BookEdition
-    |> where([e], e.isbn == ^isbn)
+    |> where([e], e.isbn == ^isbn13)
     |> preload(book: [:author, :editions])
     |> Repo.one()
     |> case do
@@ -237,13 +240,13 @@ defmodule Stacks.Books do
   """
   @spec store_upload(binary(), Plug.Upload.t()) ::
           {:ok, UploadedImage.t()} | {:error, term()}
-  def store_upload(_user_id, %Plug.Upload{path: tmp_path}) do
+  def store_upload(user_id, %Plug.Upload{path: tmp_path}) do
     image_id = Ecto.UUID.generate()
     storage_key = "uploads/#{image_id}"
 
     with {:ok, bytes} <- File.read(tmp_path),
          {:ok, _key} <- Stacks.Storage.upload_image(image_id, bytes),
-         {:ok, image} <- insert_uploaded_image(image_id, storage_key) do
+         {:ok, image} <- insert_uploaded_image(image_id, storage_key, user_id) do
       Events.emit_safe(%{
         event_type: "image.submitted",
         aggregate_type: "image",
@@ -260,7 +263,7 @@ defmodule Stacks.Books do
     end
   end
 
-  defp insert_uploaded_image(image_id, storage_key) do
+  defp insert_uploaded_image(image_id, storage_key, user_id) do
     now = DateTime.utc_now()
 
     %UploadedImage{id: image_id}
@@ -268,7 +271,8 @@ defmodule Stacks.Books do
       storage_path: storage_key,
       status: "pending",
       uploaded_at: now,
-      expires_at: DateTime.add(now, 30, :day)
+      expires_at: DateTime.add(now, 30, :day),
+      user_id: user_id
     })
     |> Repo.insert()
   end
@@ -863,7 +867,7 @@ defmodule Stacks.Books do
   def uploaded_image_changeset(image, attrs) do
     image
     |> cast(attrs, @image_cast_fields)
-    |> validate_required([:status, :uploaded_at, :expires_at])
+    |> validate_required([:status, :uploaded_at, :expires_at, :user_id])
     |> validate_inclusion(:status, @valid_image_statuses)
   end
 
@@ -913,4 +917,21 @@ defmodule Stacks.Books do
     check = rem(11 - rem(sum, 11), 11)
     check != 10 and check == Enum.at(digits, 9)
   end
+
+  # Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use
+  # the canonical form. ISBN-13s (and anything else) are returned unchanged.
+  defp to_isbn13(<<a, b, c, d, e, f, g, h, i, _check>>) do
+    nine = [a - ?0, b - ?0, c - ?0, d - ?0, e - ?0, f - ?0, g - ?0, h - ?0, i - ?0]
+    prefix = [9, 7, 8 | nine]
+    weights = [1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3]
+
+    sum =
+      Enum.zip(prefix, weights)
+      |> Enum.reduce(0, fn {d, w}, acc -> acc + d * w end)
+
+    check = rem(10 - rem(sum, 10), 10)
+    "978" <> <<a, b, c, d, e, f, g, h, i>> <> Integer.to_string(check)
+  end
+
+  defp to_isbn13(isbn), do: isbn
 end

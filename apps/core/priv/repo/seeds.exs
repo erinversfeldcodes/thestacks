@@ -966,7 +966,7 @@ Repo.insert_all(
     %{
       id: Seeds.uuid(601),
       book_id: Seeds.uuid(Map.get(edition_to_work_map, 1001, 1001)),
-      storage_path: nil,
+      storage_path: "uploads/seeds/book-cover-001.jpg",
       status: "resolved",
       uploaded_at: jan_15,
       expires_at: feb_14,

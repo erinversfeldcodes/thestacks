@@ -44,6 +44,7 @@ def _download_model() -> None:
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
+    .apt_install("libzbar0")
     .pip_install(
         "transformers>=4.50.0",
         "qwen-vl-utils>=0.0.10",
@@ -51,6 +52,7 @@ image = (
         "torchvision",
         "accelerate>=0.34.0",
         "Pillow>=10.0.0",
+        "pyzbar>=0.1.9",
     )
     .run_function(_download_model)
 )

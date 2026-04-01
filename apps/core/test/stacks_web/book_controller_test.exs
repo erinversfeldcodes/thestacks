@@ -143,6 +143,65 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Gap 2 — POST /api/books HTTP layer with mocked ISBN resolver (US-1.1.5)
+  # ---------------------------------------------------------------------------
+
+  describe "POST /api/books — mocked ISBN resolver (US-1.1.5)" do
+    setup do
+      original = Application.get_env(:core, :isbn_http_client)
+      Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
+      on_exit(fn -> Application.put_env(:core, :isbn_http_client, original) end)
+      :ok
+    end
+
+    test "returns 201 with book data when valid ISBN resolves via mock Open Library", %{
+      conn: conn
+    } do
+      user = insert(:user)
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780743273565" => %{
+             "title" => "The Great Gatsby",
+             "authors" => [%{"name" => "F. Scott Fitzgerald"}],
+             "publish_date" => "1925",
+             "number_of_pages" => 180,
+             "subjects" => ["American fiction"],
+             "key" => "/works/OL468431W"
+           }
+         }}
+      )
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books", %{"isbn" => "9780743273565"})
+
+      assert %{"book" => book} = json_response(conn, 201)
+      assert book["title"] == "The Great Gatsby"
+      assert is_binary(book["id"])
+    end
+
+    test "returns 422 when both Open Library and Google Books return no results", %{conn: conn} do
+      user = insert(:user)
+
+      # MockHttpClient returns {:ok, %{}} for unregistered patterns — empty body
+      # is treated as not found by ISBNResolver for both Open Library and Google Books.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books", %{"isbn" => "9780743273565"})
+
+      assert %{"error" => _} = json_response(conn, 422)
+    end
+  end
+
   describe "POST /api/books/confirm" do
     test "returns 200 with book data when ISBN resolves to existing book", %{conn: conn} do
       user = insert(:user)
