@@ -73,6 +73,12 @@ port saveOnboardingCompleted : () -> Cmd msg
 port onOnboardingStatus : (Bool -> msg) -> Sub msg
 
 
+port openUploadStream : { url : String } -> Cmd msg
+
+
+port uploadStreamEvent : (String -> msg) -> Sub msg
+
+
 main : Program Decode.Value Model Msg
 main =
     Browser.application
@@ -885,6 +891,14 @@ update msg model =
                                 ]
                             )
 
+                        Upload.OpenStream url ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , openUploadStream { url = url }
+                                ]
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -1465,7 +1479,7 @@ transitionClass from to =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
+subscriptions model =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
@@ -1481,6 +1495,20 @@ subscriptions _ =
                             Decode.fail "not handled"
                     )
             )
+        , case model.page of
+            PageUpload _ ->
+                uploadStreamEvent
+                    (\raw ->
+                        case Decode.decodeString (Decode.field "type" Decode.string) raw of
+                            Ok "error" ->
+                                UploadMsg Upload.StreamError
+
+                            _ ->
+                                UploadMsg (Upload.StreamEvent raw)
+                    )
+
+            _ ->
+                Sub.none
         ]
 
 

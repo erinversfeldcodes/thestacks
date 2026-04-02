@@ -55,7 +55,7 @@ module Api exposing
     , mergeFormat
     , moveBook
     , placeBook
-    , pollUploadStatus
+    , pollResponseDecoder
     , publishBlogPost
     , register
     , rejectSource
@@ -63,6 +63,7 @@ module Api exposing
     , saveConsent
     , searchBooks
     , soldListing
+    , streamEventDecoder
     , updateAgeVerification
     , updateBlogPost
     , updateLocation
@@ -174,6 +175,11 @@ fromProtoPollResponse proto =
             "rejected" ->
                 Rejected
 
+            "timeout" ->
+                -- Server-side 60-second window elapsed with no PubSub message.
+                -- Treat as a terminal rejection so the UI exits the polling loop.
+                Rejected
+
             _ ->
                 Pending
     , bookId = emptyToNothing proto.bookId
@@ -191,6 +197,69 @@ fromProtoPollResponse proto =
 pollResponseDecoder : Decoder PollResponse
 pollResponseDecoder =
     Decode.map fromProtoPollResponse ProtoUpload.decodePollResponse
+
+
+{-| Decoder for SSE stream events from /api/upload/:id/stream.
+
+SSE events use camelCase JSON keys (standard JSON API convention), while the
+proto-generated decoder uses snake\_case. This decoder handles both.
+
+-}
+streamEventDecoder : Decoder PollResponse
+streamEventDecoder =
+    Decode.map6
+        (\imageId status bookId bookIds rejectionReason isDuplicate ->
+            { imageId = imageId
+            , status =
+                case status of
+                    "resolved" ->
+                        Resolved
+
+                    "rejected" ->
+                        Rejected
+
+                    "timeout" ->
+                        Rejected
+
+                    _ ->
+                        Pending
+            , bookId = emptyToNothing (Maybe.withDefault "" bookId)
+            , bookIds = bookIds
+            , rejectionReason = emptyToNothing (Maybe.withDefault "" rejectionReason)
+            , isDuplicate =
+                if isDuplicate == Just True then
+                    Just True
+
+                else
+                    Nothing
+            }
+        )
+        (Decode.oneOf [ Decode.field "imageId" Decode.string, Decode.field "image_id" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf
+            [ Decode.field "bookId" (Decode.nullable Decode.string)
+            , Decode.field "book_id" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "bookIds" (Decode.list Decode.string)
+            , Decode.field "book_ids" (Decode.list Decode.string)
+            , Decode.succeed []
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "rejectionReason" (Decode.nullable Decode.string)
+            , Decode.field "rejection_reason" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "isDuplicate" (Decode.nullable Decode.bool)
+            , Decode.field "is_duplicate" (Decode.nullable Decode.bool)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 register :
@@ -262,25 +331,6 @@ uploadImage file token toMsg =
         , url = baseUrl ++ "/api/upload"
         , body = Http.multipartBody [ Http.filePart "image" file ]
         , expect = Http.expectJson toMsg (Decode.map .imageId ProtoUpload.decodeUploadAccepted)
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| GET /api/upload/:image\_id/status — poll for the identification result.
--}
-pollUploadStatus :
-    String
-    -> String
-    -> (Result Http.Error PollResponse -> msg)
-    -> Cmd msg
-pollUploadStatus imageId token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/status"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg pollResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
