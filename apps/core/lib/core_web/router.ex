@@ -34,6 +34,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
+  pipeline :sse_auth do
+    plug StacksWeb.Plugs.SSEAuthPipeline
+  end
+
   pipeline :view_as do
     plug StacksWeb.Plugs.ViewAsPlug
   end
@@ -104,12 +108,15 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
+    pipe_through [:api, :sse_auth]
+    get "/upload/:image_id/stream", UploadController, :stream
+  end
+
+  scope "/api", StacksWeb do
     pipe_through [:api, :authenticated]
 
     delete "/auth/logout", AuthController, :logout
     get "/auth/me", AuthController, :me
-
-    get "/upload/:image_id/status", UploadController, :status
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn
     post "/books/confirm", BookController, :confirm

@@ -28,6 +28,38 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert json_response(conn, 422)
     end
+
+    test "includes display_name in registration and stores it", %{conn: conn} do
+      params = %{email: "named@example.com", password: "password123", display_name: "Bibliophile"}
+      conn = post(conn, "/api/auth/register", params)
+
+      assert %{"message" => "confirmation_email_sent"} = json_response(conn, 201)
+
+      user = Stacks.Accounts.get_user_by_email("named@example.com")
+      assert user.display_name == "Bibliophile"
+    end
+
+    test "sets email_confirmed to false on new user", %{conn: conn} do
+      params = %{email: "unverified@example.com", password: "password123"}
+      conn = post(conn, "/api/auth/register", params)
+
+      assert json_response(conn, 201)
+
+      user = Stacks.Accounts.get_user_by_email("unverified@example.com")
+      assert user.email_confirmed == false
+    end
+
+    test "first registered user gets owner role", %{conn: conn} do
+      # Ensure no users exist before this test (ConnCase wraps in a transaction,
+      # but this is declared async: false so the table should be empty)
+      assert Core.Repo.aggregate(Stacks.Accounts.User, :count, :id) == 0
+
+      params = %{email: "founder@example.com", password: "password123"}
+      post(conn, "/api/auth/register", params)
+
+      user = Stacks.Accounts.get_user_by_email("founder@example.com")
+      assert user.role == "owner"
+    end
   end
 
   describe "POST /api/auth/login" do
@@ -153,6 +185,58 @@ defmodule StacksWeb.AuthControllerTest do
       conn = post(conn, "/api/auth/reset-password", %{})
 
       assert json_response(conn, 422)
+    end
+  end
+
+  describe "rate limiting on auth endpoints" do
+    # These tests document the desired rate-limiting behaviour.
+    # The RateLimiter plug uses an in-memory ETS table keyed by IP; in test
+    # we can exhaust the bucket by making requests in rapid succession.
+    # The `:auth` bucket allows 5 requests per minute per IP by default.
+    # Tests run with async: false so the ETS state is not shared across test
+    # processes, but isolation still depends on the bucket TTL expiring or
+    # the test server being restarted between runs. Mark as @tag :slow if
+    # flakiness is observed in CI.
+
+    test "returns 429 after exceeding rate limit on register", %{conn: conn} do
+      # Exhaust the rate limit by posting 5 times — all should succeed or 422,
+      # but not 429 yet. The 6th request should be rate-limited.
+      for n <- 1..5 do
+        post(conn, "/api/auth/register", %{
+          email: "flood#{n}@example.com",
+          password: "password123"
+        })
+      end
+
+      rate_limited_conn =
+        post(conn, "/api/auth/register", %{
+          email: "flood6@example.com",
+          password: "password123"
+        })
+
+      assert response(rate_limited_conn, 429)
+    end
+
+    test "returns 429 after exceeding rate limit on login", %{conn: conn} do
+      insert(:user,
+        email: "ratelimited@example.com",
+        password_hash: Argon2.hash_pwd_salt("correct123")
+      )
+
+      for _ <- 1..5 do
+        post(conn, "/api/auth/login", %{
+          email: "ratelimited@example.com",
+          password: "wrong-password"
+        })
+      end
+
+      rate_limited_conn =
+        post(conn, "/api/auth/login", %{
+          email: "ratelimited@example.com",
+          password: "wrong-password"
+        })
+
+      assert response(rate_limited_conn, 429)
     end
   end
 
