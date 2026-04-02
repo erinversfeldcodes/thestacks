@@ -55,7 +55,6 @@ module Api exposing
     , mergeFormat
     , moveBook
     , placeBook
-    , pollResponseDecoder
     , publishBlogPost
     , register
     , rejectSource
@@ -156,47 +155,6 @@ type alias PollResponse =
     , rejectionReason : Maybe String
     , isDuplicate : Maybe Bool
     }
-
-
-{-| Adapter: proto PollResponse -> app PollResponse.
-
-Proto uses string status and non-Maybe fields with empty/false defaults.
-App uses PollStatus ADT and Maybe for optional fields.
-
--}
-fromProtoPollResponse : ProtoUpload.PollResponse -> PollResponse
-fromProtoPollResponse proto =
-    { imageId = proto.imageId
-    , status =
-        case proto.status of
-            "resolved" ->
-                Resolved
-
-            "rejected" ->
-                Rejected
-
-            "timeout" ->
-                -- Server-side 60-second window elapsed with no PubSub message.
-                -- Treat as a terminal rejection so the UI exits the polling loop.
-                Rejected
-
-            _ ->
-                Pending
-    , bookId = emptyToNothing proto.bookId
-    , bookIds = proto.bookIds
-    , rejectionReason = emptyToNothing proto.rejectionReason
-    , isDuplicate =
-        if proto.isDuplicate then
-            Just True
-
-        else
-            Nothing
-    }
-
-
-pollResponseDecoder : Decoder PollResponse
-pollResponseDecoder =
-    Decode.map fromProtoPollResponse ProtoUpload.decodePollResponse
 
 
 {-| Decoder for SSE stream events from /api/upload/:id/stream.

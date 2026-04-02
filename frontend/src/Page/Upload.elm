@@ -9,7 +9,7 @@ module Page.Upload exposing
     , view
     )
 
-import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..), streamEventDecoder)
+import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select

@@ -25,50 +25,6 @@ dummyBook =
     }
 
 
-pendingPoll : PollResponse
-pendingPoll =
-    { imageId = "img-1"
-    , status = Pending
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Nothing
-    , isDuplicate = Nothing
-    }
-
-
-rejectedPoll : PollResponse
-rejectedPoll =
-    { imageId = "img-1"
-    , status = Rejected
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Just "isbn_not_found"
-    , isDuplicate = Nothing
-    }
-
-
-resolvedNewBook : PollResponse
-resolvedNewBook =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Just "book-1"
-    , bookIds = [ "book-1" ]
-    , rejectionReason = Nothing
-    , isDuplicate = Just False
-    }
-
-
-resolvedDuplicate : PollResponse
-resolvedDuplicate =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Just "book-1"
-    , bookIds = [ "book-1" ]
-    , rejectionReason = Nothing
-    , isDuplicate = Just True
-    }
-
-
 timeoutPoll : PollResponse
 timeoutPoll =
     { imageId = "img-1"
@@ -76,17 +32,6 @@ timeoutPoll =
     , bookId = Nothing
     , bookIds = []
     , rejectionReason = Nothing
-    , isDuplicate = Nothing
-    }
-
-
-resolvedNotABook : PollResponse
-resolvedNotABook =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Just "not_a_book"
     , isDuplicate = Nothing
     }
 
