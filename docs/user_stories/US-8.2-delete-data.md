@@ -87,6 +87,29 @@ The deletion runs inside a single `Ecto.Multi` transaction in `Stacks.GDPR.Delet
 - **Query**: `from bs in Bookshelf, where: bs.user_id == ^user_id`
 - **Transaction**: Step `:delete_bookshelves` in `Ecto.Multi`
 
+### Write: Delete writing assistant sessions
+- **Table(s)**: `op.blog_assistant_sessions`
+- **Operation**: DELETE
+- **Query**: `from s in BlogAssistantSession, where: s.user_id == ^user_id`
+- **Transaction**: Step `:delete_assistant_sessions` in `Ecto.Multi`
+
+### Write: Delete turn feedback
+- **Table(s)**: `op.turn_feedback`
+- **Operation**: DELETE (cascades from session delete via FK, or explicit step)
+- **Transaction**: Step `:delete_turn_feedback` in `Ecto.Multi`
+
+### Write: Delete user-scoped embeddings
+- **Table(s)**: `op.embeddings`
+- **Operation**: DELETE
+- **Query**: `from e in Embedding, where: e.user_id == ^user_id`
+- **Transaction**: Step `:delete_embeddings` in `Ecto.Multi`
+- **Note**: Only deletes user-scoped embeddings. Shared `op.book_content_chunks` are not deleted — they contain no personal data. `op.user_book_content_access` join records are deleted via cascading FK.
+
+### Write: Delete retrieval log
+- **Table(s)**: `op.retrieval_log`
+- **Operation**: DELETE (cascades from session delete via FK)
+- **Transaction**: Covered by `:delete_assistant_sessions` cascade
+
 ### Write: Delete user
 - **Table(s)**: `op.users`
 - **Operation**: DELETE
@@ -130,8 +153,11 @@ N/A -- no event handlers are registered for deletion events.
      c. Deletes all placement history referencing those bookshelves.
      d. Deletes all placements on those bookshelves.
      e. Deletes all bookshelves.
-     f. Deletes the user record.
-     g. Inserts an audit log entry recording the deletion.
+     f. Deletes all writing assistant sessions (cascades to turn_feedback and retrieval_log via FK).
+     g. Deletes all user-scoped embeddings (`op.embeddings WHERE user_id = ^user_id`).
+     h. Deletes `op.user_book_content_access` join records (via FK cascade or explicit step).
+     i. Deletes the user record.
+     j. Inserts an audit log entry recording the deletion.
   3. The entire transaction succeeds or fails atomically.
 - **On success**: Logs success. Returns `:ok`.
 - **On failure**: Logs the failed step name and reason. Returns `{:error, "deletion failed at {step}"}`. No retry (max_attempts: 1).

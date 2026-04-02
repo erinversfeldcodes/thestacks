@@ -25,7 +25,8 @@ Validate the complete GDPR compliance surface: data portability, right to erasur
 - **Export**: Click "Export My Data" -> "Preparing your export..." loading state -> "Export queued" success
 - **Delete**: Click "Delete My Data" -> confirmation dialog -> type "DELETE" -> submit -> "Account deletion has been queued"
 - **Delete disabled**: Delete button disabled until "DELETE" typed exactly
-- **Consent toggle**: Navigate to `/settings/consent` -> toggle analytics consent -> click "Save Preferences" -> "Saved!" confirmation
+- **Consent toggle (analytics)**: Navigate to `/settings/consent` -> toggle analytics consent -> click "Save Preferences" -> "Saved!" confirmation
+- **Consent toggle (writing assistant)**: Toggle AI writing assistant personalisation consent -> "Saved!" confirmation; toggling off shows description: "Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."
 - **Consent error display**: Show "Could not save preferences. Please try again." on failure
 
 ### 2. Playwright Navigation & Visual Tests
@@ -37,21 +38,28 @@ Validate the complete GDPR compliance surface: data portability, right to erasur
 - `POST /api/gdpr/export` — 401 without auth
 - `DELETE /api/gdpr/account` — 202 with `{ status: "accepted", message: "Account deletion has been queued." }`
 - `DELETE /api/gdpr/account` — 401 without auth
-- `POST /api/gdpr/consent` with `{ consent: true }` — 200 with `consent_analytics: true` and `consent_analytics_at` timestamp
-- `POST /api/gdpr/consent` with `{ consent: false }` — 200 with `consent_analytics: false`
+- `POST /api/gdpr/consent` with `{ consent: true, type: "analytics" }` — 200 with `consent_analytics: true` and `consent_analytics_at` timestamp
+- `POST /api/gdpr/consent` with `{ consent: false, type: "analytics" }` — 200 with `consent_analytics: false`
+- `POST /api/gdpr/consent` with `{ consent: true, type: "writing_assistant" }` — 200 with `consent_writing_assistant: true` and `consent_writing_assistant_at` timestamp
+- `POST /api/gdpr/consent` with `{ consent: false, type: "writing_assistant" }` — 200, enqueues `WritingAssistantDataPurgeWorker`
 - `POST /api/gdpr/consent` with invalid boolean — 422 `consent must be true or false`
 - `POST /api/gdpr/consent` without consent param — 422 `consent parameter is required`
 - `POST /api/gdpr/consent` — 401 without auth
+- Writing assistant endpoints (`POST /api/blog/posts/:id/chat`) — 403 when `consent_writing_assistant` is false
 
 ### 4. Database Assertion Tests
-- **Export**: `DataExportJob` collects user profile, bookshelves, placements (with books/editions), placement history
-- **Export payload**: JSON map contains keys `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`
-- **Deletion cascade**: Multi transaction deletes in order: placement_history -> placements -> bookshelves -> user
+- **Export**: `DataExportJob` collects user profile, bookshelves, placements (with books/editions), placement history, writing assistant sessions, turn feedback, embeddings summary (source type, title, shelf, date — no raw vectors)
+- **Export payload**: JSON map contains keys `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`, `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary`
+- **Deletion cascade**: Multi transaction deletes in order: placement_history -> placements -> bookshelves -> assistant_sessions (cascades to turn_feedback + retrieval_log) -> user-scoped embeddings -> user_book_content_access -> user
 - **Deletion audit**: `audit.audit_log` entry created with `action: "user.data_deleted"`, `user_id: nil`
 - **Pre-deletion audit**: `audit.audit_log` entry with `action: "user.deletion_requested"` before enqueue
 - **Event log preserved**: `event_log` is NOT modified during deletion (UUIDs only, no PII)
-- **Consent grant**: `op.users.consent_analytics` set to `true`, `consent_analytics_at` set to current timestamp
-- **Consent revoke**: `op.users.consent_analytics` set to `false`
+- **Consent grant (analytics)**: `op.users.consent_analytics` set to `true`, `consent_analytics_at` set to current timestamp
+- **Consent revoke (analytics)**: `op.users.consent_analytics` set to `false`
+- **Consent grant (writing assistant)**: `op.users.consent_writing_assistant` set to `true`, `consent_writing_assistant_at` set to current timestamp
+- **Consent revoke (writing assistant)**: `op.users.consent_writing_assistant` set to `false`, `WritingAssistantDataPurgeWorker` enqueued
+- **Writing assistant purge**: Purge worker deletes `op.blog_assistant_sessions`, `op.turn_feedback` (cascade), `op.retrieval_log` (cascade), `op.embeddings WHERE user_id`, `op.user_book_content_access WHERE user_id`
+- **Shared book chunks preserved**: `op.book_content_chunks` NOT deleted — contains no personal data
 - **Image retention — stuck**: Images in "pending" status older than 2 hours found and deleted
 - **Image retention — expired**: Images past `expires_at` found and deleted
 - **Image retention — orphan check**: `missing_purge_check/0` finds any remaining past-expiry images
@@ -76,6 +84,7 @@ Validate the complete GDPR compliance surface: data portability, right to erasur
 - `AccountDeletionJob` — `{:error, :user_not_found}` when user does not exist
 - `AccountDeletionJob` — logs failed step name on failure
 - `ConfirmDeletionJob` — stub, max_attempts 3
+- `WritingAssistantDataPurgeWorker` — enqueued on `writing_assistant` consent revocation, deletes all user AI data, idempotent (safe to retry)
 - `ImageRetentionJob` — queue `:default`, max_attempts 3, cron-scheduled
 - `ImageRetentionJob` — runs `cleanup_stuck_images/0`, `cleanup_expired_images/0`, `missing_purge_check/0` in sequence
 - `ImageRetentionJob` — logs "ALARM — {count} orphaned image(s) past expiry" on orphans
@@ -102,9 +111,10 @@ Validate the complete GDPR compliance surface: data portability, right to erasur
 - Export: `UserClicksExport` -> Loading -> `GotExportResponse` -> Success (accepted)
 - Deletion: `UserTypesDeleteConfirmation "DELETE"` enables button -> `UserClicksDeleteAccount` -> Loading -> Success
 - Deletion: Button disabled until text exactly equals "DELETE"
-- `Page.Settings.Consent` init: `{ analyticsConsent = False, saving = NotAsked }`
+- `Page.Settings.Consent` init: `{ analyticsConsent = False, writingAssistantConsent = False, saving = NotAsked }`
 - `ToggleAnalytics` flips `analyticsConsent`
-- `SaveConsent` -> `Api.saveConsent` -> `SaveCompleted (Ok _)` -> `saving = Success ()`
+- `ToggleWritingAssistant` flips `writingAssistantConsent`
+- `SaveConsent` -> `Api.saveConsent` (with `type` param) -> `SaveCompleted (Ok _)` -> `saving = Success ()`
 - `SaveCompleted (Err err)` -> `saving = Failure err`
 - N/A for image retention (no frontend)
 - N/A for audit log (no frontend page yet)

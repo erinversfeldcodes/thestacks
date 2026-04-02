@@ -87,9 +87,9 @@ Validate the metrics dashboard's 4-endpoint parallel load with owner-only access
 - `mart_system_health` refreshed on `source_health.recorded` events
 - `mart_data_freshness` computes `MAX(occurred_at)` per aggregate type
 - `mart_data_quality_trend` provides sparkline data
-- `mart_cost_tracking` provides cost ledger data
+- `mart_cost_tracking` provides cost ledger data — includes `writing_assistant` category covering Together AI dialogue (`Llama-3.3-70B-Instruct-Turbo`) and Modal compute for `apps/writing_assistant`, tracked separately from `post_association` Together AI costs
 - `mart_gdpr_compliance` provides GDPR section data
-- `mart_job_stats` provides job status counts
+- `mart_job_stats` provides job status counts — includes `WritingAssistantNudgeWorker`, `EmbedPostWorker`, `EmbedShelfPlacementWorker`, `EmbedBookContentWorker`, `WritingAssistantDataPurgeWorker`
 - N/A for RSS feeds
 
 ### 11. Elm State Machine Tests
@@ -105,6 +105,8 @@ Validate the metrics dashboard's 4-endpoint parallel load with owner-only access
 ### 12. Metrics & Telemetry Tests
 - Dashboard API response times: each of 4 endpoints under 200ms
 - `RegenerateFeedJob` Oban counts: enqueued, completed, failed
+- Writing assistant worker counts: `WritingAssistantNudgeWorker`, `EmbedPostWorker`, `EmbedShelfPlacementWorker`, `EmbedBookContentWorker`, `WritingAssistantDataPurgeWorker` — all visible in `mart_job_stats`
+- Cost ledger: `writing_assistant` category present with Together AI dialogue + Modal compute line items, distinct from `post_association` Together AI costs
 - Feed request counts: 200, 304, 403, 404 breakdown
 - ETag cache hit rate tracked
 - Rate limiter activity for public feed and cost endpoints
