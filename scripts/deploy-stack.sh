@@ -329,6 +329,11 @@ echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 echo ""
 echo "==> Rebuilding frontend assets via esbuild..."
 if command -v node &>/dev/null && [[ -f "$REPO_ROOT/apps/core/assets/build.js" ]]; then
+    # Clear Elm incremental build cache before every deploy. The esbuild-plugin-elm
+    # uses elm-stuff/ as a compilation cache keyed by file mtime, not content hash.
+    # A stale cache can produce an identical app.js even when Elm source changes.
+    echo "    Clearing Elm incremental build cache (elm-stuff/)..."
+    rm -rf "$REPO_ROOT/apps/core/assets/elm/elm-stuff"
     (cd "$REPO_ROOT/apps/core/assets" && node build.js --production) \
         || { echo "FAIL deploy: frontend build failed"; exit 1; }
     echo "    app.js rebuilt"

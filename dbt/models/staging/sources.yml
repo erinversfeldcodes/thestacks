@@ -201,6 +201,8 @@ sources:
             description: Array of book IDs when multiple books detected in one image.
           - name: book_edition_id
             description: FK to book_editions (links image to a specific edition).
+          - name: user_id
+            description: FK to users (the user who uploaded the image).
 
       - name: users
         description: Registered user accounts with GDPR consent tracking.
