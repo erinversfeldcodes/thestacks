@@ -93,38 +93,43 @@ if [[ -n "${smoke_token}" ]]; then
         echo "FAIL deploy: all warmup uploads failed"
         e2e_failed=1
     else
-        echo "    Polling until all ${#warmup_ids[@]} warmup pipelines complete (max 6 min)..."
-        warmup_deadline=$(( $(date +%s) + 360 ))
-        warmup_done_ids=""
-        all_done=0
-        while [[ $(date +%s) -lt $warmup_deadline ]]; do
-            all_done=1
-            for img_id in "${warmup_ids[@]}"; do
-                case " ${warmup_done_ids} " in
-                    *" ${img_id} "*) continue ;;
-                esac
-                poll_resp="$(curl -sf "${CORE_URL}/api/upload/${img_id}/status" \
-                    -H "Authorization: Bearer ${smoke_token}" 2>/dev/null || true)"
-                poll_status="$(echo "${poll_resp}" | python3 -c \
-                    "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
-                if [[ "${poll_status}" == "resolved" || "${poll_status}" == "rejected" ]]; then
-                    echo "    ${img_id}: ${poll_status}"
-                    warmup_done_ids="${warmup_done_ids} ${img_id}"
-                else
-                    all_done=0
-                fi
-            done
-            if [[ $all_done -eq 1 ]]; then
-                break
-            fi
-            sleep 5
+        # Stream each pipeline's SSE endpoint in parallel (blocks until resolved/rejected
+        # or the per-stream curl timeout fires). The stream endpoint returns immediately
+        # when the job is already terminal, so no polling loop is needed.
+        echo "    Streaming ${#warmup_ids[@]} warmup pipelines in parallel (max 2 min each)..."
+        warmup_dir="$(mktemp -d)"
+        stream_pids=()
+        for img_id in "${warmup_ids[@]}"; do
+            (
+                stream_resp="$(curl -sf --max-time 120 \
+                    "${CORE_URL}/api/upload/${img_id}/stream?token=${smoke_token}" \
+                    2>/dev/null || true)"
+                echo "${stream_resp}" | python3 -c \
+                    "import json,sys
+lines=[l.strip() for l in sys.stdin if l.startswith('data:')]
+d=json.loads(lines[-1][5:]) if lines else {}
+print(d.get('status','timeout'))" \
+                    > "${warmup_dir}/${img_id}" 2>/dev/null \
+                    || echo "timeout" > "${warmup_dir}/${img_id}"
+            ) &
+            stream_pids+=("$!")
         done
-        done_count=$(echo "${warmup_done_ids}" | wc -w | tr -d ' ')
+        for pid in "${stream_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+
+        all_done=1
+        for img_id in "${warmup_ids[@]}"; do
+            img_status="$(cat "${warmup_dir}/${img_id}" 2>/dev/null || echo "timeout")"
+            echo "    ${img_id}: ${img_status}"
+            if [[ "${img_status}" != "resolved" && "${img_status}" != "rejected" ]]; then
+                all_done=0
+            fi
+        done
+        rm -rf "${warmup_dir}"
+
         if [[ $all_done -eq 1 ]]; then
             echo "PASS deploy: warmup passed (all pipelines resolved/rejected)"
         else
-            remaining=$(( ${#warmup_ids[@]} - done_count ))
-            echo "FAIL deploy: warmup timed out — ${remaining}/${#warmup_ids[@]} pipeline(s) still pending"
+            echo "FAIL deploy: warmup timed out — one or more pipelines did not complete"
             echo "--- Core app logs (last 60 lines) ---"
             (fly logs --app "${CORE_APP}" 2>&1 &
              FLY_LOG_PID=$!
