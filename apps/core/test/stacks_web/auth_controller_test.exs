@@ -189,18 +189,29 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "rate limiting on auth endpoints" do
-    # These tests document the desired rate-limiting behaviour.
-    # The RateLimiter plug uses an in-memory ETS table keyed by IP; in test
-    # we can exhaust the bucket by making requests in rapid succession.
-    # The `:auth` bucket allows 5 requests per minute per IP by default.
-    # Tests run with async: false so the ETS state is not shared across test
-    # processes, but isolation still depends on the bucket TTL expiring or
-    # the test server being restarted between runs. Mark as @tag :slow if
-    # flakiness is observed in CI.
+    # Rate limiting is disabled in test.exs by default to keep tests fast.
+    # This describe block re-enables it and uses a dedicated IP range
+    # (10.99.x.x) to avoid cross-test contamination. ETS is cleared after
+    # each test so counts don't bleed across tests in this block.
+    setup do
+      original = Application.get_env(:core, :rate_limiting_enabled)
+      Application.put_env(:core, :rate_limiting_enabled, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :rate_limiting_enabled, original)
+
+        if :ets.whereis(:rate_limiter) != :undefined do
+          :ets.delete_all_objects(:rate_limiter)
+        end
+      end)
+
+      :ok
+    end
 
     test "returns 429 after exceeding rate limit on register", %{conn: conn} do
-      # Exhaust the rate limit by posting 5 times — all should succeed or 422,
-      # but not 429 yet. The 6th request should be rate-limited.
+      # Use a dedicated IP so these requests don't interfere with other tests.
+      conn = put_req_header(conn, "x-forwarded-for", "10.99.1.1")
+
       for n <- 1..5 do
         post(conn, "/api/auth/register", %{
           email: "flood#{n}@example.com",
@@ -218,6 +229,9 @@ defmodule StacksWeb.AuthControllerTest do
     end
 
     test "returns 429 after exceeding rate limit on login", %{conn: conn} do
+      # Use a dedicated IP so these requests don't interfere with other tests.
+      conn = put_req_header(conn, "x-forwarded-for", "10.99.1.2")
+
       insert(:user,
         email: "ratelimited@example.com",
         password_hash: Argon2.hash_pwd_salt("correct123")
