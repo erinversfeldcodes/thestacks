@@ -79,6 +79,19 @@ The user navigates to Settings and clicks "Export My Data." The system compiles 
 - **Query**: `from h in PlacementHistory, where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids`
 - **Schema module**: `Stacks.Shelving.PlacementHistory`
 
+### Read: Collect writing assistant sessions
+- **Table(s)**: `op.blog_assistant_sessions`
+- **Query**: `from s in BlogAssistantSession, where: s.user_id == ^user_id`
+
+### Read: Collect writing assistant feedback
+- **Table(s)**: `op.turn_feedback`
+- **Query**: Join through `blog_assistant_sessions` on `user_id`
+
+### Read: Collect embeddings summary
+- **Table(s)**: `op.embeddings`
+- **Query**: `from e in Embedding, where: e.user_id == ^user_id, select: [:source_type, :source_id, :metadata, :inserted_at]`
+- **Note**: `embedding` (vector) field excluded — not human-readable and not required for portability
+
 ### Write: None
 The export is read-only.
 
@@ -105,7 +118,10 @@ N/A
 - **What it does**:
   1. Calls `Stacks.GDPR.Export.export_user_data(user_id)`.
   2. The export function collects: user profile (id, email, display_name, role, profile_visibility, age_verified, consent_analytics, consent_analytics_at, created_at), all bookshelves (id, name, visibility, created_at), all placements (id, book_isbn via `Books.primary_edition/1`, book_title, bookshelf_id, position, placed_at, removed_at, formats, personal_rating, notes), and all placement history (id, book_id, from_bookshelf, to_bookshelf, moved_at).
-  3. Returns a JSON-serialisable map keyed by `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`.
+  3. Returns a JSON-serialisable map keyed by `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`, `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary`.
+     - `writing_assistant_sessions`: all `op.blog_assistant_sessions` for the user — full chat turn history per post
+     - `writing_assistant_feedback`: all `op.turn_feedback` records for the user
+     - `embeddings_summary`: a human-readable list of what has been embedded (source type, source title, shelf name, date embedded) — the raw vectors are not included as they are not human-readable
   4. Stub: currently logs the export size. In production, would write to object storage and notify the user.
 - **On success**: Logs "export generated for user {id}, keys={count}". Returns `:ok`.
 - **On failure**: Logs error. Returns `{:error, reason}` for Oban retry.

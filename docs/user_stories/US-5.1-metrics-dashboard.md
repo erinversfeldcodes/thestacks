@@ -129,6 +129,9 @@ N/A — the dashboard itself does not enqueue jobs. It reads data populated by:
 - `FetchReviewsJob` (reviews)
 - `FetchAuthorRSSJob` (author data)
 - `DiscoverBookstoreEventsJob` (events)
+- `WritingAssistantNudgeWorker` (proactive nudge generation)
+- `EmbedPostWorker` / `EmbedShelfPlacementWorker` / `EmbedBookContentWorker` (RAG embedding pipeline)
+- `WritingAssistantDataPurgeWorker` (consent revocation purge)
 - Monitoring records from all of the above
 
 ---
@@ -226,7 +229,7 @@ N/A — metrics are computed on each request. No caching layer for dashboard dat
 
 ## 13. Operational Metrics
 
-- **Oban job counts across all workers**: the dashboard itself aggregates job statistics from `mart_job_stats` — enqueued, completed, failed, retried counts per worker (FetchReviewsJob, TriggerPriceScrapeJob, FetchAuthorRSSJob, DiscoverBookstoreEventsJob, SourceDiscoveryJob, ScoreSourceJob, RegenerateFeedJob, DbtRefreshJob, ListingExpiryJob)
+- **Oban job counts across all workers**: the dashboard itself aggregates job statistics from `mart_job_stats` — enqueued, completed, failed, retried counts per worker (FetchReviewsJob, TriggerPriceScrapeJob, FetchAuthorRSSJob, DiscoverBookstoreEventsJob, SourceDiscoveryJob, ScoreSourceJob, RegenerateFeedJob, DbtRefreshJob, ListingExpiryJob, WritingAssistantNudgeWorker, EmbedPostWorker, EmbedShelfPlacementWorker, EmbedBookContentWorker, WritingAssistantDataPurgeWorker)
 - **External API call counts and latencies**: aggregated from `op.source_health_checks` — per-source status (healthy/degraded/broken), consecutive failures, last success/failure timestamps
 - **Circuit breaker states**: `:scraper_fuse`, Together AI fuse, Brave daily budget — all visible via the Source Health table
 - **dbt refresh job duration and model counts**: `DbtRefreshJob` execution times and models rebuilt per run — tracked in `mart_job_stats`
@@ -251,4 +254,7 @@ N/A — metrics are computed on each request. No caching layer for dashboard dat
 - **Neon compute**: dashboard queries hit `op.source_health_checks`, `op.books`, `op.price_snapshots`, `op.review_snapshots`, and multiple dbt mart views. Each page load triggers 4 concurrent queries. At low visit frequency (owner-only), cost is negligible. Neon free tier: 191.9 compute hours/month; paid: $0.16/compute-hour.
 - **Public cost endpoint** (`GET /api/costs`): rate-limited but unauthenticated — potential for higher query volume. `mart_cost_tracking` dbt view should be lightweight.
 - **dbt model rebuild cost**: the dashboard depends on 7+ dbt models (`mart_enrichment_gaps`, `mart_system_health`, `mart_data_freshness`, `mart_data_quality_trend`, `mart_cost_tracking`, `mart_gdpr_compliance`, `mart_job_stats`). Each rebuild consumes Neon compute. Event-triggered refreshes (not time-based) keep costs proportional to actual data changes.
-- **Total platform cost visibility**: the dashboard's Cost Tracking section itself tracks all other stories' costs — it is the meta-cost-tracking layer. The `mart_cost_tracking` model aggregates Fly.io, Together AI, Brave, Modal, and Neon costs into a single ledger view.
+- **Together AI** (writing assistant): per-token cost for `Llama-3.3-70B-Instruct-Turbo` dialogue + `Meta-Llama-3-8B-Instruct-Lite` classification. Tracked separately from the association worker (`Llama-3-8b-chat-hf`) in `mart_cost_tracking` under category `writing_assistant`.
+- **Modal** (writing assistant service): per-invocation compute cost for `apps/writing_assistant`. Tracked in `mart_cost_tracking` under category `writing_assistant`.
+- **Neon** (embeddings): GIN index maintenance and vector similarity query compute for `op.embeddings` and `op.book_content_chunks`. Scales with corpus size.
+- **Total platform cost visibility**: the dashboard's Cost Tracking section itself tracks all other stories' costs — it is the meta-cost-tracking layer. The `mart_cost_tracking` model aggregates Fly.io, Together AI (by use case), Brave, Modal (by service), and Neon costs into a single ledger view.
