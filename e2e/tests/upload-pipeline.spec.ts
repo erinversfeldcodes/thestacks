@@ -109,7 +109,53 @@ async function mockUploadFailure(page: Page) {
   });
 }
 
-/** Mock GET /api/upload/:id/status with a resolved single book. */
+/**
+ * Inject a mock EventSource into the page before it loads.
+ * Must be called before page.goto(). The mock fires onmessage/onerror
+ * after 80ms (enough time for the Elm app to attach its handler).
+ */
+async function injectEventSourceMock(
+  page: Page,
+  config: { payload?: object; type?: "error" | "pending" }
+) {
+  await page.addInitScript((cfg) => {
+    (window as any).__mockSSEConfig = cfg;
+    (window as any).EventSource = class MockEventSource {
+      url: string;
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: Event) => void) | null = null;
+      readyState = 0;
+
+      constructor(url: string) {
+        this.url = url;
+        const config = (window as any).__mockSSEConfig;
+        if (!config) return;
+
+        if (config.type === "error") {
+          setTimeout(() => {
+            this.readyState = 2;
+            this.onerror && this.onerror(new Event("error"));
+          }, 80);
+        } else if (config.type === "pending") {
+          // Stay in loading — never fire
+        } else if (config.payload) {
+          const data = JSON.stringify(config.payload);
+          setTimeout(() => {
+            this.readyState = 1;
+            this.onmessage &&
+              this.onmessage(new MessageEvent("message", { data }));
+          }, 80);
+        }
+      }
+
+      close() { this.readyState = 2; }
+      addEventListener() {}
+      removeEventListener() {}
+    };
+  }, config);
+}
+
+/** Mock GET /api/upload/:id/stream with a resolved single book (SSE). */
 async function mockPollResolved(
   page: Page,
   opts: {
@@ -122,67 +168,40 @@ async function mockPollResolved(
   const bookIds = opts.bookIds ?? [bookId];
   const isDuplicate = opts.isDuplicate ?? false;
 
-  await page.route(`**/api/upload/*/status`, (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        image_id: FAKE_IMAGE_ID,
-        status: "resolved",
-        book_id: bookId,
-        book_ids: bookIds,
-        rejection_reason: null,
-        is_duplicate: isDuplicate,
-      }),
-    });
+  await injectEventSourceMock(page, {
+    payload: {
+      image_id: FAKE_IMAGE_ID,
+      status: "resolved",
+      book_id: bookId,
+      book_ids: bookIds,
+      rejection_reason: null,
+      is_duplicate: isDuplicate,
+    },
   });
 }
 
-/** Mock GET /api/upload/:id/status to stay pending forever (until unrouted). */
+/** Mock GET /api/upload/:id/stream to stay pending forever (heartbeat SSE, until unrouted). */
 async function mockPollPending(page: Page) {
-  await page.route(`**/api/upload/*/status`, (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        image_id: FAKE_IMAGE_ID,
-        status: "pending",
-        book_id: null,
-        book_ids: [],
-        rejection_reason: null,
-        is_duplicate: null,
-      }),
-    });
-  });
+  await injectEventSourceMock(page, { type: "pending" });
 }
 
-/** Mock GET /api/upload/:id/status with rejected (ISBN not found). */
+/** Mock GET /api/upload/:id/stream with rejected (ISBN not found) SSE. */
 async function mockPollRejected(page: Page) {
-  await page.route(`**/api/upload/*/status`, (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        image_id: FAKE_IMAGE_ID,
-        status: "rejected",
-        book_id: null,
-        book_ids: [],
-        rejection_reason: "isbn_not_found",
-        is_duplicate: null,
-      }),
-    });
+  await injectEventSourceMock(page, {
+    payload: {
+      image_id: FAKE_IMAGE_ID,
+      status: "rejected",
+      book_id: null,
+      book_ids: [],
+      rejection_reason: "isbn_not_found",
+      is_duplicate: null,
+    },
   });
 }
 
-/** Mock GET /api/upload/:id/status to return HTTP 500. */
+/** Mock GET /api/upload/:id/stream to return HTTP 500 (triggers EventSource.onerror → StreamError → IdentificationFailed). */
 async function mockPollServerError(page: Page) {
-  await page.route(`**/api/upload/*/status`, (route) => {
-    route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({ error: "Internal server error" }),
-    });
-  });
+  await injectEventSourceMock(page, { type: "error" });
 }
 
 /** Mock GET /api/books/:id to return HTTP 500. */
@@ -200,21 +219,17 @@ async function mockGetBookServerError(page: Page, bookId: string) {
   });
 }
 
-/** Mock GET /api/upload/:id/status with resolved but no book IDs (not a book). */
+/** Mock GET /api/upload/:id/stream with resolved but no book IDs (not a book) SSE. */
 async function mockPollNotABook(page: Page) {
-  await page.route(`**/api/upload/*/status`, (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        image_id: FAKE_IMAGE_ID,
-        status: "resolved",
-        book_id: null,
-        book_ids: [],
-        rejection_reason: null,
-        is_duplicate: null,
-      }),
-    });
+  await injectEventSourceMock(page, {
+    payload: {
+      image_id: FAKE_IMAGE_ID,
+      status: "resolved",
+      book_id: null,
+      book_ids: [],
+      rejection_reason: null,
+      is_duplicate: null,
+    },
   });
 }
 
@@ -608,14 +623,8 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     // some polls, which triggers IdentificationFailed.
     await mockUploadAccept(page);
 
-    // Return an error on poll to trigger IdentificationFailed immediately
-    await page.route(`**/api/upload/*/status`, (route) => {
-      route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "timeout" }),
-      });
-    });
+    // Return an error on SSE stream to trigger IdentificationFailed immediately
+    await injectEventSourceMock(page, { type: "error" });
 
     await page.goto("/upload");
     await triggerFileUpload(page);
