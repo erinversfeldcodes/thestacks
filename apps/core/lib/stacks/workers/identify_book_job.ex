@@ -118,6 +118,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
     if count > 0 do
       Logger.info("IdentifyBookJob: resolved image #{image_id} → #{length(book_ids)} book(s)")
 
+      Phoenix.PubSub.broadcast(
+        Core.PubSub,
+        "upload:#{image_id}",
+        {:upload_complete, %{status: "resolved", book_ids: book_ids}}
+      )
+
       Events.emit_safe(%{
         event_type: "image.resolved",
         aggregate_type: "image",
@@ -147,6 +153,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
+
+      Phoenix.PubSub.broadcast(
+        Core.PubSub,
+        "upload:#{image_id}",
+        {:upload_complete, %{status: "rejected", rejection_reason: reason}}
+      )
 
       Events.emit_safe(%{
         event_type: "image.rejected",
