@@ -110,6 +110,28 @@ defmodule Stacks.UploadCacheTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :cache
+    test "book.created for each book in multi-book resolution invalidates each cache entry" do
+      book_id_1 = Ecto.UUID.generate()
+      book_id_2 = Ecto.UUID.generate()
+
+      # Prime the cache for both books.
+      BookDetailCache.put(book_id_1, %{title: "The Left Hand of Darkness"})
+      BookDetailCache.put(book_id_2, %{title: "The Dispossessed"})
+      assert {:ok, _} = BookDetailCache.get(book_id_1)
+      assert {:ok, _} = BookDetailCache.get(book_id_2)
+
+      # Dispatch a book.created event for each book individually.
+      event_1 = %{event_type: "book.created", aggregate_id: book_id_1, payload: %{}}
+      event_2 = %{event_type: "book.created", aggregate_id: book_id_2, payload: %{}}
+      assert :ok = CacheInvalidationHandler.handle_event(event_1)
+      assert :ok = CacheInvalidationHandler.handle_event(event_2)
+
+      # Both cache entries should now be invalidated.
+      assert {:miss, ^book_id_1} = BookDetailCache.get(book_id_1)
+      assert {:miss, ^book_id_2} = BookDetailCache.get(book_id_2)
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :cache
     test "invalidate_all/0 clears all cached entries" do
       ids = for _ <- 1..3, do: Ecto.UUID.generate()
       Enum.each(ids, &BookDetailCache.put(&1, %{title: "Book #{&1}"}))
