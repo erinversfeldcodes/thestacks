@@ -11,7 +11,6 @@ module TestHelpers exposing
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulateMergeFormatResponse
-    , simulatePollResponse
     , testBook
     , testPlacement
     , uploadProgram
@@ -24,7 +23,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, BookDetailResponse, PollResponse, PollStatus(..), streamEventDecoder)
+import Api exposing (AuthResponse, BookDetailResponse, PollStatus(..), streamEventDecoder)
 import Components.ISBNInput
 import Dict
 import Http
@@ -42,7 +41,7 @@ import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
-import Types.RemoteData exposing (RemoteData(..))
+import Types.RemoteData
 import Types.Shelf exposing (shelvesResponseDecoder)
 
 
@@ -265,53 +264,6 @@ simulateBookResponse bookId title authorName =
         json
 
 
-{-| Create an HTTP response for a poll status check.
-Parameters: status, optional bookId, isDuplicate flag.
--}
-simulatePollResponse : PollStatus -> Maybe String -> Bool -> Http.Response String
-simulatePollResponse status maybeBookId isDuplicate =
-    let
-        statusStr =
-            case status of
-                Pending ->
-                    "pending"
-
-                Resolved ->
-                    "resolved"
-
-                Rejected ->
-                    "rejected"
-
-        bookIdField =
-            case maybeBookId of
-                Just bid ->
-                    [ ( "book_id", Encode.string bid )
-                    , ( "book_ids", Encode.list Encode.string [ bid ] )
-                    ]
-
-                Nothing ->
-                    [ ( "book_ids", Encode.list Encode.string [] ) ]
-
-        json =
-            Encode.encode 0
-                (Encode.object
-                    ([ ( "image_id", Encode.string "img-test-001" )
-                     , ( "status", Encode.string statusStr )
-                     , ( "is_duplicate", Encode.bool isDuplicate )
-                     ]
-                        ++ bookIdField
-                    )
-                )
-    in
-    Http.GoodStatus_
-        { url = "/api/upload/img-test-001/status"
-        , statusCode = 200
-        , statusText = "OK"
-        , headers = Dict.empty
-        }
-        json
-
-
 {-| Create an HTTP response for a bookshelf listing.
 Wraps placements in a single default shelf within the shelves response shape.
 -}
@@ -501,47 +453,6 @@ simulateBookDetailResponseWithPlacement bookId book placement =
 
 
 -- DECODERS (not exposed from Api, rebuilt here for simulated effects)
-
-
-{-| Decode a PollStatus from its JSON string representation.
--}
-decodePollStatus : Decode.Decoder PollStatus
-decodePollStatus =
-    Decode.string
-        |> Decode.andThen
-            (\s ->
-                case s of
-                    "pending" ->
-                        Decode.succeed Pending
-
-                    "resolved" ->
-                        Decode.succeed Resolved
-
-                    "rejected" ->
-                        Decode.succeed Rejected
-
-                    _ ->
-                        Decode.fail ("Unknown upload status: " ++ s)
-            )
-
-
-{-| Decode a PollResponse. Mirrors Api.pollResponseDecoder which is not exposed.
--}
-decodePollResponse : Decode.Decoder PollResponse
-decodePollResponse =
-    Decode.map6 PollResponse
-        (Decode.field "image_id" Decode.string)
-        (Decode.field "status" decodePollStatus)
-        (Decode.maybe (Decode.field "book_id" Decode.string))
-        (Decode.field "book_ids" (Decode.list Decode.string)
-            |> Decode.maybe
-            |> Decode.map (Maybe.withDefault [])
-        )
-        (Decode.maybe (Decode.field "rejection_reason" Decode.string))
-        (Decode.maybe (Decode.field "is_duplicate" Decode.bool))
-
-
-
 -- SIMULATED EFFECT TRANSLATORS
 
 
