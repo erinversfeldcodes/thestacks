@@ -160,10 +160,15 @@ echo "==> Running Playwright E2E against ${CORE_URL}..."
 
 # Fly.io runs two machines with auto_stop_machines=true. The deploy health check
 # warms one machine; the second may still be cold. Send a burst of concurrent
-# requests to wake all instances before the test suite starts.
+# requests across both health-check and page routes to wake all instances before
+# the test suite starts. /login is included because it's the first route the
+# auth tests hit and triggers the full Phoenix router + static-asset serving.
 echo "==> Warming Fly.io machines..."
-for i in {1..30}; do
+for i in {1..20}; do
     curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
+done
+for i in {1..10}; do
+    curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
 done
 wait
 sleep 2
@@ -178,7 +183,9 @@ FLY_LOGS_FILE="$(mktemp)"
 (fly logs --app "${CORE_APP}" 2>&1) > "${FLY_LOGS_FILE}" &
 FLY_LOGS_PID=$!
 
-E2E_SERVICES=none BASE_URL="${CORE_URL}" bash "${REPO_ROOT}/scripts/test-e2e.sh" 2>&1 || e2e_failed=1
+# CI=1 enables Playwright's retry logic (retries: 2) and 2-worker mode, which
+# makes deployed E2E runs resilient to transient cold-start failures on Fly.
+CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" bash "${REPO_ROOT}/scripts/test-e2e.sh" 2>&1 || e2e_failed=1
 
 kill "${KEEP_ALIVE_PID}" 2>/dev/null || true
 sleep 3
