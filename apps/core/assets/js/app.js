@@ -247,3 +247,29 @@ if (app.ports && app.ports.playLoginTransition) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Port: Upload SSE stream (Issue #159/#160)
+// Opens an EventSource to stream upload status from the backend.
+// JWT is passed as ?token= query param (browser EventSource cannot set headers).
+// ---------------------------------------------------------------------------
+if (app.ports && app.ports.openUploadStream) {
+  app.ports.openUploadStream.subscribe(function (params) {
+    if (window._uploadStream) {
+      window._uploadStream.close();
+    }
+    var es = new EventSource(params.url);
+    es.onmessage = function (event) {
+      try {
+        var parsed = JSON.parse(event.data);
+        if (parsed.type === "heartbeat") return;
+      } catch (_) {}
+      app.ports.uploadStreamEvent.send(event.data);
+    };
+    es.onerror = function () {
+      app.ports.uploadStreamEvent.send(JSON.stringify({ type: "error" }));
+      es.close();
+    };
+    window._uploadStream = es;
+  });
+}

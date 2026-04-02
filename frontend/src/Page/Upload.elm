@@ -9,7 +9,7 @@ module Page.Upload exposing
     , view
     )
 
-import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..))
+import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..), streamEventDecoder)
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
@@ -19,19 +19,10 @@ import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Process
-import Task
 import Types.Book exposing (Book, authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
-
-
-{-| Maximum number of poll attempts before giving up (~300 seconds at 2s intervals).
--}
-maxPollCount : Int
-maxPollCount =
-    150
 
 
 type UploadResult
@@ -55,9 +46,8 @@ type UploadStep
 type alias Model =
     { file : Maybe File
 
-    -- Loading = upload in flight; Success imageId = upload accepted, polling in progress.
+    -- Loading = upload in flight; Success imageId = upload accepted, SSE stream in progress.
     , uploadState : RemoteData Http.Error String
-    , pollCount : Int
     , result : UploadResult
     , manualIsbn : String
     , showIsbnError : Bool
@@ -87,6 +77,7 @@ type alias Model =
 type OutMsg
     = NoOut
     | NavigateTo Route.Route
+    | OpenStream String
 
 
 type Msg
@@ -95,8 +86,9 @@ type Msg
     | DragLeave
     | FilepickerRequested
     | UploadAccepted (Result Http.Error String)
-    | CheckStatus
     | StatusReceived (Result Http.Error PollResponse)
+    | StreamEvent String
+    | StreamError
     | GotIdentifiedBook String (Result Http.Error BookDetailResponse)
     | GotDuplicateBook (Result Http.Error BookDetailResponse)
     | ManualIsbnChanged String
@@ -119,7 +111,6 @@ init : Model
 init =
     { file = Nothing
     , uploadState = NotAsked
-    , pollCount = 0
     , result = NoResult
     , manualIsbn = ""
     , showIsbnError = False
@@ -138,11 +129,6 @@ init =
     }
 
 
-sleepThenPoll : Cmd Msg
-sleepThenPoll =
-    Task.perform (\_ -> CheckStatus) (Process.sleep 2000)
-
-
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
@@ -159,7 +145,6 @@ update msg model maybeToken =
                     ( { model
                         | file = Just file
                         , uploadState = Loading
-                        , pollCount = 0
                         , isDragging = False
                         , step = Uploading
                       }
@@ -179,27 +164,19 @@ update msg model maybeToken =
         UploadAccepted result ->
             case result of
                 Ok imageId ->
-                    -- Upload accepted; begin polling for the identification result.
-                    ( { model | uploadState = Success imageId }, sleepThenPoll, NoOut )
+                    -- Upload accepted; open SSE stream for identification result.
+                    case maybeToken of
+                        Just token ->
+                            ( { model | uploadState = Success imageId }
+                            , Cmd.none
+                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                            )
+
+                        Nothing ->
+                            ( { model | uploadState = Success imageId }, Cmd.none, NoOut )
 
                 Err err ->
                     ( { model | uploadState = Failure err }, Cmd.none, NoOut )
-
-        CheckStatus ->
-            case ( model.uploadState, maybeToken ) of
-                ( Success imageId, Just token ) ->
-                    if model.pollCount >= maxPollCount then
-                        -- Timed out waiting for the vision pipeline.
-                        ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
-
-                    else
-                        ( { model | pollCount = model.pollCount + 1 }
-                        , Api.pollUploadStatus imageId token StatusReceived
-                        , NoOut
-                        )
-
-                _ ->
-                    ( model, Cmd.none, NoOut )
 
         StatusReceived result ->
             case result of
@@ -266,10 +243,22 @@ update msg model maybeToken =
                                     ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
                         Pending ->
-                            ( model, sleepThenPoll, NoOut )
+                            ( model, Cmd.none, NoOut )
 
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+
+        StreamEvent rawJson ->
+            case Decode.decodeString Api.streamEventDecoder rawJson of
+                Ok pollResponse ->
+                    update (StatusReceived (Ok pollResponse)) model maybeToken
+
+                Err _ ->
+                    -- Malformed event (e.g. heartbeat) — ignore, stay in current state.
+                    ( model, Cmd.none, NoOut )
+
+        StreamError ->
+            ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
@@ -622,7 +611,6 @@ viewUploadArea model =
                         ]
 
                 Success _ ->
-                    -- Upload accepted; polling the vision pipeline.
                     div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
                         , p [] [ text "Processing image..." ]

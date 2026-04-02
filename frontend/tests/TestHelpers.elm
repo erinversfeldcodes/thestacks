@@ -24,7 +24,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, BookDetailResponse, PollResponse, PollStatus(..))
+import Api exposing (AuthResponse, BookDetailResponse, PollResponse, PollStatus(..), streamEventDecoder)
 import Components.ISBNInput
 import Dict
 import Http
@@ -550,33 +550,13 @@ decodePollResponse =
 uploadEffects : Upload.Msg -> Upload.Model -> Maybe String -> SimulatedEffect Upload.Msg
 uploadEffects msg model maybeToken =
     case msg of
-        Upload.CheckStatus ->
-            case ( model.uploadState, maybeToken ) of
-                ( Success imageId, Just token ) ->
-                    if model.pollCount >= 150 then
-                        SimulatedEffect.Cmd.none
-
-                    else
-                        SimulatedEffect.Http.request
-                            { method = "GET"
-                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/upload/" ++ imageId ++ "/status"
-                            , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Upload.StatusReceived decodePollResponse
-                            , timeout = Nothing
-                            , tracker = Nothing
-                            }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
         Upload.UploadAccepted (Ok _) ->
-            SimulatedEffect.Task.perform (\_ -> Upload.CheckStatus) (SimulatedEffect.Process.sleep 2000)
+            SimulatedEffect.Cmd.none
 
         Upload.StatusReceived (Ok response) ->
             case response.status of
                 Pending ->
-                    SimulatedEffect.Task.perform (\_ -> Upload.CheckStatus) (SimulatedEffect.Process.sleep 2000)
+                    SimulatedEffect.Cmd.none
 
                 Resolved ->
                     let
@@ -670,6 +650,14 @@ uploadEffects msg model maybeToken =
                         }
 
                 Nothing ->
+                    SimulatedEffect.Cmd.none
+
+        Upload.StreamEvent rawJson ->
+            case Decode.decodeString streamEventDecoder rawJson of
+                Ok response ->
+                    uploadEffects (Upload.StatusReceived (Ok response)) model maybeToken
+
+                Err _ ->
                     SimulatedEffect.Cmd.none
 
         Upload.GotFile _ ->

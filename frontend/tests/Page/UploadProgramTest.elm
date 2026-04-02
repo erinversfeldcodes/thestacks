@@ -3,7 +3,7 @@ module Page.UploadProgramTest exposing (suite)
 {-| Program tests for Page.Upload using elm-program-test.
 
 These tests exercise the full Upload page lifecycle through
-simulated user interactions and HTTP responses.
+simulated user interactions and SSE stream events (replacing the old HTTP polling).
 
 -}
 
@@ -15,7 +15,7 @@ import Page.Upload as Upload exposing (Msg(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (simulateBookResponse, simulateMergeFormatResponse, simulatePollResponse, uploadProgram)
+import TestHelpers exposing (simulateBookResponse, simulateMergeFormatResponse, uploadProgram)
 
 
 {-| Helper to start an upload program with an auth token.
@@ -25,28 +25,59 @@ startUpload =
     ProgramTest.start () (uploadProgram (Just "test-token"))
 
 
-{-| Build a poll response that resolves with multiple book IDs.
+{-| Build an SSE stream event JSON string for a given status.
 -}
-simulateMultiBookPollResponse : List String -> Http.Response String
-simulateMultiBookPollResponse bookIds =
+simulateStreamEvent : PollStatus -> Maybe String -> Bool -> String
+simulateStreamEvent status maybeBookId isDuplicate =
     let
-        json =
-            Encode.encode 0
-                (Encode.object
-                    [ ( "image_id", Encode.string "img-test-001" )
-                    , ( "status", Encode.string "resolved" )
-                    , ( "is_duplicate", Encode.bool False )
-                    , ( "book_ids", Encode.list Encode.string bookIds )
+        statusStr =
+            case status of
+                Pending ->
+                    "pending"
+
+                Resolved ->
+                    "resolved"
+
+                Rejected ->
+                    "rejected"
+
+        bookIdField =
+            case maybeBookId of
+                Just bid ->
+                    [ ( "bookId", Encode.string bid )
+                    , ( "bookIds", Encode.list Encode.string [ bid ] )
                     ]
-                )
+
+                Nothing ->
+                    [ ( "bookId", Encode.null )
+                    , ( "bookIds", Encode.list Encode.string [] )
+                    ]
     in
-    Http.GoodStatus_
-        { url = "/api/upload/img-test-001/status"
-        , statusCode = 200
-        , statusText = "OK"
-        , headers = Dict.empty
-        }
-        json
+    Encode.encode 0
+        (Encode.object
+            ([ ( "imageId", Encode.string "img-test-001" )
+             , ( "status", Encode.string statusStr )
+             , ( "isDuplicate", Encode.bool isDuplicate )
+             , ( "rejectionReason", Encode.null )
+             ]
+                ++ bookIdField
+            )
+        )
+
+
+{-| Build an SSE stream event JSON string that resolves with multiple book IDs.
+-}
+simulateMultiBookStreamEvent : List String -> String
+simulateMultiBookStreamEvent bookIds =
+    Encode.encode 0
+        (Encode.object
+            [ ( "imageId", Encode.string "img-test-001" )
+            , ( "status", Encode.string "resolved" )
+            , ( "isDuplicate", Encode.bool False )
+            , ( "bookIds", Encode.list Encode.string bookIds )
+            , ( "bookId", Encode.null )
+            ]
+        )
 
 
 {-| Build a book HTTP response with a specific edition count.
@@ -120,14 +151,11 @@ suite =
 
 uploadHappyPath : Test
 uploadHappyPath =
-    test "upload_happy_path: file selected -> poll resolved -> book identified -> confirmation card shows title and author" <|
+    test "upload_happy_path: file selected -> stream resolved -> book identified -> confirmation card shows title and author" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Resolved (Just "book-1") False)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") False))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Test Book" "Test Author")
@@ -141,14 +169,11 @@ uploadHappyPath =
 
 uploadIsbnRejection : Test
 uploadIsbnRejection =
-    test "upload_isbn_rejection: poll returns Rejected -> shows failure message and retry button" <|
+    test "upload_isbn_rejection: stream returns Rejected -> shows failure message and retry button" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Rejected Nothing False)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Rejected Nothing False))
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Could Not Identify Book" ]
                 |> ProgramTest.expectViewHas
@@ -157,102 +182,44 @@ uploadIsbnRejection =
 
 uploadNotABook : Test
 uploadNotABook =
-    test "upload_not_a_book: poll returns Resolved with no bookId -> shows not-a-book message" <|
+    test "upload_not_a_book: stream returns Resolved with no bookId -> shows not-a-book message" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Resolved Nothing False)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved Nothing False))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "That Doesn't Look Like a Book" ]
 
 
 uploadPollTimeout : Test
 uploadPollTimeout =
-    test "upload_poll_timeout: repeated pending polls exhaust maxPollCount -> shows identification failed" <|
+    test "upload_poll_timeout: stream error -> shows identification failed" <|
         \() ->
-            let
-                -- Simulate many poll cycles: advance time to trigger CheckStatus, then
-                -- respond with Pending. Each cycle: advance 2000ms -> poll HTTP -> Pending response
-                -- -> auto-schedules another sleep. After 150 cycles pollCount >= maxPollCount.
-                --
-                -- Rather than simulating 150 full cycles, we directly set pollCount high by
-                -- sending many CheckStatus messages. We simulate enough cycles to hit the limit.
-                --
-                -- Actually, let's just advance time and respond with pending a few times,
-                -- then use ProgramTest.update to push pollCount to the limit.
-                advanceAndRespondPending pt =
-                    pt
-                        |> ProgramTest.advanceTime 2000
-                        |> ProgramTest.simulateHttpResponse "GET"
-                            "/api/upload/img-test-001/status"
-                            (simulatePollResponse Pending Nothing False)
-            in
             startUpload
                 |> simulateUploadAccepted
-                -- Do a few poll cycles to prove the mechanism works
-                |> advanceAndRespondPending
-                |> advanceAndRespondPending
-                |> advanceAndRespondPending
-                -- Now force the model to have a high pollCount so the next CheckStatus
-                -- triggers timeout without needing 150 full HTTP cycles
-                |> ProgramTest.update (Upload.StatusReceived (Err Http.NetworkError))
+                |> ProgramTest.update StreamError
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Could Not Identify Book" ]
 
 
 uploadPollTimeoutViaLimit : Test
 uploadPollTimeoutViaLimit =
-    test "upload_poll_timeout_via_limit: CheckStatus guard pollCount >= maxPollCount -> IdentificationFailed without HTTP error" <|
+    test "upload_poll_timeout_via_limit: StatusReceived with network error -> IdentificationFailed" <|
         \() ->
-            let
-                -- After 3 real poll cycles pollCount == 3. We need pollCount == 150 to
-                -- trigger the CheckStatus guard (pollCount >= maxPollCount). Send
-                -- CheckStatus directly 147 more times to reach pollCount 150, then one
-                -- final CheckStatus hits the >= guard and sets result = IdentificationFailed.
-                --
-                -- Each intermediate CheckStatus issues a simulated HTTP request that is
-                -- never responded to (uploadEffects returns Cmd.none once pollCount >= 150,
-                -- and the terminal expectViewHas does not require pending effects to be
-                -- handled). This path exercises the real timeout guard in CheckStatus,
-                -- NOT the error handler in StatusReceived.
-                sendCheckStatusTimes n pt =
-                    List.foldl (\_ acc -> ProgramTest.update CheckStatus acc) pt (List.repeat n ())
-
-                advanceAndRespondPending pt =
-                    pt
-                        |> ProgramTest.advanceTime 2000
-                        |> ProgramTest.simulateHttpResponse "GET"
-                            "/api/upload/img-test-001/status"
-                            (simulatePollResponse Pending Nothing False)
-            in
             startUpload
                 |> simulateUploadAccepted
-                -- 3 real poll cycles: pollCount reaches 3, confirming the polling path works
-                |> advanceAndRespondPending
-                |> advanceAndRespondPending
-                |> advanceAndRespondPending
-                -- Advance pollCount from 3 to 150 via direct CheckStatus messages (147 calls).
-                -- Each call increments pollCount by 1 and queues an HTTP request we ignore.
-                |> sendCheckStatusTimes 147
-                -- pollCount is now 150; this final CheckStatus fires the >= maxPollCount guard.
-                |> ProgramTest.update CheckStatus
+                |> ProgramTest.update (Upload.StatusReceived (Err Http.NetworkError))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Could Not Identify Book" ]
 
 
 uploadDuplicateDetected : Test
 uploadDuplicateDetected =
-    test "upload_duplicate_detected: poll returns isDuplicate=True -> shows duplicate card with shelf selector" <|
+    test "upload_duplicate_detected: stream returns isDuplicate=True -> shows duplicate card with shelf selector" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Resolved (Just "book-1") True)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") True))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Duplicate Book" "Dupe Author")
@@ -287,14 +254,11 @@ uploadManualIsbnEntry =
 
 uploadMultiBook : Test
 uploadMultiBook =
-    test "upload_multi_book: poll resolves with 3 bookIds -> fetch all 3 books -> shows Books Identified! and all titles" <|
+    test "upload_multi_book: stream resolves with 3 bookIds -> fetch all 3 books -> shows Books Identified! and all titles" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulateMultiBookPollResponse [ "book-a", "book-b", "book-c" ])
+                |> ProgramTest.update (StreamEvent (simulateMultiBookStreamEvent [ "book-a", "book-b", "book-c" ]))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-a"
                     (simulateBookResponse "book-a" "First Book" "Author One")
@@ -320,10 +284,7 @@ uploadMergeFormatSuccess =
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Resolved (Just "book-1") True)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") True))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookWithEditionCount "book-1" "Duplicate Book" "Dupe Author" 1)
@@ -343,10 +304,7 @@ uploadMergeFormatFailure =
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Resolved (Just "book-1") True)
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") True))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Duplicate Book" "Dupe Author")
@@ -387,12 +345,9 @@ uploadReset =
     test "upload_reset: from identification failed state -> click reset -> returns to drop zone" <|
         \() ->
             startUpload
-                -- Get to IdentificationFailed state
+                -- Get to IdentificationFailed state via StreamError
                 |> simulateUploadAccepted
-                |> ProgramTest.advanceTime 2000
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/upload/img-test-001/status"
-                    (simulatePollResponse Rejected Nothing False)
+                |> ProgramTest.update StreamError
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Could Not Identify Book" ]
                 -- Click the reset button
