@@ -364,22 +364,33 @@ echo "PASS deploy: core app deployed"
 # though internal health checks pass.
 echo ""
 echo "==> Signaling Fly proxy to route traffic..."
-MACHINE_ID="$(fly machines list --app "${CORE_APP}" --json 2>/dev/null \
-    | python3 -c "import json,sys; ms=json.load(sys.stdin); print(ms[0]['id'] if ms else '')" 2>/dev/null || true)"
-if [[ -n "$MACHINE_ID" ]]; then
-    fly machines start "$MACHINE_ID" --app "${CORE_APP}" 2>/dev/null || true
-    echo "    Signaled machine ${MACHINE_ID}"
-    sleep 5
-fi
+fly machines list --app "${CORE_APP}" --json 2>/dev/null \
+| python3 -c "
+import json,sys
+for m in json.load(sys.stdin):
+    print(m['id'])
+" 2>/dev/null | while read -r mid; do
+    fly machines start "$mid" --app "${CORE_APP}" 2>/dev/null && \
+        echo "    Signaled machine ${mid}" || true
+done
+sleep 5
 
 echo "==> Waiting for ${CORE_URL}/api/health..."
-RETRIES=10
-until curl -sf --max-time 15 "${CORE_URL}/api/health" &>/dev/null; do
+RETRIES=30
+until curl -sf --max-time 30 "${CORE_URL}/api/health" >/dev/null 2>&1; do
     if [[ $RETRIES -le 0 ]]; then
+        _diag="$(curl -sw "http=%{http_code} err=%{errormsg}" -o /dev/null --max-time 30 \
+            "${CORE_URL}/api/health" 2>&1 || echo "no-response")"
+        echo "    Last probe: ${_diag}"
+        echo "--- Fly app logs (last 30 lines) ---"
+        (fly logs --app "${CORE_APP}" 2>&1 & sleep 8; kill %1 2>/dev/null) | tail -30 || true
+        echo "--- End logs ---"
         echo "FAIL deploy: health check timed out for ${CORE_URL}"
         exit 1
     fi
-    echo "    Not ready — retrying in 10s ($RETRIES attempts left)..."
+    _diag="$(curl -sw "http=%{http_code} err=%{errormsg}" -o /dev/null --max-time 30 \
+        "${CORE_URL}/api/health" 2>&1 || echo "no-response")"
+    echo "    Not ready (${_diag}) — retrying in 10s ($RETRIES attempts left)..."
     sleep 10
     ((RETRIES--))
 done
