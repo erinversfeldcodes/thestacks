@@ -71,6 +71,10 @@ type alias Model =
     , mergeFormatState : RemoteData Http.Error MergeFormatResponse
     , mergeIsbn : String
     , mergeFormatLabel : String
+
+    -- True once a terminal SSE event (resolved/rejected) has been received.
+    -- Used to suppress spurious StreamError after the server closes the connection.
+    , sseTerminalReceived : Bool
     }
 
 
@@ -126,6 +130,7 @@ init =
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
     , mergeFormatLabel = ""
+    , sseTerminalReceived = False
     }
 
 
@@ -212,7 +217,7 @@ update msg model maybeToken =
                                             else
                                                 GotIdentifiedBook singleId
                                     in
-                                    ( { model | pendingBookIds = [], collectedBooks = [] }
+                                    ( { model | pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }
                                     , Api.getBook singleId (Just token) callback
                                     , NoOut
                                     )
@@ -222,6 +227,7 @@ update msg model maybeToken =
                                     ( { model
                                         | pendingBookIds = multiIds
                                         , collectedBooks = []
+                                        , sseTerminalReceived = True
                                       }
                                     , Cmd.batch
                                         (List.map
@@ -232,15 +238,15 @@ update msg model maybeToken =
                                     )
 
                                 _ ->
-                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
-                                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                                    ( { model | result = IdentificationFailed, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
@@ -258,7 +264,16 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         StreamError ->
-            ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+            -- Ignore the error if we already received a terminal SSE event.
+            -- When the server closes the connection immediately after sending
+            -- resolved/rejected, the browser fires onerror right after the
+            -- message — before book fetches complete. The flag prevents that
+            -- connection-close error from overwriting the correct pipeline state.
+            if model.sseTerminalReceived then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
