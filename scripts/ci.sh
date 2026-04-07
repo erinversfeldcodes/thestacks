@@ -200,9 +200,11 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         # ── E2E ───────────────────────────────────────────────────────────────
         echo -e "\n${CYAN}${BOLD}=== deploy: E2E ===${RESET}"
 
-        # Warm both Fly machines before Playwright starts. The deploy health check
-        # warms one machine; the second may still be cold.
-        echo "==> Warming Fly.io machines..."
+        # Warm both Fly machines AND the Neon database before Playwright starts.
+        # Health-check and login page hits wake the Fly machines; the DB calls
+        # (login API + catalogue query) unpark Neon so the first Playwright test
+        # doesn't time out waiting for the DB to spin up.
+        echo "==> Warming Fly.io machines and Neon database..."
         _warm_pids=()
         for i in {1..20}; do
             curl -sf --max-time 5 "${_core_url}/api/health" >/dev/null 2>&1 &
@@ -211,6 +213,25 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         for i in {1..10}; do
             curl -sf --max-time 10 "${_core_url}/login" >/dev/null 2>&1 &
             _warm_pids+=("$!")
+        done
+        # DB-warming calls: POST /api/auth/login and GET /api/catalogue both query
+        # Postgres, ensuring Neon is active before Playwright's first test runs.
+        for i in {1..5}; do
+            curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+                >/dev/null 2>&1 &
+            _warm_pids+=("$!")
+        done
+        for i in {1..3}; do
+            _db_warm_token="$(curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+                2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+            if [[ -n "${_db_warm_token}" ]]; then
+                curl -sf --max-time 30 "${_core_url}/api/catalogue?per_page=20" \
+                    -H "Authorization: Bearer ${_db_warm_token}" >/dev/null 2>&1 || true
+            fi
         done
         for pid in "${_warm_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
         sleep 2

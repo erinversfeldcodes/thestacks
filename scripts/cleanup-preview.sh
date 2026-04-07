@@ -55,7 +55,17 @@ echo "    Modal app:   ${MODAL_APP}"
 
 # ── Fly apps ─────────────────────────────────────────────────────────────────
 if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
-    fly apps destroy "${CORE_APP}" --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}." || echo "    ${CORE_APP} not found (already gone)."
+    # IMPORTANT: do NOT destroy CORE_APP.
+    # fly apps destroy removes the DNS record and causes macOS mDNSResponder to
+    # cache a NXDOMAIN that can persist for 10-50+ minutes. The next CI run's
+    # Node.js/Playwright calls (which use the system resolver) all fail with
+    # ENOTFOUND even after the app is redeployed, because the OS still serves
+    # the cached NXDOMAIN and flushing it requires root.
+    #
+    # Instead, we rely on auto_stop_machines = true in fly.core.toml to stop
+    # idle machines (no running-machine cost). The app DNS record stays live.
+    # The next ci.sh run re-deploys to the same app via `fly apps create || true`.
+    echo "    Keeping ${CORE_APP} (auto_stop_machines handles idle cost, preserves DNS)."
     fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
     fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
 else
