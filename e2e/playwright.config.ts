@@ -42,6 +42,7 @@ export default defineConfig({
     {
       name: "upload",
       timeout: 300_000,
+      retries: 0,
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup", "chromium", "upload-mock"],
       testMatch: /upload\.spec\.ts$/,

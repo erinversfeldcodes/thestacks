@@ -38,6 +38,14 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.SSEAuthPipeline
   end
 
+  # SSE endpoints must NOT use plug :accepts — EventSource sends
+  # "Accept: text/event-stream" which Phoenix's MIME registry doesn't map
+  # to the "event-stream" format name, causing spurious 406s.
+  # The endpoint always returns text/event-stream so no negotiation is needed.
+  pipeline :sse_api do
+    plug StacksWeb.Plugs.SecurityHeaders
+  end
+
   pipeline :view_as do
     plug StacksWeb.Plugs.ViewAsPlug
   end
@@ -108,7 +116,7 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
-    pipe_through [:api, :sse_auth]
+    pipe_through [:sse_api, :sse_auth]
     get "/upload/:image_id/stream", UploadController, :stream
   end
 
