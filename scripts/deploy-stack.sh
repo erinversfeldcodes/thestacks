@@ -261,10 +261,12 @@ else
 fi
 
 # ── Create core app ───────────────────────────────────────────────────────────
+# Do NOT destroy the app between deployments. fly deploy replaces machines
+# in-place, so destroy+create is redundant and causes a NXDOMAIN DNS cache
+# entry on macOS that breaks all subsequent curl/Node DNS lookups for 5+ min.
 echo ""
-echo "==> Creating ephemeral Fly app..."
-fly apps destroy "${CORE_APP}" --yes 2>&1 | grep -v "^Error" || true
-fly apps create "${CORE_APP}" 2>&1 || true
+echo "==> Creating ephemeral Fly app (if not already exists)..."
+fly apps create "${CORE_APP}" 2>&1 || true  # noop if app already exists
 
 # ── Stage core secrets ────────────────────────────────────────────────────────
 fly secrets set \
