@@ -363,29 +363,29 @@ done
 sleep 5
 
 echo "==> Waiting for ${CORE_URL}/api/health..."
-# Use 1.1.1.1 as the DNS resolver to bypass the macOS system DNS cache.
-# After fly apps destroy → fly apps create, mDNSResponder caches a NXDOMAIN
-# for the old hostname. Flushing requires sudo; bypassing is simpler.
-_CURL_DNS="--dns-servers 1.1.1.1"
+# After fly apps destroy → fly apps create, macOS caches a stale NXDOMAIN for
+# the hostname. Flushing requires sudo. Instead, tunnel via fly proxy which uses
+# Fly's WireGuard connection and needs no DNS resolution at all.
+_PROXY_PORT=14987
+fly proxy "${_PROXY_PORT}:4000" --app "${CORE_APP}" >/dev/null 2>&1 &
+_PROXY_PID=$!
 
 RETRIES=30
-until curl -sf --max-time 30 ${_CURL_DNS} "${CORE_URL}/api/health" >/dev/null 2>&1; do
+until curl -sf --max-time 10 "http://localhost:${_PROXY_PORT}/api/health" >/dev/null 2>&1; do
     if [[ $RETRIES -le 0 ]]; then
-        _diag="$(curl -sw "http=%{http_code} err=%{errormsg}\n" -o /dev/null --max-time 30 \
-            ${_CURL_DNS} "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
-        echo "    Last probe: ${_diag}"
+        kill "${_PROXY_PID}" 2>/dev/null || true
         echo "--- Fly app logs (last 30 lines) ---"
         (fly logs --app "${CORE_APP}" 2>&1 & sleep 8; kill %1 2>/dev/null) | tail -30 || true
         echo "--- End logs ---"
         echo "FAIL deploy: health check timed out for ${CORE_URL}"
         exit 1
     fi
-    _diag="$(curl -sw "http=%{http_code} err=%{errormsg}\n" -o /dev/null --max-time 30 \
-        ${_CURL_DNS} "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
-    echo "    Not ready (${_diag}) — retrying in 10s ($RETRIES attempts left)..."
-    sleep 10
+    echo "    Not ready — retrying in 5s ($RETRIES attempts left)..."
+    sleep 5
     ((RETRIES--))
 done
+kill "${_PROXY_PID}" 2>/dev/null || true
+wait "${_PROXY_PID}" 2>/dev/null || true
 echo "PASS deploy: health check passed"
 
 # ── Migrate ──────────────────────────────────────────────────────────────────
