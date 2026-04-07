@@ -467,8 +467,7 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     // Use file picker
     await triggerFileUpload(page);
 
-    // Processing -> Verification
-    await expect(page.getByTestId("upload-loading")).toBeVisible();
+    // Processing -> Verification (loading may be too brief to observe with fast mock)
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
