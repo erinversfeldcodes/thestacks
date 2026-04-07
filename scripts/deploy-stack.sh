@@ -363,18 +363,16 @@ done
 sleep 5
 
 echo "==> Waiting for ${CORE_URL}/api/health..."
-# On macOS, destroy→create cycles leave a negative DNS cache entry (NXDOMAIN).
-# Flush it so curl can resolve the newly provisioned hostname immediately.
-if command -v dscacheutil &>/dev/null; then
-    dscacheutil -flushcache 2>/dev/null || true
-    killall -HUP mDNSResponder 2>/dev/null || true
-fi
+# Use 1.1.1.1 as the DNS resolver to bypass the macOS system DNS cache.
+# After fly apps destroy → fly apps create, mDNSResponder caches a NXDOMAIN
+# for the old hostname. Flushing requires sudo; bypassing is simpler.
+_CURL_DNS="--dns-servers 1.1.1.1"
 
 RETRIES=30
-until curl -sf --max-time 30 "${CORE_URL}/api/health" >/dev/null 2>&1; do
+until curl -sf --max-time 30 ${_CURL_DNS} "${CORE_URL}/api/health" >/dev/null 2>&1; do
     if [[ $RETRIES -le 0 ]]; then
         _diag="$(curl -sw "http=%{http_code} err=%{errormsg}\n" -o /dev/null --max-time 30 \
-            "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
+            ${_CURL_DNS} "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
         echo "    Last probe: ${_diag}"
         echo "--- Fly app logs (last 30 lines) ---"
         (fly logs --app "${CORE_APP}" 2>&1 & sleep 8; kill %1 2>/dev/null) | tail -30 || true
@@ -383,7 +381,7 @@ until curl -sf --max-time 30 "${CORE_URL}/api/health" >/dev/null 2>&1; do
         exit 1
     fi
     _diag="$(curl -sw "http=%{http_code} err=%{errormsg}\n" -o /dev/null --max-time 30 \
-        "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
+        ${_CURL_DNS} "${CORE_URL}/api/health" 2>&1)" || _diag="no-response"
     echo "    Not ready (${_diag}) — retrying in 10s ($RETRIES attempts left)..."
     sleep 10
     ((RETRIES--))
