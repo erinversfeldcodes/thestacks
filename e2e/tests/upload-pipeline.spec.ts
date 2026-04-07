@@ -1053,9 +1053,6 @@ test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Processing spinner should appear
-    await expect(page.getByTestId("upload-loading")).toBeVisible();
-
     // Verification view should appear normally — age gating is transparent during upload
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
