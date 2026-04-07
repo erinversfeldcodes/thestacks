@@ -85,7 +85,7 @@ if [[ -n "${smoke_token}" ]]; then
     stream_pids=()
     for img_id in "${warmup_ids[@]}"; do
         (
-            stream_resp="$(curl -sf --max-time 120 \
+            stream_resp="$(curl -sf --max-time 480 \
                 "${CORE_URL}/api/upload/${img_id}/stream?token=${smoke_token}" \
                 2>/dev/null || true)"
             echo "${stream_resp}" | python3 -c \
