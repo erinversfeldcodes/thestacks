@@ -54,7 +54,7 @@ defmodule Stacks.Discovery.BraveClient do
           {:error, :rate_limited}
 
         {:ok, %Finch.Response{status: status, body: body}} ->
-          Logger.warning("BraveClient: unexpected status #{status}: #{body}")
+          Logger.warning("BraveClient: unexpected status #{status}: #{inspect(body)}")
           {:error, {:unexpected_status, status}}
 
         {:error, reason} ->

@@ -188,20 +188,7 @@ fi
 SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
 SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
 
-# Detect whether scraper source changed relative to main — if not, skip the
-# 820s Rust build. FORCE_SCRAPER=1 overrides the check (e.g. dep bumps).
-SCRAPER_CHANGED=true
-if [[ -z "${FORCE_SCRAPER:-}" ]]; then
-    BASE_REF="${GITHUB_BASE_REF:-main}"
-    if git fetch origin "${BASE_REF}" --quiet 2>/dev/null && \
-       git diff --quiet "origin/${BASE_REF}...HEAD" -- apps/scraper/ deploy/Dockerfile.scraper 2>/dev/null; then
-        SCRAPER_CHANGED=false
-        echo "    INFO: no scraper changes vs origin/${BASE_REF} — skipping scraper build (set FORCE_SCRAPER=1 to override)"
-        SCRAPER_INTERNAL_URL=""
-    fi
-fi
-
-if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]] && [[ "$SCRAPER_CHANGED" == "true" ]]; then
+if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo ""
     echo "==> Deploying scraper (app: ${SCRAPER_APP})..."
     fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
