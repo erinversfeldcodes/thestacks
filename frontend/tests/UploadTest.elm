@@ -25,57 +25,13 @@ dummyBook =
     }
 
 
-pendingPoll : PollResponse
-pendingPoll =
-    { imageId = "img-1"
-    , status = Pending
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Nothing
-    , isDuplicate = Nothing
-    }
-
-
-rejectedPoll : PollResponse
-rejectedPoll =
+timeoutPoll : PollResponse
+timeoutPoll =
     { imageId = "img-1"
     , status = Rejected
     , bookId = Nothing
     , bookIds = []
-    , rejectionReason = Just "isbn_not_found"
-    , isDuplicate = Nothing
-    }
-
-
-resolvedNewBook : PollResponse
-resolvedNewBook =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Just "book-1"
-    , bookIds = [ "book-1" ]
     , rejectionReason = Nothing
-    , isDuplicate = Just False
-    }
-
-
-resolvedDuplicate : PollResponse
-resolvedDuplicate =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Just "book-1"
-    , bookIds = [ "book-1" ]
-    , rejectionReason = Nothing
-    , isDuplicate = Just True
-    }
-
-
-resolvedNotABook : PollResponse
-resolvedNotABook =
-    { imageId = "img-1"
-    , status = Resolved
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Just "not_a_book"
     , isDuplicate = Nothing
     }
 
@@ -138,17 +94,13 @@ suite =
     describe "Page.Upload"
         [ describe "UploadAccepted"
             [ -- US-1.1.1 | Suite 10: Elm
-              test "Ok imageId sets uploadState to Success and resets pollCount" <|
+              test "Ok imageId sets uploadState to Success" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just "tok")
                     in
-                    Expect.all
-                        [ \m -> m.uploadState |> Expect.equal (Success "img-1")
-                        , \m -> m.pollCount |> Expect.equal 0
-                        ]
-                        model
+                    model.uploadState |> Expect.equal (Success "img-1")
             , -- US-1.1.1 | Suite 10: Elm
               test "Err sets uploadState to Failure" <|
                 \_ ->
@@ -158,139 +110,97 @@ suite =
                     in
                     model.uploadState |> Expect.equal (Failure Http.NetworkError)
             ]
-        , describe "CheckStatus"
-            [ -- US-1.1.1 | Suite 10: Elm
-              test "increments pollCount" <|
+        , describe "StreamEvent"
+            [ -- US-1.1.1 | Suite 10: Elm (#160 SSE)
+              test "resolved payload transitions model to awaiting book fetch" <|
                 \_ ->
                     let
-                        ( model, _, _ ) =
-                            Upload.update CheckStatus modelWithImage (Just "tok")
-                    in
-                    model.pollCount |> Expect.equal 1
-            , -- US-1.1.1 | Suite 10: Elm
-              test "sets result to IdentificationFailed when maxPollCount reached" <|
-                \_ ->
-                    let
-                        base =
-                            Upload.init
-
-                        timedOut =
-                            { base | uploadState = Success "img-1", pollCount = 150 }
+                        rawJson =
+                            "{\"status\":\"resolved\",\"bookIds\":[\"some-uuid\"],\"bookId\":\"some-uuid\",\"rejectionReason\":null,\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
 
                         ( model, _, _ ) =
-                            Upload.update CheckStatus timedOut (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
-                    model.result |> Expect.equal IdentificationFailed
-            , -- US-1.1.1 | Suite 10: Elm
-              test "no-ops when uploadState is not Success" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Upload.update CheckStatus Upload.init (Just "tok")
-                    in
-                    model.pollCount |> Expect.equal 0
-            , -- US-1.1.1 | Suite 10: Elm
-              test "no-ops when token is absent" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Upload.update CheckStatus modelWithImage Nothing
-                    in
-                    model.pollCount |> Expect.equal 0
-            ]
-        , describe "StatusReceived"
-            [ -- US-1.1.1 | Suite 10: Elm
-              test "Pending leaves result unchanged" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok pendingPoll)) modelWithImage (Just "tok")
-                    in
+                    -- Model is in-flight fetching book; result stays NoResult while
+                    -- GotIdentifiedBook request is pending.
                     model.result |> Expect.equal NoResult
-            , -- US-1.1.2 | Suite 10: Elm
-              test "Rejected sets result to IdentificationFailed" <|
+            , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
+              test "rejected payload sets result to IdentificationFailed" <|
                 \_ ->
                     let
-                        withPending =
-                            { init_
-                                | pendingBookIds = [ "book-1" ]
-                                , collectedBooks = [ dummyBook ]
-                            }
+                        rawJson =
+                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"not_a_book\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
 
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok rejectedPoll)) withPending (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
+                    -- rejection reason "not_a_book" → NotABook result
+                    model.result |> Expect.equal NotABook
+            , -- US-1.1.1 | Suite 10: Elm (#160 SSE)
+              test "heartbeat payload leaves model unchanged" <|
+                \_ ->
+                    let
+                        rawJson =
+                            "{\"type\":\"heartbeat\"}"
+
+                        ( model, _, _ ) =
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                    in
+                    -- heartbeat should not alter result or uploadState
                     Expect.all
-                        [ \m -> m.result |> Expect.equal IdentificationFailed
-                        , \m -> m.pendingBookIds |> Expect.equal [ "book-1" ]
-                        , \m -> m.collectedBooks |> Expect.equal [ dummyBook ]
+                        [ \m -> m.result |> Expect.equal NoResult
+                        , \m -> m.uploadState |> Expect.equal (Success "img-1")
                         ]
                         model
-            , -- US-1.1.3 | Suite 10: Elm
-              test "Resolved without bookId sets result to NotABook" <|
+            , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
+              test "resolved without bookId sets result to NotABook" <|
                 \_ ->
                     let
+                        rawJson =
+                            "{\"status\":\"resolved\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"not_a_book\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok resolvedNotABook)) Upload.init (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal NotABook
-            , -- US-1.1.1 | Suite 10: Elm
-              test "Resolved with bookId leaves result pending (waits for GotIdentifiedBook)" <|
+            , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
+              test "isbn_not_found rejection reason sets result to IdentificationFailed" <|
                 \_ ->
                     let
+                        rawJson =
+                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"isbn_not_found\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok resolvedNewBook)) Upload.init (Just "tok")
-                    in
-                    -- Model unchanged while getBook request is in-flight.
-                    model.result |> Expect.equal NoResult
-            , -- US-1.1.6 | Suite 10: Elm
-              test "Resolved with duplicate flag leaves result pending (waits for GotDuplicateBook)" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok resolvedDuplicate)) Upload.init (Just "tok")
-                    in
-                    model.result |> Expect.equal NoResult
-            , -- US-1.1.1 | Suite 10: Elm
-              test "Http error on poll sets result to IdentificationFailed" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Upload.update (StatusReceived (Err Http.NetworkError)) Upload.init (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
-            , -- US-1.1.2 | Suite 10: Elm
-              test "Http error during rejected poll sets result to IdentificationFailed" <|
+            ]
+        , describe "StreamError"
+            [ -- US-1.1.1 | Suite 10: Elm (#160 SSE)
+              test "StreamError sets result to IdentificationFailed" <|
                 \_ ->
                     let
-                        polling =
-                            { init_
-                                | uploadState = Success "img-1"
-                                , pendingBookIds = [ "book-1" ]
-                                , collectedBooks = []
-                            }
-
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Err Http.NetworkError)) polling (Just "tok")
+                            Upload.update StreamError modelWithImage (Just "tok")
                     in
-                    Expect.all
-                        [ \m -> m.result |> Expect.equal IdentificationFailed
-                        , \m -> m.pendingBookIds |> Expect.equal [ "book-1" ]
-                        ]
-                        model
-            , -- US-1.1.3 | Suite 10: Elm
-              test "Http error when expecting not-a-book sets result to IdentificationFailed" <|
+                    model.result |> Expect.equal IdentificationFailed
+            , -- US-1.1.1 | Suite 10: Elm (#160 SSE)
+              test "StreamError leaves uploadState unchanged" <|
                 \_ ->
                     let
-                        polling =
-                            { init_
-                                | uploadState = Success "img-1"
-                                , pendingBookIds = []
-                                , collectedBooks = []
-                            }
-
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Err Http.NetworkError)) polling (Just "tok")
+                            Upload.update StreamError modelWithImage (Just "tok")
+                    in
+                    -- uploadState stays as-is; only result changes
+                    model.uploadState |> Expect.equal (Success "img-1")
+            ]
+        , describe "StatusReceived (response-parsing logic, carried over from polling)"
+            [ -- US-1.1.2 | Suite 10: Elm
+              test "timeout status sets result to IdentificationFailed" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
             ]

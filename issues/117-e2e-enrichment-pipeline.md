@@ -258,10 +258,20 @@ Comprehensive end-to-end test coverage for the enrichment pipeline: price scrapi
 - Mock returns failure -> source health recorded
 
 #### Rust Scraper (Price Scraping)
+**Mock tests (`TEST_TARGET=local`):**
 - Mock scraper service returns price data per ISBN per store
 - Mock returns "not stocked" -> store shows "Not available"
 - Mock returns failure -> `Monitoring.record_failure/3`
 - Invalid TOML config: health check records failure, source shows degraded
+
+**Real scraper tests (`@tag :deployed_only`, `TEST_TARGET=deployed`):**
+The Rust scraper must be deployed to `thestacks-scraper` on Fly.io before these tests can pass. See deployment prerequisites below.
+- `GET https://thestacks-scraper.internal/health` returns 200 — scraper is reachable from core app
+- `TriggerPriceScrapeJob` with a real ISBN (e.g. `9781250301697`) and store `za/exclusive_books` — real HTTP scrape returns `{:ok, %{price: _, currency: "ZAR", in_stock: _}}`
+- `TriggerPriceScrapeJob` with a real ISBN and store `za/takealot` — real HTTP scrape returns valid price data
+- Price written to `op.price_snapshots` — `fetched_at` is recent, `price > 0`, `currency = "ZAR"`
+- HMAC auth round-trip: scraper rejects requests with wrong `SCRAPER_HMAC_SECRET`, accepts requests signed by core app
+- Circuit breaker recovery: after scraper returns to health, `TriggerPriceScrapeJob` succeeds again
 
 #### Brave Search API
 - Mock returns search results for source discovery
@@ -387,21 +397,67 @@ N/A — enrichment data is stored in the database, not in object storage. No R2 
 - Stale threshold: 30 days
 - Review coverage: percentage of books with at least one snapshot (via `mart_enrichment_gaps`)
 
+## Scraper Deployment Prerequisites (for `@tag :deployed_only` tests)
+
+The `@tag :deployed_only` scraper tests require the Rust scraper to be running on Fly.io before they can pass. These steps are one-time setup:
+
+1. **Build and deploy the scraper image:**
+   ```bash
+   fly deploy --config deploy/fly.scraper.toml --dockerfile deploy/Dockerfile.scraper
+   ```
+
+2. **Set secrets on the scraper app:**
+   ```bash
+   fly secrets set SCRAPER_HMAC_SECRET=<64-char secret> --app thestacks-scraper
+   ```
+
+3. **Set secrets on the core app** (same secret, plus the internal URL):
+   ```bash
+   fly secrets set SCRAPER_HMAC_SECRET=<same secret> --app stacks-core
+   fly secrets set SCRAPER_SERVICE_URL=http://thestacks-scraper.internal:8080 --app stacks-core
+   ```
+
+4. **Seed bookstore records** in the core app database:
+   ```sql
+   INSERT INTO op.bookstores (id, name, website_url, scraper_module, country_code)
+   VALUES
+     (gen_random_uuid(), 'Exclusive Books', 'https://www.exclusivebooks.co.za', 'za/exclusive_books', 'ZA'),
+     (gen_random_uuid(), 'Takealot', 'https://www.takealot.com', 'za/takealot', 'ZA');
+   ```
+
+5. **Verify** the scraper is reachable from within the Fly.io private network:
+   ```bash
+   fly ssh console --app stacks-core
+   > curl http://thestacks-scraper.internal:8080/health
+   ```
+
+Until these steps are complete, all `@tag :deployed_only` scraper tests will be excluded from local and CI runs (via `ExUnit.configure(exclude: [:deployed_only])`). Mock-based tests cover the same code paths for local development.
+
 ## Dependencies
 - Mock infrastructure for all external services:
   - `Stacks.Enrichment.MockReviewFetcher`
   - `Stacks.AI.MockClient` (Together AI)
-  - Scraper mock (Rust service)
+  - `Stacks.Enrichment.MockScraperClient` (Rust scraper — local tests only)
   - Brave Search mock
   - SearXNG mock
   - RSS feed mock
   - Bookstore website mock
+- **Rust scraper deployed to `thestacks-scraper` on Fly.io** — required for `@tag :deployed_only` price scrape tests
+- **`SCRAPER_HMAC_SECRET` and `SCRAPER_SERVICE_URL` set as Fly.io secrets** on both apps
+- **`op.bookstores` seeded** with at least `za/exclusive_books` and `za/takealot`
 - Oban testing setup (`Oban.Testing`)
 - Broadway testing setup for `PricePipeline`
 - Seeded books, authors, stores, and source records
 - Admin user with owner role for admin endpoint tests
 - Playwright test harness with auth helpers
 - `data-testid` attributes on enrichment UI elements (Issue #108)
+
+## Definition of Done
+- [ ] All mock-based test categories pass with `TEST_TARGET=local` (excludes `@tag :deployed_only`)
+- [ ] `@tag :deployed_only` scraper tests pass with `TEST_TARGET=deployed` against a preview stack that has the scraper deployed
+- [ ] Scraper deployment prerequisites documented above are met before attempting deployed tests
+- [ ] No flaky tests
+- [ ] `just verify` passes
 
 ## Agent Assignment
 Orchestrator-coordinated: `playwright-agent` for UI tests, `elixir-agent` for API/DB/event/job/external service tests, `elm-agent` for state machine tests, `dbt-agent` for model tests.

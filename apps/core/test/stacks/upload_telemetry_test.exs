@@ -544,17 +544,17 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "[:phoenix, :endpoint, :stop] fires for GET /api/upload/:id/status", %{
+    test "[:phoenix, :endpoint, :stop] fires for GET /api/upload/:id/stream", %{
       conn: conn,
-      token: token
+      token: token,
+      user: user
     } do
       attach_telemetry([:phoenix, :endpoint, :stop])
 
-      image = insert(:uploaded_image, status: "pending")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn
-      |> auth_conn(token)
-      |> get("/api/upload/#{image.id}/status")
+      |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
       assert_receive {:telemetry, [:phoenix, :endpoint, :stop], measurements, _metadata}, 2_000
       assert is_integer(measurements.duration)
@@ -625,19 +625,18 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — router_dispatch telemetry for GET /api/upload/:id/status" do
+  describe "Suite 11 — router_dispatch telemetry for GET /api/upload/:id/stream" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "200 pending status emits telemetry", %{conn: conn, token: token, user: user} do
+    test "200 pending stream emits telemetry", %{conn: conn, token: token, user: user} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn =
         conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+        |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
-      assert json_response(conn, 200)["status"] == "pending"
+      assert conn.status == 200
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000
@@ -647,7 +646,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "200 resolved status emits telemetry", %{
+    test "200 resolved stream emits telemetry", %{
       conn: conn,
       token: token,
       user: user,
@@ -671,10 +670,10 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+        |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
-      assert json_response(conn, 200)["status"] == "resolved"
+      assert conn.status == 200
+      assert String.contains?(conn.resp_body, "resolved")
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000
@@ -691,8 +690,7 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{fake_id}/status")
+        |> get("/api/upload/#{fake_id}/stream?token=#{token}")
 
       assert json_response(conn, 404)["error"] == "not found"
 
@@ -952,14 +950,12 @@ defmodule Stacks.UploadTelemetryTest do
 
   describe "Suite 11 — Ecto query telemetry during upload flow" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "[:core, :repo, :query] fires for database operations", %{conn: conn, token: token} do
+    test "[:core, :repo, :query] fires for database operations", %{token: token} do
       attach_telemetry([:core, :repo, :query])
 
       image = insert(:uploaded_image, status: "pending")
 
-      conn
-      |> auth_conn(token)
-      |> get("/api/upload/#{image.id}/status")
+      get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
 
       # Ecto emits telemetry for every query; at minimum the status lookup query
       assert_receive {:telemetry, [:core, :repo, :query], measurements, _metadata}, 2_000
@@ -1225,7 +1221,7 @@ defmodule Stacks.UploadTelemetryTest do
 
   describe "Suite 11 — telemetry for duplicate detection (US-1.1.6)" do
     @tag stories: ["US-1.1.6"], suite: :telemetry
-    test "status endpoint with is_duplicate flag emits telemetry", %{
+    test "stream endpoint with is_duplicate flag emits telemetry", %{
       conn: conn,
       token: token,
       user: user,
@@ -1251,11 +1247,10 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+        |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
-      response = json_response(conn, 200)
-      assert response["is_duplicate"] == true
+      assert conn.status == 200
+      assert String.contains?(conn.resp_body, "true")
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000
@@ -1271,7 +1266,7 @@ defmodule Stacks.UploadTelemetryTest do
 
   describe "Suite 11 — telemetry for multi-book status poll (US-1.1.7)" do
     @tag stories: ["US-1.1.7"], suite: :telemetry
-    test "status endpoint with multiple book_ids emits telemetry", %{
+    test "stream endpoint with multiple book_ids emits telemetry", %{
       conn: conn,
       token: token,
       user: user
@@ -1304,11 +1299,11 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+        |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
-      response = json_response(conn, 200)
-      assert length(response["book_ids"]) == 2
+      assert conn.status == 200
+      assert String.contains?(conn.resp_body, book1.id)
+      assert String.contains?(conn.resp_body, book2.id)
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000

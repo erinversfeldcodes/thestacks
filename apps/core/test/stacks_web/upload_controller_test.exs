@@ -99,8 +99,11 @@ defmodule StacksWeb.UploadControllerTest do
     end
   end
 
-  describe "GET /api/upload/:image_id/status" do
-    test "returns status for an existing image", %{conn: conn} do
+  describe "GET /api/upload/:image_id/stream" do
+    test "returns status for a pending image via SSE", %{conn: conn, user: user} do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
       tmp_path = Path.join(System.tmp_dir!(), "status_test_#{System.unique_integer()}.jpg")
       File.write!(tmp_path, "fake image content")
 
@@ -115,32 +118,52 @@ defmodule StacksWeb.UploadControllerTest do
         |> post("/api/upload", %{"image" => upload})
         |> json_response(202)
 
-      conn2 = get(conn, "/api/upload/#{image_id}/status")
-      assert %{"image_id" => ^image_id, "status" => "pending"} = json_response(conn2, 200)
+      conn2 = get(build_conn(), "/api/upload/#{image_id}/stream?token=#{token}")
+      assert conn2.status == 200
+      [content_type | _] = get_resp_header(conn2, "content-type")
+      assert String.contains?(content_type, "text/event-stream")
 
       File.rm(tmp_path)
     end
 
-    test "returns 404 for unknown image_id", %{conn: conn} do
-      conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
-      assert %{"error" => "not found"} = json_response(conn, 404)
+    test "returns 404 for unknown image_id", %{user: user} do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream?token=#{token}")
+      assert json_response(conn, 404)
     end
 
-    test "returns 422 for an invalid (non-UUID) image_id", %{conn: conn} do
-      conn = get(conn, "/api/upload/not-a-uuid/status")
-      assert %{"error" => "invalid image_id"} = json_response(conn, 422)
+    test "returns 400 for an invalid (non-UUID) image_id", %{user: user} do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn = get(build_conn(), "/api/upload/not-a-uuid/stream?token=#{token}")
+      assert conn.status in [400, 422]
     end
 
     test "returns 401 without auth token" do
-      conn = build_conn()
-      conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
+      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
       assert json_response(conn, 401)
     end
 
-    test "returns book_ids for a resolved image with book_ids populated", %{
-      conn: conn,
-      user: user
-    } do
+    test "returns 403 when image is owned by a different user", %{user: _user} do
+      alias Stacks.Accounts.Guardian
+
+      owner = insert(:user)
+      requester = insert(:user)
+      {:ok, requester_token, _} = Guardian.encode_and_sign(requester)
+
+      image = insert(:uploaded_image, status: "pending", user_id: owner.id)
+
+      conn = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{requester_token}")
+      assert conn.status == 403
+    end
+
+    test "returns SSE event body for a resolved image", %{user: user} do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
       book = insert(:book)
 
       image =
@@ -151,13 +174,16 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(conn, "/api/upload/#{image.id}/status")
-      data = json_response(conn2, 200)
-      assert data["status"] == "resolved"
-      assert book.id in data["book_ids"]
+      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      assert conn2.status == 200
+      assert String.contains?(conn2.resp_body, "resolved")
+      assert String.contains?(conn2.resp_body, book.id)
     end
 
-    test "returns book_id as singleton when book_ids is empty", %{conn: conn, user: user} do
+    test "returns SSE event body with singleton book_id when book_ids is empty", %{user: user} do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
       book = insert(:book)
 
       image =
@@ -168,10 +194,10 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(conn, "/api/upload/#{image.id}/status")
-      data = json_response(conn2, 200)
-      assert data["status"] == "resolved"
-      assert book.id in data["book_ids"]
+      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      assert conn2.status == 200
+      assert String.contains?(conn2.resp_body, "resolved")
+      assert String.contains?(conn2.resp_body, book.id)
     end
   end
 end

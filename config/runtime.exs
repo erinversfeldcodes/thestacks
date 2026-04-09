@@ -132,4 +132,27 @@ if config_env() == :prod do
       adapter: Swoosh.Adapters.Resend,
       api_key: System.fetch_env!("RESEND_API_KEY")
   end
+
+  # Erlang clustering on Fly.io — only active when FLY_APP_NAME is set.
+  # rel/env.sh.eex sets RELEASE_DISTRIBUTION=name and RELEASE_NODE=<app>@<ipv6>.
+  # Phoenix.PubSub's pg adapter broadcasts across all connected nodes automatically
+  # once libcluster connects them, so SSE streams on any machine receive events
+  # from Oban jobs on any other machine.
+  if fly_app = System.get_env("FLY_APP_NAME") do
+    config :libcluster,
+      topologies: [
+        fly: [
+          strategy: Cluster.Strategy.DNSPoll,
+          config: [
+            polling_interval: 5_000,
+            query: "#{fly_app}.internal",
+            node_basename: fly_app
+          ]
+        ]
+      ]
+  end
+
+  # Vision pipeline (Modal) can take 60–300s on cold starts. The SSE stream
+  # must stay open long enough for the job to complete and broadcast its result.
+  config :core, :sse_max_timeout_ms, 360_000
 end

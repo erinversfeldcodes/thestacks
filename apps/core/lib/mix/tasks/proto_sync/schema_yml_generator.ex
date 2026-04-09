@@ -259,17 +259,15 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
 
   defp render_test({:relationships, ref_model}) do
     "          - relationships:\n" <>
-      "              arguments:\n" <>
-      "                to: ref('#{ref_model}')\n" <>
-      "                field: id"
+      "              to: ref('#{ref_model}')\n" <>
+      "              field: id"
   end
 
   defp render_test({:accepted_values, values}) do
     values_str = Enum.map_join(values, ", ", fn v -> "'#{v}'" end)
 
     "          - accepted_values:\n" <>
-      "              arguments:\n" <>
-      "                values: [#{values_str}]"
+      "              values: [#{values_str}]"
   end
 
   # -- Diff helpers -----------------------------------------------------------

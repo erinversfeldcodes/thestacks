@@ -7,8 +7,9 @@
 The user navigates to Settings > Privacy & Consent. They see a list of consent items, each with a toggle and a timestamp of when it was last changed.
 
 **What they see on the page:**
-- A clean list of consent items: data collection, review aggregation, price scraping, image processing, analytics.
+- A clean list of consent items: data collection, review aggregation, price scraping, image processing, analytics, AI writing assistant personalisation.
 - Each item has: a clear description of what it covers, a toggle (on/off), and a timestamp ("Consented: 2026-01-15 14:32 UTC").
+- The AI writing assistant personalisation item reads: *"Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."*
 - Changes are logged in the audit trail immediately.
 
 ---
@@ -31,8 +32,8 @@ The user navigates to Settings > Privacy & Consent. They see a list of consent i
 
 ### Elm State Machine
 - **Page module**: `Page.Settings.Consent`
-- **Model fields involved**: `analyticsConsent : Bool`, `saving : RemoteData Http.Error ()`
-- **Msg flow**: `ToggleAnalytics -> SaveConsent -> SaveCompleted (Ok/Err)`
+- **Model fields involved**: `analyticsConsent : Bool`, `writingAssistantConsent : Bool`, `saving : RemoteData Http.Error ()`
+- **Msg flow**: `ToggleAnalytics -> SaveConsent -> SaveCompleted (Ok/Err)`, `ToggleWritingAssistant -> SaveConsent -> SaveCompleted (Ok/Err)`
 - **RemoteData states**: NotAsked -> Loading -> Success / Failure
 
 ---
@@ -43,9 +44,10 @@ The user navigates to Settings > Privacy & Consent. They see a list of consent i
 - **Auth**: Required (JWT Bearer token)
 - **Pipeline**: `:api`, `:authenticated`
 - **Controller**: `StacksWeb.GDPRController.update_consent/2`
-- **Request body**: `{ consent: boolean }`
-- **Response (success)**: `{ consent_analytics: boolean, consent_analytics_at: datetime }` -- HTTP 200
+- **Request body**: `{ consent: boolean, type: "analytics" | "writing_assistant" }`
+- **Response (success)**: `{ consent_analytics: boolean, consent_analytics_at: datetime, consent_writing_assistant: boolean, consent_writing_assistant_at: datetime }` -- HTTP 200
 - **Response (error)**: `{ error: "consent must be true or false" }` -- HTTP 422, or `{ error: "consent parameter is required" }` -- HTTP 422
+- **Side effect**: Revoking `writing_assistant` consent enqueues `WritingAssistantDataPurgeWorker` to delete the user's sessions, embeddings, and retrieval log.
 - **FallbackController handling**: Changeset errors formatted via `format_errors/1`
 
 ---
@@ -64,21 +66,23 @@ The user navigates to Settings > Privacy & Consent. They see a list of consent i
 ### Write: Grant consent
 - **Table(s)**: `op.users`
 - **Operation**: UPDATE
-- **Fields**: `consent_analytics` set to `true`, `consent_analytics_at` set to `DateTime.utc_now()`
+- **Fields**: `consent_analytics` / `consent_writing_assistant` set to `true`, corresponding `_at` timestamp set to `DateTime.utc_now()`
 - **Changeset validations**: Via `User.consent_changeset/2`
 - **Module**: `Stacks.GDPR.Consent.grant_consent/2`
 
 ### Write: Revoke consent
 - **Table(s)**: `op.users`
 - **Operation**: UPDATE
-- **Fields**: `consent_analytics` set to `false`
+- **Fields**: `consent_analytics` / `consent_writing_assistant` set to `false`
 - **Changeset validations**: Via `User.consent_changeset/2`
 - **Module**: `Stacks.GDPR.Consent.revoke_consent/2`
+- **Side effect (writing_assistant only)**: Enqueues `WritingAssistantDataPurgeWorker` to delete `op.blog_assistant_sessions`, `op.turn_feedback`, `op.retrieval_log`, and `op.embeddings` for this user
 
 ### Read: Check consent
 - **Table(s)**: `op.users`
-- **Query**: `Accounts.get_user(user_id)` then checks `user.consent_analytics == true`
+- **Query**: `Accounts.get_user(user_id)` then checks `user.consent_analytics == true` or `user.consent_writing_assistant == true`
 - **Module**: `Stacks.GDPR.Consent.check_consent/2`
+- **Gate**: Writing assistant endpoints must call `check_consent(user, :writing_assistant)` and return HTTP 403 with a clear message if consent has not been granted
 
 ---
 

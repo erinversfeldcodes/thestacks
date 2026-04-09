@@ -19,19 +19,10 @@ import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Process
-import Task
 import Types.Book exposing (Book, authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
-
-
-{-| Maximum number of poll attempts before giving up (~300 seconds at 2s intervals).
--}
-maxPollCount : Int
-maxPollCount =
-    150
 
 
 type UploadResult
@@ -55,9 +46,8 @@ type UploadStep
 type alias Model =
     { file : Maybe File
 
-    -- Loading = upload in flight; Success imageId = upload accepted, polling in progress.
+    -- Loading = upload in flight; Success imageId = upload accepted, SSE stream in progress.
     , uploadState : RemoteData Http.Error String
-    , pollCount : Int
     , result : UploadResult
     , manualIsbn : String
     , showIsbnError : Bool
@@ -81,12 +71,17 @@ type alias Model =
     , mergeFormatState : RemoteData Http.Error MergeFormatResponse
     , mergeIsbn : String
     , mergeFormatLabel : String
+
+    -- True once a terminal SSE event (resolved/rejected) has been received.
+    -- Used to suppress spurious StreamError after the server closes the connection.
+    , sseTerminalReceived : Bool
     }
 
 
 type OutMsg
     = NoOut
     | NavigateTo Route.Route
+    | OpenStream String
 
 
 type Msg
@@ -95,8 +90,9 @@ type Msg
     | DragLeave
     | FilepickerRequested
     | UploadAccepted (Result Http.Error String)
-    | CheckStatus
     | StatusReceived (Result Http.Error PollResponse)
+    | StreamEvent String
+    | StreamError
     | GotIdentifiedBook String (Result Http.Error BookDetailResponse)
     | GotDuplicateBook (Result Http.Error BookDetailResponse)
     | ManualIsbnChanged String
@@ -119,7 +115,6 @@ init : Model
 init =
     { file = Nothing
     , uploadState = NotAsked
-    , pollCount = 0
     , result = NoResult
     , manualIsbn = ""
     , showIsbnError = False
@@ -135,12 +130,8 @@ init =
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
     , mergeFormatLabel = ""
+    , sseTerminalReceived = False
     }
-
-
-sleepThenPoll : Cmd Msg
-sleepThenPoll =
-    Task.perform (\_ -> CheckStatus) (Process.sleep 2000)
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -159,7 +150,6 @@ update msg model maybeToken =
                     ( { model
                         | file = Just file
                         , uploadState = Loading
-                        , pollCount = 0
                         , isDragging = False
                         , step = Uploading
                       }
@@ -179,27 +169,19 @@ update msg model maybeToken =
         UploadAccepted result ->
             case result of
                 Ok imageId ->
-                    -- Upload accepted; begin polling for the identification result.
-                    ( { model | uploadState = Success imageId }, sleepThenPoll, NoOut )
+                    -- Upload accepted; open SSE stream for identification result.
+                    case maybeToken of
+                        Just token ->
+                            ( { model | uploadState = Success imageId }
+                            , Cmd.none
+                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                            )
+
+                        Nothing ->
+                            ( { model | uploadState = Success imageId }, Cmd.none, NoOut )
 
                 Err err ->
                     ( { model | uploadState = Failure err }, Cmd.none, NoOut )
-
-        CheckStatus ->
-            case ( model.uploadState, maybeToken ) of
-                ( Success imageId, Just token ) ->
-                    if model.pollCount >= maxPollCount then
-                        -- Timed out waiting for the vision pipeline.
-                        ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
-
-                    else
-                        ( { model | pollCount = model.pollCount + 1 }
-                        , Api.pollUploadStatus imageId token StatusReceived
-                        , NoOut
-                        )
-
-                _ ->
-                    ( model, Cmd.none, NoOut )
 
         StatusReceived result ->
             case result of
@@ -235,7 +217,7 @@ update msg model maybeToken =
                                             else
                                                 GotIdentifiedBook singleId
                                     in
-                                    ( { model | pendingBookIds = [], collectedBooks = [] }
+                                    ( { model | pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }
                                     , Api.getBook singleId (Just token) callback
                                     , NoOut
                                     )
@@ -245,6 +227,7 @@ update msg model maybeToken =
                                     ( { model
                                         | pendingBookIds = multiIds
                                         , collectedBooks = []
+                                        , sseTerminalReceived = True
                                       }
                                     , Cmd.batch
                                         (List.map
@@ -255,21 +238,42 @@ update msg model maybeToken =
                                     )
 
                                 _ ->
-                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
-                                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                                    ( { model | result = IdentificationFailed, sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Pending ->
-                            ( model, sleepThenPoll, NoOut )
+                            ( model, Cmd.none, NoOut )
 
                 Err _ ->
                     ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+
+        StreamEvent rawJson ->
+            case Decode.decodeString Api.streamEventDecoder rawJson of
+                Ok pollResponse ->
+                    update (StatusReceived (Ok pollResponse)) model maybeToken
+
+                Err _ ->
+                    -- Malformed event (e.g. heartbeat) — ignore, stay in current state.
+                    ( model, Cmd.none, NoOut )
+
+        StreamError ->
+            -- Ignore the error if we already received a terminal SSE event.
+            -- When the server closes the connection immediately after sending
+            -- resolved/rejected, the browser fires onerror right after the
+            -- message — before book fetches complete. The flag prevents that
+            -- connection-close error from overwriting the correct pipeline state.
+            if model.sseTerminalReceived then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
@@ -622,7 +626,6 @@ viewUploadArea model =
                         ]
 
                 Success _ ->
-                    -- Upload accepted; polling the vision pipeline.
                     div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
                         , p [] [ text "Processing image..." ]
