@@ -1,10 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// When BASE_URL points at a remote deployment (Fly.io preview), cold starts and
+// Neon wake-up can push individual test steps past the default 30 s. Use 90 s
+// for deployed runs so flaky timeouts don't mask real failures.
+const isDeployed = !!process.env.BASE_URL;
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  timeout: isDeployed ? 90_000 : 30_000,
   // Parallelise non-upload tests across 4 workers.
   // Upload tests run in a dedicated serial project (workers=1) because the
   // vision model (1 A10G GPU, serial inference) queues concurrent jobs and

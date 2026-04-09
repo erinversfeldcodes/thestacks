@@ -98,10 +98,11 @@ _EXTRACT_PROMPT = (
     # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
     # jobs are serialised on a single A10G) + inference (~60s for long inputs).
     timeout=300,
-    # Keep the container alive for 5 minutes after the last request.
-    # This amortises cold-start cost across batches of images (e.g. processing
-    # a backlog) while letting the container shut down during idle periods.
-    scaledown_window=300,
+    # Keep the container alive for 20 minutes after the last request.
+    # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
+    # all chromium tests complete). 20 min window ensures the GPU is still warm
+    # when upload tests start, avoiding a cold-start that would exceed the test timeout.
+    scaledown_window=1200,
 )
 class VisionModel:
     @modal.enter()
@@ -204,6 +205,8 @@ _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
+    # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
+    .apt_install("libzbar0")
     .pip_install(
         "fastapi==0.135.1",
         "starlette==0.52.1",
@@ -213,6 +216,11 @@ _fastapi_image = (
         "pydantic-settings==2.7.1",
         "structlog==24.4.0",
         "modal>=0.73.0",
+        # Pillow + pyzbar enable the local OCR barcode pre-pass in app/services/local_ocr.py.
+        # Without these, barcode images fall through to the GPU model, which cannot
+        # reliably decode machine-readable barcodes and causes E2E test timeouts.
+        "Pillow>=10.0.0",
+        "pyzbar>=0.1.9",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
@@ -229,7 +237,7 @@ _fastapi_image = (
     ],
     # Keep the ASGI container alive long enough for all E2E tests to complete.
     # ASGI apps handle concurrency natively — no @modal.concurrent needed.
-    scaledown_window=300,
+    scaledown_window=1200,
 )
 @modal.asgi_app()
 def vision_api() -> Any:
