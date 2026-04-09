@@ -188,20 +188,7 @@ fi
 SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
 SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
 
-# Detect whether scraper source changed relative to main — if not, skip the
-# 820s Rust build. FORCE_SCRAPER=1 overrides the check (e.g. dep bumps).
-SCRAPER_CHANGED=true
-if [[ -z "${FORCE_SCRAPER:-}" ]]; then
-    BASE_REF="${GITHUB_BASE_REF:-main}"
-    if git fetch origin "${BASE_REF}" --quiet 2>/dev/null && \
-       git diff --quiet "origin/${BASE_REF}...HEAD" -- apps/scraper/ deploy/Dockerfile.scraper 2>/dev/null; then
-        SCRAPER_CHANGED=false
-        echo "    INFO: no scraper changes vs origin/${BASE_REF} — skipping scraper build (set FORCE_SCRAPER=1 to override)"
-        SCRAPER_INTERNAL_URL=""
-    fi
-fi
-
-if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]] && [[ "$SCRAPER_CHANGED" == "true" ]]; then
+if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo ""
     echo "==> Deploying scraper (app: ${SCRAPER_APP})..."
     fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
@@ -274,10 +261,12 @@ else
 fi
 
 # ── Create core app ───────────────────────────────────────────────────────────
+# Do NOT destroy the app between deployments. fly deploy replaces machines
+# in-place, so destroy+create is redundant and causes a NXDOMAIN DNS cache
+# entry on macOS that breaks all subsequent curl/Node DNS lookups for 5+ min.
 echo ""
-echo "==> Creating ephemeral Fly app..."
-fly apps destroy "${CORE_APP}" --yes 2>&1 | grep -v "^Error" || true
-fly apps create "${CORE_APP}" 2>&1 || true
+echo "==> Creating ephemeral Fly app (if not already exists)..."
+fly apps create "${CORE_APP}" 2>&1 || true  # noop if app already exists
 
 # ── Stage core secrets ────────────────────────────────────────────────────────
 fly secrets set \
@@ -364,25 +353,41 @@ echo "PASS deploy: core app deployed"
 # though internal health checks pass.
 echo ""
 echo "==> Signaling Fly proxy to route traffic..."
-MACHINE_ID="$(fly machines list --app "${CORE_APP}" --json 2>/dev/null \
-    | python3 -c "import json,sys; ms=json.load(sys.stdin); print(ms[0]['id'] if ms else '')" 2>/dev/null || true)"
-if [[ -n "$MACHINE_ID" ]]; then
-    fly machines start "$MACHINE_ID" --app "${CORE_APP}" 2>/dev/null || true
-    echo "    Signaled machine ${MACHINE_ID}"
-    sleep 5
-fi
+fly machines list --app "${CORE_APP}" --json 2>/dev/null \
+| python3 -c "
+import json,sys
+for m in json.load(sys.stdin):
+    print(m['id'])
+" 2>/dev/null | while read -r mid; do
+    fly machines start "$mid" --app "${CORE_APP}" 2>/dev/null && \
+        echo "    Signaled machine ${mid}" || true
+done
+sleep 5
 
 echo "==> Waiting for ${CORE_URL}/api/health..."
-RETRIES=10
-until curl -sf --max-time 15 "${CORE_URL}/api/health" &>/dev/null; do
+# After fly apps destroy → fly apps create, macOS caches a stale NXDOMAIN for
+# the hostname. Flushing requires sudo. Instead, tunnel via fly proxy which uses
+# Fly's WireGuard connection and needs no DNS resolution at all.
+_PROXY_PORT=14987
+fly proxy "${_PROXY_PORT}:4000" --app "${CORE_APP}" >/dev/null 2>&1 &
+_PROXY_PID=$!
+
+RETRIES=30
+until curl -sf --max-time 10 "http://localhost:${_PROXY_PORT}/api/health" >/dev/null 2>&1; do
     if [[ $RETRIES -le 0 ]]; then
+        kill "${_PROXY_PID}" 2>/dev/null || true
+        echo "--- Fly app logs (last 30 lines) ---"
+        (fly logs --app "${CORE_APP}" 2>&1 & sleep 8; kill %1 2>/dev/null) | tail -30 || true
+        echo "--- End logs ---"
         echo "FAIL deploy: health check timed out for ${CORE_URL}"
         exit 1
     fi
-    echo "    Not ready — retrying in 10s ($RETRIES attempts left)..."
-    sleep 10
+    echo "    Not ready — retrying in 5s ($RETRIES attempts left)..."
+    sleep 5
     ((RETRIES--))
 done
+kill "${_PROXY_PID}" 2>/dev/null || true
+wait "${_PROXY_PID}" 2>/dev/null || true
 echo "PASS deploy: health check passed"
 
 # ── Migrate ──────────────────────────────────────────────────────────────────

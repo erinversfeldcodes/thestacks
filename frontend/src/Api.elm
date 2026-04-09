@@ -55,7 +55,6 @@ module Api exposing
     , mergeFormat
     , moveBook
     , placeBook
-    , pollUploadStatus
     , publishBlogPost
     , register
     , rejectSource
@@ -63,6 +62,7 @@ module Api exposing
     , saveConsent
     , searchBooks
     , soldListing
+    , streamEventDecoder
     , updateAgeVerification
     , updateBlogPost
     , updateLocation
@@ -157,40 +157,67 @@ type alias PollResponse =
     }
 
 
-{-| Adapter: proto PollResponse -> app PollResponse.
+{-| Decoder for SSE stream events from /api/upload/:id/stream.
 
-Proto uses string status and non-Maybe fields with empty/false defaults.
-App uses PollStatus ADT and Maybe for optional fields.
+SSE events use camelCase JSON keys (standard JSON API convention), while the
+proto-generated decoder uses snake\_case. This decoder handles both.
 
 -}
-fromProtoPollResponse : ProtoUpload.PollResponse -> PollResponse
-fromProtoPollResponse proto =
-    { imageId = proto.imageId
-    , status =
-        case proto.status of
-            "resolved" ->
-                Resolved
+streamEventDecoder : Decoder PollResponse
+streamEventDecoder =
+    Decode.map6
+        (\imageId status bookId bookIds rejectionReason isDuplicate ->
+            { imageId = imageId
+            , status =
+                case status of
+                    "resolved" ->
+                        Resolved
 
-            "rejected" ->
-                Rejected
+                    "rejected" ->
+                        Rejected
 
-            _ ->
-                Pending
-    , bookId = emptyToNothing proto.bookId
-    , bookIds = proto.bookIds
-    , rejectionReason = emptyToNothing proto.rejectionReason
-    , isDuplicate =
-        if proto.isDuplicate then
-            Just True
+                    "timeout" ->
+                        Rejected
 
-        else
-            Nothing
-    }
+                    _ ->
+                        Pending
+            , bookId = emptyToNothing (Maybe.withDefault "" bookId)
+            , bookIds = bookIds
+            , rejectionReason = emptyToNothing (Maybe.withDefault "" rejectionReason)
+            , isDuplicate =
+                if isDuplicate == Just True then
+                    Just True
 
-
-pollResponseDecoder : Decoder PollResponse
-pollResponseDecoder =
-    Decode.map fromProtoPollResponse ProtoUpload.decodePollResponse
+                else
+                    Nothing
+            }
+        )
+        (Decode.oneOf [ Decode.field "imageId" Decode.string, Decode.field "image_id" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf
+            [ Decode.field "bookId" (Decode.nullable Decode.string)
+            , Decode.field "book_id" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "bookIds" (Decode.list Decode.string)
+            , Decode.field "book_ids" (Decode.list Decode.string)
+            , Decode.succeed []
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "rejectionReason" (Decode.nullable Decode.string)
+            , Decode.field "rejection_reason" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "isDuplicate" (Decode.nullable Decode.bool)
+            , Decode.field "is_duplicate" (Decode.nullable Decode.bool)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 register :
@@ -262,25 +289,6 @@ uploadImage file token toMsg =
         , url = baseUrl ++ "/api/upload"
         , body = Http.multipartBody [ Http.filePart "image" file ]
         , expect = Http.expectJson toMsg (Decode.map .imageId ProtoUpload.decodeUploadAccepted)
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| GET /api/upload/:image\_id/status — poll for the identification result.
--}
-pollUploadStatus :
-    String
-    -> String
-    -> (Result Http.Error PollResponse -> msg)
-    -> Cmd msg
-pollUploadStatus imageId token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/status"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg pollResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

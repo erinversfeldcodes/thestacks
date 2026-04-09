@@ -6,23 +6,37 @@ defmodule Core.Application do
   @impl true
   def start(_type, _args) do
     children =
-      [
-        Core.Repo,
-        Stacks.Vault,
-        {Phoenix.PubSub, name: Core.PubSub},
-        finch_spec(),
-        Stacks.CircuitBreakers,
-        StacksWeb.Plugs.RateLimiter.Server,
-        Stacks.AI.BudgetTracker,
-        Stacks.Books.BookDetailCache,
-        {Oban, Application.fetch_env!(:core, Oban)},
-        CoreWeb.Telemetry,
-        Core.PromEx,
-        CoreWeb.Endpoint
-      ] ++ pipeline_children()
+      cluster_children() ++
+        [
+          Core.Repo,
+          Stacks.Vault,
+          {Phoenix.PubSub, name: Core.PubSub},
+          finch_spec(),
+          Stacks.CircuitBreakers,
+          StacksWeb.Plugs.RateLimiter.Server,
+          Stacks.AI.BudgetTracker,
+          Stacks.Books.BookDetailCache,
+          {Oban, Application.fetch_env!(:core, Oban)},
+          CoreWeb.Telemetry,
+          Core.PromEx,
+          CoreWeb.Endpoint
+        ] ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Erlang clustering via libcluster — active only on Fly.io (FLY_APP_NAME present).
+  # Phoenix.PubSub's pg adapter works across nodes once they are connected;
+  # no PubSub config change is needed.
+  defp cluster_children do
+    topologies = Application.get_env(:libcluster, :topologies, [])
+
+    if topologies == [] do
+      []
+    else
+      [{Cluster.Supervisor, [topologies, [name: Core.ClusterSupervisor]]}]
+    end
   end
 
   # Fly's internal .internal hostnames resolve to IPv6 (6PN) addresses only.

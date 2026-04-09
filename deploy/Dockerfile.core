@@ -34,6 +34,10 @@ COPY apps/core/priv apps/core/priv
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
 
+# Release env hook — sets RELEASE_DISTRIBUTION and RELEASE_NODE from Fly env vars.
+# Must be copied before `mix release` so it is embedded in the release artifact.
+COPY rel rel
+
 # Compile Elixir, fingerprint static assets, build release.
 # NOTE: _build cache is intentionally NOT mounted here — a shared cache can
 # serve stale .beam files when source files change between deploys (the cache

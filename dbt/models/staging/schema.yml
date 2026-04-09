@@ -28,8 +28,7 @@ models:
         description: Visibility tier.
         tests:
           - accepted_values:
-              arguments:
-                values: ['public', 'age_gated']
+              values: ['public', 'age_gated']
       - name: language
         description: Language.
       - name: bisac_codes
@@ -231,8 +230,7 @@ models:
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values: ['to_read', 'reading', 'completed', 'abandoned']
+              values: ['to_read', 'reading', 'completed', 'abandoned']
       - name: current_page
         description: Current page.
       - name: started_at
@@ -286,8 +284,7 @@ models:
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values: ['pending', 'resolved', 'rejected']
+              values: ['pending', 'resolved', 'rejected']
       - name: rejection_reason
         description: Rejection reason.
       - name: uploaded_at

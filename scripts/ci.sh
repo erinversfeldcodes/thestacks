@@ -186,9 +186,198 @@ fi
 # Only triggers when all groups are run (no args), all pass, and FLY_API_TOKEN
 # is set. Skipped when running a targeted subset (e.g. ci.sh elixir rust).
 if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
-    echo ""
-    echo -e "${CYAN}${BOLD}=== deploy: preview + E2E ===${RESET}"
-    bash scripts/deploy-preview.sh || true
+    _branch="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
+    _san="$(echo "$_branch" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
+    _san="${_san%-}"
+    _core_app="stacks-core-pr-${_san}"
+    _core_url="https://${_core_app}.fly.dev"
+    _neon_branch="preview/${_san}"
+
+    # ── Deploy + warmup ───────────────────────────────────────────────────────
+    echo -e "\n${CYAN}${BOLD}=== deploy: stack + warmup ===${RESET}"
+    if bash scripts/deploy-preview.sh; then
+
+        # ── E2E ───────────────────────────────────────────────────────────────
+        echo -e "\n${CYAN}${BOLD}=== deploy: E2E ===${RESET}"
+
+        # Warm both Fly machines AND the Neon database before Playwright starts.
+        # Health-check and login page hits wake the Fly machines; the DB calls
+        # (login API + catalogue query) unpark Neon so the first Playwright test
+        # doesn't time out waiting for the DB to spin up.
+        echo "==> Warming Fly.io machines and Neon database..."
+        _warm_pids=()
+        for i in {1..20}; do
+            curl -sf --max-time 5 "${_core_url}/api/health" >/dev/null 2>&1 &
+            _warm_pids+=("$!")
+        done
+        for i in {1..10}; do
+            curl -sf --max-time 10 "${_core_url}/login" >/dev/null 2>&1 &
+            _warm_pids+=("$!")
+        done
+        # DB-warming calls: POST /api/auth/login and GET /api/catalogue both query
+        # Postgres, ensuring Neon is active before Playwright's first test runs.
+        for i in {1..5}; do
+            curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+                >/dev/null 2>&1 &
+            _warm_pids+=("$!")
+        done
+        for i in {1..3}; do
+            _db_warm_token="$(curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+                2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+            if [[ -n "${_db_warm_token}" ]]; then
+                curl -sf --max-time 30 "${_core_url}/api/catalogue?per_page=20" \
+                    -H "Authorization: Bearer ${_db_warm_token}" >/dev/null 2>&1 || true
+            fi
+        done
+        for pid in "${_warm_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+        sleep 2
+
+        # Keep-alive: prevents auto_stop_machines firing mid-suite
+        (while true; do
+            curl -sf --max-time 5 "${_core_url}/api/health" >/dev/null 2>&1 || true
+            sleep 10
+        done) &
+        _keep_alive_pid=$!
+
+        _fly_logs="$(mktemp)"
+        (fly logs --app "${_core_app}" 2>&1) > "${_fly_logs}" &
+        _fly_logs_pid=$!
+
+        if ! CI=1 E2E_SERVICES=none BASE_URL="${_core_url}" \
+                run_group "deploy: e2e" bash scripts/test-e2e.sh; then
+            FAILED+=(deploy-e2e)
+        fi
+
+        kill "${_keep_alive_pid}" 2>/dev/null || true
+        kill "${_fly_logs_pid}" 2>/dev/null || true
+        wait "${_fly_logs_pid}" 2>/dev/null || true
+        echo ""
+        echo "--- Core app logs during E2E (last 200 lines) ---"
+        tail -200 "${_fly_logs}" || true
+        echo "--- End core logs ---"
+        rm -f "${_fly_logs}"
+
+        # ── Smoke (circuit breakers) — must run after E2E ─────────────────────
+        # Deliberately blows all circuit breakers; running before E2E corrupts
+        # Fuse state on both Fly machines and causes vision tests to fast-fail.
+        if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+            if ! SMOKE_URL="${_core_url}" \
+                    run_group "deploy: smoke" \
+                    bash scripts/smoke-circuit-breakers.sh "${_core_url}"; then
+                true  # advisory — circuit breaker failures don't gate the build
+            fi
+        else
+            echo "SKIP deploy: smoke — SCRAPER_HMAC_SECRET not set"
+        fi
+
+        # ── Security live (OWASP ZAP, Nuclei, jwt_tool, IDOR) ────────────────
+        echo -e "\n${CYAN}${BOLD}=== deploy: security-live ===${RESET}"
+
+        if command -v docker &>/dev/null; then
+            echo "==> OWASP ZAP baseline scan..."
+            zap_out="$(docker run --rm \
+                --mount type=tmpfs,destination=/zap/wrk \
+                ghcr.io/zaproxy/zaproxy:stable \
+                zap-baseline.py -t "${_core_url}" 2>&1)" || true
+            echo "${zap_out}"
+            if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
+                pass "deploy: ZAP baseline"
+            else
+                fail "deploy: ZAP baseline found new failures"
+            fi
+        else
+            echo "SKIP: docker not available — skipping OWASP ZAP"
+        fi
+
+        if command -v nuclei &>/dev/null; then
+            echo "==> Nuclei (jwt + misconfig)..."
+            nuclei_out="$(nuclei -u "${_core_url}" \
+                -tags jwt,misconfiguration \
+                -severity medium,high,critical \
+                -no-color -silent 2>&1)" || true
+            echo "${nuclei_out}"
+            if echo "${nuclei_out}" | grep -qiE "\[critical\]|\[high\]"; then
+                fail "deploy: Nuclei found high/critical vulnerabilities"
+            else
+                pass "deploy: Nuclei scan clean"
+            fi
+        else
+            echo "SKIP: nuclei not installed (brew install nuclei)"
+        fi
+
+        if command -v jwt_tool &>/dev/null; then
+            echo "==> jwt_tool..."
+            _jwt_resp="$(curl -sf "${_core_url}/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+                2>/dev/null || true)"
+            _jwt="$(echo "${_jwt_resp}" | python3 -c \
+                "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+            if [[ -n "${_jwt}" ]]; then
+                jwt_out="$(jwt_tool "${_jwt}" \
+                    -t "${_core_url}/api/auth/me" \
+                    -rh "Authorization: Bearer *JWT*" \
+                    -X a 2>&1)" || true
+                echo "${jwt_out}"
+                if echo "${jwt_out}" | grep -qi "EXPLOIT"; then
+                    fail "deploy: jwt_tool found exploitable vulnerability"
+                else
+                    pass "deploy: jwt_tool clean"
+                fi
+            else
+                echo "SKIP: jwt_tool — could not obtain JWT"
+            fi
+        else
+            echo "SKIP: jwt_tool not installed (run setup.sh)"
+        fi
+
+        echo "==> IDOR test (cross-user resource access)..."
+        _u1="$(curl -sf "${_core_url}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" \
+            2>/dev/null || true)"
+        _u2="$(curl -sf "${_core_url}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" \
+            2>/dev/null || true)"
+        if [[ -z "${_u1}" ]] || [[ -z "${_u2}" ]]; then
+            echo "SKIP: IDOR — could not authenticate both seed users"
+        else
+            _placement="$(curl -sf "${_core_url}/api/bookshelves/library" \
+                -H "Authorization: Bearer ${_u1}" 2>/dev/null \
+                | python3 -c \
+                    "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+                2>/dev/null || true)"
+            if [[ -n "${_placement}" ]]; then
+                _idor_code="$(curl -o /dev/null -s -w "%{http_code}" \
+                    -X DELETE "${_core_url}/api/placements/${_placement}" \
+                    -H "Authorization: Bearer ${_u2}")"
+                if [[ "${_idor_code}" == "200" ]]; then
+                    fail "deploy: IDOR — user2 deleted user1's placement (HTTP 200)"
+                else
+                    pass "deploy: IDOR cross-user DELETE blocked (HTTP ${_idor_code})"
+                fi
+            else
+                echo "SKIP: IDOR — user1 has no placements in library"
+            fi
+        fi
+
+    else
+        fail "deploy: stack or warmup failed"
+        FAILED+=(deploy)
+    fi
+
+    # ── Cleanup — always runs, whether deploy/tests passed or failed ──────────
+    echo -e "\n${CYAN}${BOLD}=== deploy: cleanup ===${RESET}"
+    bash scripts/cleanup-preview.sh \
+        --branch "${_branch}" \
+        --neon-branch-name "${_neon_branch}" || true
 fi
 
 if [[ ${#FAILED[@]} -ne 0 ]]; then

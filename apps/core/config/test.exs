@@ -43,4 +43,6 @@ config :core, Stacks.Vault,
 
 config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Test
 
+config :core, :sse_max_timeout_ms, 500
+
 config :logger, level: :warning

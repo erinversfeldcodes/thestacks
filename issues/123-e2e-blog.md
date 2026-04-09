@@ -34,6 +34,8 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - **Edit link**: "Edit" link visible only to post owner on detail page
 - **Empty archive**: "No posts yet." message when no posts exist
 - **Visibility badge**: `Components.VisibilityBadge` renders on post summaries
+- **Writing assistant panel**: Collapsible assistant panel present in editor; notification dot visible after save triggers nudge; dot absent before first nudge
+- **Publish gate**: If assistant has unresolved observation, "There's something unresolved here — publish anyway?" prompt appears before publish; user can proceed or dismiss
 
 ### 2. Playwright Navigation & Visual Tests
 - **Auth guard**: Unauthenticated user at `/blog/new` sees login page
@@ -74,6 +76,7 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - `blog.post_created` emitted with `{ user_id, title, visibility }`
 - `blog.post_updated` emitted on update
 - `blog.post_published` emitted on publish -> triggers `BlogAssociationHandler` + `DbtRefreshHandler`
+- `blog.post_updated` emitted on save -> triggers `DbtRefreshHandler` + `WritingAssistantNudgeHandler` (debounced, max once per 10 min per post)
 - `blog.post_deleted` emitted on delete -> triggers `DbtRefreshHandler`
 - `blog.associations_suggested` emitted by worker with `{ book_ids, count }`
 - `blog.association_confirmed` emitted with `{ post_id, book_id }`
@@ -94,11 +97,17 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - LLM parse failure: worker logs warning, returns `:ok` (no retry)
 - LLM circuit breaker open: returns `{:error, :circuit_open}` for retry
 
+### `WritingAssistantNudgeWorker` (triggered by save, debounced)
+- Trigger chain: `blog.post_updated` -> `WritingAssistantNudgeHandler` (debounced, max once per 10 min) -> enqueue worker
+- Worker calls `Stacks.AI.WritingAssistantClient` (separate from `TogetherClient`) using `Llama-3.3-70B-Instruct-Turbo`
+- Worker stores result in `op.blog_assistant_sessions`
+- Debounce: second save within 10 min does NOT enqueue a second worker for same post
+- Worker skips if user has not granted `consent_writing_assistant`
+- **Not to be confused with `PostBookAssociationWorker`**: different client, different model, different circuit breaker (`:writing_assistant_fuse`)
+
 ### 7. External Service Tests
-- Together AI mock: returns valid JSON array of associations
-- Together AI mock: circuit breaker `:together_ai_fuse` (3 failures in 2 min)
-- Together AI mock: `{:error, :api_key_missing}` when key not configured
-- Mock configured via `Application.get_env(:core, :together_client)` -> `MockTogetherClient`
+- Together AI mock (association worker): returns valid JSON array of associations; circuit breaker `:together_ai_fuse` (3 failures in 2 min); `{:error, :api_key_missing}` when key not configured; mock via `Application.get_env(:core, :together_client)` -> `MockTogetherClient`
+- Writing assistant mock (nudge worker): separate mock via `Application.get_env(:core, :writing_assistant_client)` -> `MockWritingAssistantClient`; circuit breaker `:writing_assistant_fuse` tested independently
 
 ### 8. Storage Tests
 - N/A
@@ -118,6 +127,7 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - `SaveCompleted (Ok newId)` -> switches mode to `Edit newId` if was New
 - `Publish` -> sets `publishing = Loading, saving = Loading` -> save first -> on success fires publish
 - `PublishCompleted (Ok _)` -> `publishing = Success ()`
+- `Page.Blog.Editor` includes `assistantPanel : AssistantPanelState` and `nudgeAvailable : Bool` fields (see US-12.2.1 for full state machine)
 - `Page.Blog.Archive` init: fires `Api.getBlogPosts` -> `PostsLoaded`
 - `Page.Blog.Post` init: fires `Api.getBlogPost` -> `PostLoaded`
 - `ConfirmAssociation id` -> `Api.confirmAssociation` -> `AssociationActionCompleted` -> reloads post
@@ -131,6 +141,8 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - Circuit breaker state transitions for Together AI
 - Association creation count per worker run
 - Association confirm/dismiss counts
+- `WritingAssistantNudgeWorker` success/failure rates; debounce enforcement (max 1 per 10 min per post)
+- Circuit breaker state transitions for `:writing_assistant_fuse` (independent of `:together_ai_fuse`)
 - Blog post read counts (owner vs non-owner)
 - Blog archive list counts
 - Visibility filtering drop rate
@@ -140,6 +152,7 @@ Validate blog post lifecycle (create/save/publish/delete), two-step publish flow
 - `BlogAssociationHandler` is triggered by `blog.post_published` event, not `blog.post_created`.
 - LLM prompt includes post body truncated to 4000 chars and formatted book list (`id: "title" by author`).
 - Non-owners only see associations with `visible == true` and without `reasoning` field.
+- **Two distinct LLM flows in this issue**: `PostBookAssociationWorker` (post-publish, `Llama-3-8b-chat-hf`, `TogetherClient`, `:together_ai_fuse`) vs `WritingAssistantNudgeWorker` (on-save, `Llama-3.3-70B-Instruct-Turbo`, `WritingAssistantClient`, `:writing_assistant_fuse`). These must use separate mocks and are tracked separately in cost reporting.
 
 ## Definition of Done
 - [ ] All 11 test categories implemented with specific test cases listed above

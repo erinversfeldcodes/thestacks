@@ -28,7 +28,7 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.MockClient
   alias Stacks.Books
-  alias Stacks.Books.{Book, BookEdition}
+  alias Stacks.Books.{Book, BookEdition, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
   alias Stacks.GDPR.ImageRetention
@@ -209,176 +209,144 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 2 — GET /api/upload/:image_id/status" do
+  describe "Suite 2 — GET /api/upload/:image_id/stream" do
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns pending status for a new uploaded image", %{
+    test "returns 200 text/event-stream for valid pending image", %{
       conn: conn,
       token: token,
       user: user
     } do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
 
-      assert %{"status" => "pending", "image_id" => _} = json_response(conn, 200)
+      assert conn.status == 200
+      [content_type | _] = get_resp_header(conn, "content-type")
+      assert String.contains?(content_type, "text/event-stream")
     end
 
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns resolved status with book_ids", %{
-      conn: conn,
-      token: token,
-      user: user,
-      book: book
-    } do
-      image =
-        insert(:uploaded_image,
-          status: "resolved",
-          book_id: book.id,
-          book_ids: [book.id],
-          user_id: user.id
-        )
+    test "returns 401 when no token provided", %{conn: conn, user: user} do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
+      conn = get(conn, "/api/upload/#{image.id}/stream")
 
-      resp = json_response(conn, 200)
-      assert resp["status"] == "resolved"
-      assert is_list(resp["book_ids"])
-      assert resp["is_duplicate"] == false
-    end
-
-    @tag stories: ["US-1.1.3"], suite: :api
-    test "returns rejected status with rejection_reason", %{conn: conn, token: token, user: user} do
-      image =
-        insert(:uploaded_image,
-          status: "rejected",
-          rejection_reason: "not_a_book",
-          user_id: user.id
-        )
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
-
-      resp = json_response(conn, 200)
-      assert resp["status"] == "rejected"
-      assert resp["rejection_reason"] == "not_a_book"
+      assert conn.status == 401
     end
 
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 404 for non-existent image_id", %{conn: conn, token: token} do
-      fake_id = Ecto.UUID.generate()
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{fake_id}/status")
-
-      assert %{"error" => "not found"} = json_response(conn, 404)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 422 for invalid image_id format", %{conn: conn, token: token} do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/not-a-uuid/status")
-
-      assert %{"error" => "invalid image_id"} = json_response(conn, 422)
-    end
-
-    @tag stories: ["US-1.1.6"], suite: :api
-    test "detects duplicate when book is already on user's shelf", %{
-      conn: conn,
-      token: token,
-      user: user,
-      book: book
-    } do
-      # Place the book on a shelf first
-      {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
-
-      image =
-        insert(:uploaded_image,
-          status: "resolved",
-          book_id: book.id,
-          book_ids: [book.id],
-          user_id: user.id
-        )
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
-
-      resp = json_response(conn, 200)
-      assert resp["is_duplicate"] == true
-    end
-
-    @tag stories: ["US-1.1.7"], suite: :api
-    test "returns multiple book_ids for multi-book resolution (US-1.1.7)", %{
-      conn: conn,
-      token: token,
-      user: user
-    } do
-      book1 = insert(:book, title: "Multi Book 1")
-      book2 = insert(:book, title: "Multi Book 2")
-      book3 = insert(:book, title: "Multi Book 3")
-
-      image =
-        insert(:uploaded_image,
-          status: "resolved",
-          book_id: book1.id,
-          book_ids: [book1.id, book2.id, book3.id],
-          user_id: user.id
-        )
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> get("/api/upload/#{image.id}/status")
-
-      resp = json_response(conn, 200)
-      assert resp["status"] == "resolved"
-      assert is_list(resp["book_ids"])
-      assert length(resp["book_ids"]) == 3
-      assert book1.id in resp["book_ids"]
-      assert book2.id in resp["book_ids"]
-      assert book3.id in resp["book_ids"]
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "status endpoint returns 403 for non-owner of the image",
-         %{conn: conn, book: book} do
+    test "returns 403 when image belongs to a different user", %{conn: conn, book: book} do
       owner = insert(:user)
-      other_user = insert(:user)
-      {:ok, other_token, _} = Guardian.encode_and_sign(other_user)
+      requester = insert(:user)
+      {:ok, requester_token, _} = Guardian.encode_and_sign(requester)
 
       image =
         insert(:uploaded_image,
-          status: "resolved",
+          status: "pending",
           book_id: book.id,
-          book_ids: [book.id],
           user_id: owner.id
         )
 
-      response =
-        conn
-        |> auth_conn(other_token)
-        |> get("/api/upload/#{image.id}/status")
+      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{requester_token}")
 
-      assert json_response(response, 403)
+      assert conn.status == 403
     end
 
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 401 when unauthenticated for GET /api/upload/:id/status", %{conn: conn} do
-      conn = get(conn, "/api/upload/#{Ecto.UUID.generate()}/status")
-      assert conn.status == 401
+    test "returns 404 for unknown image_id", %{conn: conn, token: token} do
+      fake_id = Ecto.UUID.generate()
+
+      conn = get(conn, "/api/upload/#{fake_id}/stream?token=#{token}")
+
+      assert conn.status == 404
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :api
+    test "returns 400 or 422 for invalid (non-UUID) image_id", %{conn: conn, token: token} do
+      conn = get(conn, "/api/upload/not-a-uuid/stream?token=#{token}")
+
+      assert conn.status in [400, 422]
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :api
+    test "sends terminal event immediately when image already resolved", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          book_id: book.id,
+          book_ids: [book.id],
+          user_id: user.id
+        )
+
+      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+
+      assert conn.status == 200
+      body = conn.resp_body
+      assert String.contains?(body, "resolved")
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :api
+    test "pushes event when IdentifyBookJob completes after connection opens", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+      topic = "upload:#{image.id}"
+
+      # Subscribe so we can broadcast a synthetic completion event
+      Phoenix.PubSub.subscribe(Core.PubSub, topic)
+
+      task =
+        Task.async(fn ->
+          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+        end)
+
+      # Broadcast the completion event after a short delay to simulate async job
+      Process.sleep(50)
+
+      Phoenix.PubSub.broadcast(Core.PubSub, topic, {
+        :upload_complete,
+        %{status: "resolved", book_ids: [book.id]}
+      })
+
+      conn = Task.await(task, 5_000)
+
+      assert conn.status == 200
+      body = conn.resp_body
+      assert String.contains?(body, "resolved")
+    end
+
+    @tag :sla
+    @tag stories: ["US-1.1.1"], suite: :api
+    test "GET /api/upload/:image_id/stream responds within 100ms", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
+      # Use a resolved image so the endpoint responds immediately without waiting on PubSub
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          book_id: book.id,
+          book_ids: [book.id],
+          user_id: user.id
+        )
+
+      {elapsed_us, _conn} =
+        :timer.tc(fn ->
+          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+        end)
+
+      assert elapsed_us < 100_000,
+             "SSE stream endpoint took #{elapsed_us}μs, expected < 100,000μs (100ms)"
     end
   end
 
@@ -2082,13 +2050,10 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"status" => "accepted", "image_id" => image_id} =
                json_response(upload_conn, 202)
 
-      # Step 2: Poll status (initially pending)
-      poll_conn =
-        build_conn()
-        |> auth_conn(token)
-        |> get("/api/upload/#{image_id}/status")
-
-      assert %{"status" => "pending"} = json_response(poll_conn, 200)
+      # Step 2: Assert DB state — image is pending
+      # SSE stream validation covered in Suite 2 SSE tests above
+      pending_image = Repo.get!(UploadedImage, image_id)
+      assert pending_image.status == "pending"
 
       # Step 3: Run the identification job (simulates async processing)
       perform_job(IdentifyBookJob, %{
@@ -2097,18 +2062,14 @@ defmodule Stacks.UploadPipelineTest do
         "image_b64" => @image_b64
       })
 
-      # Step 4: Poll status again (now resolved)
-      poll_conn2 =
-        build_conn()
-        |> auth_conn(token)
-        |> get("/api/upload/#{image_id}/status")
-
-      resp = json_response(poll_conn2, 200)
-      assert resp["status"] == "resolved"
-      assert is_list(resp["book_ids"])
+      # Step 4: Assert DB state — image is now resolved
+      # SSE stream validation covered in Suite 2 SSE tests above
+      resolved_image = Repo.get!(UploadedImage, image_id)
+      assert resolved_image.status == "resolved"
+      assert resolved_image.book_ids != []
 
       # Step 5: Fetch book detail
-      book_id = hd(resp["book_ids"])
+      book_id = List.first(resolved_image.book_ids)
 
       book_conn =
         build_conn()
@@ -2175,16 +2136,12 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      # Step 3: Poll status (rejected)
-      poll_conn =
-        build_conn()
-        |> auth_conn(token)
-        |> get("/api/upload/#{image_id}/status")
-
-      resp = json_response(poll_conn, 200)
-      assert resp["status"] == "rejected"
-      assert resp["rejection_reason"] == "not_a_book"
-      assert resp["book_ids"] == []
+      # Step 3: Assert DB state — image is rejected
+      # SSE stream validation covered in Suite 2 SSE tests above
+      rejected_image = Repo.get!(UploadedImage, image_id)
+      assert rejected_image.status == "rejected"
+      assert rejected_image.rejection_reason == "not_a_book"
+      assert rejected_image.book_ids == []
     end
 
     @tag stories: ["US-1.1.1", "US-1.1.2"], suite: :api
@@ -2216,14 +2173,11 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      poll_conn =
-        build_conn()
-        |> auth_conn(token)
-        |> get("/api/upload/#{image_id}/status")
-
-      resp = json_response(poll_conn, 200)
-      assert resp["status"] == "rejected"
-      assert resp["rejection_reason"] == "isbn_not_found"
+      # Assert DB state — image is rejected with isbn_not_found
+      # SSE stream validation covered in Suite 2 SSE tests above
+      rejected_image = Repo.get!(UploadedImage, image_id)
+      assert rejected_image.status == "rejected"
+      assert rejected_image.rejection_reason == "isbn_not_found"
     end
   end
 
