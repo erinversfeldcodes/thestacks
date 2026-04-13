@@ -26,6 +26,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load version pins (OTP, Elixir, Node, Python, Postgres).
+# Same file consumed by .github/workflows/ci.yml via the `versions` job.
+if [[ -f "$REPO_ROOT/.versions" ]]; then
+    # shellcheck source=../.versions
+    source "$REPO_ROOT/.versions"
+fi
+
 # Load local .env for dev secrets (FLY_API_TOKEN, NEON_*, etc.) when outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a

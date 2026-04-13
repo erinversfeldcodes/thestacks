@@ -16,7 +16,7 @@
           buildInputs = with pkgs; [
             # Elixir / Erlang
             elixir_1_18
-            erlang_27
+            erlang_28
             rebar3
 
             # Frontend
