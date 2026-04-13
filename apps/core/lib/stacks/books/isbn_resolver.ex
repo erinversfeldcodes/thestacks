@@ -11,6 +11,19 @@ defmodule Stacks.Books.ISBNResolver do
   @open_library_search_url "https://openlibrary.org/search.json"
   @google_books_url "https://www.googleapis.com/books/v1/volumes"
 
+  defp google_books_api_key do
+    Application.get_env(:core, :google_books_api_key)
+  end
+
+  defp google_books_url(params) do
+    base = "#{@google_books_url}?#{params}"
+
+    case google_books_api_key() do
+      nil -> base
+      key -> "#{base}&key=#{key}"
+    end
+  end
+
   @open_library_fuse :open_library_fuse
   @google_books_fuse :google_books_fuse
 
@@ -243,7 +256,7 @@ defmodule Stacks.Books.ISBNResolver do
         "intitle:#{URI.encode(title)}"
       end
 
-    url = "#{@google_books_url}?q=#{query}&maxResults=1"
+    url = google_books_url("q=#{query}&maxResults=1")
 
     case make_request(url) do
       {:ok, %{"items" => [item | _]}} ->
@@ -318,7 +331,7 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp do_google_books_request(isbn) do
-    url = "#{@google_books_url}?q=isbn:#{isbn}"
+    url = google_books_url("q=isbn:#{isbn}")
 
     case make_request(url) do
       {:ok, body} ->
