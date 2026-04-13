@@ -501,6 +501,7 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
       VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
       VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
       SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}

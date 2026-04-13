@@ -35,6 +35,10 @@ else
 
   # ── Optional service config (dev + prod) ─────────────────────────────────
 
+  if google_books_key = System.get_env("GOOGLE_BOOKS_API_KEY") do
+    config :core, :google_books_api_key, google_books_key
+  end
+
   if brave_key = System.get_env("BRAVE_SEARCH_API_KEY") do
     config :core, :brave_search_api_key, brave_key
   end
