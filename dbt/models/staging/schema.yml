@@ -298,6 +298,11 @@ models:
               where: "status = 'resolved'"
       - name: book_id
         description: Book id.
+        tests:
+          - relationships:
+              to: ref('stg_books')
+              field: id
+              where: "status = 'resolved'"
       - name: book_edition_id
         description: Book edition id.
       - name: user_id

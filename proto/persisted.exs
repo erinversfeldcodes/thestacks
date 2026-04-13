@@ -292,7 +292,10 @@
           default: [],
           dbt_tests: [{:not_null, "status = 'resolved'"}]
         },
-        book_id: %{belongs_to: Stacks.Books.Book},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          dbt_tests: [{:relationships, "stg_books", "status = 'resolved'"}]
+        },
         book_edition_id: %{belongs_to: Stacks.Books.BookEdition},
         user_id: %{ecto_type: :binary_id, belongs_to: Stacks.Accounts.User}
       }

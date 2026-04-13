@@ -243,10 +243,10 @@ update msg model maybeToken =
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
-                                    ( { model | result = IdentificationFailed, sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
