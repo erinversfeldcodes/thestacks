@@ -387,8 +387,6 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
-          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
         run: scripts/test-e2e.sh
 
   security-squawk:
