@@ -44,8 +44,6 @@ jobs:
       licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -99,8 +97,6 @@ jobs:
       MIX_ENV: test
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
@@ -130,8 +126,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ needs.versions.outputs.node }}
@@ -152,8 +146,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -176,8 +168,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ needs.versions.outputs.python }}
@@ -194,8 +184,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: bufbuild/buf-setup-action@v1.47.2
       - run: scripts/lint-proto.sh
 
@@ -220,8 +208,6 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
@@ -265,7 +251,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
         env:
@@ -276,8 +261,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile.core
@@ -295,8 +278,6 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - run: semgrep scan --config auto --error
 
   checkov:
@@ -304,8 +285,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: bridgecrewio/checkov-action@v12
         with:
           directory: deploy/
@@ -315,9 +294,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@0.30.0
         with:
           scan-type: fs
           scan-ref: .
@@ -344,8 +321,6 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
@@ -403,7 +378,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
           fetch-depth: 0
       - name: Install squawk
         run: npm install -g squawk-cli
@@ -417,8 +391,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
@@ -437,7 +409,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
           fetch-depth: 0
       - uses: trufflesecurity/trufflehog@main
         with:
@@ -451,8 +422,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: anchore/sbom-action@v0
         with:
           path: '.'
@@ -469,24 +438,22 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - name: Build images for CIS benchmark
         run: |
           docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
           docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
           docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
-      - uses: goodwithtech/dockle-action@v1
+      - uses: goodwithtech/dockle-action@v1.4.0
         with:
           image: stacks-dockle-core
           exit-code: '1'
           exit-level: WARN
-      - uses: goodwithtech/dockle-action@v1
+      - uses: goodwithtech/dockle-action@v1.4.0
         with:
           image: stacks-dockle-vision
           exit-code: '1'
           exit-level: WARN
-      - uses: goodwithtech/dockle-action@v1
+      - uses: goodwithtech/dockle-action@v1.4.0
         with:
           image: stacks-dockle-scraper
           exit-code: '1'
