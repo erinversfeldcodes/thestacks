@@ -1,7 +1,7 @@
 # Build stage
 FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base=0.5-r3 git=2.47.3-r0
+RUN apk add --no-cache build-base git
 
 WORKDIR /app
 
@@ -51,7 +51,7 @@ RUN --mount=type=cache,target=/app/deps \
 # Runtime stage
 FROM alpine:3.21.6 AS runtime
 
-RUN apk add --no-cache libstdc++=14.2.0-r4 openssl=3.3.6-r0 ncurses-libs=6.5_p20241006-r3
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
 
 RUN addgroup -S stacks && adduser -S stacks -G stacks
 WORKDIR /app
