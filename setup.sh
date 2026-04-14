@@ -113,8 +113,12 @@ mise trust --yes "$REPO_ROOT/.mise.toml" 2>/dev/null || true
 info "Installing runtimes declared in .mise.toml..."
 mise install
 
-# Reload mise shims so subsequent commands use the right versions
+# Reload mise shims so subsequent commands use the right versions.
+# Temporarily relax strict mode — mise activate generates shell code that
+# references unset variables on second activation.
+set +eu
 eval "$(mise activate bash)" 2>/dev/null || true
+set -eu
 hash -r
 
 success "Runtimes installed:"
