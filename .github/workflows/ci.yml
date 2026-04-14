@@ -356,6 +356,7 @@ jobs:
         run: |
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
+          python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
       - name: Build frontend
         working-directory: frontend
@@ -469,7 +470,7 @@ jobs:
           image: stacks-dockle-core
           exit-code: '1'
           exit-level: WARN
-          accept-key: CLOAK_KEY,SECRET_KEY_BASE,GUARDIAN_SECRET_KEY,VISION_HMAC_SECRET
+          accept-key: PHX_SERVER,ERL_INETRC,--chown
       - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-vision
