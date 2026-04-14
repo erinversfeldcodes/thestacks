@@ -377,11 +377,15 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
           MIX_ENV: dev
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
         run: mix ecto.create && mix ecto.migrate && mix run apps/core/priv/repo/seeds.exs
       - name: Run E2E
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
           MIX_ENV: dev
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
@@ -450,6 +454,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1.47.2
+      - name: Generate proto artifacts for Docker builds
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
       - name: Build images for CIS benchmark
         run: |
           docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
