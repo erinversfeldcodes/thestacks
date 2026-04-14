@@ -59,7 +59,7 @@ COPY rel rel
 # because deps.get + deps.compile always runs first and is content-addressed.
 WORKDIR /app
 RUN --mount=type=cache,target=/app/deps \
-    MIX_ENV=dev bash scripts/gen-ecto-proto.sh && \
+    bash scripts/gen-ecto-proto.sh && \
     python3 scripts/gen_python_proto.py --language elixir && \
     mix compile && mix phx.digest && mix release core && \
     cp -r /app/_build/prod/rel/core /app/release

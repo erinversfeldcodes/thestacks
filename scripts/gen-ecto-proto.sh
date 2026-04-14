@@ -31,11 +31,13 @@ cd "$CORE_DIR"
 mix deps.compile jason --no-deps-check 2>/dev/null || true
 
 # Provide dummy env vars so runtime.exs doesn't crash (we don't start the app).
+# Covers both dev and prod required vars — codegen doesn't use any of these.
 export CLOAK_KEY="${CLOAK_KEY:-$(openssl rand -base64 32)}"
 export SECRET_KEY_BASE="${SECRET_KEY_BASE:-$(openssl rand -base64 64)}"
 export DATABASE_URL="${DATABASE_URL:-ecto://localhost/stacks_dev}"
 export VISION_HMAC_SECRET="${VISION_HMAC_SECRET:-dummy_secret_for_codegen_only}"
-export MIX_ENV="${MIX_ENV:-dev}"
+export VISION_SERVICE_URL="${VISION_SERVICE_URL:-http://localhost:8000}"
+export GUARDIAN_SECRET_KEY="${GUARDIAN_SECRET_KEY:-dummy_guardian_key_for_codegen}"
 
 # Use mix run with --no-compile to skip app compilation but still have Mix available.
 # The --no-start flag prevents starting the app (we don't need the DB).
