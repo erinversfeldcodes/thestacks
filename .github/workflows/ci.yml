@@ -114,8 +114,8 @@ jobs:
           key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
-      - name: Check proto drift
-        run: cd apps/core && mix proto.sync --check
+      - name: Generate proto artifacts
+        run: cd apps/core && mix proto.sync
       - run: scripts/lint-elixir.sh
       - run: scripts/test-elixir.sh
 
@@ -136,6 +136,7 @@ jobs:
           restore-keys: elm-${{ runner.os }}-
       - working-directory: frontend
         run: npm install --save-dev elm elm-format elm-test
+      - uses: bufbuild/buf-setup-action@v1.47.2
       - run: scripts/lint-elm.sh
       - run: scripts/test-elm.sh
 
@@ -229,7 +230,7 @@ jobs:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
       - name: Install dbt-postgres, sqlfluff, and dbt-checkpoint
-        run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt dbt-checkpoint
+        run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'
       - name: Seed and test dbt staging layer
         env:
           MIX_ENV: dev
@@ -294,7 +295,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.30.0
+      - uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -340,6 +341,9 @@ jobs:
           restore-keys: mix-${{ runner.os }}-
       - name: Install Elixir deps
         run: mix deps.get
+      - uses: bufbuild/buf-setup-action@v1.47.2
+      - name: Generate Elm proto decoders
+        run: scripts/gen-elm-proto.sh
       - name: Build frontend
         working-directory: frontend
         run: |
@@ -443,17 +447,17 @@ jobs:
           docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
           docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
           docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
-      - uses: goodwithtech/dockle-action@v1.4.0
+      - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-core
           exit-code: '1'
           exit-level: WARN
-      - uses: goodwithtech/dockle-action@v1.4.0
+      - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-vision
           exit-code: '1'
           exit-level: WARN
-      - uses: goodwithtech/dockle-action@v1.4.0
+      - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-scraper
           exit-code: '1'
