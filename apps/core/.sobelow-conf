@@ -5,5 +5,5 @@
   skip: false,
   router: "lib/core_web/router.ex",
   ignore: ["Config.Secrets", "Config.HTTPS"],
-  ignore_files: []
+  ignore_files: ["test/"]
 ]
