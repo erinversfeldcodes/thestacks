@@ -128,7 +128,8 @@ defmodule Stacks.VisibilityPropertyTest do
 
   property "platform visibility and platform profile is visible to any authenticated viewer" do
     check all(
-            viewer_display_name <- StreamData.string(:alphanumeric, min_length: 1, max_length: 20),
+            viewer_display_name <-
+              StreamData.string(:alphanumeric, min_length: 1, max_length: 20),
             max_runs: 200
           ) do
       owner = insert(:user, profile_visibility: "platform")
