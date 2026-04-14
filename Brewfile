@@ -13,6 +13,11 @@ tap "goodwithtech/r"         # dockle
 # declared in .mise.toml (mirroring flake.nix / Dockerfiles).
 brew "mise"
 
+# ── Nix dev shell activation ─────────────────────────────────────────────────
+# direnv + .envrc activates the Nix flake dev shell automatically on cd,
+# ensuring all tools match the versions pinned in flake.nix.
+brew "direnv"
+
 # ── Database ──────────────────────────────────────────────────────────────────
 brew "postgresql@16"
 
