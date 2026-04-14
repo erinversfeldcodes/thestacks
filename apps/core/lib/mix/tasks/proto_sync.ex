@@ -24,6 +24,8 @@ defmodule Mix.Tasks.Proto.Sync do
 
   use Mix.Task
 
+  @requirements []
+
   alias Mix.Tasks.ProtoSync.DbtGenerator
   alias Mix.Tasks.ProtoSync.Descriptor
   alias Mix.Tasks.ProtoSync.DriftChecker
