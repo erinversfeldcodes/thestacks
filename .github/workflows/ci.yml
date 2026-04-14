@@ -364,7 +364,9 @@ jobs:
           npm run build
       - name: Install vision sidecar deps
         working-directory: apps/vision
-        run: pip install -r requirements.txt
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
       - uses: actions/cache@v4
         id: playwright-cache
         with:
@@ -467,6 +469,7 @@ jobs:
           image: stacks-dockle-core
           exit-code: '1'
           exit-level: WARN
+          accept-key: CLOAK_KEY,SECRET_KEY_BASE,GUARDIAN_SECRET_KEY,VISION_HMAC_SECRET
       - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-vision
