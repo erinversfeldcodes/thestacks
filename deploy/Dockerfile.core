@@ -1,7 +1,7 @@
 # Build stage
 FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base git python3 openssl
+RUN apk add --no-cache build-base git python3 openssl bash
 
 # Install buf for proto codegen (version pinned for reproducibility).
 ARG BUF_VERSION=1.47.2
