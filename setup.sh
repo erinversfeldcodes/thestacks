@@ -77,6 +77,30 @@ success "All Brewfile packages installed"
 PG_BIN="$(brew --prefix postgresql@16)/bin"
 export PATH="$PG_BIN:$PATH"
 
+# ── 2b. direnv + Nix dev shell ────────────────────────────────────────────────
+# Ensures every terminal session uses the exact tool versions from flake.nix
+# (Elixir, OTP, Node, Python) — no version drift between local and CI/Docker.
+step "direnv (Nix dev shell activation)"
+if command -v direnv &>/dev/null; then
+    # Create .envrc if missing
+    if [[ ! -f "$REPO_ROOT/.envrc" ]]; then
+        echo "use flake" > "$REPO_ROOT/.envrc"
+        info "Created .envrc"
+    fi
+    direnv allow "$REPO_ROOT" 2>/dev/null || true
+    success "direnv configured — Nix dev shell activates on cd"
+
+    # Check if the shell hook is set up
+    if [[ -n "${DIRENV_DIR:-}" ]]; then
+        success "direnv hook active in this shell"
+    else
+        warn "Add to your ~/.zshrc:  eval \"\$(direnv hook zsh)\""
+        warn "Then restart your shell for automatic Nix activation"
+    fi
+else
+    warn "direnv not found (expected from brew bundle) — skipping Nix shell setup"
+fi
+
 # ── 3. Runtime versions via mise ──────────────────────────────────────────────
 step "Runtime versions (mise)"
 
