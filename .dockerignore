@@ -39,13 +39,13 @@ LICENSE
 README.md
 *.md
 
-# Scripts (not needed inside container)
+# Scripts — exclude all except proto generation (needed by Dockerfile.core build)
 scripts
+!scripts/gen-ecto-proto.sh
+!scripts/gen_python_proto.py
 
-# Proto — raw schemas not needed, but proto/gen/elm/ has committed Elm decoders required for build
-proto/stacks
-proto/buf.yaml
-proto/buf.gen.yaml
+# Proto — exclude generated outputs but keep source schemas + buf config (needed for codegen)
+proto/gen
 
 # Test fixtures / images (only e2e needs them, not runtime)
 e2e
