@@ -243,6 +243,8 @@ jobs:
         env:
           MIX_ENV: dev
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           DBT_HOST: localhost
           DBT_PORT: "5432"
           DBT_USER: postgres
@@ -350,8 +352,11 @@ jobs:
       - name: Install Elixir deps
         run: mix deps.get
       - uses: bufbuild/buf-setup-action@v1.47.2
-      - name: Generate Elm proto decoders
-        run: scripts/gen-elm-proto.sh
+      - name: Generate proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+          scripts/gen-elm-proto.sh
       - name: Build frontend
         working-directory: frontend
         run: |
