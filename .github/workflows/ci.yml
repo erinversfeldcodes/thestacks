@@ -429,16 +429,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install and update grype DB
+      - name: Install grype and scan
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
           grype db update
-      - uses: anchore/scan-action@v3
-        with:
-          path: '.'
-          fail-build: 'true'
-          severity-cutoff: high
-          only-fixed: true
+          grype dir:. --fail-on high --only-fixed
 
   dockle:
     runs-on: ubuntu-latest
