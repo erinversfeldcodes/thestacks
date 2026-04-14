@@ -43,9 +43,10 @@ export GUARDIAN_SECRET_KEY="${GUARDIAN_SECRET_KEY:-dummy_guardian_key_for_codege
 # The --no-start flag prevents starting the app (we don't need the DB).
 # We eval a script that loads just the proto_sync modules.
 mix run --no-compile --no-start -e '
-  # Load all proto_sync sub-modules, then the main task module.
-  # Glob instead of explicit list so new modules are picked up automatically.
+  # Load proto_sync sub-modules then the main task module.
+  # Leaf dependencies (TypeMapper, Descriptor) first — other modules alias them.
   task_dir = "lib/mix/tasks/proto_sync"
+  for dep <- ~w(type_mapper.ex descriptor.ex manifest.ex), do: Code.compile_file(Path.join(task_dir, dep))
   for file <- Path.wildcard(Path.join(task_dir, "*.ex")) |> Enum.sort() do
     Code.compile_file(file)
   end
