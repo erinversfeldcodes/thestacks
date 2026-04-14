@@ -1,7 +1,13 @@
 # Build stage
 FROM hexpm/elixir:1.18.4-erlang-28.4-alpine-3.21.6 AS builder
 
-RUN apk add --no-cache build-base git
+RUN apk add --no-cache build-base git python3 openssl
+
+# Install buf for proto codegen (version pinned for reproducibility).
+ARG BUF_VERSION=1.47.2
+RUN wget -q -O /usr/local/bin/buf \
+    "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-Linux-x86_64" \
+    && chmod +x /usr/local/bin/buf
 
 WORKDIR /app
 
@@ -31,6 +37,12 @@ COPY config/runtime.exs config/runtime.exs
 COPY apps/core/config/ apps/core/config/
 COPY apps/core/priv apps/core/priv
 
+# Proto definitions and generation scripts — needed to bootstrap gen/ files.
+# Placed before app source because proto changes less often than app code.
+COPY proto/ proto/
+COPY scripts/gen-ecto-proto.sh scripts/gen-ecto-proto.sh
+COPY scripts/gen_python_proto.py scripts/gen_python_proto.py
+
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
 
@@ -38,13 +50,17 @@ COPY apps/core/lib apps/core/lib
 # Must be copied before `mix release` so it is embedded in the release artifact.
 COPY rel rel
 
-# Compile Elixir, fingerprint static assets, build release.
+# Generate proto schemas, compile, fingerprint static assets, build release.
+# gen-ecto-proto.sh bootstraps without app compilation (loads proto_sync directly).
+# gen_python_proto.py generates inter-service proto structs (AssociateRequest etc.).
 # NOTE: _build cache is intentionally NOT mounted here — a shared cache can
 # serve stale .beam files when source files change between deploys (the cache
 # key is the mount path, not a content hash). deps cache is safe to share
 # because deps.get + deps.compile always runs first and is content-addressed.
 WORKDIR /app
 RUN --mount=type=cache,target=/app/deps \
+    bash scripts/gen-ecto-proto.sh && \
+    python3 scripts/gen_python_proto.py --language elixir && \
     mix compile && mix phx.digest && mix release core && \
     cp -r /app/_build/prod/rel/core /app/release
 
