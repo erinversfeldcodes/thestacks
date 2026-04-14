@@ -426,15 +426,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: anchore/sbom-action@v0
-        with:
-          path: '.'
-          format: cyclonedx-json
-          output-file: sbom.json
-          artifact-name: sbom.json
       - uses: anchore/scan-action@v3
         with:
-          sbom: sbom.json
+          path: '.'
           fail-build: 'true'
           severity-cutoff: high
           only-fixed: true
