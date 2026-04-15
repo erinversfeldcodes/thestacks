@@ -373,9 +373,11 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
-      - name: Install Playwright browsers
+      - name: Install E2E deps and Playwright browsers
         working-directory: e2e
-        run: npx playwright install --with-deps chromium
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
       - name: Run migrations and seed
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
@@ -503,9 +505,11 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
-      - name: Install Playwright browsers
+      - name: Install E2E deps and Playwright browsers
         working-directory: e2e
-        run: npx playwright install --with-deps chromium
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
       - name: Deploy preview stack + warm vision pipeline
         run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
       - name: Warm Fly machines and Neon database
