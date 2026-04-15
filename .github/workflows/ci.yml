@@ -472,8 +472,9 @@ jobs:
           DOCKLE_IGNORES: DKL-DI-0006
           DOCKLE_ACCEPT_KEYS: PHX_SERVER,ERL_INETRC,--chown,savedAptMark,GNUPGHOME,GPG_KEY
         run: |
-          curl -sSfL https://raw.githubusercontent.com/goodwithtech/dockle/master/install.sh | sh -s -- -b $HOME/.local/bin
-          export PATH="$HOME/.local/bin:$PATH"
+          DOCKLE_VERSION=$(curl -s "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          curl -sL -o dockle.deb "https://github.com/goodwithtech/dockle/releases/download/v${DOCKLE_VERSION}/dockle_${DOCKLE_VERSION}_Linux-64bit.deb"
+          sudo dpkg -i dockle.deb && rm dockle.deb
           dockle --exit-code 1 --exit-level WARN stacks-dockle-core
           dockle --exit-code 1 --exit-level WARN stacks-dockle-vision
           dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
