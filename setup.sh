@@ -371,7 +371,23 @@ else
     fi
 fi
 
-# ── 11. Git hooks ──────────────────────────────────────────────────────────────
+# ── 11. act (local CI runner) ──────────────────────────────────────────────────
+step "act (GitHub Actions local runner)"
+if command -v act &>/dev/null; then
+    # Create .actrc with default settings if missing
+    if [[ ! -f "$REPO_ROOT/.actrc" ]]; then
+        cat > "$REPO_ROOT/.actrc" <<'EOF'
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+--env GITHUB_TOKEN
+EOF
+        info "Created .actrc with default runner image"
+    fi
+    success "act ready — run individual CI jobs with: act -j test-elixir"
+else
+    warn "act not found (expected from brew bundle)"
+fi
+
+# ── 12. Git hooks ──────────────────────────────────────────────────────────────
 step "Git hooks"
 bash "$REPO_ROOT/scripts/install-hooks.sh"
 success "Git hooks installed"

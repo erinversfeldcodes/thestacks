@@ -83,6 +83,11 @@ check-flyctl:
 ci *GROUPS:
     scripts/ci.sh {{GROUPS}}
 
+# Run a GitHub Actions job locally via act (requires Docker).
+# Usage: just act test-elixir
+act JOB:
+    act -j {{JOB}}
+
 # Install Python dev dependencies (pytest, ruff, mypy, pip-audit, etc.)
 install-python-dev:
     cd apps/vision && .venv/bin/pip install -r requirements-dev.txt

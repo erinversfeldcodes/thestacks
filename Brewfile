@@ -48,6 +48,11 @@ brew "grype"
 brew "goodwithtech/r/dockle"
 # checkov installed via pip (see setup.sh); jwt_tool cloned from GitHub (not on PyPI)
 
+# ── CI local runner ──────────────────────────────────────────────────────────
+# act runs GitHub Actions workflows locally in Docker containers.
+# Usage: act -j test-elixir (runs a single job matching the CI environment)
+brew "act"
+
 # ── Misc dev tools ────────────────────────────────────────────────────────────
 brew "gh"
 brew "git"
