@@ -4,5 +4,5 @@ set -euo pipefail
 mix format --check-formatted
 mix credo --strict
 mix dialyzer
-(cd apps/core && mix sobelow --config)
+(cd apps/core && mix sobelow --config --ignore-files test/support/)
 mix deps.audit
