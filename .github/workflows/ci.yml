@@ -114,11 +114,20 @@ jobs:
           key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
       - uses: bufbuild/buf-setup-action@v1.47.2
       - name: Generate proto artifacts
         run: |
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
+          scripts/gen-elm-proto.sh
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
       - run: scripts/lint-elixir.sh
       - run: scripts/test-elixir.sh
 
