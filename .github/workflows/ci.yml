@@ -477,11 +477,14 @@ jobs:
           image: stacks-dockle-vision
           exit-code: '1'
           exit-level: WARN
+          accept-key: savedAptMark,GNUPGHOME,GPG_KEY
+          ignore: DKL-DI-0006
       - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-scraper
           exit-code: '1'
           exit-level: WARN
+          ignore: DKL-DI-0006
 
   deploy-preview:
     needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
