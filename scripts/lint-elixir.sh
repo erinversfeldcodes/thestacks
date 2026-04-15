@@ -8,5 +8,7 @@ mix dialyzer
 # from gen-ecto-proto.sh includes compiled test/support/ modules that trigger
 # "unknown function" warnings for ExUnit refs. ignore_files in .sobelow-conf
 # handles this on clean builds; the exit code guard handles cached builds.
-(cd apps/core && mix sobelow --config) || test $? -eq 2
+sobelow_rc=0
+(cd apps/core && mix sobelow --config) || sobelow_rc=$?
+if [[ $sobelow_rc -eq 1 ]]; then exit 1; fi
 mix deps.audit
