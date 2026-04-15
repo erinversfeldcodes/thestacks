@@ -4,5 +4,5 @@ set -euo pipefail
 mix format --check-formatted
 mix credo --strict
 mix dialyzer
-mix sobelow --config
+MIX_ENV=dev mix sobelow --config
 mix deps.audit
