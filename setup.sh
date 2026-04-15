@@ -77,9 +77,27 @@ success "All Brewfile packages installed"
 PG_BIN="$(brew --prefix postgresql@16)/bin"
 export PATH="$PG_BIN:$PATH"
 
-# ── 2b. direnv + Nix dev shell ────────────────────────────────────────────────
+# ── 2b. Nix ──────────────────────────────────────────────────────────────────
+# flake.nix pins exact tool versions (Elixir, OTP, Node, Python) matching
+# CI and Docker. Nix is required for direnv's `use flake` to work.
+step "Nix"
+if command -v nix &>/dev/null; then
+    success "Nix $(nix --version | awk '{print $NF}') already installed"
+else
+    info "Installing Nix (Determinate Systems installer)..."
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+        | sh -s -- install --no-confirm  # nosemgrep: bash.curl.security.curl-pipe-bash.curl-pipe-bash
+    # Source Nix for the rest of this script
+    if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+        # shellcheck disable=SC1091
+        . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    fi
+    success "Nix installed"
+fi
+
+# ── 2c. direnv + Nix dev shell ────────────────────────────────────────────────
 # Ensures every terminal session uses the exact tool versions from flake.nix
-# (Elixir, OTP, Node, Python) — no version drift between local and CI/Docker.
+# — no version drift between local and CI/Docker.
 step "direnv (Nix dev shell activation)"
 if command -v direnv &>/dev/null; then
     # Create .envrc if missing
@@ -90,12 +108,18 @@ if command -v direnv &>/dev/null; then
     direnv allow "$REPO_ROOT" 2>/dev/null || true
     success "direnv configured — Nix dev shell activates on cd"
 
-    # Check if the shell hook is set up
-    if [[ -n "${DIRENV_DIR:-}" ]]; then
+    # Ensure direnv hook is in the shell profile
+    SHELL_RC="$HOME/.zshrc"
+    if [[ -f "$SHELL_RC" ]] && ! grep -q 'direnv hook' "$SHELL_RC" 2>/dev/null; then
+        echo '' >> "$SHELL_RC"
+        echo '# direnv — auto-activate Nix dev shell on cd (added by setup.sh)' >> "$SHELL_RC"
+        echo 'eval "$(direnv hook zsh)"' >> "$SHELL_RC"
+        info "Added direnv hook to ~/.zshrc"
+        warn "Restart your shell (or run: source ~/.zshrc) to activate"
+    elif [[ -n "${DIRENV_DIR:-}" ]]; then
         success "direnv hook active in this shell"
     else
-        warn "Add to your ~/.zshrc:  eval \"\$(direnv hook zsh)\""
-        warn "Then restart your shell for automatic Nix activation"
+        success "direnv hook already in ~/.zshrc"
     fi
 else
     warn "direnv not found (expected from brew bundle) — skipping Nix shell setup"
