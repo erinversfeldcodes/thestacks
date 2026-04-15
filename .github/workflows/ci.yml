@@ -311,88 +311,9 @@ jobs:
           scan-ref: .
           severity: CRITICAL,HIGH
 
-  test-e2e:
-    needs: [changes, versions]
-    if: needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:${{ needs.versions.outputs.postgres }}
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: stacks_dev
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ needs.versions.outputs.otp }}
-          elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ needs.versions.outputs.node }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ needs.versions.outputs.python }}
-      - uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-${{ runner.os }}-
-      - name: Install Elixir deps
-        run: mix deps.get
-      - uses: bufbuild/buf-setup-action@v1.47.2
-      - name: Generate proto artifacts
-        run: |
-          scripts/gen-ecto-proto.sh
-          python3 scripts/gen_python_proto.py --language elixir
-          python3 scripts/gen_python_proto.py --language python
-          scripts/gen-elm-proto.sh
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm install
-          npm run build
-      - name: Install vision sidecar deps
-        working-directory: apps/vision
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install -r requirements.txt
-      - uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
-      - name: Install E2E deps and Playwright browsers
-        working-directory: e2e
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-      - name: Run migrations and seed
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
-          MIX_ENV: dev
-          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
-          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
-        run: mix ecto.create && mix ecto.migrate && mix run apps/core/priv/repo/seeds.exs
-      - name: Run E2E
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
-          MIX_ENV: dev
-          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
-          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
-          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-        run: scripts/test-e2e.sh
+  # E2E tests run in the deploy-preview job against the deployed stack
+  # (line ~552: "Run E2E against deployed stack"). No standalone E2E job —
+  # the tests need the full stack (Phoenix + vision on Modal + Neon DB).
 
   security-squawk:
     needs: changes
@@ -480,7 +401,7 @@ jobs:
           dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
 
   deploy-preview:
-    needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
+    needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
     if: github.event_name == 'pull_request' && !failure() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 60
