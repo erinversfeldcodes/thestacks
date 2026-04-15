@@ -16,8 +16,13 @@ MIX_ENV=test mix ecto.drop --quiet
 MIX_ENV=test mix ecto.create --quiet
 MIX_ENV=test mix ecto.migrate --quiet
 
-coverage_output="$(cd "$REPO_ROOT/apps/core" && mix coveralls 2>&1)"
+coverage_rc=0
+coverage_output="$(cd "$REPO_ROOT/apps/core" && mix coveralls 2>&1)" || coverage_rc=$?
 echo "$coverage_output"
+if [[ $coverage_rc -ne 0 ]]; then
+    echo "ERROR: mix coveralls exited with code $coverage_rc" >&2
+    exit $coverage_rc
+fi
 
 # Enforce minimum coverage threshold (excoveralls minimum_coverage config does not
 # set a non-zero exit code on its own — parse the [TOTAL] line ourselves).
