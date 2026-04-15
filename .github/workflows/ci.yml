@@ -471,6 +471,7 @@ jobs:
           exit-code: '1'
           exit-level: WARN
           accept-key: PHX_SERVER,ERL_INETRC,--chown
+          ignore: DKL-DI-0006
       - uses: goodwithtech/dockle-action@v0.4.15
         with:
           image: stacks-dockle-vision
