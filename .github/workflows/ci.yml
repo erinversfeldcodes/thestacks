@@ -465,26 +465,15 @@ jobs:
           docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
           docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
           docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
-      - uses: goodwithtech/dockle-action@v0.4.15
-        with:
-          image: stacks-dockle-core
-          exit-code: '1'
-          exit-level: WARN
-          accept-key: PHX_SERVER,ERL_INETRC,--chown
-          ignore: DKL-DI-0006
-      - uses: goodwithtech/dockle-action@v0.4.15
-        with:
-          image: stacks-dockle-vision
-          exit-code: '1'
-          exit-level: WARN
-          accept-key: savedAptMark,GNUPGHOME,GPG_KEY
-          ignore: DKL-DI-0006
-      - uses: goodwithtech/dockle-action@v0.4.15
-        with:
-          image: stacks-dockle-scraper
-          exit-code: '1'
-          exit-level: WARN
-          ignore: DKL-DI-0006
+      - name: Scan images with dockle
+        env:
+          DOCKLE_IGNORES: DKL-DI-0006
+          DOCKLE_ACCEPT_KEYS: PHX_SERVER,ERL_INETRC,--chown,savedAptMark,GNUPGHOME,GPG_KEY
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/goodwithtech/dockle/master/install.sh | sh -s -- -b /usr/local/bin
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-core
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-vision
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
 
   deploy-preview:
     needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, test-e2e, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
