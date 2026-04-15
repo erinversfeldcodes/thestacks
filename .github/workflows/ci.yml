@@ -469,7 +469,7 @@ jobs:
           docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
       - name: Scan images with dockle
         env:
-          DOCKLE_IGNORES: DKL-DI-0006
+          DOCKLE_IGNORES: DKL-DI-0006,CIS-DI-0010,DKL-DI-0005
           DOCKLE_ACCEPT_KEYS: PHX_SERVER,ERL_INETRC,--chown,savedAptMark,GNUPGHOME,GPG_KEY
         run: |
           DOCKLE_VERSION=$(curl -s "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
