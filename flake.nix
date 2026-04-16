@@ -73,9 +73,12 @@
               echo "Installing dbt-postgres..."
               pip install --quiet dbt-postgres
             fi
-            if ! command -v dbt-checkpoint &> /dev/null; then
+            # dbt-checkpoint installs check-model-has-description and friends;
+            # there's no `dbt-checkpoint` binary, so check for a known one instead.
+            if ! command -v check-model-has-description &> /dev/null; then
               echo "Installing dbt-checkpoint..."
-              pip install --quiet dbt-checkpoint
+              pip install --quiet 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8' 2>/dev/null || \
+                echo "  (skipped: pip blocked by PEP 668 — install via setup.sh outside Nix shell)"
             fi
             if ! command -v jwt_tool &> /dev/null; then
               echo "Installing jwt_tool..."

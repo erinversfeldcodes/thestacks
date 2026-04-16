@@ -28,16 +28,18 @@ if ! command -v squawk &>/dev/null; then
 fi
 
 # ── Determine which migration files to lint ───────────────────────────────────
+# Use `while read` instead of `mapfile` for bash 3.2 compatibility (macOS default).
+MIGRATION_FILES=()
 if [[ "${E2E_SQUAWK_ALL:-}" == "1" ]]; then
     # Explicit opt-in to lint every migration
-    mapfile -t MIGRATION_FILES < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
+    while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
 else
     BASE="${1:-origin/main}"
 
     # Find migrations added or modified relative to the base ref.
     # Falls back to all migrations if the base ref doesn't exist (new repo).
     if git rev-parse --verify "$BASE" &>/dev/null; then
-        mapfile -t MIGRATION_FILES < <(
+        while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(
             git diff --name-only --diff-filter=AM "$BASE"...HEAD 2>/dev/null \
                 | grep "apps/core/priv/repo/migrations/.*\.exs$" \
                 | while IFS= read -r f; do echo "$REPO_ROOT/$f"; done \
@@ -45,7 +47,7 @@ else
         )
     else
         echo "WARNING: base ref '$BASE' not found — linting all migrations." >&2
-        mapfile -t MIGRATION_FILES < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
+        while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
     fi
 fi
 
@@ -102,7 +104,10 @@ for b in blocks:
         continue
     fi
 
-    tmpfile="$(mktemp --suffix=.sql)"
+    # GNU mktemp supports --suffix, BSD (macOS) does not. Create then rename.
+    tmpfile="$(mktemp)"
+    mv "$tmpfile" "$tmpfile.sql"
+    tmpfile="$tmpfile.sql"
     echo "$sql_block" > "$tmpfile"
     # --exclude rules that don't apply to our fragment-based extraction:
     # * require-timeout-settings — we extract individual statements; the real
