@@ -175,6 +175,16 @@ info "Installing npm packages in frontend/..."
 (cd frontend && npm install --save-dev elm elm-format elm-test)
 success "Elm tooling installed"
 
+# squawk-cli — lints Postgres migrations for safety issues (runs in CI).
+# Install locally so `scripts/security-squawk.sh` doesn't skip silently.
+if ! command -v squawk &>/dev/null; then
+    info "Installing squawk-cli globally..."
+    npm install -g squawk-cli
+    success "squawk-cli installed"
+else
+    success "squawk-cli already available"
+fi
+
 # ── 5b. Generate Elm proto decoders ──────────────────────────────────────────
 step "Elm proto decoders"
 if [[ -f "$REPO_ROOT/scripts/gen-elm-proto.sh" ]] && command -v buf &>/dev/null; then
@@ -347,6 +357,11 @@ else
 
     # Drop and recreate the dev database to guarantee a clean state.
     # This is intentional: setup.sh is a bootstrap script, not an upgrade path.
+    # Clear _build to avoid "corrupt atom table" from stale beams compiled with
+    # a different Elixir/OTP combination (e.g. Homebrew's Elixir vs mise's).
+    info "Clearing stale _build cache..."
+    rm -rf "$REPO_ROOT/_build"
+
     info "Resetting dev database (stacks_dev)..."
     MIX_ENV=dev mix ecto.drop --quiet 2>/dev/null || true
     MIX_ENV=dev mix ecto.create --quiet
@@ -418,6 +433,7 @@ command -v trufflehog     &>/dev/null || MISSING+=("trufflehog (brew install tru
 command -v syft           &>/dev/null || MISSING+=("syft (brew install syft)")
 command -v grype          &>/dev/null || MISSING+=("grype (brew install grype)")
 command -v dockle         &>/dev/null || MISSING+=("dockle (brew install goodwithtech/r/dockle)")
+command -v squawk         &>/dev/null || MISSING+=("squawk-cli (npm install -g squawk-cli)")
 command -v check-model-has-description &>/dev/null || MISSING+=("dbt-checkpoint (pip install git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8)")
 command -v jwt_tool       &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
 
