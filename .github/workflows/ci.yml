@@ -123,11 +123,11 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
           scripts/gen-elm-proto.sh
-      - name: Build frontend
-        working-directory: frontend
+      - name: Build frontend into priv/static
+        working-directory: apps/core/assets
         run: |
           npm install
-          npm run build
+          npm run deploy
       - run: scripts/lint-elixir.sh
       - run: scripts/test-elixir.sh
 
