@@ -95,6 +95,11 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: test
+      # Trigger the CreateDbRoles migration to actually create stacks_app /
+      # stacks_dbt / stacks_readonly — mirrors production behaviour so the
+      # role grants, revokes, and rollback are exercised in CI.
+      STACKS_APP_DB_PASSWORD: ci-stacks-app-password
+      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -424,6 +429,10 @@ jobs:
       SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
       CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
       SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      # Trigger CreateDbRoles migration against Neon preview branch — exercises
+      # role creation, grants, and revokes the same way prod will.
+      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
       - uses: actions/checkout@v4
