@@ -73,17 +73,24 @@ for migration in "${MIGRATION_FILES[@]}"; do
     #     multi                      "single line"
     #     line                    )
     #   """)
-    # Python's multi-line regex handles triple-quoted heredocs cleanly —
-    # simpler than chaining sed/awk/perl with lookbehinds.
+    # Skips blocks containing Elixir string interpolation (#{...}) — the SQL
+    # isn't known until runtime, so squawk can't analyse it.
+    # Also skips anonymous PL/pgSQL (DO $$ ... END $$) — squawk doesn't check
+    # those for migration hazards.
     sql_block="$(python3 -c '
 import re, sys
 src = open(sys.argv[1]).read()
+blocks = []
 # triple-quoted
-for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL):
-    print(m.group(1))
-# single-quoted single-line (may be wrapped across the paren)
-for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src):
-    print(m.group(1))
+blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL)]
+# single-quoted single-line
+blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src)]
+for b in blocks:
+    if "#{" in b:         # Elixir interpolation — not analysable
+        continue
+    if re.search(r"DO\s*\$\$", b, re.IGNORECASE):  # anonymous procedure
+        continue
+    print(b)
 ' "$migration" 2>/dev/null || true)"
 
     # No raw SQL to lint — skip (Ecto schema DSL migrations are not squawkable).
