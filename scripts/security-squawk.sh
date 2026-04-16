@@ -67,24 +67,37 @@ echo ""
 VIOLATIONS=0
 
 for migration in "${MIGRATION_FILES[@]}"; do
-    # Extract content from execute("...") blocks — simplistic but covers the
-    # most dangerous patterns (ADD COLUMN, ADD CONSTRAINT, DROP INDEX, etc.)
-    sql_block="$(grep -oP '(?<=execute ")[^"]+' "$migration" 2>/dev/null || true)"
+    # Extract SQL from execute(...) blocks. Handles three forms:
+    #   execute("single line")
+    #   execute("""                execute(
+    #     multi                      "single line"
+    #     line                    )
+    #   """)
+    # Python's multi-line regex handles triple-quoted heredocs cleanly —
+    # simpler than chaining sed/awk/perl with lookbehinds.
+    sql_block="$(python3 -c '
+import re, sys
+src = open(sys.argv[1]).read()
+# triple-quoted
+for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL):
+    print(m.group(1))
+# single-quoted single-line (may be wrapped across the paren)
+for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src):
+    print(m.group(1))
+' "$migration" 2>/dev/null || true)"
 
+    # No raw SQL to lint — skip (Ecto schema DSL migrations are not squawkable).
     if [[ -z "$sql_block" ]]; then
-        # No raw SQL — squawk the whole file and let it figure it out.
-        # squawk can also parse Ecto-style strings in some versions.
-        if ! squawk --assume-in-transaction "$migration" 2>/dev/null; then
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-    else
-        tmpfile="$(mktemp --suffix=.sql)"
-        echo "$sql_block" > "$tmpfile"
-        if ! squawk --assume-in-transaction "$tmpfile"; then
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-        rm -f "$tmpfile"
+        echo "  (no raw SQL in $migration — skipping)"
+        continue
     fi
+
+    tmpfile="$(mktemp --suffix=.sql)"
+    echo "$sql_block" > "$tmpfile"
+    if ! squawk --assume-in-transaction "$tmpfile"; then
+        VIOLATIONS=$((VIOLATIONS + 1))
+    fi
+    rm -f "$tmpfile"
 done
 
 if [[ $VIOLATIONS -gt 0 ]]; then
