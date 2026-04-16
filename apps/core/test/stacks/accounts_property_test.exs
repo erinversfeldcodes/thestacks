@@ -39,10 +39,14 @@ defmodule Stacks.AccountsPropertyTest do
     end
 
     property "rejects country_code of any length other than 2" do
+      # Generate lengths 1, 3..10 directly instead of filtering length==2 out of
+      # an unbounded string generator — StreamData otherwise hits FilterTooNarrow
+      # when early (small-size) generations keep producing rejected values.
+      len_gen = one_of([constant(1), integer(3..10)])
+
       check all(
-              country <- string(:alphanumeric),
-              String.length(country) != 2,
-              String.length(country) > 0,
+              len <- len_gen,
+              country <- string(:alphanumeric, length: len),
               max_runs: 100
             ) do
         user = build(:user)
