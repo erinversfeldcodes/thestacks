@@ -441,10 +441,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ needs.versions.outputs.node }}
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
       - name: Install flyctl
         run: |
           curl -L https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - uses: bufbuild/buf-setup-action@v1.47.2
+      - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
+        run: mix deps.get
+      - name: Install frontend deps (for node build.js inside deploy-stack.sh)
+        working-directory: apps/core/assets
+        run: npm install
+      - name: Install Modal (for vision deploy inside deploy-stack.sh)
+        run: pip install modal
+      - name: Generate proto artifacts for Docker builds
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
+          scripts/gen-elm-proto.sh
       - uses: actions/cache@v4
         id: playwright-cache
         with:
