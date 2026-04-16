@@ -90,7 +90,10 @@ for b in blocks:
         continue
     if re.search(r"DO\s*\$\$", b, re.IGNORECASE):  # anonymous procedure
         continue
-    print(b)
+    stmt = b.strip()
+    if not stmt.endswith(";"):
+        stmt += ";"
+    print(stmt)
 ' "$migration" 2>/dev/null || true)"
 
     # No raw SQL to lint — skip (Ecto schema DSL migrations are not squawkable).
