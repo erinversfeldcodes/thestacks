@@ -344,13 +344,27 @@ fi
 # ── Deploy core ──────────────────────────────────────────────────────────────
 CORE_URL="https://${CORE_APP}.fly.dev"
 
+# Debug: verify static assets exist before sending to Fly builder
+echo ""
+echo "==> Pre-deploy static asset check:"
+echo "    priv/static/ contents:"
+ls -la "$REPO_ROOT/apps/core/priv/static/" 2>/dev/null || echo "    ERROR: priv/static/ does not exist!"
+echo "    priv/static/textures/ file count: $(ls "$REPO_ROOT/apps/core/priv/static/textures/" 2>/dev/null | wc -l | tr -d ' ')"
+echo "    priv/static/textures/ total size: $(du -sh "$REPO_ROOT/apps/core/priv/static/textures/" 2>/dev/null | cut -f1 || echo 'N/A')"
+echo "    priv/static/index.html exists: $(test -f "$REPO_ROOT/apps/core/priv/static/index.html" && echo 'yes' || echo 'NO')"
+echo "    sample texture file size: $(wc -c "$REPO_ROOT/apps/core/priv/static/textures/spine-cloth-brown.png" 2>/dev/null | awk '{print $1}' || echo 'N/A') bytes"
 echo ""
 echo "==> Deploying ${CORE_APP}..."
+# Pass a unique ASSET_HASH to bust the remote builder cache for priv/static.
+# Without this, the builder reuses a stale COPY layer from a previous build
+# that may not have included textures or freshly-built assets.
+ASSET_HASH="$(date +%s)-$(git rev-parse --short HEAD)"
 if ! (cd "$REPO_ROOT" && fly deploy \
         --app "${CORE_APP}" \
         --config "${REPO_ROOT}/deploy/fly.core.toml" \
         --image-label "pr-${SANITISED}" \
-        --depot=false); then
+        --depot=false \
+        --build-arg "ASSET_HASH=${ASSET_HASH}"); then
     echo "FAIL deploy: core app deployment failed"
     exit 1
 fi

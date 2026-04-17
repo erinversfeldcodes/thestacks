@@ -49,6 +49,8 @@ COPY apps/core/lib apps/core/lib
 # Static assets (index.html, textures, app.js) — pre-built by deploy-stack.sh
 # via `node build.js --production`. Placed after source code because the
 # build output changes on every deploy (fingerprinted assets).
+# ARG ASSET_HASH busts the remote builder cache so fresh assets are always copied.
+ARG ASSET_HASH=default
 COPY apps/core/priv/static apps/core/priv/static
 
 # Release env hook — sets RELEASE_DISTRIBUTION and RELEASE_NODE from Fly env vars.
