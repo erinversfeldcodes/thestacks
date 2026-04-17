@@ -177,9 +177,16 @@ f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
 print(f.web_url)
 " 2>/dev/null || true)"
 
-    # Fallback: parse URL from `modal deploy` output (line like "=> https://...modal.run")
+    # Fallback: parse URL from `modal deploy` output. Modal wraps long lines,
+    # so the URL may be split across multiple lines like:
+    #   => https://user--app-name-0d7a55.moda
+    #      l.run (label truncated)
+    # Join lines, then extract the URL.
     if [[ -z "$VISION_SERVICE_URL" || "$VISION_SERVICE_URL" != http* ]]; then
-        VISION_SERVICE_URL="$(echo "$modal_deploy_output" | grep -oE 'https://[^ ]+\.modal\.run' | head -1 || true)"
+        VISION_SERVICE_URL="$(echo "$modal_deploy_output" \
+            | tr -d '\n' \
+            | grep -oE 'https://[^ ]+\.modal\.run' \
+            | head -1 || true)"
         if [[ -n "$VISION_SERVICE_URL" ]]; then
             echo "    (URL from deploy output — SDK lookup was unavailable)"
         fi
