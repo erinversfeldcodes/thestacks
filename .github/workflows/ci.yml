@@ -123,6 +123,8 @@ jobs:
         with:
           node-version: ${{ needs.versions.outputs.node }}
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - name: Generate proto artifacts
         run: |
           scripts/gen-ecto-proto.sh
@@ -154,6 +156,8 @@ jobs:
       - working-directory: frontend
         run: npm install --save-dev elm elm-format elm-test
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - run: scripts/lint-elm.sh
       - run: scripts/test-elm.sh
 
@@ -203,6 +207,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - run: scripts/lint-proto.sh
 
   test-dbt:
@@ -247,6 +253,8 @@ jobs:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - name: Generate proto artifacts
         run: |
           scripts/gen-ecto-proto.sh
@@ -393,6 +401,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - name: Generate proto artifacts for Docker builds
         run: |
           python3 scripts/gen_python_proto.py --language rust
@@ -453,6 +463,8 @@ jobs:
           curl -L https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
       - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
       - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
         run: mix deps.get
       - name: Install frontend deps (for node build.js inside deploy-stack.sh)
