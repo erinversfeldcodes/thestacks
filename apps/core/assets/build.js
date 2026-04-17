@@ -18,9 +18,11 @@ function copyStaticAssets() {
   // Copy the static/ directory contents (textures etc.) if present.
   const staticSrc = path.resolve(__dirname, "static");
   if (fs.existsSync(staticSrc)) {
-    // Use cp -r via child_process to avoid semgrep path-traversal false positives
+    // Use cp -rL via child_process to avoid semgrep path-traversal false positives
     // on path.join(dir, entry.name) patterns from readdirSync.
-    execSync(`cp -r "${staticSrc}/." "${staticDest}/"`, { stdio: "inherit" });
+    // -L dereferences symlinks (static/textures is a symlink to frontend/public/textures).
+    // macOS cp -r follows symlinks by default, but Linux preserves them — -L is portable.
+    execSync(`cp -rL "${staticSrc}/." "${staticDest}/"`, { stdio: "inherit" });
   }
 
   // Copy the SPA entrypoint index.html to priv/static so PageController
