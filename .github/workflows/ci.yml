@@ -451,6 +451,10 @@ jobs:
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
       SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       # Trigger CreateDbRoles migration against Neon preview branch — exercises
       # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
