@@ -35,7 +35,7 @@ COPY config/config.exs config/config.exs
 COPY config/prod.exs config/prod.exs
 COPY config/runtime.exs config/runtime.exs
 COPY apps/core/config/ apps/core/config/
-COPY apps/core/priv apps/core/priv
+COPY apps/core/priv/repo apps/core/priv/repo
 
 # Proto definitions and generation scripts — needed to bootstrap gen/ files.
 # Placed before app source because proto changes less often than app code.
@@ -45,6 +45,11 @@ COPY scripts/gen_python_proto.py scripts/gen_python_proto.py
 
 # Source code — most frequently changed layer, last before compilation.
 COPY apps/core/lib apps/core/lib
+
+# Static assets (index.html, textures, app.js) — pre-built by deploy-stack.sh
+# via `node build.js --production`. Placed after source code because the
+# build output changes on every deploy (fingerprinted assets).
+COPY apps/core/priv/static apps/core/priv/static
 
 # Release env hook — sets RELEASE_DISTRIBUTION and RELEASE_NODE from Fly env vars.
 # Must be copied before `mix release` so it is embedded in the release artifact.
