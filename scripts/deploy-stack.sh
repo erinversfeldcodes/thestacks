@@ -177,13 +177,14 @@ f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
 print(f.web_url)
 " 2>/dev/null || true)"
 
-    # Fallback: parse URL from `modal deploy` output. Modal wraps long lines,
-    # so the URL may be split across multiple lines like:
-    #   => https://user--app-name-0d7a55.moda
-    #      l.run (label truncated)
-    # Join lines, then extract the URL.
+    # Fallback: parse URL from `modal deploy` output. Modal's tree formatter
+    # wraps long URLs across lines with │ prefixes like:
+    #   │   https://user--app-0d7a55.moda
+    #   │   l.run (label truncated)
+    # Strip tree chars and newlines, then extract the URL.
     if [[ -z "$VISION_SERVICE_URL" || "$VISION_SERVICE_URL" != http* ]]; then
         VISION_SERVICE_URL="$(echo "$modal_deploy_output" \
+            | sed 's/[│├└─🔨]//g' \
             | tr -d '\n' \
             | grep -oE 'https://[^ ]+\.modal\.run' \
             | head -1 || true)"
