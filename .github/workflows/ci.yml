@@ -441,6 +441,8 @@ jobs:
       SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
       CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
       SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       # Trigger CreateDbRoles migration against Neon preview branch — exercises
       # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
