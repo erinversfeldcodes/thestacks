@@ -305,10 +305,15 @@ else
 fi
 
 # ── Generate Ecto schemas from proto ────────────────────────────────────────
+# Use gen-ecto-proto.sh instead of `mix proto.sync` — it bootstraps without
+# requiring app compilation (avoids chicken-and-egg when gen/ is gitignored).
 echo ""
 echo "==> Generating Ecto schemas from proto..."
-(cd "$REPO_ROOT/apps/core" && mix proto.sync) \
-    || { echo "FAIL deploy: mix proto.sync failed"; exit 1; }
+bash "$REPO_ROOT/scripts/gen-ecto-proto.sh" \
+    || { echo "FAIL deploy: gen-ecto-proto.sh failed"; exit 1; }
+# Also generate inter-service proto structs (AssociateRequest etc.)
+python3 "$REPO_ROOT/scripts/gen_python_proto.py" --language elixir \
+    || { echo "FAIL deploy: gen_python_proto.py --language elixir failed"; exit 1; }
 if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROOT/apps/core/lib/stacks/gen" 2>/dev/null)" ]]; then
     echo "FAIL deploy: apps/core/lib/stacks/gen/ is empty after generation"; exit 1
 fi
