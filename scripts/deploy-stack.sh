@@ -178,16 +178,16 @@ print(f.web_url)
 " 2>/dev/null || true)"
 
     # Fallback: parse URL from `modal deploy` output. Modal's tree formatter
-    # wraps long URLs across lines with │ prefixes like:
-    #   │   https://user--app-0d7a55.moda
-    #   │   l.run (label truncated)
-    # Strip tree chars and newlines, then extract the URL.
+    # wraps long URLs across lines with multi-byte UTF-8 box chars (│├└─🔨)
+    # that sed can't strip reliably. Use Python for portable parsing.
     if [[ -z "$VISION_SERVICE_URL" || "$VISION_SERVICE_URL" != http* ]]; then
-        VISION_SERVICE_URL="$(echo "$modal_deploy_output" \
-            | sed 's/[│├└─🔨]//g' \
-            | tr -d '\n' \
-            | grep -oE 'https://[^ ]+\.modal\.run' \
-            | head -1 || true)"
+        VISION_SERVICE_URL="$(python3 -c "
+import re, sys
+text = sys.stdin.read().replace('\n', '')
+cleaned = re.sub(r'[│├└─🔨\s]+', '', text)
+urls = re.findall(r'https://[^\s(]+\.modal\.run', cleaned)
+print(urls[0] if urls else '')
+" <<< "$modal_deploy_output" || true)"
         if [[ -n "$VISION_SERVICE_URL" ]]; then
             echo "    (URL from deploy output — SDK lookup was unavailable)"
         fi
