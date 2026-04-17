@@ -331,6 +331,12 @@ if command -v node &>/dev/null && [[ -f "$REPO_ROOT/apps/core/assets/build.js" ]
     (cd "$REPO_ROOT/apps/core/assets" && node build.js --production) \
         || { echo "FAIL deploy: frontend build failed"; exit 1; }
     echo "    app.js rebuilt"
+    # Verify textures were copied (build.js follows static/textures symlink)
+    if [[ -d "$REPO_ROOT/apps/core/priv/static/textures" ]]; then
+        echo "    textures: $(ls "$REPO_ROOT/apps/core/priv/static/textures/" | wc -l | tr -d ' ') files in priv/static/textures/"
+    else
+        echo "    WARN: priv/static/textures/ not found after build — mix phx.digest will fail"
+    fi
 else
     echo "    SKIP: node or build.js not found — Docker build will handle it"
 fi
