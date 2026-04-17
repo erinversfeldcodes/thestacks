@@ -168,12 +168,22 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
         || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
     echo "$modal_deploy_output"
 
+    # Try SDK lookup first, fall back to parsing the deploy output.
+    # The SDK call can fail if the function isn't registered yet.
     VISION_SERVICE_URL="$(MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
         python3 -c "
 import modal
 f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
 print(f.web_url)
-" 2>/dev/null)"
+" 2>/dev/null || true)"
+
+    # Fallback: parse URL from `modal deploy` output (line like "=> https://...modal.run")
+    if [[ -z "$VISION_SERVICE_URL" || "$VISION_SERVICE_URL" != http* ]]; then
+        VISION_SERVICE_URL="$(echo "$modal_deploy_output" | grep -oE 'https://[^ ]+\.modal\.run' | head -1 || true)"
+        if [[ -n "$VISION_SERVICE_URL" ]]; then
+            echo "    (URL from deploy output — SDK lookup was unavailable)"
+        fi
+    fi
     if [[ -z "$VISION_SERVICE_URL" ]]; then
         echo "FAIL deploy: could not retrieve Modal vision service URL via SDK" >&2
         exit 1
