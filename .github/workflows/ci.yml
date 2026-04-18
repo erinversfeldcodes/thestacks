@@ -428,6 +428,129 @@ jobs:
   #          dockle --exit-code 1 --exit-level WARN stacks-dockle-vision
   #          dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
   #
+  migration-safety:
+    # Expand–contract enforcement. Runs only on pull_request events that
+    # touch Ecto migrations. Three gates in sequence:
+    #   1. squawk on the extracted SQL (ban-drop-column, renaming-column,
+    #      renaming-table, adding-required-field).
+    #   2. scripts/lint-migrations.sh — requires `@breaking_ok "<reason>"`
+    #      on destructive Ecto DSL ops (remove, rename, modify null: false).
+    #   3. scripts/check-schema-diff.sh — compares structure.sql BEFORE
+    #      (origin/main) and AFTER (this branch + migrations applied). A
+    #      destructive column/table/enum diff requires the `db-breaking` PR label.
+    needs: [changes, versions]
+    if: needs.changes.outputs.migrations == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # config/dev.exs hardcodes `database: "stacks_dev"` and runtime.exs
+        # only reads DATABASE_URL in :prod, so the Postgres container name
+        # MUST match `stacks_dev` for `mix ecto.migrate` (MIX_ENV=dev) to
+        # connect. Do not change this without also changing dev.exs.
+        image: postgres:${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: dev
+      # runtime.exs raises unconditionally in non-test envs without these.
+      # Sourced from the same secrets deploy-preview uses — identical values
+      # mean the gate exercises the real config path without special casing.
+      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+      # Derived from the PR labels. `true` iff `db-breaking` is applied, which
+      # allows scripts/check-schema-diff.sh to pass on destructive diffs.
+      DB_BREAKING_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'db-breaking') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      # Pinned: 2.47.0 is the version verified locally against all Phase 2
+      # fixtures. Bump only after re-running test/platform/run_all.sh.
+      - name: Install squawk
+        run: npm install -g squawk-cli@2.47.0
+
+      # ── 1. Squawk — destructive SQL patterns ──────────────────────────────
+      - name: squawk — destructive migration rules
+        run: scripts/security-squawk.sh origin/main
+
+      # ── 2. @breaking_ok annotation on Ecto DSL destructive ops ────────────
+      - name: lint-migrations — require @breaking_ok on destructive Ecto ops
+        run: |
+          changed="$(git diff --name-only --diff-filter=AM origin/main...HEAD \
+              | grep '^apps/core/priv/repo/migrations/.*\.exs$' || true)"
+          if [[ -z "${changed}" ]]; then
+            echo "No migration files changed — skipping lint-migrations."
+            exit 0
+          fi
+          echo "Linting:"
+          printf '  %s\n' ${changed}
+          # Intentionally unquoted so each path is its own argv entry.
+          # shellcheck disable=SC2086
+          scripts/lint-migrations.sh ${changed}
+
+      # ── 3. Schema diff — BEFORE (origin/main) vs AFTER (HEAD + migrate) ───
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+
+      # Proto artifacts are gitignored (apps/core/lib/stacks/gen/) and every
+      # other Mix-using CI job regenerates them before mix deps.get. Run the
+      # same generators here — otherwise `mix compile` fails during
+      # ecto.migrate and the whole gate crashes before running a single rule.
+      - name: Generate proto artifacts (HEAD)
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+      - name: Install mix deps (HEAD)
+        run: mix deps.get
+
+      - name: Dump BEFORE structure (origin/main)
+        # Use a throwaway worktree so HEAD's deps tree is not disturbed. We
+        # must re-run proto gen + deps.get inside the worktree because each
+        # checkout has its own _build / apps/core/lib/stacks/gen/ state.
+        run: |
+          mkdir -p /tmp/schema
+          git worktree add /tmp/main-worktree origin/main
+          pushd /tmp/main-worktree >/dev/null
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+          mix deps.get
+          mix ecto.create || true
+          mix ecto.migrate
+          mix ecto.dump --dump-path /tmp/schema/before.sql
+          popd >/dev/null
+          mix ecto.drop || true
+          git worktree remove --force /tmp/main-worktree
+
+      - name: Dump AFTER structure (HEAD)
+        run: |
+          mix ecto.create || true
+          mix ecto.migrate
+          mix ecto.dump --dump-path /tmp/schema/after.sql
+
+      - name: check-schema-diff — destructive changes require db-breaking label
+        run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
+
   deploy-preview:
     # TODO: restore full dependency list after deploy-preview is stable:
     # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
