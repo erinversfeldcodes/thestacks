@@ -505,45 +505,57 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Deploy preview stack + warm vision pipeline
         run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
-      - name: Warm Fly machines and Neon database
+      - name: Pin Fly hostname to IPv4 in /etc/hosts
+        # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
+        # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
+        # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
+        # directly so every resolver (curl, Playwright, Node) returns IPv4.
         run: |
           BRANCH="${GITHUB_HEAD_REF:-preview}"
           SAN="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
           SAN="${SAN%-}"
           CORE_URL="https://stacks-core-pr-${SAN}.fly.dev"
-          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
+          HOST="stacks-core-pr-${SAN}.fly.dev"
           NEON_BRANCH="preview/${SAN}"
+          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
           echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
-          # Wake Fly machines
+          IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
+          if [[ -z "${IPV4}" ]]; then
+            echo "FAIL: no A record for ${HOST}"
+            exit 1
+          fi
+          echo "${IPV4} ${HOST}" | sudo tee -a /etc/hosts
+          echo "Pinned ${HOST} -> ${IPV4}"
+          getent hosts "${HOST}"
+      - name: Warm Fly machines and Neon database
+        run: |
+          # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
           for i in {1..20}; do
-            curl -4 -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
+            curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
           done
           for i in {1..10}; do
-            curl -4 -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
+            curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
           done
-          # DB-warming: POST /api/auth/login + GET /api/catalogue unpark Neon
           for i in {1..5}; do
-            curl -4 -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+            curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
               >/dev/null 2>&1 &
           done
           for i in {1..3}; do
-            DB_TOKEN="$(curl -4 -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+            DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
               2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
             if [[ -n "${DB_TOKEN}" ]]; then
-              curl -4 -sf --max-time 30 "${CORE_URL}/api/catalogue?per_page=20" \
+              curl -sf --max-time 30 "${CORE_URL}/api/catalogue?per_page=20" \
                 -H "Authorization: Bearer ${DB_TOKEN}" >/dev/null 2>&1 || true
             fi
           done
           wait
           sleep 2
       - name: Run E2E against deployed stack
-        # Force Node/Playwright to use IPv4 — GitHub runners may not have IPv6
-        # connectivity to Fly's anycast addresses (ENETUNREACH on ::).
-        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" NODE_OPTIONS="--dns-result-order=ipv4first" scripts/test-e2e.sh
+        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Smoke — circuit breakers
         if: always()
         run: |
