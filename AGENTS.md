@@ -92,6 +92,7 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - Testing: docs/agents/standards/testing.md
 - Security: docs/agents/standards/security.md
 - Protobuf: docs/agents/standards/protobuf.md
+- Migrations: docs/agents/standards/migrations.md
 
 ## Canonical References
 - Architecture: docs/technical-architecture.md
