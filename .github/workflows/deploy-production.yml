@@ -89,6 +89,12 @@ jobs:
       # user already exists and the call no-ops.
       PROD_OWNER_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
       PROD_OWNER_PASSWORD: ${{ secrets.PROD_OWNER_PASSWORD }}
+      # Probes use the same credentials to exercise /api/auth/login against
+      # the real prod owner. Short-term: reuses PROD_OWNER_*; longer-term we
+      # should have a dedicated prober user with minimal privileges so the
+      # owner password doesn't appear in probe logs. Tracked in Issue #138.
+      PROBE_SEED_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
+      PROBE_SEED_PASSWORD: ${{ secrets.PROD_OWNER_PASSWORD }}
       # Prod Neon connection components. Prod mode does NOT create a Neon
       # branch (that's preview-only), so DATABASE_URL must be composed from
       # these four secrets and staged onto the core Fly app. The compose
