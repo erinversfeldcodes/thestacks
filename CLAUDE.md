@@ -7,7 +7,7 @@
 
 - **Canonical docs:** `docs/technical-architecture.md` (architecture), `docs/user-stories.md` (features), `docs/implementation-mapping.md` (story-to-code bridge)
 - **Agent system:** `docs/agents/` (orchestrator + specialists), `AGENTS.md` (registry + routing)
-- **Standards:** `docs/agents/standards/` (code quality, testing, security, protobuf)
+- **Standards:** `docs/agents/standards/` (code quality, testing, security, protobuf, migrations)
 - **Issues:** `issues/` (structured task backlog, one `.md` per issue)
 - **Plans:** `plans/` (orchestrator-generated implementation plans)
 - **Proto schemas:** `proto/` (Protobuf contracts, `buf` config)
