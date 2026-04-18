@@ -2,10 +2,16 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   @moduledoc """
   Tests for the /internal/metrics auth plug (Issue #136 Phase 1, DoD #4).
 
-  Requests to /internal/metrics are rejected with 401 unless one of:
+  Requests to /internal/metrics are rejected with 401 unless the request
+  carries `authorization: Bearer <METRICS_SCRAPE_TOKEN>` matching the
+  configured token.
 
-    * `remote_ip` is inside Fly's private 6PN block (`fd00::/8`)
-    * `authorization: Bearer <METRICS_SCRAPE_TOKEN>` matches the configured token
+  The plug deliberately does NOT allowlist Fly's private 6PN block: on Fly
+  `[http_service]` without `proxy_protocol` re-originates every public
+  request over 6PN after fly-proxy termination, so `conn.remote_ip` for
+  external callers is always `fdaa::/16`. Allowlisting that range would
+  bypass the bearer check for every public caller. See the plug's
+  `@moduledoc` for the full rationale.
 
   We exercise the plug in two ways:
 
@@ -23,9 +29,11 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
 
   @valid_token "test-metrics-scrape-token-for-issue-136"
 
-  # A plausible Fly 6PN address: fd00::/8 block.
-  @fly_6pn_ip {0xFD00, 0, 0, 0, 0, 0, 0, 0x1}
   @public_ipv4 {203, 0, 113, 7}
+  # A representative Fly 6PN address in the fdaa::/16 block that the old
+  # allowlist would have matched. Kept so we can assert the plug does NOT
+  # treat it as authorized without a bearer.
+  @fly_6pn_ip {0xFDAA, 0, 0, 0, 0, 0, 0, 0x1}
 
   setup do
     original = Application.get_env(:core, :metrics_scrape_token)
@@ -54,15 +62,18 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   # Unit tests — the plug itself
   # ---------------------------------------------------------------------------
 
-  describe "MetricsAuth.call/2 — Fly 6PN allowlist" do
-    test "passes a request whose remote_ip is inside fd00::/8" do
+  describe "MetricsAuth.call/2 — bearer-only (no IP allowlist)" do
+    test "rejects a 6PN-sourced request with no bearer token" do
+      # On Fly, public HTTPS callers terminate at fly-proxy and re-originate
+      # over 6PN, so `remote_ip` inside fdaa::/16 is NOT a trust signal.
+      # The plug must demand a bearer from every caller.
       result =
         base_conn()
         |> Map.put(:remote_ip, @fly_6pn_ip)
         |> call_plug()
 
-      refute result.halted,
-             "expected fd00::/8 request to pass through, got halted=#{result.halted}"
+      assert result.halted
+      assert result.status == 401
     end
   end
 

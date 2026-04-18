@@ -33,9 +33,11 @@ defmodule CoreWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
-  # Prometheus metrics — auth-gated by StacksWeb.Plugs.MetricsAuth (Fly 6PN
-  # allowlist + METRICS_SCRAPE_TOKEN bearer). The plug halts with 401 for
-  # unauthorised callers before PromEx.Plug ever sees the request.
+  # Prometheus metrics — auth-gated by StacksWeb.Plugs.MetricsAuth: requires
+  # an Authorization: Bearer <METRICS_SCRAPE_TOKEN> header. The plug halts
+  # with 401 for unauthorised callers before PromEx.Plug ever sees the
+  # request. No IP allowlist — fly-proxy re-originates public traffic over
+  # 6PN so conn.remote_ip is not a trust signal.
   plug StacksWeb.Plugs.MetricsAuth
   plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
 

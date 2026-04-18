@@ -2,14 +2,23 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   @moduledoc """
   Auth plug guarding `/internal/metrics`.
 
-  A request is allowed through iff one of:
+  A request is allowed through iff the `authorization` header is
+  `Bearer <token>` where the token matches
+  `Application.get_env(:core, :metrics_scrape_token)`.
 
-    * `conn.remote_ip` is inside Fly's private 6PN block (`fd00::/8`)
-    * the `authorization` header is `Bearer <token>` where the token matches
-      `Application.get_env(:core, :metrics_scrape_token)`.
+  Every other request is halted with `401`. Non-metrics paths pass through
+  untouched so the plug is safe to install at the endpoint.
 
-  Every other request is halted with `401`. Non-metrics paths are passed
-  through untouched so the plug is safe to install at the endpoint.
+  ## Why bearer-only (no IP allowlist)
+
+  On Fly.io the `[http_service]` block in `deploy/fly.core.toml` does not
+  enable `proxy_protocol`, so every externally-initiated HTTPS request
+  re-originates over Fly's internal 6PN network after terminating at
+  fly-proxy. `conn.remote_ip` for public callers is therefore always an
+  `fdaa::/16` 6PN address — indistinguishable from legitimate in-cluster
+  scrapers. A 6PN allowlist would bypass the bearer check for every public
+  caller, so the plug enforces bearer-only. Internal scrapers MUST carry the
+  same bearer token as external ones.
   """
 
   @behaviour Plug
@@ -30,18 +39,7 @@ defmodule StacksWeb.Plugs.MetricsAuth do
 
   @doc false
   @spec authorized?(Plug.Conn.t()) :: boolean()
-  def authorized?(conn) do
-    fly_6pn_address?(conn.remote_ip) or valid_bearer?(conn)
-  end
-
-  # Fly private 6PN uses the fd00::/8 unique local address range. Any IPv6
-  # whose first byte (high 8 bits of the first 16-bit group) equals 0xfd is
-  # inside that block.
-  defp fly_6pn_address?({a, _, _, _, _, _, _, _}) when is_integer(a) do
-    Bitwise.bsr(a, 8) == 0xFD
-  end
-
-  defp fly_6pn_address?(_), do: false
+  def authorized?(conn), do: valid_bearer?(conn)
 
   defp valid_bearer?(conn) do
     expected = Application.get_env(:core, :metrics_scrape_token)
