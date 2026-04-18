@@ -524,27 +524,34 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
 
-      - name: Dump BEFORE structure (origin/main)
-        # Use a throwaway worktree so HEAD's deps tree is not disturbed. We
-        # must re-run deps.get + proto gen inside the worktree because each
-        # checkout has its own _build / apps/core/lib/stacks/gen/ state.
+      - name: Dump BEFORE and AFTER structure
+        # Swap the migrations/ dir between origin/main's state and HEAD's,
+        # running `mix ecto.migrate` + `mix ecto.dump` against each. Uses
+        # HEAD's compiled app and deps for both — migrations must be
+        # self-contained SQL-level DSL, per docs/agents/standards/migrations.md.
+        # If a migration imports an app module, this gate will fail loudly
+        # (app shape differs between runs), which is the correct failure mode.
+        #
+        # `rm -rf` before each `git checkout <ref> -- dir` guarantees the
+        # working tree matches the ref exactly — handles additions, deletions,
+        # and squashing uniformly.
         run: |
           mkdir -p /tmp/schema
-          git worktree add /tmp/main-worktree origin/main
-          pushd /tmp/main-worktree >/dev/null
-          mix deps.get
-          scripts/gen-ecto-proto.sh
-          python3 scripts/gen_python_proto.py --language elixir
-          mix ecto.create || true
+          MIG_DIR=apps/core/priv/repo/migrations
+
+          # BEFORE: migrations dir as it is on origin/main
+          rm -rf "${MIG_DIR}"
+          git checkout origin/main -- "${MIG_DIR}"
+          mix ecto.drop || true
+          mix ecto.create
           mix ecto.migrate
           mix ecto.dump --dump-path /tmp/schema/before.sql
-          popd >/dev/null
-          mix ecto.drop || true
-          git worktree remove --force /tmp/main-worktree
 
-      - name: Dump AFTER structure (HEAD)
-        run: |
-          mix ecto.create || true
+          # AFTER: migrations dir as it is on HEAD
+          rm -rf "${MIG_DIR}"
+          git checkout HEAD -- "${MIG_DIR}"
+          mix ecto.drop || true
+          mix ecto.create
           mix ecto.migrate
           mix ecto.dump --dump-path /tmp/schema/after.sql
 
