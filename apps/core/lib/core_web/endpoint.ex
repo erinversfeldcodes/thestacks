@@ -33,9 +33,16 @@ defmodule CoreWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
-  # Prometheus metrics — no auth, restricted to internal network in production
-  # (Fly private networking). PromEx renders metrics at /internal/metrics.
+  # Prometheus metrics — auth-gated by StacksWeb.Plugs.MetricsAuth (Fly 6PN
+  # allowlist + METRICS_SCRAPE_TOKEN bearer). The plug halts with 401 for
+  # unauthorised callers before PromEx.Plug ever sees the request.
+  plug StacksWeb.Plugs.MetricsAuth
   plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
+
+  # Tag every request with a :route_group before the router dispatches so
+  # phoenix.router_dispatch.stop metadata carries the group. Feeds the SLO
+  # gate in Issue #136.
+  plug StacksWeb.Plugs.RouteGroup
 
   plug CoreWeb.Router
 end
