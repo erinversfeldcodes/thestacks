@@ -87,6 +87,7 @@ Audit rows are append-only; the `audit.audit_log` schema already supports this. 
 - Session IP binding works; test that session invalidates on IP change
 - Runbook `docs/runbooks/prod-data-access.md` documents the admin API as the ONLY allowed non-break-glass access path
 - `NEON_API_KEY` scope narrowed to branch-management-only (no SQL access)
+- **Dedicated prober user** — `probe-production.sh` authenticates via a non-owner account (e.g. `prober@thestacks.app`) with no admin privileges and no access to real user data. The owner password must never appear in SLO gate logs. Interim in Issue #136: prober reuses `PROD_OWNER_EMAIL`/`PASSWORD` because the dedicated prober user doesn't exist yet. Phase A creates the prober user via a migration and a seed step; probe-production.sh + deploy-production.yml switch to `STACKS_PROBER_EMAIL` / `STACKS_PROBER_PASSWORD` GH secrets.
 
 ## Phase B — Signed, short-lived credentials for direct SQL (target: within 3 months of Phase A)
 
