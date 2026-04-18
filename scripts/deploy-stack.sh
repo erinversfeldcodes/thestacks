@@ -18,8 +18,10 @@
 #   MODAL_TOKEN_SECRET      — Modal API token secret
 #   VISION_HMAC_SECRET      — Elixir → vision HMAC auth
 #   SECRET_KEY_BASE         — Phoenix secret key base
-#   NEON_PARENT_BRANCH      — Name of parent branch (default: staging —
-#                             preview branches must never clone production)
+#   NEON_PARENT_BRANCH      — Name of parent branch (default: production).
+#                             TODO(Issue #136 follow-up): flip default to
+#                             `staging` once that branch is bootstrapped.
+#                             See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
 #   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
 #   R2_ACCESS_KEY_ID        — R2 access key
@@ -125,10 +127,12 @@ if [[ -n "${NEON_API_KEY:-}" ]]; then
     echo ""
     echo "==> Creating Neon DB branch for preview..."
 
-    # Parent branch for preview creation. Default is `staging` — a
+    # Parent branch for preview creation. Target is `staging` — a
     # migrations-only + fixture-data branch — so previews NEVER clone
-    # production user data. See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
-    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
+    # production user data. Flipping once staging is bootstrapped; default
+    # currently `production` so preview flow keeps working during the
+    # Issue #136 pre-launch window. See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
+    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-production}"
     echo "    Parent branch: ${NEON_PARENT_BRANCH}"
     NEON_PARENT_BRANCH_ID="$(curl -sL \
         -H "Authorization: Bearer ${NEON_API_KEY}" \
@@ -437,17 +441,17 @@ fly secrets set \
 if [[ "$PROD_MODE" -eq 1 ]]; then
     echo ""
     echo "==> Verifying DATABASE_URL is present on ${CORE_APP}..."
-    if ! fly secrets list --app "${CORE_APP}" --json 2>/dev/null \
-            | python3 -c '
-import json, sys
-secrets = json.load(sys.stdin)
-names = {s.get("Name") for s in secrets}
-sys.exit(0 if "DATABASE_URL" in names else 1)
-' ; then
+    # Grep the plain output (JSON parse was brittle — varied by flyctl version
+    # and broke when secrets were staged-but-uncommitted on a fresh app).
+    # `fly secrets list` prints a table with NAME in the first column and
+    # includes staged secrets. Skip the header row; match NAME exactly.
+    if ! fly secrets list --app "${CORE_APP}" 2>/dev/null \
+            | awk 'NR>1 && $1 == "DATABASE_URL" {found=1} END {exit !found}' ; then
         echo "FAIL deploy: DATABASE_URL is not configured on prod app ${CORE_APP}." >&2
-        echo "  Prod mode requires an existing DATABASE_URL secret pointing at" >&2
-        echo "  the prod Neon branch. Set it via:" >&2
-        echo "    fly secrets set DATABASE_URL='postgresql://...' --app ${CORE_APP}" >&2
+        echo "  Prod mode requires DATABASE_URL to be staged before fly deploy." >&2
+        echo "  The 'fly secrets set' above should have staged it from the" >&2
+        echo "  composed env var. If this keeps failing, verify the compose" >&2
+        echo "  step in deploy-production.yml produced a non-empty DATABASE_URL." >&2
         exit 1
     fi
     echo "PASS deploy: DATABASE_URL present on ${CORE_APP}"
