@@ -21,14 +21,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo ""
 echo "==> Vision pipeline warmup against ${CORE_URL}/api/upload..."
 
-smoke_login="$(curl -sf "${CORE_URL}/api/auth/login" \
+smoke_login_code="$(curl -4 -s -o /tmp/warmup-login.json -w "%{http_code}" \
+    "${CORE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null || true)"
+    -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' || true)"
+smoke_login="$(cat /tmp/warmup-login.json 2>/dev/null || true)"
 smoke_token="$(echo "${smoke_login}" | python3 -c \
     "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
 
 if [[ -z "${smoke_token}" ]]; then
-    echo "WARN warmup: skipped — could not authenticate as seed user"
+    echo "FAIL warmup: could not authenticate as seed user (HTTP ${smoke_login_code})"
+    echo "    Response body: ${smoke_login}"
     exit 1
 fi
 
@@ -43,7 +46,7 @@ warmup_ids=()
 for img in "${warmup_images[@]}"; do
     img_name="$(basename "$img")"
     body_file="$(mktemp)"
-    http_code="$(curl -s -o "${body_file}" -w "%{http_code}" \
+    http_code="$(curl -4 -s -o "${body_file}" -w "%{http_code}" \
         -X POST "${CORE_URL}/api/upload" \
         -H "Authorization: Bearer ${smoke_token}" \
         -F "image=@${img}" 2>/dev/null || true)"
@@ -72,7 +75,7 @@ warmup_dir="$(mktemp -d)"
 stream_pids=()
 for img_id in "${warmup_ids[@]}"; do
     (
-        stream_resp="$(curl -sf --max-time 480 \
+        stream_resp="$(curl -4 -sf --max-time 480 \
             "${CORE_URL}/api/upload/${img_id}/stream?token=${smoke_token}" \
             2>/dev/null || true)"
         echo "${stream_resp}" | python3 -c \
