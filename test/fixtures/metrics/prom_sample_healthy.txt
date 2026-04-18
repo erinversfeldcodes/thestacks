@@ -1,0 +1,105 @@
+# Prometheus exposition-format sample — "healthy" shape.
+#
+# Hand-synthesised to mirror what a production core Fly machine would emit
+# at /internal/metrics after ~10 min of modest traffic. Metric names match
+# apps/core/lib/core_web/telemetry.ex series names (translated into
+# Prometheus naming by prom_ex).
+#
+# Key invariants this fixture encodes:
+#   - all route groups report p95 well under their thresholds
+#   - upload terminal counter: 95 resolved, 3 rejected, 2 timeout → 95% success
+#   - no fuse open (state=1 for every fuse = healthy)
+#   - Oban failure rate per queue: <=5%
+#   - Ecto queue_time p95 <= 50ms
+#   - BEAM memory ~120MB (well under 400MB)
+
+# ── Phoenix / router_dispatch ────────────────────────────────────────────────
+# HELP stacks_router_dispatch_stop_duration_milliseconds Phoenix route duration
+# TYPE stacks_router_dispatch_stop_duration_milliseconds histogram
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="250"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="1000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="2000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="100"} 1180
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="250"} 1420
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="1000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="2000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 4
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="100"} 30
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="250"} 60
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 85
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 95
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 42000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="50"} 300
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="250"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="other"} 22000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="other"} 500
+
+# ── HTTP availability (total + 5xx counters) ─────────────────────────────────
+# HELP phoenix_endpoint_stop_total Phoenix request count per status family
+# TYPE phoenix_endpoint_stop_total counter
+phoenix_endpoint_stop_total{status_class="2xx"} 2580
+phoenix_endpoint_stop_total{status_class="3xx"} 10
+phoenix_endpoint_stop_total{status_class="4xx"} 5
+phoenix_endpoint_stop_total{status_class="5xx"} 0
+
+# ── Upload terminal counter ──────────────────────────────────────────────────
+# HELP stacks_upload_terminal_count_total Uploaded image terminal outcome count
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# ── Fuse state gauge ─────────────────────────────────────────────────────────
+# HELP stacks_fuse_state_state Current fuse state (1 healthy, 0 blown)
+# TYPE stacks_fuse_state_state gauge
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# ── Oban per-queue success/failure counters ──────────────────────────────────
+# HELP prom_ex_oban_job_stop_total Oban jobs completed by state
+# TYPE prom_ex_oban_job_stop_total counter
+prom_ex_oban_job_stop_total{queue="default",state="success"} 420
+prom_ex_oban_job_stop_total{queue="default",state="failure"} 5
+prom_ex_oban_job_stop_total{queue="uploads",state="success"} 95
+prom_ex_oban_job_stop_total{queue="uploads",state="failure"} 2
+
+# ── Ecto pool ────────────────────────────────────────────────────────────────
+# HELP core_repo_query_queue_time_milliseconds Ecto queue time
+# TYPE core_repo_query_queue_time_milliseconds histogram
+core_repo_query_queue_time_milliseconds_bucket{le="1"} 2800
+core_repo_query_queue_time_milliseconds_bucket{le="5"} 2950
+core_repo_query_queue_time_milliseconds_bucket{le="10"} 2990
+core_repo_query_queue_time_milliseconds_bucket{le="25"} 2998
+core_repo_query_queue_time_milliseconds_bucket{le="50"} 3000
+core_repo_query_queue_time_milliseconds_bucket{le="100"} 3000
+core_repo_query_queue_time_milliseconds_bucket{le="+Inf"} 3000
+core_repo_query_queue_time_milliseconds_sum 6200
+core_repo_query_queue_time_milliseconds_count 3000
+
+# ── BEAM memory ──────────────────────────────────────────────────────────────
+# HELP beam_memory_total_bytes BEAM memory usage
+# TYPE beam_memory_total_bytes gauge
+beam_memory_total_bytes{type="total"} 125829120

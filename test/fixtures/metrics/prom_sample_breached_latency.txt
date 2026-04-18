@@ -1,0 +1,83 @@
+# Prometheus sample — upload route p95 latency BREACHED (> 2000ms threshold).
+# Otherwise healthy: fuses closed, upload success ≥ 90%, Oban fine.
+#
+# Key change vs prom_sample_healthy.txt: the upload histogram's p95 falls in
+# the (2000, +Inf] bucket. Computed p95 must be > 2000ms.
+
+# ── Phoenix / router_dispatch ────────────────────────────────────────────────
+# TYPE stacks_router_dispatch_stop_duration_milliseconds histogram
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="250"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="100"} 1180
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="250"} 1420
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+# Upload p95 pushed way past 2000ms: only 50/100 samples under 2000ms, so p95
+# falls in (2000, +Inf] bucket (the gate should estimate > 2000ms).
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 2
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="100"} 10
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="250"} 20
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 30
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 40
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 50
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 95
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 280000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="50"} 300
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="other",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="other"} 22000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="other"} 500
+
+# ── HTTP availability ────────────────────────────────────────────────────────
+# TYPE phoenix_endpoint_stop_total counter
+phoenix_endpoint_stop_total{status_class="2xx"} 2580
+phoenix_endpoint_stop_total{status_class="3xx"} 10
+phoenix_endpoint_stop_total{status_class="4xx"} 5
+phoenix_endpoint_stop_total{status_class="5xx"} 0
+
+# ── Upload terminal counter ──────────────────────────────────────────────────
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# ── Fuse state gauge ─────────────────────────────────────────────────────────
+# TYPE stacks_fuse_state_state gauge
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# ── Oban per-queue ───────────────────────────────────────────────────────────
+# TYPE prom_ex_oban_job_stop_total counter
+prom_ex_oban_job_stop_total{queue="default",state="success"} 420
+prom_ex_oban_job_stop_total{queue="default",state="failure"} 5
+prom_ex_oban_job_stop_total{queue="uploads",state="success"} 95
+prom_ex_oban_job_stop_total{queue="uploads",state="failure"} 2
+
+# ── Ecto pool ────────────────────────────────────────────────────────────────
+# TYPE core_repo_query_queue_time_milliseconds histogram
+core_repo_query_queue_time_milliseconds_bucket{le="1"} 2800
+core_repo_query_queue_time_milliseconds_bucket{le="50"} 3000
+core_repo_query_queue_time_milliseconds_bucket{le="+Inf"} 3000
+core_repo_query_queue_time_milliseconds_sum 6200
+core_repo_query_queue_time_milliseconds_count 3000
+
+# ── BEAM memory ──────────────────────────────────────────────────────────────
+# TYPE beam_memory_total_bytes gauge
+beam_memory_total_bytes{type="total"} 125829120
