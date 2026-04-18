@@ -271,21 +271,31 @@ jobs:
       - name: summary — post gate observations to the workflow summary
         if: ${{ always() }}
         run: |
-          {
-            echo "## Deploy observations"
-            echo ""
-            if [[ -f gate-observations.json ]]; then
-              outcome="$(python3 -c 'import json,sys; print(json.load(open("gate-observations.json")).get("outcome", "unknown"))')"
-              echo "- **Outcome:** \`${outcome}\`"
-              echo "- **Commit:** \`${COMMIT_SHA}\`"
-              echo "- **Deploy started:** \`${DEPLOY_STARTED_AT}\`"
+          if [[ ! -f gate-observations.json ]]; then
+            {
+              echo "## Deploy observations"
               echo ""
-              echo "### SLI table"
-              echo ""
-              echo "| SLI | Value | Threshold | Breached |"
-              echo "|-----|-------|-----------|----------|"
-              python3 -c 'import json; [print(f"| {s[\"name\"]} | {s[\"value\"]} | {s[\"threshold\"]} | {(\"yes\" if s[\"breached\"] else \"no\")} |") for s in json.load(open("gate-observations.json")).get("slis", [])]'
-            else
               echo "_gate-observations.json was not produced — see earlier step logs_"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Single Python block — avoids bash/Python quote escape gymnastics
+          # (inline one-liners with \" inside bash single-quotes don't parse
+          # cleanly as Python f-strings). Heredoc passes the script as-is.
+          python3 <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          obs = json.load(open("gate-observations.json"))
+          print("## Deploy observations")
+          print()
+          print(f"- **Outcome:** `{obs.get('outcome', 'unknown')}`")
+          print(f"- **Commit:** `{os.environ.get('COMMIT_SHA', '')}`")
+          print(f"- **Deploy started:** `{os.environ.get('DEPLOY_STARTED_AT', '')}`")
+          print()
+          print("### SLI table")
+          print()
+          print("| SLI | Value | Threshold | Breached |")
+          print("|-----|-------|-----------|----------|")
+          for s in obs.get("slis", []):
+              flag = "yes" if s.get("breached") else "no"
+              print(f"| {s['name']} | {s['value']} | {s['threshold']} | {flag} |")
+          PY
