@@ -72,6 +72,12 @@ jobs:
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       METRICS_SCRAPE_TOKEN: ${{ secrets.METRICS_SCRAPE_TOKEN }}
+      # Prod-only: deploy-stack.sh (prod mode) stages these as Fly secrets
+      # so Stacks.Release.seed_prod/0 can create exactly one owner user.
+      # Idempotent: every deploy calls seed_prod; after the first run the
+      # user already exists and the call no-ops.
+      PROD_OWNER_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
+      PROD_OWNER_PASSWORD: ${{ secrets.PROD_OWNER_PASSWORD }}
       # workflow_dispatch.inputs.target_app overrides the default (prod) app
       # name so an operator can re-use this workflow against a preview app
       # for live validation. Falls back to `thestacks-core` for workflow_run.
