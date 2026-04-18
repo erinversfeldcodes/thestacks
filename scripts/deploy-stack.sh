@@ -440,21 +440,22 @@ fly secrets set \
 # already rolled. Fail fast here with a clear message instead.
 if [[ "$PROD_MODE" -eq 1 ]]; then
     echo ""
-    echo "==> Verifying DATABASE_URL is present on ${CORE_APP}..."
-    # Grep the plain output (JSON parse was brittle — varied by flyctl version
-    # and broke when secrets were staged-but-uncommitted on a fresh app).
-    # `fly secrets list` prints a table with NAME in the first column and
-    # includes staged secrets. Skip the header row; match NAME exactly.
-    if ! fly secrets list --app "${CORE_APP}" 2>/dev/null \
-            | awk 'NR>1 && $1 == "DATABASE_URL" {found=1} END {exit !found}' ; then
-        echo "FAIL deploy: DATABASE_URL is not configured on prod app ${CORE_APP}." >&2
-        echo "  Prod mode requires DATABASE_URL to be staged before fly deploy." >&2
-        echo "  The 'fly secrets set' above should have staged it from the" >&2
-        echo "  composed env var. If this keeps failing, verify the compose" >&2
-        echo "  step in deploy-production.yml produced a non-empty DATABASE_URL." >&2
+    echo "==> Verifying DATABASE_URL was composed for ${CORE_APP}..."
+    # Check the env-var we just fed to `fly secrets set` rather than querying
+    # Fly back — on a never-successfully-deployed app, staged-but-uncommitted
+    # secrets don't always show in `fly secrets list`. If EFFECTIVE_DATABASE_URL
+    # is non-empty here, the Fly stage call above received it; if empty, the
+    # caller (deploy-production.yml Compose step) didn't provide DATABASE_URL
+    # or a Neon preview URI, and boot would fail cryptically at runtime.exs.
+    if [[ -z "${EFFECTIVE_DATABASE_URL:-}" ]]; then
+        echo "FAIL deploy: DATABASE_URL is empty." >&2
+        echo "  Prod mode requires DATABASE_URL from the calling environment." >&2
+        echo "  In CI, verify the 'Compose DATABASE_URL' step in" >&2
+        echo "  .github/workflows/deploy-production.yml ran and produced a" >&2
+        echo "  non-empty value from the STACKS_PROD_DB_* component secrets." >&2
         exit 1
     fi
-    echo "PASS deploy: DATABASE_URL present on ${CORE_APP}"
+    echo "PASS deploy: DATABASE_URL composed (length: ${#EFFECTIVE_DATABASE_URL})"
 fi
 
 # ── Generate proto Elm decoders ───────────────────────────────────────────────
