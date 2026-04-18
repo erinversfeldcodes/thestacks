@@ -286,6 +286,13 @@ echo ""
 echo "==> Creating ephemeral Fly app (if not already exists)..."
 fly apps create "${CORE_APP}" 2>&1 || true  # noop if app already exists
 
+# Allocate a shared IPv4 address. Fly apps on the Machines platform get IPv6-only
+# by default, which means `curl -4` (and GitHub runners, which lack IPv6 connectivity
+# to Fly's anycast AAAA edge) cannot reach the app. `--shared` is SNI-routed and
+# free; `|| true` because re-allocation on an app that already has one is a noop
+# that prints an error.
+fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
+
 # ── Stage core secrets ────────────────────────────────────────────────────────
 fly secrets set \
     SECRET_KEY_BASE="${SECRET_KEY_BASE:-}" \
