@@ -1,0 +1,10 @@
+-- Fixture: `structure.sql` AFTER dropping `cover_image_url`.
+-- Diff vs before_drop.dump has a removed column — the gate must flag it.
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    isbn text NOT NULL,
+    title text NOT NULL,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);

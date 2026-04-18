@@ -1,0 +1,10 @@
+-- Fixture: `structure.sql` BEFORE renaming `cover_image_url` → `cover_url`.
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    isbn text NOT NULL,
+    title text NOT NULL,
+    cover_image_url text,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);

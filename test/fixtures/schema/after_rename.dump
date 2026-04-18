@@ -1,0 +1,12 @@
+-- Fixture: `structure.sql` AFTER renaming `cover_image_url` → `cover_url`.
+-- Diff vs before_rename.dump: the old name is gone, a new name appears —
+-- indistinguishable from drop+add at the column level, so the gate must flag.
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    isbn text NOT NULL,
+    title text NOT NULL,
+    cover_url text,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);

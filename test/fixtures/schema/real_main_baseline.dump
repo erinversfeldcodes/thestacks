@@ -1,0 +1,2259 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict ifjyNk1gZtFx5fqqO1heBNsA2lUdcMMapHiz5COJQ2qasRVYtpu5gYl4uWqH4dY
+
+-- Dumped from database version 15.17 (Homebrew)
+-- Dumped by pg_dump version 16.13
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: audit; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA audit;
+
+
+--
+-- Name: op; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA op;
+
+
+--
+-- Name: wh; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA wh;
+
+
+--
+-- Name: association_source; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.association_source AS ENUM (
+    'llm',
+    'manual'
+);
+
+
+--
+-- Name: book_condition; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.book_condition AS ENUM (
+    'new',
+    'like_new',
+    'good',
+    'fair',
+    'poor'
+);
+
+
+--
+-- Name: bookshelf_name; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.bookshelf_name AS ENUM (
+    'antilibrary',
+    'library',
+    'wishlist',
+    'reading_pile',
+    'looking_for_home'
+);
+
+
+--
+-- Name: group_member_role; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.group_member_role AS ENUM (
+    'member',
+    'moderator'
+);
+
+
+--
+-- Name: group_type; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.group_type AS ENUM (
+    'close_friends',
+    'broadcast',
+    'subscription'
+);
+
+
+--
+-- Name: group_visibility; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.group_visibility AS ENUM (
+    'invite_only',
+    'platform'
+);
+
+
+--
+-- Name: health_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.health_status AS ENUM (
+    'healthy',
+    'degraded',
+    'broken'
+);
+
+
+--
+-- Name: image_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.image_status AS ENUM (
+    'pending',
+    'resolved',
+    'rejected'
+);
+
+
+--
+-- Name: invitation_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.invitation_status AS ENUM (
+    'pending',
+    'accepted',
+    'declined'
+);
+
+
+--
+-- Name: listing_mode; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.listing_mode AS ENUM (
+    'open_bid',
+    'closed_bid'
+);
+
+
+--
+-- Name: listing_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.listing_status AS ENUM (
+    'draft',
+    'active',
+    'sold',
+    'removed',
+    'expired'
+);
+
+
+--
+-- Name: monitored_source_type; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.monitored_source_type AS ENUM (
+    'scraper_config',
+    'review_source',
+    'rss_feed',
+    'event_source',
+    'llm_output'
+);
+
+
+--
+-- Name: offer_message_type; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.offer_message_type AS ENUM (
+    'message',
+    'offer',
+    'counter',
+    'accept',
+    'decline'
+);
+
+
+--
+-- Name: offer_thread_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.offer_thread_status AS ENUM (
+    'open',
+    'accepted',
+    'declined',
+    'expired'
+);
+
+
+--
+-- Name: payment_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.payment_status AS ENUM (
+    'pending',
+    'paid',
+    'failed',
+    'refunded'
+);
+
+
+--
+-- Name: post_visibility; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.post_visibility AS ENUM (
+    'owner',
+    'group',
+    'platform'
+);
+
+
+--
+-- Name: pricing_mode; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.pricing_mode AS ENUM (
+    'fixed',
+    'offer'
+);
+
+
+--
+-- Name: review_source; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.review_source AS ENUM (
+    'goodreads',
+    'reddit',
+    'storygraph',
+    'other'
+);
+
+
+--
+-- Name: shipping_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.shipping_status AS ENUM (
+    'pending',
+    'shipped',
+    'delivered',
+    'returned'
+);
+
+
+--
+-- Name: source_status; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.source_status AS ENUM (
+    'pending_review',
+    'approved',
+    'dismissed',
+    'excluded'
+);
+
+
+--
+-- Name: source_type; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.source_type AS ENUM (
+    'bookshop',
+    'review_site',
+    'community',
+    'event_source'
+);
+
+
+--
+-- Name: space_type; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.space_type AS ENUM (
+    'reading_group',
+    'cafe',
+    'bookshop',
+    'festival',
+    'market'
+);
+
+
+--
+-- Name: user_role; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.user_role AS ENUM (
+    'owner',
+    'user'
+);
+
+
+--
+-- Name: visibility_level; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.visibility_level AS ENUM (
+    'owner',
+    'group',
+    'platform'
+);
+
+
+--
+-- Name: visibility_tier; Type: TYPE; Schema: op; Owner: -
+--
+
+CREATE TYPE op.visibility_tier AS ENUM (
+    'public',
+    'age_gated'
+);
+
+
+--
+-- Name: oban_job_state; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.oban_job_state AS ENUM (
+    'available',
+    'scheduled',
+    'executing',
+    'retryable',
+    'completed',
+    'discarded',
+    'cancelled'
+);
+
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: audit_log; Type: TABLE; Schema: audit; Owner: -
+--
+
+CREATE TABLE audit.audit_log (
+    id uuid NOT NULL,
+    user_id uuid,
+    action text NOT NULL,
+    resource_type text NOT NULL,
+    resource_id uuid,
+    metadata bytea,
+    ip_address text,
+    occurred_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: authors; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.authors (
+    id uuid NOT NULL,
+    name text NOT NULL,
+    website_url text,
+    rss_feed_url text,
+    open_library_id text,
+    bio text,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: blog_posts; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.blog_posts (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    title text NOT NULL,
+    body text NOT NULL,
+    visibility text DEFAULT 'owner'::text NOT NULL,
+    visibility_group_id uuid,
+    published_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: book_editions; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.book_editions (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    isbn text NOT NULL,
+    format_label text,
+    cover_image_url text,
+    page_count integer,
+    publisher text,
+    publication_year integer,
+    open_library_id text,
+    google_books_id text,
+    is_primary boolean DEFAULT false,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: books; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    title text NOT NULL,
+    author_id uuid,
+    description text,
+    language text,
+    subjects text[],
+    bisac_codes text[],
+    visibility_tier op.visibility_tier DEFAULT 'public'::op.visibility_tier NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    title_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, COALESCE(title, ''::text))) STORED
+);
+
+
+--
+-- Name: bookshelf_placement_history; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.bookshelf_placement_history (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    from_bookshelf uuid,
+    to_bookshelf uuid,
+    moved_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: bookshelf_placements; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.bookshelf_placements (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    bookshelf_id uuid NOT NULL,
+    "position" integer,
+    placed_at timestamp without time zone,
+    removed_at timestamp without time zone,
+    formats text[],
+    personal_rating integer,
+    notes text,
+    visibility op.visibility_level DEFAULT 'owner'::op.visibility_level NOT NULL,
+    listing_mode op.listing_mode,
+    listing_status op.listing_status,
+    listing_price_cents integer,
+    listing_min_price_cents integer,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    reading_status text DEFAULT 'to_read'::text NOT NULL,
+    current_page integer,
+    started_at timestamp without time zone,
+    finished_at timestamp without time zone,
+    shelf_id uuid NOT NULL,
+    CONSTRAINT current_page_non_negative CHECK ((current_page >= 0)),
+    CONSTRAINT reading_status_valid CHECK ((reading_status = ANY (ARRAY['to_read'::text, 'reading'::text, 'completed'::text, 'abandoned'::text])))
+);
+
+ALTER TABLE ONLY op.bookshelf_placements FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: bookshelves; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.bookshelves (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    name op.bookshelf_name NOT NULL,
+    visibility op.visibility_level DEFAULT 'owner'::op.visibility_level NOT NULL,
+    visibility_group_id uuid,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+ALTER TABLE ONLY op.bookshelves FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: bookstore_events; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.bookstore_events (
+    id uuid NOT NULL,
+    store_id uuid NOT NULL,
+    author_id uuid,
+    title text NOT NULL,
+    description text,
+    event_date timestamp without time zone,
+    location text,
+    url text,
+    scraped_at timestamp without time zone
+);
+
+
+--
+-- Name: bookstores; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.bookstores (
+    id uuid NOT NULL,
+    name text NOT NULL,
+    website_url text,
+    search_template text,
+    has_physical boolean DEFAULT false,
+    country_code text DEFAULT 'ZA'::text,
+    scraper_module text,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: discovered_sources; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.discovered_sources (
+    id uuid NOT NULL,
+    name text NOT NULL,
+    type op.source_type NOT NULL,
+    url text NOT NULL,
+    confidence double precision,
+    discovered_via text,
+    discovered_at timestamp without time zone NOT NULL,
+    status op.source_status NOT NULL,
+    approved_at timestamp without time zone,
+    config_generated jsonb,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    excluded_at timestamp without time zone,
+    exclusion_email text
+);
+
+
+--
+-- Name: event_log; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.event_log (
+    id uuid NOT NULL,
+    event_type text NOT NULL,
+    aggregate_type text NOT NULL,
+    aggregate_id uuid NOT NULL,
+    schema_version integer DEFAULT 1 NOT NULL,
+    payload jsonb NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    occurred_at timestamp without time zone DEFAULT now() NOT NULL,
+    published_at timestamp without time zone
+);
+
+
+--
+-- Name: group_invitations; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.group_invitations (
+    id uuid NOT NULL,
+    group_id uuid NOT NULL,
+    invited_by_id uuid NOT NULL,
+    invited_user_id uuid NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    responded_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: group_members; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.group_members (
+    id uuid NOT NULL,
+    group_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    role text DEFAULT 'member'::text NOT NULL,
+    joined_at timestamp without time zone DEFAULT now() NOT NULL,
+    created_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: groups; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.groups (
+    id uuid NOT NULL,
+    owner_id uuid NOT NULL,
+    name text NOT NULL,
+    type text NOT NULL,
+    visibility text DEFAULT 'invite_only'::text NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: listings; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.listings (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    seller_id uuid NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    pricing_mode text NOT NULL,
+    price_cents integer NOT NULL,
+    currency text DEFAULT 'ZAR'::text NOT NULL,
+    condition text NOT NULL,
+    description text,
+    photo_urls text[] DEFAULT ARRAY[]::text[] NOT NULL,
+    listed_at timestamp without time zone,
+    expires_at timestamp without time zone,
+    sold_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    contact_info text
+);
+
+
+--
+-- Name: offer_messages; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.offer_messages (
+    id uuid NOT NULL,
+    thread_id uuid NOT NULL,
+    sender_id uuid NOT NULL,
+    type text NOT NULL,
+    body text,
+    amount_cents integer,
+    created_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: offer_threads; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.offer_threads (
+    id uuid NOT NULL,
+    placement_id uuid NOT NULL,
+    buyer_id uuid NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: partner_inventory; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.partner_inventory (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    partner_id uuid NOT NULL,
+    book_edition_id uuid NOT NULL,
+    price_cents integer NOT NULL,
+    condition text NOT NULL,
+    quantity integer DEFAULT 1 NOT NULL,
+    synced_at timestamp without time zone DEFAULT now() NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    CONSTRAINT price_cents_positive CHECK ((price_cents > 0))
+);
+
+
+--
+-- Name: partners; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.partners (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    business_type text NOT NULL,
+    contact_email text NOT NULL,
+    website_url text,
+    status text DEFAULT 'pending'::text NOT NULL,
+    hmac_secret text,
+    api_key_prefix text,
+    approved_by_id uuid,
+    approved_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    third_space_id uuid
+);
+
+
+--
+-- Name: platform_costs; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.platform_costs (
+    id uuid NOT NULL,
+    category character varying(255) NOT NULL,
+    service character varying(255) NOT NULL,
+    description text,
+    amount_cents integer NOT NULL,
+    currency character varying(255) DEFAULT 'USD'::character varying NOT NULL,
+    period_start timestamp without time zone NOT NULL,
+    period_end timestamp without time zone NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: post_book_associations; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.post_book_associations (
+    id uuid NOT NULL,
+    post_id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    confidence double precision NOT NULL,
+    reasoning text,
+    source text DEFAULT 'llm'::text NOT NULL,
+    visible boolean DEFAULT true NOT NULL,
+    created_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: post_comments; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.post_comments (
+    id uuid NOT NULL,
+    post_id uuid NOT NULL,
+    author_id uuid,
+    parent_id uuid,
+    body text,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+--
+-- Name: price_snapshots; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.price_snapshots (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    store_id uuid NOT NULL,
+    price_cents integer NOT NULL,
+    currency text DEFAULT 'ZAR'::text,
+    in_stock boolean,
+    url text,
+    scraped_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: review_snapshots; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.review_snapshots (
+    id uuid NOT NULL,
+    book_id uuid NOT NULL,
+    source op.review_source NOT NULL,
+    source_url text NOT NULL,
+    sentiment_score double precision,
+    summary text,
+    rating double precision,
+    rating_count integer,
+    scraped_at timestamp without time zone NOT NULL,
+    stale_after timestamp without time zone
+);
+
+
+--
+-- Name: shelves; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.shelves (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    bookshelf_id uuid NOT NULL,
+    "position" integer DEFAULT 0 NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: source_health_checks; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.source_health_checks (
+    id uuid NOT NULL,
+    source_name text NOT NULL,
+    source_type text NOT NULL,
+    last_success_at timestamp without time zone,
+    last_failure_at timestamp without time zone,
+    last_failure_reason text,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    total_successes integer DEFAULT 0 NOT NULL,
+    total_failures integer DEFAULT 0 NOT NULL,
+    status text DEFAULT 'healthy'::text NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: third_space_events; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.third_space_events (
+    id uuid NOT NULL,
+    space_id uuid NOT NULL,
+    title text NOT NULL,
+    description text,
+    event_date timestamp without time zone,
+    recurrence text,
+    related_authors text[],
+    source_url text,
+    scraped_at timestamp without time zone,
+    ends_at timestamp without time zone
+);
+
+
+--
+-- Name: third_spaces; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.third_spaces (
+    id uuid NOT NULL,
+    name text NOT NULL,
+    type op.space_type NOT NULL,
+    city text,
+    country_code text DEFAULT 'ZA'::text,
+    instagram_url text,
+    website_url text,
+    description text,
+    discovered_via text,
+    verified boolean DEFAULT false,
+    last_active_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    opted_out boolean DEFAULT false NOT NULL,
+    opted_out_at timestamp without time zone
+);
+
+
+--
+-- Name: transactions; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.transactions (
+    id uuid NOT NULL,
+    listing_id uuid NOT NULL,
+    offer_id uuid,
+    buyer_id uuid,
+    seller_id uuid,
+    amount_cents integer NOT NULL,
+    currency text DEFAULT 'ZAR'::text NOT NULL,
+    payment_provider_ref text,
+    payment_status text DEFAULT 'pending'::text NOT NULL,
+    shipping_provider_ref text,
+    shipping_status text,
+    shipping_cost_cents integer,
+    completed_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: uploaded_images; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.uploaded_images (
+    id uuid NOT NULL,
+    book_id uuid,
+    storage_path text,
+    status op.image_status NOT NULL,
+    rejection_reason text,
+    uploaded_at timestamp without time zone NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    book_ids uuid[] DEFAULT ARRAY[]::uuid[],
+    book_edition_id uuid,
+    user_id uuid
+);
+
+
+--
+-- Name: user_blocks; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.user_blocks (
+    id uuid NOT NULL,
+    blocker_id uuid NOT NULL,
+    blocked_id uuid NOT NULL,
+    created_at timestamp without time zone NOT NULL
+);
+
+ALTER TABLE ONLY op.user_blocks FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: users; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.users (
+    id uuid NOT NULL,
+    email text NOT NULL,
+    password_hash text NOT NULL,
+    display_name text,
+    role op.user_role DEFAULT 'user'::op.user_role NOT NULL,
+    profile_visibility op.visibility_level DEFAULT 'owner'::op.visibility_level NOT NULL,
+    website_url text,
+    age_verified boolean DEFAULT false,
+    age_verified_at timestamp without time zone,
+    age_verification_provider text,
+    country_code text DEFAULT 'ZA'::text,
+    city text,
+    consent_analytics boolean DEFAULT false,
+    consent_analytics_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    notify_wishlist_availability boolean DEFAULT false NOT NULL,
+    notify_marketplace boolean DEFAULT true NOT NULL,
+    notify_group_invitations boolean DEFAULT true NOT NULL,
+    notify_event_matches boolean DEFAULT false NOT NULL,
+    email_confirmed boolean DEFAULT false NOT NULL,
+    email_confirmation_token text,
+    password_reset_token text,
+    password_reset_sent_at timestamp with time zone,
+    onboarding_steps jsonb DEFAULT '{}'::jsonb NOT NULL,
+    onboarding_completed boolean GENERATED ALWAYS AS (((((onboarding_steps ->> 'profile'::text))::boolean IS TRUE) AND (((onboarding_steps ->> 'age_verification'::text))::boolean IS TRUE) AND (((onboarding_steps ->> 'privacy'::text))::boolean IS TRUE))) STORED
+);
+
+
+--
+-- Name: visibility_grants; Type: TABLE; Schema: op; Owner: -
+--
+
+CREATE TABLE op.visibility_grants (
+    id uuid NOT NULL,
+    resource_type text NOT NULL,
+    resource_id uuid NOT NULL,
+    granted_to_id uuid NOT NULL,
+    granted_by_id uuid NOT NULL,
+    created_at timestamp without time zone NOT NULL
+);
+
+ALTER TABLE ONLY op.visibility_grants FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: oban_jobs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oban_jobs (
+    id bigint NOT NULL,
+    state public.oban_job_state DEFAULT 'available'::public.oban_job_state NOT NULL,
+    queue text DEFAULT 'default'::text NOT NULL,
+    worker text NOT NULL,
+    args jsonb DEFAULT '{}'::jsonb NOT NULL,
+    errors jsonb[] DEFAULT ARRAY[]::jsonb[] NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 20 NOT NULL,
+    inserted_at timestamp without time zone DEFAULT timezone('UTC'::text, now()) NOT NULL,
+    scheduled_at timestamp without time zone DEFAULT timezone('UTC'::text, now()) NOT NULL,
+    attempted_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    attempted_by text[],
+    discarded_at timestamp without time zone,
+    priority integer DEFAULT 0 NOT NULL,
+    tags text[] DEFAULT ARRAY[]::text[],
+    meta jsonb DEFAULT '{}'::jsonb,
+    cancelled_at timestamp without time zone,
+    CONSTRAINT attempt_range CHECK (((attempt >= 0) AND (attempt <= max_attempts))),
+    CONSTRAINT positive_max_attempts CHECK ((max_attempts > 0)),
+    CONSTRAINT queue_length CHECK (((char_length(queue) > 0) AND (char_length(queue) < 128))),
+    CONSTRAINT worker_length CHECK (((char_length(worker) > 0) AND (char_length(worker) < 128)))
+);
+
+
+--
+-- Name: TABLE oban_jobs; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.oban_jobs IS '12';
+
+
+--
+-- Name: oban_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.oban_jobs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: oban_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.oban_jobs_id_seq OWNED BY public.oban_jobs.id;
+
+
+--
+-- Name: oban_peers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE UNLOGGED TABLE public.oban_peers (
+    name text NOT NULL,
+    node text NOT NULL,
+    started_at timestamp without time zone NOT NULL,
+    expires_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.schema_migrations (
+    version bigint NOT NULL,
+    inserted_at timestamp(0) without time zone
+);
+
+
+--
+-- Name: oban_jobs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oban_jobs ALTER COLUMN id SET DEFAULT nextval('public.oban_jobs_id_seq'::regclass);
+
+
+--
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: audit; Owner: -
+--
+
+ALTER TABLE ONLY audit.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: authors authors_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.authors
+    ADD CONSTRAINT authors_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_posts blog_posts_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.blog_posts
+    ADD CONSTRAINT blog_posts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: book_editions book_editions_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.book_editions
+    ADD CONSTRAINT book_editions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: books books_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.books
+    ADD CONSTRAINT books_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bookshelf_placement_history bookshelf_placement_history_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placement_history
+    ADD CONSTRAINT bookshelf_placement_history_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bookshelf_placements bookshelf_placements_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placements
+    ADD CONSTRAINT bookshelf_placements_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bookshelves bookshelves_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelves
+    ADD CONSTRAINT bookshelves_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bookstore_events bookstore_events_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookstore_events
+    ADD CONSTRAINT bookstore_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bookstores bookstores_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookstores
+    ADD CONSTRAINT bookstores_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: discovered_sources discovered_sources_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.discovered_sources
+    ADD CONSTRAINT discovered_sources_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: event_log event_log_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.event_log
+    ADD CONSTRAINT event_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: group_invitations group_invitations_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_invitations
+    ADD CONSTRAINT group_invitations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: group_members group_members_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_members
+    ADD CONSTRAINT group_members_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: groups groups_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.groups
+    ADD CONSTRAINT groups_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: listings listings_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.listings
+    ADD CONSTRAINT listings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_messages offer_messages_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_messages
+    ADD CONSTRAINT offer_messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: offer_threads offer_threads_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_threads
+    ADD CONSTRAINT offer_threads_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: partner_inventory partner_inventory_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partner_inventory
+    ADD CONSTRAINT partner_inventory_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: partners partners_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partners
+    ADD CONSTRAINT partners_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: platform_costs platform_costs_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.platform_costs
+    ADD CONSTRAINT platform_costs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: post_book_associations post_book_associations_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_book_associations
+    ADD CONSTRAINT post_book_associations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: post_comments post_comments_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_comments
+    ADD CONSTRAINT post_comments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_snapshots price_snapshots_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.price_snapshots
+    ADD CONSTRAINT price_snapshots_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: review_snapshots review_snapshots_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.review_snapshots
+    ADD CONSTRAINT review_snapshots_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: shelves shelves_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.shelves
+    ADD CONSTRAINT shelves_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: source_health_checks source_health_checks_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.source_health_checks
+    ADD CONSTRAINT source_health_checks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: third_space_events third_space_events_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.third_space_events
+    ADD CONSTRAINT third_space_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: third_spaces third_spaces_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.third_spaces
+    ADD CONSTRAINT third_spaces_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: transactions transactions_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.transactions
+    ADD CONSTRAINT transactions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: uploaded_images uploaded_images_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.uploaded_images
+    ADD CONSTRAINT uploaded_images_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_blocks user_blocks_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.user_blocks
+    ADD CONSTRAINT user_blocks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: visibility_grants visibility_grants_pkey; Type: CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.visibility_grants
+    ADD CONSTRAINT visibility_grants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oban_jobs non_negative_priority; Type: CHECK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE public.oban_jobs
+    ADD CONSTRAINT non_negative_priority CHECK ((priority >= 0)) NOT VALID;
+
+
+--
+-- Name: oban_jobs oban_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oban_jobs
+    ADD CONSTRAINT oban_jobs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oban_peers oban_peers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oban_peers
+    ADD CONSTRAINT oban_peers_pkey PRIMARY KEY (name);
+
+
+--
+-- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_migrations
+    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: blog_posts_user_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX blog_posts_user_id_index ON op.blog_posts USING btree (user_id);
+
+
+--
+-- Name: book_editions_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX book_editions_book_id_index ON op.book_editions USING btree (book_id);
+
+
+--
+-- Name: book_editions_isbn_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX book_editions_isbn_index ON op.book_editions USING btree (isbn);
+
+
+--
+-- Name: book_editions_one_primary_per_book; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX book_editions_one_primary_per_book ON op.book_editions USING btree (book_id) WHERE (is_primary = true);
+
+
+--
+-- Name: books_author_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX books_author_id_index ON op.books USING btree (author_id);
+
+
+--
+-- Name: bookshelf_placement_history_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookshelf_placement_history_book_id_index ON op.bookshelf_placement_history USING btree (book_id);
+
+
+--
+-- Name: bookshelf_placement_history_from_bookshelf_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookshelf_placement_history_from_bookshelf_index ON op.bookshelf_placement_history USING btree (from_bookshelf);
+
+
+--
+-- Name: bookshelf_placement_history_to_bookshelf_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookshelf_placement_history_to_bookshelf_index ON op.bookshelf_placement_history USING btree (to_bookshelf);
+
+
+--
+-- Name: bookshelf_placements_book_active_idx; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX bookshelf_placements_book_active_idx ON op.bookshelf_placements USING btree (book_id, bookshelf_id) WHERE (removed_at IS NULL);
+
+
+--
+-- Name: bookshelf_placements_bookshelf_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookshelf_placements_bookshelf_id_index ON op.bookshelf_placements USING btree (bookshelf_id);
+
+
+--
+-- Name: bookshelves_user_id_name_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX bookshelves_user_id_name_index ON op.bookshelves USING btree (user_id, name);
+
+
+--
+-- Name: bookstore_events_author_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookstore_events_author_id_index ON op.bookstore_events USING btree (author_id);
+
+
+--
+-- Name: bookstore_events_store_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX bookstore_events_store_id_index ON op.bookstore_events USING btree (store_id);
+
+
+--
+-- Name: bookstore_events_store_id_title_event_date_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX bookstore_events_store_id_title_event_date_index ON op.bookstore_events USING btree (store_id, title, event_date);
+
+
+--
+-- Name: discovered_sources_url_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX discovered_sources_url_index ON op.discovered_sources USING btree (url);
+
+
+--
+-- Name: group_invitations_group_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX group_invitations_group_id_index ON op.group_invitations USING btree (group_id);
+
+
+--
+-- Name: group_members_group_id_user_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX group_members_group_id_user_id_index ON op.group_members USING btree (group_id, user_id);
+
+
+--
+-- Name: groups_owner_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX groups_owner_id_index ON op.groups USING btree (owner_id);
+
+
+--
+-- Name: idx_books_title_tsv; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX idx_books_title_tsv ON op.books USING gin (title_tsv);
+
+
+--
+-- Name: idx_event_log_type_agg; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX idx_event_log_type_agg ON op.event_log USING btree (event_type, aggregate_id, occurred_at DESC);
+
+
+--
+-- Name: listings_active_book_seller_idx; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX listings_active_book_seller_idx ON op.listings USING btree (book_id, seller_id) WHERE (status = ANY (ARRAY['draft'::text, 'active'::text]));
+
+
+--
+-- Name: listings_active_expires_at_idx; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX listings_active_expires_at_idx ON op.listings USING btree (status, expires_at) WHERE (status = 'active'::text);
+
+
+--
+-- Name: listings_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX listings_book_id_index ON op.listings USING btree (book_id);
+
+
+--
+-- Name: listings_seller_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX listings_seller_id_index ON op.listings USING btree (seller_id);
+
+
+--
+-- Name: offer_messages_thread_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX offer_messages_thread_id_index ON op.offer_messages USING btree (thread_id);
+
+
+--
+-- Name: offer_threads_placement_id_buyer_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX offer_threads_placement_id_buyer_id_index ON op.offer_threads USING btree (placement_id, buyer_id);
+
+
+--
+-- Name: one_owner_per_platform; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX one_owner_per_platform ON op.users USING btree ((true)) WHERE (role = 'owner'::op.user_role);
+
+
+--
+-- Name: partner_inventory_book_edition_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX partner_inventory_book_edition_id_index ON op.partner_inventory USING btree (book_edition_id);
+
+
+--
+-- Name: partner_inventory_partner_edition_uniq; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX partner_inventory_partner_edition_uniq ON op.partner_inventory USING btree (partner_id, book_edition_id);
+
+
+--
+-- Name: partners_approved_by_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX partners_approved_by_id_index ON op.partners USING btree (approved_by_id);
+
+
+--
+-- Name: partners_contact_email_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX partners_contact_email_index ON op.partners USING btree (contact_email);
+
+
+--
+-- Name: partners_status_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX partners_status_index ON op.partners USING btree (status);
+
+
+--
+-- Name: partners_third_space_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX partners_third_space_id_index ON op.partners USING btree (third_space_id);
+
+
+--
+-- Name: platform_costs_category_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX platform_costs_category_index ON op.platform_costs USING btree (category);
+
+
+--
+-- Name: platform_costs_period_start_period_end_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX platform_costs_period_start_period_end_index ON op.platform_costs USING btree (period_start, period_end);
+
+
+--
+-- Name: platform_costs_service_period_start_period_end_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX platform_costs_service_period_start_period_end_index ON op.platform_costs USING btree (service, period_start, period_end);
+
+
+--
+-- Name: post_book_associations_post_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX post_book_associations_post_id_index ON op.post_book_associations USING btree (post_id);
+
+
+--
+-- Name: post_comments_author_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX post_comments_author_id_index ON op.post_comments USING btree (author_id);
+
+
+--
+-- Name: post_comments_post_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX post_comments_post_id_index ON op.post_comments USING btree (post_id);
+
+
+--
+-- Name: price_snapshots_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX price_snapshots_book_id_index ON op.price_snapshots USING btree (book_id);
+
+
+--
+-- Name: price_snapshots_book_id_store_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX price_snapshots_book_id_store_id_index ON op.price_snapshots USING btree (book_id, store_id);
+
+
+--
+-- Name: price_snapshots_store_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX price_snapshots_store_id_index ON op.price_snapshots USING btree (store_id);
+
+
+--
+-- Name: review_snapshots_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX review_snapshots_book_id_index ON op.review_snapshots USING btree (book_id);
+
+
+--
+-- Name: review_snapshots_book_id_source_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX review_snapshots_book_id_source_index ON op.review_snapshots USING btree (book_id, source);
+
+
+--
+-- Name: shelves_bookshelf_id_position_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX shelves_bookshelf_id_position_index ON op.shelves USING btree (bookshelf_id, "position");
+
+
+--
+-- Name: source_health_checks_source_name_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX source_health_checks_source_name_index ON op.source_health_checks USING btree (source_name);
+
+
+--
+-- Name: third_space_events_space_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX third_space_events_space_id_index ON op.third_space_events USING btree (space_id);
+
+
+--
+-- Name: third_space_events_space_id_title_event_date_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX third_space_events_space_id_title_event_date_index ON op.third_space_events USING btree (space_id, title, event_date);
+
+
+--
+-- Name: transactions_listing_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX transactions_listing_id_index ON op.transactions USING btree (listing_id);
+
+
+--
+-- Name: uploaded_images_book_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE INDEX uploaded_images_book_id_index ON op.uploaded_images USING btree (book_id);
+
+
+--
+-- Name: user_blocks_blocker_id_blocked_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX user_blocks_blocker_id_blocked_id_index ON op.user_blocks USING btree (blocker_id, blocked_id);
+
+
+--
+-- Name: users_email_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX users_email_index ON op.users USING btree (email);
+
+
+--
+-- Name: visibility_grants_resource_type_resource_id_granted_to_id_index; Type: INDEX; Schema: op; Owner: -
+--
+
+CREATE UNIQUE INDEX visibility_grants_resource_type_resource_id_granted_to_id_index ON op.visibility_grants USING btree (resource_type, resource_id, granted_to_id);
+
+
+--
+-- Name: oban_jobs_args_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oban_jobs_args_index ON public.oban_jobs USING gin (args);
+
+
+--
+-- Name: oban_jobs_meta_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oban_jobs_meta_index ON public.oban_jobs USING gin (meta);
+
+
+--
+-- Name: oban_jobs_state_queue_priority_scheduled_at_id_index; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oban_jobs_state_queue_priority_scheduled_at_id_index ON public.oban_jobs USING btree (state, queue, priority, scheduled_at, id);
+
+
+--
+-- Name: blog_posts blog_posts_user_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.blog_posts
+    ADD CONSTRAINT blog_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: blog_posts blog_posts_visibility_group_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.blog_posts
+    ADD CONSTRAINT blog_posts_visibility_group_id_fkey FOREIGN KEY (visibility_group_id) REFERENCES op.groups(id) ON DELETE SET NULL;
+
+
+--
+-- Name: book_editions book_editions_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.book_editions
+    ADD CONSTRAINT book_editions_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id) ON DELETE CASCADE;
+
+
+--
+-- Name: books books_author_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.books
+    ADD CONSTRAINT books_author_id_fkey FOREIGN KEY (author_id) REFERENCES op.authors(id);
+
+
+--
+-- Name: bookshelf_placement_history bookshelf_placement_history_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placement_history
+    ADD CONSTRAINT bookshelf_placement_history_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id);
+
+
+--
+-- Name: bookshelf_placement_history bookshelf_placement_history_from_bookshelf_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placement_history
+    ADD CONSTRAINT bookshelf_placement_history_from_bookshelf_fkey FOREIGN KEY (from_bookshelf) REFERENCES op.bookshelves(id);
+
+
+--
+-- Name: bookshelf_placement_history bookshelf_placement_history_to_bookshelf_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placement_history
+    ADD CONSTRAINT bookshelf_placement_history_to_bookshelf_fkey FOREIGN KEY (to_bookshelf) REFERENCES op.bookshelves(id);
+
+
+--
+-- Name: bookshelf_placements bookshelf_placements_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placements
+    ADD CONSTRAINT bookshelf_placements_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id);
+
+
+--
+-- Name: bookshelf_placements bookshelf_placements_bookshelf_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placements
+    ADD CONSTRAINT bookshelf_placements_bookshelf_id_fkey FOREIGN KEY (bookshelf_id) REFERENCES op.bookshelves(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bookshelf_placements bookshelf_placements_shelf_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelf_placements
+    ADD CONSTRAINT bookshelf_placements_shelf_id_fkey FOREIGN KEY (shelf_id) REFERENCES op.shelves(id) ON DELETE SET NULL;
+
+
+--
+-- Name: bookshelves bookshelves_user_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookshelves
+    ADD CONSTRAINT bookshelves_user_id_fkey FOREIGN KEY (user_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bookstore_events bookstore_events_author_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookstore_events
+    ADD CONSTRAINT bookstore_events_author_id_fkey FOREIGN KEY (author_id) REFERENCES op.authors(id);
+
+
+--
+-- Name: bookstore_events bookstore_events_store_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.bookstore_events
+    ADD CONSTRAINT bookstore_events_store_id_fkey FOREIGN KEY (store_id) REFERENCES op.bookstores(id);
+
+
+--
+-- Name: group_invitations group_invitations_group_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_invitations
+    ADD CONSTRAINT group_invitations_group_id_fkey FOREIGN KEY (group_id) REFERENCES op.groups(id) ON DELETE CASCADE;
+
+
+--
+-- Name: group_invitations group_invitations_invited_by_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_invitations
+    ADD CONSTRAINT group_invitations_invited_by_id_fkey FOREIGN KEY (invited_by_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: group_invitations group_invitations_invited_user_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_invitations
+    ADD CONSTRAINT group_invitations_invited_user_id_fkey FOREIGN KEY (invited_user_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: group_members group_members_group_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_members
+    ADD CONSTRAINT group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES op.groups(id) ON DELETE CASCADE;
+
+
+--
+-- Name: group_members group_members_user_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.group_members
+    ADD CONSTRAINT group_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: groups groups_owner_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.groups
+    ADD CONSTRAINT groups_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: listings listings_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.listings
+    ADD CONSTRAINT listings_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id) ON DELETE CASCADE;
+
+
+--
+-- Name: listings listings_seller_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.listings
+    ADD CONSTRAINT listings_seller_id_fkey FOREIGN KEY (seller_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: offer_messages offer_messages_sender_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_messages
+    ADD CONSTRAINT offer_messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: offer_messages offer_messages_thread_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_messages
+    ADD CONSTRAINT offer_messages_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES op.offer_threads(id) ON DELETE CASCADE;
+
+
+--
+-- Name: offer_threads offer_threads_buyer_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_threads
+    ADD CONSTRAINT offer_threads_buyer_id_fkey FOREIGN KEY (buyer_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: offer_threads offer_threads_placement_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.offer_threads
+    ADD CONSTRAINT offer_threads_placement_id_fkey FOREIGN KEY (placement_id) REFERENCES op.bookshelf_placements(id) ON DELETE CASCADE;
+
+
+--
+-- Name: partner_inventory partner_inventory_book_edition_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partner_inventory
+    ADD CONSTRAINT partner_inventory_book_edition_id_fkey FOREIGN KEY (book_edition_id) REFERENCES op.book_editions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: partner_inventory partner_inventory_partner_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partner_inventory
+    ADD CONSTRAINT partner_inventory_partner_id_fkey FOREIGN KEY (partner_id) REFERENCES op.partners(id) ON DELETE CASCADE;
+
+
+--
+-- Name: partners partners_approved_by_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partners
+    ADD CONSTRAINT partners_approved_by_id_fkey FOREIGN KEY (approved_by_id) REFERENCES op.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: partners partners_third_space_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.partners
+    ADD CONSTRAINT partners_third_space_id_fkey FOREIGN KEY (third_space_id) REFERENCES op.third_spaces(id) ON DELETE SET NULL;
+
+
+--
+-- Name: post_book_associations post_book_associations_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_book_associations
+    ADD CONSTRAINT post_book_associations_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id) ON DELETE CASCADE;
+
+
+--
+-- Name: post_book_associations post_book_associations_post_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_book_associations
+    ADD CONSTRAINT post_book_associations_post_id_fkey FOREIGN KEY (post_id) REFERENCES op.blog_posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: post_comments post_comments_author_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_comments
+    ADD CONSTRAINT post_comments_author_id_fkey FOREIGN KEY (author_id) REFERENCES op.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: post_comments post_comments_post_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.post_comments
+    ADD CONSTRAINT post_comments_post_id_fkey FOREIGN KEY (post_id) REFERENCES op.blog_posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: price_snapshots price_snapshots_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.price_snapshots
+    ADD CONSTRAINT price_snapshots_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id);
+
+
+--
+-- Name: price_snapshots price_snapshots_store_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.price_snapshots
+    ADD CONSTRAINT price_snapshots_store_id_fkey FOREIGN KEY (store_id) REFERENCES op.bookstores(id);
+
+
+--
+-- Name: review_snapshots review_snapshots_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.review_snapshots
+    ADD CONSTRAINT review_snapshots_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id);
+
+
+--
+-- Name: shelves shelves_bookshelf_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.shelves
+    ADD CONSTRAINT shelves_bookshelf_id_fkey FOREIGN KEY (bookshelf_id) REFERENCES op.bookshelves(id) ON DELETE CASCADE;
+
+
+--
+-- Name: third_space_events third_space_events_space_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.third_space_events
+    ADD CONSTRAINT third_space_events_space_id_fkey FOREIGN KEY (space_id) REFERENCES op.third_spaces(id);
+
+
+--
+-- Name: transactions transactions_buyer_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.transactions
+    ADD CONSTRAINT transactions_buyer_id_fkey FOREIGN KEY (buyer_id) REFERENCES op.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: transactions transactions_listing_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.transactions
+    ADD CONSTRAINT transactions_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES op.listings(id) ON DELETE CASCADE;
+
+
+--
+-- Name: transactions transactions_seller_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.transactions
+    ADD CONSTRAINT transactions_seller_id_fkey FOREIGN KEY (seller_id) REFERENCES op.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: uploaded_images uploaded_images_book_edition_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.uploaded_images
+    ADD CONSTRAINT uploaded_images_book_edition_id_fkey FOREIGN KEY (book_edition_id) REFERENCES op.book_editions(id) ON DELETE SET NULL;
+
+
+--
+-- Name: uploaded_images uploaded_images_book_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.uploaded_images
+    ADD CONSTRAINT uploaded_images_book_id_fkey FOREIGN KEY (book_id) REFERENCES op.books(id);
+
+
+--
+-- Name: user_blocks user_blocks_blocked_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.user_blocks
+    ADD CONSTRAINT user_blocks_blocked_id_fkey FOREIGN KEY (blocked_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_blocks user_blocks_blocker_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.user_blocks
+    ADD CONSTRAINT user_blocks_blocker_id_fkey FOREIGN KEY (blocker_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: visibility_grants visibility_grants_granted_by_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.visibility_grants
+    ADD CONSTRAINT visibility_grants_granted_by_id_fkey FOREIGN KEY (granted_by_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: visibility_grants visibility_grants_granted_to_id_fkey; Type: FK CONSTRAINT; Schema: op; Owner: -
+--
+
+ALTER TABLE ONLY op.visibility_grants
+    ADD CONSTRAINT visibility_grants_granted_to_id_fkey FOREIGN KEY (granted_to_id) REFERENCES op.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bookshelf_placements; Type: ROW SECURITY; Schema: op; Owner: -
+--
+
+ALTER TABLE op.bookshelf_placements ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bookshelf_placements bookshelf_placements_owner; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY bookshelf_placements_owner ON op.bookshelf_placements USING (((current_setting('app.current_user_id'::text, true) IS NULL) OR (bookshelf_id IN ( SELECT bookshelves.id
+   FROM op.bookshelves
+  WHERE (bookshelves.user_id = (current_setting('app.current_user_id'::text, true))::uuid))))) WITH CHECK (((current_setting('app.current_user_id'::text, true) IS NULL) OR (bookshelf_id IN ( SELECT bookshelves.id
+   FROM op.bookshelves
+  WHERE (bookshelves.user_id = (current_setting('app.current_user_id'::text, true))::uuid)))));
+
+
+--
+-- Name: bookshelf_placements bookshelf_placements_platform_select; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY bookshelf_placements_platform_select ON op.bookshelf_placements FOR SELECT USING (((visibility = 'platform'::op.visibility_level) AND (bookshelf_id IN ( SELECT bookshelves.id
+   FROM op.bookshelves
+  WHERE (bookshelves.visibility = 'platform'::op.visibility_level)))));
+
+
+--
+-- Name: bookshelves; Type: ROW SECURITY; Schema: op; Owner: -
+--
+
+ALTER TABLE op.bookshelves ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bookshelves bookshelves_owner; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY bookshelves_owner ON op.bookshelves USING (((current_setting('app.current_user_id'::text, true) IS NULL) OR (user_id = (current_setting('app.current_user_id'::text, true))::uuid))) WITH CHECK (((current_setting('app.current_user_id'::text, true) IS NULL) OR (user_id = (current_setting('app.current_user_id'::text, true))::uuid)));
+
+
+--
+-- Name: bookshelves bookshelves_platform_select; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY bookshelves_platform_select ON op.bookshelves FOR SELECT USING ((visibility = 'platform'::op.visibility_level));
+
+
+--
+-- Name: user_blocks; Type: ROW SECURITY; Schema: op; Owner: -
+--
+
+ALTER TABLE op.user_blocks ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: user_blocks user_blocks_owner; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY user_blocks_owner ON op.user_blocks USING (((current_setting('app.current_user_id'::text, true) IS NULL) OR (blocker_id = (current_setting('app.current_user_id'::text, true))::uuid))) WITH CHECK (((current_setting('app.current_user_id'::text, true) IS NULL) OR (blocker_id = (current_setting('app.current_user_id'::text, true))::uuid)));
+
+
+--
+-- Name: visibility_grants; Type: ROW SECURITY; Schema: op; Owner: -
+--
+
+ALTER TABLE op.visibility_grants ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: visibility_grants visibility_grants_grantee_select; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY visibility_grants_grantee_select ON op.visibility_grants FOR SELECT USING (((current_setting('app.current_user_id'::text, true) IS NULL) OR (granted_to_id = (current_setting('app.current_user_id'::text, true))::uuid)));
+
+
+--
+-- Name: visibility_grants visibility_grants_granter; Type: POLICY; Schema: op; Owner: -
+--
+
+CREATE POLICY visibility_grants_granter ON op.visibility_grants USING (((current_setting('app.current_user_id'::text, true) IS NULL) OR (granted_by_id = (current_setting('app.current_user_id'::text, true))::uuid))) WITH CHECK (((current_setting('app.current_user_id'::text, true) IS NULL) OR (granted_by_id = (current_setting('app.current_user_id'::text, true))::uuid)));
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict ifjyNk1gZtFx5fqqO1heBNsA2lUdcMMapHiz5COJQ2qasRVYtpu5gYl4uWqH4dY
+
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000003);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000004);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000005);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000006);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000007);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000008);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000010);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000011);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000012);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000013);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000014);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000015);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000016);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000017);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000018);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000019);
+INSERT INTO public."schema_migrations" (version) VALUES (20260305000020);
+INSERT INTO public."schema_migrations" (version) VALUES (20260307000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260309000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260309000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260310000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260310000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260312000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260314000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260318065431);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000003);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000004);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000005);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000006);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000007);
+INSERT INTO public."schema_migrations" (version) VALUES (20260319000008);
+INSERT INTO public."schema_migrations" (version) VALUES (20260320000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260320000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260320000003);
+INSERT INTO public."schema_migrations" (version) VALUES (20260320000004);
+INSERT INTO public."schema_migrations" (version) VALUES (20260321000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260321000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260322000001);
+INSERT INTO public."schema_migrations" (version) VALUES (20260322000002);
+INSERT INTO public."schema_migrations" (version) VALUES (20260329212333);
+INSERT INTO public."schema_migrations" (version) VALUES (20260330035921);
+INSERT INTO public."schema_migrations" (version) VALUES (20260330094620);
+INSERT INTO public."schema_migrations" (version) VALUES (20260330101851);
+INSERT INTO public."schema_migrations" (version) VALUES (20260330130609);
+INSERT INTO public."schema_migrations" (version) VALUES (20260401074249);

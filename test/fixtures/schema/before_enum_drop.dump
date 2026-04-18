@@ -1,0 +1,21 @@
+-- Fixture: `structure.sql` BEFORE dropping an enum value.
+-- The `bookshelf_name` enum has five values; after_enum_drop.dump removes
+-- `looking_for_home`. Dropping an enum value is destructive because N-1
+-- code may still write rows with that value — those writes will 22P02 at
+-- the database.
+
+CREATE TYPE op.bookshelf_name AS ENUM (
+    'antilibrary',
+    'library',
+    'wishlist',
+    'reading_pile',
+    'looking_for_home'
+);
+
+CREATE TABLE op.bookshelves (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    name op.bookshelf_name NOT NULL,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
