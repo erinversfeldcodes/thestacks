@@ -1,0 +1,12 @@
+-- Fixture: `structure.sql` AFTER an additive migration (adds `slug` column).
+-- Diff against before_benign.dump should be DROP/RENAME-free.
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    isbn text NOT NULL,
+    title text NOT NULL,
+    author_id uuid,
+    slug text,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
