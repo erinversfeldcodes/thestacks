@@ -21,6 +21,14 @@ on:
       - CI
     types:
       - completed
+  # TEMPORARY for Issue #136 iteration: workflow_run only fires from the
+  # default branch's copy of this file, so it will not trigger until this
+  # workflow lands on main. The pull_request trigger below makes the
+  # workflow fire on PR pushes; a "Wait for CI" step gates actual deploy
+  # work on CI success to preserve the workflow_run semantic.
+  # BEFORE MERGE: delete this pull_request trigger and the Wait-for-CI step.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       target_app:
@@ -36,12 +44,15 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 jobs:
   deploy-production:
-    # Gate the workflow_run path on CI success. workflow_dispatch is
-    # operator-initiated and always runs when invoked.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Accept three trigger events:
+    #   workflow_run: gate on CI success (the production-ready path)
+    #   workflow_dispatch: operator manual; always runs
+    #   pull_request: TEMPORARY for iteration; Wait-for-CI step below gates
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -86,6 +97,48 @@ jobs:
       STACKS_CORE_PROD: "true"
       # (FORCE_BREACH is declared per-step on the gate — see below.)
     steps:
+      - name: Wait for CI to complete on this SHA
+        # TEMPORARY iteration shim. pull_request fires in parallel with CI;
+        # poll the CI run on the same SHA and abort this deploy if CI does
+        # not succeed. workflow_run and workflow_dispatch skip this step
+        # (workflow_run already implies CI succeeded; workflow_dispatch is
+        # operator-initiated).
+        # BEFORE MERGE: delete this step alongside the pull_request trigger.
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.event.pull_request.head.sha }}"
+          echo "Waiting for CI on ${sha}..."
+          for i in $(seq 1 60); do
+            line="$(gh run list --workflow=CI --commit="${sha}" --limit=1 \
+                --json status,conclusion \
+                --jq '.[0] | "\(.status // "missing")|\(.conclusion // "")"' 2>/dev/null || echo "missing|")"
+            status="${line%%|*}"
+            conclusion="${line##*|}"
+            case "${status}" in
+              completed)
+                if [[ "${conclusion}" == "success" ]]; then
+                  echo "CI succeeded on ${sha}"
+                  exit 0
+                else
+                  echo "::error::CI concluded ${conclusion:-unknown} on ${sha} — aborting deploy"
+                  exit 1
+                fi
+                ;;
+              in_progress|queued|waiting|requested|pending)
+                echo "CI status=${status} (attempt ${i}/60); sleeping 30s"
+                sleep 30
+                ;;
+              *)
+                echo "CI run not found yet on ${sha} (attempt ${i}/60); sleeping 30s"
+                sleep 30
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for CI on ${sha}"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
