@@ -43,6 +43,23 @@ fi
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
+# ── Retry helper (prod only) ─────────────────────────────────────────────────
+# Reviewer P1 #1: transient Fly/Modal/network flakes used to surface as a
+# skipped SLO gate in prod, which left the rollback step inactive (its `if`
+# pointed only at the gate's conclusion). Wrap every non-core component
+# deploy in this helper — two attempts, then a hard exit. A hard failure
+# here happens BEFORE core deploys, so no user-facing code is ever published
+# in a half-upgraded state.
+deploy_with_retry() {
+    local name="$1"; shift
+    if "$@"; then return 0; fi
+    echo "    retry: ${name} failed once; retrying in 5s..."
+    sleep 5
+    if "$@"; then return 0; fi
+    echo "FAIL deploy: ${name} failed twice; aborting before core deploy" >&2
+    return 1
+}
+
 # ── Preflight ─────────────────────────────────────────────────────────────────
 if [[ -z "${FLY_API_TOKEN:-}" ]]; then
     echo "SKIP: FLY_API_TOKEN not set — skipping deploy."
@@ -61,9 +78,18 @@ fi
 
 # ── Branch name → Fly app name ────────────────────────────────────────────────
 BRANCH=""
+# Production mode: stable app names + existing prod DB (no Neon branch).
+# Driven by --production or $STACKS_CORE_PROD=true. Off by default to keep
+# the preview flow identical for existing callers.
+PROD_MODE=0
+if [[ "${STACKS_CORE_PROD:-}" == "true" ]] || [[ "${STACKS_CORE_PROD:-}" == "1" ]]; then
+    PROD_MODE=1
+fi
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --branch) BRANCH="$2"; shift 2 ;;
+        --production) PROD_MODE=1; shift ;;
         *) shift ;;
     esac
 done
@@ -75,12 +101,21 @@ fi
 SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
 SANITISED="${SANITISED%-}"
 
-CORE_APP="stacks-core-pr-${SANITISED}"
-MODAL_APP="thestacks-vision-${SANITISED}"
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    CORE_APP="${CORE_APP:-thestacks-core}"
+    MODAL_APP="${MODAL_APP:-thestacks-vision}"
+    # Prod uses the existing production DB via DATABASE_URL — not a Neon
+    # branch. Suppress branch creation by clearing NEON_API_KEY locally.
+    NEON_API_KEY=""
+    echo "==> Deploy stack in PRODUCTION mode"
+else
+    CORE_APP="stacks-core-pr-${SANITISED}"
+    MODAL_APP="thestacks-vision-${SANITISED}"
+    echo "==> Deploy stack for branch: ${BRANCH}"
+fi
 VISION_SERVICE_URL=""
 NEON_BRANCH_NAME=""
 
-echo "==> Deploy stack for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
 echo "    Modal app:   ${MODAL_APP}"
 
@@ -162,10 +197,28 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
 
     echo ""
     echo "==> Deploying vision service to Modal (app: ${MODAL_APP})..."
-    modal_deploy_output="$(MODAL_APP_NAME="${MODAL_APP}" \
-    MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1)" \
-        || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
+    # Reviewer P1 #1: in prod mode, retry the Modal deploy once on failure.
+    # Preview mode keeps the original fail-fast behaviour so existing callers
+    # (and per-PR ephemeral stacks) aren't silently slowed down by flakes.
+    _modal_deploy_once() {
+        MODAL_APP_NAME="${MODAL_APP}" \
+        MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
+            python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1
+    }
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        if ! modal_deploy_output="$(_modal_deploy_once)"; then
+            echo "    retry: Modal vision deploy failed once; retrying in 5s..."
+            sleep 5
+            if ! modal_deploy_output="$(_modal_deploy_once)"; then
+                echo "$modal_deploy_output"
+                echo "FAIL deploy: Modal vision deploy failed twice; aborting before core" >&2
+                exit 1
+            fi
+        fi
+    else
+        modal_deploy_output="$(_modal_deploy_once)" \
+            || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
+    fi
     echo "$modal_deploy_output"
 
     # Try SDK lookup first, fall back to parsing the deploy output.
@@ -203,13 +256,19 @@ else
 fi
 
 # ── Deploy scraper service ──────────────────────────────────────────────────
-SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    SCRAPER_APP="${SCRAPER_APP:-thestacks-scraper}"
+else
+    SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
+fi
 SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
 
 if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo ""
     echo "==> Deploying scraper (app: ${SCRAPER_APP})..."
-    fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
+    if [[ "$PROD_MODE" -eq 0 ]]; then
+        fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
+    fi
     fly apps create "${SCRAPER_APP}" 2>&1 || true
 
     fly secrets set \
@@ -217,29 +276,48 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
         RUST_LOG="info" \
         --app "${SCRAPER_APP}" --stage
 
-    if (cd "$REPO_ROOT" && fly deploy \
+    _scraper_deploy_once() {
+        (cd "$REPO_ROOT" && fly deploy \
             --app "${SCRAPER_APP}" \
             --config "${REPO_ROOT}/deploy/fly.scraper.toml" \
             --image-label "pr-${SANITISED}" \
-            --depot=false); then
-        echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
+            --depot=false)
+    }
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        # Prod: retry-once then hard-fail (P1 #1). A silent scraper outage
+        # in prod breaks price discovery — must not be tolerated silently.
+        if deploy_with_retry "scraper" _scraper_deploy_once; then
+            echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
+        else
+            exit 1
+        fi
     else
-        echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
-        SCRAPER_INTERNAL_URL=""
+        if _scraper_deploy_once; then
+            echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
+        else
+            echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
+            SCRAPER_INTERNAL_URL=""
+        fi
     fi
 elif [[ -z "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo "WARN: SCRAPER_HMAC_SECRET not set — skipping scraper deploy."
     SCRAPER_INTERNAL_URL=""
 fi
 
-# ── Deploy SearXNG (ephemeral per preview) ─────────────────────────────────
-SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
+# ── Deploy SearXNG (ephemeral per preview; stable in prod) ─────────────────
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    SEARXNG_APP="${SEARXNG_APP:-thestacks-searxng}"
+else
+    SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
+fi
 SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.internal:8080"
 
 if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     echo ""
     echo "==> Deploying SearXNG (app: ${SEARXNG_APP})..."
-    fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
+    if [[ "$PROD_MODE" -eq 0 ]]; then
+        fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
+    fi
     fly apps create "${SEARXNG_APP}" 2>&1 || true
 
     fly secrets set \
@@ -259,10 +337,26 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     sed "s|__SEARXNG_SECRET_KEY__|${SEARXNG_SECRET_KEY}|g" \
         "${SETTINGS_TEMPLATE}" > "${SETTINGS_TMP}"
 
-    if (fly deploy \
+    _searxng_deploy_once() {
+        (fly deploy \
             --app "${SEARXNG_APP}" \
             --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
-            --yes); then
+            --yes)
+    }
+    _searxng_success=0
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        if deploy_with_retry "searxng" _searxng_deploy_once; then
+            _searxng_success=1
+        else
+            rm -f "${SETTINGS_TMP}"
+            exit 1
+        fi
+    else
+        if _searxng_deploy_once; then
+            _searxng_success=1
+        fi
+    fi
+    if [[ "$_searxng_success" -eq 1 ]]; then
         # Upload rendered settings to the running machine
         fly ssh sftp shell --app "${SEARXNG_APP}" <<SFTP_EOF || true
 put ${SETTINGS_TMP} /etc/searxng/settings.yml
@@ -319,6 +413,32 @@ fly secrets set \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
+
+# ── DATABASE_URL assertion (prod only, P2 #9) ────────────────────────────────
+# On a brand-new prod app no DATABASE_URL is configured yet, and
+# `${NEON_CONNECTION_URI:+...}` above means we only set it from a preview
+# Neon branch. In prod mode DATABASE_URL must already be present as a Fly
+# secret (the operator-blessed prod Neon connection string). If it isn't,
+# boot fails with a cryptic runtime.exs raise after the container has
+# already rolled. Fail fast here with a clear message instead.
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    echo ""
+    echo "==> Verifying DATABASE_URL is present on ${CORE_APP}..."
+    if ! fly secrets list --app "${CORE_APP}" --json 2>/dev/null \
+            | python3 -c '
+import json, sys
+secrets = json.load(sys.stdin)
+names = {s.get("Name") for s in secrets}
+sys.exit(0 if "DATABASE_URL" in names else 1)
+' ; then
+        echo "FAIL deploy: DATABASE_URL is not configured on prod app ${CORE_APP}." >&2
+        echo "  Prod mode requires an existing DATABASE_URL secret pointing at" >&2
+        echo "  the prod Neon branch. Set it via:" >&2
+        echo "    fly secrets set DATABASE_URL='postgresql://...' --app ${CORE_APP}" >&2
+        exit 1
+    fi
+    echo "PASS deploy: DATABASE_URL present on ${CORE_APP}"
+fi
 
 # ── Generate proto Elm decoders ───────────────────────────────────────────────
 echo ""
