@@ -150,17 +150,23 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Integration: the tag reaches phoenix.router_dispatch.stop telemetry
+  # Integration: the tag reaches the Stacks-namespaced router_dispatch event
   # ---------------------------------------------------------------------------
 
   describe "RouteGroup — telemetry integration" do
-    test "phoenix.router_dispatch.stop carries :route_group in metadata", %{conn: conn} do
+    test "stacks.router_dispatch.stop carries :route_group in metadata", %{conn: conn} do
+      # `CoreWeb.Telemetry.handle_router_dispatch_stop/4` listens on Phoenix's
+      # native `[:phoenix, :router_dispatch, :stop]` and re-emits a
+      # Stacks-namespaced `[:stacks, :router_dispatch, :stop]` event with
+      # `:route_group` merged into metadata. The rename (vs. re-emitting
+      # Phoenix's own event) prevents any reporter attached to the Stacks
+      # series from double-counting Phoenix's original emission.
       test_pid = self()
       handler_id = "rg-test-#{System.unique_integer([:positive])}"
 
       :telemetry.attach(
         handler_id,
-        [:phoenix, :router_dispatch, :stop],
+        [:stacks, :router_dispatch, :stop],
         fn _event, _measurements, metadata, _ ->
           send(test_pid, {:rd_stop, metadata})
         end,
