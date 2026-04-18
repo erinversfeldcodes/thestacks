@@ -411,6 +411,8 @@ fly secrets set \
     ${STACKS_APP_DB_PASSWORD:+STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD}"} \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
+    ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
+    ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 
@@ -585,13 +587,27 @@ if [[ -n "${machine_id}" ]]; then
     echo "PASS deploy: migrations applied"
 
     # ── Seed ─────────────────────────────────────────────────────────────────
+    # Prod and preview run DIFFERENT seed paths:
+    #   prod:    Stacks.Release.seed_prod/0 — creates one owner user from
+    #            PROD_OWNER_EMAIL + PROD_OWNER_PASSWORD fly secrets. Idempotent.
+    #   preview: Stacks.Release.seed/0 (gated by ALLOW_SEEDS=true) — full
+    #            dev fixture set for CI/E2E.
     echo ""
-    echo "==> Seeding ${CORE_APP}..."
-    fly machine exec "${machine_id}" \
-        "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
-        --app "${CORE_APP}" --timeout 60 2>&1 \
-        || { echo "FAIL deploy: seeds failed"; exit 1; }
-    echo "PASS deploy: seeds applied"
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        echo "==> Seeding ${CORE_APP} (prod owner only)..."
+        fly machine exec "${machine_id}" \
+            "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prod()'\"" \
+            --app "${CORE_APP}" --timeout 60 2>&1 \
+            || { echo "FAIL deploy: prod seed failed"; exit 1; }
+        echo "PASS deploy: prod owner seed applied"
+    else
+        echo "==> Seeding ${CORE_APP} (dev fixtures)..."
+        fly machine exec "${machine_id}" \
+            "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
+            --app "${CORE_APP}" --timeout 60 2>&1 \
+            || { echo "FAIL deploy: seeds failed"; exit 1; }
+        echo "PASS deploy: dev seeds applied"
+    fi
 else
     echo "WARN deploy: could not find running machine to run migrations/seeds"
 fi
