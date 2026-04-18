@@ -199,6 +199,12 @@ defmodule StacksWeb.UploadController do
         if remaining <= 0 do
           Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
 
+          :telemetry.execute(
+            [:stacks, :upload, :terminal],
+            %{count: 1},
+            %{outcome: :timeout}
+          )
+
           timeout_payload =
             ProtoJSON.poll_response(%{
               image_id: image_id,
