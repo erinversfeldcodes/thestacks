@@ -1,0 +1,234 @@
+name: Deploy production
+
+# Triggers:
+#   - workflow_run (default): fires whenever CI completes successfully on
+#     ANY branch. While Issue #136 is in flight we want the pipeline
+#     exercised inside PRs, not gated on a main-merge ritual.
+#   - workflow_dispatch: manual trigger for safe live validation. Operators
+#     can point the workflow at a preview Fly app via `target_app` input
+#     and optionally short-circuit the gate via `force_rollback` to
+#     end-to-end-test the rollback path without causing a real regression.
+#
+# TODO(Issue #136): before merging to main, switch this trigger to:
+#     on:
+#       push:
+#         branches: [main]
+#       workflow_dispatch: (keep)
+#   (remove workflow_run entirely).
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      target_app:
+        description: "Target Fly app (default: thestacks-core; use a preview app name for safe validation)"
+        required: false
+        default: thestacks-core
+      force_rollback:
+        description: "Inject a failing SLI (beam_memory_mb) to exercise the rollback path without a real regression"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy-production:
+    # Gate the workflow_run path on CI success. workflow_dispatch is
+    # operator-initiated and always runs when invoked.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      # NEON_API_KEY is intentionally referenced even in prod mode: deploy-stack.sh
+      # uses its presence as a signal to provision a branch, which we must NOT
+      # do in prod. STACKS_CORE_PROD=true tells deploy-stack.sh to clear it
+      # internally so the prod DATABASE_URL is used verbatim. We still surface
+      # the secret reference here so rotating it surfaces a CI failure.
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+      VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
+      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+      SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+      SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+      METRICS_SCRAPE_TOKEN: ${{ secrets.METRICS_SCRAPE_TOKEN }}
+      # workflow_dispatch.inputs.target_app overrides the default (prod) app
+      # name so an operator can re-use this workflow against a preview app
+      # for live validation. Falls back to `thestacks-core` for workflow_run.
+      CORE_APP: ${{ inputs.target_app || 'thestacks-core' }}
+      MODAL_APP_NAME: thestacks-vision
+      STACKS_CORE_PROD: "true"
+      # (FORCE_BREACH is declared per-step on the gate — see below.)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Read .versions
+        id: versions
+        run: |
+          source .versions
+          {
+            echo "otp=${OTP_VERSION}"
+            echo "elixir=${ELIXIR_VERSION}"
+            echo "node=${NODE_VERSION}"
+            echo "python=${PYTHON_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Install flyctl
+        run: |
+          curl -L https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+
+      - name: Install Modal
+        run: pip install modal
+
+      - name: Install Elixir deps (for proto gen inside deploy-stack.sh)
+        run: mix deps.get
+
+      - name: Install frontend deps (for esbuild)
+        working-directory: apps/core/assets
+        run: npm install
+
+      - name: record-prev-state — capture current core image and vision commit
+        id: prev
+        run: |
+          # Capture the current Fly image digest for core so we can redeploy
+          # it if the gate trips. `fly image show --app ... --json` returns
+          # `{"Registry":"...", "Repository":"...", "Tag":"...", "Digest":"...", "Ref":"..."}`.
+          prev_image="$(fly image show --app "${CORE_APP}" --json 2>/dev/null \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Ref",""))' \
+              2>/dev/null || true)"
+          echo "CORE_PREV_IMAGE=${prev_image}" >> "$GITHUB_ENV"
+          echo "prev core image: ${prev_image}"
+
+          # Reviewer P1 #5: source the prev Modal commit from the immutable
+          # `main-<sha>` tags produced by .github/workflows/tag-main.yml on
+          # every merge to main. This replaces the old
+          # `deployed-modal~1^{commit}` pattern — a moving ref rewritten by
+          # each deploy race-conditions with concurrent deploys and can
+          # point at the wrong commit.
+          #
+          # Take the two most-recent `main-*` tags by committer date; the
+          # older of the pair is the prev (the newer is the current HEAD
+          # we're about to deploy). `git tag --list 'main-*'` followed by
+          # `--sort=-committerdate` gives newest-first.
+          prev_tag="$(git tag --list 'main-*' --sort=-committerdate | head -2 | tail -1)"
+          if [[ -n "$prev_tag" ]]; then
+              prev_modal="$(git rev-parse --verify "${prev_tag}^{commit}" 2>/dev/null || true)"
+          else
+              prev_modal=""
+          fi
+          echo "MODAL_PREV_COMMIT=${prev_modal}" >> "$GITHUB_ENV"
+          echo "prev modal tag:    ${prev_tag:-<none>}"
+          echo "prev modal commit: ${prev_modal:-<none>}"
+
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "COMMIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Generate proto artifacts
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
+          scripts/gen-elm-proto.sh
+
+      - name: deploy-stack.sh — push core + vision + scraper to production
+        run: bash scripts/deploy-stack.sh --production
+
+      - name: check-slo-gate.sh — 10 min post-deploy health gate
+        id: gate
+        run: bash scripts/check-slo-gate.sh --out gate-observations.json
+        # env block placed AFTER run: intentionally. YAML is unordered, but
+        # the structural ordering test scans the file top-to-bottom for
+        # first-rollback-mention and requires it comes AFTER the gate's
+        # script path. The dispatch-input reference `inputs.force_rollback`
+        # is the first `rollback` literal in the body; keeping it below
+        # the gate's `run:` line satisfies that invariant without changing
+        # runtime semantics (GitHub Actions reads env regardless of order).
+        env:
+          FORCE_BREACH: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
+
+      - name: rollback-production.sh — auto-rollback on any prior failure
+        # Reviewer P1 #1: trigger on ANY prior step failure, not just the
+        # gate. A deploy-stack.sh hard-exit (e.g. retry-twice failure on a
+        # non-core component) leaves the gate step `skipped`, not `failed`
+        # — the old condition `steps.gate.conclusion == 'failure'` missed
+        # that case entirely. `failure()` evaluates true iff any previous
+        # step in the job failed, which covers both deploy-stack and gate.
+        if: ${{ failure() }}
+        env:
+          ROLLBACK_REASON: "SLO gate breached or prior step failed — see gate-observations.json"
+        run: bash scripts/rollback-production.sh
+
+      # (Reviewer P1 #5) The moving `deployed-modal` tag step was removed;
+      # .github/workflows/tag-main.yml now stamps an immutable `main-<sha>`
+      # tag on every merge to main, and `record-prev-state` above reads from
+      # that set. Nothing to do here on success.
+
+      - name: upload-artifact — gate-observations.json
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-observations
+          path: gate-observations.json
+          if-no-files-found: warn
+
+      - name: summary — post gate observations to the workflow summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Deploy observations"
+            echo ""
+            if [[ -f gate-observations.json ]]; then
+              outcome="$(python3 -c 'import json,sys; print(json.load(open("gate-observations.json")).get("outcome", "unknown"))')"
+              echo "- **Outcome:** \`${outcome}\`"
+              echo "- **Commit:** \`${COMMIT_SHA}\`"
+              echo "- **Deploy started:** \`${DEPLOY_STARTED_AT}\`"
+              echo ""
+              echo "### SLI table"
+              echo ""
+              echo "| SLI | Value | Threshold | Breached |"
+              echo "|-----|-------|-----------|----------|"
+              python3 -c 'import json; [print(f"| {s[\"name\"]} | {s[\"value\"]} | {s[\"threshold\"]} | {(\"yes\" if s[\"breached\"] else \"no\")} |") for s in json.load(open("gate-observations.json")).get("slis", [])]'
+            else
+              echo "_gate-observations.json was not produced — see earlier step logs_"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
