@@ -50,7 +50,8 @@ jobs:
     # Accept three trigger events:
     #   workflow_run: gate on CI success (the production-ready path)
     #   workflow_dispatch: operator manual; always runs
-    #   pull_request: TEMPORARY for iteration; Wait-for-CI step below gates
+    #   pull_request: TEMPORARY for iteration; runs in parallel with CI,
+    #     no CI-success gating during debug (delete before merge).
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -88,6 +89,15 @@ jobs:
       # user already exists and the call no-ops.
       PROD_OWNER_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
       PROD_OWNER_PASSWORD: ${{ secrets.PROD_OWNER_PASSWORD }}
+      # Prod Neon connection components. Prod mode does NOT create a Neon
+      # branch (that's preview-only), so DATABASE_URL must be composed from
+      # these four secrets and staged onto the core Fly app. The compose
+      # step below URL-encodes role/password/dbname to handle special chars.
+      # Rotate each piece independently as needed.
+      STACKS_PROD_DB_ROLE: ${{ secrets.STACKS_PROD_DB_ROLE }}
+      STACKS_PROD_DB_PASSWORD: ${{ secrets.STACKS_PROD_DB_PASSWORD }}
+      STACKS_PROD_DB_HOST: ${{ secrets.STACKS_PROD_DB_HOST }}
+      STACKS_PROD_DB_NAME: ${{ secrets.STACKS_PROD_DB_NAME }}
       # workflow_dispatch.inputs.target_app overrides the default (prod) app
       # name so an operator can re-use this workflow against a preview app
       # for live validation. Falls back to `thestacks-core` for workflow_run.
@@ -100,6 +110,31 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+
+      - name: Compose DATABASE_URL from prod Neon components
+        # URL-encodes role/password/dbname so passwords containing @ / : etc.
+        # survive the round-trip through the connection string grammar. The
+        # composed URL is written to $GITHUB_ENV for subsequent steps and
+        # masked in logs via ::add-mask::. Fails loudly with a named
+        # variable when any component is missing.
+        run: |
+          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::$v is required but not set"
+              exit 1
+            fi
+          done
+          DATABASE_URL="$(python3 -c "
+          import os, urllib.parse as up
+          role = up.quote(os.environ['STACKS_PROD_DB_ROLE'], safe='')
+          pw   = up.quote(os.environ['STACKS_PROD_DB_PASSWORD'], safe='')
+          host = os.environ['STACKS_PROD_DB_HOST']
+          db   = up.quote(os.environ['STACKS_PROD_DB_NAME'], safe='')
+          print(f'postgresql://{role}:{pw}@{host}/{db}?sslmode=require')
+          ")"
+          echo "::add-mask::${DATABASE_URL}"
+          echo "DATABASE_URL=${DATABASE_URL}" >> "$GITHUB_ENV"
+          echo "Composed DATABASE_URL for ${STACKS_PROD_DB_HOST}"
 
       - name: Read .versions
         id: versions

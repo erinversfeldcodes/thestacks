@@ -18,7 +18,8 @@
 #   MODAL_TOKEN_SECRET      — Modal API token secret
 #   VISION_HMAC_SECRET      — Elixir → vision HMAC auth
 #   SECRET_KEY_BASE         — Phoenix secret key base
-#   NEON_PARENT_BRANCH      — Name of parent branch (default: production)
+#   NEON_PARENT_BRANCH      — Name of parent branch (default: staging —
+#                             preview branches must never clone production)
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
 #   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
 #   R2_ACCESS_KEY_ID        — R2 access key
@@ -124,7 +125,10 @@ if [[ -n "${NEON_API_KEY:-}" ]]; then
     echo ""
     echo "==> Creating Neon DB branch for preview..."
 
-    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-production}"
+    # Parent branch for preview creation. Default is `staging` — a
+    # migrations-only + fixture-data branch — so previews NEVER clone
+    # production user data. See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
+    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
     echo "    Parent branch: ${NEON_PARENT_BRANCH}"
     NEON_PARENT_BRANCH_ID="$(curl -sL \
         -H "Authorization: Bearer ${NEON_API_KEY}" \
@@ -388,6 +392,13 @@ fly apps create "${CORE_APP}" 2>&1 || true  # noop if app already exists
 fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 
 # ── Stage core secrets ────────────────────────────────────────────────────────
+# DATABASE_URL sourcing:
+#   preview: NEON_CONNECTION_URI was populated by the Neon-branch creation block above.
+#   prod:    NEON_API_KEY is cleared → no branch → caller must provide DATABASE_URL
+#            directly in the environment (from a GitHub secret in CI, or an operator
+#            export for local prod-mode use).
+EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
+
 fly secrets set \
     SECRET_KEY_BASE="${SECRET_KEY_BASE:-}" \
     GUARDIAN_SECRET_KEY="${GUARDIAN_SECRET_KEY:-}" \
@@ -396,7 +407,7 @@ fly secrets set \
     VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
     PHX_HOST="${CORE_APP}.fly.dev" \
     RATE_LIMIT_AUTH="60" \
-    ${NEON_CONNECTION_URI:+DATABASE_URL="${NEON_CONNECTION_URI}"} \
+    ${EFFECTIVE_DATABASE_URL:+DATABASE_URL="${EFFECTIVE_DATABASE_URL}"} \
     ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
     ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
     ${R2_SECRET_ACCESS_KEY:+R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"} \
