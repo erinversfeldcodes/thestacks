@@ -44,7 +44,14 @@ defmodule CoreWeb.Telemetry do
       summary("phoenix.endpoint.stop.duration",
         unit: {:native, :millisecond}
       ),
-      summary("phoenix.router_dispatch.stop.duration",
+      # Phoenix emits `[:phoenix, :router_dispatch, :stop]` natively without
+      # a `:route_group` key. `CoreWeb.Telemetry.handle_router_dispatch_stop/4`
+      # listens on that event and re-emits under the Stacks-namespaced event
+      # below with `:route_group` merged in, so reporters attached to the
+      # series below do NOT double-count Phoenix's original emission.
+      summary("stacks.router_dispatch.stop.duration",
+        event_name: [:stacks, :router_dispatch, :stop],
+        measurement: :duration,
         tags: [:route, :route_group],
         unit: {:native, :millisecond}
       ),
@@ -161,12 +168,14 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc """
-  Attach the telemetry handler that re-emits
-  `[:phoenix, :router_dispatch, :stop]` with `:route_group` copied out of
-  `conn.private`. Idempotent — safe to call on supervisor restart.
+  Attach the telemetry handler that observes
+  `[:phoenix, :router_dispatch, :stop]` and re-emits a Stacks-namespaced
+  `[:stacks, :router_dispatch, :stop]` event with `:route_group` copied out
+  of `conn.private`. Idempotent — safe to call on supervisor restart.
 
-  The handler skips re-emission when `:route_group` is already present in
-  the metadata (the re-emit itself re-enters this same handler).
+  The re-emit uses a distinct event name (not Phoenix's) so any
+  `Telemetry.Metrics` reporter attached to the Stacks series does not
+  double-count Phoenix's original emission.
   """
   @spec attach_route_group_handler() :: :ok
   def attach_route_group_handler do
@@ -185,14 +194,11 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc false
-  # Already enriched (this is our own re-emit) — do nothing.
-  def handle_router_dispatch_stop(_event, _measurements, %{route_group: _}, _config), do: :ok
-
   def handle_router_dispatch_stop(_event, measurements, %{conn: conn} = metadata, _config)
       when is_map(conn) do
     group = conn.private[:route_group] || conn.assigns[:route_group] || :other
     enriched = Map.put(metadata, :route_group, group)
-    :telemetry.execute([:phoenix, :router_dispatch, :stop], measurements, enriched)
+    :telemetry.execute([:stacks, :router_dispatch, :stop], measurements, enriched)
   end
 
   def handle_router_dispatch_stop(_event, _measurements, _metadata, _config), do: :ok
