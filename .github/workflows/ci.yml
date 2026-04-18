@@ -513,28 +513,28 @@ jobs:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
 
-      # Proto artifacts are gitignored (apps/core/lib/stacks/gen/) and every
-      # other Mix-using CI job regenerates them before mix deps.get. Run the
-      # same generators here — otherwise `mix compile` fails during
-      # ecto.migrate and the whole gate crashes before running a single rule.
+      # `mix deps.get` must run BEFORE proto gen: gen-ecto-proto.sh shells
+      # into `mix run` to bootstrap proto.sync, which requires deps on disk.
+      # Proto artifacts are gitignored (apps/core/lib/stacks/gen/); without
+      # them `mix compile` fails during ecto.migrate below.
+      - name: Install mix deps (HEAD)
+        run: mix deps.get
       - name: Generate proto artifacts (HEAD)
         run: |
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
-      - name: Install mix deps (HEAD)
-        run: mix deps.get
 
       - name: Dump BEFORE structure (origin/main)
         # Use a throwaway worktree so HEAD's deps tree is not disturbed. We
-        # must re-run proto gen + deps.get inside the worktree because each
+        # must re-run deps.get + proto gen inside the worktree because each
         # checkout has its own _build / apps/core/lib/stacks/gen/ state.
         run: |
           mkdir -p /tmp/schema
           git worktree add /tmp/main-worktree origin/main
           pushd /tmp/main-worktree >/dev/null
+          mix deps.get
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
-          mix deps.get
           mix ecto.create || true
           mix ecto.migrate
           mix ecto.dump --dump-path /tmp/schema/before.sql
