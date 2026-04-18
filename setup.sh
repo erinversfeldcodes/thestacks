@@ -177,9 +177,12 @@ success "Elm tooling installed"
 
 # squawk-cli — lints Postgres migrations for safety issues (runs in CI).
 # Install locally so `scripts/security-squawk.sh` doesn't skip silently.
+# Pinned to 2.47.0 to match the version pinned in
+# .github/workflows/ci.yml (migration-safety job). Bump both in lockstep.
+SQUAWK_PINNED_VERSION="2.47.0"
 if ! command -v squawk &>/dev/null; then
-    info "Installing squawk-cli globally..."
-    npm install -g squawk-cli
+    info "Installing squawk-cli@${SQUAWK_PINNED_VERSION} globally..."
+    npm install -g "squawk-cli@${SQUAWK_PINNED_VERSION}"
     success "squawk-cli installed"
 else
     success "squawk-cli already available"
