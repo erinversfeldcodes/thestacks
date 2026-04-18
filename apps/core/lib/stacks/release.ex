@@ -104,7 +104,14 @@ defmodule Stacks.Release do
     }
 
     case Stacks.Accounts.register(attrs) do
-      {:ok, _user} ->
+      {:ok, user} ->
+        # Mark the owner email as confirmed so the login endpoint accepts
+        # them immediately. The owner is created programmatically from a
+        # trusted secret flow (PROD_OWNER_EMAIL/PASSWORD) — no email
+        # verification posture applies. Without this, the login probe
+        # (and the operator themselves) get `email_unconfirmed` on first
+        # authentication attempt.
+        confirm_owner!(user)
         IO.puts("seed_prod: created owner: #{email}")
         :ok
 
@@ -114,6 +121,15 @@ defmodule Stacks.Release do
       {:error, reason} ->
         raise "seed_prod: failed to create owner: #{inspect(reason)}"
     end
+  end
+
+  defp confirm_owner!(user) do
+    # Direct column update. The Accounts context does not expose a
+    # "mark confirmed" function today; if one appears in the future, prefer
+    # calling it over this inline changeset.
+    user
+    |> Ecto.Changeset.change(%{email_confirmed: true, email_confirmation_token: nil})
+    |> Core.Repo.update!()
   end
 
   defp format_changeset_errors(%Ecto.Changeset{} = changeset) do
