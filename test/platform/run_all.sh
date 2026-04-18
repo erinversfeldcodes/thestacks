@@ -14,6 +14,12 @@ SUITES=(
     "$HERE/lint_migrations_test.sh"
     "$HERE/schema_diff_test.sh"
     "$HERE/ci_migration_safety_job_test.sh"
+    "$HERE/probe_production_test.sh"
+    "$HERE/check_slo_gate_test.sh"
+    "$HERE/rollback_production_test.sh"
+    "$HERE/deploy_production_workflow_test.sh"
+    "$HERE/deploy_stack_retry_test.sh"
+    "$HERE/runtime_comment_freshness_test.sh"
 )
 
 OVERALL=0

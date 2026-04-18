@@ -86,10 +86,10 @@ else
     config :core, :smoke_tests_enabled, true
   end
 
-  # Bearer token accepted by StacksWeb.Plugs.MetricsAuth for `/internal/metrics`.
-  # Fly 6PN callers bypass the token check; this is the fallback for external
-  # scrapers (e.g. the SLO gate in CI, Issue #136). Leaving it unset means only
-  # 6PN callers can scrape.
+  # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
+  # is bearer-only (no IP allowlist) — every caller must present a matching
+  # `Authorization: Bearer <token>` header. Unset = no one can scrape, not
+  # even the SLO gate. Required in prod; CI sets it via `fly secrets`.
   config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
 end
 
