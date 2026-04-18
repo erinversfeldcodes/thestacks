@@ -529,8 +529,10 @@ jobs:
         # running `mix ecto.migrate` + `mix ecto.dump` against each. Uses
         # HEAD's compiled app and deps for both — migrations must be
         # self-contained SQL-level DSL, per docs/agents/standards/migrations.md.
-        # If a migration imports an app module, this gate will fail loudly
-        # (app shape differs between runs), which is the correct failure mode.
+        # If a migration imports an app module, this gate may silently
+        # produce the wrong diff (main's migration runs against HEAD's app
+        # shape). `lint-migrations.sh` / reviewer audit catches this class
+        # at the source; this gate does not detect it mechanically.
         #
         # `rm -rf` before each `git checkout <ref> -- dir` guarantees the
         # working tree matches the ref exactly — handles additions, deletions,
