@@ -1,0 +1,53 @@
+# Prometheus sample — otherwise healthy shape, but the Oban `default` queue
+# has only 2 completed jobs (1 success + 1 failure). Rate is 50% which would
+# trip the 5% threshold — but the sample size is below the min-samples guard
+# (OBAN_MIN_SAMPLES = 10), so the SLI must report `breached: false` with
+# `samples: 2` and a `note` field. Reviewer P1 #4.
+
+# ── Phoenix / router_dispatch (healthy) ──────────────────────────────────────
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 4
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 85
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 42000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+# ── HTTP availability ────────────────────────────────────────────────────────
+phoenix_endpoint_stop_total{status_class="2xx"} 2580
+phoenix_endpoint_stop_total{status_class="5xx"} 0
+
+# ── Upload terminal counter (healthy) ────────────────────────────────────────
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# ── Fuse state gauge (all healthy) ───────────────────────────────────────────
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# ── Oban default queue — ONLY 2 samples, 50% failure rate ────────────────────
+# This would nominally breach (rate > 0.05) but samples < min_samples guard.
+prom_ex_oban_job_stop_total{queue="default",state="success"} 1
+prom_ex_oban_job_stop_total{queue="default",state="failure"} 1
+
+# ── Ecto + BEAM (healthy) ────────────────────────────────────────────────────
+core_repo_query_queue_time_milliseconds_bucket{le="50"} 3000
+core_repo_query_queue_time_milliseconds_bucket{le="+Inf"} 3000
+core_repo_query_queue_time_milliseconds_sum 6200
+core_repo_query_queue_time_milliseconds_count 3000
+beam_memory_total_bytes{type="total"} 125829120
