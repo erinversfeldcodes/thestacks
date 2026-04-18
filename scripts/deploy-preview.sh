@@ -45,8 +45,31 @@ bash "${REPO_ROOT}/scripts/deploy-stack.sh" ${BRANCH_ARG}
 # failure IS fatal — we can't deploy a stack we can't talk to.
 echo ""
 echo "==> Vision pipeline warmup against ${CORE_URL}/api/upload..."
+
+# Wait for external edge routing to be ready. deploy-stack.sh verified health
+# via a fly-proxy tunnel to localhost, which bypasses Fly's edge — the public
+# hostname may still return 000 for a minute after deploy while Fly's anycast
+# edge learns about the new machines. Poll up to ~2 min for a real HTTP status.
+echo "    Waiting for external edge routing (${CORE_URL}/api/health)..."
+edge_ready=0
+for _ in $(seq 1 24); do
+    edge_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 "${CORE_URL}/api/health" || true)"
+    if [[ "${edge_code}" == "200" ]]; then
+        edge_ready=1
+        echo "    Edge routing ready (HTTP 200)."
+        break
+    fi
+    sleep 5
+done
+if [[ $edge_ready -ne 1 ]]; then
+    echo "FAIL warmup: external edge never returned HTTP 200 (last: ${edge_code})"
+    exit 1
+fi
+
 login_body_file="$(mktemp)"
 smoke_login_code="$(curl -4 -s -o "${login_body_file}" -w "%{http_code}" \
+    --max-time 30 \
     "${CORE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' || true)"
