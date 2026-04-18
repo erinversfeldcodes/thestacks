@@ -118,6 +118,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
     if count > 0 do
       Logger.info("IdentifyBookJob: resolved image #{image_id} → #{length(book_ids)} book(s)")
 
+      :telemetry.execute(
+        [:stacks, :upload, :terminal],
+        %{count: 1},
+        %{outcome: :resolved}
+      )
+
       Phoenix.PubSub.broadcast(
         Core.PubSub,
         "upload:#{image_id}",
@@ -153,6 +159,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
+
+      :telemetry.execute(
+        [:stacks, :upload, :terminal],
+        %{count: 1},
+        %{outcome: :rejected}
+      )
 
       Phoenix.PubSub.broadcast(
         Core.PubSub,
