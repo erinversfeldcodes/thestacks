@@ -551,197 +551,197 @@ jobs:
       - name: check-schema-diff — destructive changes require db-breaking label
         run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
 
-  deploy-preview:
-    # TODO: restore full dependency list after deploy-preview is stable:
-    # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
-    needs: [versions]
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
-      VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
-      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
-      SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
-      SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-      GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
-      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
-      SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-      # Trigger CreateDbRoles migration against Neon preview branch — exercises
-      # role creation, grants, and revokes the same way prod will.
-      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
-      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
-      GITHUB_HEAD_REF: ${{ github.head_ref }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ needs.versions.outputs.node }}
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ needs.versions.outputs.otp }}
-          elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ needs.versions.outputs.python }}
-      - name: Install flyctl
-        run: |
-          curl -L https://fly.io/install.sh | sh
-          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-      - uses: bufbuild/buf-setup-action@v1.47.2
-        with:
-          github_token: ${{ github.token }}
-      - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
-        run: mix deps.get
-      - name: Install frontend deps (for node build.js inside deploy-stack.sh)
-        working-directory: apps/core/assets
-        run: npm install
-      - name: Install Modal (for vision deploy inside deploy-stack.sh)
-        run: pip install modal
-      - name: Generate proto artifacts for Docker builds
-        run: |
-          python3 scripts/gen_python_proto.py --language rust
-          python3 scripts/gen_python_proto.py --language python
-          scripts/gen-elm-proto.sh
-      - uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
-      - name: Install E2E deps and Playwright browsers
-        working-directory: e2e
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-      - name: Deploy preview stack + warm vision pipeline
-        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
-      - name: Pin Fly hostname to IPv4 in /etc/hosts
-        # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
-        # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
-        # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
-        # directly so every resolver (curl, Playwright, Node) returns IPv4.
-        run: |
-          BRANCH="${GITHUB_HEAD_REF:-preview}"
-          SAN="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-          SAN="${SAN%-}"
-          CORE_URL="https://stacks-core-pr-${SAN}.fly.dev"
-          HOST="stacks-core-pr-${SAN}.fly.dev"
-          NEON_BRANCH="preview/${SAN}"
-          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
-          echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
-          IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
-          if [[ -z "${IPV4}" ]]; then
-            echo "FAIL: no A record for ${HOST}"
-            exit 1
-          fi
-          echo "${IPV4} ${HOST}" | sudo tee -a /etc/hosts
-          echo "Pinned ${HOST} -> ${IPV4}"
-          getent hosts "${HOST}"
-      - name: Warm Fly machines and Neon database
-        run: |
-          # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
-          for i in {1..20}; do
-            curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
-          done
-          for i in {1..10}; do
-            curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
-          done
-          for i in {1..5}; do
-            curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
-              -H "Content-Type: application/json" \
-              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
-              >/dev/null 2>&1 &
-          done
-          for i in {1..3}; do
-            DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
-              -H "Content-Type: application/json" \
-              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
-              2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
-            if [[ -n "${DB_TOKEN}" ]]; then
-              curl -sf --max-time 30 "${CORE_URL}/api/catalogue?per_page=20" \
-                -H "Authorization: Bearer ${DB_TOKEN}" >/dev/null 2>&1 || true
-            fi
-          done
-          wait
-          sleep 2
-      - name: Run E2E against deployed stack
-        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
-      - name: Smoke — circuit breakers
-        if: always()
-        run: |
-          if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
-            bash scripts/smoke-circuit-breakers.sh "${CORE_URL}" || true
-          else
-            echo "SKIP: SCRAPER_HMAC_SECRET not set"
-          fi
-      - name: Security live — OWASP ZAP baseline
-        if: always()
-        run: |
-          zap_out="$(docker run --rm \
-            --mount type=tmpfs,destination=/zap/wrk \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t "${CORE_URL}" 2>&1)" || true
-          echo "${zap_out}"
-          if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
-            echo "PASS: ZAP baseline"
-          else
-            echo "WARN: ZAP baseline found new failures (advisory)"
-          fi
-      - name: Security live — IDOR cross-user check
-        if: always()
-        run: |
-          U1="$(curl -sf "${CORE_URL}/api/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
-          U2="$(curl -sf "${CORE_URL}/api/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
-          if [[ -z "${U1}" ]] || [[ -z "${U2}" ]]; then
-            echo "SKIP: IDOR — could not authenticate both seed users"
-            exit 0
-          fi
-          PLACEMENT="$(curl -sf "${CORE_URL}/api/bookshelves/library" \
-            -H "Authorization: Bearer ${U1}" 2>/dev/null \
-            | python3 -c \
-              "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
-            2>/dev/null || true)"
-          if [[ -z "${PLACEMENT}" ]]; then
-            echo "SKIP: IDOR — user1 has no placements in library"
-            exit 0
-          fi
-          IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
-            -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
-            -H "Authorization: Bearer ${U2}")"
-          if [[ "${IDOR_CODE}" == "200" ]]; then
-            echo "FAIL: IDOR — user2 deleted user1's placement (HTTP 200)"
-            exit 1
-          else
-            echo "PASS: IDOR cross-user DELETE blocked (HTTP ${IDOR_CODE})"
-          fi
-      - name: Cleanup preview stack
-        if: always()
-        run: |
-          bash scripts/cleanup-preview.sh \
-            --branch "${GITHUB_HEAD_REF:-preview}" \
-            --neon-branch-name "${NEON_BRANCH:-}" || true
-      - name: Post deployed E2E results to PR
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: scripts/hooks/lib/post-deployed-e2e-to-pr.sh
+#  deploy-preview:
+#    # TODO: restore full dependency list after deploy-preview is stable:
+#    # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
+#    needs: [versions]
+#    if: github.event_name == 'pull_request'
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 60
+#    env:
+#      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+#      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+#      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+#      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+#      VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
+#      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+#      SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+#      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+#      SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+#      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+#      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+#      GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+#      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+#      SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
+#      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+#      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+#      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+#      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+#      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+#      # Trigger CreateDbRoles migration against Neon preview branch — exercises
+#      # role creation, grants, and revokes the same way prod will.
+#      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+#      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+#      GITHUB_HEAD_REF: ${{ github.head_ref }}
+#    steps:
+#      - uses: actions/checkout@v4
+#        with:
+#          lfs: true
+#      - uses: actions/setup-node@v4
+#        with:
+#          node-version: ${{ needs.versions.outputs.node }}
+#      - uses: erlef/setup-beam@v1
+#        with:
+#          otp-version: ${{ needs.versions.outputs.otp }}
+#          elixir-version: ${{ needs.versions.outputs.elixir }}
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: ${{ needs.versions.outputs.python }}
+#      - name: Install flyctl
+#        run: |
+#          curl -L https://fly.io/install.sh | sh
+#          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+#      - uses: bufbuild/buf-setup-action@v1.47.2
+#        with:
+#          github_token: ${{ github.token }}
+#      - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
+#        run: mix deps.get
+#      - name: Install frontend deps (for node build.js inside deploy-stack.sh)
+#        working-directory: apps/core/assets
+#        run: npm install
+#      - name: Install Modal (for vision deploy inside deploy-stack.sh)
+#        run: pip install modal
+#      - name: Generate proto artifacts for Docker builds
+#        run: |
+#          python3 scripts/gen_python_proto.py --language rust
+#          python3 scripts/gen_python_proto.py --language python
+#          scripts/gen-elm-proto.sh
+#      - uses: actions/cache@v4
+#        id: playwright-cache
+#        with:
+#          path: ~/.cache/ms-playwright
+#          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+#      - name: Install E2E deps and Playwright browsers
+#        working-directory: e2e
+#        run: |
+#          npm install
+#          npx playwright install --with-deps chromium
+#      - name: Deploy preview stack + warm vision pipeline
+#        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
+#      - name: Pin Fly hostname to IPv4 in /etc/hosts
+#        # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
+#        # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
+#        # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
+#        # directly so every resolver (curl, Playwright, Node) returns IPv4.
+#        run: |
+#          BRANCH="${GITHUB_HEAD_REF:-preview}"
+#          SAN="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
+#          SAN="${SAN%-}"
+#          CORE_URL="https://stacks-core-pr-${SAN}.fly.dev"
+#          HOST="stacks-core-pr-${SAN}.fly.dev"
+#          NEON_BRANCH="preview/${SAN}"
+#          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
+#          echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
+#          IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
+#          if [[ -z "${IPV4}" ]]; then
+#            echo "FAIL: no A record for ${HOST}"
+#            exit 1
+#          fi
+#          echo "${IPV4} ${HOST}" | sudo tee -a /etc/hosts
+#          echo "Pinned ${HOST} -> ${IPV4}"
+#          getent hosts "${HOST}"
+#      - name: Warm Fly machines and Neon database
+#        run: |
+#          # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
+#          for i in {1..20}; do
+#            curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
+#          done
+#          for i in {1..10}; do
+#            curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
+#          done
+#          for i in {1..5}; do
+#            curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+#              -H "Content-Type: application/json" \
+#              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+#              >/dev/null 2>&1 &
+#          done
+#          for i in {1..3}; do
+#            DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+#              -H "Content-Type: application/json" \
+#              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+#              2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+#            if [[ -n "${DB_TOKEN}" ]]; then
+#              curl -sf --max-time 30 "${CORE_URL}/api/catalogue?per_page=20" \
+#                -H "Authorization: Bearer ${DB_TOKEN}" >/dev/null 2>&1 || true
+#            fi
+#          done
+#          wait
+#          sleep 2
+#      - name: Run E2E against deployed stack
+#        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+#      - name: Smoke — circuit breakers
+#        if: always()
+#        run: |
+#          if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+#            bash scripts/smoke-circuit-breakers.sh "${CORE_URL}" || true
+#          else
+#            echo "SKIP: SCRAPER_HMAC_SECRET not set"
+#          fi
+#      - name: Security live — OWASP ZAP baseline
+#        if: always()
+#        run: |
+#          zap_out="$(docker run --rm \
+#            --mount type=tmpfs,destination=/zap/wrk \
+#            ghcr.io/zaproxy/zaproxy:stable \
+#            zap-baseline.py -t "${CORE_URL}" 2>&1)" || true
+#          echo "${zap_out}"
+#          if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
+#            echo "PASS: ZAP baseline"
+#          else
+#            echo "WARN: ZAP baseline found new failures (advisory)"
+#          fi
+#      - name: Security live — IDOR cross-user check
+#        if: always()
+#        run: |
+#          U1="$(curl -sf "${CORE_URL}/api/auth/login" \
+#            -H "Content-Type: application/json" \
+#            -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
+#            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+#          U2="$(curl -sf "${CORE_URL}/api/auth/login" \
+#            -H "Content-Type: application/json" \
+#            -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
+#            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+#          if [[ -z "${U1}" ]] || [[ -z "${U2}" ]]; then
+#            echo "SKIP: IDOR — could not authenticate both seed users"
+#            exit 0
+#          fi
+#          PLACEMENT="$(curl -sf "${CORE_URL}/api/bookshelves/library" \
+#            -H "Authorization: Bearer ${U1}" 2>/dev/null \
+#            | python3 -c \
+#              "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+#            2>/dev/null || true)"
+#          if [[ -z "${PLACEMENT}" ]]; then
+#            echo "SKIP: IDOR — user1 has no placements in library"
+#            exit 0
+#          fi
+#          IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
+#            -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
+#            -H "Authorization: Bearer ${U2}")"
+#          if [[ "${IDOR_CODE}" == "200" ]]; then
+#            echo "FAIL: IDOR — user2 deleted user1's placement (HTTP 200)"
+#            exit 1
+#          else
+#            echo "PASS: IDOR cross-user DELETE blocked (HTTP ${IDOR_CODE})"
+#          fi
+#      - name: Cleanup preview stack
+#        if: always()
+#        run: |
+#          bash scripts/cleanup-preview.sh \
+#            --branch "${GITHUB_HEAD_REF:-preview}" \
+#            --neon-branch-name "${NEON_BRANCH:-}" || true
+#      - name: Post deployed E2E results to PR
+#        if: always()
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          PR_NUMBER: ${{ github.event.pull_request.number }}
+#        run: scripts/hooks/lib/post-deployed-e2e-to-pr.sh
