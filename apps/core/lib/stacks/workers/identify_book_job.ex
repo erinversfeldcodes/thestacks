@@ -102,7 +102,11 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
-    query = from(i in UploadedImage, where: i.id == ^image_id)
+    # Scope the update to rows still in `pending` so Oban retries that re-enter
+    # this path after a successful run do not re-touch the row and double-emit
+    # the [:stacks, :upload, :terminal] telemetry event. Only a real
+    # pending -> resolved transition fires the counter.
+    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
       Repo.update_all(
@@ -145,7 +149,11 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   defp mark_rejected(image_id, reason) do
-    query = from(i in UploadedImage, where: i.id == ^image_id)
+    # Scope to rows still in `pending` so an Oban retry that re-enters this
+    # path after a successful rejection cannot re-emit
+    # [:stacks, :upload, :terminal]. Only real pending -> rejected transitions
+    # fire the counter.
+    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
       Repo.update_all(

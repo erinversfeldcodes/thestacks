@@ -186,5 +186,38 @@ defmodule Stacks.UploadTerminalTelemetryTest do
 
       refute_receive {:terminal, _measurements, _metadata}, 500
     end
+
+    test "running IdentifyBookJob against an already-resolved image does NOT re-emit telemetry",
+         %{user: user, book: book} do
+      # Regression for Issue #136 Phase 1 revision cycle 1:
+      # `mark_resolved` / `mark_rejected` previously UPDATEd the row
+      # unconditionally, which meant an Oban retry that re-entered the
+      # success path on an already-resolved row would re-fire the terminal
+      # counter. The fix scopes the update to `status = "pending"` so only
+      # real pending -> terminal transitions emit the event.
+      attach_terminal_handler()
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          user_id: user.id,
+          book_id: book.id,
+          book_ids: [book.id]
+        )
+
+      {:ok, _job} =
+        Oban.insert(
+          IdentifyBookJob.new(%{
+            "user_id" => user.id,
+            "image_id" => image.id,
+            "image_b64" => @image_b64
+          })
+        )
+
+      Oban.drain_queue(queue: :vision)
+
+      # No terminal event — the row was already in a terminal state.
+      refute_receive {:terminal, _measurements, _metadata}, 500
+    end
   end
 end
