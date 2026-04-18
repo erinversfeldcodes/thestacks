@@ -85,6 +85,12 @@ else
   if System.get_env("SMOKE_TESTS_ENABLED") in ~w(true 1) do
     config :core, :smoke_tests_enabled, true
   end
+
+  # Bearer token accepted by StacksWeb.Plugs.MetricsAuth for `/internal/metrics`.
+  # Fly 6PN callers bypass the token check; this is the fallback for external
+  # scrapers (e.g. the SLO gate in CI, Issue #136). Leaving it unset means only
+  # 6PN callers can scrape.
+  config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
 end
 
 # ── Prod-only (release) ───────────────────────────────────────────────────────
