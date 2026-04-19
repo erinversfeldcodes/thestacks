@@ -35,6 +35,14 @@ defmodule CoreWeb.Telemetry do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
+  # NOTE: The three `[:stacks, ...]` custom telemetry series
+  # (`:router_dispatch.stop`, `:upload.terminal`, `:fuse.state`) are now
+  # wired into Prometheus via `Core.PromEx.Plugins.Stacks` (see Issue
+  # #139). PromEx consumes plugin-returned metrics only, so defining them
+  # here too would either be dead weight or double-count. If a future
+  # change adds a second reporter (e.g. `TelemetryMetricsPrometheus.Core`
+  # attached directly), re-declare the three series here and in the
+  # plugin — don't point them at the same reporter twice.
   def metrics do
     [
       # ── Phoenix ───────────────────────────────────────────────────────
@@ -42,17 +50,6 @@ defmodule CoreWeb.Telemetry do
         unit: {:native, :millisecond}
       ),
       summary("phoenix.endpoint.stop.duration",
-        unit: {:native, :millisecond}
-      ),
-      # Phoenix emits `[:phoenix, :router_dispatch, :stop]` natively without
-      # a `:route_group` key. `CoreWeb.Telemetry.handle_router_dispatch_stop/4`
-      # listens on that event and re-emits under the Stacks-namespaced event
-      # below with `:route_group` merged in, so reporters attached to the
-      # series below do NOT double-count Phoenix's original emission.
-      summary("stacks.router_dispatch.stop.duration",
-        event_name: [:stacks, :router_dispatch, :stop],
-        measurement: :duration,
-        tags: [:route, :route_group],
         unit: {:native, :millisecond}
       ),
 
@@ -100,20 +97,12 @@ defmodule CoreWeb.Telemetry do
         tags: [:fuse_name],
         description: "Fuse blown events (circuit opened)"
       ),
-      last_value("stacks.fuse.state.state",
-        event_name: [:stacks, :fuse, :state],
-        measurement: :state,
-        tags: [:fuse_name],
-        description: "Current fuse state: 1 = healthy, 0 = blown"
-      ),
+      # `stacks.fuse.state` gauge is exported by `Core.PromEx.Plugins.Stacks`
+      # (see Issue #139); the series here would be redundant for PromEx.
 
       # ── Upload pipeline (Issue #136) ─────────────────────────────────
-      counter("stacks.upload.terminal.count",
-        event_name: [:stacks, :upload, :terminal],
-        measurement: :count,
-        tags: [:outcome],
-        description: "Uploaded image terminal outcome count (resolved/rejected/timeout)"
-      ),
+      # `stacks.upload.terminal` counter is exported by
+      # `Core.PromEx.Plugins.Stacks` (see Issue #139).
 
       # ── Budget Tracker (Issue #129) ──────────────────────────────────
       sum("stacks.budget.cost_recorded.amount_cents",
