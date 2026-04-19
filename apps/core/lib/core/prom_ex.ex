@@ -18,7 +18,8 @@ defmodule Core.PromEx do
       Plugins.Beam,
       {Plugins.Phoenix, router: CoreWeb.Router, endpoint: CoreWeb.Endpoint},
       {Plugins.Ecto, repos: [Core.Repo]},
-      {Plugins.Oban, oban_supervisors: [Oban]}
+      {Plugins.Oban, oban_supervisors: [Oban]},
+      Core.PromEx.Plugins.Stacks
     ]
   end
 
