@@ -7,19 +7,31 @@ kill_timeout = "5s"
 # The core app reaches SearXNG over Fly's private network at
 # http://thestacks-searxng.internal:8080 — no public IP is allocated.
 
+# Build our custom image that bakes settings.yml into /etc/searxng/ so
+# first boot sees the curated 5-engine config. The previous approach
+# (upstream `searxng/searxng:latest` + volume mount + post-deploy SFTP)
+# booted SearXNG with an empty volume, which fell back to the upstream
+# default engine set (hundreds of engines) and OOM-killed a 256MB VM
+# within seconds on every boot. After N restart attempts Fly suspended
+# the app, and the subsequent SFTP write never reached a running worker.
 [build]
-  image = "searxng/searxng:latest"
+  dockerfile = "searxng/Dockerfile"
 
 [env]
   SEARXNG_SETTINGS_PATH = "/etc/searxng/settings.yml"
 
-[mounts]
-  source = "searxng_settings"
-  destination = "/etc/searxng"
+# No `[mounts]` block: settings are baked into the image, so the volume
+# is no longer required. Removing the volume removes one boot-time
+# failure mode (Fly can't always mount a volume created in the same
+# deploy as the machine).
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "256mb"
+  # Bumped 256→512MB. Even with our 5-engine keep_only config, SearXNG's
+  # Python worker + granian + YAML load peaks around ~180MB during
+  # startup; 256MB left no headroom for OOM safety. The previous
+  # suspend-after-OOM loop repros at 256MB even with the baked config.
+  memory = "512mb"
 
 [[checks]]
   name = "alive"

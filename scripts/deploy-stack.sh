@@ -328,29 +328,67 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     fi
     fly apps create "${SEARXNG_APP}" 2>&1 || true
 
+    # If the previous deploy pushed the app into a `suspended` state (N
+    # consecutive OOM-kill restart attempts), resume before we try again.
+    # `fly apps resume` is idempotent — no-ops if the app isn't suspended.
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        fly apps resume "${SEARXNG_APP}" 2>&1 | grep -v "^Error" || true
+    fi
+
     fly secrets set \
         SEARXNG_SECRET_KEY="${SEARXNG_SECRET_KEY}" \
         --app "${SEARXNG_APP}" --stage
 
-    # Create volume for settings mount (required by fly.searxng.toml)
-    fly volumes create searxng_settings \
-        --app "${SEARXNG_APP}" \
-        --region iad \
-        --size 1 \
-        --yes 2>&1 || true
-
-    # Render settings.yml with the secret key
+    # Render settings.yml into the Docker build context. The Dockerfile
+    # COPYs `settings.rendered.yml` into `/etc/searxng/settings.yml`, so
+    # the first boot of the container sees our curated 5-engine config
+    # instead of the upstream default (which OOM-killed a 256MB VM
+    # within seconds). The rendered file is gitignored and cleaned up
+    # after the deploy.
     SETTINGS_TEMPLATE="${REPO_ROOT}/deploy/searxng/settings.yml"
-    SETTINGS_TMP="$(mktemp /tmp/searxng-settings-XXXXXX.yml)"
+    SETTINGS_RENDERED="${REPO_ROOT}/deploy/searxng/settings.rendered.yml"
     sed "s|__SEARXNG_SECRET_KEY__|${SEARXNG_SECRET_KEY}|g" \
-        "${SETTINGS_TEMPLATE}" > "${SETTINGS_TMP}"
+        "${SETTINGS_TEMPLATE}" > "${SETTINGS_RENDERED}"
+    trap '[[ -f "${SETTINGS_RENDERED:-/dev/null}" ]] && rm -f "${SETTINGS_RENDERED}"' EXIT
 
     _searxng_deploy_once() {
-        (fly deploy \
+        (cd "$REPO_ROOT" && fly deploy \
             --app "${SEARXNG_APP}" \
             --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
             --yes)
     }
+
+    # Post-deploy health probe. `fly deploy` returns 0 once the first
+    # machine "starts", which is NOT the same as "the app is healthy" —
+    # the previous SearXNG setup passed that initial check while the
+    # worker was already in its first OOM cycle, and the script happily
+    # declared success while Fly quietly suspended the app after N
+    # restarts.
+    #
+    # We SSH into SearXNG's own machine and curl localhost rather than
+    # routing through core (which hasn't been deployed yet at this point
+    # in the script). Fly's init keeps SSH responsive even when the main
+    # app process is crashing, so this reliably reports whether the
+    # worker is serving on :8080 right now.
+    _searxng_probe_healthy() {
+        local deadline=$(( $(date +%s) + 90 ))
+        local consecutive=0
+        while [[ $(date +%s) -lt $deadline ]]; do
+            if fly ssh console --app "${SEARXNG_APP}" \
+                -C "curl -sS -m 5 -o /dev/null -w %{http_code} http://localhost:8080/" \
+                2>/dev/null | grep -q "^200$"; then
+                consecutive=$((consecutive + 1))
+                if [[ $consecutive -ge 2 ]]; then
+                    return 0
+                fi
+            else
+                consecutive=0
+            fi
+            sleep 10
+        done
+        return 1
+    }
+
     _searxng_success=0
     if [[ "$PROD_MODE" -eq 1 ]]; then
         # SearXNG is a search-enrichment dependency, not a critical path for
@@ -359,26 +397,41 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         # behaviour; core already handles an empty SEARXNG_INTERNAL_URL by
         # degrading search gracefully.
         if deploy_with_retry "searxng" _searxng_deploy_once; then
-            _searxng_success=1
+            echo "==> Probing SearXNG health (up to 90s for two consecutive 200s)..."
+            if _searxng_probe_healthy; then
+                _searxng_success=1
+                echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
+            else
+                echo "WARN deploy: SearXNG deploy returned 0 but post-deploy probe failed — crash loop likely."
+            fi
         else
             echo "WARN deploy: SearXNG prod deployment failed after retry — core will degrade gracefully"
         fi
     else
         if _searxng_deploy_once; then
             _searxng_success=1
+            echo "PASS deploy: SearXNG deployed at ${SEARXNG_INTERNAL_URL} (preview — no health probe)"
         fi
     fi
-    if [[ "$_searxng_success" -eq 1 ]]; then
-        # Upload rendered settings to the running machine
-        fly ssh sftp shell --app "${SEARXNG_APP}" <<SFTP_EOF || true
-put ${SETTINGS_TMP} /etc/searxng/settings.yml
-SFTP_EOF
-        echo "PASS deploy: SearXNG deployed at ${SEARXNG_INTERNAL_URL}"
-    else
+
+    rm -f "${SETTINGS_RENDERED}"
+
+    if [[ "$_searxng_success" -eq 0 ]]; then
         echo "WARN deploy: SearXNG deployment failed — core will degrade gracefully"
         SEARXNG_INTERNAL_URL=""
+        # Clear the stale SEARXNG_URL from the core app so it doesn't keep
+        # calling a dead host. Without this, a previous successful deploy's
+        # SEARXNG_URL lingers on core and every request to the SearXNG
+        # fallback path (plus the /internal/deps-check probe) 503s on
+        # `:nxdomain`. Only unset when we're updating a known core app —
+        # during preview deploys CORE_APP is ephemeral and may not exist
+        # yet.
+        if [[ "$PROD_MODE" -eq 1 ]] && fly apps list 2>&1 | grep -q "^${CORE_APP} "; then
+            echo "==> Clearing stale SEARXNG_URL from ${CORE_APP}..."
+            fly secrets unset SEARXNG_URL --app "${CORE_APP}" --stage 2>&1 \
+                | grep -v "^Error: No secrets with" || true
+        fi
     fi
-    rm -f "${SETTINGS_TMP}"
 else
     echo "WARN: SEARXNG_SECRET_KEY not set — skipping SearXNG deploy."
     SEARXNG_INTERNAL_URL=""
