@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # scripts/probe-production.sh — synthetic probes for the SLO gate.
 #
-# Runs a bounded loop against the given base URL, issuing five probes in
+# Runs a bounded loop against the given base URL, issuing probes in
 # parallel every PROBE_INTERVAL_SECONDS for PROBE_WINDOW_SECONDS total:
 #   GET  /api/health
 #   GET  /api/catalogue?per_page=20
 #   POST /api/auth/login          (seed user)
-#   POST /api/upload              (canary image; final status read via SSE stream)
+#   POST /api/upload (×2)         two canary images fired in parallel:
+#                                  - real-book canary (photo.PNG):    expected outcome = resolved
+#                                  - not-a-book canary (not_a_book):  expected outcome = rejected
+#                                 Both reach terminal state; the gate's
+#                                 upload_success_rate SLI treats EITHER
+#                                 outcome as pipeline-healthy and only
+#                                 counts `timeout` as failure.
 #   GET  /internal/deps-check     (bearer-gated in-cluster SearXNG probe —
 #                                  skipped if METRICS_SCRAPE_TOKEN is unset,
 #                                  e.g. in local smoke runs)
@@ -53,7 +59,11 @@ WINDOW="${PROBE_WINDOW_SECONDS:-600}"
 INTERVAL="${PROBE_INTERVAL_SECONDS:-30}"
 SEED_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
 SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
-CANARY_IMAGE="${PROBE_CANARY_IMAGE:-${REPO_ROOT}/images/not_a_book.jpg}"
+# Two canaries fired each iteration to exercise both terminal paths of
+# the upload pipeline. Customisable for local smoke runs; the defaults
+# are the repo-checked-in images.
+CANARY_REAL_BOOK="${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/photo.PNG}"
+CANARY_NOT_A_BOOK="${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg}"
 
 # Short per-probe timeouts so a hung backend cannot stretch a single iteration
 # beyond the interval. The upload outcome poll has its own longer budget.
@@ -161,33 +171,37 @@ except: pass" 2>/dev/null || true)"
 }
 
 # ── Probe: POST /api/upload (canary) ─────────────────────────────────────────
-# Measures the POST's latency + status. The final outcome (resolved / rejected
-# / timeout) is streamed via SSE and stored in WORK_DIR/last_upload_outcome
-# for the summary. If no image is available, or no token, outcome is "error".
-probe_upload() {
+# Measures the POST's latency + status. The final outcome (resolved /
+# rejected / timeout) is streamed via SSE and stored per-canary in
+# WORK_DIR/last_upload_outcome_<name> for the summary. If no image or no
+# token, outcome is "error".
+_probe_upload_canary() {
+    local canary="$1"
+    local canary_name="$2"
     local t0 t1 http_code exit_code kind body_file body token image_id
     token=""
     if [[ -f "$WORK_DIR/last_token" ]]; then
         token="$(cat "$WORK_DIR/last_token")"
     fi
 
-    if [[ -z "$token" ]] || [[ ! -f "$CANARY_IMAGE" ]]; then
+    if [[ -z "$token" ]] || [[ ! -f "$canary" ]]; then
         # Record as error but still account for it — the gate may still pass
         # if availability across all probes is high enough.
         t0="$(_now_ms)"
         t1="$t0"
         _record_sample "$UPLOAD_LOG" "000" "0" "error"
-        echo "error" > "$WORK_DIR/last_upload_outcome"
+        echo "error" > "$WORK_DIR/last_upload_outcome_${canary_name}"
         return
     fi
 
-    body_file="$WORK_DIR/upload.body"
+    # Per-canary body file so parallel uploads don't clobber each other.
+    body_file="$WORK_DIR/upload_${canary_name}.body"
     t0="$(_now_ms)"
     http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
         -X POST "$BASE_URL/api/upload" \
         -H "Authorization: Bearer ${token}" \
-        -F "image=@${CANARY_IMAGE}" \
+        -F "image=@${canary}" \
         2>/dev/null)" || true
     exit_code=$?
     t1="$(_now_ms)"
@@ -202,7 +216,7 @@ try: print(json.load(sys.stdin).get('image_id','') or '')
 except: pass" 2>/dev/null || true)"
 
     if [[ -z "$image_id" ]] || [[ "$kind" != "ok" ]]; then
-        echo "${kind}" > "$WORK_DIR/last_upload_outcome"
+        echo "${kind}" > "$WORK_DIR/last_upload_outcome_${canary_name}"
         return
     fi
 
@@ -223,7 +237,19 @@ except Exception:
     if [[ -z "$final_status" ]]; then
         final_status="timeout"
     fi
-    echo "$final_status" > "$WORK_DIR/last_upload_outcome"
+    echo "$final_status" > "$WORK_DIR/last_upload_outcome_${canary_name}"
+}
+
+# Fire both canaries in parallel. Each iteration yields two terminal
+# outcomes feeding `stacks_upload_terminal_count_total` and hence the
+# gate's `upload_success_rate` SLI (resolved + rejected count as success,
+# only `timeout` counts as failure).
+probe_upload() {
+    _probe_upload_canary "$CANARY_REAL_BOOK" "real_book" &
+    local pid_real=$!
+    _probe_upload_canary "$CANARY_NOT_A_BOOK" "not_a_book" &
+    local pid_not=$!
+    wait "$pid_real" "$pid_not" 2>/dev/null || true
 }
 
 # ── Probe: GET /internal/deps-check ──────────────────────────────────────────
@@ -298,7 +324,12 @@ while :; do
 done
 
 # ── Summarise ────────────────────────────────────────────────────────────────
-UPLOAD_OUTCOME="$(cat "$WORK_DIR/last_upload_outcome" 2>/dev/null || echo "error")"
+# Combine the two canary outcomes into a single string for the summary.
+# Format: "<real_book>/<not_a_book>". Downstream consumers (test harness
+# + gate observation blob) treat this as opaque human-readable text.
+UPLOAD_OUTCOME_REAL="$(cat "$WORK_DIR/last_upload_outcome_real_book" 2>/dev/null || echo "error")"
+UPLOAD_OUTCOME_NOT_A_BOOK="$(cat "$WORK_DIR/last_upload_outcome_not_a_book" 2>/dev/null || echo "error")"
+UPLOAD_OUTCOME="${UPLOAD_OUTCOME_REAL}/${UPLOAD_OUTCOME_NOT_A_BOOK}"
 
 # Emit the final JSON via Python for correctness (quoting, nan handling, etc.)
 python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'

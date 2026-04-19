@@ -528,14 +528,25 @@ for group, threshold, name in [
         }
     )
 
-# Upload success rate (resolved / total terminal).
+# Upload pipeline completion rate.
 #
-# Previously defaulted to 1.0 when total_terminal == 0, which meant a
-# silent-scrape failure (zero rows parsed) produced a "perfect" score on
-# this SLI. Apply a min_samples guard like Oban / real_5xx_rate so we
-# only gate on a meaningful sample, and separately record whether the
-# sample was absent entirely — `metrics_scrape_healthy` below will
-# catch the observation-channel failure.
+# The probe fires two canaries per iteration — a real book image
+# (expected outcome: `resolved`) and a not-a-book image (expected
+# outcome: `rejected`). Both outcomes represent a pipeline that worked:
+# the POST accepted the image, storage persisted it, the IdentifyBookJob
+# ran, vision classified, and the async handler reached a terminal
+# state. Only `timeout` (the pipeline hung / vision never replied)
+# represents a genuine failure.
+#
+# The previous formula (`resolved / total`) hard-coded the happy-path
+# canary as the only "success", which meant the not-a-book canary
+# produced a 0% success rate on a perfectly healthy pipeline. Include
+# both resolved and rejected in the numerator.
+#
+# Apply a min_samples guard (matches Oban / real_5xx_rate pattern) so
+# low-traffic windows don't false-breach on a single timeout, and
+# separately record whether the sample was absent entirely —
+# `metrics_scrape_healthy` above catches scrape-channel failure.
 UPLOAD_MIN_SAMPLES = 5
 terminal = {
     r["labels"].get("outcome", ""): r["value"]
@@ -543,16 +554,20 @@ terminal = {
 }
 total_terminal = sum(terminal.values())
 resolved = terminal.get("resolved", 0)
-success_rate = (resolved / total_terminal) if total_terminal > 0 else 1.0
+rejected = terminal.get("rejected", 0)
+timeout = terminal.get("timeout", 0)
+completed = resolved + rejected
+denominator = completed + timeout
+success_rate = (completed / denominator) if denominator > 0 else 1.0
 upload_entry = {
     "name": "upload_success_rate",
     "value": round(success_rate, 4),
     "threshold": 0.90,
-    "samples": int(total_terminal),
+    "samples": int(denominator),
     "min_samples": UPLOAD_MIN_SAMPLES,
-    "breached": int(total_terminal) >= UPLOAD_MIN_SAMPLES and success_rate < 0.90,
+    "breached": int(denominator) >= UPLOAD_MIN_SAMPLES and success_rate < 0.90,
 }
-if int(total_terminal) < UPLOAD_MIN_SAMPLES:
+if int(denominator) < UPLOAD_MIN_SAMPLES:
     upload_entry["note"] = "below min_samples; not gating"
 slis.append(upload_entry)
 
