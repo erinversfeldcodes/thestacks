@@ -437,7 +437,75 @@ else
     _record_fail "metrics_scrape_healthy should be 1 on healthy fixture"
 fi
 
-# ── Case 14 (P2 #7): --out without a value exits non-zero ────────────────────
+# ── Case 14: upload SLI treats `rejected` as pipeline-healthy ────────────────
+# Reproduces the 2026-04-19 prod false-positive where every upload in the
+# gate window was a not-a-book canary (outcome=rejected). The old SLI
+# formula (resolved / total) reported 0.0 and breached; the new formula
+# ((resolved + rejected) / (resolved + rejected + timeout)) must stay
+# green because `rejected` is a healthy pipeline outcome (vision worked,
+# correctly classified as not-a-book). Only `timeout` counts as failure.
+test_case "upload_rejected_counts_as_healthy" \
+    "fixture with rejected>0 and timeout=0 → upload_success_rate green"
+rejected_fixture="$(mktemp)"
+cat > "$rejected_fixture" <<'EOF'
+# HELP stacks_upload_terminal_count_total Upload pipeline terminal outcomes.
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="resolved"} 0
+stacks_upload_terminal_count_total{outcome="rejected"} 20
+stacks_upload_terminal_count_total{outcome="timeout"} 0
+# HELP core_prom_ex_beam_memory_processes_total_bytes Memory allocated to :processes.
+# TYPE core_prom_ex_beam_memory_processes_total_bytes gauge
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$rejected_fixture" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$rejected_fixture" "$probe_fixture"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="upload_success_rate") | (.value == 1.0 and .breached == false)' \
+        >/dev/null 2>&1; then
+    _record_pass "upload_success_rate=1.0 and not breached with only rejected outcomes"
+else
+    _record_fail "upload_success_rate should be 1.0 when all terminals are rejected (no timeouts)"
+fi
+
+# ── Case 15: upload SLI breaches when timeout rate exceeds threshold ─────────
+# Positive check — the SLI must still gate on pipeline hangs. Fixture:
+# 5 resolved + 5 rejected + 3 timeout → (10 / 13) = 0.77, below the 0.90
+# threshold. The SLI should breach loudly.
+test_case "upload_timeout_breaches" \
+    "fixture with timeout > 10% of terminals → upload_success_rate breaches"
+timeout_fixture="$(mktemp)"
+cat > "$timeout_fixture" <<'EOF'
+# HELP stacks_upload_terminal_count_total Upload pipeline terminal outcomes.
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="resolved"} 5
+stacks_upload_terminal_count_total{outcome="rejected"} 5
+stacks_upload_terminal_count_total{outcome="timeout"} 3
+# HELP core_prom_ex_beam_memory_processes_total_bytes Memory allocated to :processes.
+# TYPE core_prom_ex_beam_memory_processes_total_bytes gauge
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$timeout_fixture" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$timeout_fixture" "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero when timeout rate breaches"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="upload_success_rate") | (.breached == true and .value < 0.90)' \
+        >/dev/null 2>&1; then
+    _record_pass "upload_success_rate correctly breaches on timeout-heavy fixture"
+else
+    _record_fail "upload_success_rate should breach when (resolved+rejected)/total < 0.90"
+fi
+
+# ── Case 16 (P2 #7): --out without a value exits non-zero ────────────────────
 test_case "out_flag_bounds_check" "--out with no following argument fails fast"
 probe_fixture="$(mktemp)"
 write_probe_fixture "$probe_fixture" "1.0" "resolved"
