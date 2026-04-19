@@ -20,6 +20,12 @@
 #   synthetic_probes (forwarded from probe summary),
 #   observations (misc raw counters for debugging).
 #
+# Min-samples floors (rate SLIs don't gate below these):
+#   Oban per-queue failure rate: 10 samples (OBAN_MIN_SAMPLES)
+#   Real traffic 5xx rate:       50 samples (HTTP_MIN_SAMPLES)
+# Below the floor, the SLI emits `samples`, `min_samples`, and a `note`
+# field explaining why it isn't gating.
+#
 # Exit 0 iff every SLI has breached=false; non-zero otherwise.
 #
 # Environment:
@@ -236,20 +242,47 @@ def parse_prom(text: str):
 
 
 # Load and merge across machines: SUM counters, MAX gauges.
+#
+# Names come directly from a PromEx 1.11 scrape with the default plugins
+# (Beam, Ecto, Phoenix, Oban, Application) on `otp_app: :core`. Built-in
+# plugins prefix every metric with `core_prom_ex_<plugin>_`; the custom
+# `Core.PromEx.Plugins.Stacks` plugin bypasses the auto-prefix so its
+# `stacks_*` names are exported verbatim. See Issue #140.
 COUNTER_NAMES = {
+    # Custom (Stacks plugin) — names are unprefixed by design.
     "stacks_upload_terminal_count_total",
-    "phoenix_endpoint_stop_total",
-    "prom_ex_oban_job_stop_total",
     "stacks_router_dispatch_stop_duration_milliseconds_bucket",
     "stacks_router_dispatch_stop_duration_milliseconds_sum",
     "stacks_router_dispatch_stop_duration_milliseconds_count",
-    "core_repo_query_queue_time_milliseconds_bucket",
-    "core_repo_query_queue_time_milliseconds_sum",
-    "core_repo_query_queue_time_milliseconds_count",
+    # Phoenix — counter of serviced requests (tagged by :status).
+    "core_prom_ex_phoenix_http_requests_total",
+    # Oban — the `_count` field on each distribution serves as the
+    # effective per-queue total for that outcome (success vs failure).
+    "core_prom_ex_oban_job_processing_duration_milliseconds_bucket",
+    "core_prom_ex_oban_job_processing_duration_milliseconds_sum",
+    "core_prom_ex_oban_job_processing_duration_milliseconds_count",
+    "core_prom_ex_oban_job_exception_duration_milliseconds_bucket",
+    "core_prom_ex_oban_job_exception_duration_milliseconds_sum",
+    "core_prom_ex_oban_job_exception_duration_milliseconds_count",
+    # Ecto — queue_time histogram.
+    "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket",
+    "core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum",
+    "core_prom_ex_ecto_repo_query_queue_time_milliseconds_count",
 }
+# BEAM memory is broken down per-category by PromEx; there is no single
+# `*_total_bytes` roll-up. Sum these at SLI-computation time to derive the
+# effective total memory footprint.
+BEAM_MEMORY_METRICS = (
+    "core_prom_ex_beam_memory_atom_total_bytes",
+    "core_prom_ex_beam_memory_binary_total_bytes",
+    "core_prom_ex_beam_memory_code_total_bytes",
+    "core_prom_ex_beam_memory_ets_total_bytes",
+    "core_prom_ex_beam_memory_persistent_term_total_bytes",
+    "core_prom_ex_beam_memory_processes_total_bytes",
+)
 GAUGE_NAMES = {
     "stacks_fuse_state_state",
-    "beam_memory_total_bytes",
+    *BEAM_MEMORY_METRICS,
 }
 
 
@@ -258,12 +291,22 @@ def label_key(labels):
 
 
 merged: dict[str, dict[tuple, dict]] = {}
+# Track per-machine BEAM memory totals separately so we can MAX across
+# machines after summing the per-category gauges within each machine. (A
+# naive MAX on each category independently would over-count when machines
+# have asymmetric category breakdowns.)
+per_machine_beam_bytes: list[float] = []
 for path in metric_files:
     try:
         with open(path) as f:
             parsed = parse_prom(f.read())
     except OSError:
         continue
+    machine_beam = 0.0
+    for mem_name in BEAM_MEMORY_METRICS:
+        for row in parsed.get(mem_name, []):
+            machine_beam += row["value"]
+    per_machine_beam_bytes.append(machine_beam)
     for name, rows in parsed.items():
         bucket = merged.setdefault(name, {})
         for row in rows:
@@ -402,6 +445,35 @@ slis.append(
     }
 )
 
+# Real-traffic 5xx rate (from PromEx Phoenix plugin).
+#
+# Synthetic probes only hit a handful of endpoints as the owner account.
+# An availability SLI derived from probes can pass while real user traffic
+# is 5xxing on other routes. Gate the rate of `status` labels starting
+# with "5" against all serviced requests. Apply a min-samples guard like
+# Oban so low-traffic windows don't false-breach on a single 500.
+HTTP_MIN_SAMPLES = 50
+http_total = 0.0
+http_5xx = 0.0
+for r in rows_for("core_prom_ex_phoenix_http_requests_total"):
+    status = str(r["labels"].get("status", ""))
+    http_total += r["value"]
+    if status.startswith("5"):
+        http_5xx += r["value"]
+http_rate = (http_5xx / http_total) if http_total > 0 else 0.0
+http_samples = int(http_total)
+http_entry = {
+    "name": "real_5xx_rate",
+    "value": round(http_rate, 4),
+    "threshold": 0.005,
+    "samples": http_samples,
+    "min_samples": HTTP_MIN_SAMPLES,
+    "breached": http_samples >= HTTP_MIN_SAMPLES and http_rate > 0.005,
+}
+if http_samples < HTTP_MIN_SAMPLES:
+    http_entry["note"] = "below min_samples; not gating"
+slis.append(http_entry)
+
 # Route-group p95 latency: auth, catalogue, upload.
 HIST = "stacks_router_dispatch_stop_duration_milliseconds_bucket"
 for group, threshold, name in [
@@ -437,16 +509,28 @@ slis.append(
 )
 
 # Oban per-queue failure rate.
+#
+# PromEx's Oban plugin emits two separate distribution families rather than
+# a single counter tagged by outcome:
+#   * `…_oban_job_processing_duration_*`  — [:oban, :job, :stop]      (success)
+#   * `…_oban_job_exception_duration_*`   — [:oban, :job, :exception] (failure)
+# The `_count` field on each histogram is the per-queue total sample count
+# for that outcome, which is exactly what we want for the failure-rate SLI.
+#
 # Reviewer P1 #4: a queue with 0 successes + 1 failure previously reported
 # 100% failure and breached the gate, even though the sample is meaningless.
 # Emit the SLI with raw `samples` and `min_samples` hints, and only mark it
 # breached when samples >= min_samples AND rate > threshold.
 OBAN_MIN_SAMPLES = 10
+OBAN_SUCCESS_COUNT = "core_prom_ex_oban_job_processing_duration_milliseconds_count"
+OBAN_FAILURE_COUNT = "core_prom_ex_oban_job_exception_duration_milliseconds_count"
 queues: dict[str, dict[str, float]] = {}
-for r in rows_for("prom_ex_oban_job_stop_total"):
+for r in rows_for(OBAN_SUCCESS_COUNT):
     q = r["labels"].get("queue", "unknown")
-    state = r["labels"].get("state", "unknown")
-    queues.setdefault(q, {})[state] = r["value"]
+    queues.setdefault(q, {"success": 0.0, "failure": 0.0})["success"] += r["value"]
+for r in rows_for(OBAN_FAILURE_COUNT):
+    q = r["labels"].get("queue", "unknown")
+    queues.setdefault(q, {"success": 0.0, "failure": 0.0})["failure"] += r["value"]
 for q, states in queues.items():
     fail = states.get("failure", 0.0)
     succ = states.get("success", 0.0)
@@ -480,7 +564,15 @@ for r in rows_for("stacks_fuse_state_state"):
     )
 
 # DB pool queue_time p95.
-db_p95 = histogram_p95("core_repo_query_queue_time_milliseconds_bucket")
+#
+# PromEx's Ecto plugin prefixes the metric with the otp_app + plugin name,
+# so the real series is `core_prom_ex_ecto_repo_query_queue_time_*`. The
+# previous parser looked for an un-prefixed `core_repo_query_queue_time_*`
+# name that PromEx does not emit, so this SLI silently reported 0 for every
+# production deploy (Issue #140).
+db_p95 = histogram_p95(
+    "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket"
+)
 slis.append(
     {
         "name": "db_pool_queue_p95_ms",
@@ -494,9 +586,13 @@ slis.append(
 # bytes so the raw value carries units. We also emit an MB-valued twin SLI
 # so the human-readable table has something operators recognise, but the
 # canonical SLI the gate compares against is the bytes form.
-beam_bytes = 0.0
-for r in rows_for("beam_memory_total_bytes"):
-    beam_bytes = max(beam_bytes, r["value"])
+#
+# PromEx breaks BEAM memory down per-category (atom, binary, code, ets,
+# persistent_term, processes) — there is no roll-up series. We sum the
+# categories WITHIN each machine, then MAX across machines. Falling back
+# to 0 ensures the test fixtures without any beam_memory_* rows still
+# produce a deterministic zero rather than crashing on max([]).
+beam_bytes = max(per_machine_beam_bytes) if per_machine_beam_bytes else 0.0
 beam_mb = int(beam_bytes / (1024 * 1024))
 beam_threshold_bytes = 400 * 1024 * 1024
 slis.append(

@@ -1,20 +1,12 @@
-# Prometheus exposition-format sample - "healthy" shape.
+# Prometheus exposition-format sample - "breached real_5xx_rate" shape.
 #
-# Derived from a real PromEx scrape of Core.PromEx in MIX_ENV=test, then
-# sanitised: dynamic values (uptime, process counts, gc counts, memory)
-# replaced with stable constants so the fixture is deterministic across
-# runs. Metric NAMES are exactly what PromEx 1.11 emits for an
-# `otp_app: :core` configuration with the Beam, Ecto, Phoenix, Oban, and
-# Application plugins plus the Core.PromEx.Plugins.Stacks custom plugin.
+# Copy of prom_sample_healthy.txt with 5xx responses added to two
+# high-traffic routes. All other invariants (latency, upload success,
+# fuse, Oban, BEAM memory) remain healthy — this fixture isolates the
+# real_5xx_rate SLI.
 #
-# Key invariants this fixture encodes for the SLO gate:
-#   - all route groups report p95 well under their thresholds
-#   - upload terminal counter: 95 resolved, 3 rejected, 2 timeout -> 95% success
-#   - no fuse open (state=1 for every fuse = healthy)
-#   - Oban default queue: 420 successes + 5 exceptions (~1.2% failure, under 5%)
-#   - Oban uploads queue: 95 successes + 2 exceptions (~2.1% failure, under 5%)
-#   - Ecto queue_time p95 <= 50ms (95% of waits fall into le=10 bucket)
-#   - BEAM memory ~120MB total, well under the 400MB threshold
+# Breach arithmetic: 2600 healthy 200s + 60 5xx = 60/2660 ≈ 2.26%, well
+# over the 0.5% threshold and well above the 50 HTTP_MIN_SAMPLES floor.
 
 # -- BEAM memory (per-category, sum = total) --
 # HELP core_prom_ex_beam_memory_persistent_term_total_bytes Memory allocated to :persistent_term.
@@ -114,6 +106,8 @@ core_prom_ex_phoenix_http_requests_total{action="index",controller="CoreWeb.Book
 core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.SessionController",host="thestacks-core.fly.dev",method="POST",path="/api/login",status="200"} 500
 core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.UploadController",host="thestacks-core.fly.dev",method="POST",path="/api/upload",status="200"} 95
 core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.UploadController",host="thestacks-core.fly.dev",method="POST",path="/api/upload",status="422"} 5
+core_prom_ex_phoenix_http_requests_total{action="index",controller="CoreWeb.BookshelfController",host="thestacks-core.fly.dev",method="GET",path="/api/bookshelves/:name",status="500"} 40
+core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.SessionController",host="thestacks-core.fly.dev",method="POST",path="/api/login",status="503"} 20
 
 # -- Ecto query metrics (core_prom_ex_ecto_repo_query_*) --
 # HELP core_prom_ex_ecto_repo_query_queue_time_milliseconds The time spent waiting to check out a database connection.
