@@ -1,0 +1,43 @@
+app = "thestacks-log-shipper"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "5s"
+
+# Internal-only app: no [[services]] / [http_service] block. The shipper
+# is a pure consumer of Fly's NATS log broadcast and a producer against
+# Axiom's HTTPS ingest — nothing else in the org needs to reach it.
+# Egress-only networking is sufficient.
+
+# Build our custom image that overlays `vector.toml` (PII scrub + Axiom
+# sink) on top of ghcr.io/superfly/fly-log-shipper. See
+# `deploy/log-shipper/Dockerfile`.
+[build]
+  dockerfile = "log-shipper/Dockerfile"
+
+[env]
+  # ORG is the Fly organisation slug. The ACCESS_TOKEN secret authenticates
+  # the NATS subscription under this org. For a personal Fly account the
+  # slug is literally "personal"; change here if you migrate to a team.
+  ORG = "personal"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # Vector's memory profile at our traffic level is ~80MB steady; 256MB
+  # is plenty and matches the smallest shared-cpu-1x tier. Bump only if
+  # log volume climbs and the shipper starts batching up a backlog
+  # (visible in `fly logs --app thestacks-log-shipper` as repeated
+  # "sink buffer full" warnings).
+  memory = "256mb"
+
+# Liveness check against Vector's built-in HTTP health endpoint. Vector
+# exposes :8686 for internal health + metrics by default; see
+# https://vector.dev/docs/reference/api/. fly-log-shipper's base image
+# leaves this enabled, so the check works without extra config.
+[[checks]]
+  name = "alive"
+  type = "http"
+  port = 8686
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"

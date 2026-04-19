@@ -685,6 +685,55 @@ else
     echo "WARN deploy: could not find running machine to run migrations/seeds"
 fi
 
+# ── Deploy log shipper (prod only) ────────────────────────────────────────────
+# One shipper per Fly org, not per preview. Fly's NATS log broadcast is
+# org-scoped (`logs.>` emits every app's stdout/stderr), so a single
+# subscriber captures core + vision + scraper + SearXNG + every preview
+# app — we'd waste money + burn Axiom quota running one per PR. The
+# preview branch of this script therefore skips the shipper entirely;
+# preview logs still reach Axiom via the single prod shipper.
+#
+# Graceful-on-failure: the shipper going down doesn't block a release.
+# Logs simply stop flowing to Axiom until the next successful deploy.
+# Monitor via Axiom-side "no ingest for N min" alerts (future work).
+#
+# First-deploy bootstrap: if `thestacks-log-shipper` doesn't exist yet,
+# `fly apps create` makes it, secrets stage, `fly deploy` builds the
+# image from deploy/log-shipper/Dockerfile. No manual operator step.
+if [[ "$PROD_MODE" -eq 1 ]] && [[ -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
+    LOG_SHIPPER_APP="${LOG_SHIPPER_APP:-thestacks-log-shipper}"
+    echo ""
+    echo "==> Deploying log shipper (app: ${LOG_SHIPPER_APP})..."
+
+    fly apps create "${LOG_SHIPPER_APP}" 2>&1 || true
+
+    # ORG is hardcoded in fly.log-shipper.toml [env], so we only stage
+    # the secret env vars. AXIOM_TOKEN / AXIOM_DATASET are empty-safe
+    # via the `${VAR:-}` expansion — a missing Axiom credential is
+    # surfaced as a Vector startup error rather than a script-level
+    # unbound-variable crash.
+    fly secrets set \
+        LOG_SHIPPER_ACCESS_TOKEN="${LOG_SHIPPER_ACCESS_TOKEN}" \
+        AXIOM_TOKEN="${AXIOM_TOKEN:-}" \
+        AXIOM_DATASET="${AXIOM_DATASET:-}" \
+        --app "${LOG_SHIPPER_APP}" --stage
+
+    _log_shipper_deploy_once() {
+        (cd "$REPO_ROOT" && fly deploy \
+            --app "${LOG_SHIPPER_APP}" \
+            --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
+            --yes)
+    }
+
+    if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
+        echo "PASS deploy: log shipper deployed"
+    else
+        echo "WARN deploy: log shipper deployment failed — logs will not ship this cycle, core unaffected"
+    fi
+elif [[ "$PROD_MODE" -eq 1 ]]; then
+    echo "WARN: LOG_SHIPPER_ACCESS_TOKEN not set — skipping log shipper deploy (logs will not persist beyond Fly's short retention)."
+fi
+
 # ── Output ───────────────────────────────────────────────────────────────────
 echo ""
 echo "PASS deploy: stack is live at ${CORE_URL}"
