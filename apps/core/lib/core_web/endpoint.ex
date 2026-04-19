@@ -41,6 +41,14 @@ defmodule CoreWeb.Endpoint do
   plug StacksWeb.Plugs.MetricsAuth
   plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
 
+  # Synthetic dependency probe for SLO gate cold-start coverage. Handled at
+  # the endpoint level (before the router) so it (a) never appears in
+  # `core_prom_ex_phoenix_http_requests_total` and therefore can't skew
+  # `real_5xx_rate`, (b) never triggers route-group tagging, and (c) short-
+  # circuits dependency-heavy Plug pipelines that the real `/api/*` routes
+  # run. Bearer auth is provided by the MetricsAuth plug above.
+  plug StacksWeb.Plugs.DepsCheck
+
   # Tag every request with a :route_group before the router dispatches so
   # phoenix.router_dispatch.stop metadata carries the group. Feeds the SLO
   # gate in Issue #136.

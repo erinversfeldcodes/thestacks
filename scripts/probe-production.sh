@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # scripts/probe-production.sh — synthetic probes for the SLO gate.
 #
-# Runs a bounded loop against the given base URL, issuing four probes in
+# Runs a bounded loop against the given base URL, issuing five probes in
 # parallel every PROBE_INTERVAL_SECONDS for PROBE_WINDOW_SECONDS total:
 #   GET  /api/health
 #   GET  /api/catalogue?per_page=20
-#   POST /api/auth/login    (seed user)
-#   POST /api/upload        (canary image; final status read via SSE stream)
+#   POST /api/auth/login          (seed user)
+#   POST /api/upload              (canary image; final status read via SSE stream)
+#   GET  /internal/deps-check     (bearer-gated in-cluster SearXNG probe —
+#                                  skipped if METRICS_SCRAPE_TOKEN is unset,
+#                                  e.g. in local smoke runs)
 #
 # Emits a JSON summary to stdout on completion:
 #   {
@@ -25,7 +28,10 @@
 # Environment variables:
 #   PROBE_WINDOW_SECONDS   default 600
 #   PROBE_INTERVAL_SECONDS default 30
-#   METRICS_SCRAPE_TOKEN   used only by the gate, ignored here
+#   METRICS_SCRAPE_TOKEN   bearer for /internal/deps-check. When unset,
+#                          the deps-check probe is silently skipped so the
+#                          script stays usable in local dev / smoke runs
+#                          that don't need the dependency probe.
 #   PROBE_SEED_EMAIL       default owner@thestacks.app
 #   PROBE_SEED_PASSWORD    default dev-password-123
 #
@@ -56,6 +62,7 @@ CATALOGUE_TIMEOUT=10
 LOGIN_TIMEOUT=15
 UPLOAD_POST_TIMEOUT=30
 UPLOAD_STREAM_TIMEOUT=90
+DEPS_CHECK_TIMEOUT=20
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -64,7 +71,8 @@ HEALTH_LOG="$WORK_DIR/health.log"
 CATALOGUE_LOG="$WORK_DIR/catalogue.log"
 LOGIN_LOG="$WORK_DIR/login.log"
 UPLOAD_LOG="$WORK_DIR/upload.log"
-: > "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG"
+DEPS_CHECK_LOG="$WORK_DIR/deps_check.log"
+: > "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG"
 
 # Records one sample as: "<status>\t<duration_ms>\t<kind>"
 # kind ∈ ok | http_5xx | http_4xx | timeout | error
@@ -218,6 +226,28 @@ except Exception:
     echo "$final_status" > "$WORK_DIR/last_upload_outcome"
 }
 
+# ── Probe: GET /internal/deps-check ──────────────────────────────────────────
+# Synchronously exercises in-cluster dependencies that the other probes don't
+# reach (currently just SearXNG; the endpoint is extensible). Short-circuits
+# when METRICS_SCRAPE_TOKEN is unset so local smoke runs without the token
+# don't record spurious 401s against availability.
+probe_deps_check() {
+    if [[ -z "${METRICS_SCRAPE_TOKEN:-}" ]]; then
+        return 0
+    fi
+
+    local t0 t1 http_code exit_code kind
+    t0="$(_now_ms)"
+    http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+        --max-time "$DEPS_CHECK_TIMEOUT" \
+        -H "Authorization: Bearer ${METRICS_SCRAPE_TOKEN}" \
+        "$BASE_URL/internal/deps-check" 2>/dev/null)" || true
+    exit_code=$?
+    t1="$(_now_ms)"
+    kind="$(_classify "$exit_code" "${http_code:-000}")"
+    _record_sample "$DEPS_CHECK_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
+}
+
 # ── Main sampling loop ───────────────────────────────────────────────────────
 START_TS="$(date +%s)"
 END_TS=$((START_TS + WINDOW))
@@ -238,11 +268,13 @@ while :; do
     pid_c=$!
     probe_login &
     pid_l=$!
+    probe_deps_check &
+    pid_d=$!
     # Wait for login so the upload probe has a fresh token.
     wait "$pid_l" 2>/dev/null || true
     probe_upload &
     pid_u=$!
-    wait "$pid_h" "$pid_c" "$pid_u" 2>/dev/null || true
+    wait "$pid_h" "$pid_c" "$pid_d" "$pid_u" 2>/dev/null || true
 
     now="$(date +%s)"
     if [[ "$now" -ge "$END_TS" ]]; then
@@ -269,7 +301,7 @@ done
 UPLOAD_OUTCOME="$(cat "$WORK_DIR/last_upload_outcome" 2>/dev/null || echo "error")"
 
 # Emit the final JSON via Python for correctness (quoting, nan handling, etc.)
-python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$UPLOAD_OUTCOME" <<'PY'
+python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'
 import json
 import sys
 
@@ -305,9 +337,10 @@ health = load(sys.argv[1])
 catalogue = load(sys.argv[2])
 login = load(sys.argv[3])
 upload = load(sys.argv[4])
-upload_outcome = sys.argv[5] or "error"
+deps_check = load(sys.argv[5])
+upload_outcome = sys.argv[6] or "error"
 
-all_samples = health + catalogue + login + upload
+all_samples = health + catalogue + login + upload + deps_check
 total = len(all_samples)
 # Availability treats 1xx/2xx/3xx as success; 4xx AND 5xx as failure. Timeouts
 # and connection errors also count as failures. The prior implementation only
@@ -327,6 +360,9 @@ p95_per_probe = {
     ),
     "login": p95([d for _, d, k in login if k in ("ok", "http_4xx", "http_5xx")]),
     "upload": p95([d for _, d, k in upload if k in ("ok", "http_4xx", "http_5xx")]),
+    "deps_check": p95(
+        [d for _, d, k in deps_check if k in ("ok", "http_4xx", "http_5xx")]
+    ),
 }
 
 summary = {
@@ -366,6 +402,7 @@ flat = {
     "p95_ms_catalogue": summary["p95_ms"]["catalogue"],
     "p95_ms_login": summary["p95_ms"]["login"],
     "p95_ms_upload": summary["p95_ms"]["upload"],
+    "p95_ms_deps_check": summary["p95_ms"]["deps_check"],
     "synthetic_probes_total": summary["synthetic_probes"]["total"],
     "synthetic_probes_succeeded": summary["synthetic_probes"]["succeeded"],
     "synthetic_probes_p95_ms": summary["synthetic_probes"]["p95_ms"],
