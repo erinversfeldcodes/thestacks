@@ -120,10 +120,25 @@ for m in json.load(sys.stdin):
                 if nc -z 127.0.0.1 "$port" 2>/dev/null; then break; fi
                 sleep 1
             done
-            curl -s --max-time 10 \
+            scrape_file="${LAST_SCRAPE_PREFIX}-${mid}.txt"
+            # Capture HTTP status alongside the body so we can discard
+            # unauthorized / error / empty responses instead of passing them
+            # to the parser as if they were valid scrapes. A 401 or 0-byte
+            # body would otherwise yield "no rows" downstream, which every
+            # one-sided threshold (`p95 > 500ms`, `mem > 400MB`) silently
+            # passes — the exact false-pass class Issue #140 was meant to
+            # eliminate, reappearing one layer deeper (observation rather
+            # than naming).
+            http_code=$(curl -sS --max-time 10 \
                 -H "Authorization: Bearer ${METRICS_SCRAPE_TOKEN}" \
-                "http://127.0.0.1:${port}/internal/metrics" \
-                > "${LAST_SCRAPE_PREFIX}-${mid}.txt" 2>/dev/null || true
+                -o "$scrape_file" \
+                -w "%{http_code}" \
+                "http://127.0.0.1:${port}/internal/metrics" 2>/dev/null || echo "000")
+            if [[ "$http_code" != "200" ]] || [[ ! -s "$scrape_file" ]]; then
+                body_size=$(wc -c < "$scrape_file" 2>/dev/null || echo 0)
+                echo "WARN scrape: machine=$mid http=$http_code size=$body_size — discarding"
+                rm -f "$scrape_file"
+            fi
             kill "$proxy_pid" 2>/dev/null || true
             wait "$proxy_pid" 2>/dev/null || true
         done <<< "$machine_ids"
@@ -445,6 +460,34 @@ slis.append(
     }
 )
 
+# Metrics-scrape liveness (observation-channel sentinel).
+#
+# Answers "did I actually see prod data?" — NOT "is prod healthy?". If the
+# scrape channel is broken (401 token mismatch, endpoint moved, parser
+# skew, auto-stopped machines, Fly proxy failure, PromEx downgrade that
+# renames every series), every metric-derived SLI computes to 0, and every
+# one-sided threshold (`p95 > X`, `mem > Y`) passes trivially. Probes use
+# a separate channel (public HTTPS, no token) so `availability=1.0` can
+# co-exist with total scrape blindness — as happened on the 2026-04-19
+# first-prod-deploy gate (commit acdad4b).
+#
+# We look for the most basic series PromEx emits by default — BEAM memory
+# and Phoenix HTTP requests. If both families are empty, there is no
+# scrape regardless of what rows_for(stacks_*) returns (a custom-plugin
+# regression would also appear as empty). Strict fail-closed: a zero here
+# is ALWAYS a breach, no min_samples escape.
+scrape_live = any(rows_for(n) for n in BEAM_MEMORY_METRICS) or bool(
+    rows_for("core_prom_ex_phoenix_http_requests_total")
+)
+slis.append(
+    {
+        "name": "metrics_scrape_healthy",
+        "value": 1 if scrape_live else 0,
+        "threshold": 1,
+        "breached": not scrape_live,
+    }
+)
+
 # Real-traffic 5xx rate (from PromEx Phoenix plugin).
 #
 # Synthetic probes only hit a handful of endpoints as the owner account.
@@ -492,6 +535,14 @@ for group, threshold, name in [
     )
 
 # Upload success rate (resolved / total terminal).
+#
+# Previously defaulted to 1.0 when total_terminal == 0, which meant a
+# silent-scrape failure (zero rows parsed) produced a "perfect" score on
+# this SLI. Apply a min_samples guard like Oban / real_5xx_rate so we
+# only gate on a meaningful sample, and separately record whether the
+# sample was absent entirely — `metrics_scrape_healthy` below will
+# catch the observation-channel failure.
+UPLOAD_MIN_SAMPLES = 5
 terminal = {
     r["labels"].get("outcome", ""): r["value"]
     for r in rows_for("stacks_upload_terminal_count_total")
@@ -499,14 +550,17 @@ terminal = {
 total_terminal = sum(terminal.values())
 resolved = terminal.get("resolved", 0)
 success_rate = (resolved / total_terminal) if total_terminal > 0 else 1.0
-slis.append(
-    {
-        "name": "upload_success_rate",
-        "value": round(success_rate, 4),
-        "threshold": 0.90,
-        "breached": success_rate < 0.90,
-    }
-)
+upload_entry = {
+    "name": "upload_success_rate",
+    "value": round(success_rate, 4),
+    "threshold": 0.90,
+    "samples": int(total_terminal),
+    "min_samples": UPLOAD_MIN_SAMPLES,
+    "breached": int(total_terminal) >= UPLOAD_MIN_SAMPLES and success_rate < 0.90,
+}
+if int(total_terminal) < UPLOAD_MIN_SAMPLES:
+    upload_entry["note"] = "below min_samples; not gating"
+slis.append(upload_entry)
 
 # Oban per-queue failure rate.
 #

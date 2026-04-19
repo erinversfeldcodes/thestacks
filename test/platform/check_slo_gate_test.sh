@@ -386,7 +386,58 @@ else
     _record_fail "real_5xx_rate non-zero or breached on healthy fixture"
 fi
 
-# ── Case 12 (P2 #7): --out without a value exits non-zero ────────────────────
+# ── Case 12: blind scrape (empty fixture) breaches metrics_scrape_healthy ────
+# Reproduces the 2026-04-19 first-prod-deploy false-pass, where a bearer-token
+# mismatch caused every /internal/metrics scrape to return 401 → 0-byte file
+# → every metric-derived SLI computed to 0 → every one-sided threshold passed.
+# The metrics_scrape_healthy sentinel must breach on empty input regardless
+# of which specific observation channel broke.
+test_case "blind_scrape_breaches_liveness" \
+    "empty fixture → metrics_scrape_healthy breach + gate exits non-zero"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+empty_fixture="$(mktemp)"
+: > "$empty_fixture"
+METRICS_FIXTURE="$empty_fixture" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture" "$empty_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero on empty scrape fixture"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="metrics_scrape_healthy") | .breached == true' \
+        >/dev/null 2>&1; then
+    _record_pass "metrics_scrape_healthy flagged as breached on empty scrape"
+else
+    _record_fail "metrics_scrape_healthy did not breach on empty scrape"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="upload_success_rate") | (.samples == 0 and .breached == false and has("note"))' \
+        >/dev/null 2>&1; then
+    _record_pass "upload_success_rate stays non-gating below min_samples"
+else
+    _record_fail "upload_success_rate should not gate with zero samples"
+fi
+
+# ── Case 13: healthy fixture satisfies metrics_scrape_healthy ────────────────
+test_case "healthy_scrape_liveness_ok" \
+    "healthy fixture → metrics_scrape_healthy value=1"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_healthy.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="metrics_scrape_healthy") | .value == 1 and .breached == false' \
+        >/dev/null 2>&1; then
+    _record_pass "metrics_scrape_healthy=1 on healthy fixture"
+else
+    _record_fail "metrics_scrape_healthy should be 1 on healthy fixture"
+fi
+
+# ── Case 14 (P2 #7): --out without a value exits non-zero ────────────────────
 test_case "out_flag_bounds_check" "--out with no following argument fails fast"
 probe_fixture="$(mktemp)"
 write_probe_fixture "$probe_fixture" "1.0" "resolved"
