@@ -353,11 +353,15 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     }
     _searxng_success=0
     if [[ "$PROD_MODE" -eq 1 ]]; then
+        # SearXNG is a search-enrichment dependency, not a critical path for
+        # authoring/reading books. A Fly brownout or upstream image outage
+        # should not block a core release. Retry-then-WARN matches preview
+        # behaviour; core already handles an empty SEARXNG_INTERNAL_URL by
+        # degrading search gracefully.
         if deploy_with_retry "searxng" _searxng_deploy_once; then
             _searxng_success=1
         else
-            rm -f "${SETTINGS_TMP}"
-            exit 1
+            echo "WARN deploy: SearXNG prod deployment failed after retry — core will degrade gracefully"
         fi
     else
         if _searxng_deploy_once; then
