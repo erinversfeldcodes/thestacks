@@ -90,58 +90,51 @@ if [[ "$TEST_MODE" -eq 0 ]]; then
     ) &
     PROBE_PID=$!
 
-    # Scrape loop. Every SCRAPE_INTERVAL seconds we enumerate machines and
-    # fetch /internal/metrics via a short-lived `fly proxy`. The LAST scrape
-    # per machine wins — the SLO gate looks at steady-state, not trends.
+    # Scrape loop. Every SCRAPE_INTERVAL seconds fetch /internal/metrics
+    # via the public HTTPS URL (https://${CORE_APP}.fly.dev). This is the
+    # same observation channel real users exercise, so HTTP auto-start
+    # fires for stopped machines (`auto_stop_machines = true` in
+    # deploy/fly.core.toml) and the scrape always lands on a warm target.
+    #
+    # The previous implementation used `fly proxy --select --machine <id>`
+    # to scrape each machine individually, but direct-machine proxies do
+    # NOT trigger HTTP auto-start — a stopped machine is just unreachable,
+    # which produced `http=000` on every iteration and false-passed the
+    # gate until `metrics_scrape_healthy` caught it.
+    #
+    # Tradeoff: Fly's public proxy load-balances across machines so each
+    # iteration lands on ONE machine (not all of them). We keep only the
+    # last-scrape file — Prometheus counters are cumulative per instance,
+    # so summing multiple scrapes would multiply counts. Steady-state
+    # from whichever machine served the final request is what the gate
+    # evaluates.
     SCRAPE_END=$(( $(date +%s) + WINDOW ))
-    LAST_SCRAPE_PREFIX="$WORK_DIR/last-scrape"
+    LAST_SCRAPE_FILE="$WORK_DIR/last-scrape.txt"
+    PUBLIC_METRICS_URL="https://${CORE_APP}.fly.dev/internal/metrics"
     while [[ $(date +%s) -lt $SCRAPE_END ]]; do
-        machine_ids="$(fly machines list --app "$CORE_APP" --json 2>/dev/null \
-            | python3 -c 'import json,sys
-for m in json.load(sys.stdin):
-    if m.get("state") == "started":
-        print(m["id"])
-' 2>/dev/null || true)"
-        if [[ -z "$machine_ids" ]]; then
-            sleep "$SCRAPE_INTERVAL"
-            continue
-        fi
-        while IFS= read -r mid; do
-            [[ -z "$mid" ]] && continue
-            # Reviewer P2 #8: random high-port per machine (20000–29999)
-            # prevents collisions with concurrent gate runs or a lingering
-            # proxy from a prior iteration.
-            port=$((RANDOM % 10000 + 20000))
-            fly proxy "${port}:4000" --app "$CORE_APP" --select --machine "$mid" \
-                >/dev/null 2>&1 &
-            proxy_pid=$!
-            # Wait briefly for the proxy to be ready.
-            for _ in 1 2 3 4 5; do
-                if nc -z 127.0.0.1 "$port" 2>/dev/null; then break; fi
-                sleep 1
-            done
-            scrape_file="${LAST_SCRAPE_PREFIX}-${mid}.txt"
-            # Capture HTTP status alongside the body so we can discard
-            # unauthorized / error / empty responses instead of passing them
-            # to the parser as if they were valid scrapes. A 401 or 0-byte
-            # body would otherwise yield "no rows" downstream, which every
-            # one-sided threshold (`p95 > 500ms`, `mem > 400MB`) silently
-            # passes — the exact false-pass class Issue #140 was meant to
-            # eliminate, reappearing one layer deeper (observation rather
-            # than naming).
-            http_code=$(curl -sS --max-time 10 \
-                -H "Authorization: Bearer ${METRICS_SCRAPE_TOKEN}" \
-                -o "$scrape_file" \
-                -w "%{http_code}" \
-                "http://127.0.0.1:${port}/internal/metrics" 2>/dev/null || echo "000")
-            if [[ "$http_code" != "200" ]] || [[ ! -s "$scrape_file" ]]; then
-                body_size=$(wc -c < "$scrape_file" 2>/dev/null || echo 0)
-                echo "WARN scrape: machine=$mid http=$http_code size=$body_size — discarding"
-                rm -f "$scrape_file"
+        # Note on `|| true`: curl's `-w "%{http_code}"` already writes
+        # "000" to stdout on connection failure, so we only need to
+        # stop `set -e` from killing the script. Using `|| echo "000"`
+        # would double-count ("000000") because both curl's `-w` and
+        # the fallback would emit.
+        http_code=$(curl -sS --max-time 30 \
+            -H "Authorization: Bearer ${METRICS_SCRAPE_TOKEN}" \
+            -o "$LAST_SCRAPE_FILE" \
+            -w "%{http_code}" \
+            "$PUBLIC_METRICS_URL" 2>/dev/null || true)
+        http_code="${http_code:-000}"
+        if [[ "$http_code" != "200" ]] || [[ ! -s "$LAST_SCRAPE_FILE" ]]; then
+            # Bash evaluates `<` redirection before the command runs,
+            # so `wc -c < "$scrape_file"` with a missing file prints a
+            # redirect error that trailing `2>/dev/null` can't catch.
+            # Gate the read on existence.
+            body_size=0
+            if [[ -f "$LAST_SCRAPE_FILE" ]]; then
+                body_size=$(wc -c < "$LAST_SCRAPE_FILE" | awk '{print $1}')
             fi
-            kill "$proxy_pid" 2>/dev/null || true
-            wait "$proxy_pid" 2>/dev/null || true
-        done <<< "$machine_ids"
+            echo "WARN scrape: http=$http_code size=$body_size — discarding"
+            rm -f "$LAST_SCRAPE_FILE"
+        fi
 
         now=$(date +%s)
         remaining=$(( SCRAPE_END - now ))
@@ -154,11 +147,12 @@ for m in json.load(sys.stdin):
     # Wait for the probe to finish.
     wait "$PROBE_PID" 2>/dev/null || true
 
-    # Collect the last scrape per machine.
-    for f in "${LAST_SCRAPE_PREFIX}"-*.txt; do
-        [[ -f "$f" ]] || continue
-        METRIC_FILES+=("$f")
-    done
+    # Collect the last scrape (one file since the public URL serves one
+    # machine per request). `rm -f` already ran on every discard path,
+    # so existence here means the last iteration succeeded.
+    if [[ -f "$LAST_SCRAPE_FILE" ]] && [[ -s "$LAST_SCRAPE_FILE" ]]; then
+        METRIC_FILES+=("$LAST_SCRAPE_FILE")
+    fi
 
     # Extract the probe JSON summary from the probe's stdout log. The probe
     # prints a line starting with `probe-summary-json: {...}`.
