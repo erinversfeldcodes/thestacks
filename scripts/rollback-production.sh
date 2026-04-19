@@ -13,6 +13,14 @@
 #   MODAL_PREV_COMMIT    Previous git sha for the modal app source — optional;
 #                        if unset, core rolls back and vision is skipped with
 #                        a loud warning (core is the critical path).
+#
+#                        Bootstrap note: on the very first production deploy
+#                        there is no prior `main-*` tag, so this will always
+#                        be empty. The first deploy therefore has no rollback
+#                        target; operators must accept that the first merge
+#                        to main cannot be auto-rolled-back. After the first
+#                        successful deploy `tag-main.yml` stamps a tag and
+#                        subsequent rollbacks restore vision correctly.
 #   MODAL_TOKEN_ID       Modal auth (required when MODAL_PREV_COMMIT is set).
 #   MODAL_TOKEN_SECRET   Modal auth (required when MODAL_PREV_COMMIT is set).
 #   ROLLBACK_REASON      Free-form string written to stdout + logs.

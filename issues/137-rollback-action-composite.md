@@ -56,6 +56,40 @@ Replace the current inline rollback step with a `uses: ./.github/actions/rollbac
 - [ ] Added to CI lint scope if composite actions are included.
 - [ ] Test: fire the workflow on a safe target (preview app) and confirm the action runs the rollback script correctly.
 
+## Secondary scope — migrate-before-image-cutover
+
+**Problem** (PE gate finding, 2026-04-19): `scripts/deploy-stack.sh` runs
+`fly deploy` (core image cutover, machines start serving traffic) *before*
+invoking `Stacks.Release.migrate()` inside the new container. If a migration
+partially applies and then raises, the failure path rolls back the image
+but leaves the schema half-applied. The expand-contract discipline usually
+makes this recoverable, but any multi-statement migration that executes
+statement N successfully before N+1 fails will leave the DB on a schema the
+rolled-back image was never written against.
+
+### Proposed fix
+Run migrations from the GitHub Actions runner against the Neon prod
+DATABASE_URL *before* the core image cutover:
+
+1. New step in `deploy-production.yml` between "Decompose DATABASE_URL" and
+   "Deploy core": run `mix ecto.migrate` using the release binary *or* the
+   source checkout with production Mix env. Fail the workflow before any
+   image cutover happens.
+2. Remove the in-container migrate invocation from `deploy-stack.sh`'s
+   post-deploy block (or keep as a no-op safety net — it'll find no pending
+   migrations on a healthy path).
+3. Keep `seed_prod` in-container (needs the running release env for Argon2
+   + encryption vault setup).
+
+### DoD additions
+- [ ] `deploy-production.yml` migrates against prod DATABASE_URL before
+  image cutover.
+- [ ] `deploy-stack.sh` no longer runs migrations as part of the core
+  deploy success path.
+- [ ] Test: a migration that raises mid-way aborts the workflow before
+  the new image is deployed (simulate with a throwaway migration against
+  a preview branch).
+
 ## Dependencies
 - Issue #136 — rollback-production.sh must exist and be stable.
 
@@ -63,4 +97,5 @@ Replace the current inline rollback step with a `uses: ./.github/actions/rollbac
 platform-agent.
 
 ## Progress Notes
-Created 2026-04-18 as follow-up from Issue #136 Phase 3 platform-reviewer finding.
+- 2026-04-18: Created as follow-up from Issue #136 Phase 3 platform-reviewer finding.
+- 2026-04-19: Added migrate-before-image-cutover secondary scope from PE gate finding — the rollback-action work and the migration-ordering fix both live in the deploy-production.yml surface and are cleaner bundled than split.
