@@ -351,8 +351,13 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         "${SETTINGS_TEMPLATE}" > "${SETTINGS_RENDERED}"
     trap '[[ -f "${SETTINGS_RENDERED:-/dev/null}" ]] && rm -f "${SETTINGS_RENDERED}"' EXIT
 
+    # CD into the Dockerfile's directory so Fly's remote builder uses it
+    # as the build context. Running this from the repo root produced a
+    # 2-byte context (root .dockerignore filtered everything) and the
+    # COPY settings.rendered.yml failed at build time. See the top
+    # comment in deploy/searxng/Dockerfile for the diagnosis.
     _searxng_deploy_once() {
-        (cd "$REPO_ROOT" && fly deploy \
+        (cd "$REPO_ROOT/deploy/searxng" && fly deploy \
             --app "${SEARXNG_APP}" \
             --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
             --yes)
@@ -718,8 +723,11 @@ if [[ "$PROD_MODE" -eq 1 ]] && [[ -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
         AXIOM_DATASET="${AXIOM_DATASET:-}" \
         --app "${LOG_SHIPPER_APP}" --stage
 
+    # CD into the Dockerfile's directory for the same reason as the
+    # SearXNG deploy above — CWD wins over --config's directory for
+    # Fly's build context.
     _log_shipper_deploy_once() {
-        (cd "$REPO_ROOT" && fly deploy \
+        (cd "$REPO_ROOT/deploy/log-shipper" && fly deploy \
             --app "${LOG_SHIPPER_APP}" \
             --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
             --yes)

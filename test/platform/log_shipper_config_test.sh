@@ -108,71 +108,71 @@ else
     _fail "fly_toml_build_dockerfile — build.dockerfile or app name wrong"
 fi
 
-# ── Case 4b: Dockerfile COPY path is reachable from Fly's build context ─────
-# Fly's build context defaults to the directory containing fly.toml
-# (i.e. deploy/). COPY paths in our Dockerfile are therefore relative
-# to deploy/, not to the Dockerfile's own directory. A bare
-# `COPY vector.toml` would fail at build time ("not found in context"),
-# with fly deploy returning non-zero — and deploy-stack.sh's
-# `deploy_with_retry` would then WARN and leave the app in a
-# created-but-never-deployed state.
+# ── Case 4b: Dockerfile COPY paths resolve in Fly's build context ───────────
+# deploy-stack.sh cd's into the Dockerfile's own directory before
+# invoking `fly deploy`, so Fly's remote builder uses CWD (the
+# Dockerfile's directory) as the build context. COPY paths in the
+# Dockerfile must therefore be relative to THAT directory.
 #
-# This test catches that class of bug by extracting each COPY source
-# path and confirming the corresponding file exists relative to
-# deploy/.
-_case "dockerfile_copy_paths_resolve_in_build_context" \
-    "Dockerfile COPY sources resolve relative to deploy/ (Fly's build context)"
-COPY_SOURCES="$(grep -E '^[[:space:]]*COPY[[:space:]]' \
-    "${REPO_ROOT}/deploy/log-shipper/Dockerfile" \
-    | awk '{print $2}')"
-if [[ -z "$COPY_SOURCES" ]]; then
-    _fail "dockerfile_copy_paths_resolve_in_build_context — no COPY lines found"
-else
-    all_ok=1
+# Running fly deploy from the repo root instead produces a 2-byte
+# build-context payload (verified empirically 2026-04-19) — the root
+# .dockerignore filters nearly everything — and the COPY fails with
+# `"settings.rendered.yml": not found`. Either way, deploy-stack.sh's
+# `deploy_with_retry` swallows the error into a WARN and the app sits
+# in a created-but-never-deployed state.
+#
+# This test prevents both regressions: a subdir-prefixed path (which
+# would break once we're cd'd into the subdir) and a missing source
+# file in the correct directory.
+_check_dockerfile_copy_paths() {
+    local dockerfile="$1"
+    local label="$2"
+    local dir
+    dir="$(dirname "$dockerfile")"
+    local sources
+    sources="$(grep -E '^[[:space:]]*COPY[[:space:]]' "$dockerfile" | awk '{print $2}')"
+    if [[ -z "$sources" ]]; then
+        _fail "${label} — no COPY lines found"
+        return
+    fi
+    local all_ok=1
     while IFS= read -r src; do
-        # Skip deploy-time-generated files by name (e.g. *.rendered.*).
-        # They don't exist at repo-check time but will at deploy time.
-        if [[ "$src" == *.rendered.* ]]; then
+        # Subdir-prefixed paths (e.g. `searxng/foo.yml`) are a regression
+        # — they'd break now that deploy-stack cd's INTO the subdir.
+        # A bare basename is correct.
+        if [[ "$src" == */* ]]; then
+            _fail "${label} — COPY source '${src}' has a subdir prefix; must be a bare basename relative to the Dockerfile's directory"
+            all_ok=0
             continue
         fi
-        if [[ ! -e "${REPO_ROOT}/deploy/${src}" ]]; then
-            _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${src} missing (COPY source in log-shipper Dockerfile)"
-            all_ok=0
-        fi
-    done <<< "$COPY_SOURCES"
-    if [[ "$all_ok" -eq 1 ]]; then
-        _pass "dockerfile_copy_paths_resolve_in_build_context — every COPY source resolves under deploy/"
-    fi
-fi
-
-# Also check the SearXNG Dockerfile — same class of bug, same file layout.
-SEARXNG_COPY_SOURCES="$(grep -E '^[[:space:]]*COPY[[:space:]]' \
-    "${REPO_ROOT}/deploy/searxng/Dockerfile" \
-    | awk '{print $2}')"
-if [[ -z "$SEARXNG_COPY_SOURCES" ]]; then
-    _fail "dockerfile_copy_paths_resolve_in_build_context — no COPY lines in searxng Dockerfile"
-else
-    all_ok=1
-    while IFS= read -r src; do
+        # Deploy-time-generated files (e.g. *.rendered.*) don't exist
+        # at test time; assert the *unrendered* template lives alongside.
         if [[ "$src" == *.rendered.* ]]; then
-            # settings.rendered.yml is generated at deploy time, not committed.
-            # Assert instead that the *unrendered* template lives alongside it.
-            unrendered="${src/.rendered/}"
-            if [[ ! -e "${REPO_ROOT}/deploy/${unrendered}" ]]; then
-                _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${unrendered} template missing (needed to produce ${src})"
+            local unrendered="${src/.rendered/}"
+            if [[ ! -e "${dir}/${unrendered}" ]]; then
+                _fail "${label} — ${dir}/${unrendered} template missing (needed to produce ${src} at deploy time)"
                 all_ok=0
             fi
             continue
         fi
-        if [[ ! -e "${REPO_ROOT}/deploy/${src}" ]]; then
-            _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${src} missing (COPY source in searxng Dockerfile)"
+        if [[ ! -e "${dir}/${src}" ]]; then
+            _fail "${label} — ${dir}/${src} missing (COPY source)"
             all_ok=0
         fi
-    done <<< "$SEARXNG_COPY_SOURCES"
+    done <<< "$sources"
     if [[ "$all_ok" -eq 1 ]]; then
-        _pass "dockerfile_copy_paths_resolve_in_build_context — searxng Dockerfile paths resolve too"
+        _pass "${label} — every COPY source resolves relative to the Dockerfile's directory"
     fi
-fi
+}
+
+_case "dockerfile_copy_paths_resolve_in_build_context" \
+    "Dockerfile COPY sources resolve relative to the Dockerfile's own directory"
+_check_dockerfile_copy_paths \
+    "${REPO_ROOT}/deploy/log-shipper/Dockerfile" \
+    "log-shipper Dockerfile"
+_check_dockerfile_copy_paths \
+    "${REPO_ROOT}/deploy/searxng/Dockerfile" \
+    "searxng Dockerfile"
 
 # ── Case 5: axiom sink reads token + dataset from env ────────────────────────
 _case "vector_toml_axiom_sink" "axiom sink uses env-interpolated token + dataset"

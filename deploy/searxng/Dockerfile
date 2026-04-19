@@ -5,13 +5,21 @@
 # upstream default (hundreds of engines, OOM-kills a 256/512MB VM in the
 # first 3 seconds).
 #
-# Build context: `deploy/` (Fly uses the directory containing fly.toml
-# as the build context by default; our fly.searxng.toml lives at
-# deploy/fly.searxng.toml). The rendered settings file is therefore
-# referenced as `searxng/settings.rendered.yml` — path is relative to
-# the build context, NOT to this Dockerfile's own directory.
-# scripts/deploy-stack.sh writes it via sed at deploy time; the rendered
-# copy is gitignored and cleaned up after the deploy.
+# Build context: `deploy/searxng/` (scripts/deploy-stack.sh cd's into
+# this directory before invoking `fly deploy`, so Fly's remote builder
+# treats CWD as the context and COPY paths below are relative to THIS
+# directory).
+#
+# Empirically verified 2026-04-19: running `fly deploy --config <abs>`
+# from the repo root collapses the build context to a 2-byte payload
+# (the root .dockerignore filters almost everything out) and the COPY
+# fails with `"settings.rendered.yml": not found`. Running from within
+# deploy/searxng/ yields a ~2 kB context containing exactly what we
+# need. CWD wins over --config's directory for Fly's context
+# resolution.
+#
+# The rendered settings file is written by sed at deploy time and
+# cleaned up after; see deploy/searxng/.gitignore.
 #
 # Why not a volume + post-deploy SFTP?
 # The previous approach mounted an empty `searxng_settings` volume, ran
@@ -30,7 +38,7 @@
 FROM searxng/searxng:latest
 
 # `settings.rendered.yml` is generated at deploy time by
-# scripts/deploy-stack.sh; see deploy/searxng/.gitignore. Path is
-# relative to the Fly build context (`deploy/`), so we prefix with the
-# subdirectory name.
-COPY searxng/settings.rendered.yml /etc/searxng/settings.yml
+# scripts/deploy-stack.sh and sits in the same directory as this
+# Dockerfile. Path is relative to the build context (this directory —
+# see top comment), hence the bare basename.
+COPY settings.rendered.yml /etc/searxng/settings.yml
