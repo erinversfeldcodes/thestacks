@@ -1,13 +1,21 @@
 defmodule StacksWeb.Plugs.MetricsAuth do
   @moduledoc """
-  Auth plug guarding `/internal/metrics`.
+  Bearer-token auth plug guarding every `/internal/*` route.
 
   A request is allowed through iff the `authorization` header is
   `Bearer <token>` where the token matches
   `Application.get_env(:core, :metrics_scrape_token)`.
 
-  Every other request is halted with `401`. Non-metrics paths pass through
-  untouched so the plug is safe to install at the endpoint.
+  Non-internal paths pass through untouched so the plug is safe to install
+  at the endpoint. Currently guards:
+
+    * `/internal/metrics`   — PromEx scrape target (Issue #136).
+    * `/internal/deps-check` — synthetic dependency probe (cold-start
+      coverage for SearXNG etc., Issue #136 post-launch follow-up).
+
+  The token is shared across all internal routes because the only caller
+  is the SLO gate — introducing per-route tokens would complicate rotation
+  without adding real isolation.
 
   ## Why bearer-only (no IP allowlist)
 
@@ -25,13 +33,13 @@ defmodule StacksWeb.Plugs.MetricsAuth do
 
   import Plug.Conn
 
-  @metrics_path "/internal/metrics"
+  @internal_prefix "/internal/"
 
   @impl Plug
   def init(opts), do: opts
 
   @impl Plug
-  def call(%Plug.Conn{request_path: @metrics_path} = conn, _opts) do
+  def call(%Plug.Conn{request_path: @internal_prefix <> _} = conn, _opts) do
     if authorized?(conn), do: conn, else: halt_with_401(conn)
   end
 
