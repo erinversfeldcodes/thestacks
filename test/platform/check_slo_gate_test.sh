@@ -245,7 +245,148 @@ else
     _record_fail "Oban SLI missing min_samples=10 hint"
 fi
 
-# ── Case 8 (P2 #7): --out without a value exits non-zero ─────────────────────
+# ── Case 8 (Issue #140): real PromEx scrape produces non-zero SLI values ─────
+# Anchors the parser against the real metric-name shape that PromEx 1.11
+# emits. If a future refactor silently drifts back to a non-existent metric
+# name (as #140 did before the fix), these assertions flip to zero and the
+# gate false-passes. Guard that by asserting the healthy fixture — which is
+# now derived from a real PromEx scrape — produces strictly positive values
+# for every SLI that reads a PromEx built-in series.
+test_case "real_scrape_produces_nonzero_slis" \
+    "healthy real-scrape fixture yields non-zero BEAM memory, DB pool p95, and Oban samples"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_healthy.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+BLOB="$(last_json)"
+assert_slis_value_gt() {
+    # assert_slis_value_gt <sli-name> <threshold> <message>
+    local sli="$1" threshold="$2" msg="$3"
+    local actual
+    actual="$(echo "$BLOB" | jq -r --arg n "$sli" \
+        '.slis[] | select(.name == $n) | .value' 2>/dev/null)"
+    if [[ -n "$actual" ]] && python3 -c "
+import sys
+try:
+    v = float('$actual')
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if v > $threshold else 1)
+" 2>/dev/null; then
+        _record_pass "$msg (value=$actual)"
+    else
+        _record_fail "$msg (value=$actual not > $threshold)"
+    fi
+}
+assert_slis_samples_gt() {
+    local sli="$1" threshold="$2" msg="$3"
+    local actual
+    actual="$(echo "$BLOB" | jq -r --arg n "$sli" \
+        '.slis[] | select(.name == $n) | .samples // 0' 2>/dev/null)"
+    if [[ -n "$actual" ]] && [[ "$actual" -gt "$threshold" ]]; then
+        _record_pass "$msg (samples=$actual)"
+    else
+        _record_fail "$msg (samples=$actual not > $threshold)"
+    fi
+}
+assert_slis_value_gt "beam_memory_bytes" 0 \
+    "BEAM memory bytes is non-zero on real-scrape-shaped fixture"
+assert_slis_value_gt "beam_memory_mb" 0 \
+    "BEAM memory MB is non-zero on real-scrape-shaped fixture"
+# db_pool_queue_p95 could be 0 if every sample is in the first bucket; with
+# the baked fixture (50 samples above the le=10 bucket) it interpolates > 0.
+assert_slis_value_gt "db_pool_queue_p95_ms" 0 \
+    "DB pool queue p95 is non-zero on real-scrape-shaped fixture"
+assert_slis_value_gt "auth_p95_ms" 0 \
+    "auth route p95 is non-zero on real-scrape-shaped fixture"
+assert_slis_value_gt "catalogue_p95_ms" 0 \
+    "catalogue route p95 is non-zero on real-scrape-shaped fixture"
+assert_slis_value_gt "upload_p95_ms" 0 \
+    "upload route p95 is non-zero on real-scrape-shaped fixture"
+# Oban queues — `samples` must include both success (processing_duration) and
+# failure (exception_duration) counts pulled from the two distinct
+# distribution families PromEx emits.
+assert_slis_samples_gt "oban_failure_rate_default" 0 \
+    "Oban default queue reports non-zero samples on real-scrape-shaped fixture"
+assert_slis_samples_gt "oban_failure_rate_uploads" 0 \
+    "Oban uploads queue reports non-zero samples on real-scrape-shaped fixture"
+
+# ── Case 9 (Issue #140): verbatim real PromEx capture also parses cleanly ────
+# The raw `prom_sample_real_scrape.txt` is the exact (sanitised) output from
+# a `PromEx.get_metrics(Core.PromEx)` call — no hand-curation of fixture
+# values. If this parses without crashing and surfaces non-zero BEAM memory,
+# the parser is aligned with PromEx's live format (including Erlang's
+# scientific-notation floats like `1.2e3`).
+test_case "real_scrape_raw_capture_parses" \
+    "raw PromEx capture parses and produces non-zero BEAM memory"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_real_scrape.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" | jq -e '.outcome' >/dev/null 2>&1; then
+    _record_pass "parser processed the raw PromEx scrape without error"
+else
+    _record_fail "parser failed to process the raw PromEx scrape"
+fi
+assert_slis_value_gt "beam_memory_bytes" 0 \
+    "BEAM memory bytes is non-zero on raw PromEx capture"
+
+# ── Case 10: real 5xx rate SLI gates on Phoenix http_requests_total ──────────
+# Fixture adds 60 5xx responses (status=500 + 503) to two routes on top of
+# 2600 healthy 200s. Expected rate ≈ 60/2660 = 2.26%, well over the 0.5%
+# threshold and above HTTP_MIN_SAMPLES=50. Healthy fixture already covered
+# by Case 1 (real_5xx_rate=0 → not breached).
+test_case "real_5xx_rate_breach_fails" \
+    "≥0.5% 5xx rate over HTTP_MIN_SAMPLES samples → real_5xx_rate breach"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_breached_5xx.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero when real 5xx rate breaches"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name=="real_5xx_rate") | .breached] | all' \
+        >/dev/null 2>&1; then
+    _record_pass "real_5xx_rate SLI flagged as breached"
+else
+    _record_fail "real_5xx_rate SLI not flagged breached on breached_5xx fixture"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="real_5xx_rate") | .samples >= 50' \
+        >/dev/null 2>&1; then
+    _record_pass "real_5xx_rate samples clear the min_samples floor"
+else
+    _record_fail "real_5xx_rate samples below min_samples floor; test fixture too small"
+fi
+
+# ── Case 11: healthy real-scrape real_5xx_rate is not flagged ────────────────
+# Sanity: the healthy fixture should produce a non-breached real_5xx_rate
+# with samples well above HTTP_MIN_SAMPLES and value 0.0.
+test_case "real_5xx_rate_healthy_not_breached" \
+    "healthy fixture has no 5xxes → real_5xx_rate passes"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_healthy.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="real_5xx_rate") | .value == 0 and .breached == false' \
+        >/dev/null 2>&1; then
+    _record_pass "real_5xx_rate=0 and not breached on healthy fixture"
+else
+    _record_fail "real_5xx_rate non-zero or breached on healthy fixture"
+fi
+
+# ── Case 12 (P2 #7): --out without a value exits non-zero ────────────────────
 test_case "out_flag_bounds_check" "--out with no following argument fails fast"
 probe_fixture="$(mktemp)"
 write_probe_fixture "$probe_fixture" "1.0" "resolved"

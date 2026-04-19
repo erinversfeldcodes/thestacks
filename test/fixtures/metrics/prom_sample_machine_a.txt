@@ -1,26 +1,46 @@
 # Machine A half of a two-machine scrape fixture.
-# Aggregation rules: counters SUM, gauges MAX across machines.
+# Aggregation rules: counters SUM across machines; gauges MAX across machines;
+# BEAM memory is SUMmed WITHIN each machine (across per-category gauges)
+# and then MAXed across machines.
 #
 # Combined upload terminal totals across A+B must equal the single-machine
 # healthy fixture: 95 resolved, 3 rejected, 2 timeout.
+#
+# Machine A is the heavier machine - its BEAM memory total sums to ~202 MB
+# (209715200+ bytes), so the MAX-across-machines aggregate picks A.
 
+# -- BEAM memory - machine A, ~202 MiB total --
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+core_prom_ex_beam_memory_binary_total_bytes 20971520
+core_prom_ex_beam_memory_code_total_bytes 62914560
+core_prom_ex_beam_memory_ets_total_bytes 41943040
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+core_prom_ex_beam_memory_processes_total_bytes 83886080
+
+# -- Upload terminal counter - half of the total --
 stacks_upload_terminal_count_total{outcome="resolved"} 50
 stacks_upload_terminal_count_total{outcome="rejected"} 1
 stacks_upload_terminal_count_total{outcome="timeout"} 1
 
-# BEAM memory — A is heavier than B. Aggregator should take MAX (200MB).
-beam_memory_total_bytes{type="total"} 209715200
-
-# All fuses closed (healthy).
+# -- All fuses closed (healthy) --
 stacks_fuse_state_state{fuse_name="vision_fuse"} 1
 stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
 stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
 stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
 stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
 
-# Sparse histogram for the upload group — aggregator should add counts.
+# -- Sparse router histogram - aggregator adds counts across machines --
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 40
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 50
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 50
 stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 50
 stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 20000
+
+# -- Ecto + Oban (healthy) --
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 1500
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 1500
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 1500
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 3100
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 1500
+core_prom_ex_oban_job_processing_duration_milliseconds_count{queue="default",state="success"} 210
+core_prom_ex_oban_job_exception_duration_milliseconds_count{queue="default",state="failure"} 2
