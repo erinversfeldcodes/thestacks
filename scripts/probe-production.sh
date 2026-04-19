@@ -62,7 +62,14 @@ SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
 # Two canaries fired each iteration to exercise both terminal paths of
 # the upload pipeline. Customisable for local smoke runs; the defaults
 # are the repo-checked-in images.
-CANARY_REAL_BOOK="${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/photo.PNG}"
+#
+# The "real book" canary is an ISBN barcode JPG — vision classifies it
+# as a book, extracts the ISBN, Open Library verifies, terminal
+# outcome = `resolved`. A previous iteration used `images/photo.PNG`
+# which turned out to be a HEIF file mislabelled with a `.PNG`
+# extension; PIL/Pillow on the vision service can't read HEIF without
+# `pillow-heif` so every real-book upload 502'd. Tracked in Issue #141.
+CANARY_REAL_BOOK="${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/barcode_isbn_clean.jpg}"
 CANARY_NOT_A_BOOK="${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg}"
 
 # Short per-probe timeouts so a hung backend cannot stretch a single iteration
