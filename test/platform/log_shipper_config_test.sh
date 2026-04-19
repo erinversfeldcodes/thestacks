@@ -108,6 +108,72 @@ else
     _fail "fly_toml_build_dockerfile — build.dockerfile or app name wrong"
 fi
 
+# ── Case 4b: Dockerfile COPY path is reachable from Fly's build context ─────
+# Fly's build context defaults to the directory containing fly.toml
+# (i.e. deploy/). COPY paths in our Dockerfile are therefore relative
+# to deploy/, not to the Dockerfile's own directory. A bare
+# `COPY vector.toml` would fail at build time ("not found in context"),
+# with fly deploy returning non-zero — and deploy-stack.sh's
+# `deploy_with_retry` would then WARN and leave the app in a
+# created-but-never-deployed state.
+#
+# This test catches that class of bug by extracting each COPY source
+# path and confirming the corresponding file exists relative to
+# deploy/.
+_case "dockerfile_copy_paths_resolve_in_build_context" \
+    "Dockerfile COPY sources resolve relative to deploy/ (Fly's build context)"
+COPY_SOURCES="$(grep -E '^[[:space:]]*COPY[[:space:]]' \
+    "${REPO_ROOT}/deploy/log-shipper/Dockerfile" \
+    | awk '{print $2}')"
+if [[ -z "$COPY_SOURCES" ]]; then
+    _fail "dockerfile_copy_paths_resolve_in_build_context — no COPY lines found"
+else
+    all_ok=1
+    while IFS= read -r src; do
+        # Skip deploy-time-generated files by name (e.g. *.rendered.*).
+        # They don't exist at repo-check time but will at deploy time.
+        if [[ "$src" == *.rendered.* ]]; then
+            continue
+        fi
+        if [[ ! -e "${REPO_ROOT}/deploy/${src}" ]]; then
+            _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${src} missing (COPY source in log-shipper Dockerfile)"
+            all_ok=0
+        fi
+    done <<< "$COPY_SOURCES"
+    if [[ "$all_ok" -eq 1 ]]; then
+        _pass "dockerfile_copy_paths_resolve_in_build_context — every COPY source resolves under deploy/"
+    fi
+fi
+
+# Also check the SearXNG Dockerfile — same class of bug, same file layout.
+SEARXNG_COPY_SOURCES="$(grep -E '^[[:space:]]*COPY[[:space:]]' \
+    "${REPO_ROOT}/deploy/searxng/Dockerfile" \
+    | awk '{print $2}')"
+if [[ -z "$SEARXNG_COPY_SOURCES" ]]; then
+    _fail "dockerfile_copy_paths_resolve_in_build_context — no COPY lines in searxng Dockerfile"
+else
+    all_ok=1
+    while IFS= read -r src; do
+        if [[ "$src" == *.rendered.* ]]; then
+            # settings.rendered.yml is generated at deploy time, not committed.
+            # Assert instead that the *unrendered* template lives alongside it.
+            unrendered="${src/.rendered/}"
+            if [[ ! -e "${REPO_ROOT}/deploy/${unrendered}" ]]; then
+                _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${unrendered} template missing (needed to produce ${src})"
+                all_ok=0
+            fi
+            continue
+        fi
+        if [[ ! -e "${REPO_ROOT}/deploy/${src}" ]]; then
+            _fail "dockerfile_copy_paths_resolve_in_build_context — deploy/${src} missing (COPY source in searxng Dockerfile)"
+            all_ok=0
+        fi
+    done <<< "$SEARXNG_COPY_SOURCES"
+    if [[ "$all_ok" -eq 1 ]]; then
+        _pass "dockerfile_copy_paths_resolve_in_build_context — searxng Dockerfile paths resolve too"
+    fi
+fi
+
 # ── Case 5: axiom sink reads token + dataset from env ────────────────────────
 _case "vector_toml_axiom_sink" "axiom sink uses env-interpolated token + dataset"
 if python3 -c "

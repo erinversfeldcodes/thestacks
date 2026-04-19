@@ -5,10 +5,13 @@
 # upstream default (hundreds of engines, OOM-kills a 256/512MB VM in the
 # first 3 seconds).
 #
-# Build context: `deploy/searxng/` — scripts/deploy-stack.sh renders
-# `settings.yml` into `settings.rendered.yml` (secret substituted) before
-# invoking `fly deploy`. The rendered file is gitignored and cleaned up
-# after the deploy.
+# Build context: `deploy/` (Fly uses the directory containing fly.toml
+# as the build context by default; our fly.searxng.toml lives at
+# deploy/fly.searxng.toml). The rendered settings file is therefore
+# referenced as `searxng/settings.rendered.yml` — path is relative to
+# the build context, NOT to this Dockerfile's own directory.
+# scripts/deploy-stack.sh writes it via sed at deploy time; the rendered
+# copy is gitignored and cleaned up after the deploy.
 #
 # Why not a volume + post-deploy SFTP?
 # The previous approach mounted an empty `searxng_settings` volume, ran
@@ -27,5 +30,7 @@
 FROM searxng/searxng:latest
 
 # `settings.rendered.yml` is generated at deploy time by
-# scripts/deploy-stack.sh; see deploy/searxng/.gitignore.
-COPY settings.rendered.yml /etc/searxng/settings.yml
+# scripts/deploy-stack.sh; see deploy/searxng/.gitignore. Path is
+# relative to the Fly build context (`deploy/`), so we prefix with the
+# subdirectory name.
+COPY searxng/settings.rendered.yml /etc/searxng/settings.yml

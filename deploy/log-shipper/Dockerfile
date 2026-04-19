@@ -5,7 +5,11 @@
 # the default vector.toml with our own — adding PII-scrubbing transforms
 # between the source and the Axiom sink.
 #
-# Build context: `deploy/log-shipper/`.
+# Build context: `deploy/` (Fly uses the directory containing fly.toml
+# as the build context by default; our fly.log-shipper.toml lives at
+# deploy/fly.log-shipper.toml). The vector config is therefore
+# referenced as `log-shipper/vector.toml` below — path is relative to
+# the build context, NOT to this Dockerfile's own directory.
 #
 # Why not build our own from scratch off timberio/vector? The NATS auth
 # flow against Fly's log broadcast is non-trivial (token exchange on
@@ -18,4 +22,4 @@
 # hadolint ignore=DL3007
 FROM ghcr.io/superfly/fly-log-shipper:latest
 
-COPY vector.toml /etc/vector/vector.toml
+COPY log-shipper/vector.toml /etc/vector/vector.toml
