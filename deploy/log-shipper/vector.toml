@@ -1,0 +1,79 @@
+# Vector config for thestacks-log-shipper.
+#
+# Subscribes to the Fly org's NATS log broadcast (every app in the org
+# emits structured log events onto `logs.>`), scrubs PII at this hop
+# before anything leaves Fly's private network, and forwards to Axiom.
+#
+# Runs inside a dedicated Fly app — see `deploy/fly.log-shipper.toml`.
+# Replaces the default `vector.toml` shipped with ghcr.io/superfly/fly-
+# log-shipper at /etc/vector/vector.toml via the Dockerfile in this
+# directory.
+#
+# Required env vars (staged via `fly secrets set` — see
+# scripts/deploy-log-shipper.sh):
+#   ORG                       — Fly organisation slug (the app's org;
+#                               "personal" for a personal Fly account).
+#                               Hardcoded in `[env]` on
+#                               `deploy/fly.log-shipper.toml` rather
+#                               than staged as a secret — it's not
+#                               sensitive.
+#   LOG_SHIPPER_ACCESS_TOKEN  — Fly API token used to authenticate the
+#                               NATS subscription. Generate via
+#                               `fly tokens create org --name
+#                               log-shipper --expiry 8760h`. The
+#                               `LOG_SHIPPER_` prefix disambiguates this
+#                               from Fly's generic `ACCESS_TOKEN`
+#                               convention, which tripped up earlier
+#                               secret-rotation work.
+#   AXIOM_TOKEN               — Axiom API token with Ingest permission
+#                               on the target dataset only (least-
+#                               privilege).
+#   AXIOM_DATASET             — Axiom dataset name, e.g.
+#                               "thestacks-prod-logs".
+#
+# ── Source ────────────────────────────────────────────────────────────
+# Fly broadcasts every app's stdout/stderr onto an internal NATS server
+# reachable from any app in the same org at [fdaa::3]:4223. The URL
+# embeds the ORG slug + LOG_SHIPPER_ACCESS_TOKEN as basic auth.
+[sources.fly]
+type = "nats"
+subject = "logs.>"
+url = "nats://${ORG}:${LOG_SHIPPER_ACCESS_TOKEN}@[fdaa::3]:4223"
+connection_name = "thestacks-log-shipper"
+
+# ── Transform: PII scrub ──────────────────────────────────────────────
+# Three classes of PII appear in The Stacks log output:
+#   - email addresses (login bodies, admin audit logs)
+#   - user UUIDs ("IdentifyBookJob: processing image X for user <uuid>")
+#   - IPv4 addresses (Plug logger, ingress access logs)
+#
+# Replace each with a fixed placeholder rather than a hash so operators
+# searching Axiom can pattern-match on "[REDACTED_EMAIL]" etc. to see
+# that a redaction happened, without recovering the original value.
+#
+# The transform runs BEFORE the sink, so PII never lands in Axiom. IP
+# and UUID patterns are slightly loose on purpose — false positives
+# (e.g. a hex string that happens to look like a UUID) are cheaper than
+# false negatives that leak real IDs.
+[transforms.scrub_pii]
+type = "remap"
+inputs = ["fly"]
+source = '''
+if exists(.message) {
+    msg = string!(.message)
+    msg = replace(msg, r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', "[REDACTED_EMAIL]")
+    msg = replace(msg, r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', "[UUID]")
+    msg = replace(msg, r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', "[IP]")
+    .message = msg
+}
+'''
+
+# ── Sink: Axiom ───────────────────────────────────────────────────────
+# Free tier: 500GB/month ingest, configurable retention (default 30
+# days). Dataset-scoped tokens so a compromised shipper can't touch
+# other datasets.
+[sinks.axiom]
+type = "axiom"
+inputs = ["scrub_pii"]
+token = "${AXIOM_TOKEN}"
+dataset = "${AXIOM_DATASET}"

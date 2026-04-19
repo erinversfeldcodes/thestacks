@@ -83,6 +83,15 @@ jobs:
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       METRICS_SCRAPE_TOKEN: ${{ secrets.METRICS_SCRAPE_TOKEN }}
+      # Log-shipper secrets. deploy-stack.sh's prod branch creates the
+      # `thestacks-log-shipper` Fly app (idempotent) and stages these on
+      # every deploy so rotating any of them happens on the next merge to
+      # main. An empty LOG_SHIPPER_ACCESS_TOKEN skips the shipper entirely
+      # with a WARN; that's intentional — logs just stop persisting to
+      # Axiom until a deploy runs with a populated token.
+      LOG_SHIPPER_ACCESS_TOKEN: ${{ secrets.LOG_SHIPPER_ACCESS_TOKEN }}
+      AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+      AXIOM_DATASET: ${{ secrets.AXIOM_DATASET }}
       # Prod-only: deploy-stack.sh (prod mode) stages these as Fly secrets
       # so Stacks.Release.seed_prod/0 can create exactly one owner user.
       # Idempotent: every deploy calls seed_prod; after the first run the
