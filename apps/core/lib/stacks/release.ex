@@ -124,12 +124,13 @@ defmodule Stacks.Release do
   end
 
   defp confirm_owner!(user) do
-    # Direct column update. The Accounts context does not expose a
-    # "mark confirmed" function today; if one appears in the future, prefer
-    # calling it over this inline changeset.
-    user
-    |> Ecto.Changeset.change(%{email_confirmed: true, email_confirmation_token: nil})
-    |> Core.Repo.update!()
+    case Stacks.Accounts.mark_confirmed(user) do
+      {:ok, confirmed} ->
+        confirmed
+
+      {:error, changeset} ->
+        raise "seed_prod: failed to confirm owner: #{format_changeset_errors(changeset)}"
+    end
   end
 
   defp format_changeset_errors(%Ecto.Changeset{} = changeset) do

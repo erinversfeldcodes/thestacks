@@ -161,6 +161,25 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
+  Marks a user's email as confirmed, clearing any pending confirmation token.
+
+  Used by the token-based confirmation flow (`Stacks.Email.confirm_email/1`)
+  and by trusted programmatic flows that bypass email verification
+  (`Stacks.Release.seed_prod/0`). Any future confirmation side effects
+  (audit, events, token cleanup across related channels) should be added
+  here so every caller picks them up automatically.
+  """
+  @spec mark_confirmed(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def mark_confirmed(%User{} = user) do
+    user
+    |> email_confirmation_changeset(%{
+      email_confirmed: true,
+      email_confirmation_token: nil
+    })
+    |> Repo.update()
+  end
+
+  @doc """
   Registers a new user. The first user on the platform receives the `owner` role.
 
   The user is created with `email_confirmed: false` and a confirmation token.
