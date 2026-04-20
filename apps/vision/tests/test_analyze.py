@@ -1,15 +1,17 @@
 """Tests for the /analyze endpoint — consolidated classify + extract.
 
-/analyze composes the classify and extract steps in a single HTTP round-trip,
-short-circuiting the extract step when the classifier says NOT_BOOK. These
-tests verify:
+/analyze now runs classification + extraction in a SINGLE Modal inference
+via `VisionClient.analyze`. These tests verify:
 
-- BOOK classification → both classify + extract run, response includes books
-- NOT_BOOK classification → extract is NOT called, books is []
-- AMBIGUOUS classification → extract is NOT called, books is []
-- Image URL and base64 input shapes both work
+- BOOK classification → response includes books extracted in the same call
+- NOT_BOOK classification → books is forced to [] regardless of model output
+- AMBIGUOUS classification → books is forced to []
 - Input validation: missing image/image_url → 422
 - HMAC auth is enforced (delegated to the same verify_hmac plug)
+
+Local OCR pre-pass is disabled by pointing `local_ocr_enabled` at False
+within each test (when needed). The default test settings already have
+local OCR disabled in conftest.
 """
 
 import base64
@@ -34,9 +36,10 @@ def _make_header(path: str = "/analyze") -> dict[str, str]:
 
 
 def test_analyze_returns_books_for_book_classification() -> None:
-    """Happy path: classifier says BOOK → extract runs → response has both."""
-    classify_output = {"classification": "book", "confidence": 0.95}
-    extract_output = {
+    """Happy path: single analyze call yields classification + books."""
+    analyze_output = {
+        "classification": "book",
+        "confidence": 0.95,
         "books": [
             {
                 "title": "The Great Gatsby",
@@ -45,19 +48,14 @@ def test_analyze_returns_books_for_book_classification() -> None:
                 "raw_text": None,
                 "confidence": 0.9,
             }
-        ]
+        ],
     }
     with (
         patch(
-            "app.services.vision_client.VisionClient.classify",
+            "app.services.vision_client.VisionClient.analyze",
             new_callable=AsyncMock,
-            return_value=classify_output,
-        ) as mock_classify,
-        patch(
-            "app.services.vision_client.VisionClient.extract",
-            new_callable=AsyncMock,
-            return_value=extract_output,
-        ) as mock_extract,
+            return_value=analyze_output,
+        ) as mock_analyze,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -72,25 +70,29 @@ def test_analyze_returns_books_for_book_classification() -> None:
     assert data["confidence"] == 0.95
     assert len(data["books"]) == 1
     assert data["books"][0]["potential_isbns"] == ["9780743273565"]
-    # Both underlying calls fired exactly once.
-    assert mock_classify.await_count == 1
-    assert mock_extract.await_count == 1
+    # Exactly ONE Modal invocation — the whole point of the consolidation.
+    assert mock_analyze.await_count == 1
 
 
-def test_analyze_short_circuits_on_not_book() -> None:
-    """NOT_BOOK classification → extract is NOT called, books is empty."""
-    classify_output = {"classification": "not_book", "confidence": 0.92}
+def test_analyze_forces_empty_books_on_not_book() -> None:
+    """NOT_BOOK classification → books is [] even if model returned data.
+
+    The prompt asks the model for `books: []` on non-books, but we enforce
+    it defensively on the server side — model output is a guideline, not a
+    wire contract.
+    """
+    analyze_output = {
+        "classification": "not_book",
+        "confidence": 0.92,
+        # Model misbehaves and returns data anyway — we must discard it.
+        "books": [{"title": "hallucinated", "author": "x", "potential_isbns": []}],
+    }
     with (
         patch(
-            "app.services.vision_client.VisionClient.classify",
+            "app.services.vision_client.VisionClient.analyze",
             new_callable=AsyncMock,
-            return_value=classify_output,
-        ) as mock_classify,
-        patch(
-            "app.services.vision_client.VisionClient.extract",
-            new_callable=AsyncMock,
-            return_value={"books": []},
-        ) as mock_extract,
+            return_value=analyze_output,
+        ) as mock_analyze,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -103,26 +105,22 @@ def test_analyze_short_circuits_on_not_book() -> None:
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_NOT_BOOK"
     assert data["books"] == []
-    # Crucial invariant: extract MUST NOT be invoked when classification != BOOK.
-    # Compromising this defeats the whole cost optimisation of /analyze vs
-    # running classify and extract in parallel.
-    assert mock_classify.await_count == 1
-    assert mock_extract.await_count == 0
+    assert mock_analyze.await_count == 1
 
 
-def test_analyze_short_circuits_on_ambiguous() -> None:
-    """AMBIGUOUS classification also skips extract — only BOOK triggers it."""
-    classify_output = {"classification": "ambiguous", "confidence": 0.45}
+def test_analyze_forces_empty_books_on_ambiguous() -> None:
+    """AMBIGUOUS classification → books forced to [] same as NOT_BOOK."""
+    analyze_output = {
+        "classification": "ambiguous",
+        "confidence": 0.45,
+        "books": [],
+    }
     with (
         patch(
-            "app.services.vision_client.VisionClient.classify",
+            "app.services.vision_client.VisionClient.analyze",
             new_callable=AsyncMock,
-            return_value=classify_output,
+            return_value=analyze_output,
         ),
-        patch(
-            "app.services.vision_client.VisionClient.extract",
-            new_callable=AsyncMock,
-        ) as mock_extract,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -135,27 +133,24 @@ def test_analyze_short_circuits_on_ambiguous() -> None:
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
     assert data["books"] == []
-    assert mock_extract.await_count == 0
 
 
 def test_analyze_with_empty_extraction_returns_empty_books() -> None:
     """BOOK classification + zero extractable candidates → empty books list.
 
-    This is the pipeline's "we think it's a book but couldn't read it" case.
-    The core Moderation code maps this to :isbn_not_found.
+    The pipeline's "we think it's a book but couldn't read it" case. Core
+    maps this to :isbn_not_found.
     """
-    classify_output = {"classification": "book", "confidence": 0.85}
-    extract_output: dict[str, list[dict[str, object]]] = {"books": []}
+    analyze_output: dict[str, object] = {
+        "classification": "book",
+        "confidence": 0.85,
+        "books": [],
+    }
     with (
         patch(
-            "app.services.vision_client.VisionClient.classify",
+            "app.services.vision_client.VisionClient.analyze",
             new_callable=AsyncMock,
-            return_value=classify_output,
-        ),
-        patch(
-            "app.services.vision_client.VisionClient.extract",
-            new_callable=AsyncMock,
-            return_value=extract_output,
+            return_value=analyze_output,
         ),
         TestClient(app) as client,
     ):
@@ -179,7 +174,6 @@ def test_analyze_missing_input_returns_422() -> None:
             json={},
             headers=_make_header(),
         )
-    # Pydantic's oneof validator runs before our handler, returning 422.
     assert response.status_code == 422
 
 

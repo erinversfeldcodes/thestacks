@@ -406,14 +406,21 @@ def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
     dependencies=[Depends(verify_hmac)],
 )
 async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
-    """Single-request classification + extraction.
+    """Single-request classification + extraction in ONE Modal inference.
 
-    Runs classify first and short-circuits on non-book inputs — extract is
-    only called when the classifier says BOOK. Matches the original
-    sequential /classify → /extract pipeline in core, collapsed into one
-    HTTP round-trip and one Modal container invocation. Avoids the double
-    cold-start + double-round-trip cost of the two-endpoint design without
-    wasting Modal compute on extract calls for non-books.
+    Flow:
+      1. Local OCR pre-pass — a clean barcode decode implies BOOK without
+         needing the vision model. ISBN barcodes have a checksum, so false
+         positives on non-books are effectively zero.
+      2. Single `client.analyze` call — one `model.generate()` yields both
+         `classification` and `books` via the combined `_ANALYZE_PROMPT`.
+         Replaces the prior classify-then-extract sequential pair which
+         doubled Modal RPCs (and cold-start exposure) with no dependency
+         between the two calls.
+
+    Non-book payloads are forced to `books: []` regardless of what the
+    model returned — the prompt asks for empty extraction on non-books but
+    the wire contract enforces it defensively.
     """
     log = logger.bind(endpoint="/analyze")
 
@@ -421,39 +428,30 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
+    if settings.local_ocr_enabled:
+        decoded = base64.b64decode(image_b64, validate=True)
+        isbn = local_isbn_scan(decoded)
+        if isbn is not None:
+            log.info("local OCR pre-pass hit", isbn=isbn)
+            return AnalyzeResponse(
+                classification=_CLF_BOOK,
+                confidence=1.0,
+                books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
+                model_used="local_ocr",
+            )
+
     client: VisionClient = request.app.state.vision_client
 
-    log.info("calling vision model for classification")
-    classify_parsed = await client.classify(image_b64)
-    classification, confidence = _parse_classification(classify_parsed)
+    log.info("calling vision model for analyze (classify + extract)")
+    parsed = await client.analyze(image_b64)
+    classification, confidence = _parse_classification(parsed)
+    books = _parse_extracted_books(parsed) if classification == _CLF_BOOK else []
     log.info(
-        "classification complete",
+        "analyze complete",
         classification=classification,
         confidence=confidence,
+        book_count=len(books),
     )
-
-    books: list[ExtractedBook] = []
-    if classification == _CLF_BOOK:
-        # Local OCR pre-pass: skip the vision model round-trip entirely when
-        # a barcode ISBN is already visible. Mirrors /extract's behaviour.
-        decoded = base64.b64decode(image_b64, validate=True)
-        if settings.local_ocr_enabled:
-            isbn = local_isbn_scan(decoded)
-            if isbn is not None:
-                log.info("local OCR pre-pass hit", isbn=isbn)
-                return AnalyzeResponse(
-                    classification=classification,
-                    confidence=confidence,
-                    books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
-                    model_used="local_ocr",
-                )
-
-        log.info("calling vision model for extraction")
-        extract_parsed = await client.extract([image_b64])
-        books = _parse_extracted_books(extract_parsed)
-        log.info("extraction complete", book_count=len(books))
-    else:
-        log.info("skipping extraction: classification != BOOK")
 
     return AnalyzeResponse(
         classification=classification,
