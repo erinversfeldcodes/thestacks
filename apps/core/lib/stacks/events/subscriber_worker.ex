@@ -91,8 +91,12 @@ defmodule Stacks.Events.SubscriberWorker do
     start = System.monotonic_time()
     tags = %{handler: inspect(handler), event_type: event.event_type}
 
+    # Event path matches the `event_name:` key on the PromEx
+    # Counter — NOT the full metric path. Telemetry.Metrics appends
+    # `:count, :total` to form the Prometheus name; callers emit on
+    # the shorter event path.
     :telemetry.execute(
-      [:stacks, :events, :handler_invoked, :count, :total],
+      [:stacks, :events, :handler_invoked],
       %{count: 1},
       tags
     )
@@ -112,7 +116,7 @@ defmodule Stacks.Events.SubscriberWorker do
           )
 
           :telemetry.execute(
-            [:stacks, :events, :handler_error, :count, :total],
+            [:stacks, :events, :handler_error],
             %{count: 1},
             tags
           )
@@ -127,7 +131,7 @@ defmodule Stacks.Events.SubscriberWorker do
         )
 
         :telemetry.execute(
-          [:stacks, :events, :handler_error, :count, :total],
+          [:stacks, :events, :handler_error],
           %{count: 1},
           tags
         )
@@ -137,8 +141,11 @@ defmodule Stacks.Events.SubscriberWorker do
   defp emit_dispatch_duration(start, tags) do
     duration = System.monotonic_time() - start
 
+    # `event_name:` on the PromEx distribution is
+    # `[:stacks, :events, :dispatch]`; the unit suffix
+    # `:duration, :milliseconds` is part of the METRIC name only.
     :telemetry.execute(
-      [:stacks, :events, :dispatch, :duration, :milliseconds],
+      [:stacks, :events, :dispatch],
       %{duration: duration},
       tags
     )

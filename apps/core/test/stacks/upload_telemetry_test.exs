@@ -134,9 +134,9 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "emits [:stacks, :events, :handler_error, :count, :total] when handler returns {:error, reason}",
+    test "emits [:stacks, :events, :handler_error] when handler returns {:error, reason}",
          %{user: user} do
-      attach_telemetry([:stacks, :events, :handler_error, :count, :total])
+      attach_telemetry([:stacks, :events, :handler_error])
 
       Application.put_env(:core, :test_handler_overrides, %{
         "test.returns_error" => [Stacks.UploadTelemetryTest.FailingHandler]
@@ -163,8 +163,7 @@ defmodule Stacks.UploadTelemetryTest do
 
       perform_job(SubscriberWorker, %{"event_id" => event_id})
 
-      assert_receive {:telemetry, [:stacks, :events, :handler_error, :count, :total], %{count: 1},
-                      metadata},
+      assert_receive {:telemetry, [:stacks, :events, :handler_error], %{count: 1}, metadata},
                      2_000
 
       assert is_binary(metadata.handler)
@@ -172,10 +171,10 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "emits [:stacks, :events, :handler_error, :count, :total] when handler raises", %{
+    test "emits [:stacks, :events, :handler_error] when handler raises", %{
       user: user
     } do
-      attach_telemetry([:stacks, :events, :handler_error, :count, :total])
+      attach_telemetry([:stacks, :events, :handler_error])
 
       Application.put_env(:core, :test_handler_overrides, %{
         "test.raises" => [Stacks.UploadTelemetryTest.RaisingHandler]
@@ -202,8 +201,7 @@ defmodule Stacks.UploadTelemetryTest do
 
       perform_job(SubscriberWorker, %{"event_id" => event_id})
 
-      assert_receive {:telemetry, [:stacks, :events, :handler_error, :count, :total], %{count: 1},
-                      metadata},
+      assert_receive {:telemetry, [:stacks, :events, :handler_error], %{count: 1}, metadata},
                      2_000
 
       assert is_binary(metadata.handler)
@@ -212,7 +210,7 @@ defmodule Stacks.UploadTelemetryTest do
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "handler_error metadata includes handler name and event_type", %{user: user} do
-      attach_telemetry([:stacks, :events, :handler_error, :count, :total])
+      attach_telemetry([:stacks, :events, :handler_error])
 
       Application.put_env(:core, :test_handler_overrides, %{
         "test.metadata_check" => [Stacks.UploadTelemetryTest.FailingHandler]
@@ -239,8 +237,7 @@ defmodule Stacks.UploadTelemetryTest do
 
       perform_job(SubscriberWorker, %{"event_id" => event_id})
 
-      assert_receive {:telemetry, [:stacks, :events, :handler_error, :count, :total],
-                      measurements, metadata},
+      assert_receive {:telemetry, [:stacks, :events, :handler_error], measurements, metadata},
                      2_000
 
       assert measurements == %{count: 1}
