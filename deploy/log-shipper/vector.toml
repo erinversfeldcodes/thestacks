@@ -19,12 +19,25 @@
 #                               `deploy/fly.log-shipper.toml` rather
 #                               than staged as a secret — it's not
 #                               sensitive.
-#   LOG_SHIPPER_ACCESS_TOKEN  — Fly API token used to authenticate the
-#                               NATS subscription. Generate via
-#                               `fly tokens create org --name
-#                               log-shipper --expiry 8760h`. The
-#                               `LOG_SHIPPER_` prefix disambiguates this
-#                               from Fly's generic `ACCESS_TOKEN`
+#   LOG_SHIPPER_ACCESS_TOKEN  — Fly readonly-org token used to
+#                               authenticate the NATS subscription.
+#                               MUST be created with:
+#
+#                                 fly tokens create readonly personal \
+#                                     --name log-shipper --expiry 8760h
+#
+#                               The `readonly` subcommand is
+#                               load-bearing — `fly tokens create org`
+#                               produces a different token type that
+#                               Fly's NATS broadcast server rejects
+#                               with "authorization violation"
+#                               (verified 2026-04-20 after hours of
+#                               crash-loops). See fly-log-shipper's
+#                               README for the canonical recipe:
+#                               https://github.com/superfly/fly-log-shipper
+#
+#                               The `LOG_SHIPPER_` prefix disambiguates
+#                               this from Fly's generic `ACCESS_TOKEN`
 #                               convention, which tripped up earlier
 #                               secret-rotation work.
 #   AXIOM_TOKEN               — Axiom API token with Ingest permission
