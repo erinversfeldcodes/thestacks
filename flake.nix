@@ -64,6 +64,23 @@
           ];
 
           shellHook = ''
+            # Nixpkgs-unstable packages `semgrep` as a Python 3.13 application,
+            # which means entering this dev-shell appends every Python 3.13
+            # dependency (pydantic-core, attrs, etc.) to PYTHONPATH. The
+            # project's own venv is Python 3.12 (see `python312` above plus
+            # apps/vision/pyproject.toml requires-python = ">=3.12"), so the
+            # venv's interpreter picks up 3.13-compiled .so files from Nix's
+            # PYTHONPATH, fails to import pydantic_core._pydantic_core, and
+            # pytest breaks with a cryptic ABI-mismatch trace.
+            #
+            # Venvs are Python's designated isolation boundary, but the
+            # language honours PYTHONPATH over the venv's own site-packages,
+            # so no venv-side patch fixes this. We unset PYTHONPATH here
+            # instead — Nix-packaged Python tools (semgrep, the checkov
+            # install etc.) have wrapper scripts that set their own
+            # PYTHONPATH at invocation time, so they still work.
+            unset PYTHONPATH
+
             # Install flyctl from GitHub releases (superfly/homebrew-tap is abandoned)
             if ! command -v flyctl &> /dev/null && ! test -x "$HOME/.local/bin/flyctl"; then
               bash scripts/install-flyctl.sh
