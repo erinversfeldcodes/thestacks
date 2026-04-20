@@ -20,6 +20,14 @@ defmodule CoreWeb.Telemetry do
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
   @slow_query_handler_id "stacks-slow-query-log"
+  @oban_worker_tag_handler_id "stacks-oban-worker-tag"
+
+  # Process-dict key used to tag the current Oban worker. Set at
+  # [:oban, :job, :start] and cleared at [:oban, :job, :stop] /
+  # [:oban, :job, :exception] so any Ecto query fired from within
+  # Oban.Worker.perform/1 is tagged with the worker module name.
+  # HTTP paths (no job in scope) get tagged as "http".
+  @current_worker_key :stacks_current_oban_worker
 
   # Threshold for slow-query logging. Queries with Ecto total_time
   # (queue + query + decode) above this fire a Logger.warning with the
@@ -36,6 +44,7 @@ defmodule CoreWeb.Telemetry do
   @impl true
   def init(_arg) do
     attach_route_group_handler()
+    attach_oban_worker_tag_handler()
     attach_slow_query_handler()
 
     children = [
@@ -221,6 +230,31 @@ defmodule CoreWeb.Telemetry do
 
   @doc false
   def handle_slow_query(_event, measurements, metadata, _config) do
+    total_time = Map.get(measurements, :total_time, 0)
+    source = Map.get(metadata, :source) || "(raw)"
+    repo_atom = Map.get(metadata, :repo, :unknown)
+    worker = Process.get(@current_worker_key) || "http"
+
+    # Always-emit: per-query duration tagged by worker + source + repo.
+    # Distribution picked up by Core.PromEx.Plugins.Stacks and exported
+    # as `stacks_repo_query_duration_milliseconds_{bucket,sum,count}`.
+    # The `worker` tag is "http" for queries issued from the request
+    # pipeline, "Stacks.Workers.XxxJob" for queries issued from Oban
+    # workers. Answers "which worker's business-logic queries are
+    # dominating Core.Repo's pool time?" — indirectly a proxy for
+    # connection-hold time per worker.
+    :telemetry.execute(
+      [:stacks, :repo, :query, :duration, :milliseconds],
+      %{duration: total_time},
+      %{
+        worker: worker,
+        source: source,
+        repo: Atom.to_string(repo_atom)
+      }
+    )
+
+    # Slow-query log (throttled by threshold so we only log the
+    # interesting ones).
     threshold_native =
       System.convert_time_unit(
         Application.get_env(:core, :slow_query_threshold_ms, @default_slow_query_threshold_ms),
@@ -228,28 +262,62 @@ defmodule CoreWeb.Telemetry do
         :native
       )
 
-    total_time = Map.get(measurements, :total_time, 0)
-
     if total_time > threshold_native do
       total_ms = System.convert_time_unit(total_time, :native, :millisecond)
       queue_ms = ms(Map.get(measurements, :queue_time, 0))
       query_ms = ms(Map.get(measurements, :query_time, 0))
       decode_ms = ms(Map.get(measurements, :decode_time, 0))
-      # `source` is usually the table name for plain queries; nil for
-      # ad-hoc SQL. Keep both — operators want to group by source when
-      # it's available and fall back to the raw SQL otherwise.
-      source = Map.get(metadata, :source) || "(raw)"
       sql_preview = metadata |> Map.get(:query, "") |> truncate_sql()
-      repo = metadata |> Map.get(:repo, :unknown) |> inspect()
 
       require Logger
 
       Logger.warning(
-        "slow_query repo=#{repo} source=#{source} total=#{total_ms}ms " <>
-          "queue=#{queue_ms}ms query=#{query_ms}ms decode=#{decode_ms}ms sql=#{sql_preview}"
+        "slow_query repo=#{inspect(repo_atom)} worker=#{worker} source=#{source} " <>
+          "total=#{total_ms}ms queue=#{queue_ms}ms query=#{query_ms}ms decode=#{decode_ms}ms " <>
+          "sql=#{sql_preview}"
       )
     end
 
+    :ok
+  end
+
+  @doc """
+  Attach a telemetry handler that keeps `@current_worker_key` in the
+  process dictionary in sync with the currently-executing Oban job
+  worker module. Read by `handle_slow_query/4` to tag the per-query
+  duration histogram.
+
+  Oban runs each job in a dedicated process via
+  `Oban.Worker.perform/1`, so the process-dict scoping works: one
+  worker per process, cleared on completion.
+  """
+  @spec attach_oban_worker_tag_handler() :: :ok
+  def attach_oban_worker_tag_handler do
+    :telemetry.detach(@oban_worker_tag_handler_id)
+
+    :telemetry.attach_many(
+      @oban_worker_tag_handler_id,
+      [
+        [:oban, :job, :start],
+        [:oban, :job, :stop],
+        [:oban, :job, :exception]
+      ],
+      &__MODULE__.handle_oban_job_lifecycle/4,
+      nil
+    )
+
+    :ok
+  end
+
+  @doc false
+  def handle_oban_job_lifecycle([:oban, :job, :start], _measurements, metadata, _config) do
+    worker = metadata |> Map.get(:job, %{}) |> Map.get(:worker, "unknown")
+    Process.put(@current_worker_key, worker)
+    :ok
+  end
+
+  def handle_oban_job_lifecycle([:oban, :job, _stop_or_exc], _measurements, _metadata, _config) do
+    Process.delete(@current_worker_key)
     :ok
   end
 
