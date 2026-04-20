@@ -6,6 +6,11 @@
 #   GET  /api/health
 #   GET  /api/catalogue?per_page=20
 #   POST /api/auth/login          (seed user)
+#   GET  /api/bookshelves/library (authenticated; exercises Core.Repo
+#                                  via multi-table join to generate the
+#                                  sample volume that the gate's
+#                                  db_pool_queue_p95_ms SLI needs to
+#                                  clear its min_samples floor)
 #   POST /api/upload (×2)         two canary images fired in parallel:
 #                                  - real-book canary (photo.PNG):    expected outcome = resolved
 #                                  - not-a-book canary (not_a_book):  expected outcome = rejected
@@ -20,7 +25,7 @@
 # Emits a JSON summary to stdout on completion:
 #   {
 #     "availability": 1.0,
-#     "p95_ms": {"health": 180, "catalogue": 240, "login": 320, "upload": 1700},
+#     "p95_ms": {"health": 180, "catalogue": 240, "login": 320, "bookshelf": 220, "upload": 1700},
 #     "synthetic_probes": {
 #         "total": 20, "succeeded": 20, "p95_ms": 310,
 #         "http_5xx_count": 0, "timeout_count": 0
@@ -33,7 +38,10 @@
 #
 # Environment variables:
 #   PROBE_WINDOW_SECONDS   default 600
-#   PROBE_INTERVAL_SECONDS default 30
+#   PROBE_INTERVAL_SECONDS default 15 (halved from 30 to double Core.Repo
+#                                      sample count per window — the
+#                                      db_pool_queue_p95_ms SLI requires
+#                                      50+ samples before gating)
 #   METRICS_SCRAPE_TOKEN   bearer for /internal/deps-check. When unset,
 #                          the deps-check probe is silently skipped so the
 #                          script stays usable in local dev / smoke runs
@@ -56,7 +64,7 @@ BASE_URL="${BASE_URL%/}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WINDOW="${PROBE_WINDOW_SECONDS:-600}"
-INTERVAL="${PROBE_INTERVAL_SECONDS:-30}"
+INTERVAL="${PROBE_INTERVAL_SECONDS:-15}"
 SEED_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
 SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
 # Two canaries fired each iteration to exercise both terminal paths of
@@ -77,6 +85,7 @@ CANARY_NOT_A_BOOK="${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg
 HEALTH_TIMEOUT=10
 CATALOGUE_TIMEOUT=10
 LOGIN_TIMEOUT=15
+BOOKSHELF_TIMEOUT=10
 UPLOAD_POST_TIMEOUT=30
 UPLOAD_STREAM_TIMEOUT=90
 DEPS_CHECK_TIMEOUT=20
@@ -87,9 +96,10 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 HEALTH_LOG="$WORK_DIR/health.log"
 CATALOGUE_LOG="$WORK_DIR/catalogue.log"
 LOGIN_LOG="$WORK_DIR/login.log"
+BOOKSHELF_LOG="$WORK_DIR/bookshelf.log"
 UPLOAD_LOG="$WORK_DIR/upload.log"
 DEPS_CHECK_LOG="$WORK_DIR/deps_check.log"
-: > "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG"
+: > "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$BOOKSHELF_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG"
 
 # Records one sample as: "<status>\t<duration_ms>\t<kind>"
 # kind ∈ ok | http_5xx | http_4xx | timeout | error
@@ -175,6 +185,37 @@ except: pass" 2>/dev/null || true)"
         printf '%s' "$token" > "$WORK_DIR/last_token"
     fi
     rm -f "$body_file"
+}
+
+# ── Probe: GET /api/bookshelves/library ──────────────────────────────────────
+# Authenticated read that exercises op.bookshelves + op.bookshelf_placements
+# + op.books joins. Each call issues several Core.Repo queries — the main
+# lever for keeping the db_pool_queue_p95_ms SLI above its min_samples
+# floor across the 10-min gate window. Skipped when no login token has
+# landed yet (the probe can still record "error" so availability accounts
+# for token outages instead of silently dropping the sample).
+probe_bookshelf() {
+    local t0 t1 http_code exit_code kind token
+    token=""
+    if [[ -f "$WORK_DIR/last_token" ]]; then
+        token="$(cat "$WORK_DIR/last_token")"
+    fi
+
+    if [[ -z "$token" ]]; then
+        t0="$(_now_ms)"
+        _record_sample "$BOOKSHELF_LOG" "000" "0" "error"
+        return
+    fi
+
+    t0="$(_now_ms)"
+    http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+        --max-time "$BOOKSHELF_TIMEOUT" \
+        -H "Authorization: Bearer ${token}" \
+        "$BASE_URL/api/bookshelves/library" 2>/dev/null)" || true
+    exit_code=$?
+    t1="$(_now_ms)"
+    kind="$(_classify "$exit_code" "${http_code:-000}")"
+    _record_sample "$BOOKSHELF_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
 }
 
 # ── Probe: POST /api/upload (canary) ─────────────────────────────────────────
@@ -303,11 +344,13 @@ while :; do
     pid_l=$!
     probe_deps_check &
     pid_d=$!
-    # Wait for login so the upload probe has a fresh token.
+    # Wait for login so the upload + bookshelf probes have a fresh token.
     wait "$pid_l" 2>/dev/null || true
+    probe_bookshelf &
+    pid_b=$!
     probe_upload &
     pid_u=$!
-    wait "$pid_h" "$pid_c" "$pid_d" "$pid_u" 2>/dev/null || true
+    wait "$pid_h" "$pid_c" "$pid_d" "$pid_b" "$pid_u" 2>/dev/null || true
 
     now="$(date +%s)"
     if [[ "$now" -ge "$END_TS" ]]; then
@@ -339,7 +382,7 @@ UPLOAD_OUTCOME_NOT_A_BOOK="$(cat "$WORK_DIR/last_upload_outcome_not_a_book" 2>/d
 UPLOAD_OUTCOME="${UPLOAD_OUTCOME_REAL}/${UPLOAD_OUTCOME_NOT_A_BOOK}"
 
 # Emit the final JSON via Python for correctness (quoting, nan handling, etc.)
-python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'
+python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$BOOKSHELF_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'
 import json
 import sys
 
@@ -374,11 +417,12 @@ def p95(durations: list[int]) -> int:
 health = load(sys.argv[1])
 catalogue = load(sys.argv[2])
 login = load(sys.argv[3])
-upload = load(sys.argv[4])
-deps_check = load(sys.argv[5])
-upload_outcome = sys.argv[6] or "error"
+bookshelf = load(sys.argv[4])
+upload = load(sys.argv[5])
+deps_check = load(sys.argv[6])
+upload_outcome = sys.argv[7] or "error"
 
-all_samples = health + catalogue + login + upload + deps_check
+all_samples = health + catalogue + login + bookshelf + upload + deps_check
 total = len(all_samples)
 # Availability treats 1xx/2xx/3xx as success; 4xx AND 5xx as failure. Timeouts
 # and connection errors also count as failures. The prior implementation only
@@ -397,6 +441,9 @@ p95_per_probe = {
         [d for _, d, k in catalogue if k in ("ok", "http_4xx", "http_5xx")]
     ),
     "login": p95([d for _, d, k in login if k in ("ok", "http_4xx", "http_5xx")]),
+    "bookshelf": p95(
+        [d for _, d, k in bookshelf if k in ("ok", "http_4xx", "http_5xx")]
+    ),
     "upload": p95([d for _, d, k in upload if k in ("ok", "http_4xx", "http_5xx")]),
     "deps_check": p95(
         [d for _, d, k in deps_check if k in ("ok", "http_4xx", "http_5xx")]
@@ -439,6 +486,7 @@ flat = {
     "p95_ms_health": summary["p95_ms"]["health"],
     "p95_ms_catalogue": summary["p95_ms"]["catalogue"],
     "p95_ms_login": summary["p95_ms"]["login"],
+    "p95_ms_bookshelf": summary["p95_ms"]["bookshelf"],
     "p95_ms_upload": summary["p95_ms"]["upload"],
     "p95_ms_deps_check": summary["p95_ms"]["deps_check"],
     "synthetic_probes_total": summary["synthetic_probes"]["total"],

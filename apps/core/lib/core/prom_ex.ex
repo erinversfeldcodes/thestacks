@@ -17,10 +17,21 @@ defmodule Core.PromEx do
       Plugins.Application,
       Plugins.Beam,
       {Plugins.Phoenix, router: CoreWeb.Router, endpoint: CoreWeb.Endpoint},
-      {Plugins.Ecto, repos: [Core.Repo]},
+      {Plugins.Ecto, repos: tracked_repos()},
       {Plugins.Oban, oban_supervisors: [Oban]},
       Core.PromEx.Plugins.Stacks
     ]
+  end
+
+  # Only include Core.ObanRepo when Oban is configured to use it — same
+  # rule as `Core.Application.oban_repo_child/0`. In test, Oban is routed
+  # to Core.Repo and Core.ObanRepo is never started, so registering its
+  # telemetry prefix would just listen for events that never fire.
+  defp tracked_repos do
+    case Application.fetch_env!(:core, Oban)[:repo] do
+      Core.ObanRepo -> [Core.Repo, Core.ObanRepo]
+      _ -> [Core.Repo]
+    end
   end
 
   @impl true

@@ -626,24 +626,65 @@ for r in rows_for("stacks_fuse_state_state"):
         }
     )
 
-# DB pool queue_time p95.
+# DB pool queue_time p95 — two SLIs, one per repo.
 #
 # PromEx's Ecto plugin prefixes the metric with the otp_app + plugin name,
 # so the real series is `core_prom_ex_ecto_repo_query_queue_time_*`. The
 # previous parser looked for an un-prefixed `core_repo_query_queue_time_*`
 # name that PromEx does not emit, so this SLI silently reported 0 for every
 # production deploy (Issue #140).
-db_p95 = histogram_p95(
-    "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket"
-)
-slis.append(
-    {
-        "name": "db_pool_queue_p95_ms",
-        "value": int(db_p95),
-        "threshold": 50,
-        "breached": db_p95 > 50,
+#
+# As of 2026-04-20 PromEx tracks both Core.Repo and Core.ObanRepo (see
+# Core.PromEx.plugins/0). Buckets are labelled by `repo=`; without
+# filtering, `histogram_p95` would sum counts across both and report a
+# meaningless blend. Compute a per-repo p95 via `histogram_p95_by_group`
+# and emit each as its own SLI.
+#
+# min_samples guard: on low-volume machines (early deploy, quiet prod)
+# Core.Repo sees ~20 queries over the 10-min gate window. p95 on 20
+# samples is noise — two outliers during cold-start warmup pushed it
+# to 174ms previously, gating a healthy prod on a non-signal. Only
+# gate when sample count clears the floor.
+DB_QUEUE_MIN_SAMPLES = 50
+DB_QUEUE_METRIC = "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket"
+DB_QUEUE_COUNT_METRIC = "core_prom_ex_ecto_repo_query_queue_time_milliseconds_count"
+
+
+def _queue_samples_for(repo_label: str) -> int:
+    # `*_count` is a counter — pick the le="+Inf" row (which carries the
+    # total sample count for the histogram) OR sum the count metric's
+    # per-label value. PromEx emits a single count row per repo.
+    for r in rows_for(DB_QUEUE_COUNT_METRIC):
+        if r["labels"].get("repo") == repo_label:
+            return int(r["value"])
+    return 0
+
+
+for repo_label, sli_name, threshold in [
+    # Core.Repo: HTTP-request-path business logic. Threshold 50ms is
+    # the historical target — honest when sample count is high enough
+    # to be meaningful.
+    ("Core.Repo", "db_pool_queue_p95_ms", 50),
+    # Core.ObanRepo: Oban supervision + worker infrastructure. Higher
+    # threshold because Oban's LISTEN/NOTIFY holds connections by
+    # design — normal operating queue times run hotter than HTTP's.
+    # 200ms is a reasonable alarm level; below that the pool is
+    # keeping up with background work.
+    ("Core.ObanRepo", "oban_repo_queue_p95_ms", 200),
+]:
+    samples = _queue_samples_for(repo_label)
+    p95 = histogram_p95_by_group(DB_QUEUE_METRIC, "repo", repo_label)
+    entry = {
+        "name": sli_name,
+        "value": int(p95),
+        "threshold": threshold,
+        "samples": samples,
+        "min_samples": DB_QUEUE_MIN_SAMPLES,
+        "breached": samples >= DB_QUEUE_MIN_SAMPLES and p95 > threshold,
     }
-)
+    if samples < DB_QUEUE_MIN_SAMPLES:
+        entry["note"] = "below min_samples; not gating"
+    slis.append(entry)
 
 # BEAM memory (MAX across machines). Threshold is 400 MB, expressed in
 # bytes so the raw value carries units. We also emit an MB-valued twin SLI
