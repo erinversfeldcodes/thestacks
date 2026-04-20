@@ -110,19 +110,27 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  # POOL_SIZE default: 30. Bumped from 20 on 2026-04-20 after
-  # db_pool_queue_p95_ms=78ms continued to breach the 50ms threshold
-  # even with the 10→20 bump. 30 × ~8MB = ~240MB, still well under
-  # the 512MB core VM budget. Oban runs on a DEDICATED repo
-  # (Core.ObanRepo, see below) with its own pool, so this value
-  # sizes the HTTP-request handler pool only — queue times here
-  # should drop cleanly since background work can no longer starve
-  # it.
+  # POOL_SIZE default: 40. Evolution:
+  #   10 → 20: initial bump after db_pool_queue_p95_ms=89ms
+  #   20 → 30: split Oban off into Core.ObanRepo (OBAN_POOL_SIZE=50)
+  #   30 → 40: counter-intuitive but necessary. Splitting Oban at 50
+  #     workers meant more concurrent background jobs, each of which
+  #     runs its BUSINESS-LOGIC queries through Core.Repo (e.g.
+  #     IdentifyBookJob inserts books via Books.store_book →
+  #     Core.Repo, NOT Core.ObanRepo). So the split relieved
+  #     pressure on Oban's INFRASTRUCTURE queue state but worsened
+  #     Core.Repo contention. db_pool_queue_p95_ms went 78ms → 169ms
+  #     after the split. The fix: bigger Core.Repo pool + smaller
+  #     Oban pool (25 is still well above the infra-queries need).
+  #
+  # Total connections per machine: 40 (Core.Repo) + 25 (Core.ObanRepo)
+  # = 65. With 2 machines: 130. Neon ceiling: 200. Leaves ~35% head-
+  # room for a third machine later.
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "30"),
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "40"),
     socket_options: maybe_ipv6
 
   # Dedicated repo for Oban. Having background workers share
@@ -133,27 +141,27 @@ if config_env() == :prod do
   # user-facing traffic; Oban workers compete only among themselves
   # on their own pool.
   #
-  # OBAN_POOL_SIZE default: 50. Bumped from 15 on 2026-04-20 after
-  # slow-query logs surfaced `queue=~800ms` wait times on the
-  # periodic `SELECT queue, state, COUNT(id) FROM oban_jobs GROUP BY
-  # ...` that PromEx's Oban plugin runs every 10s. Queue
-  # concurrency totals 44 workers (default: 10, events: 20, vision:
-  # 5, scraper: 5, notifications: 3, dbt_refresh: 1) — 15
-  # connections oversubscribed by 3×. 50 covers 44 workers +
-  # ~6 connections of headroom for PromEx polling + Oban's internal
-  # heartbeat + pruner queries.
+  # OBAN_POOL_SIZE default: 25. Evolution:
+  #   15: initial pool-split default (too low — Oban's own GROUP BY
+  #     poll waited ~800ms for a connection)
+  #   50: over-corrected — allowed 44 workers to run concurrently,
+  #     each of which then contended on Core.Repo for business-logic
+  #     queries, so Core.Repo's queue time got worse
+  #   25: balance point. Oban's INFRASTRUCTURE queries (enqueue,
+  #     state updates, pruner, PromEx's periodic poll) need at most
+  #     ~10 simultaneous connections; 25 gives comfortable headroom
+  #     without artificially boosting concurrency of business-logic
+  #     work.
   #
   # Both repos point at the same Postgres database, so Oban still
   # sees the same event_log, same op.* tables, same job state — just
-  # through a separate connection set. Total Neon connections with
-  # 2 machines: (30 + 50) × 2 = 160, still under Neon's 200 ceiling
-  # but tighter — if we add a third core machine we'll need to
-  # rethink (either a larger Neon plan or smaller pool splits).
+  # through a separate connection set. See Core.Repo POOL_SIZE
+  # comment above for the total-connections budget.
   config :core, Core.ObanRepo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "50"),
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "25"),
     socket_options: maybe_ipv6
 
   secret_key_base =
