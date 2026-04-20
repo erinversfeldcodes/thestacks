@@ -32,7 +32,15 @@ defmodule Core.PromEx.Plugins.Stacks do
   # Buckets aligned with the `le=` values baked into the existing gate
   # fixtures (`test/fixtures/metrics/prom_sample_healthy.txt`) and the
   # route-group p95 thresholds (auth/catalogue 500ms, upload 2000ms).
-  @route_duration_buckets [50, 100, 250, 500, 1_000, 2_000, 5_000]
+  #
+  # 10_000 and 20_000 buckets added 2026-04-20 because upload p95 was
+  # saturating the old 5000ms ceiling — the gate's histogram p95
+  # computation falls back to `2 × max_finite_bucket` when the +Inf
+  # bucket is the only one with counts beyond the top, which reported
+  # as a flat 10000ms and hid the true latency distribution. Upload's
+  # real cost profile is ~3–8s (two sequential Modal vision calls +
+  # R2 upload + DB writes); anything over 20s is genuinely anomalous.
+  @route_duration_buckets [50, 100, 250, 500, 1_000, 2_000, 5_000, 10_000, 20_000]
 
   @impl true
   def event_metrics(_opts) do
