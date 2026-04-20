@@ -243,8 +243,12 @@ defmodule CoreWeb.Telemetry do
     # workers. Answers "which worker's business-logic queries are
     # dominating Core.Repo's pool time?" — indirectly a proxy for
     # connection-hold time per worker.
+    #
+    # Event path matches `event_name:` in the PromEx plugin. The
+    # `:duration, :milliseconds` suffix is part of the METRIC name
+    # only — Telemetry.Metrics strips it when listening.
     :telemetry.execute(
-      [:stacks, :repo, :query, :duration, :milliseconds],
+      [:stacks, :repo, :query, :duration],
       %{duration: total_time},
       %{
         worker: worker,

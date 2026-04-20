@@ -66,9 +66,12 @@ defmodule Stacks.Events do
         # flows are noisy (e.g. `book.created` vs `placement.moved`)
         # and size the :events Oban queue accordingly. Aggregated by
         # PromEx into `stacks_events_emitted_count_total` — see
-        # Core.PromEx.Plugins.Stacks.
+        # Core.PromEx.Plugins.Stacks. The event name here MUST match
+        # the `event_name:` key on the Counter definition in the
+        # PromEx plugin (not the metric name — that has the
+        # `:count, :total` suffix appended by Telemetry.Metrics).
         :telemetry.execute(
-          [:stacks, :events, :emitted, :count, :total],
+          [:stacks, :events, :emitted],
           %{count: 1},
           %{event_type: event.event_type, aggregate_type: event.aggregate_type}
         )
