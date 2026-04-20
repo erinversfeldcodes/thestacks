@@ -19,6 +19,15 @@ defmodule CoreWeb.Telemetry do
   ]
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
+  @slow_query_handler_id "stacks-slow-query-log"
+
+  # Threshold for slow-query logging. Queries with Ecto total_time
+  # (queue + query + decode) above this fire a Logger.warning with the
+  # SQL source + params-size + pool queue time. Chosen to match Ecto's
+  # own default "slow" perception: anything 500ms+ is noteworthy on a
+  # primarily-OLTP workload. Override via the `:slow_query_threshold_ms`
+  # application env at startup for tuning without a code change.
+  @default_slow_query_threshold_ms 500
 
   def start_link(arg) do
     Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
@@ -27,6 +36,7 @@ defmodule CoreWeb.Telemetry do
   @impl true
   def init(_arg) do
     attach_route_group_handler()
+    attach_slow_query_handler()
 
     children = [
       {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
@@ -181,6 +191,86 @@ defmodule CoreWeb.Telemetry do
 
     :ok
   end
+
+  @doc """
+  Attach a telemetry handler that logs Ecto queries exceeding a wall-
+  clock threshold. Listens on both `Core.Repo` and `Core.ObanRepo`
+  `[:query]` events. Idempotent — safe to call on supervisor restart.
+
+  Why not just bump Ecto's `:log` level to `:info`? That logs EVERY
+  query, which is too noisy in prod (~200 queries/sec steady-state
+  during probe load). Slow-only is what operators need to find the
+  actual hot-spots causing db_pool_queue saturation.
+  """
+  @spec attach_slow_query_handler() :: :ok
+  def attach_slow_query_handler do
+    :telemetry.detach(@slow_query_handler_id)
+
+    :telemetry.attach_many(
+      @slow_query_handler_id,
+      [
+        [:core, :repo, :query],
+        [:core, :oban_repo, :query]
+      ],
+      &__MODULE__.handle_slow_query/4,
+      nil
+    )
+
+    :ok
+  end
+
+  @doc false
+  def handle_slow_query(_event, measurements, metadata, _config) do
+    threshold_native =
+      System.convert_time_unit(
+        Application.get_env(:core, :slow_query_threshold_ms, @default_slow_query_threshold_ms),
+        :millisecond,
+        :native
+      )
+
+    total_time = Map.get(measurements, :total_time, 0)
+
+    if total_time > threshold_native do
+      total_ms = System.convert_time_unit(total_time, :native, :millisecond)
+      queue_ms = ms(Map.get(measurements, :queue_time, 0))
+      query_ms = ms(Map.get(measurements, :query_time, 0))
+      decode_ms = ms(Map.get(measurements, :decode_time, 0))
+      # `source` is usually the table name for plain queries; nil for
+      # ad-hoc SQL. Keep both — operators want to group by source when
+      # it's available and fall back to the raw SQL otherwise.
+      source = Map.get(metadata, :source) || "(raw)"
+      sql_preview = metadata |> Map.get(:query, "") |> truncate_sql()
+      repo = metadata |> Map.get(:repo, :unknown) |> inspect()
+
+      require Logger
+
+      Logger.warning(
+        "slow_query repo=#{repo} source=#{source} total=#{total_ms}ms " <>
+          "queue=#{queue_ms}ms query=#{query_ms}ms decode=#{decode_ms}ms sql=#{sql_preview}"
+      )
+    end
+
+    :ok
+  end
+
+  defp ms(native) when is_integer(native) do
+    System.convert_time_unit(native, :native, :millisecond)
+  end
+
+  defp ms(_), do: 0
+
+  # Cap SQL at 200 chars so a slow 20KB bulk INSERT doesn't drown the
+  # log line. Truncation marker keeps grep-ability for the full query
+  # shape without the parameter blob.
+  defp truncate_sql(sql) when is_binary(sql) do
+    if byte_size(sql) > 200 do
+      binary_part(sql, 0, 200) <> "…"
+    else
+      sql
+    end
+  end
+
+  defp truncate_sql(_), do: ""
 
   @doc false
   def handle_router_dispatch_stop(_event, measurements, %{conn: conn} = metadata, _config)
