@@ -63,6 +63,45 @@ deploy_with_retry() {
     return 1
 }
 
+# Verify that a Fly app has at least one started machine with all its
+# `[[checks]]` entries passing. Polls `fly status --json` up to the given
+# deadline, returns 0 on success, non-zero on timeout.
+#
+# `fly deploy` already waits for checks before returning 0, but upstream
+# images like searxng/searxng lack curl/wget so we can't double-check
+# from inside the container via `fly ssh console -C curl ...`. Parsing
+# `fly status --json` is tool-agnostic — it asks Fly's proxy for the
+# state of the same health checks defined in the app's fly.toml. No
+# in-container tooling assumed; works against any image.
+#
+# Usage: wait_for_fly_checks <app> <timeout_seconds>
+wait_for_fly_checks() {
+    local app="$1"
+    local timeout="${2:-90}"
+    local deadline=$(( $(date +%s) + timeout ))
+    while [[ $(date +%s) -lt $deadline ]]; do
+        if fly status --app "$app" --json 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+machines = data.get("Machines") or data.get("machines") or []
+healthy = False
+for m in machines:
+    state = m.get("state", "")
+    checks = m.get("checks") or []
+    if state == "started" and checks and all(
+        (c.get("status") or "").lower() == "passing" for c in checks
+    ):
+        healthy = True
+        break
+sys.exit(0 if healthy else 1)
+' 2>/dev/null; then
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
+}
+
 # ── Preflight ─────────────────────────────────────────────────────────────────
 if [[ -z "${FLY_API_TOKEN:-}" ]]; then
     echo "SKIP: FLY_API_TOKEN not set — skipping deploy."
@@ -363,37 +402,6 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
             --yes)
     }
 
-    # Post-deploy health probe. `fly deploy` returns 0 once the first
-    # machine "starts", which is NOT the same as "the app is healthy" —
-    # the previous SearXNG setup passed that initial check while the
-    # worker was already in its first OOM cycle, and the script happily
-    # declared success while Fly quietly suspended the app after N
-    # restarts.
-    #
-    # We SSH into SearXNG's own machine and curl localhost rather than
-    # routing through core (which hasn't been deployed yet at this point
-    # in the script). Fly's init keeps SSH responsive even when the main
-    # app process is crashing, so this reliably reports whether the
-    # worker is serving on :8080 right now.
-    _searxng_probe_healthy() {
-        local deadline=$(( $(date +%s) + 90 ))
-        local consecutive=0
-        while [[ $(date +%s) -lt $deadline ]]; do
-            if fly ssh console --app "${SEARXNG_APP}" \
-                -C "curl -sS -m 5 -o /dev/null -w %{http_code} http://localhost:8080/" \
-                2>/dev/null | grep -q "^200$"; then
-                consecutive=$((consecutive + 1))
-                if [[ $consecutive -ge 2 ]]; then
-                    return 0
-                fi
-            else
-                consecutive=0
-            fi
-            sleep 10
-        done
-        return 1
-    }
-
     _searxng_success=0
     if [[ "$PROD_MODE" -eq 1 ]]; then
         # SearXNG is a search-enrichment dependency, not a critical path for
@@ -401,13 +409,22 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         # should not block a core release. Retry-then-WARN matches preview
         # behaviour; core already handles an empty SEARXNG_INTERNAL_URL by
         # degrading search gracefully.
+        #
+        # Post-deploy verification: `fly deploy` already waits for the
+        # [[checks]] block in fly.searxng.toml to pass before returning
+        # 0, so in the common case we just trust its exit code. We then
+        # re-verify via `fly status --json` as a defence against edge
+        # cases (e.g. fly deploy returning early on a --wait-timeout).
+        # The previous curl-inside-the-container probe failed on the
+        # upstream SearXNG image which lacks curl — parsing fly status
+        # is tool-agnostic.
         if deploy_with_retry "searxng" _searxng_deploy_once; then
-            echo "==> Probing SearXNG health (up to 90s for two consecutive 200s)..."
-            if _searxng_probe_healthy; then
+            echo "==> Verifying SearXNG health via fly status (up to 90s)..."
+            if wait_for_fly_checks "${SEARXNG_APP}" 90; then
                 _searxng_success=1
                 echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
             else
-                echo "WARN deploy: SearXNG deploy returned 0 but post-deploy probe failed — crash loop likely."
+                echo "WARN deploy: SearXNG deploy returned 0 but fly status never reported passing checks — crash loop likely."
             fi
         else
             echo "WARN deploy: SearXNG prod deployment failed after retry — core will degrade gracefully"
@@ -734,7 +751,17 @@ if [[ "$PROD_MODE" -eq 1 ]] && [[ -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
     }
 
     if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
-        echo "PASS deploy: log shipper deployed"
+        echo "==> Verifying log shipper health via fly status (up to 90s)..."
+        # Vector's built-in /health on :8686 is what fly.log-shipper.toml's
+        # [[checks]] block hits. Same rationale as SearXNG: parse Fly's
+        # own report rather than running curl inside the container. A
+        # previous iteration tried `fly ssh console -C curl localhost:8686`
+        # and silently broke on base images that ship without curl.
+        if wait_for_fly_checks "${LOG_SHIPPER_APP}" 90; then
+            echo "PASS deploy: log shipper deployed"
+        else
+            echo "WARN deploy: log shipper deploy returned 0 but fly status never reported passing checks — logs may not ship until next deploy, core unaffected"
+        fi
     else
         echo "WARN deploy: log shipper deployment failed — logs will not ship this cycle, core unaffected"
     fi
