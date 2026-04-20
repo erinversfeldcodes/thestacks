@@ -41,15 +41,23 @@ defmodule Core.Application do
 
   # Fly's internal .internal hostnames resolve to IPv6 (6PN) addresses only.
   # Without :inet6, Erlang's gen_tcp defaults to :inet (IPv4) and cannot dial
-  # them. We detect internal URLs at startup and configure pools accordingly.
+  # them — `:inet.getaddrs/2` returns `:nxdomain` because there's no A
+  # record, only AAAA. Every in-cluster service URL must be added to this
+  # list or its calls will fail silently from the caller's perspective.
+  #
+  # Discovered 2026-04-20 when SearXNG deps-check was returning
+  # `%Mint.TransportError{reason: :nxdomain}` even though SearXNG was
+  # healthy and DNS resolved fine from a shell (`getent hosts` worked
+  # but Erlang's IPv4-only resolver didn't).
   defp finch_spec do
     vision_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
     scraper_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
+    searxng_url = Application.get_env(:core, :searxng_url, "http://localhost:8888")
 
     inet6_pool = [conn_opts: [transport_opts: [inet6: true]]]
 
     pools =
-      [vision_url, scraper_url]
+      [vision_url, scraper_url, searxng_url]
       |> Enum.filter(&String.contains?(&1, ".internal"))
       |> Map.new(&{&1, inet6_pool})
 
