@@ -56,13 +56,20 @@ else
     _fail "vector_toml_structure — missing required blocks"
 fi
 
-# ── Case 2: source references Fly's NATS URL with env-var expansion ─────────
-# The env var name is `LOG_SHIPPER_ACCESS_TOKEN` (not bare `ACCESS_TOKEN`)
-# to disambiguate from Fly's generic `ACCESS_TOKEN` convention — the
-# shipper has its own org-scoped token independent of any other Fly
-# credential in the system.
+# ── Case 2: source is wired to Fly's NATS broadcast with explicit auth ──────
+# Two requirements, both load-bearing:
+#   1. URL points at Fly's internal NATS host (`[fdaa::3]:4223`). No
+#      credentials in the URL — Vector's nats source doesn't parse
+#      user:pass@ from URLs and the server rejects the connection with
+#      "authorization violation" if we try. Verified empirically
+#      2026-04-20 when the shipper crash-looped on that error.
+#   2. `auth.strategy = "user_password"` with user = ${ORG} and
+#      password = ${LOG_SHIPPER_ACCESS_TOKEN}. The
+#      `LOG_SHIPPER_ACCESS_TOKEN` name disambiguates from Fly's generic
+#      `ACCESS_TOKEN` convention — the shipper has its own org-scoped
+#      token independent of any other Fly credential in the system.
 _case "vector_toml_nats_source" \
-    "fly source uses NATS with ORG + LOG_SHIPPER_ACCESS_TOKEN env vars"
+    "fly source connects to Fly NATS with user_password auth"
 if python3 -c "
 import tomllib
 with open('${VECTOR_TOML}', 'rb') as f:
@@ -70,16 +77,21 @@ with open('${VECTOR_TOML}', 'rb') as f:
 src = data['sources']['fly']
 assert src['type'] == 'nats', f'expected nats, got {src[\"type\"]}'
 url = src.get('url', '')
-assert '\${ORG}' in url, f'URL missing \${{ORG}}: {url}'
-assert '\${LOG_SHIPPER_ACCESS_TOKEN}' in url, \
-    f'URL missing \${{LOG_SHIPPER_ACCESS_TOKEN}}: {url}'
-assert '\${ACCESS_TOKEN}' not in url or '\${LOG_SHIPPER_ACCESS_TOKEN}' in url, \
-    'URL must use LOG_SHIPPER_ACCESS_TOKEN, not the bare ACCESS_TOKEN name'
 assert '[fdaa::3]:4223' in url, f'URL missing Fly NATS host: {url}'
+# Credentials must NOT live in the URL — Vector doesn't parse them there.
+assert '@' not in url, f'URL must not embed user:pass@ (Vector ignores it): {url}'
+auth = src.get('auth', {})
+assert auth.get('strategy') == 'user_password', \
+    f'auth.strategy must be user_password, got {auth.get(\"strategy\")!r}'
+up = auth.get('user_password', {})
+assert '\${ORG}' in up.get('user', ''), \
+    f'auth.user_password.user must interpolate \${{ORG}}, got {up.get(\"user\")!r}'
+assert '\${LOG_SHIPPER_ACCESS_TOKEN}' in up.get('password', ''), \
+    f'auth.user_password.password must interpolate \${{LOG_SHIPPER_ACCESS_TOKEN}}, got {up.get(\"password\")!r}'
 " 2>&1; then
-    _pass "vector_toml_nats_source — NATS URL references \${ORG} + \${LOG_SHIPPER_ACCESS_TOKEN}"
+    _pass "vector_toml_nats_source — NATS source uses explicit user_password auth with ORG + LOG_SHIPPER_ACCESS_TOKEN"
 else
-    _fail "vector_toml_nats_source — NATS URL misconfigured"
+    _fail "vector_toml_nats_source — NATS source misconfigured; Vector will reject auth"
 fi
 
 # ── Case 3: scrub_pii transform mentions all three PII classes ───────────────
