@@ -110,17 +110,38 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  # POOL_SIZE default: 20. Was 10 through 2026-04-20 and hit
-  # db_pool_queue_p95_ms=89ms under SLO-gate load (6 probes/iter ×
-  # parallel iterations + Oban :vision/:events queues + background
-  # retries). 20 connections × ~8MB each = ~160MB, well within the
-  # 512MB core VM. Neon prod ceiling is 200; with 2 machines that's
-  # 40 — 20% of the ceiling.
+  # POOL_SIZE default: 30. Bumped from 20 on 2026-04-20 after
+  # db_pool_queue_p95_ms=78ms continued to breach the 50ms threshold
+  # even with the 10→20 bump. 30 × ~8MB = ~240MB, still well under
+  # the 512MB core VM budget. Oban runs on a DEDICATED repo
+  # (Core.ObanRepo, see below) with its own pool, so this value
+  # sizes the HTTP-request handler pool only — queue times here
+  # should drop cleanly since background work can no longer starve
+  # it.
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "20"),
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "30"),
+    socket_options: maybe_ipv6
+
+  # Dedicated repo for Oban. Having background workers share
+  # Core.Repo meant a burst of enqueued jobs could starve HTTP
+  # request handlers of DB connections — exactly the contention
+  # profile db_pool_queue_p95_ms measures. A separate repo with its
+  # own pool decouples the two: HTTP keeps its 30 connections for
+  # user-facing traffic; Oban workers compete only among themselves
+  # on their own 15-connection pool.
+  #
+  # Both repos point at the same Postgres database, so Oban still
+  # sees the same event_log, same op.* tables, same job state — just
+  # through a separate connection set. Total Neon connections with
+  # 2 machines: (30 + 15) × 2 = 90, well under Neon's 200 ceiling.
+  config :core, Core.ObanRepo,
+    url: database_url,
+    ssl: true,
+    parameters: [search_path: "public,op"],
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "15"),
     socket_options: maybe_ipv6
 
   secret_key_base =
