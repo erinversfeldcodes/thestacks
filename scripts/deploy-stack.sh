@@ -404,37 +404,42 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
 
     _searxng_success=0
     if [[ "$PROD_MODE" -eq 1 ]]; then
-        # SearXNG is a search-enrichment dependency, not a critical path for
-        # authoring/reading books. A Fly brownout or upstream image outage
-        # should not block a core release. Retry-then-WARN matches preview
-        # behaviour; core already handles an empty SEARXNG_INTERNAL_URL by
-        # degrading search gracefully.
+        # SearXNG is in the SLO gate's hot path via /internal/deps-check.
+        # If it can't come up healthy, the gate pollutes its measurements:
+        # availability drops, real_5xx_rate rises from deps-check 503s,
+        # downstream latency SLIs may shift because catalogue-path calls
+        # touch SearXNG, and db_pool_queue_p95_ms can creep up from
+        # retries eating connections. All false signals relative to
+        # core's actual health.
         #
-        # Post-deploy verification: `fly deploy` already waits for the
-        # [[checks]] block in fly.searxng.toml to pass before returning
-        # 0, so in the common case we just trust its exit code. We then
-        # re-verify via `fly status --json` as a defence against edge
-        # cases (e.g. fly deploy returning early on a --wait-timeout).
-        # The previous curl-inside-the-container probe failed on the
-        # upstream SearXNG image which lacks curl — parsing fly status
-        # is tool-agnostic.
-        if deploy_with_retry "searxng" _searxng_deploy_once; then
-            # SearXNG's first-passing-check can take 3–4 minutes on a
-            # cold deploy: custom image build + 512MB VM allocation +
-            # Python startup + engine loading. Observed 234s on the
-            # 2026-04-20 run — my earlier 90s timeout cleared
-            # SEARXNG_URL on core and broke deps-check. 300s gives
-            # room.
-            echo "==> Verifying SearXNG health via fly status (up to 300s)..."
-            if wait_for_fly_checks "${SEARXNG_APP}" 300; then
-                _searxng_success=1
-                echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
-            else
-                echo "WARN deploy: SearXNG deploy returned 0 but fly status never reported passing checks within 300s — crash loop likely."
-            fi
-        else
-            echo "WARN deploy: SearXNG prod deployment failed after retry — core will degrade gracefully"
+        # Earlier policy was WARN-and-continue on SearXNG failure (on
+        # the reasoning that search is non-critical). The gate-pollution
+        # problem means that's not an acceptable trade: a SearXNG
+        # outage would cause the gate to breach on derived signals and
+        # roll core back on a bad diagnosis. Block the deploy up front
+        # instead so the rollback path fires on a clean, named signal.
+        #
+        # Preview mode keeps WARN-and-continue — ephemeral branches
+        # aren't rolled back on search-dependency health.
+        if ! deploy_with_retry "searxng" _searxng_deploy_once; then
+            rm -f "${SETTINGS_RENDERED}"
+            echo "FAIL deploy: SearXNG deployment failed after retry — aborting prod release so the gate doesn't run on a polluted SearXNG signal" >&2
+            exit 1
         fi
+
+        # SearXNG's first-passing-check can take 3–4 minutes on a
+        # cold deploy: custom image build + 512MB VM allocation +
+        # Python startup + engine loading. Observed 234s on the
+        # 2026-04-20 run — an earlier 90s timeout cleared
+        # SEARXNG_URL on core and broke deps-check. 300s gives room.
+        echo "==> Verifying SearXNG health via fly status (up to 300s)..."
+        if ! wait_for_fly_checks "${SEARXNG_APP}" 300; then
+            rm -f "${SETTINGS_RENDERED}"
+            echo "FAIL deploy: SearXNG deploy returned 0 but fly status never reported started+passing within 300s — aborting prod release" >&2
+            exit 1
+        fi
+        _searxng_success=1
+        echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
     else
         if _searxng_deploy_once; then
             _searxng_success=1
@@ -444,22 +449,12 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
 
     rm -f "${SETTINGS_RENDERED}"
 
+    # Preview-only failure path — prod has already exited on failure
+    # above. Core still has SEARXNG_URL from fly.core.toml [env] if it
+    # were to reach the gate on a degraded preview, but we don't gate
+    # preview anyway.
     if [[ "$_searxng_success" -eq 0 ]]; then
-        echo "WARN deploy: SearXNG deployment failed — core will degrade gracefully"
-        # Leave SEARXNG_INTERNAL_URL set to the expected internal
-        # hostname. A prior implementation cleared it here and also ran
-        # `fly secrets unset SEARXNG_URL --app ${CORE_APP}` — the
-        # reasoning was "don't point at a dead host". That was
-        # backwards: SEARXNG_URL is a deterministic internal name, not
-        # a liveness signal. Unsetting it broke the graceful-recovery
-        # path — once SearXNG came back healthy, core stayed broken
-        # until the next deploy re-staged the URL. Keeping the URL
-        # means `SearxngClient.search/2` gets `:nxdomain` while
-        # SearXNG is down and `{:ok, ...}` the moment it recovers; the
-        # client already handles both. The hardcoded value in
-        # fly.core.toml [env] provides the same default on fresh
-        # deploys even if this branch is reached on the very first
-        # deploy.
+        echo "WARN deploy: SearXNG deployment failed (preview) — core will degrade gracefully"
     fi
 else
     echo "WARN: SEARXNG_SECRET_KEY not set — skipping SearXNG deploy."
