@@ -104,6 +104,11 @@ defmodule Stacks.AI.Client do
 
   defp endpoint_path("is_book"), do: "classify"
   defp endpoint_path("extract_isbn"), do: "extract"
+  # Single-request classify + extract — the vision service composes both
+  # steps and short-circuits on non-books internally. Prefer this over
+  # calling "is_book" and "extract_isbn" separately; see
+  # Stacks.Moderation.run_pipeline/1.
+  defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("associate"), do: "associate"
 
   defp endpoint_path(other) do

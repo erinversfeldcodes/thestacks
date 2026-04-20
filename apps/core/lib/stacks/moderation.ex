@@ -38,67 +38,32 @@ defmodule Stacks.Moderation do
   """
   @spec run_pipeline(map()) :: {:ok, [Stacks.Books.Book.t()]} | {:error, term()}
   def run_pipeline(%{image_url: image_url} = context) do
-    with {:ok, :is_book} <- check_is_book_url(image_url),
-         {:ok, candidates} <- extract_all_candidates_url(image_url) do
-      resolve_and_store_all(candidates, context)
-    else
-      {:error, reason} -> {:error, reason}
-    end
+    analyze(%{image_url: image_url}, context)
   end
 
   def run_pipeline(%{image_b64: image_b64} = context) do
-    with {:ok, :is_book} <- check_is_book(image_b64),
-         {:ok, candidates} <- extract_all_candidates(image_b64) do
-      resolve_and_store_all(candidates, context)
-    else
-      {:error, reason} -> {:error, reason}
-    end
+    analyze(%{image: image_b64}, context)
   end
 
-  # ── image_url path ───────────────────────────────────────────────────────
-
-  defp check_is_book_url(image_url) do
-    case AIClient.call_vision("is_book", %{image_url: image_url}) do
-      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} -> {:ok, :is_book}
-      {:ok, %{"classification" => _}} -> {:error, :not_a_book}
-      error -> error
-    end
-  end
-
-  defp extract_all_candidates_url(image_url) do
-    case AIClient.call_vision("extract_isbn", %{image_url: image_url}) do
-      {:ok, %{"books" => []}} ->
+  # Single-request classify + extract via the vision service's /analyze
+  # endpoint. Replaces the earlier two-call pattern (is_book then
+  # extract_isbn — either sequential or a parallel fan-out that wasted
+  # a Modal call on non-books). One HTTP round-trip, one Modal container
+  # invocation. The service short-circuits internally when classification
+  # is not BOOK, returning an empty books list without running the
+  # expensive extract step.
+  defp analyze(payload, context) do
+    case AIClient.call_vision("analyze", payload) do
+      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}} ->
         {:error, :isbn_not_found}
 
-      {:ok, %{"books" => books}} when is_list(books) ->
-        Logger.info("Moderation: extraction returned #{length(books)} candidate(s)")
-        {:ok, books}
+      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => books}}
+      when is_list(books) ->
+        Logger.info("Moderation: /analyze returned #{length(books)} candidate(s)")
+        resolve_and_store_all(books, context)
 
-      error ->
-        error
-    end
-  end
-
-  # ── image_b64 path (legacy) ──────────────────────────────────────────────
-
-  defp check_is_book(image_b64) do
-    case AIClient.call_vision("is_book", %{image: image_b64}) do
-      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} -> {:ok, :is_book}
-      {:ok, %{"classification" => _}} -> {:error, :not_a_book}
-      error -> error
-    end
-  end
-
-  # Calls the extraction endpoint and returns a list of candidate maps,
-  # each with :isbn (if found directly) or :title/:author/:raw_text for search.
-  defp extract_all_candidates(image_b64) do
-    case AIClient.call_vision("extract_isbn", %{images: [image_b64]}) do
-      {:ok, %{"books" => []}} ->
-        {:error, :isbn_not_found}
-
-      {:ok, %{"books" => books}} when is_list(books) ->
-        Logger.info("Moderation: extraction returned #{length(books)} candidate(s)")
-        {:ok, books}
+      {:ok, %{"classification" => _}} ->
+        {:error, :not_a_book}
 
       error ->
         error
@@ -128,13 +93,38 @@ defmodule Stacks.Moderation do
   # For each candidate, resolve to an ISBN (direct or via title search) and
   # create/find the book. Returns {:ok, [books]} with whatever could be resolved;
   # fails only if NONE of the candidates resolve.
+  #
+  # Candidates are resolved concurrently via `Task.async_stream`. Each
+  # candidate triggers an Open Library (sometimes Google Books) HTTP
+  # lookup plus DB work; sequential processing of 2+ candidates easily
+  # adds 0.5–1.5s to the overall pipeline. With concurrency, total wait
+  # is bounded by the slowest candidate rather than their sum. Failures
+  # in one candidate don't affect the others — `resolve_and_store/3`
+  # returns `[]` on failure which flat-maps away.
   defp resolve_and_store_all(candidates, context) do
     expanded = expand_compound_candidates(candidates)
+    concurrency = max(length(expanded), 1)
 
     books =
       expanded
       |> Enum.with_index(1)
-      |> Enum.flat_map(fn {candidate, idx} -> resolve_and_store(candidate, idx, context) end)
+      |> Task.async_stream(
+        fn {candidate, idx} -> resolve_and_store(candidate, idx, context) end,
+        # Same upper bound as run_pipeline's Task.await_many — matches
+        # the Modal/Open Library client receive_timeout ceilings. A
+        # genuinely slow candidate should not kill the task.
+        timeout: 210_000,
+        max_concurrency: concurrency,
+        on_timeout: :kill_task
+      )
+      |> Enum.flat_map(fn
+        {:ok, result} ->
+          result
+
+        {:exit, reason} ->
+          Logger.warning("Moderation: candidate task exited: #{inspect(reason)}")
+          []
+      end)
 
     case books do
       [] -> {:error, :isbn_not_found}

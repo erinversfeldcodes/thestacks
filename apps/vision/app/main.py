@@ -13,6 +13,8 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 
 from app.config import settings
 from app.proto.gen.vision import (
+    AnalyzeRequest,
+    AnalyzeResponse,
     AssociateCallback,
     AssociateRequest,
     AssociateResponse,
@@ -329,6 +331,136 @@ async def associate(
 
     logger.bind(job_id=job_id, edition_id=edition_id).info("associate: job queued")
     return AssociateResponse(job_id=job_id)
+
+
+async def _load_image_b64(
+    image: str | None,
+    image_url: str | None,
+) -> str:
+    """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
+    into a single base64-encoded string. Raises HTTPException(422) for invalid
+    input — identical validation semantics to the /classify endpoint's inline
+    logic, factored out so /analyze can reuse it without duplication.
+    """
+    if image_url is not None:
+        image_bytes = await _download_image(image_url)
+        return base64.b64encode(image_bytes).decode()
+    if image is None:
+        raise HTTPException(
+            status_code=422, detail="Either 'image' or 'image_url' must be provided"
+        )
+    try:
+        decoded = base64.b64decode(image, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+    if len(decoded) > settings.max_image_size_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+        )
+    return image
+
+
+def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
+    """Normalise the ML model's classify payload into a (proto-enum, confidence)
+    pair. Identical to /classify's inline parsing."""
+    raw_ml = str(parsed.get("classification", "ambiguous"))
+    classification = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
+    raw_confidence = parsed.get("confidence", 0.0)
+    confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    return classification, confidence
+
+
+def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
+    """Normalise the ML model's extract payload into a list of ExtractedBook.
+    Identical to /extract's inline parsing."""
+    books: list[ExtractedBook] = []
+    raw_books = parsed.get("books")
+    if not isinstance(raw_books, list):
+        return books
+    for item in raw_books:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        author = item.get("author")
+        isbns = item.get("potential_isbns")
+        raw_text = item.get("raw_text")
+        conf = item.get("confidence")
+        books.append(
+            ExtractedBook(
+                title=title if isinstance(title, str) else None,
+                author=author if isinstance(author, str) else None,
+                potential_isbns=isbns if isinstance(isbns, list) else [],
+                raw_text=raw_text if isinstance(raw_text, str) else None,
+                confidence=float(conf) if isinstance(conf, int | float) else None,
+            )
+        )
+    return books
+
+
+@app.post(
+    "/analyze",
+    response_model=AnalyzeResponse,
+    status_code=200,
+    dependencies=[Depends(verify_hmac)],
+)
+async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
+    """Single-request classification + extraction.
+
+    Runs classify first and short-circuits on non-book inputs — extract is
+    only called when the classifier says BOOK. Matches the original
+    sequential /classify → /extract pipeline in core, collapsed into one
+    HTTP round-trip and one Modal container invocation. Avoids the double
+    cold-start + double-round-trip cost of the two-endpoint design without
+    wasting Modal compute on extract calls for non-books.
+    """
+    log = logger.bind(endpoint="/analyze")
+
+    image_b64 = await _load_image_b64(body.image, body.image_url)
+    if body.image_url is not None:
+        log = log.bind(image_url=body.image_url)
+
+    client: VisionClient = request.app.state.vision_client
+
+    log.info("calling vision model for classification")
+    classify_parsed = await client.classify(image_b64)
+    classification, confidence = _parse_classification(classify_parsed)
+    log.info(
+        "classification complete",
+        classification=classification,
+        confidence=confidence,
+    )
+
+    books: list[ExtractedBook] = []
+    if classification == _CLF_BOOK:
+        # Local OCR pre-pass: skip the vision model round-trip entirely when
+        # a barcode ISBN is already visible. Mirrors /extract's behaviour.
+        decoded = base64.b64decode(image_b64, validate=True)
+        if settings.local_ocr_enabled:
+            isbn = local_isbn_scan(decoded)
+            if isbn is not None:
+                log.info("local OCR pre-pass hit", isbn=isbn)
+                return AnalyzeResponse(
+                    classification=classification,
+                    confidence=confidence,
+                    books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
+                    model_used="local_ocr",
+                )
+
+        log.info("calling vision model for extraction")
+        extract_parsed = await client.extract([image_b64])
+        books = _parse_extracted_books(extract_parsed)
+        log.info("extraction complete", book_count=len(books))
+    else:
+        log.info("skipping extraction: classification != BOOK")
+
+    return AnalyzeResponse(
+        classification=classification,
+        confidence=confidence,
+        books=books,
+        model_used=settings.model_name,
+    )
 
 
 @app.post(

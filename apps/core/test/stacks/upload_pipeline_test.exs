@@ -1497,13 +1497,13 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "NotABookClient returns not_book classification" do
-      result = __MODULE__.NotABookClient.call_vision("is_book", %{})
+      result = __MODULE__.NotABookClient.call_vision("analyze", %{})
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "AmbiguousClient returns ambiguous classification" do
-      result = __MODULE__.AmbiguousClient.call_vision("is_book", %{})
+      result = __MODULE__.AmbiguousClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
                result
@@ -1511,7 +1511,7 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.1"], suite: :external
     test "ErrorClient returns service_unavailable" do
-      result = __MODULE__.ErrorClient.call_vision("is_book", %{})
+      result = __MODULE__.ErrorClient.call_vision("analyze", %{})
       assert {:error, :service_unavailable} = result
     end
   end
@@ -1519,14 +1519,14 @@ defmodule Stacks.UploadPipelineTest do
   describe "Suite 6 — MockClient extraction responses" do
     @tag stories: ["US-1.1.1"], suite: :external
     test "default MockClient returns book extraction with ISBN" do
-      {:ok, resp} = MockClient.call_vision("extract_isbn", %{})
+      {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert [book | _] = resp["books"]
       assert [_ | _] = book["potential_isbns"]
     end
 
     @tag stories: ["US-1.1.2"], suite: :external
     test "NoIsbnClient returns empty books array" do
-      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("extract_isbn", %{})
+      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("analyze", %{})
       assert resp["books"] == []
     end
   end
@@ -1534,7 +1534,7 @@ defmodule Stacks.UploadPipelineTest do
   describe "Suite 6 — circuit breaker" do
     @tag stories: ["US-1.1.1"], suite: :external
     test "CircuitOpenClient returns :circuit_open error" do
-      result = __MODULE__.CircuitOpenClient.call_vision("is_book", %{})
+      result = __MODULE__.CircuitOpenClient.call_vision("analyze", %{})
       assert {:error, :circuit_open} = result
     end
   end
@@ -2182,19 +2182,22 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Inline mock modules
+  # Inline mock modules. Each returns the consolidated /analyze shape
+  # (classification + books in one response), matching what the production
+  # Moderation pipeline now calls post-consolidation.
   # ---------------------------------------------------------------------------
 
   defmodule NotABookClient do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
            "confidence" => 0.95,
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -2205,17 +2208,15 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
+           "books" => [],
            "model_used" => "mock"
          }}
-
-    def call_vision("extract_isbn", _payload),
-      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -2224,7 +2225,7 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload), do: {:error, :service_unavailable}
+    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
   end
 
@@ -2232,28 +2233,16 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    # AMBIGUOUS classifications are treated as not-a-book by Moderation
+    # (only BOOK short-circuits into extract). Books field should be
+    # empty since extract is never reached for AMBIGUOUS.
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
            "confidence" => 0.5,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
-           "books" => [
-             %{
-               "title" => "Ambiguous Book",
-               "author" => nil,
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.5
-             }
-           ],
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -2271,19 +2260,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Things I Don't Want to Know OR The Cost of Living",
@@ -2303,19 +2285,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Romance Novel",
@@ -2335,19 +2310,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Book One",

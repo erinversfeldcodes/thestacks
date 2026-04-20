@@ -323,23 +323,23 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   # Inline mock modules
   # ---------------------------------------------------------------------------
 
+  # All inline mocks now return the consolidated /analyze shape
+  # (classification + books in one response). The legacy
+  # "is_book"/"extract_isbn" clauses were deleted when Moderation
+  # switched to the single-request /analyze endpoint — Moderation no
+  # longer calls them, so keeping them around would be confusing dead
+  # code.
+
   defmodule AgeGatedBookClient do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => nil,
@@ -359,12 +359,13 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
            "confidence" => 0.95,
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -375,17 +376,15 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
+           "books" => [],
            "model_used" => "mock"
          }}
-
-    def call_vision("extract_isbn", _payload),
-      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -394,7 +393,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload), do: {:error, :service_unavailable}
+    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
   end
 
@@ -402,19 +401,12 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.95,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => nil,
@@ -441,19 +433,12 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.95,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => nil,
@@ -480,19 +465,12 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.95,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => nil,
