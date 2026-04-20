@@ -91,6 +91,54 @@ _EXTRACT_PROMPT = (
     'If no books can be identified: {"books": []}'
 )
 
+# Single-pass prompt: one `model.generate()` yields both the classification
+# signal and the extracted book list. The caller (`app.main:/analyze`)
+# previously issued classify + extract back-to-back — two container
+# invocations, two round-trips. On real book uploads the second call runs
+# against a cold container more often than the first because the first
+# warmed the class but the Modal scheduler load-balances independently.
+# Consolidating halves inference count and removes the inter-call gap
+# (~2-4s observed at upload p95=7.7s).
+#
+# Prompt engineering notes:
+#   - The two sub-prompts were added sequentially so the model never sees
+#     them together in fine-tuning data. The combined prompt re-asserts
+#     the classification criteria FIRST so the model doesn't leak
+#     extraction detail into the `classification` branch.
+#   - Extraction is conditional on `"book"` classification, but we ask
+#     the model to emit `"books": []` for every non-book so the caller
+#     never needs a second call. Non-book inputs still return a well-
+#     formed payload — `main.py` treats it as a non-book and discards
+#     `books` regardless of content (defensive parse — the prompt is a
+#     guideline, not a wire contract).
+#   - Single JSON object, no nested code fences. `_parse_json` already
+#     handles the "model wrapped the response in ```json" case.
+_ANALYZE_PROMPT = (
+    "Examine this image and determine whether it shows or mentions a book, then "
+    "extract every book you can identify.\n\n"
+    "CLASSIFICATION — set `classification` to one of:\n"
+    '  - "book"       — the image shows a physical book (cover with readable\n'
+    "                   title/author, spine, or barcode) OR is a screenshot/photo\n"
+    "                   of text that explicitly names a specific book title or author.\n"
+    '  - "not_book"   — no book is present and no book is named in legible text.\n'
+    "                   Examples: animals, food, landscapes, logos, abstract art,\n"
+    "                   a rectangle resembling a cover but with no legible title/author.\n"
+    '  - "ambiguous"  — you genuinely cannot tell (blurred/cropped image where\n'
+    "                   something book-like is partially visible).\n\n"
+    "EXTRACTION — populate `books` with every book identifiable from the image:\n"
+    "  - Physical books: use visible text + cover artwork (illustration style,\n"
+    "    subject matter, period, imagery) as complementary identification signals.\n"
+    "  - Text screenshots: extract every book title/author mentioned in the text.\n"
+    '  - If classification is "not_book" or "ambiguous": return `books`: [].\n\n'
+    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
+    "{\n"
+    '  "classification": "book" | "not_book" | "ambiguous",\n'
+    '  "confidence": 0.95,\n'
+    '  "reasoning": "one sentence explaining the classification",\n'
+    '  "books": [{"title": "...", "author": "...", "potential_isbns": [], "raw_text": "..."}]\n'
+    "}"
+)
+
 
 @app.cls(
     gpu="A10G",
@@ -126,6 +174,10 @@ class VisionModel:
         if not images_b64:
             return {"books": []}
         return self._infer(images_b64[0], _EXTRACT_PROMPT)
+
+    @modal.method()
+    def analyze(self, image_b64: str) -> dict[str, Any]:
+        return self._infer(image_b64, _ANALYZE_PROMPT)
 
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import torch

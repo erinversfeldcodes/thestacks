@@ -58,5 +58,28 @@ class VisionClient:
             else {"classification": "ambiguous", "confidence": 0.0}
         )
 
+    async def analyze(self, image: str) -> dict[str, object]:
+        """Single-pass classify + extract via one Modal inference.
+
+        Returns the combined payload shape documented on `_ANALYZE_PROMPT`
+        in modal_app.py: `classification`, `confidence`, `reasoning`, `books`.
+        The caller is responsible for normalising/validating the payload.
+        """
+        try:
+            model = self._modal_cls()
+            result = await asyncio.wait_for(
+                model.analyze.remote.aio(image),
+                timeout=float(settings.request_timeout_seconds),
+            )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Vision model request failed: {exc}"
+            ) from exc
+        if not isinstance(result, dict):
+            return {"classification": "ambiguous", "confidence": 0.0, "books": []}
+        return result
+
     async def close(self) -> None:
         pass  # Modal client manages its own connection lifecycle
