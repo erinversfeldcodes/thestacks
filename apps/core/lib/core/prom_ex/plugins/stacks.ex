@@ -42,10 +42,70 @@ defmodule Core.PromEx.Plugins.Stacks do
   # R2 upload + DB writes); anything over 20s is genuinely anomalous.
   @route_duration_buckets [50, 100, 250, 500, 1_000, 2_000, 5_000, 10_000, 20_000]
 
+  # Buckets for the per-handler dispatch duration — most event
+  # handlers are DB-only and complete in tens of ms; a slow one
+  # (e.g. one that makes an external HTTP call) can push into the
+  # seconds. The 5000/10000 upper bounds catch handlers that are
+  # genuinely problematic so operators can find them in grafana/axiom.
+  @dispatch_duration_buckets [5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
+
   @impl true
   def event_metrics(_opts) do
     [
       Event.build(:stacks_app_metrics, [
+        # ── Event emission throughput ─────────────────────────────────
+        # Fires once per `Stacks.Events.emit/1`. Tagged by event_type
+        # so we can see which event flows dominate the
+        # `:events` Oban queue and size the queue's concurrency
+        # accordingly. Exported as `stacks_events_emitted_count_total`.
+        counter(
+          [:stacks, :events, :emitted, :count, :total],
+          event_name: [:stacks, :events, :emitted],
+          description: "Events appended to the op.event_log (pre-dispatch).",
+          tags: [:event_type, :aggregate_type]
+        ),
+
+        # ── Handler invocation counter ────────────────────────────────
+        # Fires every time SubscriberWorker calls a handler, regardless
+        # of outcome. Labelled by handler module + event_type so
+        # operators can answer "how often does each handler fire?" and
+        # compare against `dispatch_duration` to find the expensive-
+        # times-frequent combinations.
+        counter(
+          [:stacks, :events, :handler_invoked, :count, :total],
+          event_name: [:stacks, :events, :handler_invoked],
+          description: "Invocations of Stacks.Events handlers from SubscriberWorker.",
+          tags: [:handler, :event_type]
+        ),
+
+        # ── Handler error counter (renamed from legacy path) ─────────
+        # The legacy path was `[:stacks, :events, :handler_error]`;
+        # PromEx's `_total` suffix convention requires the metric path
+        # to end `:count, :total`. Keeps the semantics identical (fires
+        # on `{:error, _}` return AND on raise) but exports cleanly as
+        # `stacks_events_handler_error_count_total`.
+        counter(
+          [:stacks, :events, :handler_error, :count, :total],
+          event_name: [:stacks, :events, :handler_error],
+          description: "Handler errors (returned {:error, _} or raised).",
+          tags: [:handler, :event_type]
+        ),
+
+        # ── Handler dispatch duration (histogram) ─────────────────────
+        # Per-handler wall-clock time for one `handle_event/1` call.
+        # Wire-format: `stacks_events_dispatch_duration_milliseconds_{bucket,sum,count}`.
+        # The gate can derive a p95-by-handler SLI from this if we want
+        # to gate on handler timeouts later.
+        distribution(
+          [:stacks, :events, :dispatch, :duration, :milliseconds],
+          event_name: [:stacks, :events, :dispatch],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description: "Per-handler dispatch time in SubscriberWorker.",
+          tags: [:handler, :event_type],
+          reporter_options: [buckets: @dispatch_duration_buckets]
+        ),
+
         # ── Upload pipeline terminal outcomes ─────────────────────────
         # Counter path ends in `:total` so the exported Prometheus name is
         # `stacks_upload_terminal_count_total`.
