@@ -77,6 +77,12 @@ def make_handler(mode: str, fail_ratio: float):
                 else:
                     self._respond(200, b'{"items":[]}')
                 return
+            # Authenticated bookshelf read — exercises the Core.Repo multi-
+            # table join path in the real app. Here we just echo an empty
+            # shelf so availability stays 100% under the `healthy` mode.
+            if self.path.startswith("/api/bookshelves/"):
+                self._respond(200, b'{"books":[]}')
+                return
             self._respond(404)
 
         def do_POST(self):  # noqa: N802
