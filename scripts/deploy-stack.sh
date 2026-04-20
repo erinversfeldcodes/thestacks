@@ -419,12 +419,18 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         # upstream SearXNG image which lacks curl — parsing fly status
         # is tool-agnostic.
         if deploy_with_retry "searxng" _searxng_deploy_once; then
-            echo "==> Verifying SearXNG health via fly status (up to 90s)..."
-            if wait_for_fly_checks "${SEARXNG_APP}" 90; then
+            # SearXNG's first-passing-check can take 3–4 minutes on a
+            # cold deploy: custom image build + 512MB VM allocation +
+            # Python startup + engine loading. Observed 234s on the
+            # 2026-04-20 run — my earlier 90s timeout cleared
+            # SEARXNG_URL on core and broke deps-check. 300s gives
+            # room.
+            echo "==> Verifying SearXNG health via fly status (up to 300s)..."
+            if wait_for_fly_checks "${SEARXNG_APP}" 300; then
                 _searxng_success=1
                 echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
             else
-                echo "WARN deploy: SearXNG deploy returned 0 but fly status never reported passing checks — crash loop likely."
+                echo "WARN deploy: SearXNG deploy returned 0 but fly status never reported passing checks within 300s — crash loop likely."
             fi
         else
             echo "WARN deploy: SearXNG prod deployment failed after retry — core will degrade gracefully"
@@ -440,19 +446,20 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
 
     if [[ "$_searxng_success" -eq 0 ]]; then
         echo "WARN deploy: SearXNG deployment failed — core will degrade gracefully"
-        SEARXNG_INTERNAL_URL=""
-        # Clear the stale SEARXNG_URL from the core app so it doesn't keep
-        # calling a dead host. Without this, a previous successful deploy's
-        # SEARXNG_URL lingers on core and every request to the SearXNG
-        # fallback path (plus the /internal/deps-check probe) 503s on
-        # `:nxdomain`. Only unset when we're updating a known core app —
-        # during preview deploys CORE_APP is ephemeral and may not exist
-        # yet.
-        if [[ "$PROD_MODE" -eq 1 ]] && fly apps list 2>&1 | grep -q "^${CORE_APP} "; then
-            echo "==> Clearing stale SEARXNG_URL from ${CORE_APP}..."
-            fly secrets unset SEARXNG_URL --app "${CORE_APP}" --stage 2>&1 \
-                | grep -v "^Error: No secrets with" || true
-        fi
+        # Leave SEARXNG_INTERNAL_URL set to the expected internal
+        # hostname. A prior implementation cleared it here and also ran
+        # `fly secrets unset SEARXNG_URL --app ${CORE_APP}` — the
+        # reasoning was "don't point at a dead host". That was
+        # backwards: SEARXNG_URL is a deterministic internal name, not
+        # a liveness signal. Unsetting it broke the graceful-recovery
+        # path — once SearXNG came back healthy, core stayed broken
+        # until the next deploy re-staged the URL. Keeping the URL
+        # means `SearxngClient.search/2` gets `:nxdomain` while
+        # SearXNG is down and `{:ok, ...}` the moment it recovers; the
+        # client already handles both. The hardcoded value in
+        # fly.core.toml [env] provides the same default on fresh
+        # deploys even if this branch is reached on the very first
+        # deploy.
     fi
 else
     echo "WARN: SEARXNG_SECRET_KEY not set — skipping SearXNG deploy."
@@ -751,16 +758,20 @@ if [[ "$PROD_MODE" -eq 1 ]] && [[ -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
     }
 
     if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
-        echo "==> Verifying log shipper health via fly status (up to 90s)..."
+        # Same reasoning as SearXNG's 300s timeout above — cold image
+        # build + VM boot + Vector's config parse + NATS source
+        # connection + API server start. Vector is lighter than
+        # SearXNG but still far from instant on a cold deploy.
+        echo "==> Verifying log shipper health via fly status (up to 300s)..."
         # Vector's built-in /health on :8686 is what fly.log-shipper.toml's
         # [[checks]] block hits. Same rationale as SearXNG: parse Fly's
         # own report rather than running curl inside the container. A
         # previous iteration tried `fly ssh console -C curl localhost:8686`
         # and silently broke on base images that ship without curl.
-        if wait_for_fly_checks "${LOG_SHIPPER_APP}" 90; then
+        if wait_for_fly_checks "${LOG_SHIPPER_APP}" 300; then
             echo "PASS deploy: log shipper deployed"
         else
-            echo "WARN deploy: log shipper deploy returned 0 but fly status never reported passing checks — logs may not ship until next deploy, core unaffected"
+            echo "WARN deploy: log shipper deploy returned 0 but fly status never reported passing checks within 300s — logs may not ship until next deploy, core unaffected"
         fi
     else
         echo "WARN deploy: log shipper deployment failed — logs will not ship this cycle, core unaffected"
