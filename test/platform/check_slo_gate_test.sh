@@ -245,6 +245,52 @@ else
     _record_fail "Oban SLI missing min_samples=10 hint"
 fi
 
+# ── db_pool_queue_p95_ms min_samples guard + per-repo split ─────────────────
+# Same min_samples pattern as Oban: on low-volume deploys (~20 Core.Repo
+# queries over the 10-min gate window) p95 noise should not gate the deploy.
+# Two SLIs now — one per repo — with per-repo thresholds.
+test_case "db_pool_queue_per_repo_split" \
+    "db_pool_queue_p95_ms and oban_repo_queue_p95_ms both emit with samples + min_samples"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_healthy.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+BLOB="$(last_json)"
+# Core.Repo SLI — fixture has 3000 samples, well above min_samples=50.
+# All samples fall into le<=10 so p95 interpolates to ≤10ms (not breached).
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "db_pool_queue_p95_ms") | .samples] | first? == 3000' \
+        >/dev/null 2>&1; then
+    _record_pass "db_pool_queue_p95_ms reports Core.Repo samples=3000"
+else
+    _record_fail "db_pool_queue_p95_ms did not report Core.Repo samples=3000"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "db_pool_queue_p95_ms") | .min_samples] | first? == 50' \
+        >/dev/null 2>&1; then
+    _record_pass "db_pool_queue_p95_ms carries min_samples=50 hint"
+else
+    _record_fail "db_pool_queue_p95_ms missing min_samples=50 hint"
+fi
+# ObanRepo SLI — fixture has no Core.ObanRepo rows, so samples=0 and the
+# SLI is marked non-gating under min_samples (not breached).
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "oban_repo_queue_p95_ms") | .samples] | first? == 0' \
+        >/dev/null 2>&1; then
+    _record_pass "oban_repo_queue_p95_ms emitted with samples=0 when fixture has no ObanRepo rows"
+else
+    _record_fail "oban_repo_queue_p95_ms missing or reporting non-zero samples on Core.Repo-only fixture"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "oban_repo_queue_p95_ms") | .breached] | any | not' \
+        >/dev/null 2>&1; then
+    _record_pass "oban_repo_queue_p95_ms not breached when below min_samples"
+else
+    _record_fail "oban_repo_queue_p95_ms flagged breached despite samples=0"
+fi
+
 # ── Case 8 (Issue #140): real PromEx scrape produces non-zero SLI values ─────
 # Anchors the parser against the real metric-name shape that PromEx 1.11
 # emits. If a future refactor silently drifts back to a non-existent metric
