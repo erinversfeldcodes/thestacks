@@ -19,15 +19,30 @@ import Config
 # ──────────────────────────────────────────────────────────────────────────────
 
 config :core,
-  ecto_repos: [Core.Repo],
+  # Core.ObanRepo is a dedicated pool for Oban, pointed at the same
+  # database as Core.Repo. See apps/core/lib/core/oban_repo.ex for
+  # the rationale. Listed in ecto_repos so migrations apply to it
+  # too — though in practice both repos target the same DB so either
+  # one running migrations is sufficient. Keeping both for clarity.
+  ecto_repos: [Core.Repo, Core.ObanRepo],
   generators: [binary_id: true, timestamp_type: :utc_datetime_usec]
 
 config :core, Core.Repo,
   migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at],
   types: Core.PostgrexTypes
 
+config :core, Core.ObanRepo,
+  migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at],
+  types: Core.PostgrexTypes,
+  # Share migrations with Core.Repo — both repos point at the same
+  # database, so we run migrations once (via Core.Repo's priv/repo/
+  # migrations path) and Core.ObanRepo simply opens connections to the
+  # already-migrated schema. Without this override Ecto looks for
+  # `priv/oban_repo/migrations/` and fails.
+  priv: "priv/repo"
+
 config :core, Oban,
-  repo: Core.Repo,
+  repo: Core.ObanRepo,
   plugins: [
     Oban.Plugins.Pruner,
     {Oban.Plugins.Cron,

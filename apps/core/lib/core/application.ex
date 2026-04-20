@@ -8,7 +8,10 @@ defmodule Core.Application do
     children =
       cluster_children() ++
         [
-          Core.Repo,
+          Core.Repo
+        ] ++
+        oban_repo_child() ++
+        [
           Stacks.Vault,
           {Phoenix.PubSub, name: Core.PubSub},
           finch_spec(),
@@ -24,6 +27,22 @@ defmodule Core.Application do
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Start Core.ObanRepo only when Oban is actually configured to use it.
+  # In prod, config.exs points Oban at Core.ObanRepo for HTTP-handler /
+  # background-worker pool isolation. In test, test.exs overrides Oban
+  # back to Core.Repo (the multi-repo sandbox dance gets complicated),
+  # so starting Core.ObanRepo there just adds a second idle pool that
+  # doesn't interact cleanly with Ecto.Adapters.SQL.Sandbox.
+  defp oban_repo_child do
+    oban_repo = Application.fetch_env!(:core, Oban)[:repo]
+
+    if oban_repo == Core.ObanRepo do
+      [Core.ObanRepo]
+    else
+      []
+    end
   end
 
   # Erlang clustering via libcluster — active only on Fly.io (FLY_APP_NAME present).
