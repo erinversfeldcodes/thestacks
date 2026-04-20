@@ -110,11 +110,17 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # POOL_SIZE default: 20. Was 10 through 2026-04-20 and hit
+  # db_pool_queue_p95_ms=89ms under SLO-gate load (6 probes/iter ×
+  # parallel iterations + Oban :vision/:events queues + background
+  # retries). 20 connections × ~8MB each = ~160MB, well within the
+  # 512MB core VM. Neon prod ceiling is 200; with 2 machines that's
+  # 40 — 20% of the ceiling.
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "20"),
     socket_options: maybe_ipv6
 
   secret_key_base =
