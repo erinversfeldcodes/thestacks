@@ -45,13 +45,21 @@ address = "0.0.0.0:8686"
 
 # ── Source ────────────────────────────────────────────────────────────
 # Fly broadcasts every app's stdout/stderr onto an internal NATS server
-# reachable from any app in the same org at [fdaa::3]:4223. The URL
-# embeds the ORG slug + LOG_SHIPPER_ACCESS_TOKEN as basic auth.
+# reachable from any app in the same org at [fdaa::3]:4223. Auth is a
+# Fly org-scoped access token (ORG slug as the NATS "user", token as
+# "password"). Credentials MUST be declared via the explicit
+# `auth.strategy` sub-config — Vector's NATS source does NOT parse
+# `nats://user:pass@host:port` URL-embedded basic auth and the server
+# rejects the connection with "authorization violation" if you try.
+# Verified by running it and watching the server reject us (2026-04-20).
 [sources.fly]
 type = "nats"
 subject = "logs.>"
-url = "nats://${ORG}:${LOG_SHIPPER_ACCESS_TOKEN}@[fdaa::3]:4223"
+url = "nats://[fdaa::3]:4223"
 connection_name = "thestacks-log-shipper"
+auth.strategy = "user_password"
+auth.user_password.user = "${ORG}"
+auth.user_password.password = "${LOG_SHIPPER_ACCESS_TOKEN}"
 
 # ── Transform: PII scrub ──────────────────────────────────────────────
 # Three classes of PII appear in The Stacks log output:
