@@ -174,6 +174,28 @@ _check_dockerfile_copy_paths \
     "${REPO_ROOT}/deploy/searxng/Dockerfile" \
     "searxng Dockerfile"
 
+# ── Case 4c: Vector's HTTP API is enabled on :8686 for the /health probe ────
+# fly.log-shipper.toml's [[checks]] block hits `localhost:8686/health`.
+# Vector's HTTP API is off by default in `timberio/vector` — we must
+# declare `[api] enabled = true, address = "0.0.0.0:8686"` in
+# vector.toml or the health check will never pass and Fly will suspend
+# the app after enough failed checks. Regression-catch that.
+_case "vector_toml_api_enabled" \
+    "[api] block enables /health on :8686 for Fly's health check"
+if python3 -c "
+import tomllib
+with open('${VECTOR_TOML}', 'rb') as f:
+    data = tomllib.load(f)
+api = data.get('api', {})
+assert api.get('enabled') is True, f'[api] must have enabled=true, got {api}'
+address = api.get('address', '')
+assert '8686' in address, f'[api] address must bind :8686 so fly check hits it, got {address!r}'
+" 2>&1; then
+    _pass "vector_toml_api_enabled — [api] block present, enabled, binding :8686"
+else
+    _fail "vector_toml_api_enabled — /health would not respond; Fly would suspend the app"
+fi
+
 # ── Case 5: axiom sink reads token + dataset from env ────────────────────────
 _case "vector_toml_axiom_sink" "axiom sink uses env-interpolated token + dataset"
 if python3 -c "

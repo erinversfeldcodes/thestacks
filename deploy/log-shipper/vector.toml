@@ -5,12 +5,14 @@
 # before anything leaves Fly's private network, and forwards to Axiom.
 #
 # Runs inside a dedicated Fly app — see `deploy/fly.log-shipper.toml`.
-# Replaces the default `vector.toml` shipped with ghcr.io/superfly/fly-
-# log-shipper at /etc/vector/vector.toml via the Dockerfile in this
-# directory.
+# This is the sole config file loaded by Vector; we build off
+# `timberio/vector:latest-debian` directly rather than the
+# `ghcr.io/superfly/fly-log-shipper` base (whose startup script
+# auto-generates a sink config that collided with ours, see the comment
+# block in deploy/log-shipper/Dockerfile).
 #
-# Required env vars (staged via `fly secrets set` — see
-# scripts/deploy-log-shipper.sh):
+# Required env vars (staged via `fly secrets set` by
+# `scripts/deploy-stack.sh`'s prod-only log-shipper block):
 #   ORG                       — Fly organisation slug (the app's org;
 #                               "personal" for a personal Fly account).
 #                               Hardcoded in `[env]` on
@@ -31,6 +33,16 @@
 #   AXIOM_DATASET             — Axiom dataset name, e.g.
 #                               "thestacks-prod-logs".
 #
+# ── HTTP API ──────────────────────────────────────────────────────────
+# Vector's HTTP API exposes `/health`, `/metrics`, and `/graphql` on
+# port 8686. We only care about `/health` — the fly.log-shipper.toml
+# [[checks]] block polls it so `fly status` can report machine health.
+# The fly-log-shipper base image enabled this implicitly; timberio/
+# vector does not, so we declare it explicitly.
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
 # ── Source ────────────────────────────────────────────────────────────
 # Fly broadcasts every app's stdout/stderr onto an internal NATS server
 # reachable from any app in the same org at [fdaa::3]:4223. The URL

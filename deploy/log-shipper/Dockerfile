@@ -1,9 +1,8 @@
 # Log shipper image for The Stacks.
 #
-# Extends Superfly's fly-log-shipper (which bundles Vector + the NATS
-# dial-in logic to subscribe to the org's log broadcast) and replaces
-# the default vector.toml with our own — adding PII-scrubbing transforms
-# between the source and the Axiom sink.
+# Runs Vector directly against Fly's org-wide NATS log broadcast and
+# forwards to Axiom, scrubbing PII on the way. The full pipeline is in
+# vector.toml (source + transform + sink) and fits in one file.
 #
 # Build context: `deploy/log-shipper/` (scripts/deploy-stack.sh cd's
 # into this directory before invoking `fly deploy`, so Fly's remote
@@ -12,15 +11,21 @@
 # for the empirical evidence that CWD beats --config's directory for
 # context resolution.
 #
-# Why not build our own from scratch off timberio/vector? The NATS auth
-# flow against Fly's log broadcast is non-trivial (token exchange on
-# startup, reconnect handling). fly-log-shipper's entrypoint handles it.
-# We only need to override the config.
+# Why not `ghcr.io/superfly/fly-log-shipper`?
+# That image's entrypoint script auto-generates
+# `/etc/vector/sinks/axiom.toml` at container startup when AXIOM_TOKEN
+# + AXIOM_DATASET are present. Vector then loads both the generated
+# sink AND our `/etc/vector/vector.toml`, hits `duplicate sink id
+# found: axiom`, and refuses to start (verified 2026-04-19: log-shipper
+# crash-looped until Fly suspended it). We could skip declaring the
+# sink in our vector.toml and let the base generate it, but the base's
+# sink reads directly from the raw NATS source and bypasses our
+# PII-scrub transform — which defeats the whole point. Using Vector's
+# upstream image avoids the double-wiring; NATS basic-auth in the URL
+# is enough for Fly's broadcast so we don't need fly-log-shipper's
+# auth machinery.
 
-# Track upstream's rolling `latest` tag intentionally — same rationale
-# as deploy/searxng/Dockerfile. Vector itself is stable, and upstream
-# patches arrive via this tag.
 # hadolint ignore=DL3007
-FROM ghcr.io/superfly/fly-log-shipper:latest
+FROM timberio/vector:latest-debian
 
 COPY vector.toml /etc/vector/vector.toml
