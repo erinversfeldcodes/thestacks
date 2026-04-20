@@ -131,17 +131,29 @@ if config_env() == :prod do
   # profile db_pool_queue_p95_ms measures. A separate repo with its
   # own pool decouples the two: HTTP keeps its 30 connections for
   # user-facing traffic; Oban workers compete only among themselves
-  # on their own 15-connection pool.
+  # on their own pool.
+  #
+  # OBAN_POOL_SIZE default: 50. Bumped from 15 on 2026-04-20 after
+  # slow-query logs surfaced `queue=~800ms` wait times on the
+  # periodic `SELECT queue, state, COUNT(id) FROM oban_jobs GROUP BY
+  # ...` that PromEx's Oban plugin runs every 10s. Queue
+  # concurrency totals 44 workers (default: 10, events: 20, vision:
+  # 5, scraper: 5, notifications: 3, dbt_refresh: 1) — 15
+  # connections oversubscribed by 3×. 50 covers 44 workers +
+  # ~6 connections of headroom for PromEx polling + Oban's internal
+  # heartbeat + pruner queries.
   #
   # Both repos point at the same Postgres database, so Oban still
   # sees the same event_log, same op.* tables, same job state — just
   # through a separate connection set. Total Neon connections with
-  # 2 machines: (30 + 15) × 2 = 90, well under Neon's 200 ceiling.
+  # 2 machines: (30 + 50) × 2 = 160, still under Neon's 200 ceiling
+  # but tighter — if we add a third core machine we'll need to
+  # rethink (either a larger Neon plan or smaller pool splits).
   config :core, Core.ObanRepo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "15"),
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "50"),
     socket_options: maybe_ipv6
 
   secret_key_base =
