@@ -98,12 +98,16 @@ defmodule Stacks.UploadTerminalTelemetryTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    # Returns the consolidated /analyze shape — classification + (empty)
+    # books field in one response. Matches what Moderation calls via the
+    # single-request /analyze endpoint post-consolidation.
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_A_BOOK",
+           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
            "confidence" => 0.95,
+           "books" => [],
            "model_used" => "mock"
          }}
 

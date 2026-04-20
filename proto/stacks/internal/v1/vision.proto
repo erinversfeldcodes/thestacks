@@ -77,6 +77,38 @@ message ExtractedBook {
   optional double confidence = 5 [json_name = "confidence"];
 }
 
+// POST /analyze — single-request classification + extraction.
+//
+// Combines /classify + /extract into one call so core pays for one HTTP
+// round-trip and one potential cold-start on the Modal side. The vision
+// service runs classify internally first; if the result is BOOK it
+// proceeds to extract, otherwise returns an empty `books` list and
+// skips the expensive extract step. Preserves the pre-consolidation
+// short-circuit ("don't run extract on non-books") without forcing
+// core to make two HTTP calls.
+message AnalyzeRequest {
+  // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
+  oneof input {
+    // Base64-encoded image data.
+    string image = 1 [json_name = "image"];
+    // URL of a remote image.
+    string image_url = 2 [json_name = "image_url"];
+  }
+}
+
+// Response from POST /analyze.
+message AnalyzeResponse {
+  // Classification result; see ClassificationResult enum.
+  ClassificationResult classification = 1 [json_name = "classification"];
+  // Confidence score (0.0–1.0).
+  double confidence = 2 [json_name = "confidence"];
+  // Extracted book candidates. Empty when classification is not BOOK
+  // (extraction is skipped in that case).
+  repeated ExtractedBook books = 3 [json_name = "books"];
+  // Name of the vision model used for inference.
+  string model_used = 4 [json_name = "model_used"];
+}
+
 // POST /associate — async cover classification with callback.
 message AssociateRequest {
   // ISBN (digits only, no hyphens).

@@ -863,17 +863,17 @@ defmodule Stacks.UploadDbtTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    # Consolidated /analyze shape — BOOK classification + empty books
+    # triggers :isbn_not_found in Moderation.
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
+           "books" => [],
            "model_used" => "mock"
          }}
-
-    def call_vision("extract_isbn", _payload),
-      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end

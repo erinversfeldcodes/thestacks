@@ -37,6 +37,31 @@ defmodule Stacks.AI.MockClient do
      }}
   end
 
+  # Consolidated endpoint — composes classify + extract server-side.
+  # Mirrors the shape of AnalyzeResponse from vision.proto.
+  def call_vision("analyze", payload) do
+    isbn =
+      Map.get(payload, :isbn) ||
+        Map.get(payload, "isbn") ||
+        "9780743273565"
+
+    {:ok,
+     %{
+       "classification" => "CLASSIFICATION_RESULT_BOOK",
+       "confidence" => 0.9,
+       "books" => [
+         %{
+           "title" => nil,
+           "author" => nil,
+           "potential_isbns" => [isbn],
+           "raw_text" => nil,
+           "confidence" => 0.9
+         }
+       ],
+       "model_used" => "mock"
+     }}
+  end
+
   def call_vision("associate", %{isbn: isbn, edition_id: edition_id}) do
     {:ok, %{"job_id" => "mock-job-#{isbn}-#{edition_id}"}}
   end

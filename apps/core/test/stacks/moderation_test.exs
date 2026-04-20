@@ -174,24 +174,22 @@ defmodule Stacks.ModerationTest do
   # Inline mock modules for specific failure scenarios
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Inline mock modules for specific failure scenarios. Each returns the
+  # consolidated /analyze shape (classification + books in one response).
+  # ---------------------------------------------------------------------------
+
   defmodule AdultBisacClient do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => nil,
@@ -212,12 +210,13 @@ defmodule Stacks.ModerationTest do
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
            "confidence" => 0.95,
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -228,19 +227,17 @@ defmodule Stacks.ModerationTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
 
+    # BOOK + empty books — triggers :isbn_not_found in Moderation.analyze/2.
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
+           "books" => [],
            "model_used" => "mock"
          }}
-
-    # Returns empty books list — triggers :isbn_not_found
-    def call_vision("extract_isbn", _payload),
-      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -249,17 +246,10 @@ defmodule Stacks.ModerationTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
 
+    # Service-unavailable at the analyze call — same failure mode the old
+    # ExtractionErrorClient exercised against /extract_isbn.
     @impl true
-    def call_vision("is_book", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload), do: {:error, :service_unavailable}
+    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
@@ -268,18 +258,11 @@ defmodule Stacks.ModerationTest do
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("is_book", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload) do
+    def call_vision("analyze", _payload) do
       {:ok,
        %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
          "books" => [
            %{
              "title" => nil,
@@ -307,20 +290,13 @@ defmodule Stacks.ModerationTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
 
+    # Candidate with no ISBN and nil title — title_fallback returns immediately.
     @impl true
-    def call_vision("is_book", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    # Returns a candidate with no ISBN and nil title — title_fallback returns immediately.
-    def call_vision("extract_isbn", _payload) do
+    def call_vision("analyze", _payload) do
       {:ok,
        %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
          "books" => [
            %{
              "title" => nil,
@@ -340,20 +316,14 @@ defmodule Stacks.ModerationTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
 
+    # Candidate with empty-string title — exercises the title_fallback
+    # trimming path.
     @impl true
-    def call_vision("is_book", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    # Returns a candidate with an empty string title.
-    def call_vision("extract_isbn", _payload) do
+    def call_vision("analyze", _payload) do
       {:ok,
        %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
          "books" => [
            %{
              "title" => "",
