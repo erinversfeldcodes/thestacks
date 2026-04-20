@@ -49,6 +49,12 @@ defmodule Core.PromEx.Plugins.Stacks do
   # genuinely problematic so operators can find them in grafana/axiom.
   @dispatch_duration_buckets [5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
 
+  # Buckets for per-query duration. Narrower than the handler
+  # distribution because a single query is much smaller in scope —
+  # most PG round-trips are <50ms; >500ms is already a red flag.
+  # Top bucket of 5000ms catches genuinely pathological queries.
+  @query_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
+
   @impl true
   def event_metrics(_opts) do
     [
@@ -104,6 +110,30 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Per-handler dispatch time in SubscriberWorker.",
           tags: [:handler, :event_type],
           reporter_options: [buckets: @dispatch_duration_buckets]
+        ),
+
+        # ── Per-query duration, tagged by Oban worker ─────────────────
+        # Emitted by `CoreWeb.Telemetry.handle_slow_query/4` on every
+        # Ecto query event. Tags:
+        #   - `worker`: Oban worker module name if the query is running
+        #     inside an Oban job, "http" otherwise. Populated via
+        #     process-dict tagging in `handle_oban_job_lifecycle/4`.
+        #   - `source`: target table, or "(raw)" for ad-hoc SQL.
+        #   - `repo`: Core.Repo vs Core.ObanRepo, for pool-attribution.
+        #
+        # Exported as
+        # `stacks_repo_query_duration_milliseconds_{bucket,sum,count}`.
+        # Answers "which worker's DB queries are dominating
+        # Core.Repo's pool?" — directly actionable signal for
+        # db_pool_queue_p95_ms saturation.
+        distribution(
+          [:stacks, :repo, :query, :duration, :milliseconds],
+          event_name: [:stacks, :repo, :query, :duration],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description: "Per-query duration tagged by Oban worker, source table, and repo.",
+          tags: [:worker, :source, :repo],
+          reporter_options: [buckets: @query_duration_buckets]
         ),
 
         # ── Upload pipeline terminal outcomes ─────────────────────────
