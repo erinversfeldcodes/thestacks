@@ -188,18 +188,29 @@ defmodule Stacks.Books.ISBNResolver do
     Enum.find_value(candidates, {:error, :not_found}, &try_candidate/1)
   end
 
+  # Race OL + GB per candidate query. The `resolve/1` path already does
+  # this for direct-ISBN lookups; title-based candidates benefit even
+  # more because `search_by_title/3` can try up to 12 candidate variants,
+  # so sequential OL-then-GB inside each one compounds to 24+ HTTP
+  # round-trips on a miss. Racing halves per-candidate cost and, for
+  # mixed_text uploads (which may resolve several books), meaningfully
+  # reduces total pipeline time.
+  #
+  # The existing `await_first_success/2` helper matches `{:ok, _}` —
+  # OL/GB title searches return a 3-tuple `{:ok, isbn, metadata}`, so
+  # wrap+unwrap around the race rather than duplicate the helper.
   defp try_candidate({t, a}) do
-    case open_library_title_search(t, a) do
-      {:ok, _, _} = result ->
-        result
+    ol = Task.async(fn -> wrap_3tuple(open_library_title_search(t, a)) end)
+    gb = Task.async(fn -> wrap_3tuple(google_books_search(t, a)) end)
 
-      _ ->
-        case google_books_search(t, a) do
-          {:ok, _, _} = result -> result
-          _ -> nil
-        end
+    case await_first_success([ol, gb], {:error, :not_found}) do
+      {:ok, {isbn, metadata}} -> {:ok, isbn, metadata}
+      _ -> nil
     end
   end
+
+  defp wrap_3tuple({:ok, isbn, metadata}), do: {:ok, {isbn, metadata}}
+  defp wrap_3tuple(other), do: other
 
   # Strip subtitle after `:`, `–`, or `—` (handles long academic titles like
   # "Born Again Bodies: Flesh and Spirit in American Christianity" → "Born Again Bodies").
