@@ -14,6 +14,7 @@ defmodule Stacks.CircuitBreakers do
   | `:open_library_fuse`| Open Library REST API  | 5 in 60 s       | 5 min    |
   | `:google_books_fuse`| Google Books API       | 5 in 60 s       | 5 min    |
   | `:scraper_fuse`     | Rust scraper service   | 3 in 60 s       | 15 min   |
+  | `:brave_fuse`       | Brave Search API       | 5 in 60 s       | 5 min    |
 
   Per-store fuses are deferred to a follow-on issue.
 
@@ -68,7 +69,8 @@ defmodule Stacks.CircuitBreakers do
     together_ai_fuse: @standard_spec,
     open_library_fuse: @standard_spec,
     google_books_fuse: @standard_spec,
-    scraper_fuse: @scraper_spec
+    scraper_fuse: @scraper_spec,
+    brave_fuse: @standard_spec
   ]
 
   # Probe functions keyed by fuse atom.
@@ -80,7 +82,8 @@ defmodule Stacks.CircuitBreakers do
     scraper_fuse: &__MODULE__.probe_scraper/0,
     together_ai_fuse: &__MODULE__.probe_together_ai/0,
     open_library_fuse: &__MODULE__.probe_open_library/0,
-    google_books_fuse: &__MODULE__.probe_google_books/0
+    google_books_fuse: &__MODULE__.probe_google_books/0,
+    brave_fuse: &__MODULE__.probe_brave/0
   }
 
   # ---------------------------------------------------------------------------
@@ -186,6 +189,45 @@ defmodule Stacks.CircuitBreakers do
   @spec probe_open_library() :: :ok | {:error, term()}
   def probe_open_library do
     probe_http_get("https://openlibrary.org/search.json?q=frankenstein&limit=1")
+  end
+
+  @doc false
+  @spec probe_brave() :: :ok | {:error, term()}
+  def probe_brave do
+    # Probes Brave Search with a lightweight `count=1` query. Requires the
+    # API key — without it the fuse can't be meaningfully probed, so we
+    # return `{:error, :api_key_not_configured}` and the circuit stays
+    # blown until a human rotates the key.
+    #
+    # One probe call spends ~1 query against the Brave daily budget
+    # (67/day on free tier). At the default 15 s probe interval while
+    # blown, that's <1% of budget per hour of outage — acceptable.
+    case Application.get_env(:core, :brave_search_api_key) do
+      key when is_binary(key) and byte_size(key) > 0 ->
+        req =
+          Finch.build(
+            :get,
+            "https://api.search.brave.com/res/v1/web/search?q=test&count=1",
+            [
+              {"Accept", "application/json"},
+              {"X-Subscription-Token", key}
+            ],
+            nil
+          )
+
+        case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
+          {:ok, %Finch.Response{status: 200}} -> :ok
+          {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        Logger.warning(
+          "CircuitBreakers: brave_search_api_key not configured — cannot probe :brave_fuse"
+        )
+
+        {:error, :api_key_not_configured}
+    end
   end
 
   @doc false
