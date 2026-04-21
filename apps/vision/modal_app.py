@@ -57,9 +57,9 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libzbar0")
     .pip_install(
-        # vLLM provides continuous batching, PagedAttention, prefix
-        # caching, and AWQ-kernel support. The same Qwen weights run
-        # ~3-5x faster here than under `transformers.generate()`.
+        # vLLM provides continuous batching, PagedAttention, and
+        # AWQ-kernel support. The same Qwen weights run ~3-5x faster
+        # here than under `transformers.generate()`.
         #
         # Pinned rather than `>=` because vLLM's async engine API has
         # been churning across minor versions. 0.7.3 is a tested
@@ -68,11 +68,15 @@ image = (
         # below still matches the target version's contract.
         "vllm==0.7.3",
         # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
-        # vLLM dispatches to when `quantization="awq"` is set.
+        # vLLM dispatches to when `quantization="awq_marlin"` is set.
         "autoawq>=0.2.0",
-        # Processor/tokenizer. vLLM itself bundles a transformers pin,
-        # but we import AutoProcessor explicitly for the chat template.
-        "transformers>=4.50.0",
+        # Transformers PINNED to the version vLLM 0.7.3 was built
+        # against. Without this pin, transformers resolves to a newer
+        # release that removed `Qwen2Tokenizer.all_special_tokens_extended`,
+        # crashing `AsyncLLMEngine.from_engine_args` on every container
+        # start with `AttributeError: Qwen2Tokenizer has no attribute
+        # all_special_tokens_extended`. Re-pin in lockstep with vllm.
+        "transformers==4.48.3",
         "qwen-vl-utils>=0.0.10",
         "huggingface_hub>=0.26.0",
         "Pillow>=10.0.0",
@@ -214,15 +218,15 @@ class VisionModel:
         context. Modal supports async `@modal.enter`.
 
         vLLM config choices:
-          * quantization="awq"            — 4-bit weight quant, ~2x faster
-                                            token generation, <1% accuracy
-                                            delta on VLM benchmarks.
-          * enable_prefix_caching=True    — our `_ANALYZE_PROMPT` is
-                                            identical on every call
-                                            (~200 tokens of instructions);
-                                            vLLM caches that prefix's KV
-                                            state and reuses it per call,
-                                            saving prefill work.
+          * quantization="awq_marlin"     — 4-bit AWQ weights served
+                                            through the Marlin kernel,
+                                            ~1.5-2x faster than plain
+                                            "awq". vLLM suggests this
+                                            automatically when it detects
+                                            AWQ weights; we set it
+                                            explicitly to silence the
+                                            "you could be using marlin"
+                                            warning at boot.
           * max_model_len=4096            — image tokens (~1500 at 672px)
                                             + prompt (~250) + output
                                             (~512) = ~2300. 4096 leaves
@@ -238,6 +242,13 @@ class VisionModel:
                                             not to reserve space for
                                             multi-image batches.
 
+        Prefix caching is NOT enabled: vLLM 0.7.x's v0 engine explicitly
+        disables `--enable-prefix-caching` for multimodal models (the
+        warning ``enable-prefix-caching is currently not supported for
+        multimodal models in v0 and has been disabled`` appears in the
+        boot log when the flag is set). Upgrading to vLLM v1 would
+        re-enable it; for now we don't bother passing the flag.
+
         PagedAttention is vLLM's default attention impl and requires no
         flag — it's what makes the KV cache pool work block-by-block
         and lets concurrent requests share VRAM efficiently.
@@ -249,13 +260,11 @@ class VisionModel:
 
         engine_args = AsyncEngineArgs(
             model=MODEL_NAME,
-            quantization="awq",
-            enable_prefix_caching=True,
+            quantization="awq_marlin",
             max_model_len=4096,
             gpu_memory_utilization=0.90,
             limit_mm_per_prompt={"image": 1},
             trust_remote_code=True,
-            dtype="float16",
         )
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
 
