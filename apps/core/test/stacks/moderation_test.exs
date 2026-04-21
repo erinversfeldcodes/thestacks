@@ -14,6 +14,7 @@ defmodule Stacks.ModerationTest do
   # async: false — tests use Application.put_env to swap the vision client,
   # which is global process state and not safe for concurrent test execution.
   use Core.DataCase, async: false
+  use Oban.Testing, repo: Core.Repo
 
   import Stacks.Factory
 
@@ -170,6 +171,51 @@ defmodule Stacks.ModerationTest do
     end
   end
 
+  describe "run_pipeline/1 — local-OCR fast path" do
+    # When vision's /analyze short-circuits via the barcode pre-pass, it
+    # returns `model_used: "local_ocr"`. We should skip the synchronous
+    # OpenLibrary/Google Books lookup, use a placeholder title, and
+    # enqueue EnrichBookJob to fill in metadata async.
+    test "creates a placeholder book and enqueues EnrichBookJob when source is local_ocr" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.LocalOcrClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:ok, [book]} = Moderation.run_pipeline(context)
+        # Placeholder title comes from "ISBN <isbn>".
+        assert String.starts_with?(book.title, "ISBN ")
+
+        # EnrichBookJob should have been enqueued for this ISBN.
+        isbn = List.first(book.editions).isbn
+        assert_enqueued(worker: Stacks.Workers.EnrichBookJob, args: %{"isbn" => isbn})
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "does NOT apply fast path when ISBN comes from the VLM (not local_ocr)" do
+      # Same checksum-valid ISBN, but model_used is the VLM — we should
+      # take the old OL/GB path. With the test mock returning {:ok, %{}}
+      # for the HTTP lookup, metadata stays empty, title remains nil,
+      # and the book is rejected (isbn_not_found).
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.VlmExtractedIsbnClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+
+        # No enrichment job enqueued — the fast path didn't fire.
+        refute_enqueued(worker: Stacks.Workers.EnrichBookJob)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Inline mock modules for specific failure scenarios
   # ---------------------------------------------------------------------------
@@ -178,6 +224,60 @@ defmodule Stacks.ModerationTest do
   # Inline mock modules for specific failure scenarios. Each returns the
   # consolidated /analyze shape (classification + books in one response).
   # ---------------------------------------------------------------------------
+
+  defmodule LocalOcrClient do
+    @moduledoc "Vision client that simulates a local_ocr barcode hit."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 1.0,
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               # Checksum-valid ISBN — Gatsby.
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 1.0
+             }
+           ],
+           "model_used" => "local_ocr"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule VlmExtractedIsbnClient do
+    @moduledoc "Vision client that returns a checksum-valid ISBN from the VLM, not barcode OCR."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.85,
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               # Same checksum-valid ISBN as the local_ocr test.
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 0.8
+             }
+           ],
+           "model_used" => "Qwen/Qwen2.5-VL-7B-Instruct"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
 
   defmodule AdultBisacClient do
     @moduledoc false
