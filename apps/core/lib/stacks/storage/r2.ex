@@ -16,15 +16,33 @@ defmodule Stacks.Storage.R2 do
       config :ex_aws,
         access_key_id: ...,
         secret_access_key: ...
+
+  Protected by `:r2_fuse` — managed by `Stacks.CircuitBreakers`. When
+  the fuse is blown (R2 is unreachable, rate-limiting us, or returning
+  5xx), `put/3` and `delete/1` fast-fail with `{:error, :circuit_open}`
+  instead of blocking the caller on a slow HTTPS round-trip. `presigned_url/2`
+  is not fuse-gated because it's a local SigV4 signing op — no upstream call.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
 
   require Logger
 
+  @fuse_name :r2_fuse
+
   @impl true
   @spec put(String.t(), binary(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def put(key, data, opts \\ []) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :blown ->
+        {:error, :circuit_open}
+
+      _ ->
+        do_put(key, data, opts)
+    end
+  end
+
+  defp do_put(key, data, opts) do
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
 
     bucket()
@@ -37,6 +55,7 @@ defmodule Stacks.Storage.R2 do
 
       {:error, reason} ->
         Logger.error("Storage.R2: upload failed for #{key}: #{inspect(reason)}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, reason}
     end
   end
@@ -59,6 +78,16 @@ defmodule Stacks.Storage.R2 do
   @impl true
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :blown ->
+        {:error, :circuit_open}
+
+      _ ->
+        do_delete(key)
+    end
+  end
+
+  defp do_delete(key) do
     bucket()
     |> ExAws.S3.delete_object(key)
     |> ExAws.request()
@@ -69,6 +98,7 @@ defmodule Stacks.Storage.R2 do
 
       {:error, reason} ->
         Logger.error("Storage.R2: delete failed for #{key}: #{inspect(reason)}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, reason}
     end
   end

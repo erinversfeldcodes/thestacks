@@ -15,6 +15,8 @@ defmodule Stacks.CircuitBreakers do
   | `:google_books_fuse`| Google Books API       | 5 in 60 s       | 5 min    |
   | `:scraper_fuse`     | Rust scraper service   | 3 in 60 s       | 15 min   |
   | `:brave_fuse`       | Brave Search API       | 5 in 60 s       | 5 min    |
+  | `:searxng_fuse`     | SearXNG discovery      | 5 in 60 s       | 5 min    |
+  | `:r2_fuse`          | Cloudflare R2 storage  | 5 in 60 s       | 5 min    |
 
   Per-store fuses are deferred to a follow-on issue.
 
@@ -70,7 +72,9 @@ defmodule Stacks.CircuitBreakers do
     open_library_fuse: @standard_spec,
     google_books_fuse: @standard_spec,
     scraper_fuse: @scraper_spec,
-    brave_fuse: @standard_spec
+    brave_fuse: @standard_spec,
+    searxng_fuse: @standard_spec,
+    r2_fuse: @standard_spec
   ]
 
   # Probe functions keyed by fuse atom.
@@ -83,7 +87,9 @@ defmodule Stacks.CircuitBreakers do
     together_ai_fuse: &__MODULE__.probe_together_ai/0,
     open_library_fuse: &__MODULE__.probe_open_library/0,
     google_books_fuse: &__MODULE__.probe_google_books/0,
-    brave_fuse: &__MODULE__.probe_brave/0
+    brave_fuse: &__MODULE__.probe_brave/0,
+    searxng_fuse: &__MODULE__.probe_searxng/0,
+    r2_fuse: &__MODULE__.probe_r2/0
   }
 
   # ---------------------------------------------------------------------------
@@ -227,6 +233,64 @@ defmodule Stacks.CircuitBreakers do
         )
 
         {:error, :api_key_not_configured}
+    end
+  end
+
+  @doc false
+  @spec probe_searxng() :: :ok | {:error, term()}
+  def probe_searxng do
+    case Application.get_env(:core, :searxng_url) do
+      url when is_binary(url) and byte_size(url) > 0 ->
+        # SearXNG exposes `/healthz` when `general.enable_http = true` in
+        # settings.yml; when disabled, the root path still returns 200.
+        # Use the root path to avoid a config coupling.
+        probe_http_get(String.trim_trailing(url, "/") <> "/")
+
+      _ ->
+        Logger.warning("CircuitBreakers: searxng_url not configured — cannot probe :searxng_fuse")
+
+        {:error, :url_not_configured}
+    end
+  end
+
+  @doc false
+  @spec probe_r2() :: :ok | {:error, term()}
+  def probe_r2 do
+    # R2's bucket endpoint returns 400 for unauthenticated GETs to the
+    # root but still proves network + DNS + TLS. We accept any sub-500
+    # status as "service up" — we're probing health, not
+    # functionality (functionality is covered by actual writes melting
+    # the fuse on failure).
+    case r2_probe_host() do
+      host when is_binary(host) and byte_size(host) > 0 ->
+        do_probe_r2("https://" <> host <> "/")
+
+      _ ->
+        Logger.warning("CircuitBreakers: R2 endpoint not configured — cannot probe :r2_fuse")
+        {:error, :endpoint_not_configured}
+    end
+  end
+
+  # Prefer the explicit `:r2_endpoint_host` app env, fall back to the
+  # ExAws `:s3` config which runtime.exs sets to
+  # `<account>.r2.cloudflarestorage.com`. Returns nil if neither is set.
+  defp r2_probe_host do
+    case Application.get_env(:core, :r2_endpoint_host) do
+      host when is_binary(host) and byte_size(host) > 0 ->
+        host
+
+      _ ->
+        get_in(Application.get_env(:ex_aws, :s3) || [], [:host])
+    end
+  end
+
+  defp do_probe_r2(url) do
+    req = Finch.build(:get, url, [], nil)
+
+    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
+      {:ok, %Finch.Response{status: status}} when status < 500 -> :ok
+      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
