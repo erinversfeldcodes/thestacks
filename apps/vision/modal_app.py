@@ -143,6 +143,13 @@ _ANALYZE_PROMPT = (
 @app.cls(
     gpu="A10G",
     image=image,
+    # Pin to us-east so the Modal GPU lives in the same region as Fly IAD
+    # (core) and Neon us-east-1 (DB). Without pinning, Modal's scheduler
+    # places containers wherever A10G capacity exists — a us-west placement
+    # adds ~60ms Fly→Modal RTT per /analyze call, compounding with cold
+    # starts. Tradeoff: if us-east runs out of A10G, scheduling blocks
+    # rather than falling back. In practice us-east has ample A10G.
+    region="us-east",
     # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
     # jobs are serialised on a single A10G) + inference (~60s for long inputs).
     timeout=300,
@@ -152,6 +159,15 @@ _ANALYZE_PROMPT = (
     # when upload tests start, avoiding a cold-start that would exceed the test timeout.
     scaledown_window=1200,
 )
+# Accept up to 4 in-flight calls per container. Qwen2.5-VL-7B at bfloat16 on
+# an A10G uses ~15 GB VRAM for weights; the 24 GB A10G has headroom for a
+# small batch of concurrent KV-caches. Without this decorator Modal runs ONE
+# inference at a time per container, so two probes in the same iteration
+# (real-book + not-a-book) serialise on the GPU and the second pays the
+# full latency of the first — the main driver of upload_p95_ms at 4.7s.
+# 4 is conservative: enough to absorb the probe's 2-at-a-time burst with
+# headroom, not so high that we OOM on longer-context inputs.
+@modal.concurrent(max_inputs=4)
 class VisionModel:
     @modal.enter()
     def load(self) -> None:
@@ -280,6 +296,10 @@ _fastapi_image = (
 
 @app.function(
     image=_fastapi_image,
+    # Pin the ASGI entry point to us-east too. Otherwise the
+    # FastAPI→VisionModel call becomes a cross-region RPC inside Modal,
+    # adding ~60ms to every /analyze even when the GPU is warm.
+    region="us-east",
     secrets=[
         modal.Secret.from_name("thestacks-vision"),
         # Bake the app name into the ASGI container so VisionClient can look up
