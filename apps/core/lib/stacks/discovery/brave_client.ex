@@ -5,6 +5,12 @@ defmodule Stacks.Discovery.BraveClient do
   Rate limited to ~67 queries/day (2000/month free tier).
   Uses Finch with the shared `Stacks.Finch` pool.
   API key configured via `Application.get_env(:core, :brave_search_api_key)`.
+
+  Protected by `:brave_fuse` — managed by `Stacks.CircuitBreakers`. When
+  the fuse is blown (Brave is rate-limiting us, 5xx'ing, or off-budget),
+  requests short-circuit to `{:error, :circuit_open}` without touching
+  the upstream. `Stacks.CircuitBreakers` runs a periodic probe against
+  Brave's API and resets the fuse as soon as it's healthy again.
   """
 
   @behaviour Stacks.Discovery.BraveClientBehaviour
@@ -13,13 +19,25 @@ defmodule Stacks.Discovery.BraveClient do
 
   @base_url "https://api.search.brave.com/res/v1/web/search"
   @daily_budget 67
+  @fuse_name :brave_fuse
 
   @impl true
   @spec search(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def search(query, opts \\ []) do
-    case check_daily_budget() do
-      :ok -> do_search(query, opts)
-      {:error, _} = err -> err
+    with :ok <- check_fuse(),
+         :ok <- check_daily_budget() do
+      do_search(query, opts)
+    end
+  end
+
+  # Ask the fuse first — short-circuit without spending budget or network
+  # when we know Brave is unhealthy. `CircuitBreakers.melt/1` trips the
+  # fuse when `do_search/2` actually fails upstream, so the loop is
+  # self-healing and self-breaking.
+  defp check_fuse do
+    case :fuse.ask(@fuse_name, :sync) do
+      :ok -> :ok
+      :blown -> {:error, :circuit_open}
     end
   end
 
@@ -51,14 +69,24 @@ defmodule Stacks.Discovery.BraveClient do
 
         {:ok, %Finch.Response{status: 429}} ->
           Logger.warning("BraveClient: rate limited by Brave API")
+          Stacks.CircuitBreakers.melt(@fuse_name)
           {:error, :rate_limited}
 
+        {:ok, %Finch.Response{status: status, body: body}} when status >= 500 ->
+          Logger.warning("BraveClient: upstream 5xx #{status}: #{inspect(body)}")
+          Stacks.CircuitBreakers.melt(@fuse_name)
+          {:error, {:unexpected_status, status}}
+
         {:ok, %Finch.Response{status: status, body: body}} ->
+          # 4xx other than 429 (e.g. 401, 403, 400) — don't melt; likely
+          # a misconfigured request, not a service-health signal. Surface
+          # the error so callers see it but keep the fuse closed.
           Logger.warning("BraveClient: unexpected status #{status}: #{inspect(body)}")
           {:error, {:unexpected_status, status}}
 
         {:error, reason} ->
           Logger.warning("BraveClient: request failed: #{inspect(reason)}")
+          Stacks.CircuitBreakers.melt(@fuse_name)
           {:error, reason}
       end
     end
