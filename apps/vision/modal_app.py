@@ -60,7 +60,13 @@ image = (
         # vLLM provides continuous batching, PagedAttention, prefix
         # caching, and AWQ-kernel support. The same Qwen weights run
         # ~3-5x faster here than under `transformers.generate()`.
-        "vllm>=0.7.3",
+        #
+        # Pinned rather than `>=` because vLLM's async engine API has
+        # been churning across minor versions. 0.7.3 is a tested
+        # combination with Qwen2.5-VL + AWQ. Bump only after validating
+        # the `AsyncLLMEngine.generate(prompt_dict, ...)` signature
+        # below still matches the target version's contract.
+        "vllm==0.7.3",
         # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
         # vLLM dispatches to when `quantization="awq"` is set.
         "autoawq>=0.2.0",
@@ -192,7 +198,7 @@ _ANALYZE_PROMPT = (
 @modal.concurrent(max_inputs=8)
 class VisionModel:
     @modal.enter()
-    def load(self) -> None:
+    async def load(self) -> None:
         """Load the vLLM AsyncLLMEngine + tokenizer.
 
         AsyncLLMEngine (not the sync `LLM` wrapper) is required here: it
@@ -200,6 +206,12 @@ class VisionModel:
         continuous-batching loop. `LLM.chat()` from multiple threads
         would serialise behind the engine's internal lock — defeating
         the whole point of Modal's `max_inputs=8`.
+
+        `load` is `async` so `AsyncLLMEngine.from_engine_args` runs with
+        an active event loop — the engine spawns an internal background
+        coroutine for the scheduler, which raises
+        `RuntimeError: no running event loop` if constructed from a sync
+        context. Modal supports async `@modal.enter`.
 
         vLLM config choices:
           * quantization="awq"            — 4-bit weight quant, ~2x faster
