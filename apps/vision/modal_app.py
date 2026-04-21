@@ -70,13 +70,19 @@ image = (
         # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
         # vLLM dispatches to when `quantization="awq_marlin"` is set.
         "autoawq>=0.2.0",
-        # Transformers PINNED to the version vLLM 0.7.3 was built
-        # against. Without this pin, transformers resolves to a newer
-        # release that removed `Qwen2Tokenizer.all_special_tokens_extended`,
-        # crashing `AsyncLLMEngine.from_engine_args` on every container
-        # start with `AttributeError: Qwen2Tokenizer has no attribute
-        # all_special_tokens_extended`. Re-pin in lockstep with vllm.
-        "transformers==4.48.3",
+        # Transformers PINNED to the narrow window compatible with both
+        # Qwen2.5-VL and vLLM 0.7.3:
+        #   * 4.48.x and earlier: no `qwen2_5_vl` architecture entry;
+        #     loading the checkpoint raises
+        #     `ValueError: model type qwen2_5_vl not recognized`
+        #     (support was added in 4.49.0).
+        #   * 4.50.0 and later: removed `Qwen2Tokenizer.all_special_tokens_extended`,
+        #     which vLLM 0.7.3's tokenizer init calls directly, producing
+        #     `AttributeError: Qwen2Tokenizer has no attribute
+        #     all_special_tokens_extended` on container start.
+        # 4.49.x is the one stable patch range where both work. Re-pin
+        # in lockstep with vllm when bumping the vLLM version.
+        "transformers==4.49.0",
         "qwen-vl-utils>=0.0.10",
         "huggingface_hub>=0.26.0",
         "Pillow>=10.0.0",
