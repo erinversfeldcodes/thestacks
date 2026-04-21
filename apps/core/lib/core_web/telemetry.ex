@@ -16,7 +16,9 @@ defmodule CoreWeb.Telemetry do
     :open_library_fuse,
     :google_books_fuse,
     :scraper_fuse,
-    :brave_fuse
+    :brave_fuse,
+    :searxng_fuse,
+    :r2_fuse
   ]
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
