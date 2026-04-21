@@ -159,15 +159,19 @@ _ANALYZE_PROMPT = (
     # when upload tests start, avoiding a cold-start that would exceed the test timeout.
     scaledown_window=1200,
 )
-# Accept up to 4 in-flight calls per container. Qwen2.5-VL-7B at bfloat16 on
-# an A10G uses ~15 GB VRAM for weights; the 24 GB A10G has headroom for a
-# small batch of concurrent KV-caches. Without this decorator Modal runs ONE
-# inference at a time per container, so two probes in the same iteration
-# (real-book + not-a-book) serialise on the GPU and the second pays the
-# full latency of the first — the main driver of upload_p95_ms at 4.7s.
-# 4 is conservative: enough to absorb the probe's 2-at-a-time burst with
-# headroom, not so high that we OOM on longer-context inputs.
-@modal.concurrent(max_inputs=4)
+# Accept up to 8 in-flight calls per container. Qwen2.5-VL-7B at bfloat16
+# on an A10G uses ~15 GB VRAM for weights; the 24 GB A10G has ~9 GB left
+# for activations + KV cache. At 672-px inputs + short prompts, each
+# concurrent request's KV cache is <1 GB, so 8 concurrent fits
+# comfortably without OOM risk.
+#
+# Was 4 originally — the probe now fires 6 canaries in parallel per
+# iteration, so 4 forced two to queue and pushed iterations to ~27s as
+# Modal also occasionally autoscaled cold containers under the burst.
+# 8 absorbs the full burst on a single warm container, keeping iteration
+# time bounded by the slowest canary's inference rather than Modal-side
+# queueing.
+@modal.concurrent(max_inputs=8)
 class VisionModel:
     @modal.enter()
     def load(self) -> None:
