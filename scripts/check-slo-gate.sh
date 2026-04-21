@@ -661,16 +661,21 @@ def _queue_samples_for(repo_label: str) -> int:
 
 
 for repo_label, sli_name, threshold in [
-    # Core.Repo: HTTP-request-path business logic. Threshold 50ms is
-    # the historical target — honest when sample count is high enough
-    # to be meaningful.
-    ("Core.Repo", "db_pool_queue_p95_ms", 50),
-    # Core.ObanRepo: Oban supervision + worker infrastructure. Higher
-    # threshold because Oban's LISTEN/NOTIFY holds connections by
-    # design — normal operating queue times run hotter than HTTP's.
-    # 200ms is a reasonable alarm level; below that the pool is
-    # keeping up with background work.
-    ("Core.ObanRepo", "oban_repo_queue_p95_ms", 200),
+    # Industry gold standard for DB pool queue_time p95 is <5ms (healthy
+    # pool, connection always immediately available). 20ms is the upper
+    # edge of "healthy with occasional pressure" and the point at which
+    # tail latency becomes user-visible on hot request paths. Anything
+    # above 20ms means the pool is too small OR connections are held
+    # too long by slow queries / long transactions — both worth paging
+    # on rather than tolerating.
+    #
+    # Previous thresholds (50ms / 200ms) were defensive-alarm levels,
+    # not health targets. The 200ms Oban threshold in particular was
+    # rationalised as "LISTEN/NOTIFY holds conns by design" — but LISTEN
+    # doesn't contribute to queue_time; it just reduces effective pool
+    # capacity. Fix is a larger pool, not a looser threshold.
+    ("Core.Repo", "db_pool_queue_p95_ms", 20),
+    ("Core.ObanRepo", "oban_repo_queue_p95_ms", 20),
 ]:
     samples = _queue_samples_for(repo_label)
     p95 = histogram_p95_by_group(DB_QUEUE_METRIC, "repo", repo_label)
