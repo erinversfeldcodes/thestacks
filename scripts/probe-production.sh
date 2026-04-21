@@ -11,13 +11,22 @@
 #                                  sample volume that the gate's
 #                                  db_pool_queue_p95_ms SLI needs to
 #                                  clear its min_samples floor)
-#   POST /api/upload (×2)         two canary images fired in parallel:
-#                                  - real-book canary (photo.PNG):    expected outcome = resolved
-#                                  - not-a-book canary (not_a_book):  expected outcome = rejected
-#                                 Both reach terminal state; the gate's
-#                                 upload_success_rate SLI treats EITHER
-#                                 outcome as pipeline-healthy and only
-#                                 counts `timeout` as failure.
+#   POST /api/upload (×2)         two canary images fired in parallel
+#                                 per iteration, round-robin through a
+#                                 pool of 6 inputs covering the full
+#                                 identification-path matrix:
+#                                  - barcode:         clean ISBN barcode
+#                                                     (local_ocr fast path)
+#                                  - not_a_book:      non-book image
+#                                                     (Modal classify → reject)
+#                                  - reversed:        mirror-reversed cover
+#                                  - reversed_cutoff: reversed + cut-off title
+#                                  - obscured:        cover with overlay text
+#                                  - mixed_text:      multi-book text post
+#                                 All reach a terminal state; the gate's
+#                                 upload_success_rate SLI treats
+#                                 resolved OR rejected as pipeline-healthy
+#                                 and only counts `timeout` as failure.
 #   GET  /internal/deps-check     (bearer-gated in-cluster SearXNG probe —
 #                                  skipped if METRICS_SCRAPE_TOKEN is unset,
 #                                  e.g. in local smoke runs)
@@ -67,18 +76,55 @@ WINDOW="${PROBE_WINDOW_SECONDS:-600}"
 INTERVAL="${PROBE_INTERVAL_SECONDS:-15}"
 SEED_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
 SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
-# Two canaries fired each iteration to exercise both terminal paths of
-# the upload pipeline. Customisable for local smoke runs; the defaults
-# are the repo-checked-in images.
+# Canary image pool. Each iteration picks TWO canaries (round-robin
+# through the pool) and fires them in parallel. Exercising the full
+# range of real-world book-identification inputs makes `upload_p95_ms`
+# reflect user-perceived latency, not just the best/worst-case pair.
 #
-# The "real book" canary is an ISBN barcode JPG — vision classifies it
-# as a book, extracts the ISBN, Open Library verifies, terminal
-# outcome = `resolved`. A previous iteration used `images/photo.PNG`
-# which turned out to be a HEIF file mislabelled with a `.PNG`
-# extension; PIL/Pillow on the vision service can't read HEIF without
-# `pillow-heif` so every real-book upload 502'd. Tracked in Issue #141.
-CANARY_REAL_BOOK="${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/barcode_isbn_clean.jpg}"
-CANARY_NOT_A_BOOK="${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg}"
+# Fixed inputs (each fire once across the loop):
+#   - barcode_isbn_clean.jpg          — clean ISBN barcode. Hits
+#                                       local_ocr fast path, ~500ms.
+#   - not_a_book.jpg                  — non-book image. Modal
+#                                       classifies as not_book, ~3s.
+#   - screenshot_image_reversed.jpg   — book cover held mirror-
+#                                       reversed ("FLYBOYS"). VLM
+#                                       must read reversed text.
+#   - screenshot_image_reversed_and_cut_off.jpg — reversed + partial
+#                                       title ("THE TRAIN to CRYSTAL
+#                                       CITY"). Tests cut-off fallback
+#                                       in ISBNResolver.search_by_title.
+#   - screenshot_mildly_obscured.jpg  — cover with caption overlay
+#                                       ("BORN AGAIN BODIES by Marie
+#                                       Griffith"). VLM must read
+#                                       around obstructions.
+#   - screenshot_mixed_text.jpg       — Instagram post with multiple
+#                                       books named in text. VLM
+#                                       extracts all, pipeline resolves
+#                                       each via ISBNResolver.
+#
+# The "real book" canary used to be `images/photo.PNG` which turned
+# out to be a HEIF file mislabelled with a `.PNG` extension; PIL on the
+# vision service can't read HEIF without `pillow-heif` so every upload
+# 502'd. Tracked in Issue #141.
+CANARY_POOL=(
+    "${REPO_ROOT}/images/barcode_isbn_clean.jpg|barcode"
+    "${REPO_ROOT}/images/not_a_book.jpg|not_a_book"
+    "${REPO_ROOT}/images/screenshot_image_reversed.jpg|reversed"
+    "${REPO_ROOT}/images/screenshot_image_reversed_and_cut_off.jpg|reversed_cutoff"
+    "${REPO_ROOT}/images/screenshot_mildly_obscured.jpg|obscured"
+    "${REPO_ROOT}/images/screenshot_mixed_text.jpg|mixed_text"
+)
+CANARY_POOL_SIZE=${#CANARY_POOL[@]}
+
+# Back-compat overrides — respected if set, used only for tests that
+# want to pin the canary choice.
+if [[ -n "${PROBE_CANARY_REAL_BOOK:-}" ]] || [[ -n "${PROBE_CANARY_NOT_A_BOOK:-}" ]]; then
+    CANARY_POOL=(
+        "${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/barcode_isbn_clean.jpg}|barcode"
+        "${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg}|not_a_book"
+    )
+    CANARY_POOL_SIZE=${#CANARY_POOL[@]}
+fi
 
 # Short per-probe timeouts so a hung backend cannot stretch a single iteration
 # beyond the interval. The upload outcome poll has its own longer budget.
@@ -288,16 +334,36 @@ except Exception:
     echo "$final_status" > "$WORK_DIR/last_upload_outcome_${canary_name}"
 }
 
-# Fire both canaries in parallel. Each iteration yields two terminal
-# outcomes feeding `stacks_upload_terminal_count_total` and hence the
-# gate's `upload_success_rate` SLI (resolved + rejected count as success,
+# Round-robin cursor through CANARY_POOL. Each iteration advances by 2.
+# Global so it persists across probe_upload/2 calls within the loop.
+CANARY_CURSOR=0
+
+# Fire two canaries in parallel per iteration, advancing through the
+# pool round-robin. Over a 600s / 15s window that's ~40 iterations × 2
+# = ~80 canary uploads distributed across the pool — ~13 of each of
+# the 6 canaries by default. Each terminal outcome feeds
+# `stacks_upload_terminal_count_total` and the gate's
+# `upload_success_rate` SLI (resolved + rejected count as success,
 # only `timeout` counts as failure).
 probe_upload() {
-    _probe_upload_canary "$CANARY_REAL_BOOK" "real_book" &
-    local pid_real=$!
-    _probe_upload_canary "$CANARY_NOT_A_BOOK" "not_a_book" &
-    local pid_not=$!
-    wait "$pid_real" "$pid_not" 2>/dev/null || true
+    local i0 i1 entry0 entry1 path0 name0 path1 name1
+
+    i0=$(( CANARY_CURSOR % CANARY_POOL_SIZE ))
+    i1=$(( (CANARY_CURSOR + 1) % CANARY_POOL_SIZE ))
+    CANARY_CURSOR=$(( (CANARY_CURSOR + 2) % CANARY_POOL_SIZE ))
+
+    entry0="${CANARY_POOL[$i0]}"
+    entry1="${CANARY_POOL[$i1]}"
+    path0="${entry0%%|*}"
+    name0="${entry0##*|}"
+    path1="${entry1%%|*}"
+    name1="${entry1##*|}"
+
+    _probe_upload_canary "$path0" "$name0" &
+    local pid_a=$!
+    _probe_upload_canary "$path1" "$name1" &
+    local pid_b=$!
+    wait "$pid_a" "$pid_b" 2>/dev/null || true
 }
 
 # ── Probe: GET /internal/deps-check ──────────────────────────────────────────
@@ -374,12 +440,19 @@ while :; do
 done
 
 # ── Summarise ────────────────────────────────────────────────────────────────
-# Combine the two canary outcomes into a single string for the summary.
-# Format: "<real_book>/<not_a_book>". Downstream consumers (test harness
-# + gate observation blob) treat this as opaque human-readable text.
-UPLOAD_OUTCOME_REAL="$(cat "$WORK_DIR/last_upload_outcome_real_book" 2>/dev/null || echo "error")"
-UPLOAD_OUTCOME_NOT_A_BOOK="$(cat "$WORK_DIR/last_upload_outcome_not_a_book" 2>/dev/null || echo "error")"
-UPLOAD_OUTCOME="${UPLOAD_OUTCOME_REAL}/${UPLOAD_OUTCOME_NOT_A_BOOK}"
+# Roll up per-canary last-seen outcomes into a compact string for the
+# observation blob. Format: `name1=outcome1,name2=outcome2,...` in the
+# order defined by CANARY_POOL. Downstream consumers treat this as
+# opaque human-readable text — the authoritative success signal is
+# `stacks_upload_terminal_count_total` scraped from metrics, not this
+# string.
+UPLOAD_OUTCOME_PARTS=()
+for entry in "${CANARY_POOL[@]}"; do
+    name="${entry##*|}"
+    outcome="$(cat "$WORK_DIR/last_upload_outcome_${name}" 2>/dev/null || echo "-")"
+    UPLOAD_OUTCOME_PARTS+=("${name}=${outcome}")
+done
+UPLOAD_OUTCOME=$(IFS=, ; echo "${UPLOAD_OUTCOME_PARTS[*]}")
 
 # Emit the final JSON via Python for correctness (quoting, nan handling, etc.)
 python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$BOOKSHELF_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'
