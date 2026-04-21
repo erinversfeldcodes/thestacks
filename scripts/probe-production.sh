@@ -11,22 +11,28 @@
 #                                  sample volume that the gate's
 #                                  db_pool_queue_p95_ms SLI needs to
 #                                  clear its min_samples floor)
-#   POST /api/upload (×2)         two canary images fired in parallel
-#                                 per iteration, round-robin through a
-#                                 pool of 6 inputs covering the full
+#   POST /api/upload (×6)         six canary images fired in parallel
+#                                 per iteration, exercising the full
 #                                 identification-path matrix:
 #                                  - barcode:         clean ISBN barcode
-#                                                     (local_ocr fast path)
+#                                                     (local_ocr fast path;
+#                                                     fires ONCE on the
+#                                                     first iteration only —
+#                                                     one sample is enough
+#                                                     to confirm the fast
+#                                                     path still works)
 #                                  - not_a_book:      non-book image
 #                                                     (Modal classify → reject)
 #                                  - reversed:        mirror-reversed cover
 #                                  - reversed_cutoff: reversed + cut-off title
 #                                  - obscured:        cover with overlay text
 #                                  - mixed_text:      multi-book text post
-#                                 All reach a terminal state; the gate's
-#                                 upload_success_rate SLI treats
-#                                 resolved OR rejected as pipeline-healthy
-#                                 and only counts `timeout` as failure.
+#                                 The 5 extraction canaries rotate to fill
+#                                 all 6 slots every iteration (one doubles
+#                                 per iteration). Over the gate window
+#                                 each extraction class gets ~48 samples;
+#                                 barcode gets 1. All terminal outcomes
+#                                 feed the upload SLIs.
 #   GET  /internal/deps-check     (bearer-gated in-cluster SearXNG probe —
 #                                  skipped if METRICS_SCRAPE_TOKEN is unset,
 #                                  e.g. in local smoke runs)
@@ -106,25 +112,37 @@ SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
 # out to be a HEIF file mislabelled with a `.PNG` extension; PIL on the
 # vision service can't read HEIF without `pillow-heif` so every upload
 # 502'd. Tracked in Issue #141.
-CANARY_POOL=(
-    "${REPO_ROOT}/images/barcode_isbn_clean.jpg|barcode"
+# Barcode is the "fast-path" canary — it hits local_ocr and never touches
+# Modal. One sample is enough to prove the fast path still works; burning
+# a slot on it every iteration wastes Modal-bound capacity.
+BARCODE_CANARY="${REPO_ROOT}/images/barcode_isbn_clean.jpg|barcode"
+
+# Extraction canaries — all exercise Modal + ISBNResolver paths, which is
+# what `upload_p95_ms` actually measures. These fill every slot on every
+# iteration so we get ~50 samples per canary class over the gate window
+# (40 iterations × 6 slots / 5 canaries ≈ 48 each).
+EXTRACTION_POOL=(
     "${REPO_ROOT}/images/not_a_book.jpg|not_a_book"
     "${REPO_ROOT}/images/screenshot_image_reversed.jpg|reversed"
     "${REPO_ROOT}/images/screenshot_image_reversed_and_cut_off.jpg|reversed_cutoff"
     "${REPO_ROOT}/images/screenshot_mildly_obscured.jpg|obscured"
     "${REPO_ROOT}/images/screenshot_mixed_text.jpg|mixed_text"
 )
-CANARY_POOL_SIZE=${#CANARY_POOL[@]}
+EXTRACTION_POOL_SIZE=${#EXTRACTION_POOL[@]}
 
 # Back-compat overrides — respected if set, used only for tests that
 # want to pin the canary choice.
 if [[ -n "${PROBE_CANARY_REAL_BOOK:-}" ]] || [[ -n "${PROBE_CANARY_NOT_A_BOOK:-}" ]]; then
-    CANARY_POOL=(
-        "${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/barcode_isbn_clean.jpg}|barcode"
+    BARCODE_CANARY="${PROBE_CANARY_REAL_BOOK:-${REPO_ROOT}/images/barcode_isbn_clean.jpg}|barcode"
+    EXTRACTION_POOL=(
         "${PROBE_CANARY_NOT_A_BOOK:-${REPO_ROOT}/images/not_a_book.jpg}|not_a_book"
     )
-    CANARY_POOL_SIZE=${#CANARY_POOL[@]}
+    EXTRACTION_POOL_SIZE=${#EXTRACTION_POOL[@]}
 fi
+
+# Number of canary slots fired in parallel per iteration. 6 matches
+# `max_inputs=8` on Modal's VisionModel with room for retries.
+CANARIES_PER_ITERATION=6
 
 # Short per-probe timeouts so a hung backend cannot stretch a single iteration
 # beyond the interval. The upload outcome poll has its own longer budget.
@@ -334,25 +352,50 @@ except Exception:
     echo "$final_status" > "$WORK_DIR/last_upload_outcome_${canary_name}"
 }
 
-# Fire EVERY canary in the pool in parallel per iteration. Over a
-# 600s / 15s window that's ~40 iterations × 6 canaries ≈ 240 pipelines
-# — enough samples for `upload_p95_ms` to settle (±3–5% CI) and a
-# realistic concurrency shape: the Oban `:vision` queue has concurrency
-# 5, so 6 simultaneous arrivals force one to queue each iteration.
-# That contention is the point — exercising real pipeline stress is
-# what the upload SLI is measuring, not a best-case sequential path.
+# Round-robin cursor through EXTRACTION_POOL so samples are spread
+# evenly across the 5 canary classes over the gate window.
+EXTRACTION_CURSOR=0
+
+# Each iteration fires CANARIES_PER_ITERATION canaries in parallel:
+#   * The FIRST iteration fires the barcode canary once (proves the
+#     local_ocr fast path still works) + extraction canaries for the
+#     remaining slots.
+#   * Every subsequent iteration fires extraction canaries only,
+#     advancing the cursor by CANARIES_PER_ITERATION per iteration so
+#     the pool is rotated cleanly.
 #
-# Each iteration takes ~max(canary_times) to complete; with the slow
-# `not_a_book` + Modal path at ~3–6s, iterations fit within the 15s
-# interval and the loop sleeps the remainder.
+# Net per 600s / 15s / 40-iteration window:
+#   * barcode: 1 sample (smoke test only)
+#   * each extraction canary: ~48 samples
+# That's enough per-class volume for the upload_p95 to converge while
+# keeping Oban's :vision queue (concurrency 5) productively busy — 6
+# simultaneous arrivals means 1 queues per iteration, realistic stress.
 probe_upload() {
     local pids=()
-    for entry in "${CANARY_POOL[@]}"; do
-        local path="${entry%%|*}"
-        local name="${entry##*|}"
+    local slot=0
+    local entry path name
+
+    if [[ "$ITERATION_NUM" -eq 1 ]]; then
+        # Fire barcode once, in the first slot of the first iteration.
+        path="${BARCODE_CANARY%%|*}"
+        name="${BARCODE_CANARY##*|}"
         _probe_upload_canary "$path" "$name" &
         pids+=($!)
+        slot=1
+    fi
+
+    # Fill remaining slots from the extraction pool, advancing the cursor.
+    while [[ "$slot" -lt "$CANARIES_PER_ITERATION" ]]; do
+        local idx=$(( EXTRACTION_CURSOR % EXTRACTION_POOL_SIZE ))
+        entry="${EXTRACTION_POOL[$idx]}"
+        path="${entry%%|*}"
+        name="${entry##*|}"
+        _probe_upload_canary "$path" "$name" &
+        pids+=($!)
+        EXTRACTION_CURSOR=$(( EXTRACTION_CURSOR + 1 ))
+        slot=$(( slot + 1 ))
     done
+
     wait "${pids[@]}" 2>/dev/null || true
 }
 
@@ -385,7 +428,12 @@ END_TS=$((START_TS + WINDOW))
 # Initial outcome: will be overwritten by the first successful upload probe.
 echo "error" > "$WORK_DIR/last_upload_outcome"
 
+# 1-indexed iteration counter, read by probe_upload to decide whether
+# to fire the barcode canary (only on the first iteration).
+ITERATION_NUM=0
+
 while :; do
+    ITERATION_NUM=$(( ITERATION_NUM + 1 ))
     iter_start="$(date +%s)"
 
     # Fire all four probes in parallel. Login runs first to populate the token,
@@ -432,12 +480,12 @@ done
 # ── Summarise ────────────────────────────────────────────────────────────────
 # Roll up per-canary last-seen outcomes into a compact string for the
 # observation blob. Format: `name1=outcome1,name2=outcome2,...` in the
-# order defined by CANARY_POOL. Downstream consumers treat this as
-# opaque human-readable text — the authoritative success signal is
-# `stacks_upload_terminal_count_total` scraped from metrics, not this
-# string.
+# order: barcode (if fired) first, then extraction canaries. Downstream
+# consumers treat this as opaque human-readable text — the authoritative
+# success signal is `stacks_upload_terminal_count_total` scraped from
+# metrics, not this string.
 UPLOAD_OUTCOME_PARTS=()
-for entry in "${CANARY_POOL[@]}"; do
+for entry in "$BARCODE_CANARY" "${EXTRACTION_POOL[@]}"; do
     name="${entry##*|}"
     outcome="$(cat "$WORK_DIR/last_upload_outcome_${name}" 2>/dev/null || echo "-")"
     UPLOAD_OUTCOME_PARTS+=("${name}=${outcome}")
