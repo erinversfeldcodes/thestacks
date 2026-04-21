@@ -51,6 +51,9 @@ config :core, :env, :test
 config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
+# Disable ISBN cache in test — ETS is global, tests register different
+# mock responses for the same ISBN, so caching would cross-contaminate.
+config :core, :isbn_resolver_cache_enabled, false
 config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
 config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"

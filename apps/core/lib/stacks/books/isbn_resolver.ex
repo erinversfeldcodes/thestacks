@@ -7,9 +7,16 @@ defmodule Stacks.Books.ISBNResolver do
 
   require Logger
 
+  alias Stacks.Books.ISBNResolverCache
+
   @open_library_url "https://openlibrary.org/api/books"
   @open_library_search_url "https://openlibrary.org/search.json"
   @google_books_url "https://www.googleapis.com/books/v1/volumes"
+
+  # Hard deadline for the parallel OL + GB race. Each individual upstream
+  # has its own HTTP client timeout, but this cap protects the upload job
+  # from a truly stuck external service.
+  @race_timeout_ms 5_000
 
   defp google_books_api_key do
     Application.get_env(:core, :google_books_api_key)
@@ -28,14 +35,86 @@ defmodule Stacks.Books.ISBNResolver do
   @google_books_fuse :google_books_fuse
 
   @doc """
-  Resolves an ISBN to book metadata. Tries Open Library first, then falls back
-  to Google Books. Returns `{:ok, map}` on success, `{:error, :not_found}` otherwise.
+  Resolves an ISBN to book metadata.
+
+  Flow:
+    1. Check `ISBNResolverCache` — immutable ISBN→book means we cache
+       positive results for 24h, negative for 1h.
+    2. On miss, race OpenLibrary and Google Books in parallel and take
+       the first success. Costs one extra API call per request when OL
+       hits first, but cuts ~300ms off the worst case (sequential
+       fallback was `OL_time + GB_time`; parallel is `max(OL, GB)`).
+    3. Memoise the result (positive or negative).
+
+  Circuit-open responses are NOT cached — the fuse is the signal to
+  retry later, not to memoise.
   """
   @spec resolve(String.t()) :: {:ok, map()} | {:error, :not_found | :circuit_open}
   def resolve(isbn) do
-    case resolve_open_library(isbn) do
-      {:ok, data} -> {:ok, data}
-      _error -> resolve_google_books(isbn)
+    if cache_enabled?() do
+      case ISBNResolverCache.get(isbn) do
+        {:ok, cached} ->
+          cached
+
+        :miss ->
+          result = race_resolve(isbn)
+          ISBNResolverCache.put(isbn, result)
+          result
+      end
+    else
+      race_resolve(isbn)
+    end
+  end
+
+  # ETS is global, so per-test mocks leaking across tests via the cache
+  # would make the resolver suite flaky. `config/test.exs` disables
+  # caching; prod/dev leave it on (default true).
+  defp cache_enabled? do
+    Application.get_env(:core, :isbn_resolver_cache_enabled, true)
+  end
+
+  # Race OL and GB in parallel. First `{:ok, _}` wins; remaining tasks
+  # are killed. If both fail, return the last error seen (or
+  # `{:error, :not_found}` on timeout).
+  defp race_resolve(isbn) do
+    ol = Task.async(fn -> resolve_open_library(isbn) end)
+    gb = Task.async(fn -> resolve_google_books(isbn) end)
+    await_first_success([ol, gb], {:error, :not_found})
+  end
+
+  defp await_first_success([], last_error), do: last_error
+
+  defp await_first_success(tasks, last_error) do
+    receive do
+      {ref, result} when is_reference(ref) ->
+        case Enum.find(tasks, &(&1.ref == ref)) do
+          nil ->
+            # Stale ref from a prior call — ignore and keep waiting.
+            await_first_success(tasks, last_error)
+
+          _task ->
+            # Flush any pending :DOWN for this finished task.
+            Process.demonitor(ref, [:flush])
+            others = Enum.reject(tasks, &(&1.ref == ref))
+
+            case result do
+              {:ok, _} = ok ->
+                Enum.each(others, &Task.shutdown(&1, :brutal_kill))
+                ok
+
+              err ->
+                await_first_success(others, err)
+            end
+        end
+
+      {:DOWN, ref, :process, _pid, _reason} ->
+        # Task crashed without sending a result. Drop it and keep waiting.
+        remaining = Enum.reject(tasks, &(&1.ref == ref))
+        await_first_success(remaining, last_error)
+    after
+      @race_timeout_ms ->
+        Enum.each(tasks, &Task.shutdown(&1, :brutal_kill))
+        last_error
     end
   end
 

@@ -19,6 +19,7 @@ defmodule Core.Application do
           StacksWeb.Plugs.RateLimiter.Server,
           Stacks.AI.BudgetTracker,
           Stacks.Books.BookDetailCache,
+          Stacks.Books.ISBNResolverCache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
           Core.PromEx,

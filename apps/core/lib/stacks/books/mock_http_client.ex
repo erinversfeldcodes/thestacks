@@ -19,7 +19,7 @@ defmodule Stacks.Books.MockHttpClient do
 
   @impl true
   def get(url) do
-    responses = Process.get(__MODULE__, [])
+    responses = lookup_responses()
 
     case Enum.find(responses, fn {pattern, _} -> String.contains?(url, pattern) end) do
       {_, response} -> response
@@ -36,5 +36,34 @@ defmodule Stacks.Books.MockHttpClient do
   @doc "Clear all registered responses for the current process."
   def clear do
     Process.delete(__MODULE__)
+  end
+
+  # Walk the `$callers` chain so responses registered in the test process
+  # are visible to Tasks spawned from it (e.g. ISBNResolver.race_resolve/1
+  # spawns two parallel Task.async'd lookups). Elixir automatically puts
+  # the caller hierarchy in `$callers` when a Task is started, so we can
+  # check each ancestor's dictionary. Local dict wins; fall through to
+  # ancestors only on miss.
+  defp lookup_responses do
+    case Process.get(__MODULE__, :undefined) do
+      :undefined -> find_in_callers(Process.get(:"$callers", []))
+      responses -> responses
+    end
+  end
+
+  defp find_in_callers([]), do: []
+
+  defp find_in_callers([pid | rest]) do
+    case safe_dict_get(pid) do
+      nil -> find_in_callers(rest)
+      responses -> responses
+    end
+  end
+
+  defp safe_dict_get(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} -> Keyword.get(dict, __MODULE__)
+      nil -> nil
+    end
   end
 end
