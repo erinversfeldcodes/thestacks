@@ -26,31 +26,49 @@ import modal
 # Per-PR deploys override this via the MODAL_APP_NAME env var.
 # Local / production deploys use the default.
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
-MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
+
+# AWQ-quantized 4-bit Qwen2.5-VL. Weights ~4 GB vs ~15 GB for the
+# bfloat16 original, ~2x faster token generation with <1% quality loss
+# on vision benchmarks. The freed VRAM (24 GB A10G - ~5 GB weights -
+# overhead) supports higher concurrent batching without OOM.
+#
+# Override via MODEL_NAME env var if the official Qwen AWQ release is
+# ever deprecated or a faster community quant emerges.
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
 
 
 def _download_model() -> None:
     """Pre-download model weights into the container image during build.
 
     Runs once at `modal deploy` time (or when the image is invalidated).
-    The downloaded weights are cached in the image layer — every subsequent
-    container start loads from local disk rather than re-downloading.
+    vLLM loads from the local HuggingFace cache directory, so
+    snapshot_download is sufficient — no need to construct the model
+    object at build time (which would also require GPU).
     """
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from huggingface_hub import snapshot_download
+    from transformers import AutoProcessor
 
+    snapshot_download(MODEL_NAME)
+    # Processor is needed at runtime for chat-template application.
     AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
-    Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libzbar0")
     .pip_install(
+        # vLLM provides continuous batching, PagedAttention, prefix
+        # caching, and AWQ-kernel support. The same Qwen weights run
+        # ~3-5x faster here than under `transformers.generate()`.
+        "vllm>=0.7.3",
+        # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
+        # vLLM dispatches to when `quantization="awq"` is set.
+        "autoawq>=0.2.0",
+        # Processor/tokenizer. vLLM itself bundles a transformers pin,
+        # but we import AutoProcessor explicitly for the chat template.
         "transformers>=4.50.0",
         "qwen-vl-utils>=0.0.10",
-        "torch>=2.4.0",
-        "torchvision",
-        "accelerate>=0.34.0",
+        "huggingface_hub>=0.26.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
     )
@@ -175,69 +193,123 @@ _ANALYZE_PROMPT = (
 class VisionModel:
     @modal.enter()
     def load(self) -> None:
-        import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        """Load the vLLM AsyncLLMEngine + tokenizer.
+
+        AsyncLLMEngine (not the sync `LLM` wrapper) is required here: it
+        schedules concurrent `generate()` coroutines through a single
+        continuous-batching loop. `LLM.chat()` from multiple threads
+        would serialise behind the engine's internal lock — defeating
+        the whole point of Modal's `max_inputs=8`.
+
+        vLLM config choices:
+          * quantization="awq"            — 4-bit weight quant, ~2x faster
+                                            token generation, <1% accuracy
+                                            delta on VLM benchmarks.
+          * enable_prefix_caching=True    — our `_ANALYZE_PROMPT` is
+                                            identical on every call
+                                            (~200 tokens of instructions);
+                                            vLLM caches that prefix's KV
+                                            state and reuses it per call,
+                                            saving prefill work.
+          * max_model_len=4096            — image tokens (~1500 at 672px)
+                                            + prompt (~250) + output
+                                            (~512) = ~2300. 4096 leaves
+                                            headroom without wasting KV
+                                            VRAM on the full 32k context
+                                            window Qwen advertises.
+          * gpu_memory_utilization=0.90   — vLLM claims 90% of the GPU
+                                            for weights + KV cache pool,
+                                            leaving 10% for activations.
+          * limit_mm_per_prompt={"image": 1}
+                                          — our prompts always carry
+                                            exactly one image; tells vLLM
+                                            not to reserve space for
+                                            multi-image batches.
+
+        PagedAttention is vLLM's default attention impl and requires no
+        flag — it's what makes the KV cache pool work block-by-block
+        and lets concurrent requests share VRAM efficiently.
+        """
+        from transformers import AutoProcessor
+        from vllm import AsyncEngineArgs, AsyncLLMEngine
 
         self.processor = AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+
+        engine_args = AsyncEngineArgs(
+            model=MODEL_NAME,
+            quantization="awq",
+            enable_prefix_caching=True,
+            max_model_len=4096,
+            gpu_memory_utilization=0.90,
+            limit_mm_per_prompt={"image": 1},
+            trust_remote_code=True,
+            dtype="float16",
         )
+        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
 
     @modal.method()
-    def classify(self, image_b64: str) -> dict[str, Any]:
-        return self._infer(image_b64, _CLASSIFY_PROMPT)
+    async def classify(self, image_b64: str) -> dict[str, Any]:
+        return await self._infer(image_b64, _CLASSIFY_PROMPT)
 
     @modal.method()
-    def extract(self, images_b64: list[str]) -> dict[str, Any]:
+    async def extract(self, images_b64: list[str]) -> dict[str, Any]:
         if not images_b64:
             return {"books": []}
-        return self._infer(images_b64[0], _EXTRACT_PROMPT)
+        return await self._infer(images_b64[0], _EXTRACT_PROMPT)
 
     @modal.method()
-    def analyze(self, image_b64: str) -> dict[str, Any]:
-        return self._infer(image_b64, _ANALYZE_PROMPT)
+    async def analyze(self, image_b64: str) -> dict[str, Any]:
+        return await self._infer(image_b64, _ANALYZE_PROMPT)
 
-    def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
-        import torch
-        from qwen_vl_utils import process_vision_info
+    async def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
+        import base64
+        import io
+        import uuid
 
+        from PIL import Image as PILImage
+        from vllm import SamplingParams
+
+        raw = base64.b64decode(image_b64, validate=True)
+        pil_image = PILImage.open(io.BytesIO(raw)).convert("RGB")
+
+        # Qwen2.5-VL chat template inserts <|vision_start|><|image_pad|>
+        # <|vision_end|> placeholders in the right spots; vLLM fills the
+        # image_pad positions with the actual visual embeddings derived
+        # from `multi_modal_data`.
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": f"data:image/jpeg;base64,{image_b64}"},
+                    {"type": "image"},
                     {"type": "text", "text": prompt},
                 ],
             }
         ]
-
-        text = self.processor.apply_chat_template(
+        text_prompt = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        image_inputs, video_inputs = process_vision_info(messages)
-        inputs = self.processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="pt",
-        ).to(self.model.device)
 
-        with torch.no_grad():
-            generated_ids = self.model.generate(
-                **inputs,
-                max_new_tokens=512,
-                do_sample=False,
-                temperature=None,
-                top_p=None,
-            )
+        sampling_params = SamplingParams(
+            max_tokens=512,
+            temperature=0.0,
+        )
 
-        output_ids = [
-            out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
-        ]
-        response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+        request_id = str(uuid.uuid4())
+        final_output = None
+        async for output in self.engine.generate(
+            {
+                "prompt": text_prompt,
+                "multi_modal_data": {"image": pil_image},
+            },
+            sampling_params=sampling_params,
+            request_id=request_id,
+        ):
+            final_output = output
+
+        if final_output is None or not final_output.outputs:
+            return {}
+
+        response = final_output.outputs[0].text.strip()
         return _parse_json(response)
 
 
