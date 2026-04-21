@@ -23,6 +23,7 @@ defmodule Stacks.Moderation do
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.Books
   alias Stacks.Books.ISBNResolver
+  alias Stacks.Workers.EnrichBookJob
 
   @doc """
   Runs the full moderation pipeline for an uploaded image.
@@ -57,10 +58,18 @@ defmodule Stacks.Moderation do
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}} ->
         {:error, :isbn_not_found}
 
-      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => books}}
+      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => books} = resp}
       when is_list(books) ->
         Logger.info("Moderation: /analyze returned #{length(books)} candidate(s)")
-        resolve_and_store_all(books, context)
+        # Propagate `model_used` so downstream can tell barcode-sourced
+        # (local_ocr) ISBNs apart from VLM-extracted ones. The fast-path
+        # metadata skip is only safe when the source is local_ocr — the
+        # VLM can produce strings that happen to pass the ISBN-13 check
+        # digit but aren't real books, so we don't trust it unilaterally.
+        context_with_source =
+          Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
+
+        resolve_and_store_all(books, context_with_source)
 
       {:ok, %{"classification" => _}} ->
         {:error, :not_a_book}
@@ -183,35 +192,8 @@ defmodule Stacks.Moderation do
   end
 
   defp store_book(isbn, prefetched_metadata, context) do
-    metadata =
-      if prefetched_metadata do
-        prefetched_metadata
-      else
-        case Books.resolve_isbn(isbn) do
-          {:ok, data} -> data
-          _ -> %{}
-        end
-      end
-
-    subjects = metadata[:subjects] || []
-    bisac_codes = subjects_to_bisac(subjects)
-    visibility_tier = determine_visibility_tier(bisac_codes)
-
-    base_attrs = %{
-      "isbn" => isbn,
-      "title" => metadata[:title],
-      "subjects" => subjects,
-      "bisac_codes" => bisac_codes,
-      "visibility_tier" => visibility_tier,
-      "description" => metadata[:description],
-      "cover_image_url" => metadata[:cover_image_url],
-      "publisher" => metadata[:publisher],
-      "publication_year" => metadata[:publication_year],
-      "page_count" => metadata[:page_count],
-      "author" => metadata[:author]
-    }
-
-    attrs = Map.merge(base_attrs, context[:book_attrs] || %{})
+    {metadata, used_fast_path} = resolve_metadata(isbn, prefetched_metadata, context)
+    attrs = build_book_attrs(isbn, metadata, used_fast_path, context)
 
     case Books.find_existing(isbn) do
       nil -> Books.create(attrs)
@@ -227,6 +209,98 @@ defmodule Stacks.Moderation do
     else
       "public"
     end
+  end
+
+  # `used_fast_path` tracks whether the synchronous OL/GB lookup was
+  # skipped because the ISBN checksum was valid. Without this flag we
+  # can't distinguish two `metadata == %{}` cases that must be handled
+  # differently:
+  #   * fast path fired → use placeholder title, enqueue enrichment
+  #   * sync lookup returned :not_found → leave title nil so the
+  #     changeset validation rejects the row (VLM-hallucinated ISBNs
+  #     that are neither checksum-valid nor in OL/GB shouldn't pollute
+  #     the books table)
+  defp resolve_metadata(_isbn, prefetched_metadata, _context)
+       when not is_nil(prefetched_metadata) do
+    {prefetched_metadata, false}
+  end
+
+  defp resolve_metadata(isbn, _prefetched_metadata, context) do
+    if fast_path?(isbn, context) do
+      enqueue_metadata_enrichment(isbn)
+      {%{}, true}
+    else
+      case Books.resolve_isbn(isbn) do
+        {:ok, data} -> {data, false}
+        _ -> {%{}, false}
+      end
+    end
+  end
+
+  # Fast path: a checksum-valid ISBN that came from local OCR (barcode
+  # decode) is trustworthy — zbar rejects invalid EAN-13 before we ever
+  # see it, so the string in hand is a real ISBN. Skip the synchronous
+  # OL/GB round-trip (~400ms+) on the upload hot path and let
+  # `EnrichBookJob` fill in title/author/cover asynchronously.
+  #
+  # Intentionally NOT applied to VLM-extracted ISBNs: the model can read
+  # garbled text and produce a 13-digit string that passes the check
+  # digit (~10% of random 13-digit strings) but isn't a real book. Only
+  # `model_used == "local_ocr"` gives us scanner-level confidence.
+  defp fast_path?(isbn, context) do
+    context[:vision_model_used] == "local_ocr" and Books.valid_isbn_checksum?(isbn)
+  end
+
+  defp build_book_attrs(isbn, metadata, used_fast_path, context) do
+    subjects = metadata[:subjects] || []
+    bisac_codes = subjects_to_bisac(subjects)
+
+    base_attrs = %{
+      "isbn" => isbn,
+      "title" => derive_title(isbn, metadata, used_fast_path),
+      "subjects" => subjects,
+      "bisac_codes" => bisac_codes,
+      "visibility_tier" => determine_visibility_tier(bisac_codes),
+      "description" => metadata[:description],
+      "cover_image_url" => metadata[:cover_image_url],
+      "publisher" => metadata[:publisher],
+      "publication_year" => metadata[:publication_year],
+      "page_count" => metadata[:page_count],
+      "author" => metadata[:author]
+    }
+
+    Map.merge(base_attrs, context[:book_attrs] || %{})
+  end
+
+  defp derive_title(isbn, metadata, used_fast_path) do
+    cond do
+      metadata[:title] -> metadata[:title]
+      used_fast_path -> "ISBN #{isbn}"
+      true -> nil
+    end
+  end
+
+  defp enqueue_metadata_enrichment(isbn) do
+    case %{"isbn" => isbn}
+         |> EnrichBookJob.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Moderation: failed to enqueue EnrichBookMetadataJob for #{isbn}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  rescue
+    exception ->
+      Logger.warning(
+        "Moderation: EnrichBookMetadataJob enqueue raised for #{isbn}: #{inspect(exception)}"
+      )
+
+      :ok
   end
 
   defp subjects_to_bisac(subjects) do

@@ -881,7 +881,21 @@ defmodule Stacks.Books do
     end)
   end
 
-  defp valid_isbn_checksum?(isbn) do
+  @doc """
+  True iff `isbn` is a well-formed ISBN-10 or ISBN-13 with a valid
+  check digit. Strings that don't match the shape are accepted (returns
+  `true`) so validation callsites can defer shape-checking to separate
+  validators; for explicit checksum gating, pre-filter with the shape
+  regex before calling.
+
+  Publicly exposed so callers (e.g. `Stacks.Moderation`) can trust a
+  scanner-decoded ISBN without a round-trip to Open Library: barcode
+  scanners won't decode a checksum-invalid EAN-13, and the 1-in-10 odds
+  of a random 13-digit string passing the checksum make false positives
+  vanishingly rare.
+  """
+  @spec valid_isbn_checksum?(String.t()) :: boolean()
+  def valid_isbn_checksum?(isbn) do
     if isbn =~ ~r/^\d{10}$|^\d{13}$/ do
       digits = Enum.map(String.graphemes(isbn), &String.to_integer/1)
 
