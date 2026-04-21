@@ -18,7 +18,15 @@ defmodule Stacks.Discovery.BraveClient do
   require Logger
 
   @base_url "https://api.search.brave.com/res/v1/web/search"
-  @daily_budget 67
+  # Daily cap. Free tier quota is 2000/month ≈ 67/day, but we typically
+  # run several gate windows per day (each generates dozens of author-
+  # discovery jobs) plus real-user traffic; 67 is too tight and caused
+  # oban_failure_rate_default breaches once the canary probe expanded
+  # to cover non-barcode book extraction. 200/day is a defensive buffer
+  # against spikes while still well under the 2000/month cap (at sustained
+  # 200/day you'd hit the monthly ceiling in ~10 days — a useful signal
+  # that the batch-cron refactor is overdue).
+  @daily_budget 200
   @fuse_name :brave_fuse
 
   @impl true
