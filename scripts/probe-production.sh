@@ -334,36 +334,26 @@ except Exception:
     echo "$final_status" > "$WORK_DIR/last_upload_outcome_${canary_name}"
 }
 
-# Round-robin cursor through CANARY_POOL. Each iteration advances by 2.
-# Global so it persists across probe_upload/2 calls within the loop.
-CANARY_CURSOR=0
-
-# Fire two canaries in parallel per iteration, advancing through the
-# pool round-robin. Over a 600s / 15s window that's ~40 iterations × 2
-# = ~80 canary uploads distributed across the pool — ~13 of each of
-# the 6 canaries by default. Each terminal outcome feeds
-# `stacks_upload_terminal_count_total` and the gate's
-# `upload_success_rate` SLI (resolved + rejected count as success,
-# only `timeout` counts as failure).
+# Fire EVERY canary in the pool in parallel per iteration. Over a
+# 600s / 15s window that's ~40 iterations × 6 canaries ≈ 240 pipelines
+# — enough samples for `upload_p95_ms` to settle (±3–5% CI) and a
+# realistic concurrency shape: the Oban `:vision` queue has concurrency
+# 5, so 6 simultaneous arrivals force one to queue each iteration.
+# That contention is the point — exercising real pipeline stress is
+# what the upload SLI is measuring, not a best-case sequential path.
+#
+# Each iteration takes ~max(canary_times) to complete; with the slow
+# `not_a_book` + Modal path at ~3–6s, iterations fit within the 15s
+# interval and the loop sleeps the remainder.
 probe_upload() {
-    local i0 i1 entry0 entry1 path0 name0 path1 name1
-
-    i0=$(( CANARY_CURSOR % CANARY_POOL_SIZE ))
-    i1=$(( (CANARY_CURSOR + 1) % CANARY_POOL_SIZE ))
-    CANARY_CURSOR=$(( (CANARY_CURSOR + 2) % CANARY_POOL_SIZE ))
-
-    entry0="${CANARY_POOL[$i0]}"
-    entry1="${CANARY_POOL[$i1]}"
-    path0="${entry0%%|*}"
-    name0="${entry0##*|}"
-    path1="${entry1%%|*}"
-    name1="${entry1##*|}"
-
-    _probe_upload_canary "$path0" "$name0" &
-    local pid_a=$!
-    _probe_upload_canary "$path1" "$name1" &
-    local pid_b=$!
-    wait "$pid_a" "$pid_b" 2>/dev/null || true
+    local pids=()
+    for entry in "${CANARY_POOL[@]}"; do
+        local path="${entry%%|*}"
+        local name="${entry##*|}"
+        _probe_upload_canary "$path" "$name" &
+        pids+=($!)
+    done
+    wait "${pids[@]}" 2>/dev/null || true
 }
 
 # ── Probe: GET /internal/deps-check ──────────────────────────────────────────
