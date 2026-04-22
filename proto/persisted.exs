@@ -78,6 +78,70 @@
     },
 
     # -------------------------------------------------------------------------
+    # Book lookup caches (L2 — persistent backing for the ETS L1 caches in
+    # Stacks.Books.ISBNResolverCache and Stacks.Books.TitleSearchCache).
+    # Survive Fly machine stops and deploys; shared across all nodes.
+    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/internal/v1/book_cache.proto",
+      proto_message: "IsbnResolverCacheEntry",
+      table_name: "isbn_resolver_cache",
+      schema_prefix: "op",
+      ecto_module: Stacks.Books.IsbnResolverCacheEntry,
+      ecto_path: "lib/stacks/gen/books/isbn_resolver_cache_entry.ex",
+      dbt_path: "stg_isbn_resolver_cache.sql",
+      timestamps: :standard,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [
+        %{
+          name: "isbn_resolver_cache_isbn_index",
+          columns: [:isbn],
+          unique: true
+        },
+        %{
+          name: "isbn_resolver_cache_expires_at_index",
+          columns: [:expires_at]
+        }
+      ],
+      field_overrides: %{
+        isbn: %{null: false},
+        outcome: %{null: false},
+        metadata: %{ecto_type: :map},
+        expires_at: %{null: false}
+      }
+    },
+    %{
+      proto_file: "stacks/internal/v1/book_cache.proto",
+      proto_message: "TitleSearchCacheEntry",
+      table_name: "title_search_cache",
+      schema_prefix: "op",
+      ecto_module: Stacks.Books.TitleSearchCacheEntry,
+      ecto_path: "lib/stacks/gen/books/title_search_cache_entry.ex",
+      dbt_path: "stg_title_search_cache.sql",
+      timestamps: :standard,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [
+        %{
+          name: "title_search_cache_key_index",
+          columns: [:cache_key],
+          unique: true
+        },
+        %{
+          name: "title_search_cache_expires_at_index",
+          columns: [:expires_at]
+        }
+      ],
+      field_overrides: %{
+        cache_key: %{null: false},
+        outcome: %{null: false},
+        metadata: %{ecto_type: :map},
+        expires_at: %{null: false}
+      }
+    },
+
+    # -------------------------------------------------------------------------
     # Partners
     # -------------------------------------------------------------------------
     %{
