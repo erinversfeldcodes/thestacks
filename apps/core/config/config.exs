@@ -61,7 +61,11 @@ config :core, Oban,
        # and walks it, respecting `BraveClient.@daily_budget` — once
        # budget is spent the remaining authors are picked up on the
        # next night. 08:00 UTC picks a low-traffic window.
-       {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}}
+       {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
+       # Sweeps expired rows from op.isbn_resolver_cache and
+       # op.title_search_cache. Runs at 03:30 UTC in the low-traffic
+       # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
+       {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
