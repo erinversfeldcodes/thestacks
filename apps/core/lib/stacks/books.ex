@@ -65,7 +65,13 @@ defmodule Stacks.Books do
     :user_id
   ]
 
-  @valid_image_statuses ~w(pending resolved rejected)
+  # Image lifecycle:
+  #   awaiting_upload → client has been issued a presigned PUT URL but
+  #     hasn't yet committed. The bytes may or may not be in R2.
+  #   pending         → bytes verified in R2, IdentifyBookJob enqueued.
+  #   resolved        → pipeline identified one or more books.
+  #   rejected        → pipeline rejected (not-a-book, isbn-not-found, etc).
+  @valid_image_statuses ~w(awaiting_upload pending resolved rejected)
 
   @doc """
   Returns a book edition by ID, or nil if not found.
@@ -263,18 +269,125 @@ defmodule Stacks.Books do
     end
   end
 
-  defp insert_uploaded_image(image_id, storage_key, user_id) do
+  defp insert_uploaded_image(image_id, storage_key, user_id, status \\ "pending") do
     now = DateTime.utc_now()
 
     %UploadedImage{id: image_id}
     |> uploaded_image_changeset(%{
       storage_path: storage_key,
-      status: "pending",
+      status: status,
       uploaded_at: now,
       expires_at: DateTime.add(now, 30, :day),
       user_id: user_id
     })
     |> Repo.insert()
+  end
+
+  @doc """
+  Init step of the presigned-URL upload flow. Allocates an `image_id`,
+  reserves the R2 storage key, inserts an `UploadedImage` row with
+  status `"awaiting_upload"`, and returns a short-lived presigned PUT
+  URL the client uploads to directly.
+
+  Bytes never touch the Phoenix handler — the client PUTs straight to
+  R2, then calls `commit_upload/2` to signal completion. Frees the
+  HTTP pool during the slow upload transit and removes R2 latency
+  from the API response.
+
+  Returns `{:ok, %{image_id: ..., upload_url: ..., expires_in: ...}}`
+  or `{:error, reason}` if the row insert or presigning fails.
+
+  `opts` may include:
+    * `:content_type` — MIME type hint baked into the presigned URL.
+      The client MUST send the matching `Content-Type` header on its
+      PUT or R2 rejects with a signature mismatch.
+    * `:ttl_seconds` — presigned URL lifetime. Default 900s (15 min).
+  """
+  @spec init_upload(binary(), keyword()) ::
+          {:ok, %{image_id: binary(), upload_url: String.t(), expires_in: pos_integer()}}
+          | {:error, term()}
+  def init_upload(user_id, opts \\ []) do
+    image_id = Ecto.UUID.generate()
+    storage_key = "uploads/#{image_id}"
+    content_type = Keyword.get(opts, :content_type, "image/jpeg")
+    ttl_seconds = Keyword.get(opts, :ttl_seconds, 900)
+
+    with {:ok, _image} <-
+           insert_uploaded_image(image_id, storage_key, user_id, "awaiting_upload"),
+         {:ok, upload_url} <-
+           Stacks.Storage.presigned_put_url(storage_key, ttl_seconds, content_type: content_type) do
+      {:ok, %{image_id: image_id, upload_url: upload_url, expires_in: ttl_seconds}}
+    end
+  end
+
+  @doc """
+  Commit step of the presigned-URL upload flow. Verifies the client's
+  direct PUT to R2 actually landed, flips the `UploadedImage` row from
+  `"awaiting_upload"` to `"pending"`, and enqueues `IdentifyBookJob`.
+
+  The HEAD check prevents a client from calling commit without actually
+  uploading — we won't enqueue vision work against a missing object.
+
+  Returns `{:ok, %{image_id: ..., job_id: ...}}` on success, or:
+    * `{:error, :not_found}` — no such upload row, or the client's
+      user_id doesn't own it.
+    * `{:error, :not_yet_uploaded}` — row exists and is owned, but R2
+      HEAD returned 404. Either the client is racing the commit before
+      their PUT completed, or the upload failed silently.
+    * `{:error, :already_committed}` — row status is already `"pending"`
+      or a terminal state. Idempotent — repeat commits are safe but
+      don't re-enqueue.
+  """
+  @spec commit_upload(binary(), binary()) ::
+          {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
+  def commit_upload(user_id, image_id) when is_binary(user_id) and is_binary(image_id) do
+    with {:ok, image} <- fetch_owned_awaiting_upload(user_id, image_id),
+         :ok <- verify_object_exists(image.storage_path),
+         {:ok, updated} <- flip_awaiting_to_pending(image),
+         {:ok, job} <- upload_and_identify(user_id, updated.id, updated.storage_path) do
+      Events.emit_safe(%{
+        event_type: "image.submitted",
+        aggregate_type: "image",
+        aggregate_id: updated.id,
+        payload: %{storage_path: updated.storage_path}
+      })
+
+      {:ok, %{image_id: updated.id, job_id: job.id}}
+    end
+  end
+
+  # Translate the storage backend's :not_found into :not_yet_uploaded so
+  # the controller can distinguish "no such row" from "row exists but
+  # the client PUT hasn't landed yet" — the latter is a race condition
+  # clients can retry, the former is a hard 404.
+  defp verify_object_exists(storage_path) do
+    case Stacks.Storage.head_image(storage_path) do
+      {:ok, _size} -> :ok
+      {:error, :not_found} -> {:error, :not_yet_uploaded}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_owned_awaiting_upload(user_id, image_id) do
+    case Repo.get(UploadedImage, image_id) do
+      nil ->
+        {:error, :not_found}
+
+      %UploadedImage{user_id: owner} when owner != user_id ->
+        {:error, :not_found}
+
+      %UploadedImage{status: "awaiting_upload"} = image ->
+        {:ok, image}
+
+      %UploadedImage{} ->
+        {:error, :already_committed}
+    end
+  end
+
+  defp flip_awaiting_to_pending(%UploadedImage{} = image) do
+    image
+    |> uploaded_image_changeset(%{status: "pending"})
+    |> Repo.update()
   end
 
   @doc """

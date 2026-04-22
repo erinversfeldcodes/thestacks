@@ -31,6 +31,24 @@ defmodule Stacks.Storage.Mock do
   end
 
   @impl true
+  @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []) do
+    {:ok, "https://mock-storage.test/#{key}?signed=true&method=put"}
+  end
+
+  @impl true
+  @spec head(String.t()) :: {:ok, non_neg_integer()} | {:error, :not_found | term()}
+  def head(key) do
+    store = Process.get(__MODULE__, %{})
+
+    case Map.fetch(store, key) do
+      {:ok, data} -> {:ok, byte_size(data)}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  @impl true
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key) do
     store = Process.get(__MODULE__, %{})

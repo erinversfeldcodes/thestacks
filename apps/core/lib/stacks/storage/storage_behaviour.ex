@@ -16,6 +16,28 @@ defmodule Stacks.Storage.StorageBehaviour do
   @callback presigned_url(key :: String.t(), ttl_seconds :: pos_integer()) ::
               {:ok, String.t()} | {:error, term()}
 
+  @doc """
+  Generate a presigned PUT URL the client can upload to directly,
+  bypassing the Phoenix handler. Used by the init/commit upload flow.
+  Returns `{:ok, url}` or `{:error, reason}`.
+  """
+  @callback presigned_put_url(
+              key :: String.t(),
+              ttl_seconds :: pos_integer(),
+              opts :: keyword()
+            ) :: {:ok, String.t()} | {:error, term()}
+
+  @doc """
+  Check whether an object exists at the given key without downloading
+  bytes. Used by the commit step to verify the client's direct upload
+  succeeded before we enqueue identification work.
+
+  Returns `{:ok, size_bytes}` on success, `{:error, :not_found}` if
+  absent, `{:error, reason}` for transport failures.
+  """
+  @callback head(key :: String.t()) ::
+              {:ok, non_neg_integer()} | {:error, :not_found | term()}
+
   @doc "Delete an object by key. Returns `:ok` or `{:error, reason}`."
   @callback delete(key :: String.t()) :: :ok | {:error, term()}
 end
