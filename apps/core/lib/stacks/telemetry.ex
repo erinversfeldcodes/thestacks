@@ -27,10 +27,18 @@ defmodule Stacks.Telemetry do
   @spec phase(atom(), map(), (-> result)) :: result when result: var
   def phase(phase, metadata \\ %{}, fun)
       when is_atom(phase) and is_map(metadata) and is_function(fun, 0) do
+    # `:telemetry.span/3` does NOT merge start_metadata into the stop
+    # event — the stop event's metadata is whatever the span function
+    # returns in the second element of its `{result, metadata}` tuple.
+    # So the same tags must be supplied to both start and stop, not just
+    # start. Return the same merged map from the span function to make
+    # phase/upload_id available to downstream log and metric handlers.
+    full_metadata = Map.put(metadata, :phase, phase)
+
     :telemetry.span(
       [:stacks, :upload, :phase],
-      Map.put(metadata, :phase, phase),
-      fn -> {fun.(), %{}} end
+      full_metadata,
+      fn -> {fun.(), full_metadata} end
     )
   end
 end
