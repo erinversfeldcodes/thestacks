@@ -175,24 +175,35 @@ _ANALYZE_PROMPT = (
 
 
 @app.cls(
-    gpu="A10G",
+    gpu="H100",
     image=image,
     # Pin to us-east so the Modal GPU lives in the same region as Fly IAD
     # (core) and Neon us-east-1 (DB). Without pinning, Modal's scheduler
-    # places containers wherever A10G capacity exists — a us-west placement
+    # places containers wherever H100 capacity exists — a us-west placement
     # adds ~60ms Fly→Modal RTT per /analyze call, compounding with cold
-    # starts. Tradeoff: if us-east runs out of A10G, scheduling blocks
-    # rather than falling back. In practice us-east has ample A10G.
+    # starts. Tradeoff: H100 availability in us-east is tighter than A10G;
+    # if the pool is exhausted, scheduling blocks rather than falling back.
+    # Watch `[:stacks, :vision, :request, :stop]` tail latency after
+    # cutover — capacity-bound bursts can push single calls to 30 s+.
     region="us-east",
+    # Swapped from A10G (24 GB, Ampere bf16) to H100 (80 GB, Hopper w/ FP8
+    # tensor cores). Telemetry showed vision inference was the only
+    # remaining lever on `upload_p95_ms` - cache was already hitting at
+    # near-100% on repeat canaries, so single-book warm inference at
+    # 800-2200 ms and mixed_text at ~4 s is the ceiling. awq_marlin
+    # targets Hopper's FP8 path on H100 where A10G could only use bf16,
+    # giving ~3-4x throughput on Qwen2.5-VL-7B-AWQ. Expected p95 impact:
+    # ~300-700 ms single-book, ~1.2-1.5 s mixed_text.
     # Cap autoscaled containers at 10. With max_inputs=8 each, that's up
-    # to 80 concurrent inferences — well above the Oban :vision queue
-    # ceiling of 60. Prevents runaway scale-out from a burst spike
-    # producing a surprising end-of-month GPU bill. At peak ~$12/hr
-    # (10 * ~$1.20/hr A10G); amortises to pennies/hour at real
-    # utilisation because Modal charges per active container-second.
+    # to 80 concurrent inferences - well above the Oban :vision queue
+    # ceiling of 60. At peak ~$40-50/hr (10 * ~$4-5/hr H100); amortises
+    # well below that at real utilisation because Modal charges per
+    # active container-second and `scaledown_window=1200` lets idle
+    # containers release. Re-evaluate `max_containers` if monthly bill
+    # runs hotter than expected - H100 is ~4x A10G's per-second cost.
     max_containers=10,
     # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
-    # jobs are serialised on a single A10G) + inference (~60s for long inputs).
+    # jobs are serialised on a single H100) + inference (~60s for long inputs).
     timeout=300,
     # Keep the container alive for 20 minutes after the last request.
     # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
