@@ -76,6 +76,70 @@ defmodule Stacks.Storage.R2 do
   end
 
   @impl true
+  @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def presigned_put_url(key, ttl_seconds \\ 900, _opts \\ []) do
+    # Presigned PUT is a local SigV4 signing op — no network call — so
+    # no fuse gate here. The actual upload is client → R2 directly, not
+    # client → us → R2, so our fuse would see no traffic to melt on
+    # anyway. The fuse still protects `put/3` for any server-side
+    # writes we do (e.g. migrations, admin tools).
+    config = ExAws.Config.new(:s3)
+
+    case ExAws.S3.presigned_url(config, :put, bucket(), key, expires_in: ttl_seconds) do
+      {:ok, url} -> {:ok, url}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.error("Storage.R2: presigned PUT URL failed for #{key}: #{inspect(e)}")
+      {:error, e}
+  end
+
+  @impl true
+  @spec head(String.t()) :: {:ok, non_neg_integer()} | {:error, :not_found | term()}
+  def head(key) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :blown ->
+        {:error, :circuit_open}
+
+      _ ->
+        do_head(key)
+    end
+  end
+
+  defp do_head(key) do
+    bucket()
+    |> ExAws.S3.head_object(key)
+    |> ExAws.request()
+    |> case do
+      {:ok, %{headers: headers}} ->
+        size =
+          headers
+          |> Enum.find_value(fn
+            {"Content-Length", v} -> v
+            {"content-length", v} -> v
+            _ -> nil
+          end)
+          |> case do
+            nil -> 0
+            v when is_binary(v) -> String.to_integer(v)
+            v when is_integer(v) -> v
+          end
+
+        {:ok, size}
+
+      {:error, {:http_error, 404, _}} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        Logger.error("Storage.R2: head failed for #{key}: #{inspect(reason)}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
+        {:error, reason}
+    end
+  end
+
+  @impl true
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key) do
     case :fuse.ask(@fuse_name, :sync) do

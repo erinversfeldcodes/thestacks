@@ -51,7 +51,14 @@ defmodule StacksWeb.UploadController do
     end
   end
 
-  @doc "POST /api/upload — accepts a multipart image upload and enqueues IdentifyBookJob."
+  @doc """
+  POST /api/upload — legacy multipart image upload.
+
+  Deprecated in favour of the init/commit flow (`POST /api/upload/init`
+  + `POST /api/upload/:id/commit`) which keeps R2 upload off the
+  Phoenix handler pool. Kept for backward compatibility and as a
+  rollback target.
+  """
   def create(conn, %{"image" => %Plug.Upload{} = upload}) do
     user = Guardian.Plug.current_resource(conn)
 
@@ -72,6 +79,66 @@ defmodule StacksWeb.UploadController do
     conn
     |> put_status(422)
     |> json(%{error: "no image provided"})
+  end
+
+  @doc """
+  POST /api/upload/init — first step of the presigned-URL upload flow.
+
+  Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
+
+  Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
+  bytes directly to `upload_url` (R2), then calls
+  `POST /api/upload/:id/commit` to signal completion. Phoenix never
+  sees the bytes — the POST here is a lightweight DB insert + local
+  SigV4 signing operation (~50ms typical).
+  """
+  @spec init(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def init(conn, params) do
+    user = Guardian.Plug.current_resource(conn)
+    content_type = Map.get(params, "content_type", "image/jpeg")
+
+    case Books.init_upload(user.id, content_type: content_type) do
+      {:ok, %{image_id: image_id, upload_url: url, expires_in: expires_in}} ->
+        conn
+        |> put_status(201)
+        |> json(%{image_id: image_id, upload_url: url, expires_in: expires_in})
+
+      {:error, _reason} ->
+        conn
+        |> put_status(500)
+        |> json(%{error: "init_failed"})
+    end
+  end
+
+  @doc """
+  POST /api/upload/:image_id/commit — second step of the presigned-URL
+  flow. Verifies that the client's direct PUT to R2 landed (HEAD),
+  flips the row from `awaiting_upload` to `pending`, and enqueues
+  `IdentifyBookJob`. The SSE stream endpoint works against the
+  resulting row exactly as before.
+  """
+  @spec commit(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def commit(conn, %{"image_id" => image_id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Books.commit_upload(user.id, image_id) do
+      {:ok, %{image_id: id, job_id: _}} ->
+        conn
+        |> put_status(202)
+        |> json(%{status: "accepted", image_id: id})
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      {:error, :not_yet_uploaded} ->
+        conn |> put_status(409) |> json(%{error: "not_yet_uploaded"})
+
+      {:error, :already_committed} ->
+        conn |> put_status(409) |> json(%{error: "already_committed"})
+
+      {:error, _reason} ->
+        conn |> put_status(500) |> json(%{error: "commit_failed"})
+    end
   end
 
   @doc "GET /api/upload/:image_id/stream — stream SSE status updates for an uploaded image."

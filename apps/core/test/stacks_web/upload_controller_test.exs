@@ -7,6 +7,8 @@ defmodule StacksWeb.UploadControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Books.UploadedImage
+  alias Stacks.Storage.Mock, as: StorageMock
   alias Stacks.Workers.IdentifyBookJob
 
   setup %{conn: conn} do
@@ -49,6 +51,108 @@ defmodule StacksWeb.UploadControllerTest do
       conn = build_conn()
       conn = post(conn, "/api/upload", %{"image" => "not_a_file"})
       assert json_response(conn, 401)
+    end
+  end
+
+  describe "POST /api/upload/init" do
+    test "returns 201 with image_id + upload_url + expires_in", %{conn: conn} do
+      conn = post(conn, "/api/upload/init", %{"content_type" => "image/jpeg"})
+
+      assert %{
+               "image_id" => image_id,
+               "upload_url" => url,
+               "expires_in" => expires_in
+             } = json_response(conn, 201)
+
+      assert is_binary(image_id)
+      assert String.starts_with?(url, "https://") or String.starts_with?(url, "file://")
+      assert is_integer(expires_in) and expires_in > 0
+    end
+
+    test "inserts an UploadedImage row with status awaiting_upload", %{conn: conn, user: user} do
+      conn = post(conn, "/api/upload/init", %{"content_type" => "image/jpeg"})
+      %{"image_id" => image_id} = json_response(conn, 201)
+
+      image = Core.Repo.get!(UploadedImage, image_id)
+      assert image.status == "awaiting_upload"
+      assert image.user_id == user.id
+      assert image.storage_path == "uploads/#{image_id}"
+    end
+
+    test "defaults content_type to image/jpeg when absent", %{conn: conn} do
+      conn = post(conn, "/api/upload/init", %{})
+      assert %{"image_id" => _} = json_response(conn, 201)
+    end
+
+    test "returns 401 without auth token" do
+      conn = build_conn() |> post("/api/upload/init", %{})
+      assert json_response(conn, 401)
+    end
+  end
+
+  describe "POST /api/upload/:id/commit" do
+    setup %{user: user} do
+      # Seed an awaiting_upload row as if the user had already called init.
+      {:ok, init} = Stacks.Books.init_upload(user.id)
+      {:ok, init: init}
+    end
+
+    test "returns 202 and enqueues IdentifyBookJob when R2 object exists", %{
+      conn: conn,
+      user: user,
+      init: init
+    } do
+      # Mock backend: seed bytes at the storage_path so head_image returns {:ok, _}.
+      StorageMock.seed("uploads/#{init.image_id}", "fake image bytes")
+
+      conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
+
+      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
+      assert image_id == init.image_id
+
+      assert_enqueued(
+        worker: IdentifyBookJob,
+        args: %{"user_id" => user.id, "image_id" => init.image_id}
+      )
+
+      # Status must flip from awaiting_upload → pending.
+      row = Core.Repo.get!(UploadedImage, init.image_id)
+      assert row.status == "pending"
+    end
+
+    test "returns 409 not_yet_uploaded when R2 object is missing", %{conn: conn, init: init} do
+      # Don't seed — HEAD will 404.
+      conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
+
+      assert %{"error" => "not_yet_uploaded"} = json_response(conn, 409)
+
+      refute_enqueued(worker: IdentifyBookJob, args: %{"image_id" => init.image_id})
+    end
+
+    test "returns 404 when image_id does not belong to the caller", %{init: init} do
+      # A different user tries to commit the first user's upload.
+      other = insert(:user)
+      {:ok, other_token, _} = Guardian.encode_and_sign(other)
+      other_conn = build_conn() |> put_req_header("authorization", "Bearer #{other_token}")
+
+      StorageMock.seed("uploads/#{init.image_id}", "fake")
+      conn = post(other_conn, "/api/upload/#{init.image_id}/commit", %{})
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 409 already_committed on repeat commit", %{conn: conn, init: init} do
+      StorageMock.seed("uploads/#{init.image_id}", "fake")
+      # First commit: succeeds, flips to pending.
+      post(conn, "/api/upload/#{init.image_id}/commit", %{})
+      # Second commit: row is no longer awaiting_upload.
+      conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
+      assert %{"error" => "already_committed"} = json_response(conn, 409)
+    end
+
+    test "returns 404 for unknown image_id", %{conn: conn} do
+      conn = post(conn, "/api/upload/#{Ecto.UUID.generate()}/commit", %{})
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
   end
 
