@@ -1,69 +1,32 @@
 defmodule Stacks.Enrichment.Handlers.AuthorDiscoveryHandler do
   @moduledoc """
-  Event handler that triggers author source discovery when a new book is created.
+  Event handler for `book.created` events. **Intentionally a no-op in
+  the steady state** — the per-book enqueue of `DiscoverAuthorSourcesJob`
+  was removed because:
 
-  On `book.created`: extracts the author_id from the book, checks if the author
-  has sources already, and if not enqueues a `DiscoverAuthorSourcesJob`.
+    1. Every new book fired one Brave Search call, and Brave's free tier
+       is capped at 2000/month (≈67/day). A modestly active user would
+       blow the budget in an afternoon, at which point every subsequent
+       job returned `{:error, :daily_budget_exhausted}` — pushing
+       `oban_failure_rate_default` to >90% and poisoning the SLO gate.
+
+    2. Author-source discovery is **nice-to-have**, not on the upload
+       critical path. It powers RSS/blog ingestion, which happens
+       asynchronously and only needs to be current-ish.
+
+  The work hasn't gone away — `DiscoverAuthorSourcesJob` still has a
+  `%{"batch" => true}` mode that processes `authors_without_sources()`
+  in one pass. It runs from cron (see `crontab` in `config/config.exs`)
+  and drains the queue at whatever rate the Brave daily budget allows.
+
+  Kept as a no-op handler rather than deleted so the event-registry
+  wiring doesn't go stale; future signals might still want per-book
+  hooks (e.g. updating a cached `last_seen_at` for author prioritisation
+  in the batch).
   """
 
   @behaviour Stacks.Events.Handler
 
-  require Logger
-
-  alias Stacks.Books.Book
-  alias Stacks.Enrichment.Authors
-  alias Stacks.Workers.DiscoverAuthorSourcesJob
-
   @impl true
-  def handle_event(%{event_type: "book.created", aggregate_id: book_id})
-      when is_binary(book_id) do
-    case get_author_id_for_book(book_id) do
-      nil ->
-        Logger.debug("AuthorDiscoveryHandler: no author for book #{book_id}")
-        :ok
-
-      author_id ->
-        maybe_enqueue_discovery(author_id)
-    end
-  end
-
   def handle_event(_event), do: :ok
-
-  defp maybe_enqueue_discovery(author_id) do
-    case Authors.get_author(author_id) do
-      nil ->
-        :ok
-
-      author ->
-        if is_nil(author.website_url) or is_nil(author.rss_feed_url) do
-          enqueue_discovery_job(author_id)
-        end
-
-        :ok
-    end
-  end
-
-  defp enqueue_discovery_job(author_id) do
-    Logger.info("AuthorDiscoveryHandler: enqueuing discovery for author #{author_id}")
-
-    case %{author_id: author_id}
-         |> DiscoverAuthorSourcesJob.new()
-         |> Oban.insert() do
-      {:ok, _job} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "AuthorDiscoveryHandler: failed to enqueue discovery for author #{author_id}: #{inspect(reason)}"
-        )
-
-        :ok
-    end
-  end
-
-  defp get_author_id_for_book(book_id) do
-    import Ecto.Query
-
-    Core.Repo.one(from(b in Book, where: b.id == ^book_id, select: b.author_id))
-  end
 end
