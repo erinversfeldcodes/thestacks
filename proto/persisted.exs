@@ -83,16 +83,20 @@
     # Survive Fly machine stops and deploys; shared across all nodes.
     # -------------------------------------------------------------------------
     %{
-      proto_file: "stacks/internal/v1/book_cache.proto",
+      proto_file: "stacks/infra/v1/book_cache.proto",
       proto_message: "IsbnResolverCacheEntry",
       table_name: "isbn_resolver_cache",
-      schema_prefix: "op",
+      schema_prefix: "cache",
       ecto_module: Stacks.Books.IsbnResolverCacheEntry,
       ecto_path: "lib/stacks/gen/books/isbn_resolver_cache_entry.ex",
       dbt_path: "stg_isbn_resolver_cache.sql",
       timestamps: :standard,
-      migration_exists: false,
-      dbt_grant: true,
+      migration_exists: true,
+      # Infra plumbing: NOT exposed to dbt. `dbt_grant: false` suppresses the
+      # GRANT SELECT block in any generated migration; `skip_dbt: true` also
+      # skips the staging .sql model and its schema.yml block.
+      dbt_grant: false,
+      skip_dbt: true,
       indexes: [
         %{
           name: "isbn_resolver_cache_isbn_index",
@@ -112,16 +116,17 @@
       }
     },
     %{
-      proto_file: "stacks/internal/v1/book_cache.proto",
+      proto_file: "stacks/infra/v1/book_cache.proto",
       proto_message: "TitleSearchCacheEntry",
       table_name: "title_search_cache",
-      schema_prefix: "op",
+      schema_prefix: "cache",
       ecto_module: Stacks.Books.TitleSearchCacheEntry,
       ecto_path: "lib/stacks/gen/books/title_search_cache_entry.ex",
       dbt_path: "stg_title_search_cache.sql",
       timestamps: :standard,
-      migration_exists: false,
-      dbt_grant: true,
+      migration_exists: true,
+      dbt_grant: false,
+      skip_dbt: true,
       indexes: [
         %{
           name: "title_search_cache_key_index",

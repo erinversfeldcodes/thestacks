@@ -4,7 +4,7 @@ defmodule Stacks.Books.TitleSearchCache do
 
     * **L1 — ETS** (this GenServer owns the table). Per-node in-memory,
       monotonic-time TTL.
-    * **L2 — Postgres** (`op.title_search_cache`, Ecto schema
+    * **L2 — Postgres** (`cache.title_search_cache`, Ecto schema
       `Stacks.Books.TitleSearchCacheEntry`). Shared across all Fly
       machines; survives machine stops and deploys.
 
@@ -44,6 +44,7 @@ defmodule Stacks.Books.TitleSearchCache do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCacheEntry
 
   require Logger
@@ -133,6 +134,18 @@ defmodule Stacks.Books.TitleSearchCache do
     :ok
   end
 
+  @doc """
+  Await all in-flight async L2 write tasks from the shared
+  `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
+  DB-level effects after a `put/4` must call this first, or the async
+  write may not have landed yet. Not part of the production caller
+  contract.
+  """
+  @spec await_pending_writes(timeout()) :: :ok
+  def await_pending_writes(timeout \\ 500) do
+    ISBNResolverCache.await_pending_writes(timeout)
+  end
+
   # ---------------------------------------------------------------------------
   # GenServer callbacks
   # ---------------------------------------------------------------------------
@@ -219,6 +232,12 @@ defmodule Stacks.Books.TitleSearchCache do
       :miss
   end
 
+  # Asynchronous L2 upsert — same rationale as
+  # `Stacks.Books.ISBNResolverCache.db_put/3`. The upload hot path runs
+  # title-search on every non-ISBN candidate (up to 5 per image); paying
+  # DB latency on each was the symptom that motivated the L2 cache in the
+  # first place. ETS write stays synchronous so the caller's subsequent
+  # reads hit the warm local entry; the Postgres upsert is fire-and-forget.
   defp db_put(key, title, author, raw_text, result, ttl_ms) do
     if persistent_enabled?() do
       now = DateTime.utc_now()
@@ -238,17 +257,32 @@ defmodule Stacks.Books.TitleSearchCache do
         updated_at: now
       }
 
-      Repo.insert_all(TitleSearchCacheEntry, [attrs],
-        on_conflict: {:replace, [:outcome, :isbn, :metadata, :expires_at, :updated_at]},
-        conflict_target: :cache_key
-      )
+      async_db_put(key, attrs)
     end
 
     :ok
-  rescue
-    error ->
-      Logger.warning("TitleSearchCache L2 write failed for #{inspect(key)}: #{inspect(error)}")
-      :ok
+  end
+
+  defp async_db_put(key, attrs) do
+    Task.Supervisor.start_child(Stacks.Books.CacheWriteSupervisor, fn ->
+      try do
+        Repo.insert_all(TitleSearchCacheEntry, [attrs],
+          on_conflict: {:replace, [:outcome, :isbn, :metadata, :expires_at, :updated_at]},
+          conflict_target: :cache_key
+        )
+
+        emit_put(:stored, key)
+      rescue
+        error ->
+          Logger.warning(
+            "TitleSearchCache L2 write failed for #{inspect(key)}: #{inspect(error)}"
+          )
+
+          emit_put(:error, key)
+      end
+    end)
+
+    :ok
   end
 
   defp db_delete_all do
@@ -267,6 +301,17 @@ defmodule Stacks.Books.TitleSearchCache do
   # Key / normalisation
   # ---------------------------------------------------------------------------
 
+  # Build the cache key.
+  #
+  # Algorithm: `normalise(title) <> "\x1f" <> normalise(author) <> "\x1f" <>
+  # normalise(raw_text)`, where `normalise/1` trims surrounding whitespace
+  # and lowercases. The `\x1f` (ASCII Unit Separator) is used as a field
+  # delimiter that cannot appear inside a normalised input.
+  #
+  # Mirrored in `proto/stacks/infra/v1/book_cache.proto` on
+  # `TitleSearchCacheEntry.cache_key`. This algorithm must NOT change
+  # without a coordinated migration — every existing persisted row would
+  # miss on lookup because the new key wouldn't match the stored digest.
   defp key_for(title, author, raw_text) do
     [title, author, raw_text]
     |> Enum.map_join("\x1f", &normalise/1)
@@ -345,6 +390,19 @@ defmodule Stacks.Books.TitleSearchCache do
       [:stacks, :books, :title_search_cache, :lookup],
       %{count: 1},
       %{tier: tier, outcome: outcome, cache_key: cache_key}
+    )
+  end
+
+  # Emitted from inside the Task.Supervisor fn after the async DB upsert.
+  # `outcome` is `:stored` on success, `:error` on a rescued exception.
+  # Stacks.Telemetry.Reporter subscribes and writes a `cache_put ...` log
+  # line — this is the ONLY way async write failures surface, so the log
+  # line must be emitted on every terminal outcome.
+  defp emit_put(outcome, cache_key) do
+    :telemetry.execute(
+      [:stacks, :books, :title_search_cache, :put],
+      %{count: 1},
+      %{tier: :l2, outcome: outcome, cache_key: cache_key}
     )
   end
 

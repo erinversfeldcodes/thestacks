@@ -14,6 +14,13 @@ defmodule Stacks.Telemetry.Reporter do
     * `[:stacks, :books, :title_search_cache, :lookup]`
       Log shape: `cache_lookup cache=<name> tier=l1|l2 outcome=hit|miss`
 
+    * `[:stacks, :books, :isbn_resolver_cache, :put]`
+    * `[:stacks, :books, :title_search_cache, :put]`
+      Log shape: `cache_put cache=<name> tier=l2 outcome=stored|error`
+      Emitted from the async Task.Supervisor fn inside `db_put` — this is
+      the only place L2 write failures surface (the caller already
+      received `:ok`), so every terminal outcome must produce a line.
+
   Attach once at boot (`Core.Application.start/2`). The handler IDs are
   unique per event so `:telemetry.detach/1` can remove individual hooks
   if needed.
@@ -22,9 +29,13 @@ defmodule Stacks.Telemetry.Reporter do
   require Logger
 
   @upload_phase_events [[:stacks, :upload, :phase, :stop]]
-  @cache_events [
+  @cache_lookup_events [
     [:stacks, :books, :isbn_resolver_cache, :lookup],
     [:stacks, :books, :title_search_cache, :lookup]
+  ]
+  @cache_put_events [
+    [:stacks, :books, :isbn_resolver_cache, :put],
+    [:stacks, :books, :title_search_cache, :put]
   ]
 
   @doc """
@@ -34,7 +45,14 @@ defmodule Stacks.Telemetry.Reporter do
   @spec attach() :: :ok
   def attach do
     attach_many("stacks-upload-phase", @upload_phase_events, &__MODULE__.handle_upload_phase/4)
-    attach_many("stacks-cache-lookup", @cache_events, &__MODULE__.handle_cache_lookup/4)
+
+    attach_many(
+      "stacks-cache-lookup",
+      @cache_lookup_events,
+      &__MODULE__.handle_cache_lookup/4
+    )
+
+    attach_many("stacks-cache-put", @cache_put_events, &__MODULE__.handle_cache_put/4)
     :ok
   end
 
@@ -62,6 +80,11 @@ defmodule Stacks.Telemetry.Reporter do
     Logger.info(
       "cache_lookup cache=#{cache} tier=#{metadata[:tier]} outcome=#{metadata[:outcome]}"
     )
+  end
+
+  @doc false
+  def handle_cache_put([_, _, cache, :put], _measurements, metadata, _config) do
+    Logger.info("cache_put cache=#{cache} tier=#{metadata[:tier]} outcome=#{metadata[:outcome]}")
   end
 
   defp native_to_ms(nil), do: nil

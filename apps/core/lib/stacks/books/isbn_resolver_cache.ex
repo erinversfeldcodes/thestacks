@@ -6,7 +6,7 @@ defmodule Stacks.Books.ISBNResolverCache do
     * **L1 — ETS** (this GenServer owns the table). Per-node, in-memory,
       monotonic-time TTL, microsecond reads. The hot path for repeat
       hits within a live node.
-    * **L2 — Postgres** (`op.isbn_resolver_cache`, Ecto schema
+    * **L2 — Postgres** (`cache.isbn_resolver_cache`, Ecto schema
       `Stacks.Books.IsbnResolverCacheEntry`). Shared across all Fly
       machines, survives machine stops and deploys, ~1–3 ms round-trip.
       Populated alongside ETS on `put/2`; read on ETS miss and back-fills
@@ -143,6 +143,54 @@ defmodule Stacks.Books.ISBNResolverCache do
     :ok
   end
 
+  @doc """
+  Await all in-flight async L2 write tasks from the shared
+  `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
+  DB-level effects after a `put/2` must call this first, or the async
+  write may not have landed yet. Not part of the production caller
+  contract.
+
+  Important semantics:
+
+    * **Sandbox ownership.** The async task runs in a separate process
+      that does NOT inherit the test's Ecto sandbox owner by default.
+      Callers must use `Core.DataCase` with `async: false` so the
+      sandbox runs in shared mode (`Sandbox.start_owner!(Core.Repo,
+      shared: true)`); in shared mode any process on the node can
+      transparently use the owner's connection. An `async: true` test
+      that fires an async cache write will raise
+      `DBConnection.OwnershipError` inside the task.
+
+    * **Snapshot race.** This function calls `Task.Supervisor.children/1`
+      once, then monitors the returned PIDs. A task spawned AFTER the
+      snapshot is NOT awaited. In practice tests always fire `put` and
+      THEN `await_pending_writes`, so the snapshot sees the task — but
+      back-to-back `put` + `await` + `put` + assert patterns must call
+      `await` a second time before the assertion.
+
+    * **Cross-cache supervisor.** `ISBNResolverCache` and
+      `TitleSearchCache` share the same `CacheWriteSupervisor`.
+      `await_pending_writes/1` drains BOTH caches' tasks — it is not
+      module-scoped. The delegate on `TitleSearchCache.await_pending_writes/1`
+      calls this function for the same reason.
+  """
+  @spec await_pending_writes(timeout()) :: :ok
+  def await_pending_writes(timeout \\ 500) do
+    Stacks.Books.CacheWriteSupervisor
+    |> Task.Supervisor.children()
+    |> Enum.each(fn pid ->
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      after
+        timeout -> Process.demonitor(ref, [:flush])
+      end
+    end)
+
+    :ok
+  end
+
   # ---------------------------------------------------------------------------
   # GenServer callbacks
   # ---------------------------------------------------------------------------
@@ -236,6 +284,19 @@ defmodule Stacks.Books.ISBNResolverCache do
       :miss
   end
 
+  # Asynchronous L2 upsert. The whole point of the persistent cache is to
+  # remove DB latency from the upload hot path — if `put/2` waited on
+  # `Repo.insert_all/3` inline, the caller would pay ~1-3 ms per resolution.
+  # Submitting to Stacks.Books.CacheWriteSupervisor makes the write truly
+  # fire-and-forget. ETS is populated synchronously by the caller so
+  # subsequent in-process reads still see the entry immediately; the
+  # Postgres row lands within a tick for other nodes/machines.
+  #
+  # Errors inside the task are logged and emitted as a :put telemetry
+  # event (see `emit_put/2`) so L2 write failures remain visible in Fly
+  # logs. They are deliberately not surfaced back to the caller —
+  # resolution already succeeded, the cache miss on the next lookup is
+  # self-correcting.
   defp db_put(isbn, result, ttl_ms) do
     if persistent_enabled?() do
       now = DateTime.utc_now()
@@ -251,17 +312,32 @@ defmodule Stacks.Books.ISBNResolverCache do
         updated_at: now
       }
 
-      Repo.insert_all(IsbnResolverCacheEntry, [attrs],
-        on_conflict: {:replace, [:outcome, :metadata, :expires_at, :updated_at]},
-        conflict_target: :isbn
-      )
+      async_db_put(isbn, attrs)
     end
 
     :ok
-  rescue
-    error ->
-      Logger.warning("ISBNResolverCache L2 write failed for #{inspect(isbn)}: #{inspect(error)}")
-      :ok
+  end
+
+  defp async_db_put(isbn, attrs) do
+    Task.Supervisor.start_child(Stacks.Books.CacheWriteSupervisor, fn ->
+      try do
+        Repo.insert_all(IsbnResolverCacheEntry, [attrs],
+          on_conflict: {:replace, [:outcome, :metadata, :expires_at, :updated_at]},
+          conflict_target: :isbn
+        )
+
+        emit_put(:stored, isbn)
+      rescue
+        error ->
+          Logger.warning(
+            "ISBNResolverCache L2 write failed for #{inspect(isbn)}: #{inspect(error)}"
+          )
+
+          emit_put(:error, isbn)
+      end
+    end)
+
+    :ok
   end
 
   defp db_delete(isbn) do
@@ -352,6 +428,19 @@ defmodule Stacks.Books.ISBNResolverCache do
       [:stacks, :books, :isbn_resolver_cache, :lookup],
       %{count: 1},
       %{tier: tier, outcome: outcome, isbn: isbn}
+    )
+  end
+
+  # Emitted from inside the Task.Supervisor fn after the async DB upsert.
+  # `outcome` is `:stored` on success, `:error` on a rescued exception.
+  # Stacks.Telemetry.Reporter subscribes and writes a `cache_put ...` log
+  # line — this is the ONLY way async write failures surface, so the log
+  # line must be emitted on every terminal outcome.
+  defp emit_put(outcome, isbn) do
+    :telemetry.execute(
+      [:stacks, :books, :isbn_resolver_cache, :put],
+      %{count: 1},
+      %{tier: :l2, outcome: outcome, isbn: isbn}
     )
   end
 

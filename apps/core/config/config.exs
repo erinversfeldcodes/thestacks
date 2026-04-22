@@ -62,8 +62,8 @@ config :core, Oban,
        # budget is spent the remaining authors are picked up on the
        # next night. 08:00 UTC picks a low-traffic window.
        {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
-       # Sweeps expired rows from op.isbn_resolver_cache and
-       # op.title_search_cache. Runs at 03:30 UTC in the low-traffic
+       # Sweeps expired rows from cache.isbn_resolver_cache and
+       # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
        # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
        {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
