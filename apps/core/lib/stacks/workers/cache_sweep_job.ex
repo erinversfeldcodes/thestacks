@@ -1,7 +1,7 @@
 defmodule Stacks.Workers.CacheSweepJob do
   @moduledoc """
   Daily Oban cron worker that deletes expired rows from the persistent
-  cache tables `op.isbn_resolver_cache` and `op.title_search_cache`.
+  cache tables `cache.isbn_resolver_cache` and `cache.title_search_cache`.
 
   Without this, both tables grow unbounded — every ISBN/title ever
   looked up stays as a tombstone past its `expires_at`. Reads still

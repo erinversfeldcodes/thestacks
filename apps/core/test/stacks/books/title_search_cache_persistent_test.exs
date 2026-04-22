@@ -32,6 +32,8 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
           {:ok, "9780441172719", meta}
         )
 
+      TitleSearchCache.await_pending_writes()
+
       row = Repo.one(TitleSearchCacheEntry)
       assert row.outcome == "found"
       assert row.isbn == "9780441172719"
@@ -45,6 +47,7 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
 
     test "put writes a negative result with empty isbn and 1h TTL" do
       :ok = TitleSearchCache.put("Fake", "Fake", nil, {:error, :not_found})
+      TitleSearchCache.await_pending_writes()
 
       row = Repo.one(TitleSearchCacheEntry)
       assert row.outcome == "not_found"
@@ -57,6 +60,7 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
 
     test ":circuit_open is not persisted" do
       :ok = TitleSearchCache.put("X", "Y", nil, {:error, :circuit_open})
+      TitleSearchCache.await_pending_writes()
       assert Repo.all(TitleSearchCacheEntry) == []
     end
 
@@ -69,6 +73,8 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
           {:ok, "9780316556347", %{source: :google_books}}
         )
 
+      TitleSearchCache.await_pending_writes()
+
       :ets.delete_all_objects(:title_search_cache)
 
       assert {:ok, {:ok, "9780316556347", meta}} = TitleSearchCache.get("Circe", "Miller", nil)
@@ -78,6 +84,8 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
     test "normalisation collapses whitespace/case in the cache_key used for lookup" do
       :ok =
         TitleSearchCache.put("The Great Gatsby", "Fitzgerald", nil, {:ok, "9780743273565", %{}})
+
+      TitleSearchCache.await_pending_writes()
 
       :ets.delete_all_objects(:title_search_cache)
 
@@ -109,7 +117,9 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
 
     test "put upserts an existing cache_key row" do
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{v: 1}})
+      TitleSearchCache.await_pending_writes()
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{v: 2}})
+      TitleSearchCache.await_pending_writes()
 
       assert [row] = Repo.all(TitleSearchCacheEntry)
       assert row.metadata["v"] == 2
@@ -118,6 +128,7 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
     test "invalidate_all/0 clears all rows" do
       :ok = TitleSearchCache.put("A", "a", nil, {:ok, "9780000000001", %{}})
       :ok = TitleSearchCache.put("B", "b", nil, {:ok, "9780000000002", %{}})
+      TitleSearchCache.await_pending_writes()
 
       :ok = TitleSearchCache.invalidate_all()
 

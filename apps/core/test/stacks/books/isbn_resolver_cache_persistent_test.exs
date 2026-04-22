@@ -28,6 +28,7 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
     test "put writes a positive result to Postgres" do
       meta = %{title: "Dune", author: "Herbert", source: :open_library}
       :ok = ISBNResolverCache.put("9780441172719", {:ok, meta})
+      ISBNResolverCache.await_pending_writes()
 
       row = Repo.get_by(IsbnResolverCacheEntry, isbn: "9780441172719")
       assert row.outcome == "found"
@@ -38,6 +39,7 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
 
     test "put writes a negative result with 1h TTL" do
       :ok = ISBNResolverCache.put("9999999999999", {:error, :not_found})
+      ISBNResolverCache.await_pending_writes()
 
       row = Repo.get_by(IsbnResolverCacheEntry, isbn: "9999999999999")
       assert row.outcome == "not_found"
@@ -49,6 +51,9 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
 
     test ":circuit_open is not written to Postgres" do
       :ok = ISBNResolverCache.put("9780441172719", {:error, :circuit_open})
+      # No task is spawned for :circuit_open (the put/2 head short-circuits),
+      # but calling await is a no-op and keeps the pattern uniform.
+      ISBNResolverCache.await_pending_writes()
       assert Repo.get_by(IsbnResolverCacheEntry, isbn: "9780441172719") == nil
     end
 
@@ -85,6 +90,10 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
       :ok =
         ISBNResolverCache.put("9780316556347", {:ok, %{title: "Circe", source: :google_books}})
 
+      # The async DB upsert must complete before we can rely on the L2
+      # read falling through to a populated row.
+      ISBNResolverCache.await_pending_writes()
+
       # Wipe ETS but leave the DB row behind.
       :ets.delete_all_objects(:isbn_resolver_cache)
 
@@ -116,7 +125,9 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
 
     test "put upserts an existing row rather than erroring on the unique index" do
       :ok = ISBNResolverCache.put("9780441172719", {:ok, %{title: "Dune v1"}})
+      ISBNResolverCache.await_pending_writes()
       :ok = ISBNResolverCache.put("9780441172719", {:ok, %{title: "Dune v2"}})
+      ISBNResolverCache.await_pending_writes()
 
       assert [row] = Repo.all(IsbnResolverCacheEntry)
       assert row.metadata["title"] == "Dune v2"
@@ -124,6 +135,7 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
 
     test "invalidate/1 removes the row from Postgres" do
       :ok = ISBNResolverCache.put("9780441172719", {:ok, %{title: "Dune"}})
+      ISBNResolverCache.await_pending_writes()
       assert Repo.get_by(IsbnResolverCacheEntry, isbn: "9780441172719")
 
       :ok = ISBNResolverCache.invalidate("9780441172719")
@@ -133,6 +145,7 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
     test "invalidate_all/0 clears all rows from Postgres" do
       :ok = ISBNResolverCache.put("9780441172719", {:ok, %{title: "Dune"}})
       :ok = ISBNResolverCache.put("9780316556347", {:ok, %{title: "Circe"}})
+      ISBNResolverCache.await_pending_writes()
 
       :ok = ISBNResolverCache.invalidate_all()
 

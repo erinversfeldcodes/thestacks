@@ -22,6 +22,15 @@ defmodule Core.Application do
           Stacks.CircuitBreakers,
           StacksWeb.Plugs.RateLimiter.Server,
           Stacks.AI.BudgetTracker,
+          # Supervises fire-and-forget L2 cache writes from
+          # Stacks.Books.ISBNResolverCache and Stacks.Books.TitleSearchCache.
+          # The persistent-cache `put/2` and `put/4` entry points run ETS
+          # writes inline (callers need subsequent reads to see them) and
+          # hand off the Postgres upsert to this supervisor so the upload
+          # hot path doesn't pay DB latency. Failures are logged and
+          # swallowed inside the task body — a dropped cache write is an
+          # observability event, not an error the caller can act on.
+          {Task.Supervisor, name: Stacks.Books.CacheWriteSupervisor},
           Stacks.Books.BookDetailCache,
           Stacks.Books.ISBNResolverCache,
           Stacks.Books.TitleSearchCache,
