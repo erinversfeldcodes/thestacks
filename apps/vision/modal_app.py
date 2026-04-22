@@ -184,6 +184,13 @@ _ANALYZE_PROMPT = (
     # starts. Tradeoff: if us-east runs out of A10G, scheduling blocks
     # rather than falling back. In practice us-east has ample A10G.
     region="us-east",
+    # Cap autoscaled containers at 10. With max_inputs=8 each, that's up
+    # to 80 concurrent inferences — well above the Oban :vision queue
+    # ceiling of 60. Prevents runaway scale-out from a burst spike
+    # producing a surprising end-of-month GPU bill. At peak ~$12/hr
+    # (10 * ~$1.20/hr A10G); amortises to pennies/hour at real
+    # utilisation because Modal charges per active container-second.
+    max_containers=10,
     # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
     # jobs are serialised on a single A10G) + inference (~60s for long inputs).
     timeout=300,
