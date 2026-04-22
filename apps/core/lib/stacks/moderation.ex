@@ -111,6 +111,14 @@ defmodule Stacks.Moderation do
   # in one candidate don't affect the others — `resolve_and_store/3`
   # returns `[]` on failure which flat-maps away.
   defp resolve_and_store_all(candidates, context) do
+    Stacks.Telemetry.phase(
+      :isbn_resolution,
+      %{upload_id: Map.get(context, :image_id), candidate_count: length(candidates)},
+      fn -> do_resolve_and_store_all(candidates, context) end
+    )
+  end
+
+  defp do_resolve_and_store_all(candidates, context) do
     expanded = expand_compound_candidates(candidates)
     concurrency = max(length(expanded), 1)
 
@@ -192,13 +200,19 @@ defmodule Stacks.Moderation do
   end
 
   defp store_book(isbn, prefetched_metadata, context) do
-    {metadata, used_fast_path} = resolve_metadata(isbn, prefetched_metadata, context)
-    attrs = build_book_attrs(isbn, metadata, used_fast_path, context)
+    Stacks.Telemetry.phase(
+      :persistence,
+      %{upload_id: Map.get(context, :image_id), isbn: isbn},
+      fn ->
+        {metadata, used_fast_path} = resolve_metadata(isbn, prefetched_metadata, context)
+        attrs = build_book_attrs(isbn, metadata, used_fast_path, context)
 
-    case Books.find_existing(isbn) do
-      nil -> Books.create(attrs)
-      existing -> {:ok, existing}
-    end
+        case Books.find_existing(isbn) do
+          nil -> Books.create(attrs)
+          existing -> {:ok, existing}
+        end
+      end
+    )
   end
 
   defp determine_visibility_tier(bisac_codes) do

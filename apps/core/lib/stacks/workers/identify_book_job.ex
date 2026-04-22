@@ -66,6 +66,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   defp run_pipeline(context, image_id) do
+    Stacks.Telemetry.phase(:identify_book, %{upload_id: image_id}, fn ->
+      do_run_pipeline(context, image_id)
+    end)
+  end
+
+  defp do_run_pipeline(context, image_id) do
     case Moderation.run_pipeline(context) do
       {:ok, books} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
