@@ -11,12 +11,21 @@ defmodule Core.Repo.Migrations.AddAwaitingUploadToImageStatus do
   # It is also not reversible — Postgres does not support `DROP VALUE`
   # without rebuilding the type. We ship-forward and treat the old
   # values as a safety subset.
+  #
+  # `BEFORE 'pending'` places the new value at the start of the enum
+  # ordering, which matches the lifecycle: an uploaded image starts in
+  # `awaiting_upload`, then moves to `pending` → (`resolved` | `rejected`).
+  # Without an explicit position, Postgres appends the value, which
+  # sorts it after all terminal states — semantically wrong and also
+  # trips the `require-enum-value-ordering` Squawk rule.
 
   @disable_ddl_transaction true
   @disable_migration_lock true
 
   def up do
-    execute("ALTER TYPE op.image_status ADD VALUE IF NOT EXISTS 'awaiting_upload'")
+    execute(
+      "ALTER TYPE op.image_status ADD VALUE IF NOT EXISTS 'awaiting_upload' BEFORE 'pending'"
+    )
   end
 
   def down do
