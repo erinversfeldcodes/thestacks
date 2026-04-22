@@ -266,23 +266,27 @@ class VisionModel:
                                             is cached after the first
                                             request and reused for all
                                             subsequent prefills.
-          * speculative_model              — Qwen2.5-VL-3B-AWQ as the
-                                            draft model. Generates
-                                            NUM_SPECULATIVE_TOKENS
-                                            candidate tokens per step,
-                                            which the 7B target verifies
-                                            in one forward pass.
-                                            Rejection sampling preserves
-                                            output equality with the 7B
-                                            alone — speedup only, no
-                                            accuracy change. Expected
-                                            1.7-2x on our JSON-structured
+          * speculative_config              — Qwen2.5-VL-3B-AWQ as the
+                                            draft model, 5 tokens
+                                            speculated per step. The
+                                            3B generates candidate
+                                            tokens which the 7B target
+                                            verifies in one forward
+                                            pass; rejection sampling
+                                            preserves output equality
+                                            with the 7B alone (accuracy
+                                            unchanged). Expected 1.7-2x
+                                            speedup on JSON-structured
                                             output.
-          * num_speculative_tokens=5       — draft generates 5 tokens
-                                            ahead per step. Higher
-                                            values waste more on
-                                            rejection; 5 is vLLM's
-                                            common default.
+                                            vLLM 0.9 consolidated the
+                                            old `speculative_model` +
+                                            `num_speculative_tokens`
+                                            top-level args into one
+                                            dict. Passing them as
+                                            separate kwargs raises
+                                            `TypeError: unexpected
+                                            keyword argument
+                                            'speculative_model'`.
           * max_model_len=4096            — image tokens (~1500 at 672px)
                                             + prompt (~250) + output
                                             (~512) = ~2300. 4096 leaves
@@ -313,8 +317,10 @@ class VisionModel:
             model=MODEL_NAME,
             quantization="awq_marlin",
             enable_prefix_caching=True,
-            speculative_model=SPECULATIVE_MODEL_NAME,
-            num_speculative_tokens=NUM_SPECULATIVE_TOKENS,
+            speculative_config={
+                "model": SPECULATIVE_MODEL_NAME,
+                "num_speculative_tokens": NUM_SPECULATIVE_TOKENS,
+            },
             max_model_len=4096,
             gpu_memory_utilization=0.85,
             limit_mm_per_prompt={"image": 1},
