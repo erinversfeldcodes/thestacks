@@ -83,8 +83,22 @@ defmodule Stacks.Books.TitleSearchCache do
     key = key_for(title, author, raw_text)
 
     case ets_get(key) do
-      {:ok, _} = hit -> hit
-      :miss -> db_get(key)
+      {:ok, _} = hit ->
+        emit_lookup(:l1, :hit, key)
+        hit
+
+      :miss ->
+        emit_lookup(:l1, :miss, key)
+
+        case db_get(key) do
+          {:ok, _} = hit ->
+            emit_lookup(:l2, :hit, key)
+            hit
+
+          :miss ->
+            emit_lookup(:l2, :miss, key)
+            :miss
+        end
     end
   end
 
@@ -324,6 +338,14 @@ defmodule Stacks.Books.TitleSearchCache do
 
   defp persistent_enabled? do
     Application.get_env(:core, :persistent_cache_enabled, true)
+  end
+
+  defp emit_lookup(tier, outcome, cache_key) do
+    :telemetry.execute(
+      [:stacks, :books, :title_search_cache, :lookup],
+      %{count: 1},
+      %{tier: tier, outcome: outcome, cache_key: cache_key}
+    )
   end
 
   defp schedule_cleanup do

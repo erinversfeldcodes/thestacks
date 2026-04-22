@@ -88,8 +88,22 @@ defmodule Stacks.Books.ISBNResolverCache do
   @spec get(String.t()) :: {:ok, {:ok, map()} | {:error, :not_found}} | :miss
   def get(isbn) when is_binary(isbn) do
     case ets_get(isbn) do
-      {:ok, _} = hit -> hit
-      :miss -> db_get(isbn)
+      {:ok, _} = hit ->
+        emit_lookup(:l1, :hit, isbn)
+        hit
+
+      :miss ->
+        emit_lookup(:l1, :miss, isbn)
+
+        case db_get(isbn) do
+          {:ok, _} = hit ->
+            emit_lookup(:l2, :hit, isbn)
+            hit
+
+          :miss ->
+            emit_lookup(:l2, :miss, isbn)
+            :miss
+        end
     end
   end
 
@@ -331,6 +345,14 @@ defmodule Stacks.Books.ISBNResolverCache do
 
   defp persistent_enabled? do
     Application.get_env(:core, :persistent_cache_enabled, true)
+  end
+
+  defp emit_lookup(tier, outcome, isbn) do
+    :telemetry.execute(
+      [:stacks, :books, :isbn_resolver_cache, :lookup],
+      %{count: 1},
+      %{tier: tier, outcome: outcome, isbn: isbn}
+    )
   end
 
   defp schedule_cleanup do

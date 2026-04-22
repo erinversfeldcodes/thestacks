@@ -3,8 +3,12 @@ defmodule Core.Application do
 
   use Application
 
+  alias Stacks.Telemetry.Reporter, as: TelemetryReporter
+
   @impl true
   def start(_type, _args) do
+    TelemetryReporter.attach()
+
     children =
       cluster_children() ++
         [
