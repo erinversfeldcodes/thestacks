@@ -36,39 +36,19 @@ MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 # ever deprecated or a faster community quant emerges.
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
 
-# Draft model for speculative decoding. Must share a tokenizer with
-# MODEL_NAME (Qwen2.5 family shares tokenizer vocab). Smaller + faster
-# than the target so it's cheap to generate candidate tokens for the
-# target to verify in one forward pass. 3B is the standard companion
-# to 7B; same-family draft/target pairs typically achieve 60-85% token
-# acceptance on structured JSON output.
-SPECULATIVE_MODEL_NAME = os.environ.get("SPECULATIVE_MODEL_NAME", "Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
-
-# Number of tokens the draft model proposes per verification step.
-# Bigger = more parallelism, more waste on rejection. 5 is a common
-# default; vLLM's scheduler can adapt but this is the upper bound.
-NUM_SPECULATIVE_TOKENS = int(os.environ.get("NUM_SPECULATIVE_TOKENS", "5"))
-
 
 def _download_model() -> None:
-    """Pre-download target + draft model weights into the container image.
+    """Pre-download model weights into the container image.
 
     Runs once at `modal deploy` time (or when the image is invalidated).
     vLLM loads from the local HuggingFace cache directory, so
     `snapshot_download` is sufficient — no need to construct the model
     object at build time (which would also require GPU).
-
-    The draft model adds ~2 GB to the image; acceptable cost for the
-    inference speedup once deployed.
     """
     from huggingface_hub import snapshot_download
     from transformers import AutoProcessor
 
     snapshot_download(MODEL_NAME)
-    snapshot_download(SPECULATIVE_MODEL_NAME)
-    # Processor is needed at runtime for chat-template application.
-    # Target + draft share the Qwen2.5 processor/tokenizer, so loading
-    # MODEL_NAME's processor covers both.
     AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
 
 
@@ -77,21 +57,20 @@ image = (
     .apt_install("libzbar0")
     .pip_install(
         # vLLM v1 engine (default in 0.9.x+). Upgraded from 0.7.3 to
-        # unlock two features the 0.7.x v0 engine couldn't provide for
-        # multimodal models:
-        #   1. Prefix caching for VLM prompts — the `_ANALYZE_PROMPT`
-        #      instruction prefix (~250 tokens, identical on every call)
-        #      is cached across requests, saving prefill work. v0.7.3
-        #      silently disabled prefix caching for multimodal models;
-        #      v1 supports it.
-        #   2. Speculative decoding with a VLM draft model — the
-        #      `speculative_model` arg below configures 3B-AWQ as the
-        #      draft for 7B-AWQ, giving ~1.7-2x token generation speedup
-        #      via rejection sampling (accuracy preserved).
+        # unlock prefix caching for multimodal prompts — the v0 engine
+        # (used by 0.7.3) silently disabled prefix caching for VLMs,
+        # forcing a full prefill on the ~250-token `_ANALYZE_PROMPT`
+        # instruction prefix on every request. v1 caches that prefix
+        # across requests.
+        #
+        # Draft-model speculative decoding was also attempted here; it
+        # is unsupported for VLMs on vLLM 0.9 (V0 asserts on init when
+        # combining spec-dec + multimodal; V1 doesn't support draft-
+        # model spec-dec yet). Keep this in mind before re-enabling.
         #
         # Pinned to a tested 0.9.x release. Bump only after revalidating
-        # the AsyncLLMEngine API surface + Qwen2.5-VL + AWQ + spec-dec
-        # combination. All four have been in flux across minor versions.
+        # the AsyncLLMEngine API surface + Qwen2.5-VL + AWQ combination.
+        # All three have been in flux across minor versions.
         "vllm==0.9.0",
         # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
         # vLLM dispatches to when `quantization="awq_marlin"` is set.
@@ -266,38 +245,16 @@ class VisionModel:
                                             is cached after the first
                                             request and reused for all
                                             subsequent prefills.
-          * speculative_config              — Qwen2.5-VL-3B-AWQ as the
-                                            draft model, 5 tokens
-                                            speculated per step. The
-                                            3B generates candidate
-                                            tokens which the 7B target
-                                            verifies in one forward
-                                            pass; rejection sampling
-                                            preserves output equality
-                                            with the 7B alone (accuracy
-                                            unchanged). Expected 1.7-2x
-                                            speedup on JSON-structured
-                                            output.
-                                            vLLM 0.9 consolidated the
-                                            old `speculative_model` +
-                                            `num_speculative_tokens`
-                                            top-level args into one
-                                            dict. Passing them as
-                                            separate kwargs raises
-                                            `TypeError: unexpected
-                                            keyword argument
-                                            'speculative_model'`.
           * max_model_len=4096            — image tokens (~1500 at 672px)
                                             + prompt (~250) + output
                                             (~512) = ~2300. 4096 leaves
                                             headroom without wasting KV
                                             VRAM on the full 32k context
                                             window Qwen advertises.
-          * gpu_memory_utilization=0.85   — dropped from 0.90 to leave
-                                            headroom for the draft
-                                            model's weights (~2 GB AWQ)
-                                            and its share of the KV
-                                            cache pool.
+          * gpu_memory_utilization=0.90   — leaves ~2 GB of A10G headroom
+                                            for activations + CUDA graph
+                                            workspace, everything else
+                                            goes to the KV cache pool.
           * limit_mm_per_prompt={"image": 1}
                                           — our prompts always carry
                                             exactly one image; tells vLLM
@@ -317,12 +274,8 @@ class VisionModel:
             model=MODEL_NAME,
             quantization="awq_marlin",
             enable_prefix_caching=True,
-            speculative_config={
-                "model": SPECULATIVE_MODEL_NAME,
-                "num_speculative_tokens": NUM_SPECULATIVE_TOKENS,
-            },
             max_model_len=4096,
-            gpu_memory_utilization=0.85,
+            gpu_memory_utilization=0.90,
             limit_mm_per_prompt={"image": 1},
             trust_remote_code=True,
         )
