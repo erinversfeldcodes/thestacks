@@ -27,7 +27,14 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @window_ms 60_000
   @global_limit 1_000
   @auth_limit 5
-  @upload_limit 10
+  # Uploads per user per minute. 10 was too tight — real users populating
+  # a shelf routinely hit it, and our gate probe (24/min sustained)
+  # couldn't run without 429s. 120 is set by the Oban :vision queue
+  # ceiling (concurrency=60, ~3s/job ≈ ~100 jobs/min in steady state);
+  # above 120 one user can flood the queue and starve others. 120 is
+  # comfortable for ~2 concurrent heavy users, graceful backpressure
+  # beyond. Real users won't approach this.
+  @upload_limit 120
   @password_change_limit 3
   @social_limit 20
   @public_limit 30

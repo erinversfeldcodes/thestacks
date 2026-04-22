@@ -114,13 +114,17 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
       refute result.halted
     end
 
-    test "blocks the 11th upload for the same authenticated user", %{conn: conn} do
+    test "blocks the 121st upload for the same authenticated user", %{conn: conn} do
       user = insert(:user)
 
       conn =
         conn |> assign(:guardian_default_resource, user) |> Map.put(:remote_ip, {10, 2, 0, 3})
 
-      for _ <- 1..10, do: RateLimiter.call(conn, bucket: :upload)
+      # @upload_limit = 120 / min. First 120 allowed, 121st blocks.
+      # Bumped from 10 to support realistic bookshelf-populating
+      # workflows and the gate probe's sustained ~24/min load without
+      # spurious 429s.
+      for _ <- 1..120, do: RateLimiter.call(conn, bucket: :upload)
 
       result = RateLimiter.call(conn, bucket: :upload)
       assert result.halted

@@ -160,10 +160,12 @@ defmodule Stacks.UploadPipelineTest do
       Application.put_env(:core, :rate_limiting_enabled, true)
 
       try do
-        # The :upload bucket allows 10 requests per 60 seconds per user.
-        # Fire 11 requests to trigger the limiter.
+        # The :upload bucket allows 120 requests per 60 seconds per user.
+        # Fire 121 requests to trigger the limiter. Bumped from 10→120
+        # when Oban :vision queue concurrency scaled up to match
+        # realistic bookshelf-populating traffic.
         results =
-          Enum.map(1..11, fn _ ->
+          Enum.map(1..121, fn _ ->
             build_conn()
             |> auth_conn(token)
             |> post("/api/upload", %{})
