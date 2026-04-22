@@ -57,6 +57,13 @@ config :core, :isbn_resolver_cache_enabled, false
 # Same reasoning for the title-search cache — tests reuse titles like
 # "The Great Gatsby" across scenarios with different expected ISBNs.
 config :core, :title_search_cache_enabled, false
+# Disable the Postgres L2 layer in tests. The existing cache unit tests
+# assume an empty state after `invalidate_all/0`; keeping the DB layer
+# enabled would bleed cached entries across tests (the sandbox rolls
+# back changes per-test but the initial state after invalidate_all would
+# still vary). DB-layer behaviour is exercised by its own integration
+# tests that opt-in to persistent mode.
+config :core, :persistent_cache_enabled, false
 config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
 config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"
