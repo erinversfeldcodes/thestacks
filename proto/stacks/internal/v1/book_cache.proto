@@ -1,0 +1,77 @@
+// book_cache.proto — Persistent caches for external ISBN / title lookups.
+//
+// These back the ETS caches in Stacks.Books.ISBNResolverCache and
+// Stacks.Books.TitleSearchCache. The ETS layer stays as a per-node L1;
+// Postgres is the shared L2 that survives Fly machine stops and deploys.
+//
+// Keys are natural (ISBN for ISBNResolverCacheEntry, a normalised digest
+// for TitleSearchCacheEntry). The generator still adds a synthetic UUID
+// primary key — uniqueness is enforced by an index declared in the
+// persisted.exs manifest.
+//
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.internal.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// IsbnResolverCacheEntry memoises ISBNResolver.resolve/1 — one ISBN to the
+// metadata record returned by Open Library or Google Books.
+// Maps to op.isbn_resolver_cache.
+message IsbnResolverCacheEntry {
+  // Raw ISBN (digits only, no hyphens). Unique natural key — one row per ISBN.
+  string isbn = 1 [json_name = "isbn"];
+
+  // "found" when metadata was resolved, "not_found" when both upstreams
+  // returned nothing. `:circuit_open` terms are never persisted — the
+  // circuit breaker is the signal to retry later, not to memoise.
+  string outcome = 2 [json_name = "outcome"];
+
+  // Resolver result payload (title, author, subjects, publication_year,
+  // cover_image_url, publisher, page_count, description, source, etc.).
+  // Stored as JSONB; shape is the map ISBNResolver returns unmodified.
+  // Present when outcome = "found", absent otherwise.
+  google.protobuf.Struct metadata = 3 [json_name = "metadata"];
+
+  // Expiry timestamp. 24h after insert for positive results, 1h for
+  // negative. Reads filter on expires_at > now(); a daily Oban sweep
+  // deletes expired rows so the table doesn't grow unbounded.
+  google.protobuf.Timestamp expires_at = 4 [json_name = "expires_at"];
+}
+
+// TitleSearchCacheEntry memoises ISBNResolver.search_by_title/3 — a
+// (title, author, raw_text) triple to the resolved ISBN + metadata.
+// Maps to op.title_search_cache.
+message TitleSearchCacheEntry {
+  // Deterministic digest of the normalised (title, author, raw_text)
+  // triple. Unique natural key. Normalisation (trim + downcase) happens
+  // in the Elixir cache module before the digest is computed.
+  string cache_key = 1 [json_name = "cache_key"];
+
+  // Original title input. Stored for debugging / observability; the
+  // cache_key is what's actually looked up.
+  string title = 2 [json_name = "title"];
+
+  // Original author input (possibly empty).
+  string author = 3 [json_name = "author"];
+
+  // Original raw_text hint — additional OCR context the VLM extracted
+  // alongside the title. Part of the cache key because different raw_text
+  // can steer the search to different candidates.
+  string raw_text = 4 [json_name = "raw_text"];
+
+  // "found" or "not_found". Same semantics as IsbnResolverCacheEntry.
+  string outcome = 5 [json_name = "outcome"];
+
+  // The resolved ISBN when outcome = "found"; empty otherwise.
+  string isbn = 6 [json_name = "isbn"];
+
+  // Resolver result metadata payload (source, score, etc.). Present when
+  // outcome = "found".
+  google.protobuf.Struct metadata = 7 [json_name = "metadata"];
+
+  // Expiry timestamp — 24h positive / 1h negative TTL.
+  google.protobuf.Timestamp expires_at = 8 [json_name = "expires_at"];
+}

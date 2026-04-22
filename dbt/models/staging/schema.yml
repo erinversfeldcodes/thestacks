@@ -1103,3 +1103,75 @@ models:
         description: Position.
       - name: created_at
         description: Created at.
+
+  - name: stg_title_search_cache
+    description: >
+      Proto-synced staging model for title_search_cache.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: cache_key
+        description: Cache key.
+        tests:
+          - not_null
+      - name: title
+        description: Title.
+      - name: author
+        description: Author.
+      - name: raw_text
+        description: Raw text.
+      - name: outcome
+        description: Outcome.
+        tests:
+          - not_null
+      - name: isbn
+        description: Isbn.
+      - name: metadata
+        description: Metadata.
+      - name: expires_at
+        description: Expires at.
+        tests:
+          - not_null
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_isbn_resolver_cache
+    description: >
+      Proto-synced staging model for isbn_resolver_cache.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: isbn
+        description: Isbn.
+        tests:
+          - not_null
+      - name: outcome
+        description: Outcome.
+        tests:
+          - not_null
+      - name: metadata
+        description: Metadata.
+      - name: expires_at
+        description: Expires at.
+        tests:
+          - not_null
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
