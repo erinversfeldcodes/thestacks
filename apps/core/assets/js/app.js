@@ -89,18 +89,29 @@ import "../css/main.css";
   var origOpen = XMLHttpRequest.prototype.open;
   var origSend = XMLHttpRequest.prototype.send;
 
+  // Match either the legacy `POST /api/upload` flow (multipart body) or
+  // the new presigned flow's `PUT https://*.r2.cloudflarestorage.com/...`
+  // step, where the body is a raw File.
+  function classifyUpload(method, url) {
+    if (typeof method !== "string" || typeof url !== "string") return null;
+    var m = method.toUpperCase();
+    if (m === "POST" && /\/api\/upload(\?|$)/.test(url)) return "legacy_post";
+    if (m === "PUT" && /\br2\.cloudflarestorage\.com\b/.test(url))
+      return "presigned_put";
+    return null;
+  }
+
   XMLHttpRequest.prototype.open = function (method, url) {
-    this._stacksIsUploadXhr =
-      typeof method === "string" &&
-      method.toUpperCase() === "POST" &&
-      typeof url === "string" &&
-      /\/api\/upload(\?|$)/.test(url);
+    this._stacksUploadKind = classifyUpload(method, url);
     return origOpen.apply(this, arguments);
   };
 
   XMLHttpRequest.prototype.send = function (body) {
+    var kind = this._stacksUploadKind;
+
+    // Legacy path: multipart body with an "image" field.
     if (
-      this._stacksIsUploadXhr &&
+      kind === "legacy_post" &&
       body &&
       typeof FormData !== "undefined" &&
       body instanceof FormData
@@ -113,7 +124,6 @@ import "../css/main.css";
           .then(function (compressed) {
             var newBody = new FormData();
             newBody.set("image", compressed);
-            // Preserve any other multipart fields the client set.
             body.forEach(function (value, key) {
               if (key !== "image") newBody.append(key, value);
             });
@@ -125,6 +135,28 @@ import "../css/main.css";
         return;
       }
     }
+
+    // Presigned path: raw File body PUT directly to R2. Compress the
+    // File first, then hand it off so R2 receives the smaller payload.
+    // On any error, fall back to the original File to keep the upload
+    // working — compression is a perf optimization, not a correctness
+    // requirement.
+    if (kind === "presigned_put" && body instanceof File) {
+      var xhr2 = this;
+      var originalArgs2 = arguments;
+      if (!/^image\//.test(body.type)) {
+        return origSend.apply(this, arguments);
+      }
+      compressImage(body)
+        .then(function (compressed) {
+          origSend.call(xhr2, compressed);
+        })
+        .catch(function () {
+          origSend.apply(xhr2, originalArgs2);
+        });
+      return;
+    }
+
     return origSend.apply(this, arguments);
   };
 })();

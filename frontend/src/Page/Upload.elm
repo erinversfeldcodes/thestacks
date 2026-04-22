@@ -89,6 +89,8 @@ type Msg
     | DragOver
     | DragLeave
     | FilepickerRequested
+    | UploadInitialised File String (Result Http.Error Api.UploadInit)
+    | R2PutCompleted String String (Result Http.Error ())
     | UploadAccepted (Result Http.Error String)
     | StatusReceived (Result Http.Error PollResponse)
     | StreamEvent String
@@ -147,15 +149,41 @@ update msg model maybeToken =
                     )
 
                 Just token ->
+                    -- Three-step presigned-URL flow:
+                    --   1. Init: ask backend for an image_id + presigned R2 PUT URL.
+                    --   2. PUT the file bytes directly to R2 (bypasses Phoenix).
+                    --   3. Commit: tell backend the PUT landed; backend enqueues
+                    --      the vision pipeline and we open the SSE stream.
                     ( { model
                         | file = Just file
                         , uploadState = Loading
                         , isDragging = False
                         , step = Uploading
                       }
-                    , Api.uploadImage file token UploadAccepted
+                    , Api.initUpload
+                        (File.mime file)
+                        token
+                        (UploadInitialised file token)
                     , NoOut
                     )
+
+        UploadInitialised _ _ (Err _) ->
+            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+
+        UploadInitialised file token (Ok init_) ->
+            ( model
+            , Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)
+            , NoOut
+            )
+
+        R2PutCompleted _ _ (Err _) ->
+            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+
+        R2PutCompleted imageId token (Ok ()) ->
+            ( model
+            , Api.commitUpload imageId token UploadAccepted
+            , NoOut
+            )
 
         DragOver ->
             ( { model | isDragging = True }, Cmd.none, NoOut )
