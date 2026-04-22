@@ -8,6 +8,7 @@ defmodule Stacks.Books.ISBNResolver do
   require Logger
 
   alias Stacks.Books.ISBNResolverCache
+  alias Stacks.Books.TitleSearchCache
 
   @open_library_url "https://openlibrary.org/api/books"
   @open_library_search_url "https://openlibrary.org/search.json"
@@ -132,10 +133,36 @@ defmodule Stacks.Books.ISBNResolver do
     6. Trimmed title only
 
   Returns `{:ok, isbn, metadata}` on success, `{:error, :not_found}` otherwise.
+
+  Results are cached in `TitleSearchCache` keyed by `(title, author,
+  raw_text)` with 24h positive / 1h negative TTL. Repeat lookups for
+  the same extracted title (common on probe workloads and real users
+  uploading the same book cover or text post multiple times) skip
+  OL/GB entirely.
   """
   @spec search_by_title(String.t(), String.t() | nil, String.t() | nil) ::
           {:ok, String.t(), map()} | {:error, :not_found}
   def search_by_title(title, author \\ nil, raw_text \\ nil) do
+    if title_cache_enabled?() do
+      case TitleSearchCache.get(title, author, raw_text) do
+        {:ok, cached} ->
+          cached
+
+        :miss ->
+          result = do_search_by_title(title, author, raw_text)
+          TitleSearchCache.put(title, author, raw_text, result)
+          result
+      end
+    else
+      do_search_by_title(title, author, raw_text)
+    end
+  end
+
+  defp title_cache_enabled? do
+    Application.get_env(:core, :title_search_cache_enabled, true)
+  end
+
+  defp do_search_by_title(title, author, raw_text) do
     trimmed_title = trim_last_word(title)
     surname = author_surname(author)
     raw_keywords = normalize_raw_text(raw_text)

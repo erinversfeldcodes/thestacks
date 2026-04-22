@@ -20,6 +20,7 @@ defmodule Core.Application do
           Stacks.AI.BudgetTracker,
           Stacks.Books.BookDetailCache,
           Stacks.Books.ISBNResolverCache,
+          Stacks.Books.TitleSearchCache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
           Core.PromEx,

@@ -54,6 +54,9 @@ config :core, :isbn_http_client, Stacks.Books.MockHttpClient
 # Disable ISBN cache in test — ETS is global, tests register different
 # mock responses for the same ISBN, so caching would cross-contaminate.
 config :core, :isbn_resolver_cache_enabled, false
+# Same reasoning for the title-search cache — tests reuse titles like
+# "The Great Gatsby" across scenarios with different expected ISBNs.
+config :core, :title_search_cache_enabled, false
 config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
 config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"
