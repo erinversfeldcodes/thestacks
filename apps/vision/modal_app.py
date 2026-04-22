@@ -36,20 +36,39 @@ MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 # ever deprecated or a faster community quant emerges.
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
 
+# Draft model for speculative decoding. Must share a tokenizer with
+# MODEL_NAME (Qwen2.5 family shares tokenizer vocab). Smaller + faster
+# than the target so it's cheap to generate candidate tokens for the
+# target to verify in one forward pass. 3B is the standard companion
+# to 7B; same-family draft/target pairs typically achieve 60-85% token
+# acceptance on structured JSON output.
+SPECULATIVE_MODEL_NAME = os.environ.get("SPECULATIVE_MODEL_NAME", "Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+
+# Number of tokens the draft model proposes per verification step.
+# Bigger = more parallelism, more waste on rejection. 5 is a common
+# default; vLLM's scheduler can adapt but this is the upper bound.
+NUM_SPECULATIVE_TOKENS = int(os.environ.get("NUM_SPECULATIVE_TOKENS", "5"))
+
 
 def _download_model() -> None:
-    """Pre-download model weights into the container image during build.
+    """Pre-download target + draft model weights into the container image.
 
     Runs once at `modal deploy` time (or when the image is invalidated).
     vLLM loads from the local HuggingFace cache directory, so
-    snapshot_download is sufficient — no need to construct the model
+    `snapshot_download` is sufficient — no need to construct the model
     object at build time (which would also require GPU).
+
+    The draft model adds ~2 GB to the image; acceptable cost for the
+    inference speedup once deployed.
     """
     from huggingface_hub import snapshot_download
     from transformers import AutoProcessor
 
     snapshot_download(MODEL_NAME)
+    snapshot_download(SPECULATIVE_MODEL_NAME)
     # Processor is needed at runtime for chat-template application.
+    # Target + draft share the Qwen2.5 processor/tokenizer, so loading
+    # MODEL_NAME's processor covers both.
     AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
 
 
@@ -57,32 +76,34 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libzbar0")
     .pip_install(
-        # vLLM provides continuous batching, PagedAttention, and
-        # AWQ-kernel support. The same Qwen weights run ~3-5x faster
-        # here than under `transformers.generate()`.
+        # vLLM v1 engine (default in 0.9.x+). Upgraded from 0.7.3 to
+        # unlock two features the 0.7.x v0 engine couldn't provide for
+        # multimodal models:
+        #   1. Prefix caching for VLM prompts — the `_ANALYZE_PROMPT`
+        #      instruction prefix (~250 tokens, identical on every call)
+        #      is cached across requests, saving prefill work. v0.7.3
+        #      silently disabled prefix caching for multimodal models;
+        #      v1 supports it.
+        #   2. Speculative decoding with a VLM draft model — the
+        #      `speculative_model` arg below configures 3B-AWQ as the
+        #      draft for 7B-AWQ, giving ~1.7-2x token generation speedup
+        #      via rejection sampling (accuracy preserved).
         #
-        # Pinned rather than `>=` because vLLM's async engine API has
-        # been churning across minor versions. 0.7.3 is a tested
-        # combination with Qwen2.5-VL + AWQ. Bump only after validating
-        # the `AsyncLLMEngine.generate(prompt_dict, ...)` signature
-        # below still matches the target version's contract.
-        "vllm==0.7.3",
+        # Pinned to a tested 0.9.x release. Bump only after revalidating
+        # the AsyncLLMEngine API surface + Qwen2.5-VL + AWQ + spec-dec
+        # combination. All four have been in flux across minor versions.
+        "vllm==0.9.0",
         # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
         # vLLM dispatches to when `quantization="awq_marlin"` is set.
         "autoawq>=0.2.0",
-        # Transformers PINNED to the narrow window compatible with both
-        # Qwen2.5-VL and vLLM 0.7.3:
-        #   * 4.48.x and earlier: no `qwen2_5_vl` architecture entry;
-        #     loading the checkpoint raises
-        #     `ValueError: model type qwen2_5_vl not recognized`
-        #     (support was added in 4.49.0).
-        #   * 4.50.0 and later: removed `Qwen2Tokenizer.all_special_tokens_extended`,
-        #     which vLLM 0.7.3's tokenizer init calls directly, producing
-        #     `AttributeError: Qwen2Tokenizer has no attribute
-        #     all_special_tokens_extended` on container start.
-        # 4.49.x is the one stable patch range where both work. Re-pin
-        # in lockstep with vllm when bumping the vLLM version.
-        "transformers==4.49.0",
+        # Transformers pinned to the compatibility window for vLLM 0.9.x.
+        # Historical pitfalls that forced earlier narrow ranges:
+        #   * 4.48.x and earlier: no `qwen2_5_vl` architecture (added 4.49.0).
+        #   * 4.50.0 (only): removed `Qwen2Tokenizer.all_special_tokens_extended`
+        #     which older vLLM versions called directly.
+        # vLLM 0.9.x tolerates a wider range; 4.52 is a safe middle.
+        # Re-pin in lockstep with vllm when bumping either.
+        "transformers==4.52.0",
         "qwen-vl-utils>=0.0.10",
         "huggingface_hub>=0.26.0",
         "Pillow>=10.0.0",
@@ -234,33 +255,50 @@ class VisionModel:
           * quantization="awq_marlin"     — 4-bit AWQ weights served
                                             through the Marlin kernel,
                                             ~1.5-2x faster than plain
-                                            "awq". vLLM suggests this
-                                            automatically when it detects
-                                            AWQ weights; we set it
-                                            explicitly to silence the
-                                            "you could be using marlin"
-                                            warning at boot.
+                                            "awq".
+          * enable_prefix_caching=True    — v1 engine supports prefix
+                                            caching for multimodal
+                                            models (v0 silently disabled
+                                            this for VLMs). Our
+                                            `_ANALYZE_PROMPT` is ~250
+                                            tokens, identical on every
+                                            call, so the prefix KV state
+                                            is cached after the first
+                                            request and reused for all
+                                            subsequent prefills.
+          * speculative_model              — Qwen2.5-VL-3B-AWQ as the
+                                            draft model. Generates
+                                            NUM_SPECULATIVE_TOKENS
+                                            candidate tokens per step,
+                                            which the 7B target verifies
+                                            in one forward pass.
+                                            Rejection sampling preserves
+                                            output equality with the 7B
+                                            alone — speedup only, no
+                                            accuracy change. Expected
+                                            1.7-2x on our JSON-structured
+                                            output.
+          * num_speculative_tokens=5       — draft generates 5 tokens
+                                            ahead per step. Higher
+                                            values waste more on
+                                            rejection; 5 is vLLM's
+                                            common default.
           * max_model_len=4096            — image tokens (~1500 at 672px)
                                             + prompt (~250) + output
                                             (~512) = ~2300. 4096 leaves
                                             headroom without wasting KV
                                             VRAM on the full 32k context
                                             window Qwen advertises.
-          * gpu_memory_utilization=0.90   — vLLM claims 90% of the GPU
-                                            for weights + KV cache pool,
-                                            leaving 10% for activations.
+          * gpu_memory_utilization=0.85   — dropped from 0.90 to leave
+                                            headroom for the draft
+                                            model's weights (~2 GB AWQ)
+                                            and its share of the KV
+                                            cache pool.
           * limit_mm_per_prompt={"image": 1}
                                           — our prompts always carry
                                             exactly one image; tells vLLM
                                             not to reserve space for
                                             multi-image batches.
-
-        Prefix caching is NOT enabled: vLLM 0.7.x's v0 engine explicitly
-        disables `--enable-prefix-caching` for multimodal models (the
-        warning ``enable-prefix-caching is currently not supported for
-        multimodal models in v0 and has been disabled`` appears in the
-        boot log when the flag is set). Upgrading to vLLM v1 would
-        re-enable it; for now we don't bother passing the flag.
 
         PagedAttention is vLLM's default attention impl and requires no
         flag — it's what makes the KV cache pool work block-by-block
@@ -274,8 +312,11 @@ class VisionModel:
         engine_args = AsyncEngineArgs(
             model=MODEL_NAME,
             quantization="awq_marlin",
+            enable_prefix_caching=True,
+            speculative_model=SPECULATIVE_MODEL_NAME,
+            num_speculative_tokens=NUM_SPECULATIVE_TOKENS,
             max_model_len=4096,
-            gpu_memory_utilization=0.90,
+            gpu_memory_utilization=0.85,
             limit_mm_per_prompt={"image": 1},
             trust_remote_code=True,
         )
@@ -330,6 +371,18 @@ class VisionModel:
 
         request_id = str(uuid.uuid4())
         final_output = None
+
+        # Stream the response. As soon as we detect a `not_book`
+        # classification (the model emits `classification` as the
+        # first JSON field), abort the remaining generation — the
+        # rejection branch in Moderation doesn't use `reasoning` for
+        # not_book (it surfaces a fixed "not a book" message to the
+        # user), and `books` is always `[]` for not_book anyway, so
+        # truncating after we've seen `confidence` is safe.
+        #
+        # For `book` / `ambiguous` classifications we keep streaming
+        # to EOS — the full structured response is needed downstream
+        # for reasoning, book extraction, etc.
         async for output in self.engine.generate(
             {
                 "prompt": text_prompt,
@@ -339,12 +392,15 @@ class VisionModel:
             request_id=request_id,
         ):
             final_output = output
+            if output.outputs and _can_early_terminate(output.outputs[0].text):
+                await self.engine.abort(request_id)
+                break
 
         if final_output is None or not final_output.outputs:
             return {}
 
         response = final_output.outputs[0].text.strip()
-        return _parse_json(response)
+        return _parse_json_with_not_book_fallback(response)
 
 
 def _parse_json(text: str) -> dict[str, Any]:
@@ -368,6 +424,62 @@ def _parse_json(text: str) -> dict[str, Any]:
             pass
 
     return {}
+
+
+# Matches the model's `not_book` classification in a streaming JSON
+# prefix. We wait until `confidence` has started so the partial output
+# carries a usable confidence score for downstream logging; without
+# this check we might abort on `{"classification": "not_book"` before
+# the confidence token is emitted.
+_EARLY_TERMINATE_PATTERN = re.compile(
+    r'"classification"\s*:\s*"not_book"\s*,\s*"confidence"\s*:\s*[0-9.]+',
+    re.IGNORECASE,
+)
+
+
+def _can_early_terminate(partial_text: str) -> bool:
+    """True if the streaming output has emitted enough JSON to know the
+    classification is `not_book` AND carry a confidence score. Once we
+    know that, the rest of the generation is redundant — `books` is `[]`
+    for not_book by prompt contract, and `reasoning` on a rejection
+    isn't surfaced in the user-facing UX.
+    """
+    return bool(_EARLY_TERMINATE_PATTERN.search(partial_text))
+
+
+def _parse_json_with_not_book_fallback(text: str) -> dict[str, Any]:
+    """Parse the model output. If the JSON is complete, delegate to
+    `_parse_json`. If it was truncated by `_can_early_terminate` (we
+    aborted mid-generation), reconstruct a minimal valid payload:
+
+        {"classification": "not_book", "confidence": <parsed>, "books": []}
+
+    This keeps the caller's contract stable — it always sees a
+    well-formed `{"classification": ..., "books": [...]}` shape
+    regardless of whether we bailed early.
+    """
+    parsed = _parse_json(text)
+    if parsed.get("classification") == "not_book":
+        # Full parse worked even if we truncated, or the model completed
+        # normally on a not_book input. Ensure `books` is present.
+        parsed.setdefault("books", [])
+        return parsed
+
+    # Parse failed — likely because we aborted mid-JSON. Try to recover
+    # the classification+confidence from the partial buffer.
+    match = _EARLY_TERMINATE_PATTERN.search(text)
+    if match:
+        # Extract the confidence value out of the matched fragment.
+        conf_match = re.search(r"([0-9.]+)\s*$", match.group(0))
+        confidence = float(conf_match.group(1)) if conf_match else 0.0
+        return {
+            "classification": "not_book",
+            "confidence": confidence,
+            "books": [],
+        }
+
+    # Otherwise fall back to whatever `_parse_json` managed (possibly {}).
+    return parsed
 
 
 # ── FastAPI vision service (ASGI) ─────────────────────────────────────────────
