@@ -53,10 +53,18 @@ config :core, Oban,
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
-       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}}
+       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}},
+       # Nightly author-source discovery in batch mode. Replaces the
+       # per-book enqueue that was exhausting Brave Search's free-tier
+       # quota (2000/month ≈ 67/day) within the first few hours of
+       # traffic. The batch mode calls `Authors.authors_without_sources/0`
+       # and walks it, respecting `BraveClient.@daily_budget` — once
+       # budget is spent the remaining authors are picked up on the
+       # next night. 08:00 UTC picks a low-traffic window.
+       {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}}
      ]}
   ],
-  queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3, dbt_refresh: 1]
+  queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
   url: [host: "localhost"],

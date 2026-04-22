@@ -141,17 +141,23 @@ if config_env() == :prod do
   # user-facing traffic; Oban workers compete only among themselves
   # on their own pool.
   #
-  # OBAN_POOL_SIZE default: 25. Evolution:
+  # OBAN_POOL_SIZE default: 80. Evolution:
   #   15: initial pool-split default (too low — Oban's own GROUP BY
   #     poll waited ~800ms for a connection)
   #   50: over-corrected — allowed 44 workers to run concurrently,
   #     each of which then contended on Core.Repo for business-logic
   #     queries, so Core.Repo's queue time got worse
-  #   25: balance point. Oban's INFRASTRUCTURE queries (enqueue,
-  #     state updates, pruner, PromEx's periodic poll) need at most
-  #     ~10 simultaneous connections; 25 gives comfortable headroom
-  #     without artificially boosting concurrency of business-logic
-  #     work.
+  #   25: balance point for the old `:vision` queue concurrency=5 era.
+  #     Oban's infrastructure queries (enqueue, state updates, pruner,
+  #     PromEx's periodic poll) need ~10 simultaneous connections;
+  #     workers need one each.
+  #   80: scaled for `:vision` concurrency=60. Each worker holds a
+  #     connection during its DB reads/writes (pipeline context fetch,
+  #     mark_resolved/rejected, event emission). Pool of 80 covers:
+  #     60 vision workers + 10 default queue + 3 notifications +
+  #     5 scraper + ~15 infrastructure overhead. Below 70 the Oban
+  #     pruner/poll contend with workers; above ~100 risks exhausting
+  #     Neon's connection limit combined with Core.Repo's pool.
   #
   # Both repos point at the same Postgres database, so Oban still
   # sees the same event_log, same op.* tables, same job state — just
@@ -161,7 +167,7 @@ if config_env() == :prod do
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "25"),
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "80"),
     socket_options: maybe_ipv6
 
   secret_key_base =
