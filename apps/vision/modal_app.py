@@ -177,15 +177,25 @@ _ANALYZE_PROMPT = (
 @app.cls(
     gpu="H100",
     image=image,
-    # Pin to us-east so the Modal GPU lives in the same region as Fly IAD
-    # (core) and Neon us-east-1 (DB). Without pinning, Modal's scheduler
-    # places containers wherever H100 capacity exists — a us-west placement
-    # adds ~60ms Fly→Modal RTT per /analyze call, compounding with cold
-    # starts. Tradeoff: H100 availability in us-east is tighter than A10G;
-    # if the pool is exhausted, scheduling blocks rather than falling back.
-    # Watch `[:stacks, :vision, :request, :stop]` tail latency after
-    # cutover — capacity-bound bursts can push single calls to 30 s+.
-    region="us-east",
+    # Region pinning was removed 2026-04-23 after gate observations showed
+    # `upload_p95_ms` regressing to 3556 ms (vs 2074 ms during local warm
+    # testing) with 0% vision failure rate and fuse closed — i.e., not a
+    # correctness issue, just Modal taking longer to schedule. The
+    # leading-order suspect was us-east H100 capacity pressure, where the
+    # scheduler blocks rather than falling back when the regional pool is
+    # exhausted.
+    #
+    # Trade-off accepted: cross-region placement (e.g. us-west) adds ~60 ms
+    # Fly→Modal RTT per /analyze call. At a 2000-3000 ms p95 budget, 60 ms
+    # is rounding error; multi-second scheduling wait was not.
+    #
+    # Neon us-east-1 is unaffected — vision doesn't talk to Neon. Fly IAD
+    # (core) is still the sole upstream, so cross-region placement only
+    # affects the single Modal HTTPS round-trip per upload. If the p95
+    # worsens after unpinning (evidence: a `[:stacks, :vision, :request,
+    # :stop]` p95 > ~200 ms higher than the historical us-east median),
+    # reconsider: pin back with a min_containers=1 keep-warm, or move to
+    # L40S which has broader availability.
     # Swapped from A10G (24 GB, Ampere bf16) to H100 (80 GB, Hopper w/ FP8
     # tensor cores). Telemetry showed vision inference was the only
     # remaining lever on `upload_p95_ms` - cache was already hitting at
