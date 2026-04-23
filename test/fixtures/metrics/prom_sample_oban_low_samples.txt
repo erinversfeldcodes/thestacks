@@ -56,7 +56,18 @@ core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.DefaultW
 core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker"} 1
 
 # -- Ecto (healthy) --
-core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 3000
+# Mirrors prom_sample_healthy.txt's bucket granularity — the SLI's p95
+# algorithm interpolates within the tightest populated bucket, so
+# skipping intermediate buckets forces p95 to land near the upper edge
+# of whatever bucket is populated (~47 ms here when only `le=50` is
+# present), which spuriously breached the 20 ms threshold in earlier
+# revisions of this fixture.
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 2950
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 2998
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="250"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="1000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="5000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10000"} 3000
 core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3000
 core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 6200
 core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3000
