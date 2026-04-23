@@ -1,8 +1,12 @@
-# Prometheus sample - upload route p95 latency BREACHED (> 2000ms threshold).
+# Prometheus sample - upload route p95 latency BREACHED (> 3000ms threshold).
 # Derived from prom_sample_healthy.txt; only the `route_group="upload"`
-# histogram buckets are edited to push the upload p95 above 2000ms. All
-# other series are unchanged so every other SLI computes a real value and
-# the gate's breach decision is anchored on a single signal.
+# histogram buckets are edited to push the upload p95 above the 3000 ms
+# interim threshold (target: 2000 ms once the experimental framework in
+# ADR 015 exists). The fixture p95 lands in the 2000–5000 ms bucket, so
+# the fixture breaches both the current (3000) and target (2000)
+# thresholds — it does not need updating when the threshold tightens.
+# All other series are unchanged so every other SLI computes a real
+# value and the gate's breach decision is anchored on a single signal.
 
 # -- BEAM memory (per-category, sum = total) --
 core_prom_ex_beam_memory_persistent_term_total_bytes 524288
