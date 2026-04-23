@@ -775,6 +775,179 @@ elif [[ "$PROD_MODE" -eq 1 ]]; then
     echo "WARN: LOG_SHIPPER_ACCESS_TOKEN not set — skipping log shipper deploy (logs will not persist beyond Fly's short retention)."
 fi
 
+# ── Vision pipeline warmup ────────────────────────────────────────────────────
+# Pre-warm Modal's vision containers before the SLO gate (or E2E tests) start
+# probing. Without this the gate's first probe iteration IS the first request
+# post-deploy — every /analyze call hits a cold H100 container (~30-60s to
+# load vLLM + model weights into GPU memory). The gate's 6-parallel-canary
+# burst forces Modal to scale out, so several containers cold-start
+# concurrently; those slow samples live in the p95's top 5 %, dragging the
+# measurement ~1.5 s above the steady-state figure.
+#
+# Strategy: fire all 6 gate canaries in parallel so Modal spawns the same
+# container count the gate will demand. `scaledown_window=1200` (20 min on
+# the @app.cls decorator) keeps them warm through the 10-min gate window.
+#
+# Credentials: PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD (same vars
+# check-slo-gate.sh uses — set in the production workflow from
+# PROD_OWNER_EMAIL / PROD_OWNER_PASSWORD secrets). Dev defaults
+# (owner@thestacks.app / dev-password-123) match the seeded preview user.
+#
+# Failure handling: an individual upload or stream timeout is a WARN, not a
+# FAIL — a warmup that couldn't complete still partially pre-spawned
+# containers, which is better than no warmup. Only auth failure is fatal,
+# since it implies the new deploy can't talk to its own auth endpoint.
+
+WARMUP_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
+WARMUP_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
+
+# Canaries match scripts/probe-production.sh's burst set — firing the same
+# six images Modal will see during the gate maximises the proportion of
+# warm-path requests once the gate starts.
+warmup_canaries=(
+    "${REPO_ROOT}/images/barcode_isbn_clean.jpg"
+    "${REPO_ROOT}/images/not_a_book.jpg"
+    "${REPO_ROOT}/images/screenshot_image_reversed.jpg"
+    "${REPO_ROOT}/images/screenshot_image_reversed_and_cut_off.jpg"
+    "${REPO_ROOT}/images/screenshot_mildly_obscured.jpg"
+    "${REPO_ROOT}/images/screenshot_mixed_text.jpg"
+)
+
+echo ""
+echo "==> Vision pipeline warmup against ${CORE_URL}/api/upload..."
+
+# Wait for external edge routing. deploy-stack.sh already verified health
+# via fly-proxy (localhost path), but Fly's anycast edge can lag by a minute
+# after deploy while learning about the new machines. Poll up to ~2 min.
+echo "    Waiting for external edge routing (${CORE_URL}/api/health)..."
+edge_ready=0
+for _ in $(seq 1 24); do
+    edge_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 "${CORE_URL}/api/health" || true)"
+    if [[ "${edge_code}" == "200" ]]; then
+        edge_ready=1
+        echo "    Edge routing ready (HTTP 200)."
+        break
+    fi
+    sleep 5
+done
+if [[ $edge_ready -ne 1 ]]; then
+    echo "WARN warmup: external edge never returned HTTP 200 (last: ${edge_code}) — skipping vision warmup"
+    echo ""
+    echo "PASS deploy: stack is live at ${CORE_URL}"
+    echo "    Core app:    ${CORE_APP}"
+    echo "    Modal app:   ${MODAL_APP}"
+    echo "    Neon branch: ${NEON_BRANCH_NAME}"
+    exit 0
+fi
+
+login_body_file="$(mktemp)"
+smoke_login_code="$(curl -4 -s -o "${login_body_file}" -w "%{http_code}" \
+    --max-time 30 \
+    "${CORE_URL}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    --data-binary @<(python3 -c "import json,os; print(json.dumps({'email':os.environ['WARMUP_EMAIL'],'password':os.environ['WARMUP_PASSWORD']}))") \
+    || true)"
+smoke_login="$(cat "${login_body_file}" 2>/dev/null || true)"
+rm -f "${login_body_file}"
+smoke_token="$(echo "${smoke_login}" | python3 -c \
+    "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+
+if [[ -z "${smoke_token}" ]]; then
+    echo "FAIL warmup: could not authenticate as warmup user (HTTP ${smoke_login_code})"
+    echo "    Check PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD."
+    exit 1
+fi
+
+# Fire all canaries in parallel so Modal sees the same scale-out demand
+# shape the gate will generate. Collect image_ids from the 202 responses.
+echo "    Uploading ${#warmup_canaries[@]} canaries in parallel..."
+warmup_dir="$(mktemp -d)"
+upload_pids=()
+for img in "${warmup_canaries[@]}"; do
+    (
+        img_name="$(basename "$img")"
+        body_file="${warmup_dir}/upload_${img_name}"
+        http_code="$(curl -4 -s -o "${body_file}" -w "%{http_code}" \
+            --max-time 30 \
+            -X POST "${CORE_URL}/api/upload" \
+            -H "Authorization: Bearer ${smoke_token}" \
+            -F "image=@${img}" 2>/dev/null || true)"
+        if [[ "${http_code}" == "202" ]]; then
+            img_id="$(python3 -c \
+                "import json,sys; print(json.load(open('${body_file}')).get('image_id',''))" \
+                2>/dev/null || true)"
+            echo "${img_id}" > "${warmup_dir}/id_${img_name}"
+        fi
+    ) &
+    upload_pids+=("$!")
+done
+for pid in "${upload_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+
+warmup_ids=()
+for img in "${warmup_canaries[@]}"; do
+    img_name="$(basename "$img")"
+    id_file="${warmup_dir}/id_${img_name}"
+    if [[ -f "$id_file" ]] && img_id="$(cat "$id_file")" && [[ -n "$img_id" ]]; then
+        warmup_ids+=("$img_id")
+        echo "    ${img_name}: accepted (image_id=${img_id})"
+    else
+        echo "    ${img_name}: upload did not return 202 — skipping"
+    fi
+done
+
+if [[ ${#warmup_ids[@]} -eq 0 ]]; then
+    echo "WARN warmup: all uploads failed — app may be broken, but the deploy step already passed health checks"
+    rm -rf "${warmup_dir}"
+    echo ""
+    echo "PASS deploy: stack is live at ${CORE_URL}"
+    echo "    Core app:    ${CORE_APP}"
+    echo "    Modal app:   ${MODAL_APP}"
+    echo "    Neon branch: ${NEON_BRANCH_NAME}"
+    exit 0
+fi
+
+# Stream each pipeline's SSE channel so Modal runs the full /analyze call
+# and spawns a container per concurrent request (up to max_containers=10).
+# Bound by --max-time 480 (8 min) — a cold H100 container should boot
+# within this; if not, Modal is unhealthy enough that the gate will catch
+# it regardless.
+echo "    Streaming ${#warmup_ids[@]} warmup pipelines in parallel (up to 8 min each)..."
+stream_pids=()
+for img_id in "${warmup_ids[@]}"; do
+    (
+        stream_resp="$(curl -4 -sf --max-time 480 \
+            "${CORE_URL}/api/upload/${img_id}/stream?token=${smoke_token}" \
+            2>/dev/null || true)"
+        echo "${stream_resp}" | python3 -c \
+            "import json,sys
+lines=[l.strip() for l in sys.stdin if l.startswith('data:')]
+d=json.loads(lines[-1][5:]) if lines else {}
+print(d.get('status','timeout'))" \
+            > "${warmup_dir}/status_${img_id}" 2>/dev/null \
+            || echo "timeout" > "${warmup_dir}/status_${img_id}"
+    ) &
+    stream_pids+=("$!")
+done
+for pid in "${stream_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+
+all_terminal=1
+for img_id in "${warmup_ids[@]}"; do
+    img_status="$(cat "${warmup_dir}/status_${img_id}" 2>/dev/null || echo "timeout")"
+    echo "    ${img_id}: ${img_status}"
+    if [[ "${img_status}" != "resolved" && "${img_status}" != "rejected" ]]; then
+        all_terminal=0
+    fi
+done
+rm -rf "${warmup_dir}"
+
+if [[ $all_terminal -eq 1 ]]; then
+    echo "PASS warmup: all ${#warmup_ids[@]} pipelines resolved/rejected — Modal containers warm"
+else
+    echo "WARN warmup: one or more pipelines timed out — Modal may still be partially cold"
+    echo "    The SLO gate will likely still pass, but p95 may reflect the remaining cold-start tail."
+fi
+
 # ── Output ───────────────────────────────────────────────────────────────────
 echo ""
 echo "PASS deploy: stack is live at ${CORE_URL}"
