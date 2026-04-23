@@ -1,9 +1,19 @@
 # ADR 001: Modal for Vision Inference, Together AI for Summarisation
 
-**Status:** Accepted
+**Status:** Accepted — partially superseded by [ADR 015](015-vision-service-architecture.md)
 **Date:** 2026-03-17
 **Deciders:** Platform owner
 **Technical area:** AI infrastructure, external services
+
+> **Update (2026-04-23):** the core decision in this ADR — Modal for
+> vision, Together AI for summarisation — is unchanged. However the
+> vision service's GPU class, model variant, engine version, and
+> quantization strategy have evolved since this document was written.
+> For the current state of the vision service (H100 instead of A10G,
+> AWQ-quantized weights, vLLM v1, single `/analyze` endpoint, and the
+> reasons for each change) see [ADR 015](015-vision-service-architecture.md).
+> Treat the "Vision model selected" and GPU references in this ADR as
+> historical context, not current configuration.
 
 ---
 

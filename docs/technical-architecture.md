@@ -50,7 +50,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 |-----------|-----------|-----------|
 | Core API, orchestration, job processing | **Elixir + Phoenix** | OTP supervision trees are ideal for orchestrating unreliable external sources. Fault tolerance, backpressure, and lightweight concurrency make it the right tool for a system that talks to dozens of flaky scrapers and APIs. |
 | Frontend SPA | **Elm** | Type-safe with zero runtime exceptions. The shelf-spine-detail state machine demands robust UI state management. Elm's compiler catches entire categories of bugs before they ship. |
-| Vision service | **Python + FastAPI on Modal** | Serverless GPU service for image classification and book extraction via Qwen2.5-VL-7B-Instruct. Runs on Modal (A10G GPU), not co-located with the core. Receives base64-encoded images over HMAC-authenticated HTTPS from Oban workers. Python has the best ML ecosystem; Modal provides cold-start-amortised GPU inference without managing containers or GPU hosts. |
+| Vision service | **Python + FastAPI on Modal** | Serverless GPU service for image classification and book extraction via `Qwen2.5-VL-7B-Instruct-AWQ` (4-bit quantized) served by vLLM v1 on an NVIDIA H100. Runs on Modal (us-east), not co-located with the core. Receives base64-encoded images over HMAC-authenticated HTTPS from Oban workers. Python has the best ML ecosystem; Modal provides cold-start-amortised GPU inference without managing containers or GPU hosts. See [ADR 015](decisions/015-vision-service-architecture.md) for the current configuration (GPU class, quantization, engine, endpoint shape). |
 | Bookshop price scraper | **Rust** | Standalone OSS tool, deployable as a Lambda or separate container. Performance and correctness matter for scraping. Configurable via TOML files per store per country. |
 
 ### Infrastructure
@@ -125,8 +125,9 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 │ Modal           │ │ Rust Scraper│ │ PostgreSQL          │
 │ (Python/FastAPI │ │ Microservice│ │                     │
 │  serverless GPU │ │ (bookshop   │ │ ┌── op schema      │
-│  A10G)          │ │  prices)    │ │ ├── wh schema      │
-│ Qwen2.5-VL-7B   │ │             │ │ ├── audit           │
+│  H100)          │ │  prices)    │ │ ├── wh schema      │
+│ Qwen2.5-VL-7B   │ │             │ │ ├── cache           │
+│  -AWQ / vLLM v1 │ │             │ │ ├── audit           │
 │ HMAC over HTTPS │ │             │ │ └── event_log       │
 └─────────────────┘ └─────────────┘ └─────────────────────┘
 ```
@@ -135,7 +136,7 @@ The Stacks is an open-source, self-hosted book management and discovery platform
 
 1. User uploads a photo or enters an ISBN via the Elm frontend (`POST /api/upload/identify`).
 2. Phoenix receives the multipart upload, reads the temp file, base64-encodes the bytes, inserts an `uploaded_images` record, and enqueues an `IdentifyBookJob` with the base64 image in the Oban job args. The temp file is discarded — the image is never written to permanent storage.
-3. The Oban worker sends the base64-encoded image to the Modal vision service (Qwen2.5-VL-7B-Instruct on A10G) over HMAC-authenticated HTTPS. Modal classifies the image, then extracts book titles/authors/ISBNs.
+3. The Oban worker sends the base64-encoded image to the Modal vision service (`Qwen2.5-VL-7B-Instruct-AWQ` on H100, served by vLLM v1) over HMAC-authenticated HTTPS via a single `/analyze` endpoint that returns classification + extracted candidates in one response. See [ADR 015](decisions/015-vision-service-architecture.md) for the architecture and rationale.
 4. ISBN is resolved via Open Library (primary) or Google Books (fallback). The system returns the identified candidate(s) to the frontend for user verification ("We think this is…").
 5. The user confirms the identification and chooses a shelf. The frontend calls `POST /api/books/confirm` with the confirmed ISBN + target shelf.
 6. The system checks whether a `book_editions` record with this ISBN already exists. If yes, it checks for a same-work merge opportunity (US-1.1.8). If no, it creates a new work (`books`) and first edition (`book_editions`), then creates the shelf placement.
@@ -393,7 +394,7 @@ The Stacks uses AI in three places: vision model (book identification), LLM (rev
 | **Cost explosion** | Bug in retry logic or runaway Oban jobs cause unlimited AI API calls | Large unexpected bill from Modal or future AI providers | Budget controls, circuit breakers, per-day caps. |
 | **PII in uploaded images** | User photos contain faces, background context, GPS (EXIF) | User photos processed inside Modal's GPU container; bytes leave Fly.io | Strip EXIF, re-encode images, crop to book region where possible. Document in privacy policy. Note: images are processed inside Modal's isolated GPU container — no data is forwarded to a third-party AI API. |
 | **Prompt injection via background content** | Image contains URLs on a t-shirt, poster, or background (e.g. "visit evil.com") that the vision model might open | Unexpected network requests from Modal container; potential SSRF | Modal containers have no outbound network access by default. Future: pre-process image to extract only book-cover region before sending. |
-| **Model supply chain — weights** | Qwen2.5-VL-7B-Instruct weights downloaded from HuggingFace by name at `modal deploy` time without a pinned commit hash or checksum | Poisoned or backdoored model weights silently introduced | Pin to a specific HuggingFace commit SHA. Verify weight checksums post-download. |
+| **Model supply chain — weights** | `Qwen2.5-VL-7B-Instruct-AWQ` weights downloaded from HuggingFace by name at `modal deploy` time without a pinned commit hash or checksum | Poisoned or backdoored model weights silently introduced | Pin to a specific HuggingFace commit SHA. Verify weight checksums post-download. |
 | **Model supply chain — pip deps** | `apps/vision/requirements.txt` uses `>=` bounds, not exact pins | Transitive dep update introduces vulnerability or behavioural change at next deploy | Switch to exact versions (`==`) or use `pip-compile` to produce a locked `requirements.txt`. |
 | **Model output drift** | Model weights updated on HuggingFace without notice | Silent degradation of book identification accuracy | Pin model commit hash. Test suite with known book images. Alert on identification failure rate increase. |
 
@@ -403,12 +404,13 @@ The Stacks uses AI in three places: vision model (book identification), LLM (rev
 
 | Property | Value |
 |----------|-------|
-| **Model** | `Qwen/Qwen2.5-VL-7B-Instruct` |
+| **Model** | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ` (4-bit quantized) |
 | **Developer** | Alibaba DAMO Academy |
 | **Licence** | Apache 2.0 |
-| **Source** | HuggingFace (`https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct`) |
+| **Source** | HuggingFace (`https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct-AWQ`) |
+| **Engine** | vLLM v1 (`vllm==0.9.0`) with `quantization="awq_marlin"` |
 | **How it arrives** | Downloaded to Modal's volume at `modal deploy` time; baked into the container image |
-| **Inference** | Runs entirely inside Modal's isolated A10G GPU container — no data forwarded to Alibaba or any external AI API |
+| **Inference** | Runs entirely inside Modal's isolated H100 GPU container — no data forwarded to Alibaba or any external AI API. See [ADR 015](decisions/015-vision-service-architecture.md) for the current architecture. |
 | **Data at rest** | Images are processed in-memory inside the container; no image storage on Modal's side |
 
 **At inference time, Alibaba receives nothing.** The weights are downloaded once (at deploy time) and run locally within Modal's container network. Alibaba has no visibility into queries or responses after that point.
@@ -442,7 +444,7 @@ end
 
 | Provider | Estimated Cost | Daily Cap | Monthly Cap |
 |----------|---------------|-----------|-------------|
-| Modal (vision — Qwen2.5-VL-7B on A10G) | ~R0.50-R2.50 per identification | R5 | R100 |
+| Modal (vision — Qwen2.5-VL-7B-AWQ on H100) | per-second GPU bill; see [ADR 015](decisions/015-vision-service-architecture.md) for cost profile | R5 | R100 |
 | LLM for review summarisation | ~R0.10 per summary | R3 | R50 |
 | LLM for source discovery evaluation | ~R0.05 per evaluation | R2 | R30 |
 
@@ -517,7 +519,7 @@ Search results → LLM → confidence score + suggested config
 ```elixir
 # config/config.exs
 config :the_stacks, :ai,
-  vision_model: "Qwen/Qwen2.5-VL-7B-Instruct",
+  vision_model: "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
   vision_provider: :modal,
   summarisation_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct",
   summarisation_provider: :together_ai
@@ -2291,7 +2293,7 @@ Mox.defmock(TheStacks.AI.MockVision, for: TheStacks.AI.VisionProvider)
 
 | Behaviour | Production Module | What It Wraps |
 |-----------|------------------|---------------|
-| `VisionProvider` | `ModalVision` | Modal vision service (Qwen2.5-VL-7B-Instruct) |
+| `VisionProvider` | `ModalVision` | Modal vision service (`Qwen2.5-VL-7B-Instruct-AWQ` on H100) |
 | `ISBNResolver` | `OpenLibraryResolver` | Open Library + Google Books API |
 | `SearchProvider` | `BraveSearchProvider` | Brave Search API |
 | `PriceScraper` | `RustScraperClient` | Rust scraper microservice |
