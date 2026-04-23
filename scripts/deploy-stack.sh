@@ -841,13 +841,21 @@ if [[ $edge_ready -ne 1 ]]; then
     exit 0
 fi
 
+# Build the login JSON via python's json.dumps rather than shell interpolation
+# so credentials with quotes/backslashes round-trip safely. Pass the secrets
+# as argv — env-var indirection doesn't survive `<(process substitution)`
+# reliably, which caused a KeyError: 'WARMUP_EMAIL' at first cut.
 login_body_file="$(mktemp)"
+login_payload_file="$(mktemp)"
+python3 -c "import json,sys; json.dump({'email':sys.argv[1],'password':sys.argv[2]}, sys.stdout)" \
+    "${WARMUP_EMAIL}" "${WARMUP_PASSWORD}" > "${login_payload_file}"
 smoke_login_code="$(curl -4 -s -o "${login_body_file}" -w "%{http_code}" \
     --max-time 30 \
     "${CORE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
-    --data-binary @<(python3 -c "import json,os; print(json.dumps({'email':os.environ['WARMUP_EMAIL'],'password':os.environ['WARMUP_PASSWORD']}))") \
+    --data-binary @"${login_payload_file}" \
     || true)"
+rm -f "${login_payload_file}"
 smoke_login="$(cat "${login_body_file}" 2>/dev/null || true)"
 rm -f "${login_body_file}"
 smoke_token="$(echo "${smoke_login}" | python3 -c \
