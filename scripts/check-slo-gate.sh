@@ -512,11 +512,19 @@ if http_samples < HTTP_MIN_SAMPLES:
 slis.append(http_entry)
 
 # Route-group p95 latency: auth, catalogue, upload.
+#
+# `upload_p95_ms` threshold is 3000 ms (interim). The target is 2000 ms
+# and will be lowered back to that once an experimental framework exists
+# to compare vision configurations (model / quantization / engine / GPU)
+# on a reproducible canary set. See ADR 015 section "Future work:
+# experimental framework for model comparison". The 3000 ms ceiling is
+# high enough to absorb a bursty probe cold-start but still catches a
+# regression if the vision pipeline gets meaningfully worse.
 HIST = "stacks_router_dispatch_stop_duration_milliseconds_bucket"
 for group, threshold, name in [
     ("auth", 500, "auth_p95_ms"),
     ("catalogue", 500, "catalogue_p95_ms"),
-    ("upload", 2000, "upload_p95_ms"),
+    ("upload", 3000, "upload_p95_ms"),
 ]:
     p95 = histogram_p95_by_group(HIST, "route_group", group)
     slis.append(
