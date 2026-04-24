@@ -58,11 +58,12 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-      # NEON_API_KEY is intentionally referenced even in prod mode: deploy-stack.sh
-      # uses its presence as a signal to provision a branch, which we must NOT
-      # do in prod. STACKS_CORE_PROD=true tells deploy-stack.sh to clear it
-      # internally so the prod DATABASE_URL is used verbatim. We still surface
-      # the secret reference here so rotating it surfaces a CI failure.
+      # NEON_API_KEY is intentionally referenced even in prod mode:
+      # deploy-stack.sh uses its presence as a signal to provision a branch,
+      # which we must NOT do in prod. The `--production` arg passed to the
+      # script tells it to clear NEON_API_KEY internally so the prod
+      # DATABASE_URL is used verbatim. We still surface the secret reference
+      # here so rotating it surfaces a CI failure.
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
       GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
       VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
@@ -118,7 +119,6 @@ jobs:
       # for live validation. Falls back to `thestacks-core` for workflow_run.
       CORE_APP: ${{ inputs.target_app || 'thestacks-core' }}
       MODAL_APP_NAME: thestacks-vision
-      STACKS_CORE_PROD: "true"
       # (FORCE_BREACH is declared per-step on the gate — see below.)
     steps:
       - uses: actions/checkout@v4
