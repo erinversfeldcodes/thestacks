@@ -2,13 +2,21 @@
 # scripts/check-slo-gate.sh — 10-min SLO gate for post-deploy health.
 #
 # Modes:
-#   production: scrape `/internal/metrics` on each Fly machine via `fly proxy`
-#               every 60s for PROBE_WINDOW_SECONDS, run probe-production.sh in
-#               parallel, then compute SLIs from the last scrape per machine.
+#   production: scrape `/internal/metrics` every 60s for PROBE_WINDOW_SECONDS,
+#               run probe-production.sh in parallel, then compute SLIs from
+#               the WINDOW DELTA between the first and last successful
+#               scrapes. Pre-gate samples (deploy warmup, late-finishing
+#               previous-deploy jobs) are excluded because Prometheus
+#               histograms/counters are cumulative since BEAM start — a
+#               raw last-scrape value conflates those with in-window traffic.
+#               Gauges (fuse state, BEAM memory) still use last-scrape
+#               values directly since "delta" isn't meaningful for them.
 #   test:       when METRICS_FIXTURE / METRICS_FIXTURES + PROBE_SUMMARY_FIXTURE
 #               are set, skip the live scrape + probe launch and read those
-#               fixtures directly. This is how the Phase 3 tests exercise the
-#               aggregation + SLI math without touching Fly.
+#               fixtures directly. An optional METRICS_FIRST_FIXTURE /
+#               METRICS_FIRST_FIXTURES can supply the window's first
+#               snapshot; when absent, the first snapshot is treated as
+#               all zeros (windowed == cumulative, backward compatible).
 #
 # Aggregation: SUM counters (upload terminals, Oban outcomes, Phoenix status),
 #              MAX gauges (BEAM memory, fuse state is boolean-combined: 0 if any
@@ -56,14 +64,28 @@ done
 
 # ── Test-mode fast path ──────────────────────────────────────────────────────
 # If fixture env vars are set, skip all live scraping / probe spawning.
+#
+# METRIC_FILES is the last-scrape(s); METRIC_FIRST_FILES is the first-scrape(s).
+# Histogram/counter SLIs are computed from the WINDOW delta (last - first), not
+# cumulative-since-BEAM-start values. Gauges (fuse state, BEAM memory) use
+# last-scrape values directly. If METRIC_FIRST_FIXTURE* is not set, the first
+# scrape is treated as empty (all counters at zero), which means the delta ==
+# the raw last-scrape values — a backward-compatible fallback that keeps single-
+# snapshot test fixtures working without modification.
 TEST_MODE=0
 METRIC_FILES=()
+METRIC_FIRST_FILES=()
 if [[ -n "${METRICS_FIXTURE:-}" ]]; then
     TEST_MODE=1
     METRIC_FILES=("$METRICS_FIXTURE")
 elif [[ -n "${METRICS_FIXTURES:-}" ]]; then
     TEST_MODE=1
     IFS=':' read -r -a METRIC_FILES <<< "$METRICS_FIXTURES"
+fi
+if [[ -n "${METRICS_FIRST_FIXTURE:-}" ]]; then
+    METRIC_FIRST_FILES=("$METRICS_FIRST_FIXTURE")
+elif [[ -n "${METRICS_FIRST_FIXTURES:-}" ]]; then
+    IFS=':' read -r -a METRIC_FIRST_FILES <<< "$METRICS_FIRST_FIXTURES"
 fi
 
 # ── Production mode: live scrape ─────────────────────────────────────────────
@@ -110,6 +132,7 @@ if [[ "$TEST_MODE" -eq 0 ]]; then
     # evaluates.
     SCRAPE_END=$(( $(date +%s) + WINDOW ))
     LAST_SCRAPE_FILE="$WORK_DIR/last-scrape.txt"
+    FIRST_SCRAPE_FILE="$WORK_DIR/first-scrape.txt"
     PUBLIC_METRICS_URL="https://${CORE_APP}.fly.dev/internal/metrics"
     while [[ $(date +%s) -lt $SCRAPE_END ]]; do
         # Note on `|| true`: curl's `-w "%{http_code}"` already writes
@@ -134,6 +157,14 @@ if [[ "$TEST_MODE" -eq 0 ]]; then
             fi
             echo "WARN scrape: http=$http_code size=$body_size — discarding"
             rm -f "$LAST_SCRAPE_FILE"
+        else
+            # Snapshot the FIRST successful scrape so p95/rate SLIs can be
+            # computed over the gate window (delta) rather than cumulative
+            # from BEAM start. Without this, pre-gate samples (warmup
+            # uploads, deploy-time probes) contaminate the measurement.
+            if [[ ! -f "$FIRST_SCRAPE_FILE" ]]; then
+                cp "$LAST_SCRAPE_FILE" "$FIRST_SCRAPE_FILE"
+            fi
         fi
 
         now=$(date +%s)
@@ -152,6 +183,12 @@ if [[ "$TEST_MODE" -eq 0 ]]; then
     # so existence here means the last iteration succeeded.
     if [[ -f "$LAST_SCRAPE_FILE" ]] && [[ -s "$LAST_SCRAPE_FILE" ]]; then
         METRIC_FILES+=("$LAST_SCRAPE_FILE")
+    fi
+    # Collect the first scrape for window-delta SLI computation. If no
+    # scrapes ever succeeded, this will be absent and the Python code
+    # treats the first scrape as zero (delta == cumulative — safe fallback).
+    if [[ -f "$FIRST_SCRAPE_FILE" ]] && [[ -s "$FIRST_SCRAPE_FILE" ]]; then
+        METRIC_FIRST_FILES+=("$FIRST_SCRAPE_FILE")
     fi
 
     # Extract the probe JSON summary from the probe's stdout log. The probe
@@ -197,8 +234,16 @@ export DEPLOY_COMPLETED_AT
 # JSON and pick an exit code from the aggregate `breached` flag.
 
 # Export shell values to Python via environment for the inline script.
-export METRIC_FILES_JSON
+export METRIC_FILES_JSON METRIC_FIRST_FILES_JSON
 METRIC_FILES_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${METRIC_FILES[@]}")"
+# First-scrape files are optional — if empty, Python treats first-snapshot as
+# all-zero and windowed == cumulative (backward compatible with single-
+# fixture tests).
+if [[ ${#METRIC_FIRST_FILES[@]} -gt 0 ]]; then
+    METRIC_FIRST_FILES_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${METRIC_FIRST_FILES[@]}")"
+else
+    METRIC_FIRST_FILES_JSON="[]"
+fi
 
 BLOB="$(python3 - <<'PY'
 import json
@@ -206,6 +251,7 @@ import os
 import sys
 
 metric_files = json.loads(os.environ.get("METRIC_FILES_JSON") or "[]")
+metric_first_files = json.loads(os.environ.get("METRIC_FIRST_FILES_JSON") or "[]")
 probe_summary_path = os.environ.get("PROBE_SUMMARY_FIXTURE") or ""
 commit_sha = os.environ.get("COMMIT_SHA") or ""
 deploy_started_at = os.environ.get("DEPLOY_STARTED_AT") or ""
@@ -299,57 +345,116 @@ def label_key(labels):
     return tuple(sorted(labels.items()))
 
 
-merged: dict[str, dict[tuple, dict]] = {}
-# Track per-machine BEAM memory totals separately so we can MAX across
-# machines after summing the per-category gauges within each machine. (A
-# naive MAX on each category independently would over-count when machines
-# have asymmetric category breakdowns.)
-per_machine_beam_bytes: list[float] = []
-for path in metric_files:
-    try:
-        with open(path) as f:
-            parsed = parse_prom(f.read())
-    except OSError:
-        continue
-    machine_beam = 0.0
-    for mem_name in BEAM_MEMORY_METRICS:
-        for row in parsed.get(mem_name, []):
-            machine_beam += row["value"]
-    per_machine_beam_bytes.append(machine_beam)
-    for name, rows in parsed.items():
-        bucket = merged.setdefault(name, {})
-        for row in rows:
-            k = label_key(row["labels"])
-            if k in bucket:
-                # Reviewer P2 #6: check GAUGE_NAMES exact-match FIRST so a
-                # future gauge accidentally named `foo_total` is still MAX-
-                # aggregated, not SUM. Explicit counter names also take
-                # priority over suffix heuristics for the same reason.
-                if name in GAUGE_NAMES:
-                    # Special case fuse state: MIN (because 0 = open, worse).
-                    if name == "stacks_fuse_state_state":
-                        bucket[k]["value"] = min(bucket[k]["value"], row["value"])
+def merge_scrape_files(paths: list[str]):
+    """Parse + merge a list of Prometheus scrape files into one view.
+
+    Returns `(merged, per_machine_beam_bytes)`:
+      * merged: dict[name, dict[label_key, {labels, value}]]
+      * per_machine_beam_bytes: list of total bytes per file (for MAX-
+        across-machines computation elsewhere).
+    """
+    merged: dict[str, dict[tuple, dict]] = {}
+    per_machine_beam: list[float] = []
+    for path in paths:
+        try:
+            with open(path) as f:
+                parsed = parse_prom(f.read())
+        except OSError:
+            continue
+        machine_beam = 0.0
+        for mem_name in BEAM_MEMORY_METRICS:
+            for row in parsed.get(mem_name, []):
+                machine_beam += row["value"]
+        per_machine_beam.append(machine_beam)
+        for name, rows in parsed.items():
+            bucket = merged.setdefault(name, {})
+            for row in rows:
+                k = label_key(row["labels"])
+                if k in bucket:
+                    # Reviewer P2 #6: check GAUGE_NAMES exact-match FIRST so a
+                    # future gauge accidentally named `foo_total` is still MAX-
+                    # aggregated, not SUM. Explicit counter names also take
+                    # priority over suffix heuristics for the same reason.
+                    if name in GAUGE_NAMES:
+                        # Special case fuse state: MIN (because 0 = open, worse).
+                        if name == "stacks_fuse_state_state":
+                            bucket[k]["value"] = min(bucket[k]["value"], row["value"])
+                        else:
+                            bucket[k]["value"] = max(bucket[k]["value"], row["value"])
+                    elif name in COUNTER_NAMES or name.endswith(
+                        ("_total", "_bucket", "_sum", "_count")
+                    ):
+                        bucket[k]["value"] += row["value"]
                     else:
+                        # Default: overwrite (gauges) — but treat conservatively.
                         bucket[k]["value"] = max(bucket[k]["value"], row["value"])
-                elif name in COUNTER_NAMES or name.endswith(
-                    ("_total", "_bucket", "_sum", "_count")
-                ):
-                    bucket[k]["value"] += row["value"]
                 else:
-                    # Default: overwrite (gauges) — but treat conservatively.
-                    bucket[k]["value"] = max(bucket[k]["value"], row["value"])
-            else:
-                bucket[k] = {"labels": dict(row["labels"]), "value": row["value"]}
+                    bucket[k] = {"labels": dict(row["labels"]), "value": row["value"]}
+    return merged, per_machine_beam
+
+
+# `merged` is the last-scrape view: used for gauges (fuse state, BEAM memory).
+# `first_merged` is the first-scrape view: subtracted from `merged` to build
+# the windowed view used by rate + histogram SLIs. This makes `upload_p95_ms`
+# and friends reflect only traffic that occurred during the gate window —
+# pre-gate samples (deploy-time warmup probes, late-resolving Oban jobs from
+# previous deploys) no longer contaminate the measurement.
+#
+# If `first_merged` is empty (no first-scrape available, e.g. single-fixture
+# test mode, or prod run where no scrape ever succeeded), `windowed` falls
+# back to last values == cumulative. Backward compatible.
+merged, per_machine_beam_bytes = merge_scrape_files(metric_files)
+first_merged, _ = merge_scrape_files(metric_first_files)
+
+# Build windowed view. Counter/histogram series get last - first (clamped
+# non-negative for machine-swap safety); gauges pass through unchanged.
+windowed: dict[str, dict[tuple, dict]] = {}
+_machine_swap_warned = False
+for name, last_bucket in merged.items():
+    windowed_bucket: dict[tuple, dict] = {}
+    first_bucket = first_merged.get(name, {})
+    is_gauge = name in GAUGE_NAMES
+    for k, row in last_bucket.items():
+        if is_gauge:
+            windowed_bucket[k] = row
+        else:
+            first_val = first_bucket.get(k, {}).get("value", 0.0)
+            delta = row["value"] - first_val
+            if delta < 0:
+                # Cumulative counter went backwards between scrapes. Either
+                # the BEAM restarted mid-window (redeploy, OOM) or Fly's
+                # proxy served scrapes from two machines with independent
+                # counters. Neither yields a meaningful delta — clamp to 0
+                # and flag once so the gate output notes the anomaly.
+                delta = 0.0
+                if not _machine_swap_warned:
+                    print(
+                        "WARN: cumulative counter regressed between scrapes — "
+                        "likely BEAM restart or Fly proxy machine swap mid-window. "
+                        "Affected windowed deltas clamped to zero.",
+                        file=sys.stderr,
+                    )
+                    _machine_swap_warned = True
+        windowed_bucket[k] = {**row, "value": delta} if not is_gauge else row
+    windowed[name] = windowed_bucket
 
 
 def rows_for(name: str):
+    """Cumulative values from the last scrape — used for gauges."""
     return list(merged.get(name, {}).values())
 
 
+def windowed_rows_for(name: str):
+    """Windowed (last - first) values — used for rate + histogram SLIs."""
+    return list(windowed.get(name, {}).values())
+
+
 # ── Histogram p95 via bucket interpolation ──────────────────────────────────
+# p95 reads from the WINDOWED view — bucket counts are last - first, giving
+# the distribution of samples that arrived during the gate window only.
 def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
     rows = [
-        r for r in rows_for(metric)
+        r for r in windowed_rows_for(metric)
         if r["labels"].get(group_label) == target_group
     ]
     # Collect (le_float, cumulative_count).
@@ -387,8 +492,12 @@ def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
 
 
 def histogram_p95(metric: str):
-    """p95 across a non-labelled histogram (e.g. ecto queue_time)."""
-    rows = rows_for(metric)
+    """p95 across a non-labelled histogram (e.g. ecto queue_time).
+
+    Reads windowed (last - first) bucket counts so pre-gate samples don't
+    contaminate the measurement.
+    """
+    rows = windowed_rows_for(metric)
     buckets: list[tuple[float, float]] = []
     for r in rows:
         le = r["labels"].get("le")
@@ -492,7 +601,9 @@ slis.append(
 HTTP_MIN_SAMPLES = 50
 http_total = 0.0
 http_5xx = 0.0
-for r in rows_for("core_prom_ex_phoenix_http_requests_total"):
+# Windowed: only 5xxes from the gate window count, not cumulative since
+# BEAM start. Otherwise a single 500 pre-gate could false-breach forever.
+for r in windowed_rows_for("core_prom_ex_phoenix_http_requests_total"):
     status = str(r["labels"].get("status", ""))
     http_total += r["value"]
     if status.startswith("5"):
@@ -556,9 +667,12 @@ for group, threshold, name in [
 # separately record whether the sample was absent entirely —
 # `metrics_scrape_healthy` above catches scrape-channel failure.
 UPLOAD_MIN_SAMPLES = 5
+# Windowed: only terminals that fired during the gate window count. Pre-gate
+# resolves/rejects (warmup uploads, late-finishing previous-deploy jobs)
+# aren't part of the SLO measurement.
 terminal = {
     r["labels"].get("outcome", ""): r["value"]
-    for r in rows_for("stacks_upload_terminal_count_total")
+    for r in windowed_rows_for("stacks_upload_terminal_count_total")
 }
 total_terminal = sum(terminal.values())
 resolved = terminal.get("resolved", 0)
@@ -596,10 +710,12 @@ OBAN_MIN_SAMPLES = 10
 OBAN_SUCCESS_COUNT = "core_prom_ex_oban_job_processing_duration_milliseconds_count"
 OBAN_FAILURE_COUNT = "core_prom_ex_oban_job_exception_duration_milliseconds_count"
 queues: dict[str, dict[str, float]] = {}
-for r in rows_for(OBAN_SUCCESS_COUNT):
+# Windowed: per-queue failure rate reflects only jobs that completed during
+# the gate window, not cumulative lifetime counts.
+for r in windowed_rows_for(OBAN_SUCCESS_COUNT):
     q = r["labels"].get("queue", "unknown")
     queues.setdefault(q, {"success": 0.0, "failure": 0.0})["success"] += r["value"]
-for r in rows_for(OBAN_FAILURE_COUNT):
+for r in windowed_rows_for(OBAN_FAILURE_COUNT):
     q = r["labels"].get("queue", "unknown")
     queues.setdefault(q, {"success": 0.0, "failure": 0.0})["failure"] += r["value"]
 for q, states in queues.items():
@@ -662,7 +778,9 @@ def _queue_samples_for(repo_label: str) -> int:
     # `*_count` is a counter — pick the le="+Inf" row (which carries the
     # total sample count for the histogram) OR sum the count metric's
     # per-label value. PromEx emits a single count row per repo.
-    for r in rows_for(DB_QUEUE_COUNT_METRIC):
+    # Windowed so the min-samples floor reflects in-window volume, not
+    # cumulative lifetime count.
+    for r in windowed_rows_for(DB_QUEUE_COUNT_METRIC):
         if r["labels"].get("repo") == repo_label:
             return int(r["value"])
     return 0

@@ -776,27 +776,29 @@ elif [[ "$PROD_MODE" -eq 1 ]]; then
 fi
 
 # ── Vision pipeline warmup ────────────────────────────────────────────────────
-# Pre-warm Modal's vision containers before the SLO gate (or E2E tests) start
-# probing. Without this the gate's first probe iteration IS the first request
-# post-deploy — every /analyze call hits a cold H100 container (~30-60s to
-# load vLLM + model weights into GPU memory). The gate's 6-parallel-canary
-# burst forces Modal to scale out, so several containers cold-start
-# concurrently; those slow samples live in the p95's top 5 %, dragging the
-# measurement ~1.5 s above the steady-state figure.
+# Queue 6 warmup uploads so Modal starts scaling out before the SLO gate
+# starts probing. The gate fires 6 parallel canaries every 15s; queueing 6
+# Oban vision jobs upfront causes Modal to spawn 6 containers in parallel
+# with the gate's own cold-start demand.
 #
-# Strategy: fire all 6 gate canaries in parallel so Modal spawns the same
-# container count the gate will demand. `scaledown_window=1200` (20 min on
-# the @app.cls decorator) keeps them warm through the 10-min gate window.
+# We do NOT stream the SSE `/api/upload/:id/stream` route during warmup.
+# That route shares route_group=:upload with the gate's probes, and its
+# duration is cumulative in the `upload_p95_ms` histogram for the
+# lifetime of the BEAM. An earlier version waited for SSE to resolve —
+# cold-start delays produced 8-minute SSE samples that dominated the
+# gate's p95 (which is sample #147 of ~154: 5 long samples = blown).
 #
-# Credentials: PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD (same vars
-# check-slo-gate.sh uses — set in the production workflow from
-# PROD_OWNER_EMAIL / PROD_OWNER_PASSWORD secrets). Dev defaults
+# Fire-and-forget via POST is enough. The Oban vision queue picks up the
+# 6 jobs and exercises Modal; container warming happens in parallel with
+# check-slo-gate.sh starting up. `scaledown_window=1200` on the @app.cls
+# decorator keeps warmed containers alive through the full 10-min gate.
+#
+# Credentials: PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD — set at job-level
+# in the production workflow from PROD_OWNER_* secrets. Dev defaults
 # (owner@thestacks.app / dev-password-123) match the seeded preview user.
 #
-# Failure handling: an individual upload or stream timeout is a WARN, not a
-# FAIL — a warmup that couldn't complete still partially pre-spawned
-# containers, which is better than no warmup. Only auth failure is fatal,
-# since it implies the new deploy can't talk to its own auth endpoint.
+# Failure handling: upload acceptance (HTTP 202) is the success signal;
+# anything else is a WARN. Only auth failure is fatal.
 
 WARMUP_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
 WARMUP_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
@@ -904,57 +906,20 @@ for img in "${warmup_canaries[@]}"; do
     fi
 done
 
-if [[ ${#warmup_ids[@]} -eq 0 ]]; then
-    echo "WARN warmup: all uploads failed — app may be broken, but the deploy step already passed health checks"
-    rm -rf "${warmup_dir}"
-    echo ""
-    echo "PASS deploy: stack is live at ${CORE_URL}"
-    echo "    Core app:    ${CORE_APP}"
-    echo "    Modal app:   ${MODAL_APP}"
-    echo "    Neon branch: ${NEON_BRANCH_NAME}"
-    exit 0
-fi
-
-# Stream each pipeline's SSE channel so Modal runs the full /analyze call
-# and spawns a container per concurrent request (up to max_containers=10).
-# Bound by --max-time 480 (8 min) — a cold H100 container should boot
-# within this; if not, Modal is unhealthy enough that the gate will catch
-# it regardless.
-echo "    Streaming ${#warmup_ids[@]} warmup pipelines in parallel (up to 8 min each)..."
-stream_pids=()
-for img_id in "${warmup_ids[@]}"; do
-    (
-        stream_resp="$(curl -4 -sf --max-time 480 \
-            "${CORE_URL}/api/upload/${img_id}/stream?token=${smoke_token}" \
-            2>/dev/null || true)"
-        echo "${stream_resp}" | python3 -c \
-            "import json,sys
-lines=[l.strip() for l in sys.stdin if l.startswith('data:')]
-d=json.loads(lines[-1][5:]) if lines else {}
-print(d.get('status','timeout'))" \
-            > "${warmup_dir}/status_${img_id}" 2>/dev/null \
-            || echo "timeout" > "${warmup_dir}/status_${img_id}"
-    ) &
-    stream_pids+=("$!")
-done
-for pid in "${stream_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
-
-all_terminal=1
-for img_id in "${warmup_ids[@]}"; do
-    img_status="$(cat "${warmup_dir}/status_${img_id}" 2>/dev/null || echo "timeout")"
-    echo "    ${img_id}: ${img_status}"
-    if [[ "${img_status}" != "resolved" && "${img_status}" != "rejected" ]]; then
-        all_terminal=0
-    fi
-done
 rm -rf "${warmup_dir}"
 
-if [[ $all_terminal -eq 1 ]]; then
-    echo "PASS warmup: all ${#warmup_ids[@]} pipelines resolved/rejected — Modal containers warm"
+if [[ ${#warmup_ids[@]} -eq 0 ]]; then
+    echo "WARN warmup: all uploads failed — app may be broken, but the deploy step already passed health checks"
+elif [[ ${#warmup_ids[@]} -lt ${#warmup_canaries[@]} ]]; then
+    echo "WARN warmup: only ${#warmup_ids[@]}/${#warmup_canaries[@]} canaries accepted — partial queue"
 else
-    echo "WARN warmup: one or more pipelines timed out — Modal may still be partially cold"
-    echo "    The SLO gate will likely still pass, but p95 may reflect the remaining cold-start tail."
+    echo "PASS warmup: ${#warmup_ids[@]} canaries queued — Oban vision jobs will scale Modal in parallel with the gate"
 fi
+
+# Brief pause so the Oban vision queue can pick up the jobs before the gate
+# starts probing. 15 seconds is enough for Oban to pull + start them; Modal
+# cold-start runs in parallel with check-slo-gate.sh from there.
+sleep 15
 
 # ── Output ───────────────────────────────────────────────────────────────────
 echo ""

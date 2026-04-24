@@ -551,6 +551,110 @@ else
     _record_fail "upload_success_rate should breach when (resolved+rejected)/total < 0.90"
 fi
 
+# ── Case 17: windowed p95 excludes pre-gate histogram samples ────────────────
+# Regression guard for "cumulative-histogram p95 pollutes the gate measurement
+# with pre-gate samples" — e.g. 8-minute SSE streams from deploy warmup would
+# previously live in the top-5% tail and blow `upload_p95_ms` on an otherwise-
+# healthy gate. With windowing, only samples that arrived between the first
+# and last gate scrapes count; pre-gate traffic is subtracted out.
+#
+# Fixture design:
+#   first snapshot: 100 slow samples already in the histogram (le=5000), plus
+#                   5 very slow samples (le=+Inf).
+#   last snapshot:  same 100 slow + 5 very slow (unchanged from first) PLUS
+#                   50 fast samples (le=50). During the gate window only fast
+#                   traffic landed; the pre-gate tail must NOT pull p95 up.
+test_case "windowed_p95_excludes_pre_gate" \
+    "first+last scrape delta excludes pre-gate histogram samples"
+
+first_scrape="$(mktemp)"
+cat > "$first_scrape" <<'EOF'
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 105
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 2000000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 105
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+
+last_scrape="$(mktemp)"
+cat > "$last_scrape" <<'EOF'
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 50
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 50
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 50
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 150
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 155
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 2002500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 155
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIRST_FIXTURE="$first_scrape" \
+METRICS_FIXTURE="$last_scrape" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$first_scrape" "$last_scrape" "$probe_fixture"
+
+# Without windowing: p95 is in [2000, 5000] with cumulative=155 → interpolates
+# to ~4000ms (blown).
+# With windowing: 50 windowed samples, all in [0, 50] → p95 ≤ 50ms.
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="upload_p95_ms") | .value <= 100' \
+        >/dev/null 2>&1; then
+    _record_pass "upload_p95_ms reflects windowed delta (≤100ms, fast samples only)"
+else
+    _record_fail "upload_p95_ms did not reflect windowing (expected ≤100, got $(echo "$BLOB" | jq '.slis[] | select(.name=="upload_p95_ms") | .value'))"
+fi
+assert_exit_zero "$RC" "gate passes when windowed p95 is fast"
+
+# ── Case 18: machine-swap clamp ──────────────────────────────────────────────
+# If last-scrape cumulative < first-scrape cumulative (e.g. Fly proxy served
+# scrapes from two machines with independent counters, or BEAM restarted
+# mid-window), the raw delta is negative. Python clamps to 0; the resulting
+# windowed SLI should not breach on bogus negative counts.
+test_case "windowed_machine_swap_clamps_to_zero" \
+    "negative delta (machine swap) clamps to zero instead of producing noise"
+
+first_scrape="$(mktemp)"
+cat > "$first_scrape" <<'EOF'
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 200
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 4000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 200
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+
+last_scrape="$(mktemp)"
+cat > "$last_scrape" <<'EOF'
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 10
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 10
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 200
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 10
+core_prom_ex_beam_memory_processes_total_bytes 100000000
+EOF
+
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIRST_FIXTURE="$first_scrape" \
+METRICS_FIXTURE="$last_scrape" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$first_scrape" "$last_scrape" "$probe_fixture"
+
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '.slis[] | select(.name=="upload_p95_ms") | .value == 0' \
+        >/dev/null 2>&1; then
+    _record_pass "windowed p95=0 on machine-swap (negative delta clamped)"
+else
+    _record_fail "machine-swap clamp failed — got $(echo "$BLOB" | jq '.slis[] | select(.name=="upload_p95_ms") | .value')"
+fi
+
 # ── Case 16 (P2 #7): --out without a value exits non-zero ────────────────────
 test_case "out_flag_bounds_check" "--out with no following argument fails fast"
 probe_fixture="$(mktemp)"
