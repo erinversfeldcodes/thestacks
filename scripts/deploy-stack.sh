@@ -244,27 +244,24 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
 
     echo ""
     echo "==> Deploying vision service to Modal (app: ${MODAL_APP})..."
-    # Reviewer P1 #1: in prod mode, retry the Modal deploy once on failure.
-    # Preview mode keeps the original fail-fast behaviour so existing callers
-    # (and per-PR ephemeral stacks) aren't silently slowed down by flakes.
+    # Retry-once + hard-fail for both prod and preview. Unified 2026-04-24 —
+    # preview was previously fail-fast to avoid slowing ephemeral stacks on
+    # transient flakes, but a broken Modal vision deploy produces a preview
+    # where E2E tests flake confusingly rather than fail cleanly. One retry
+    # absorbs Modal-side flakes in either environment.
     _modal_deploy_once() {
         MODAL_APP_NAME="${MODAL_APP}" \
         MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
             python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1
     }
-    if [[ "$PROD_MODE" -eq 1 ]]; then
+    if ! modal_deploy_output="$(_modal_deploy_once)"; then
+        echo "    retry: Modal vision deploy failed once; retrying in 5s..."
+        sleep 5
         if ! modal_deploy_output="$(_modal_deploy_once)"; then
-            echo "    retry: Modal vision deploy failed once; retrying in 5s..."
-            sleep 5
-            if ! modal_deploy_output="$(_modal_deploy_once)"; then
-                echo "$modal_deploy_output"
-                echo "FAIL deploy: Modal vision deploy failed twice; aborting before core" >&2
-                exit 1
-            fi
+            echo "$modal_deploy_output"
+            echo "FAIL deploy: Modal vision deploy failed twice; aborting before core" >&2
+            exit 1
         fi
-    else
-        modal_deploy_output="$(_modal_deploy_once)" \
-            || { echo "$modal_deploy_output"; echo "FAIL deploy: Modal vision deploy failed"; exit 1; }
     fi
     echo "$modal_deploy_output"
 
@@ -330,21 +327,15 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
             --image-label "pr-${SANITISED}" \
             --depot=false)
     }
-    if [[ "$PROD_MODE" -eq 1 ]]; then
-        # Prod: retry-once then hard-fail (P1 #1). A silent scraper outage
-        # in prod breaks price discovery — must not be tolerated silently.
-        if deploy_with_retry "scraper" _scraper_deploy_once; then
-            echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
-        else
-            exit 1
-        fi
+    # Retry-once + hard-fail for both prod and preview. Unified 2026-04-24 —
+    # a scraper deploy failure produces a preview where price enrichment is
+    # silently degraded, which makes E2E tests flaky in ways unrelated to
+    # the PR. Better to fail the deploy and surface the scraper issue
+    # directly. Retry-once absorbs transient Fly flakes.
+    if deploy_with_retry "scraper" _scraper_deploy_once; then
+        echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
     else
-        if _scraper_deploy_once; then
-            echo "PASS deploy: scraper deployed at ${SCRAPER_INTERNAL_URL}"
-        else
-            echo "WARN deploy: scraper deployment failed — core will degrade gracefully"
-            SCRAPER_INTERNAL_URL=""
-        fi
+        exit 1
     fi
 elif [[ -z "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo "WARN: SCRAPER_HMAC_SECRET not set — skipping scraper deploy."
@@ -402,60 +393,37 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
             --yes)
     }
 
-    _searxng_success=0
-    if [[ "$PROD_MODE" -eq 1 ]]; then
-        # SearXNG is in the SLO gate's hot path via /internal/deps-check.
-        # If it can't come up healthy, the gate pollutes its measurements:
-        # availability drops, real_5xx_rate rises from deps-check 503s,
-        # downstream latency SLIs may shift because catalogue-path calls
-        # touch SearXNG, and db_pool_queue_p95_ms can creep up from
-        # retries eating connections. All false signals relative to
-        # core's actual health.
-        #
-        # Earlier policy was WARN-and-continue on SearXNG failure (on
-        # the reasoning that search is non-critical). The gate-pollution
-        # problem means that's not an acceptable trade: a SearXNG
-        # outage would cause the gate to breach on derived signals and
-        # roll core back on a bad diagnosis. Block the deploy up front
-        # instead so the rollback path fires on a clean, named signal.
-        #
-        # Preview mode keeps WARN-and-continue — ephemeral branches
-        # aren't rolled back on search-dependency health.
-        if ! deploy_with_retry "searxng" _searxng_deploy_once; then
-            rm -f "${SETTINGS_RENDERED}"
-            echo "FAIL deploy: SearXNG deployment failed after retry — aborting prod release so the gate doesn't run on a polluted SearXNG signal" >&2
-            exit 1
-        fi
-
-        # SearXNG's first-passing-check can take 3–4 minutes on a
-        # cold deploy: custom image build + 512MB VM allocation +
-        # Python startup + engine loading. Observed 234s on the
-        # 2026-04-20 run — an earlier 90s timeout cleared
-        # SEARXNG_URL on core and broke deps-check. 300s gives room.
-        echo "==> Verifying SearXNG health via fly status (up to 300s)..."
-        if ! wait_for_fly_checks "${SEARXNG_APP}" 300; then
-            rm -f "${SETTINGS_RENDERED}"
-            echo "FAIL deploy: SearXNG deploy returned 0 but fly status never reported started+passing within 300s — aborting prod release" >&2
-            exit 1
-        fi
-        _searxng_success=1
-        echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
-    else
-        if _searxng_deploy_once; then
-            _searxng_success=1
-            echo "PASS deploy: SearXNG deployed at ${SEARXNG_INTERNAL_URL} (preview — no health probe)"
-        fi
+    # Retry-once + hard-fail + 300s health check, unified across prod and
+    # preview (2026-04-24). SearXNG is in the SLO gate's hot path via
+    # /internal/deps-check. If it can't come up healthy, the gate pollutes
+    # its measurements: availability drops, real_5xx_rate rises from
+    # deps-check 503s, downstream latency SLIs shift because catalogue-
+    # path calls touch SearXNG, and db_pool_queue_p95_ms creeps up from
+    # retries eating connections. All false signals relative to core's
+    # actual health. Hard-fail up front so the rollback path (prod) or PR
+    # break (preview) fires on a clean named signal rather than a noisy
+    # gate breach on a derived metric.
+    #
+    # SearXNG's first-passing-check can take 3–4 minutes on a cold deploy:
+    # custom image build + 512MB VM allocation + Python startup + engine
+    # loading. Observed 234s on the 2026-04-20 run — an earlier 90s
+    # timeout cleared SEARXNG_URL on core and broke deps-check. 300s
+    # gives room.
+    if ! deploy_with_retry "searxng" _searxng_deploy_once; then
+        rm -f "${SETTINGS_RENDERED}"
+        echo "FAIL deploy: SearXNG deployment failed after retry — aborting so the gate doesn't run on a polluted SearXNG signal" >&2
+        exit 1
     fi
+
+    echo "==> Verifying SearXNG health via fly status (up to 300s)..."
+    if ! wait_for_fly_checks "${SEARXNG_APP}" 300; then
+        rm -f "${SETTINGS_RENDERED}"
+        echo "FAIL deploy: SearXNG deploy returned 0 but fly status never reported started+passing within 300s — aborting" >&2
+        exit 1
+    fi
+    echo "PASS deploy: SearXNG healthy at ${SEARXNG_INTERNAL_URL}"
 
     rm -f "${SETTINGS_RENDERED}"
-
-    # Preview-only failure path — prod has already exited on failure
-    # above. Core still has SEARXNG_URL from fly.core.toml [env] if it
-    # were to reach the gate on a degraded preview, but we don't gate
-    # preview anyway.
-    if [[ "$_searxng_success" -eq 0 ]]; then
-        echo "WARN deploy: SearXNG deployment failed (preview) — core will degrade gracefully"
-    fi
 else
     echo "WARN: SEARXNG_SECRET_KEY not set — skipping SearXNG deploy."
     SEARXNG_INTERNAL_URL=""
