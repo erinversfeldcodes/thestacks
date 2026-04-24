@@ -32,6 +32,21 @@ This ADR captures the current state of the vision service after that evolution, 
 
 Until then: treat 2000 ms as the aspiration and 3000 ms as the breach floor. A gate run that lands between 2000 and 3000 ms is a signal to look at phase-level telemetry (Modal inference vs ISBN resolution vs persistence) before declaring the run "fine".
 
+### Pre-gate warmup (added 2026-04-23)
+
+The first post-H100 gate runs landed at 3474–3556 ms despite steady-state telemetry showing `identify_book` p95 = 1224 ms. Analysis pointed at Modal cold-start concentration: the gate was the first request against a fresh Modal deploy, so the gate's 6-parallel-canary burst forced Modal to scale out from zero, with each new H100 container paying a 30–60 s cold-start. Those ~5 slowest samples (p95 is the 95th percentile) dominated the reported p95 even though they represented <5 % of total traffic.
+
+**Mitigation:** `scripts/deploy-stack.sh` now queues 6 warmup uploads at the end of every deploy, _before_ the SLO gate starts:
+
+1. Authenticates with `PROBE_SEED_EMAIL` / `PROBE_SEED_PASSWORD` (same credentials check-slo-gate uses).
+2. Fires 6 canary `POST /api/upload` requests in parallel — matching the gate's burst width so Modal spawns the same container count the gate will demand.
+3. Verifies HTTP 202 acceptance (~100 ms per POST) but **does NOT** stream the SSE `/api/upload/:id/stream` response.
+4. Sleeps 15 s so the Oban vision queue can pick up the jobs, then exits. Modal cold-start runs in parallel with `check-slo-gate.sh`.
+
+**Why no SSE stream:** the SSE route shares `route_group=:upload` with the gate's probes, and its duration accumulates in the `upload_p95_ms` histogram for the lifetime of the BEAM. An earlier version streamed SSE with an 8-minute timeout — 5 cold-start-delayed warmup streams produced 8-minute samples that landed in the gate's p95 sample pool (sample #147 of 154), blowing the measurement to 4109 ms on what would otherwise have been a healthy run. Fire-and-forget via POST only keeps the histogram clean.
+
+With `scaledown_window=1200` (20 min on the `@app.cls` decorator), the containers spawned during warmup stay warm through the subsequent 10-min gate window. Expected gate p95 with warmup active: **1500–2000 ms** (steady-state + modest probe-burst variance).
+
 ---
 
 ## Decision
@@ -74,9 +89,13 @@ Swapped from A10G (24 GB, Ampere bf16) to H100 (80 GB, Hopper with FP8 tensor co
 
 **Cost:** Modal A10G ~$1.20/hr, H100 ~$4–5/hr. At `max_containers=10` the theoretical peak is ~$40–50/hr; real utilisation averages well below that because `scaledown_window=1200` lets idle containers release. A monthly spend-cap alert is a prerequisite for this configuration — we hit the workspace cap once during evaluation when a gate burst ran with no headroom.
 
-### 6. Pinned region (`region="us-east"`)
+### 6. Region placement (unpinned, 2026-04-23)
 
-Modal GPU in the same region as Fly IAD and Neon us-east-1. Without pinning, Modal's scheduler places containers wherever capacity exists — a us-west placement adds ~60 ms Fly→Modal RTT per call, compounding with cold starts. Tradeoff: H100 availability in us-east is tighter than A10G, and if the pool is exhausted, scheduling blocks rather than falling back. Watch `[:stacks, :vision, :request, :stop]` tail latency after any GPU-class change — capacity-bound bursts can push single calls to 30 s+.
+Initially pinned to `region="us-east"` to keep the Modal GPU co-located with Fly IAD (core) and Neon us-east-1 (DB). That trade-off was reconsidered after the first post-H100 CI gate (commit `a66901e`) regressed `upload_p95_ms` to 3556 ms — against a 2074 ms local warm baseline, with 0 % vision failure rate and the vision fuse closed. The signal shape (healthy downstream, slow inference) pointed at Modal scheduler wait, not model or correctness issues. H100 capacity in us-east is tighter than A10G's was, and a pinned region blocks rather than falls back when the regional pool is exhausted.
+
+The decision was to unpin. Cross-region placement (e.g. us-west) adds ~60 ms Fly→Modal RTT per call; at a 2000–3000 ms p95 budget, 60 ms is rounding error and multi-second scheduling wait was not. Neon is unaffected — vision does not talk to Neon directly.
+
+**Reverting is cheap:** add `region="us-east"` back to the `@app.cls` decorator in `modal_app.py`. The signal that would justify reverting is `[:stacks, :vision, :request, :stop]` p95 consistently more than ~200 ms higher than the historical us-east median. If pinning is reintroduced for capacity reasons, pair it with `min_containers=1` so the scheduler never has to cold-start under load, or switch to L40S (broader availability, lower cost).
 
 ### 7. Concurrency caps (`max_inputs=8`, `max_containers=10`)
 
