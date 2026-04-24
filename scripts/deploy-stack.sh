@@ -46,13 +46,13 @@ fi
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
-# ── Retry helper (prod only) ─────────────────────────────────────────────────
-# Reviewer P1 #1: transient Fly/Modal/network flakes used to surface as a
-# skipped SLO gate in prod, which left the rollback step inactive (its `if`
-# pointed only at the gate's conclusion). Wrap every non-core component
-# deploy in this helper — two attempts, then a hard exit. A hard failure
-# here happens BEFORE core deploys, so no user-facing code is ever published
-# in a half-upgraded state.
+# ── Helpers ──────────────────────────────────────────────────────────────────
+# Run a deploy command, retry once on failure, hard-fail if the retry also
+# fails. Used for every non-core component (Modal vision, scraper, SearXNG,
+# log-shipper) in both prod and preview modes — transient Fly/Modal/network
+# flakes are the common failure, and one retry absorbs them without
+# tolerating genuinely-broken deploys. Hard-fail happens BEFORE core deploy,
+# so no user-facing code is ever published on a half-upgraded stack.
 deploy_with_retry() {
     local name="$1"; shift
     if "$@"; then return 0; fi
@@ -61,6 +61,34 @@ deploy_with_retry() {
     if "$@"; then return 0; fi
     echo "FAIL deploy: ${name} failed twice; aborting before core deploy" >&2
     return 1
+}
+
+# `fly apps create` is idempotent but prints a confusing "App already exists"
+# error to stderr with exit code 1 on subsequent calls. Swallow both so the
+# script's own failure signals stay legible.
+ensure_fly_app() {
+    fly apps create "$1" 2>&1 | grep -v "^Error" || true
+}
+
+# All machine IDs for an app (one per line). Empty output = no machines.
+fly_machine_ids() {
+    fly machines list --app "$1" --json 2>/dev/null \
+        | python3 -c "
+import json,sys
+for m in json.load(sys.stdin):
+    print(m['id'])
+" 2>/dev/null || true
+}
+
+# ID of the first started machine for an app, or empty if none started.
+fly_machine_started_id() {
+    fly machines list --app "$1" --json 2>/dev/null \
+        | python3 -c "
+import json,sys
+machines = json.load(sys.stdin)
+started = [m for m in machines if m.get('state') == 'started']
+print(started[0]['id'] if started else '')
+" 2>/dev/null || true
 }
 
 # Verify that a Fly app has at least one started machine with all its
@@ -121,13 +149,13 @@ fi
 # ── Branch name → Fly app name ────────────────────────────────────────────────
 BRANCH=""
 # Production mode: stable app names + existing prod DB (no Neon branch).
-# Driven by --production or $STACKS_CORE_PROD=true. Off by default to keep
-# the preview flow identical for existing callers.
+# Driven exclusively by the --production arg (explicit at the call site).
+# An earlier version also honoured $STACKS_CORE_PROD=true, but a stale
+# export in an operator's shell would silently promote a preview deploy to
+# prod — an env-var entry point without a visible invocation cue. Dropped
+# 2026-04-24; the GitHub production workflow now passes --production
+# directly.
 PROD_MODE=0
-if [[ "${STACKS_CORE_PROD:-}" == "true" ]] || [[ "${STACKS_CORE_PROD:-}" == "1" ]]; then
-    PROD_MODE=1
-fi
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --branch) BRANCH="$2"; shift 2 ;;
@@ -313,7 +341,7 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     if [[ "$PROD_MODE" -eq 0 ]]; then
         fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
-    fly apps create "${SCRAPER_APP}" 2>&1 || true
+    ensure_fly_app "${SCRAPER_APP}"
 
     fly secrets set \
         SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}" \
@@ -356,7 +384,7 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     if [[ "$PROD_MODE" -eq 0 ]]; then
         fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
-    fly apps create "${SEARXNG_APP}" 2>&1 || true
+    ensure_fly_app "${SEARXNG_APP}"
 
     # If the previous deploy pushed the app into a `suspended` state (N
     # consecutive OOM-kill restart attempts), resume before we try again.
@@ -435,7 +463,7 @@ fi
 # entry on macOS that breaks all subsequent curl/Node DNS lookups for 5+ min.
 echo ""
 echo "==> Creating ephemeral Fly app (if not already exists)..."
-fly apps create "${CORE_APP}" 2>&1 || true  # noop if app already exists
+ensure_fly_app "${CORE_APP}"
 
 # Allocate a shared IPv4 address. Fly apps on the Machines platform get IPv6-only
 # by default, which means `curl -4` (and GitHub runners, which lack IPv6 connectivity
@@ -562,15 +590,6 @@ fi
 # ── Deploy core ──────────────────────────────────────────────────────────────
 CORE_URL="https://${CORE_APP}.fly.dev"
 
-# Debug: verify static assets exist before sending to Fly builder
-echo ""
-echo "==> Pre-deploy static asset check:"
-echo "    priv/static/ contents:"
-ls -la "$REPO_ROOT/apps/core/priv/static/" 2>/dev/null || echo "    ERROR: priv/static/ does not exist!"
-echo "    priv/static/textures/ file count: $(ls "$REPO_ROOT/apps/core/priv/static/textures/" 2>/dev/null | wc -l | tr -d ' ')"
-echo "    priv/static/textures/ total size: $(du -sh "$REPO_ROOT/apps/core/priv/static/textures/" 2>/dev/null | cut -f1 || echo 'N/A')"
-echo "    priv/static/index.html exists: $(test -f "$REPO_ROOT/apps/core/priv/static/index.html" && echo 'yes' || echo 'NO')"
-echo "    sample texture file size: $(wc -c "$REPO_ROOT/apps/core/priv/static/textures/spine-cloth-brown.png" 2>/dev/null | awk '{print $1}' || echo 'N/A') bytes"
 echo ""
 echo "==> Deploying ${CORE_APP}..."
 # Pass a unique ASSET_HASH to bust the remote builder cache for priv/static.
@@ -596,12 +615,8 @@ echo "PASS deploy: core app deployed"
 # though internal health checks pass.
 echo ""
 echo "==> Signaling Fly proxy to route traffic..."
-fly machines list --app "${CORE_APP}" --json 2>/dev/null \
-| python3 -c "
-import json,sys
-for m in json.load(sys.stdin):
-    print(m['id'])
-" 2>/dev/null | while read -r mid; do
+fly_machine_ids "${CORE_APP}" | while read -r mid; do
+    [[ -z "$mid" ]] && continue
     fly machines start "$mid" --app "${CORE_APP}" 2>/dev/null && \
         echo "    Signaled machine ${mid}" || true
 done
@@ -636,13 +651,7 @@ echo "PASS deploy: health check passed"
 # ── Migrate ──────────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running migrations on ${CORE_APP}..."
-machine_id="$(fly machines list --app "${CORE_APP}" --json 2>/dev/null \
-    | python3 -c "
-import json,sys
-machines = json.load(sys.stdin)
-started = [m for m in machines if m.get('state') == 'started']
-print(started[0]['id'] if started else '')
-" 2>/dev/null || true)"
+machine_id="$(fly_machine_started_id "${CORE_APP}")"
 
 if [[ -n "${machine_id}" ]]; then
     fly machine exec "${machine_id}" \
@@ -692,55 +701,57 @@ fi
 # First-deploy bootstrap: if `thestacks-log-shipper` doesn't exist yet,
 # `fly apps create` makes it, secrets stage, `fly deploy` builds the
 # image from deploy/log-shipper/Dockerfile. No manual operator step.
-if [[ "$PROD_MODE" -eq 1 ]] && [[ -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
-    LOG_SHIPPER_APP="${LOG_SHIPPER_APP:-thestacks-log-shipper}"
-    echo ""
-    echo "==> Deploying log shipper (app: ${LOG_SHIPPER_APP})..."
-
-    fly apps create "${LOG_SHIPPER_APP}" 2>&1 || true
-
-    # ORG is hardcoded in fly.log-shipper.toml [env], so we only stage
-    # the secret env vars. AXIOM_TOKEN / AXIOM_DATASET are empty-safe
-    # via the `${VAR:-}` expansion — a missing Axiom credential is
-    # surfaced as a Vector startup error rather than a script-level
-    # unbound-variable crash.
-    fly secrets set \
-        LOG_SHIPPER_ACCESS_TOKEN="${LOG_SHIPPER_ACCESS_TOKEN}" \
-        AXIOM_TOKEN="${AXIOM_TOKEN:-}" \
-        AXIOM_DATASET="${AXIOM_DATASET:-}" \
-        --app "${LOG_SHIPPER_APP}" --stage
-
-    # CD into the Dockerfile's directory for the same reason as the
-    # SearXNG deploy above — CWD wins over --config's directory for
-    # Fly's build context.
-    _log_shipper_deploy_once() {
-        (cd "$REPO_ROOT/deploy/log-shipper" && fly deploy \
-            --app "${LOG_SHIPPER_APP}" \
-            --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
-            --yes)
-    }
-
-    if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
-        # Same reasoning as SearXNG's 300s timeout above — cold image
-        # build + VM boot + Vector's config parse + NATS source
-        # connection + API server start. Vector is lighter than
-        # SearXNG but still far from instant on a cold deploy.
-        echo "==> Verifying log shipper health via fly status (up to 300s)..."
-        # Vector's built-in /health on :8686 is what fly.log-shipper.toml's
-        # [[checks]] block hits. Same rationale as SearXNG: parse Fly's
-        # own report rather than running curl inside the container. A
-        # previous iteration tried `fly ssh console -C curl localhost:8686`
-        # and silently broke on base images that ship without curl.
-        if wait_for_fly_checks "${LOG_SHIPPER_APP}" 300; then
-            echo "PASS deploy: log shipper deployed"
-        else
-            echo "WARN deploy: log shipper deploy returned 0 but fly status never reported passing checks within 300s — logs may not ship until next deploy, core unaffected"
-        fi
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    if [[ -z "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
+        echo "WARN: LOG_SHIPPER_ACCESS_TOKEN not set — skipping log shipper deploy (logs will not persist beyond Fly's short retention)."
     else
-        echo "WARN deploy: log shipper deployment failed — logs will not ship this cycle, core unaffected"
+        LOG_SHIPPER_APP="${LOG_SHIPPER_APP:-thestacks-log-shipper}"
+        echo ""
+        echo "==> Deploying log shipper (app: ${LOG_SHIPPER_APP})..."
+
+        ensure_fly_app "${LOG_SHIPPER_APP}"
+
+        # ORG is hardcoded in fly.log-shipper.toml [env], so we only stage
+        # the secret env vars. AXIOM_TOKEN / AXIOM_DATASET are empty-safe
+        # via the `${VAR:-}` expansion — a missing Axiom credential is
+        # surfaced as a Vector startup error rather than a script-level
+        # unbound-variable crash.
+        fly secrets set \
+            LOG_SHIPPER_ACCESS_TOKEN="${LOG_SHIPPER_ACCESS_TOKEN}" \
+            AXIOM_TOKEN="${AXIOM_TOKEN:-}" \
+            AXIOM_DATASET="${AXIOM_DATASET:-}" \
+            --app "${LOG_SHIPPER_APP}" --stage
+
+        # CD into the Dockerfile's directory for the same reason as the
+        # SearXNG deploy above — CWD wins over --config's directory for
+        # Fly's build context.
+        _log_shipper_deploy_once() {
+            (cd "$REPO_ROOT/deploy/log-shipper" && fly deploy \
+                --app "${LOG_SHIPPER_APP}" \
+                --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
+                --yes)
+        }
+
+        if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
+            # Same reasoning as SearXNG's 300s timeout above — cold image
+            # build + VM boot + Vector's config parse + NATS source
+            # connection + API server start. Vector is lighter than
+            # SearXNG but still far from instant on a cold deploy.
+            echo "==> Verifying log shipper health via fly status (up to 300s)..."
+            # Vector's built-in /health on :8686 is what fly.log-shipper.toml's
+            # [[checks]] block hits. Same rationale as SearXNG: parse Fly's
+            # own report rather than running curl inside the container. A
+            # previous iteration tried `fly ssh console -C curl localhost:8686`
+            # and silently broke on base images that ship without curl.
+            if wait_for_fly_checks "${LOG_SHIPPER_APP}" 300; then
+                echo "PASS deploy: log shipper deployed"
+            else
+                echo "WARN deploy: log shipper deploy returned 0 but fly status never reported passing checks within 300s — logs may not ship until next deploy, core unaffected"
+            fi
+        else
+            echo "WARN deploy: log shipper deployment failed — logs will not ship this cycle, core unaffected"
+        fi
     fi
-elif [[ "$PROD_MODE" -eq 1 ]]; then
-    echo "WARN: LOG_SHIPPER_ACCESS_TOKEN not set — skipping log shipper deploy (logs will not persist beyond Fly's short retention)."
 fi
 
 # ── Vision pipeline warmup ────────────────────────────────────────────────────
