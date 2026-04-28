@@ -155,10 +155,12 @@ fi
 
 # ── secrets referenced ───────────────────────────────────────────────────────
 test_case "secrets_referenced" "workflow references all required secrets (preview set + METRICS_SCRAPE_TOKEN)"
+# NEON_PROJECT_ID + NEON_API_KEY were intentionally removed from
+# deploy-production.yml in #142 (two-project Neon architecture). Prod mode
+# never consults Neon — DATABASE_URL is composed from STACKS_PROD_DB_*
+# components — so neither secret should be referenced from this workflow.
 REQUIRED_SECRETS=(
     FLY_API_TOKEN
-    NEON_PROJECT_ID
-    NEON_API_KEY
     VISION_TOGETHER_API_KEY
     VISION_HMAC_SECRET
     SECRET_KEY_BASE

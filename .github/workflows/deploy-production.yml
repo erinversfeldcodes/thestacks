@@ -57,14 +57,11 @@ jobs:
     timeout-minutes: 45
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-      # NEON_API_KEY is intentionally referenced even in prod mode:
-      # deploy-stack.sh uses its presence as a signal to provision a branch,
-      # which we must NOT do in prod. The `--production` arg passed to the
-      # script tells it to clear NEON_API_KEY internally so the prod
-      # DATABASE_URL is used verbatim. We still surface the secret reference
-      # here so rotating it surfaces a CI failure.
-      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      # Prod mode is driven entirely by the `--production` arg to
+      # deploy-stack.sh; the script never consults Neon in prod (no branch
+      # creation, no Neon API calls) and instead composes DATABASE_URL from
+      # the STACKS_PROD_DB_* components below. So no NEON_* secrets are
+      # surfaced here — the staging Neon project is preview-only.
       GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
       VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
       VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}

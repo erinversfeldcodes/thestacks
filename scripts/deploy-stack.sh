@@ -9,18 +9,24 @@
 # On failure, writes FAIL lines and exits non-zero.
 #
 # Required env vars:
-#   FLY_API_TOKEN   — Fly.io API token
-#   NEON_PROJECT_ID — Neon project to branch from
+#   FLY_API_TOKEN           — Fly.io API token
+#   NEON_STAGING_PROJECT_ID — Neon project ID for the `thestacks-staging`
+#                             project (distinct from the prod project).
+#                             Previews branch from `staging` within this
+#                             project — zero lineage to production.
 #
 # Optional env vars:
-#   NEON_API_KEY            — Neon API key (required when using Neon branch)
+#   NEON_STAGING_API_KEY    — Neon API key scoped to the staging project
+#                             (required when creating a preview branch)
 #   MODAL_TOKEN_ID          — Modal API token ID
 #   MODAL_TOKEN_SECRET      — Modal API token secret
 #   VISION_HMAC_SECRET      — Elixir → vision HMAC auth
 #   SECRET_KEY_BASE         — Phoenix secret key base
-#   NEON_PARENT_BRANCH      — Name of parent branch (default: production).
-#                             TODO(Issue #136 follow-up): flip default to
-#                             `staging` once that branch is bootstrapped.
+#   NEON_PARENT_BRANCH      — Name of parent branch within the staging
+#                             project (default: `staging`). Previews are
+#                             copy-on-write children of this branch, so
+#                             they inherit the migrations + dev fixture
+#                             set without needing a per-preview seed step.
 #                             See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
 #   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
@@ -136,11 +142,6 @@ if [[ -z "${FLY_API_TOKEN:-}" ]]; then
     exit 0
 fi
 
-if [[ -z "${NEON_PROJECT_ID:-}" ]]; then
-    echo "SKIP: NEON_PROJECT_ID not set — skipping deploy."
-    exit 0
-fi
-
 if ! command -v fly &>/dev/null; then
     echo "SKIP: flyctl not installed (brew install flyctl)"
     exit 0
@@ -175,10 +176,21 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     CORE_APP="${CORE_APP:-thestacks-core}"
     MODAL_APP="${MODAL_APP:-thestacks-vision}"
     # Prod uses the existing production DB via DATABASE_URL — not a Neon
-    # branch. Suppress branch creation by clearing NEON_API_KEY locally.
-    NEON_API_KEY=""
+    # branch. Suppress branch creation by clearing NEON_STAGING_API_KEY
+    # locally so the preview-branch block below is a no-op.
+    NEON_STAGING_API_KEY=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
+    # Preview-only preflight: the preview branch-creation block below
+    # talks to Neon's API using the staging project ID. Prod mode doesn't
+    # touch Neon branching (DATABASE_URL is composed from STACKS_PROD_DB_*
+    # in deploy-production.yml), so this check stays scoped to preview
+    # mode — gating it unconditionally would silently short-circuit prod
+    # deploys with SKIP when the staging secret isn't in the prod env.
+    if [[ -z "${NEON_STAGING_PROJECT_ID:-}" ]]; then
+        echo "SKIP: NEON_STAGING_PROJECT_ID not set — skipping preview deploy."
+        exit 0
+    fi
     CORE_APP="stacks-core-pr-${SANITISED}"
     MODAL_APP="thestacks-vision-${SANITISED}"
     echo "==> Deploy stack for branch: ${BRANCH}"
@@ -190,20 +202,21 @@ echo "    Core app:    ${CORE_APP}"
 echo "    Modal app:   ${MODAL_APP}"
 
 # ── Create Neon branch ────────────────────────────────────────────────────────
-if [[ -n "${NEON_API_KEY:-}" ]]; then
+if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
     echo ""
     echo "==> Creating Neon DB branch for preview..."
 
-    # Parent branch for preview creation. Target is `staging` — a
-    # migrations-only + fixture-data branch — so previews NEVER clone
-    # production user data. Flipping once staging is bootstrapped; default
-    # currently `production` so preview flow keeps working during the
-    # Issue #136 pre-launch window. See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
-    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-production}"
+    # Parent branch for preview creation. Default `staging` — a
+    # migrations + fixture-data branch in the dedicated `thestacks-staging`
+    # Neon project, which has zero copy-on-write lineage to production.
+    # Previews therefore never clone production data and inherit the dev
+    # fixture set automatically (no per-preview seed step).
+    # See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
+    NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
     echo "    Parent branch: ${NEON_PARENT_BRANCH}"
     NEON_PARENT_BRANCH_ID="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
         | python3 -c "
 import json,sys
 branches = json.load(sys.stdin).get('branches', [])
@@ -212,14 +225,14 @@ print(match[0] if match else '')
 " 2>/dev/null || true)"
 
     if [[ -z "$NEON_PARENT_BRANCH_ID" ]]; then
-        echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_PROJECT_ID}" >&2
+        echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_STAGING_PROJECT_ID}" >&2
         exit 1
     fi
     echo "    Parent branch ID: ${NEON_PARENT_BRANCH_ID}"
 
     stale_id="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
         | python3 -c "
 import json,sys
 branches = json.load(sys.stdin).get('branches', [])
@@ -229,15 +242,15 @@ print(match[0] if match else '')
     if [[ -n "$stale_id" ]]; then
         echo "    Deleting stale branch preview/${SANITISED}..."
         curl -sL -X DELETE \
-            -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${stale_id}" > /dev/null
+            -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches/${stale_id}" > /dev/null
     fi
 
     neon_response="$(curl -sL -X POST \
-        -H "Authorization: Bearer ${NEON_API_KEY}" \
+        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "{\"branch\": {\"name\": \"preview/${SANITISED}\", \"parent_id\": \"${NEON_PARENT_BRANCH_ID}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?include_passwords=true")"
+        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches?include_passwords=true")"
 
     NEON_CONNECTION_URI="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['connection_uris'][0]['connection_uri'])" 2>/dev/null || true)"
     neon_branch_name="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['branch']['name'])" 2>/dev/null || true)"
@@ -255,7 +268,7 @@ print(match[0] if match else '')
         echo "    WARNING: no connection URI returned."
     fi
 else
-    echo "SKIP: NEON_API_KEY not set — skipping Neon branch creation."
+    echo "SKIP: NEON_STAGING_API_KEY not set — skipping Neon branch creation."
     NEON_CONNECTION_URI=""
 fi
 
@@ -475,9 +488,9 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 # ── Stage core secrets ────────────────────────────────────────────────────────
 # DATABASE_URL sourcing:
 #   preview: NEON_CONNECTION_URI was populated by the Neon-branch creation block above.
-#   prod:    NEON_API_KEY is cleared → no branch → caller must provide DATABASE_URL
-#            directly in the environment (from a GitHub secret in CI, or an operator
-#            export for local prod-mode use).
+#   prod:    NEON_STAGING_API_KEY is cleared → no branch → caller must provide
+#            DATABASE_URL directly in the environment (from a GitHub secret in CI,
+#            or an operator export for local prod-mode use).
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 
 fly secrets set \
@@ -661,26 +674,17 @@ if [[ -n "${machine_id}" ]]; then
     echo "PASS deploy: migrations applied"
 
     # ── Seed ─────────────────────────────────────────────────────────────────
-    # Prod and preview run DIFFERENT seed paths:
-    #   prod:    Stacks.Release.seed_prod/0 — creates one owner user from
-    #            PROD_OWNER_EMAIL + PROD_OWNER_PASSWORD fly secrets. Idempotent.
-    #   preview: Stacks.Release.seed/0 (gated by ALLOW_SEEDS=true) — full
-    #            dev fixture set for CI/E2E.
-    echo ""
+    # Only production runs a seed step here. Preview stacks inherit the dev
+    # fixture set via Neon copy-on-write from `staging` (see #142), so
+    # nothing needs to happen on the preview side.
     if [[ "$PROD_MODE" -eq 1 ]]; then
+        echo ""
         echo "==> Seeding ${CORE_APP} (prod owner only)..."
         fly machine exec "${machine_id}" \
             "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prod()'\"" \
             --app "${CORE_APP}" --timeout 60 2>&1 \
             || { echo "FAIL deploy: prod seed failed"; exit 1; }
         echo "PASS deploy: prod owner seed applied"
-    else
-        echo "==> Seeding ${CORE_APP} (dev fixtures)..."
-        fly machine exec "${machine_id}" \
-            "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
-            --app "${CORE_APP}" --timeout 60 2>&1 \
-            || { echo "FAIL deploy: seeds failed"; exit 1; }
-        echo "PASS deploy: dev seeds applied"
     fi
 else
     echo "WARN deploy: could not find running machine to run migrations/seeds"
