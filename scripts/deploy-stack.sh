@@ -274,10 +274,24 @@ fi
 
 # ── Deploy vision service to Modal ────────────────────────────────────────────
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
+    # Modal CLI lives in the vision app's runtime venv, not the project
+    # toolchain venv. The interactive shell's `python3` now resolves to
+    # .venv-tools/bin/python3 (per flake.nix shellHook), and that venv
+    # intentionally doesn't carry the heavy `modal` SDK — only sqlfluff,
+    # checkov, and dbt-checkpoint. Pin to the vision venv directly so
+    # `python3 -m modal` finds the module regardless of what's first on
+    # PATH or which python is "active" in the caller's environment.
+    MODAL_PYTHON="${REPO_ROOT}/apps/vision/.venv/bin/python3"
+    if [[ ! -x "$MODAL_PYTHON" ]]; then
+        echo "FAIL deploy: Modal python not found at $MODAL_PYTHON" >&2
+        echo "    Run ./setup.sh to materialise apps/vision/.venv (it pip-installs modal>=0.73.0)." >&2
+        exit 1
+    fi
+
     echo ""
     echo "==> Syncing Modal secret 'thestacks-vision'..."
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -m modal secret create thestacks-vision \
+        "$MODAL_PYTHON" -m modal secret create thestacks-vision \
             "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}" \
             "MODAL_TOKEN_ID=${MODAL_TOKEN_ID}" \
             "MODAL_TOKEN_SECRET=${MODAL_TOKEN_SECRET}" \
@@ -293,7 +307,7 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     _modal_deploy_once() {
         MODAL_APP_NAME="${MODAL_APP}" \
         MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-            python3 -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1
+            "$MODAL_PYTHON" -m modal deploy "${REPO_ROOT}/apps/vision/modal_app.py" 2>&1
     }
     if ! modal_deploy_output="$(_modal_deploy_once)"; then
         echo "    retry: Modal vision deploy failed once; retrying in 5s..."
@@ -309,7 +323,7 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     # Try SDK lookup first, fall back to parsing the deploy output.
     # The SDK call can fail if the function isn't registered yet.
     VISION_SERVICE_URL="$(MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
-        python3 -c "
+        "$MODAL_PYTHON" -c "
 import modal
 f = modal.Function.from_name('${MODAL_APP}', 'vision_api')
 print(f.web_url)
