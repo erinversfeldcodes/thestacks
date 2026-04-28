@@ -8,11 +8,10 @@ if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# Ensure pip-installed tools (dbt, sqlfluff) are on PATH.
-# Python --user installs land in ~/Library/Python/*/bin on macOS.
-for pybin in "$HOME"/Library/Python/*/bin; do
-    [[ -d "$pybin" ]] && export PATH="$pybin:$PATH"
-done
+# dbt + sqlfluff live in .venv-tools/, exposed by flake.nix shellHook.
+# Earlier versions globbed ~/Library/Python/*/bin onto PATH to surface
+# `pip install --user` wrappers; those are stale now and import-fail at
+# runtime, so trust the venv and don't re-prepend a parallel toolchain.
 # shellcheck source=scripts/lib/postgres.sh
 source "$REPO_ROOT/scripts/lib/postgres.sh"
 
