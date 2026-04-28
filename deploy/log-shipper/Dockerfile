@@ -41,6 +41,18 @@ RUN rm -f /etc/vector/vector.yaml
 
 COPY vector.toml /etc/vector/vector.toml
 
+# Drop privileges. The upstream timberio/vector image runs as root by
+# default; Vector itself is a passive log forwarder (NATS source, HTTP
+# sink) and needs no privileged capabilities. Create a dedicated
+# `vector` user so the running process can't be confused for / abused
+# as root. Buffer state lives in /var/lib/vector — chown it so Vector
+# can write checkpoint files when buffering is enabled.
+RUN groupadd --system --gid 10001 vector \
+ && useradd  --system --uid 10001 --gid vector --no-create-home --shell /usr/sbin/nologin vector \
+ && mkdir -p /var/lib/vector \
+ && chown -R vector:vector /var/lib/vector
+USER vector
+
 # Override the default CMD (`--config-dir /etc/vector`) with an
 # explicit --config pointing at our file. Prevents any future stock
 # files or operator-dropped configs in /etc/vector/ from being loaded
