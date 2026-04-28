@@ -6,6 +6,15 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.SecurityHeaders
   end
 
+  # Browser pipeline for the Elm SPA's HTML response. Only sets security
+  # headers — the SPA route below is the catch-all that serves index.html
+  # for client-side routing, so every page load runs through here and
+  # picks up CSP, X-Frame-Options, HSTS, etc. Without this pipeline the
+  # SPA's HTML response carries no security headers at all.
+  pipeline :spa do
+    plug StacksWeb.Plugs.SecurityHeaders
+  end
+
   pipeline :authenticated do
     plug StacksWeb.Plugs.AuthPipeline
   end
@@ -257,6 +266,7 @@ defmodule CoreWeb.Router do
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
   scope "/", CoreWeb do
+    pipe_through :spa
     get "/*path", PageController, :index
   end
 end
