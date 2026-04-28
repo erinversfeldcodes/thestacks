@@ -31,12 +31,17 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
-      # Indexes use `CREATE INDEX CONCURRENTLY`, which Postgres refuses to
-      # run inside a transaction. Ecto wraps every migration in a
-      # transaction by default; this flag opts out. The migration lock is
-      # kept (held on its own connection, separate from the DDL) so Ecto
-      # still serialises concurrent migrator runs.
+      # `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so opt
+      # out of Ecto's default migration-wide transaction.
       @disable_ddl_transaction true
+
+      # Ecto holds its advisory migration lock on a separate idle connection
+      # for the full CONCURRENTLY build. Neon's managed Postgres drops idle
+      # TCP sockets on its own keepalive window, surfacing as a 300s hang +
+      # `ssl send: closed` on fresh envs (observed 2026-04-22 bootstrapping
+      # the staging project). Disabling the lock prevents that; deploys are
+      # already serialised by the release pipeline.
+      @disable_migration_lock true
 
       def up do
         create table(:#{table.table_name}, prefix: "#{table.schema_prefix}", primary_key: false) do
