@@ -11,10 +11,104 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Cost gate. The pre-push hook runs `just ci` + the deployed-E2E suite
+  # locally and writes their results into the PR description between two
+  # sentinel blocks (<!-- ci-summary-* -->, <!-- deployed-e2e-summary-* -->).
+  # We don't want to burn CI minutes re-running checks that already failed
+  # locally — or running CI at all on a PR that was pushed with
+  # --no-verify, which leaves the report blank. So before any other job
+  # runs, scan the description: if either block is missing, contains a
+  # "skipped" sentinel, or has any ❌, set proceed=false and let the rest
+  # of the workflow short-circuit.
+  #
+  # Trust model: this is a cost-saving optimization, not a security gate.
+  # PR descriptions are editable by anyone with write access — branch
+  # protection rules are the actual gate that enforces "CI must pass
+  # before merge". Someone faking a green report can skip the cost-saver
+  # but cannot bypass branch protection.
+  #
+  # Only runs on pull_request events. Pushes to main bypass the gate
+  # entirely (the workflow's `on: push: branches: [main]` trigger fires
+  # only after merge, when CI must always run).
+  gate-pre-push-report:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check pre-push report on PR description
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          body="$(gh pr view "$PR_NUMBER" --json body --jq '.body')"
+
+          # Extract content strictly between (and excluding) the sentinel
+          # comments. Empty string if either sentinel is missing.
+          extract_block() {
+              local start="$1" end="$2"
+              awk -v s="$start" -v e="$end" '
+                  $0 ~ s { f=1; next }
+                  $0 ~ e { f=0 }
+                  f
+              ' <<< "$body"
+          }
+
+          # Pass condition: block exists, contains at least one ✅, and
+          # contains zero ❌. This catches three failure modes — block
+          # missing entirely (--no-verify), block is a skipped sentinel
+          # (no checks ran, e.g. FLY_API_TOKEN unset locally), or block
+          # has a real failure.
+          block_is_green() {
+              local label="$1" block="$2"
+              if [[ -z "$block" ]]; then
+                  echo "Gate: ${label} block missing or empty in PR description"
+                  return 1
+              fi
+              if grep -q '❌' <<< "$block"; then
+                  echo "Gate: ${label} block has at least one ❌"
+                  return 1
+              fi
+              if ! grep -q '✅' <<< "$block"; then
+                  echo "Gate: ${label} block has no ✅ rows (likely a 'skipped' sentinel)"
+                  return 1
+              fi
+              return 0
+          }
+
+          ci_block="$(extract_block '<!-- ci-summary-start -->' '<!-- ci-summary-end -->')"
+          e2e_block="$(extract_block '<!-- deployed-e2e-summary-start -->' '<!-- deployed-e2e-summary-end -->')"
+
+          proceed=true
+          block_is_green "ci-summary"           "$ci_block"  || proceed=false
+          block_is_green "deployed-e2e-summary" "$e2e_block" || proceed=false
+
+          if [[ "$proceed" == "true" ]]; then
+              echo "Gate: pre-push report is fully green; CI will proceed."
+          else
+              echo "Gate: pre-push report not all green; CI will skip remaining jobs."
+              echo "Push without skipping the local hook (don't pass --no-verify) and"
+              echo "ensure both ci-summary and deployed-e2e-summary land green to"
+              echo "trigger a CI run."
+          fi
+          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
   # Reads .versions and exposes the values as job outputs so every other job
   # has a single authoritative reference. Service container images (which are
   # resolved before steps run) can also reference needs.versions.outputs.*
   versions:
+    needs: gate-pre-push-report
+    # Run when the gate ran and approved (PR with green report) OR when
+    # the gate was skipped entirely (push to main, no PR context).
+    if: |
+      always() &&
+      (needs.gate-pre-push-report.result == 'skipped' ||
+       (needs.gate-pre-push-report.result == 'success' &&
+        needs.gate-pre-push-report.outputs.proceed == 'true'))
     runs-on: ubuntu-latest
     outputs:
       otp: ${{ steps.v.outputs.otp }}
@@ -35,6 +129,12 @@ jobs:
           echo "postgres=${POSTGRES_VERSION}" >> "$GITHUB_OUTPUT"
 
   changes:
+    needs: gate-pre-push-report
+    if: |
+      always() &&
+      (needs.gate-pre-push-report.result == 'skipped' ||
+       (needs.gate-pre-push-report.result == 'success' &&
+        needs.gate-pre-push-report.outputs.proceed == 'true'))
     runs-on: ubuntu-latest
     outputs:
       elixir: ${{ steps.filter.outputs.elixir }}
@@ -283,6 +383,7 @@ jobs:
           scripts/lint-dbt.sh
 
   gitleaks:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -294,6 +395,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   hadolint:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -309,6 +411,7 @@ jobs:
           dockerfile: deploy/Dockerfile.scraper
 
   semgrep:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
@@ -318,6 +421,7 @@ jobs:
       - run: semgrep scan --config auto --error
 
   checkov:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -327,6 +431,7 @@ jobs:
           directory: deploy/
 
   trivy:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -375,6 +480,7 @@ jobs:
         run: scripts/check-licenses.sh
 
   trufflehog:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -389,6 +495,7 @@ jobs:
           extra_args: '--only-verified'
 
   syft-grype:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -400,6 +507,7 @@ jobs:
           grype dir:. --fail-on high --only-fixed
 
   dockle:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
