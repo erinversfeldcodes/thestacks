@@ -490,7 +490,12 @@ for entry in "$BARCODE_CANARY" "${EXTRACTION_POOL[@]}"; do
     outcome="$(cat "$WORK_DIR/last_upload_outcome_${name}" 2>/dev/null || echo "-")"
     UPLOAD_OUTCOME_PARTS+=("${name}=${outcome}")
 done
-UPLOAD_OUTCOME=$(IFS=, ; echo "${UPLOAD_OUTCOME_PARTS[*]}")
+# Join with commas. `printf` + parameter trim avoids tampering with the
+# shell-global IFS (semgrep bash.lang.security.ifs-tampering); a stray
+# IFS leak into a later subshell would silently corrupt unquoted-array
+# expansions or `read` calls elsewhere in the script.
+UPLOAD_OUTCOME="$(printf '%s,' "${UPLOAD_OUTCOME_PARTS[@]}")"
+UPLOAD_OUTCOME="${UPLOAD_OUTCOME%,}"
 
 # Emit the final JSON via Python for correctness (quoting, nan handling, etc.)
 python3 - "$HEALTH_LOG" "$CATALOGUE_LOG" "$LOGIN_LOG" "$BOOKSHELF_LOG" "$UPLOAD_LOG" "$DEPS_CHECK_LOG" "$UPLOAD_OUTCOME" <<'PY'
