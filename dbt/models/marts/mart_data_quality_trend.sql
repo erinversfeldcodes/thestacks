@@ -92,7 +92,8 @@ select
 from daily_snapshot as ds
 
 {% if is_incremental() %}
-    where ds.snapshot_date >= (
+where
+    ds.snapshot_date >= (
         select max(dqt.snapshot_date)
         from {{ this }} as dqt
     )
