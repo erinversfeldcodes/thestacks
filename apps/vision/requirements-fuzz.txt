@@ -1,0 +1,12 @@
+# Fuzz-only deps. Kept out of requirements-dev.txt so CI's normal
+# `pip install -r requirements-dev.txt` doesn't try to build atheris
+# under Python 3.12 (the 2.3.0 wheel on PyPI references the removed
+# PRECALL opcode and its C++ extension fails to compile).
+#
+# Install on demand:
+#   pip install -r requirements-fuzz.txt
+#
+# Or via the just target (which is the supported entry point for
+# real fuzz iterations as opposed to seed-corpus regression):
+#   just fuzz-vision -- -atheris_runs=100000
+atheris==2.3.0; sys_platform == "linux"
