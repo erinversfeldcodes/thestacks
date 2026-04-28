@@ -66,6 +66,11 @@ test_case "safe_additive" "add_column (nullable) passes cleanly"
 run_linter "$FIXTURES/safe.exs"
 assert_exit_zero "$RC" "safe.exs exits 0"
 
+# ── create_table with canonical def down reversal ────────────────────────────
+test_case "create_table_with_down" "drop table inside def down is not destructive"
+run_linter "$FIXTURES/create_table_with_down.exs"
+assert_exit_zero "$RC" "create_table_with_down.exs exits 0 (drop only in down)"
+
 # ── multiple files in one invocation ─────────────────────────────────────────
 test_case "multiple_files" "argv with >1 file exits non-zero if ANY is bad"
 run_linter \

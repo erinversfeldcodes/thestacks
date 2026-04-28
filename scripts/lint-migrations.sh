@@ -64,6 +64,29 @@ path = sys.argv[1]
 with open(path) as f:
     src = f.read()
 
+# Strip `def down do ... end` before pattern matching. The down function is
+# the canonical reversal of up — for a `create_table` migration it always
+# contains `drop table(...)`, but that drop only fires on `mix ecto.rollback`,
+# never on a forward deploy. Linting it as destructive would force every
+# create migration to carry `@breaking_ok`, which is wrong: there's no
+# expand/contract phase to attest to. We assume uniform 2-space indentation
+# (enforced by `mix format` + the proto.sync generator) so the `end` that
+# closes `def down` sits in the same column as the `def`.
+def _strip_def_down(text):
+    # `[ \t]*` so the indent capture doesn't cross newlines (re.MULTILINE
+    # makes `^` line-anchored but `\s` still consumes `\n`).
+    m = re.search(r'^([ \t]*)def down(?:\([^)]*\))?\s+do\s*$', text, re.MULTILINE)
+    if not m:
+        return text
+    indent = m.group(1)
+    close_re = re.compile(r'^' + re.escape(indent) + r'end[ \t]*$', re.MULTILINE)
+    close = close_re.search(text, m.end())
+    if not close:
+        return text
+    return text[:m.start()] + text[close.end():]
+
+src = _strip_def_down(src)
+
 # Extract the @breaking_ok reason if present. Accepts:
 #   @breaking_ok "reason string"
 #   @breaking_ok """
