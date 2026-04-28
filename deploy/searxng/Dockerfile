@@ -34,6 +34,22 @@
 # patched build each deploy without tag-curation overhead. The risk of a
 # breaking upstream change is bounded by this repo's 5-engine keep_only
 # config — `settings.rendered.yml` below — which SearXNG has kept stable.
+#
+# Suppressions matching the upstream image's choices, not local omissions:
+#   * CKV_DOCKER_7 — :latest is intentional (rationale above); same as the
+#     hadolint DL3007 ignore.
+#   * CKV_DOCKER_3 — the upstream searxng image already drops to a
+#     non-root `searxng` user; checkov can't see across FROM, so it sees
+#     no USER directive and flags it. Re-asserting `USER searxng` here
+#     would couple us to the upstream UID/username, which is exactly the
+#     kind of duplication this image is trying to avoid.
+#   * CKV_DOCKER_2 — Fly's [[checks]] in fly.searxng.toml owns liveness
+#     (TCP probe on the listening port); a Docker HEALTHCHECK would just
+#     duplicate it inside the container with worse failure visibility.
+#
+# checkov:skip=CKV_DOCKER_7: rolling :latest is intentional — see comment
+# checkov:skip=CKV_DOCKER_3: upstream image drops to `searxng` user
+# checkov:skip=CKV_DOCKER_2: liveness owned by Fly [[checks]], not Docker HEALTHCHECK
 # hadolint ignore=DL3007
 FROM searxng/searxng:latest
 
