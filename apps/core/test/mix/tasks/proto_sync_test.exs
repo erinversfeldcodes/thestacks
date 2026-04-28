@@ -558,9 +558,12 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "desc: :occurred_at"
       # CONCURRENTLY requires running outside a transaction.
       assert output =~ "@disable_ddl_transaction true"
-      # The migration lock stays on — it runs on its own connection and
-      # doesn't interfere with CONCURRENTLY.
-      refute output =~ "@disable_migration_lock"
+      # Ecto holds its migration lock on its own connection, but in the
+      # non-disabled path that lock lives long enough during a
+      # CONCURRENTLY build that Neon's TCP idle-keepalive drops the
+      # socket (observed: 300s hang + `ssl send: closed`). Disable the
+      # lock for CONCURRENTLY-bearing migrations.
+      assert output =~ "@disable_migration_lock true"
       # The raw-SQL index escape hatch is gone — use Ecto's `create index`.
       refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"

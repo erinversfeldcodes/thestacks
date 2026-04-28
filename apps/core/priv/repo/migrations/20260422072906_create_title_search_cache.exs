@@ -8,6 +8,11 @@ defmodule Core.Repo.Migrations.TitleSearchCache20260422072906 do
   # index creation. CONCURRENTLY requires running outside a transaction.
   @disable_ddl_transaction true
 
+  # Same Neon-specific rationale as IsbnResolverCache: the advisory
+  # migration lock's idle connection is dropped by Neon mid-CONCURRENTLY,
+  # so disable it here too.
+  @disable_migration_lock true
+
   def up do
     create table(:title_search_cache, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
