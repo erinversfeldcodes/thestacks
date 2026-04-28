@@ -284,6 +284,16 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       - run: cargo install cargo-audit --locked
+      # The Rust proto code (apps/scraper/src/proto/generated/) is
+      # gitignored and built from proto/ at deploy time. `cargo fmt
+      # --check` follows `pub mod generated;` from src/proto/mod.rs and
+      # errors if the file isn't there ("failed to resolve mod
+      # `generated`"), so the generator has to run before lint.
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate Rust proto artifacts
+        run: scripts/gen-rust-proto.sh
       - run: scripts/lint-rust.sh
       - run: scripts/test-rust.sh
 
@@ -300,6 +310,14 @@ jobs:
           cache: pip
       - working-directory: apps/vision
         run: pip install -r requirements.txt -r requirements-dev.txt
+      # apps/vision/app/proto/gen/ is gitignored; lint and tests both
+      # `from app.proto.gen.vision import ...`, which fails to resolve
+      # without first running the generator. Same shape as test-rust.
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate Python proto artifacts
+        run: python3 scripts/gen_python_proto.py --language python
       - run: scripts/lint-python.sh
       - run: scripts/test-python.sh
 
