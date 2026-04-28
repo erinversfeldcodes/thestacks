@@ -25,6 +25,14 @@
 # is enough for Fly's broadcast so we don't need fly-log-shipper's
 # auth machinery.
 
+# Suppression matching the upstream/Fly choice, not a local omission:
+#   * CKV_DOCKER_2 — Fly's [[checks]] in fly.log-shipper.toml owns
+#     liveness (TCP probe on Vector's listener); a Docker HEALTHCHECK
+#     would just duplicate it with worse failure visibility from the
+#     orchestrator's perspective. Vector itself has no useful in-image
+#     check beyond "process alive", which Fly already detects.
+#
+# checkov:skip=CKV_DOCKER_2: liveness owned by Fly [[checks]], not Docker HEALTHCHECK
 # hadolint ignore=DL3007
 FROM timberio/vector:latest-debian
 
