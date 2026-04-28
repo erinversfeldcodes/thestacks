@@ -64,6 +64,14 @@
           ];
 
           shellHook = ''
+            # Marker so scripts can detect "this command is already running
+            # inside the project devShell" without relying on Nix's
+            # implementation-specific `IN_NIX_SHELL` semantics. Set early so
+            # subshells inherit it. Used by scripts/hooks/lib/update-pr-ci.sh
+            # to skip the `nix develop --command` re-entry in the pre-push
+            # hook when the operator is already in the dev shell.
+            export STACKS_DEV_SHELL=1
+
             # Nixpkgs-unstable packages `semgrep` as a Python 3.13 application,
             # which means entering this dev-shell appends every Python 3.13
             # dependency (pydantic-core, attrs, etc.) to PYTHONPATH. The
