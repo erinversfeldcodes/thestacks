@@ -25,6 +25,17 @@ defmodule Stacks.Moderation do
   alias Stacks.Books.ISBNResolver
   alias Stacks.Workers.EnrichBookJob
 
+  @typedoc """
+  Pipeline result. The success shape carries both the resolved books and any
+  candidates that failed to resolve so observability events can be emitted
+  per-failure rather than silently dropped. `rejected` is a list of
+  `{isbn_or_title, reason}` tuples (the first element is the candidate's
+  potential ISBN if available, otherwise its title).
+  """
+  @type pipeline_result ::
+          {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
+          | {:error, term()}
+
   @doc """
   Runs the full moderation pipeline for an uploaded image.
 
@@ -34,10 +45,13 @@ defmodule Stacks.Moderation do
 
   Plus `user_id`, `image_id` for logging/context.
 
-  Returns `{:ok, [Book.t()]}` on success (one or more books identified),
-  or `{:error, reason}` on failure.
+  Returns `{:ok, %{resolved: [Book.t()], rejected: [{candidate_id, reason}]}}`
+  on success (at least one book identified). The `rejected` list surfaces
+  candidates that failed to resolve in a multi-book image — callers should
+  emit observability events per entry. Returns `{:error, reason}` if no
+  candidates resolved or the image is not a book.
   """
-  @spec run_pipeline(map()) :: {:ok, [Stacks.Books.Book.t()]} | {:error, term()}
+  @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do
     analyze(%{image_url: image_url}, context)
   end
@@ -100,16 +114,19 @@ defmodule Stacks.Moderation do
   end
 
   # For each candidate, resolve to an ISBN (direct or via title search) and
-  # create/find the book. Returns {:ok, [books]} with whatever could be resolved;
-  # fails only if NONE of the candidates resolve.
+  # create/find the book. Returns
+  # `{:ok, %{resolved: [books], rejected: [{candidate_id, reason}]}}`.
+  # `candidate_id` is the candidate's potential ISBN if present, otherwise
+  # its title. Fails only if NONE of the candidates resolve.
   #
   # Candidates are resolved concurrently via `Task.async_stream`. Each
   # candidate triggers an Open Library (sometimes Google Books) HTTP
   # lookup plus DB work; sequential processing of 2+ candidates easily
   # adds 0.5–1.5s to the overall pipeline. With concurrency, total wait
   # is bounded by the slowest candidate rather than their sum. Failures
-  # in one candidate don't affect the others — `resolve_and_store/3`
-  # returns `[]` on failure which flat-maps away.
+  # in one candidate don't affect the others — they surface in the
+  # `rejected` list so the caller can emit per-candidate
+  # `image.rejected` events for observability.
   defp resolve_and_store_all(candidates, context) do
     Stacks.Telemetry.phase(
       :isbn_resolution,
@@ -122,7 +139,7 @@ defmodule Stacks.Moderation do
     expanded = expand_compound_candidates(candidates)
     concurrency = max(length(expanded), 1)
 
-    books =
+    outcomes =
       expanded
       |> Enum.with_index(1)
       |> Task.async_stream(
@@ -134,18 +151,21 @@ defmodule Stacks.Moderation do
         max_concurrency: concurrency,
         on_timeout: :kill_task
       )
-      |> Enum.flat_map(fn
-        {:ok, result} ->
-          result
+      |> Enum.map(fn
+        {:ok, outcome} ->
+          outcome
 
         {:exit, reason} ->
           Logger.warning("Moderation: candidate task exited: #{inspect(reason)}")
-          []
+          {:rejected, "unknown", :task_exit}
       end)
 
-    case books do
+    resolved = for {:resolved, book} <- outcomes, do: book
+    rejected = for {:rejected, candidate_id, reason} <- outcomes, do: {candidate_id, reason}
+
+    case resolved do
       [] -> {:error, :isbn_not_found}
-      _ -> {:ok, books}
+      _ -> {:ok, %{resolved: resolved, rejected: rejected}}
     end
   end
 
@@ -153,15 +173,36 @@ defmodule Stacks.Moderation do
     case resolve_candidate(candidate, idx) do
       {:ok, isbn, metadata} ->
         case store_book(isbn, metadata, context) do
-          {:ok, book} -> [book]
-          _ -> []
+          {:ok, book} ->
+            {:resolved, book}
+
+          {:error, reason} ->
+            Logger.warning(
+              "Moderation: candidate #{idx} ISBN #{isbn} failed to store: #{inspect(reason)}"
+            )
+
+            {:rejected, isbn, store_failure_reason(reason)}
         end
 
       {:error, reason} ->
         Logger.warning("Moderation: candidate #{idx} failed to resolve: #{inspect(reason)}")
-        []
+        {:rejected, candidate_identifier(candidate), reason}
     end
   end
+
+  # Best-effort identifier for the rejected list payload. Prefer the candidate's
+  # potential ISBN; fall back to its title; finally fall back to a sentinel
+  # so consumers always see a non-empty string.
+  defp candidate_identifier(%{"potential_isbns" => [isbn | _]})
+       when is_binary(isbn) and isbn != "",
+       do: isbn
+
+  defp candidate_identifier(%{"title" => title}) when is_binary(title) and title != "", do: title
+  defp candidate_identifier(_), do: "unknown"
+
+  defp store_failure_reason(%Ecto.Changeset{}), do: :invalid_book
+  defp store_failure_reason(reason) when is_atom(reason), do: reason
+  defp store_failure_reason(_), do: :store_failed
 
   defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = _candidate, idx)
        when is_binary(isbn) and isbn != "" do

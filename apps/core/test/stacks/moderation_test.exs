@@ -31,7 +31,7 @@ defmodule Stacks.ModerationTest do
         book_attrs: %{"title" => "The Great Gatsby"}
       }
 
-      assert {:ok, [book]} = Moderation.run_pipeline(context)
+      assert {:ok, %{resolved: [book], rejected: []}} = Moderation.run_pipeline(context)
       assert [edition | _] = book.editions
       assert edition.isbn == "9780743273565"
       assert book.visibility_tier in ["public", "age_gated"]
@@ -43,7 +43,7 @@ defmodule Stacks.ModerationTest do
         book_attrs: %{"title" => "A Peaceful Novel"}
       }
 
-      assert {:ok, [book]} = Moderation.run_pipeline(context)
+      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
       assert book.visibility_tier == "public"
     end
 
@@ -57,7 +57,7 @@ defmodule Stacks.ModerationTest do
         Application.put_env(:core, :vision_client, __MODULE__.AdultBisacClient)
 
         context = %{image_b64: @test_image_b64}
-        assert {:ok, [book]} = Moderation.run_pipeline(context)
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
         assert book.visibility_tier == "age_gated"
       after
         Application.put_env(:core, :vision_client, original)
@@ -73,7 +73,7 @@ defmodule Stacks.ModerationTest do
         book_attrs: %{"title" => "Should Not Matter"}
       }
 
-      assert {:ok, [book]} = Moderation.run_pipeline(context)
+      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
       assert book.id == existing.id
     end
   end
@@ -135,7 +135,7 @@ defmodule Stacks.ModerationTest do
         Application.put_env(:core, :vision_client, __MODULE__.CompoundTitleClient)
 
         context = %{image_b64: @test_image_b64}
-        assert {:ok, books} = Moderation.run_pipeline(context)
+        assert {:ok, %{resolved: books}} = Moderation.run_pipeline(context)
         assert length(books) == 2
       after
         Application.put_env(:core, :vision_client, original)
@@ -183,7 +183,7 @@ defmodule Stacks.ModerationTest do
         Application.put_env(:core, :vision_client, __MODULE__.LocalOcrClient)
 
         context = %{image_b64: @test_image_b64}
-        assert {:ok, [book]} = Moderation.run_pipeline(context)
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
         # Placeholder title comes from "ISBN <isbn>".
         assert String.starts_with?(book.title, "ISBN ")
 

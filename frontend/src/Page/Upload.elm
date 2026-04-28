@@ -19,7 +19,7 @@ import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, authorName, bookCoverImageUrl)
+import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -58,6 +58,11 @@ type alias Model =
     -- Accumulate multiple book fetches before showing the result.
     , pendingBookIds : List String
     , collectedBooks : List Book
+
+    -- Multi-book partial-failure tracking: book IDs whose fetch failed.
+    -- Used to render a "Could not identify" placeholder per failed book
+    -- in the identified list, alongside the successfully fetched books.
+    , failedBookIds : List String
 
     -- Verification step state machine
     , step : UploadStep
@@ -125,6 +130,7 @@ init =
     , duplicateMoveState = NotAsked
     , pendingBookIds = []
     , collectedBooks = []
+    , failedBookIds = []
     , step = Uploading
     , selectedShelf = "wishlist"
     , placementState = NotAsked
@@ -245,7 +251,7 @@ update msg model maybeToken =
                                             else
                                                 GotIdentifiedBook singleId
                                     in
-                                    ( { model | pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }
+                                    ( { model | pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }
                                     , Api.getBook singleId (Just token) callback
                                     , NoOut
                                     )
@@ -255,6 +261,7 @@ update msg model maybeToken =
                                     ( { model
                                         | pendingBookIds = multiIds
                                         , collectedBooks = []
+                                        , failedBookIds = []
                                         , sseTerminalReceived = True
                                       }
                                     , Cmd.batch
@@ -271,10 +278,10 @@ update msg model maybeToken =
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
-                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
@@ -351,29 +358,35 @@ update msg model maybeToken =
                         )
 
                 Err _ ->
-                    -- One book fetch failed — remove from pending; show what we have
-                    -- if everything else is done, otherwise keep waiting.
+                    -- One book fetch failed — remove from pending and remember
+                    -- the failed ID so the multi-book identified view can render
+                    -- a "Could not identify" placeholder for it. Show what we
+                    -- have if everything else is done, otherwise keep waiting.
                     let
                         remaining =
                             List.filter (\bid -> bid /= bookId) model.pendingBookIds
+
+                        newFailed =
+                            model.failedBookIds ++ [ bookId ]
                     in
                     if List.isEmpty remaining then
                         case model.collectedBooks of
                             [] ->
-                                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                                ( { model | result = IdentificationFailed, failedBookIds = newFailed }, Cmd.none, NoOut )
 
                             books ->
                                 ( { model
                                     | result = Identified books
                                     , collectedBooks = []
                                     , pendingBookIds = []
+                                    , failedBookIds = newFailed
                                   }
                                 , Cmd.none
                                 , NoOut
                                 )
 
                     else
-                        ( { model | pendingBookIds = remaining }, Cmd.none, NoOut )
+                        ( { model | pendingBookIds = remaining, failedBookIds = newFailed }, Cmd.none, NoOut )
 
         GotDuplicateBook result ->
             case result of
@@ -588,7 +601,7 @@ view model maybeToken =
                                     viewUploadArea model
 
                                 Identified books ->
-                                    viewIdentified books
+                                    viewIdentified books model.failedBookIds
 
                                 IdentificationFailed ->
                                     viewIdentificationFailed
@@ -693,20 +706,25 @@ viewDropPrompt =
         ]
 
 
-viewIdentified : List Book -> Html Msg
-viewIdentified books =
-    div [ class "upload-result upload-result--identified", attribute "role" "status", testId "upload-identified" ]
-        ([ h2 []
-            [ text
-                (if List.length books == 1 then
-                    "Book Identified!"
+viewIdentified : List Book -> List String -> Html Msg
+viewIdentified books failedBookIds =
+    let
+        totalCount =
+            List.length books + List.length failedBookIds
 
-                 else
-                    "Books Identified!"
-                )
-            ]
+        heading =
+            if totalCount == 1 then
+                "Book Identified!"
+
+            else
+                "Books Identified!"
+    in
+    div [ class "upload-result upload-result--identified", attribute "role" "status", testId "upload-identified" ]
+        ([ h2 [] [ text heading ]
          , ul [ class "upload-result__book-list" ]
-            (List.map viewIdentifiedBook books)
+            (List.map viewIdentifiedBook books
+                ++ List.map viewUnidentifiedPlaceholder failedBookIds
+            )
          ]
             ++ [ button [ class "btn btn--ghost", onClick Reset ] [ text "Try Another" ] ]
         )
@@ -722,6 +740,23 @@ viewIdentifiedBook book =
             , class "btn btn--primary"
             ]
             [ text "View Book" ]
+        ]
+
+
+{-| Render a placeholder list item for a book whose fetch failed during a
+multi-book upload. The user still sees the resolved books and can act on
+them; this row makes the partial failure visible without blocking the
+overall result.
+-}
+viewUnidentifiedPlaceholder : String -> Html Msg
+viewUnidentifiedPlaceholder _ =
+    li
+        [ class "upload-result__book-item upload-result__book-item--unidentified"
+        , testId "upload-unidentified-placeholder"
+        ]
+        [ p [ class "upload-result__book-title" ] [ text "Could not identify" ]
+        , p [ class "upload-result__book-author" ]
+            [ text "We couldn't load this book. You can still place the others." ]
         ]
 
 
@@ -784,12 +819,51 @@ viewManualEntry model =
         ]
 
 
+{-| Path to the in-app age-verification settings page. Used as the
+`age_verify_url` for age-gate notices that surface during the upload
+flow when a resolved book carries `visibility_tier = "age_gated"`.
+-}
+ageVerifyUrl : String
+ageVerifyUrl =
+    Route.toPath Route.SettingsAgeVerification
+
+
+{-| Render an in-flow age-gate notice when the resolved book is
+age-gated. Per US-1.1.4 the upload flow proceeds normally for the
+identification step, but the user is informed that age verification
+is required to view the book detail and is given a primary CTA that
+links to the age-verification settings page.
+-}
+viewAgeGateNoticeIfNeeded : Book -> Html Msg
+viewAgeGateNoticeIfNeeded book =
+    case book.visibilityTier of
+        AgeGated ->
+            div
+                [ class "upload-verify__age-gate-notice"
+                , testId "upload-age-gate-notice"
+                , attribute "role" "status"
+                ]
+                [ p [ class "upload-verify__age-gate-message" ]
+                    [ text "This book has been marked as age-gated based on its subject matter. Age verification is required to view its details." ]
+                , a
+                    [ href ageVerifyUrl
+                    , class "btn btn--primary"
+                    , testId "upload-age-gate-cta"
+                    ]
+                    [ text "Verify Age" ]
+                ]
+
+        _ ->
+            text ""
+
+
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
 viewVerifying : Book -> Html Msg
 viewVerifying book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
+        , viewAgeGateNoticeIfNeeded book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
                 [ case bookCoverImageUrl book of

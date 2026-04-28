@@ -99,6 +99,10 @@ models:
         description: Google books id.
       - name: book_id
         description: Book id.
+        tests:
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: created_at
         description: Timestamp when the record was created.
         tests:

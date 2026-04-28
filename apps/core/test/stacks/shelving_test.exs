@@ -61,6 +61,29 @@ defmodule Stacks.ShelvingTest do
       assert event_count("placement.created") == before_count + 1
     end
 
+    test "placement.created payload includes the book's visibility_tier" do
+      user = insert(:user)
+      book = insert(:book, visibility_tier: "age_gated")
+
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+
+      latest =
+        from(e in "event_log",
+          prefix: "op",
+          where: e.event_type == "placement.created",
+          order_by: [desc: e.occurred_at],
+          limit: 1,
+          select: %{aggregate_id: e.aggregate_id, payload: e.payload}
+        )
+        |> Repo.one()
+
+      {:ok, latest_aggregate_id} = Ecto.UUID.load(latest.aggregate_id)
+      assert latest_aggregate_id == placement.id
+      assert latest.payload["visibility_tier"] == "age_gated"
+      assert latest.payload["book_id"] == book.id
+      assert latest.payload["bookshelf"] == "library"
+    end
+
     test "returns changeset error when book does not exist" do
       user = insert(:user)
       nonexistent_book_id = Ecto.UUID.generate()
