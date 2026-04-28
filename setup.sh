@@ -245,67 +245,107 @@ info "Installing MCP server dependencies..."
 "$MCP_VENV_DIR/bin/pip" install -r scripts/mcp/requirements.txt --quiet
 success "MCP server virtualenv ready at scripts/mcp/.venv"
 
-# ── 7. Pip-based global CLI tools ─────────────────────────────────────────────
-# These run outside the vision venv — they're dev toolchain tools used by
-# scripts/ and CI, not runtime app dependencies.
-step "Global pip tools (dbt-postgres, sqlfluff, checkov, dbt-checkpoint, jwt_tool)"
+# ── 7. Project-local toolchain venv ───────────────────────────────────────────
+# Project-local venv at .venv-tools/ owns every pip-installed dev CLI:
+# dbt-postgres, sqlfluff (+ dbt templater), checkov, dbt-checkpoint, and the
+# Python deps for jwt_tool. Three reasons for a venv over `pip install --user`:
+#
+#   1. Determinism — wrapper bin and lib site-packages share one Python, so
+#      `command -v sqlfluff` and `import sqlfluff` always agree.
+#   2. Isolation from mise/system Python user-sites that previously held
+#      half-installed copies (wrapper points to mise python; lib in system
+#      python; runtime ImportError).
+#   3. Reset-friendly — `rm -rf .venv-tools && ./setup.sh` rebuilds clean
+#      without touching any user-global Python state.
+#
+# `flake.nix shellHook` prepends `.venv-tools/bin` to PATH so every shell
+# (interactive, hook subshell, `nix develop --command ...`) sees the same
+# CLIs without re-running pip.
+step "Project toolchain venv at .venv-tools/ (dbt-postgres, sqlfluff, checkov, dbt-checkpoint, jwt_tool)"
 
-# Use the mise-managed pip, falling back to pip3
-PIP_BIN="$(mise which pip 2>/dev/null || command -v pip3 || command -v pip)"
+TOOLS_VENV="$REPO_ROOT/.venv-tools"
 
-install_pip_tool() {
+# Pick a Python 3.12 interpreter. Prefer the one currently active (nix's
+# python3 inside `nix develop`); fall back to mise.
+TOOLS_PYTHON="$(command -v python3.12 || command -v python3 || true)"
+if [[ -z "$TOOLS_PYTHON" ]]; then
+    err "No python3.12 / python3 found on PATH — install Python 3.12 via mise or run inside \`nix develop\`."
+    exit 1
+fi
+
+if [[ ! -d "$TOOLS_VENV" ]]; then
+    info "Creating project toolchain venv at .venv-tools/ using $TOOLS_PYTHON..."
+    "$TOOLS_PYTHON" -m venv "$TOOLS_VENV"
+fi
+
+TOOLS_PIP="$TOOLS_VENV/bin/pip"
+
+# Quiet install; -q suppresses the "already satisfied" chatter on re-runs.
+"$TOOLS_PIP" install --upgrade --quiet pip
+
+install_tool() {
+    # install_tool <pip_package> <command_to_check>
+    # Verifies the command resolves to the venv (not a stale wrapper from
+    # an earlier --user install elsewhere on PATH). On verification failure,
+    # reinstalls — this self-heals partial-install legacy state.
     local package="$1"
-    local command="${2:-$1}"
-    if ! command -v "$command" &>/dev/null; then
-        info "Installing $package..."
-        "$PIP_BIN" install --user --quiet "$package"
-    else
-        success "$command already available"
+    local check_cmd="${2:-$1}"
+    local venv_bin="$TOOLS_VENV/bin/$check_cmd"
+
+    if [[ -x "$venv_bin" ]] && "$venv_bin" --version &>/dev/null; then
+        success "$check_cmd already in venv"
+        return 0
     fi
+    info "Installing $package into .venv-tools/..."
+    "$TOOLS_PIP" install --quiet "$package"
 }
 
-install_pip_tool "dbt-postgres" "dbt"
-install_pip_tool "sqlfluff" "sqlfluff"
-install_pip_tool "sqlfluff-templater-dbt" "sqlfluff"   # no separate binary — installed alongside
-install_pip_tool "checkov" "checkov"
+install_tool "dbt-postgres" "dbt"
+install_tool "sqlfluff" "sqlfluff"
+# sqlfluff-templater-dbt has no separate binary — sqlfluff loads it
+# automatically when SQLFLUFF_TEMPLATER=dbt. Install only if missing.
+if ! "$TOOLS_PIP" show sqlfluff-templater-dbt &>/dev/null; then
+    info "Installing sqlfluff-templater-dbt into .venv-tools/..."
+    "$TOOLS_PIP" install --quiet sqlfluff-templater-dbt
+fi
+install_tool "checkov" "checkov"
 
 # dbt-checkpoint is not on PyPI — install directly from GitHub.
 # It installs individual check commands (check-model-has-description, etc.),
 # not a single 'dbt-checkpoint' binary.
-if ! command -v check-model-has-description &>/dev/null; then
-    info "Installing dbt-checkpoint from GitHub..."
-    "$PIP_BIN" install --user --quiet \
+if [[ ! -x "$TOOLS_VENV/bin/check-model-has-description" ]]; then
+    info "Installing dbt-checkpoint from GitHub into .venv-tools/..."
+    "$TOOLS_PIP" install --quiet \
         "git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8"
     success "dbt-checkpoint installed"
 else
-    success "dbt-checkpoint already available"
+    success "dbt-checkpoint already in venv"
 fi
 
-# jwt_tool has no Python package — clone the repo and create a wrapper script.
+# jwt_tool has no Python package — clone the repo and create a wrapper that
+# runs under the venv's Python so it can import the deps we install below.
 JWT_TOOL_DIR="$HOME/.local/share/jwt_tool"
-if ! command -v jwt_tool &>/dev/null; then
+JWT_WRAPPER="$TOOLS_VENV/bin/jwt_tool"
+if [[ ! -x "$JWT_WRAPPER" ]]; then
     info "Installing jwt_tool from GitHub..."
-    mkdir -p "$HOME/.local/bin"
     if [[ -d "$JWT_TOOL_DIR/.git" ]]; then
         git -C "$JWT_TOOL_DIR" pull --quiet
     else
         git clone --quiet https://github.com/ticarpi/jwt_tool.git "$JWT_TOOL_DIR"
     fi
-    "$PIP_BIN" install --user --quiet termcolor cprint pycryptodomex requests
-    printf '#!/usr/bin/env bash\nexec python3 "%s/jwt_tool.py" "$@"\n' "$JWT_TOOL_DIR" \
-        > "$HOME/.local/bin/jwt_tool"
-    chmod +x "$HOME/.local/bin/jwt_tool"
-    success "jwt_tool installed at $HOME/.local/bin/jwt_tool"
+    "$TOOLS_PIP" install --quiet termcolor cprint pycryptodomex requests
+    printf '#!/usr/bin/env bash\nexec "%s" "%s/jwt_tool.py" "$@"\n' \
+        "$TOOLS_VENV/bin/python" "$JWT_TOOL_DIR" > "$JWT_WRAPPER"
+    chmod +x "$JWT_WRAPPER"
+    success "jwt_tool installed at .venv-tools/bin/jwt_tool"
 else
-    success "jwt_tool already available"
+    success "jwt_tool already in venv"
 fi
 
-# Ensure user pip bin is on PATH for the rest of this script
-for pybin in "$HOME/Library/Python/"*/bin "$HOME/.local/bin"; do
-    [[ -d "$pybin" ]] && export PATH="$pybin:$PATH"
-done
+# Make the venv visible to the rest of this script.
+export PATH="$TOOLS_VENV/bin:$PATH"
 
-success "Global pip tools installed"
+success "Project toolchain venv ready at .venv-tools/"
 
 # ── 8. Rust toolchain components ──────────────────────────────────────────────
 step "Rust (rustfmt, clippy, cargo-audit, cargo-llvm-cov)"

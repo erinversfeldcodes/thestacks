@@ -28,6 +28,7 @@ __pycache__/
 .eggs/
 dist/
 .venv/
+.venv-tools/
 venv/
 .mypy_cache/
 .ruff_cache/
