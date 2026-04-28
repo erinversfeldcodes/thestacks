@@ -73,12 +73,13 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   defp do_run_pipeline(context, image_id) do
     case Moderation.run_pipeline(context) do
-      {:ok, books} when is_list(books) ->
+      {:ok, %{resolved: books, rejected: rejected}} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
         isbns = Enum.map_join(books, ", ", &primary_isbn/1)
 
         Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{isbns}")
         mark_resolved(image_id, book_ids)
+        emit_partial_rejections(image_id, rejected)
         :ok
 
       {:error, :not_a_book} ->
@@ -102,6 +103,29 @@ defmodule Stacks.Workers.IdentifyBookJob do
       )
 
       {:error, exception}
+  end
+
+  # Emits one `image.rejected` event per failed candidate from a
+  # multi-book partial-resolve. The aggregate_id stays the same `image_id`
+  # so the events tie back to the upload — observability tools can group
+  # by aggregate to reconstruct the per-image outcome (1+ resolved + N
+  # rejected). The image's row stays `resolved` because at least one
+  # candidate succeeded; that's the all-or-nothing rejection contract at
+  # the upload level.
+  defp emit_partial_rejections(_image_id, []), do: :ok
+
+  defp emit_partial_rejections(image_id, rejected) when is_list(rejected) do
+    Enum.each(rejected, fn {candidate_id, reason} ->
+      Events.emit_safe(%{
+        event_type: "image.rejected",
+        aggregate_type: "image",
+        aggregate_id: image_id,
+        payload: %{
+          isbn: to_string(candidate_id),
+          reason: to_string(reason)
+        }
+      })
+    end)
   end
 
   defp primary_isbn(%{editions: [edition | _]}), do: edition.isbn

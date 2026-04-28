@@ -133,6 +133,48 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         Application.put_env(:core, :vision_client, original)
       end
     end
+
+    test "emits image.resolved plus one image.rejected per failed ISBN, all tied to the same image_id",
+         %{user: user, image: image, book: book} do
+      original = Application.get_env(:core, :vision_client)
+      resolved_before = event_count("image.resolved")
+      rejected_before = event_count("image.rejected")
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.MultiBookPartialClient)
+
+        assert :ok =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+
+      # Exactly one image.resolved (the upload succeeded overall) and one
+      # image.rejected per failed candidate (the MultiBookPartialClient
+      # supplies 2 candidates, only the 9780743273565 one resolves).
+      assert event_count("image.resolved") == resolved_before + 1
+      assert event_count("image.rejected") == rejected_before + 1
+
+      events = events_of_type("image.rejected")
+      latest = List.last(events)
+
+      # The rejection ties back to the upload via aggregate_id, NOT to a
+      # book row that was never created. Downstream observability tooling
+      # groups by image aggregate to reconstruct the partial outcome.
+      assert latest.aggregate_id == image.id
+      assert latest.aggregate_type == "image"
+      assert latest.payload["isbn"] == "9780000000003"
+      assert latest.payload["reason"] != nil
+
+      # Sanity: the resolved book row was still persisted via mark_resolved.
+      resolved = Repo.get!(Stacks.Books.UploadedImage, image.id)
+      assert resolved.status == "resolved"
+      assert resolved.book_ids == [book.id]
+    end
   end
 
   describe "perform/1 — storage_path preservation" do
@@ -317,6 +359,34 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
       :count
     )
+  end
+
+  # Mirrors the helper in upload_pipeline_test.exs — the raw event_log query
+  # returns aggregate_id as binary; we decode to a string UUID so callers
+  # can compare against the original UUID without juggling encodings.
+  defp events_of_type(event_type) do
+    from(e in "event_log",
+      prefix: "op",
+      where: e.event_type == ^event_type,
+      order_by: [asc: e.occurred_at],
+      select: %{
+        event_type: e.event_type,
+        aggregate_type: e.aggregate_type,
+        aggregate_id: e.aggregate_id,
+        payload: e.payload,
+        occurred_at: e.occurred_at
+      }
+    )
+    |> Repo.all()
+    |> Enum.map(fn event ->
+      decoded_id =
+        case Ecto.UUID.load(event.aggregate_id) do
+          {:ok, str} -> str
+          _ -> event.aggregate_id
+        end
+
+      %{event | aggregate_id: decoded_id}
+    end)
   end
 
   # ---------------------------------------------------------------------------

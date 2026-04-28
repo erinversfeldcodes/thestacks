@@ -329,7 +329,10 @@
         :updated_at
       ],
       field_overrides: %{
-        book_id: %{belongs_to: Stacks.Books.Book},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          dbt_tests: [{:relationships, "stg_books"}]
+        },
         is_primary: %{default: false}
       }
     },

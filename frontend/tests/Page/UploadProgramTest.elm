@@ -9,6 +9,7 @@ simulated user interactions and SSE stream events (replacing the old HTTP pollin
 
 import Api exposing (PollStatus(..))
 import Dict
+import Html.Attributes
 import Http
 import Json.Encode as Encode
 import Page.Upload as Upload exposing (Msg(..))
@@ -80,6 +81,46 @@ simulateMultiBookStreamEvent bookIds =
         )
 
 
+{-| Build a book HTTP response carrying a specific `visibility_tier`
+field. Used to test the age-gated flow where the upload-time book
+fetch returns `visibility_tier: "age_gated"` and the verify step
+should surface an age-gate notice with a CTA to age verification.
+-}
+simulateBookWithVisibilityTier : String -> String -> String -> String -> Http.Response String
+simulateBookWithVisibilityTier bookId title authorName visibilityTier =
+    let
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book"
+                      , Encode.object
+                            [ ( "id", Encode.string bookId )
+                            , ( "title", Encode.string title )
+                            , ( "author"
+                              , Encode.object
+                                    [ ( "id", Encode.string "author-1" )
+                                    , ( "name", Encode.string authorName )
+                                    ]
+                              )
+                            , ( "editions", Encode.list identity [] )
+                            , ( "edition_count", Encode.int 0 )
+                            , ( "subjects", Encode.list Encode.string [] )
+                            , ( "visibility_tier", Encode.string visibilityTier )
+                            ]
+                      )
+                    , ( "placement", Encode.null )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
 {-| Build a book HTTP response with a specific edition count.
 Allows testing edition count logic after merge.
 -}
@@ -142,6 +183,8 @@ suite =
         , uploadManualIsbnEntry
         , uploadManualIsbnValidation
         , uploadMultiBook
+        , uploadMultiBookPartialFailure
+        , uploadAgeGated
         , uploadMergeFormatSuccess
         , uploadMergeFormatFailure
         , uploadReset
@@ -367,3 +410,90 @@ uploadDragOver =
                 |> ProgramTest.update DragOver
                 |> ProgramTest.expectViewHas
                     [ Selector.class "upload-area--dragging" ]
+
+
+{-| US-1.1.4 sad — age-gate program flow.
+
+Drives the full upload pipeline (init -> upload accepted -> SSE
+resolved -> book fetch) for a book whose `visibility_tier` is
+`"age_gated"`. The verification view must surface the age-gate notice
+with the user-visible message, an `href` to the age-verification
+settings page, and a primary CTA that links to it.
+
+-}
+uploadAgeGated : Test
+uploadAgeGated =
+    test "upload_age_gated: resolved age-gated book renders age-gate notice with verify-age CTA linking to settings" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-age-gated") False))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-age-gated"
+                    (simulateBookWithVisibilityTier "book-age-gated" "Adult Title" "Adult Author" "age_gated")
+                -- We are in the verifying step for the identified book.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "We think this is…" ]
+                -- Age-gate notice is rendered.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-notice") ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Age verification is required to view its details." ]
+                -- Primary CTA exists, points at the age-verification settings page,
+                -- and is rendered as a link (i.e. anchor with href = age_verify_url).
+                |> ProgramTest.expectViewHas
+                    [ Selector.tag "a"
+                    , Selector.attribute (Html.Attributes.href "/settings/age-verification")
+                    , Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-cta")
+                    , Selector.text "Verify Age"
+                    ]
+
+
+{-| US-1.1.7 sad — multi-book partial-failure UX.
+
+Drives a 3-book upload where 2 book fetches succeed and 1 returns a
+network error. The Identified state should list the 2 resolved books
+alongside a "Could not identify" placeholder, and confirming
+placement on a partial-failure result must not crash the program.
+
+-}
+uploadMultiBookPartialFailure : Test
+uploadMultiBookPartialFailure =
+    test "upload_multi_book_partial_failure: 3 bookIds, 2 resolve + 1 rejected -> shows 2 books + 1 placeholder, ConfirmPlacement does not crash" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateMultiBookStreamEvent [ "book-a", "book-b", "book-c" ]))
+                -- Two resolve normally...
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-a"
+                    (simulateBookResponse "book-a" "First Book" "Author One")
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-b"
+                    (simulateBookResponse "book-b" "Second Book" "Author Two")
+                -- ...and the third fails the underlying book fetch.
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-c"
+                    (Http.BadStatus_
+                        { url = "/api/books/book-c"
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                -- The two resolved books are listed, alongside a "Could not identify"
+                -- placeholder for the failed fetch.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Books Identified!" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "First Book" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Second Book" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Could not identify" ]
+                -- Confirming placement on a partial-failure result must not crash —
+                -- the program continues to render the identified list.
+                |> ProgramTest.update Upload.ConfirmPlacement
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "First Book" ]
