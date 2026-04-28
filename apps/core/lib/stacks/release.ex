@@ -117,9 +117,6 @@ defmodule Stacks.Release do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         raise "seed_prod: failed to create owner: #{format_changeset_errors(changeset)}"
-
-      {:error, reason} ->
-        raise "seed_prod: failed to create owner: #{inspect(reason)}"
     end
   end
 
