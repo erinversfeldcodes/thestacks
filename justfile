@@ -117,7 +117,15 @@ test-python:
 
 # Run the vision sidecar Atheris fuzz target against the seed corpus (all platforms)
 # Pass -- -atheris_runs=N to run the full fuzzer (Linux + atheris installed only)
+# atheris lives in requirements-fuzz.txt rather than requirements-dev.txt
+# (it doesn't compile on Python 3.12 — see the comment in -dev.txt). When
+# ARGS includes `-atheris_runs=*`, ensure atheris is in the venv first.
 fuzz-vision *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ " {{ARGS}} " == *"-atheris_runs="* ]]; then
+        apps/vision/.venv/bin/pip install -q -r apps/vision/requirements-fuzz.txt
+    fi
     cd apps/vision && PYTHONPATH=. VISION_ENVIRONMENT=test .venv/bin/python tests/fuzz_image_input.py {{ARGS}}
 
 # Run all linters (check only — no modifications)
