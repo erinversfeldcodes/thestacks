@@ -75,7 +75,6 @@ module Api exposing
     , updateProfile
     , updateProfileVisibility
     , updateShelfVisibility
-    , uploadImage
     )
 
 import File exposing (File)
@@ -89,7 +88,6 @@ import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
 import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
-import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
@@ -274,27 +272,6 @@ logout token toMsg =
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| POST /api/upload — legacy multipart upload. Still here as a
-fallback; the primary flow is now `initUpload` + `putFileToR2` +
-`commitUpload`.
--}
-uploadImage :
-    File
-    -> String
-    -> (Result Http.Error String -> msg)
-    -> Cmd msg
-uploadImage file token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload"
-        , body = Http.multipartBody [ Http.filePart "image" file ]
-        , expect = Http.expectJson toMsg (Decode.map .imageId ProtoUpload.decodeUploadAccepted)
         , timeout = Nothing
         , tracker = Nothing
         }
