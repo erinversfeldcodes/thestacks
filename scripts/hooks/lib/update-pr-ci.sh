@@ -130,15 +130,18 @@ run_ci_and_get_section() {
 
     # Git hooks run in a fresh bash subshell that doesn't trigger direnv
     # (direnv hooks fire on interactive shell init), so the project's nix
-    # devShell — which provides dbt-checkpoint, sqlfluff, checkov,
-    # llvm-tools-preview, and the rest of the security/lint toolchain via
-    # shellHook — isn't loaded. Wrap the `just ci` invocation in
+    # devShell — which exposes the .venv-tools/ wrappers and LLVM env vars
+    # via shellHook — isn't loaded. Wrap the `just ci` invocation in
     # `nix develop --command` so the hook sees the same environment as an
-    # interactive shell. Skip the wrap if we're already inside the dev
-    # shell (interactive user running `git push` from a nix-loaded shell)
-    # or if `nix` isn't installed (e.g. CI runners using --no-verify).
+    # interactive shell.
+    #
+    # Marker check uses STACKS_DEV_SHELL (set by our shellHook) rather than
+    # the generic IN_NIX_SHELL — IN_NIX_SHELL is also set when entering
+    # *any* nix shell (including a stale one with broken state), so it
+    # produces false negatives that skip the wrap when we genuinely need it.
+    # Skip the wrap if `nix` isn't installed (e.g. CI runners with --no-verify).
     local runner=()
-    if [[ -z "${IN_NIX_SHELL:-}" && -z "${STACKS_DEV_SHELL:-}" ]] && command -v nix &>/dev/null; then
+    if [[ -z "${STACKS_DEV_SHELL:-}" ]] && command -v nix &>/dev/null; then
         runner=(nix develop --command)
     fi
 

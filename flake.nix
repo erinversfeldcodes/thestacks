@@ -32,6 +32,13 @@
             rustfmt
             cargo-audit
             cargo-fuzz
+            # cargo-llvm-cov needs llvm-cov + llvm-profdata to compute Rust
+            # coverage. Nix-managed Rust isn't rustup-managed, so the standard
+            # `rustup component add llvm-tools-preview` path doesn't apply.
+            # Pulling `llvm` into the devShell and exporting LLVM_COV /
+            # LLVM_PROFDATA in shellHook gives cargo-llvm-cov the binaries it
+            # discovers via env-var contract.
+            llvm
 
             # Python
             python312
@@ -44,7 +51,10 @@
             # Protobuf
             buf
 
-            # dbt — installed via pip in shellHook for reliable postgres adapter support
+            # dbt + sqlfluff + dbt-checkpoint + checkov + jwt_tool live in
+            # `.venv-tools/`, materialised by `./setup.sh`. shellHook prepends
+            # that venv to PATH so the same wrappers and libs travel together
+            # in every shell (interactive, hook subshell, --command).
 
             # Tools
             just
@@ -93,27 +103,26 @@
             if ! command -v flyctl &> /dev/null && ! test -x "$HOME/.local/bin/flyctl"; then
               bash scripts/install-flyctl.sh
             fi
-            # Install Python-based tools via pip if not already available
-            if ! command -v dbt &> /dev/null; then
-              echo "Installing dbt-postgres..."
-              pip install --quiet dbt-postgres
+
+            # Project toolchain venv. setup.sh owns its creation + the pip
+            # installs (sqlfluff, dbt-postgres, dbt-checkpoint, checkov,
+            # jwt_tool). shellHook just exposes it on PATH so every subshell
+            # — including non-direnv contexts like the pre-push hook — sees
+            # the same wrappers backed by a single Python and site-packages.
+            if [[ -d "$PWD/.venv-tools/bin" ]]; then
+              export PATH="$PWD/.venv-tools/bin:$PATH"
+            else
+              echo "warning: .venv-tools/ not found — run \`./setup.sh\` to install dbt/sqlfluff/checkov/dbt-checkpoint."
             fi
-            # dbt-checkpoint installs check-model-has-description and friends;
-            # there's no `dbt-checkpoint` binary, so check for a known one instead.
-            if ! command -v check-model-has-description &> /dev/null; then
-              echo "Installing dbt-checkpoint..."
-              pip install --quiet 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8' 2>/dev/null || \
-                echo "  (skipped: pip blocked by PEP 668 — install via setup.sh outside Nix shell)"
+
+            # cargo-llvm-cov contract: read LLVM tools from env vars when not
+            # using rustup. Nix's `llvm` package puts these on PATH inside
+            # the devShell, so resolving with `command -v` is safe.
+            if command -v llvm-cov &> /dev/null; then
+              export LLVM_COV="$(command -v llvm-cov)"
+              export LLVM_PROFDATA="$(command -v llvm-profdata)"
             fi
-            if ! command -v jwt_tool &> /dev/null; then
-              echo "Installing jwt_tool..."
-              pip install --quiet jwt_tool
-            fi
-            # checkov is Python-based; install via pip for reliable version management
-            if ! command -v checkov &> /dev/null; then
-              echo "Installing checkov..."
-              pip install --quiet checkov
-            fi
+
             echo "The Stacks dev environment loaded."
             echo "Run 'just dev' to start all services."
           '';
