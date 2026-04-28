@@ -711,6 +711,13 @@ jobs:
           fi
       - name: Security live — IDOR cross-user check
         if: always()
+        # Hard-fails on missing preconditions. Skipping a security check
+        # because the seed data didn't cooperate masks regressions: if a
+        # future code change accidentally allowed cross-user DELETE, this
+        # step would still report green. So:
+        #   * either auth login failing → seed/auth path broken (real issue)
+        #   * owner has zero placements anywhere → seed contract broken
+        # Both fail loudly so someone is forced to fix the test surface.
         run: |
           U1="$(curl -sf "${CORE_URL}/api/auth/login" \
             -H "Content-Type: application/json" \
@@ -721,18 +728,32 @@ jobs:
             -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
           if [[ -z "${U1}" ]] || [[ -z "${U2}" ]]; then
-            echo "SKIP: IDOR — could not authenticate both seed users"
-            exit 0
+            echo "FAIL: IDOR — could not authenticate both seed users (auth seed broken or login regressed)"
+            exit 1
           fi
-          PLACEMENT="$(curl -sf "${CORE_URL}/api/bookshelves/library" \
-            -H "Authorization: Bearer ${U1}" 2>/dev/null \
-            | python3 -c \
-              "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
-            2>/dev/null || true)"
+          # Try each of the 5 named bookshelves until we find a placement.
+          # Distribution of seeded placements across bookshelves isn't
+          # contractual — only "owner has at least one placement" is — so
+          # we don't hard-code which bookshelf to look in.
+          PLACEMENT=""
+          USED_BOOKSHELF=""
+          for bookshelf in library antilibrary wishlist reading-pile looking-for-home; do
+            candidate="$(curl -sf "${CORE_URL}/api/bookshelves/${bookshelf}" \
+              -H "Authorization: Bearer ${U1}" 2>/dev/null \
+              | python3 -c \
+                "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+              2>/dev/null || true)"
+            if [[ -n "${candidate}" ]]; then
+              PLACEMENT="${candidate}"
+              USED_BOOKSHELF="${bookshelf}"
+              break
+            fi
+          done
           if [[ -z "${PLACEMENT}" ]]; then
-            echo "SKIP: IDOR — user1 has no placements in library"
-            exit 0
+            echo "FAIL: IDOR — owner has no placements across any of the 5 bookshelves; staging seed contract is to populate at least one"
+            exit 1
           fi
+          echo "Using placement ${PLACEMENT} from bookshelf '${USED_BOOKSHELF}'"
           IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
             -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
             -H "Authorization: Bearer ${U2}")"
