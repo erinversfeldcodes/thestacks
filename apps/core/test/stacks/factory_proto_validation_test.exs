@@ -80,7 +80,16 @@ defmodule Stacks.FactoryProtoValidationTest do
   # Schemas that are proto-generated but intentionally have no factory.
   # EventLog: insert-only via Stacks.Events.emit/1, not ExMachina.
   # Entry: insert-only via Stacks.Audit.log/1, not ExMachina.
-  @excluded_schemas [Stacks.Events.EventLog, Stacks.Audit.Entry]
+  # IsbnResolverCacheEntry / TitleSearchCacheEntry: write-through caches
+  # populated by Stacks.Books.BookCache during the identification pipeline.
+  # Tests that exercise the cache use the cache module directly; no fixture
+  # builder is needed.
+  @excluded_schemas [
+    Stacks.Events.EventLog,
+    Stacks.Audit.Entry,
+    Stacks.Books.IsbnResolverCacheEntry,
+    Stacks.Books.TitleSearchCacheEntry
+  ]
 
   # ── Per-factory field coverage tests ──────────────────────────────────────
 
