@@ -41,16 +41,17 @@ def test_test_environment_skips_validation() -> None:
 
 def test_effective_core_api_url_falls_back_to_core_url_in_dev() -> None:
     """In non-production environments the fallback property still works."""
-    # `hmac_secret: ""` bypasses the insecure-default validator (the same
-    # explicit-empty escape hatch used by the surrounding test_dev /
-    # test_test cases). Without it the validator rejects the input on
-    # the placeholder VISION_HMAC_SECRET shipped with the dev image.
+    # `validate_secrets` only short-circuits insecure-default checks when
+    # environment == "test". In "development" mode it still rejects
+    # empty/placeholder secrets — pass a real-looking value so the
+    # validator's actual interest (the URL-fallback property below) is
+    # what gets exercised.
     s = Settings.model_validate(
         {
             "environment": "development",
             "core_url": "http://core.internal:4000",
             "core_api_url": "",
-            "hmac_secret": "",
+            "hmac_secret": "a-strong-secret-value",
         }
     )
     assert s.effective_core_api_url == "http://core.internal:4000"
