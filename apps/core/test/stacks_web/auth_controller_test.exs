@@ -193,12 +193,28 @@ defmodule StacksWeb.AuthControllerTest do
     # This describe block re-enables it and uses a dedicated IP range
     # (10.99.x.x) to avoid cross-test contamination. ETS is cleared after
     # each test so counts don't bleed across tests in this block.
+    #
+    # The :auth bucket's production default is 60/60s — sized for
+    # NAT-shared IPs hitting login traffic. Pin a tight 5/60s value
+    # here so the boundary tests below can fire with a small loop
+    # rather than 60+ HTTP requests. See rate_limiter.ex moduledoc
+    # for the prod sizing rationale and rate_limiter_test.exs for the
+    # same per-test override pattern.
     setup do
       original = Application.get_env(:core, :rate_limiting_enabled)
       Application.put_env(:core, :rate_limiting_enabled, true)
 
+      original_auth = Application.get_env(:core, :rate_limit_auth)
+      Application.put_env(:core, :rate_limit_auth, 5)
+
       on_exit(fn ->
         Application.put_env(:core, :rate_limiting_enabled, original)
+
+        if original_auth do
+          Application.put_env(:core, :rate_limit_auth, original_auth)
+        else
+          Application.delete_env(:core, :rate_limit_auth)
+        end
 
         if :ets.whereis(:rate_limiter) != :undefined do
           :ets.delete_all_objects(:rate_limiter)
