@@ -65,7 +65,7 @@ deploy_with_retry() {
     echo "    retry: ${name} failed once; retrying in 5s..."
     sleep 5
     if "$@"; then return 0; fi
-    echo "FAIL deploy: ${name} failed twice; aborting before core deploy" >&2
+    echo "FAIL deploy: ${name} failed twice; aborting" >&2
     return 1
 }
 
@@ -623,12 +623,24 @@ echo "==> Deploying ${CORE_APP}..."
 # Without this, the builder reuses a stale COPY layer from a previous build
 # that may not have included textures or freshly-built assets.
 ASSET_HASH="$(date +%s)-$(git rev-parse --short HEAD)"
-if ! (cd "$REPO_ROOT" && fly deploy \
+
+# One-retry on the core deploy too. Fly's remote-builder occasionally
+# returns transient errors mid-build — e.g. "unable to upgrade to h2c,
+# received 500" — that disappear on the very next attempt. We already
+# retry-once for scraper / searxng / log-shipper / Modal vision; core
+# is the most expensive deploy in the pipeline so a 5-second retry
+# cycle is cheap compared to a wholesale stack rebuild on the next
+# push. Hard-fails after two attempts so a genuinely-broken build
+# still surfaces.
+_core_deploy_once() {
+    (cd "$REPO_ROOT" && fly deploy \
         --app "${CORE_APP}" \
         --config "${REPO_ROOT}/deploy/fly.core.toml" \
         --image-label "pr-${SANITISED}" \
         --depot=false \
-        --build-arg "ASSET_HASH=${ASSET_HASH}"); then
+        --build-arg "ASSET_HASH=${ASSET_HASH}")
+}
+if ! deploy_with_retry "core" _core_deploy_once; then
     echo "FAIL deploy: core app deployment failed"
     exit 1
 fi
