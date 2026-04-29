@@ -283,7 +283,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          # llvm-tools is required by cargo-llvm-cov for the 80% coverage
+          # gate in scripts/test-rust.sh. Locally it's installed by
+          # setup.sh via `rustup component add llvm-tools-preview`.
+          components: rustfmt, clippy, llvm-tools
       - uses: actions/cache@v4
         with:
           path: |
@@ -293,6 +296,10 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       - run: cargo install cargo-audit --locked
+      # cargo-llvm-cov drives the 80% coverage threshold check at the
+      # end of test-rust.sh. Locally installed by setup.sh; install
+      # here so CI runs the same gate. --locked pins to Cargo.lock.
+      - run: cargo install cargo-llvm-cov --locked
       # The Rust proto code (apps/scraper/src/proto/generated/) is
       # gitignored and built from proto/ at deploy time. `cargo fmt
       # --check` follows `pub mod generated;` from src/proto/mod.rs and

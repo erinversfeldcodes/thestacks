@@ -322,25 +322,36 @@ else
     success "dbt-checkpoint already in venv"
 fi
 
-# jwt_tool has no Python package — clone the repo and create a wrapper that
-# runs under the venv's Python so it can import the deps we install below.
+# jwt_tool has no Python package — clone the repo, install its declared
+# requirements into the venv, and create a wrapper script.
+#
+# Always (re-)install from the upstream requirements.txt rather than
+# hard-coding a dep list here. jwt_tool has historically added deps
+# (most recently `ratelimit`) without bumping a version we'd notice;
+# pinning to its requirements.txt makes the install self-correcting on
+# `git pull` + setup.sh re-run. pip skips already-satisfied packages so
+# the cost on no-op runs is negligible.
 JWT_TOOL_DIR="$HOME/.local/share/jwt_tool"
 JWT_WRAPPER="$TOOLS_VENV/bin/jwt_tool"
-if [[ ! -x "$JWT_WRAPPER" ]]; then
-    info "Installing jwt_tool from GitHub..."
-    if [[ -d "$JWT_TOOL_DIR/.git" ]]; then
-        git -C "$JWT_TOOL_DIR" pull --quiet
-    else
-        git clone --quiet https://github.com/ticarpi/jwt_tool.git "$JWT_TOOL_DIR"
-    fi
-    "$TOOLS_PIP" install --quiet termcolor cprint pycryptodomex requests
-    printf '#!/usr/bin/env bash\nexec "%s" "%s/jwt_tool.py" "$@"\n' \
-        "$TOOLS_VENV/bin/python" "$JWT_TOOL_DIR" > "$JWT_WRAPPER"
-    chmod +x "$JWT_WRAPPER"
-    success "jwt_tool installed at .venv-tools/bin/jwt_tool"
+if [[ -d "$JWT_TOOL_DIR/.git" ]]; then
+    info "Updating jwt_tool from GitHub..."
+    git -C "$JWT_TOOL_DIR" pull --quiet
 else
-    success "jwt_tool already in venv"
+    info "Cloning jwt_tool from GitHub..."
+    git clone --quiet https://github.com/ticarpi/jwt_tool.git "$JWT_TOOL_DIR"
 fi
+
+if [[ -f "$JWT_TOOL_DIR/requirements.txt" ]]; then
+    "$TOOLS_PIP" install --quiet -r "$JWT_TOOL_DIR/requirements.txt"
+else
+    warn "jwt_tool requirements.txt missing — falling back to known dep list"
+    "$TOOLS_PIP" install --quiet termcolor cprint pycryptodomex requests ratelimit
+fi
+
+printf '#!/usr/bin/env bash\nexec "%s" "%s/jwt_tool.py" "$@"\n' \
+    "$TOOLS_VENV/bin/python" "$JWT_TOOL_DIR" > "$JWT_WRAPPER"
+chmod +x "$JWT_WRAPPER"
+success "jwt_tool installed at .venv-tools/bin/jwt_tool"
 
 # Make the venv visible to the rest of this script.
 export PATH="$TOOLS_VENV/bin:$PATH"
