@@ -268,23 +268,48 @@ print(match[0] if match else '')
         echo "    WARNING: no connection URI returned."
     fi
 else
-    echo "SKIP: NEON_STAGING_API_KEY not set — skipping Neon branch creation."
+    if [[ "$PROD_MODE" -eq 1 ]]; then
+        # Prod deploys never branch Neon; DATABASE_URL is composed from
+        # STACKS_PROD_DB_* in deploy-production.yml. The empty
+        # NEON_STAGING_API_KEY is set deliberately above (line ~181) to
+        # make this block a no-op — not a missing-config error.
+        echo "    No Neon branch creation in production mode (DATABASE_URL is composed upstream)."
+    else
+        echo "SKIP: NEON_STAGING_API_KEY not set — skipping Neon branch creation."
+    fi
     NEON_CONNECTION_URI=""
 fi
 
 # ── Deploy vision service to Modal ────────────────────────────────────────────
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
-    # Modal CLI lives in the vision app's runtime venv, not the project
-    # toolchain venv. The interactive shell's `python3` now resolves to
-    # .venv-tools/bin/python3 (per flake.nix shellHook), and that venv
-    # intentionally doesn't carry the heavy `modal` SDK — only sqlfluff,
-    # checkov, and dbt-checkpoint. Pin to the vision venv directly so
-    # `python3 -m modal` finds the module regardless of what's first on
-    # PATH or which python is "active" in the caller's environment.
-    MODAL_PYTHON="${REPO_ROOT}/apps/vision/.venv/bin/python3"
-    if [[ ! -x "$MODAL_PYTHON" ]]; then
-        echo "FAIL deploy: Modal python not found at $MODAL_PYTHON" >&2
-        echo "    Run ./setup.sh to materialise apps/vision/.venv (it pip-installs modal>=0.73.0)." >&2
+    # Pick a Python that has the `modal` SDK importable.
+    #
+    # Local dev: the interactive shell's `python3` resolves to
+    # .venv-tools/bin/python3 (per flake.nix shellHook). That venv
+    # intentionally does NOT carry the heavy `modal` SDK — only
+    # sqlfluff, checkov, dbt-checkpoint. The vision app's runtime venv
+    # (apps/vision/.venv) does have modal (declared in
+    # apps/vision/requirements.txt). Prefer that.
+    #
+    # CI (deploy-production.yml + deploy-preview.yml): there is no
+    # apps/vision/.venv (setup.sh isn't run on the runner). The
+    # workflow `pip install modal` directly into the runner's
+    # tool-cache python, so falling back to plain `python3` works.
+    #
+    # Order: vision venv first, plain `python3` second, fail loudly
+    # if neither has modal.
+    MODAL_PYTHON=""
+    if [[ -x "${REPO_ROOT}/apps/vision/.venv/bin/python3" ]] \
+        && "${REPO_ROOT}/apps/vision/.venv/bin/python3" -c "import modal" 2>/dev/null; then
+        MODAL_PYTHON="${REPO_ROOT}/apps/vision/.venv/bin/python3"
+    elif command -v python3 &>/dev/null && python3 -c "import modal" 2>/dev/null; then
+        MODAL_PYTHON="$(command -v python3)"
+    fi
+
+    if [[ -z "$MODAL_PYTHON" ]]; then
+        echo "FAIL deploy: no python with the 'modal' SDK importable" >&2
+        echo "    Local dev: run ./setup.sh to populate apps/vision/.venv" >&2
+        echo "    CI: the workflow should \`pip install modal\` before invoking this script" >&2
         exit 1
     fi
 
