@@ -11,13 +11,19 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Cost gate. The pre-push hook runs `just ci` + the deployed-E2E suite
-  # locally and writes their results into the PR description between two
-  # sentinel blocks (<!-- ci-summary-* -->, <!-- deployed-e2e-summary-* -->).
+  # Cost gate. The pre-push hook runs `just ci` — which includes the local
+  # deploy-preview + E2E suite as part of scripts/ci.sh's deploy phase —
+  # and writes the results to <!-- ci-summary-* --> in the PR description.
+  # The PR also carries a <!-- deployed-e2e-summary-* --> block written
+  # by CI's post-pipeline step as an audit artefact of the runner-side
+  # deploy; we deliberately do NOT gate on it here, because (a) it
+  # always lags one CI cycle behind the current push and would
+  # ratchet stale red state into a permanent block, and (b) its
+  # content overlaps with ci-summary's "deploy: *" rows anyway.
   # We don't want to burn CI minutes re-running checks that already failed
   # locally — or running CI at all on a PR that was pushed with
-  # --no-verify, which leaves the report blank. So before any other job
-  # runs, scan the description: if either block is missing, contains a
+  # --no-verify, which leaves ci-summary blank. So before any other job
+  # runs, scan the description: if ci-summary is missing, contains a
   # "skipped" sentinel, or has any ❌, set proceed=false and let the rest
   # of the workflow short-circuit.
   #
@@ -64,11 +70,11 @@ jobs:
               ' <<< "$body"
           }
 
-          # Pass condition: block exists, contains at least one ✅, and
-          # contains zero ❌. This catches three failure modes — block
-          # missing entirely (--no-verify), block is a skipped sentinel
-          # (no checks ran, e.g. FLY_API_TOKEN unset locally), or block
-          # has a real failure.
+          # Pass condition: ci-summary exists, contains at least one ✅,
+          # and contains zero ❌. This catches three failure modes —
+          # block missing entirely (--no-verify), block is a "skipped"
+          # sentinel (no checks ran, e.g. FLY_API_TOKEN unset locally),
+          # or block has a real failure.
           block_is_green() {
               local label="$1" block="$2"
               if [[ -z "$block" ]]; then
@@ -87,19 +93,16 @@ jobs:
           }
 
           ci_block="$(extract_block '<!-- ci-summary-start -->' '<!-- ci-summary-end -->')"
-          e2e_block="$(extract_block '<!-- deployed-e2e-summary-start -->' '<!-- deployed-e2e-summary-end -->')"
 
           proceed=true
-          block_is_green "ci-summary"           "$ci_block"  || proceed=false
-          block_is_green "deployed-e2e-summary" "$e2e_block" || proceed=false
+          block_is_green "ci-summary" "$ci_block" || proceed=false
 
           if [[ "$proceed" == "true" ]]; then
               echo "Gate: pre-push report is fully green; CI will proceed."
           else
               echo "Gate: pre-push report not all green; CI will skip remaining jobs."
               echo "Push without skipping the local hook (don't pass --no-verify) and"
-              echo "ensure both ci-summary and deployed-e2e-summary land green to"
-              echo "trigger a CI run."
+              echo "ensure ci-summary lands green to trigger a CI run."
           fi
           echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
 
