@@ -11,8 +11,34 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     original = Application.get_env(:core, :rate_limiting_enabled)
     Application.put_env(:core, :rate_limiting_enabled, true)
 
+    # Pin tight limits for the auth + password_change buckets so the
+    # tests below can exercise the boundary with small loops. Production
+    # defaults are deliberately looser (60 / 20 per minute respectively
+    # — see the moduledoc) and would force every test to either run a
+    # 60+-iteration loop or assert weaker boundaries. Decoupling the
+    # tests from the prod defaults keeps the assertions sharp without
+    # coupling the test count to whatever credential-stuffing-defence
+    # tuning the moduledoc settles on.
+    original_auth = Application.get_env(:core, :rate_limit_auth)
+    original_pwc = Application.get_env(:core, :rate_limit_password_change)
+    Application.put_env(:core, :rate_limit_auth, 5)
+    Application.put_env(:core, :rate_limit_password_change, 3)
+
     on_exit(fn ->
       Application.put_env(:core, :rate_limiting_enabled, original)
+
+      if original_auth do
+        Application.put_env(:core, :rate_limit_auth, original_auth)
+      else
+        Application.delete_env(:core, :rate_limit_auth)
+      end
+
+      if original_pwc do
+        Application.put_env(:core, :rate_limit_password_change, original_pwc)
+      else
+        Application.delete_env(:core, :rate_limit_password_change)
+      end
+
       # Clear all ETS entries so tests don't bleed into each other.
       if :ets.whereis(:rate_limiter) != :undefined do
         :ets.delete_all_objects(:rate_limiter)
