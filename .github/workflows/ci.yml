@@ -43,6 +43,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Pass the repo explicitly so `gh pr view` doesn't fall back
+          # to detecting it via local git. This job has no checkout
+          # (saves ~5s per CI run — we only need the PR body, not the
+          # repo contents) so without -R, gh shells out to git and dies
+          # on "fatal: not a git repository".
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           body="$(gh pr view "$PR_NUMBER" --json body --jq '.body')"
