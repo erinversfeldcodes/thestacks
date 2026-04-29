@@ -55,6 +55,57 @@ defmodule Stacks.Audit do
     error -> {:error, error}
   end
 
+  @doc """
+  Logs a deploy rollback event. Inserts an audit row (action `"system.rollback"`,
+  resource_type `"deploy"`) and, on successful insert, emits a
+  `[:stacks, :system, :rollback]` telemetry event with `%{count: 1}`.
+
+  `failed_sha` is the git SHA being rolled back **from** — i.e. the broken
+  deployment — not the target of the rollback. Because a git SHA is not a UUID,
+  it cannot live in the `resource_id` column; it is carried in metadata under
+  the atom key `:failed_sha`.
+
+  ## Allowed `triggered_by` values
+  - `"slo-gate"` — automatic rollback because a deploy SLO gate tripped
+  - `"manual"` — operator-initiated rollback
+  - `"step-failure"` — a deploy pipeline step failed
+  - `"migration-failure"` — a database migration failed during deploy
+
+  No runtime guard is enforced — the caller is trusted.
+
+  Telemetry is only emitted when the underlying audit insert succeeds, so a
+  rollback signal never fires for a rollback that was not recorded.
+  """
+  @spec log_rollback(map()) :: {:ok, map()} | {:error, term()}
+  def log_rollback(%{
+        failed_sha: failed_sha,
+        target_image: target_image,
+        modal_prev_commit: modal_prev_commit,
+        reason: reason,
+        triggered_by: triggered_by
+      }) do
+    metadata = %{
+      failed_sha: failed_sha,
+      target_image: target_image,
+      modal_prev_commit: modal_prev_commit,
+      reason: reason,
+      triggered_by: triggered_by
+    }
+
+    case log(nil, "system.rollback",
+           resource_type: "deploy",
+           resource_id: failed_sha,
+           metadata: metadata
+         ) do
+      {:ok, entry} ->
+        :telemetry.execute([:stacks, :system, :rollback], %{count: 1}, metadata)
+        {:ok, entry}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp hash_ip(ip) when is_binary(ip) do
     :crypto.hash(:sha256, ip)
     |> Base.encode16(case: :lower)
