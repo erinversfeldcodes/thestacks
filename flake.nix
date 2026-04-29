@@ -44,6 +44,13 @@
             python312
             python312Packages.pip
             python312Packages.mypy
+            # zbar is the C library behind pyzbar (used by the vision
+            # sidecar's local OCR pre-pass). pyzbar dlopens libzbar.so.0
+            # via ctypes — without zbar in the dev shell + the right
+            # library path env vars set in shellHook, every barcode test
+            # hits ImportError and silently returns None (the safety
+            # contract on local_isbn_scan).
+            zbar
 
             # Database
             postgresql_16
@@ -122,6 +129,16 @@
               export LLVM_COV="$(command -v llvm-cov)"
               export LLVM_PROFDATA="$(command -v llvm-profdata)"
             fi
+
+            # pyzbar uses ctypes.cdll.LoadLibrary("libzbar.so.0") which
+            # only searches the OS's standard library paths — nix puts
+            # libraries in /nix/store/.../lib instead. Push zbar's lib
+            # dir onto the loader's search path so pyzbar can find it.
+            # macOS uses DYLD_LIBRARY_PATH; Linux uses LD_LIBRARY_PATH.
+            # Set both so the same shellHook works on darwin + linux.
+            ZBAR_LIB="${pkgs.zbar.out}/lib"
+            export DYLD_LIBRARY_PATH="$ZBAR_LIB''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+            export LD_LIBRARY_PATH="$ZBAR_LIB''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
             echo "The Stacks dev environment loaded."
             echo "Run 'just dev' to start all services."
