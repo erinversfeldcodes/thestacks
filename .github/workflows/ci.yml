@@ -324,6 +324,13 @@ jobs:
         with:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
+      # libzbar is the C library behind pyzbar (used by the vision
+      # sidecar's local OCR pre-pass). pyzbar dlopens libzbar.so.0 via
+      # ctypes — without the system package, every barcode test in
+      # test_local_ocr.py silently returns None (local_isbn_scan's
+      # safety contract on ImportError). Locally provided by nix's
+      # `zbar` package; on Ubuntu CI runners it's `libzbar0`.
+      - run: sudo apt-get update && sudo apt-get install -y libzbar0
       - working-directory: apps/vision
         run: pip install -r requirements.txt -r requirements-dev.txt
       # apps/vision/app/proto/gen/ is gitignored; lint and tests both

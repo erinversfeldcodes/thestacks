@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.config import Settings
 
 
-def _production_base() -> dict:
+def _production_base() -> dict[str, str]:
     """Minimum valid production settings."""
     return {
         "environment": "production",
@@ -41,8 +41,17 @@ def test_test_environment_skips_validation() -> None:
 
 def test_effective_core_api_url_falls_back_to_core_url_in_dev() -> None:
     """In non-production environments the fallback property still works."""
+    # `hmac_secret: ""` bypasses the insecure-default validator (the same
+    # explicit-empty escape hatch used by the surrounding test_dev /
+    # test_test cases). Without it the validator rejects the input on
+    # the placeholder VISION_HMAC_SECRET shipped with the dev image.
     s = Settings.model_validate(
-        {"environment": "development", "core_url": "http://core.internal:4000", "core_api_url": ""}
+        {
+            "environment": "development",
+            "core_url": "http://core.internal:4000",
+            "core_api_url": "",
+            "hmac_secret": "",
+        }
     )
     assert s.effective_core_api_url == "http://core.internal:4000"
 
