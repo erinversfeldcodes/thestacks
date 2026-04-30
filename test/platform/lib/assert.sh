@@ -86,6 +86,16 @@ assert_not_contains() {
     fi
 }
 
+assert_path_exists() {
+    local path="$1"
+    local msg="${2:-path exists: $path}"
+    if [[ -e "$path" ]]; then
+        _record_pass "$msg"
+    else
+        _record_fail "$msg (file not found: $path)"
+    fi
+}
+
 summarise() {
     printf '\n# ——————————————————————————\n'
     printf '# passed: %d  failed: %d\n' "$TESTS_PASSED" "$TESTS_FAILED"

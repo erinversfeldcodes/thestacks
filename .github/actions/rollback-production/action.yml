@@ -1,0 +1,201 @@
+name: "Rollback production stack (core + DB + vision)"
+description: >
+  Wraps scripts/rollback-production.sh with declarative inputs. Every secret
+  the script reads is named here as an input — nothing is inherited from the
+  surrounding job-level env: block. Rolls back in the order: core image →
+  Neon DB (LSN reset, optional) → Modal vision (optional). Both DB and vision
+  rollback are optional by design: an empty pre-migrate-lsn skips the DB leg
+  (image-only rollback), and an empty modal-prev-commit skips the vision leg
+  (bootstrap path on a brand-new prod stack). On rollback success, an audit
+  row is written via Stacks.Audit.log_rollback/1 and the corresponding
+  telemetry event fires.
+inputs:
+  core-app:
+    description: "Fly app name for the core service."
+    required: false
+    default: thestacks-core
+  core-prev-image:
+    description: >
+      Previous Fly image digest/SHA to roll core back to. REQUIRED. Resolve
+      from the latest main-<sha> tag via the workflow's record-prev-state
+      step.
+    required: true
+  modal-app:
+    description: "Modal prod app name."
+    required: false
+    default: thestacks-vision
+  modal-prev-commit:
+    description: >
+      Previous git SHA for the Modal vision app. Empty = skip the Modal
+      rollback leg (core is the critical path; the first deploy on a brand-new
+      prod stack will always be empty because no main-<sha> tag exists yet).
+    required: false
+    default: ""
+  modal-token-id:
+    description: "Modal auth token ID. Required when modal-prev-commit is set."
+    required: false
+    default: ""
+  modal-token-secret:
+    description: "Modal auth token secret. Required when modal-prev-commit is set."
+    required: false
+    default: ""
+  fly-api-token:
+    description: "Fly.io API token (used by `fly deploy --image`)."
+    required: true
+  rollback-reason:
+    description: "Free-form string written to stdout + audit log."
+    required: true
+  origin-remote:
+    description: "Git remote to clone the previous Modal commit from."
+    required: false
+    default: "https://github.com/erinversfeld/thestacks.git"
+  neon-prod-project-id:
+    description: >
+      Neon project ID for the production project. Required when
+      pre-migrate-lsn is set; the restore endpoint is path-scoped to a
+      project + branch.
+    required: false
+    default: ""
+  neon-prod-api-key:
+    description: "Neon API key scoped to the production project."
+    required: false
+    default: ""
+  neon-prod-branch-id:
+    description: >
+      Neon branch ID for the prod project's default branch. Resolved by the
+      workflow's `Capture pre-migrate Neon LSN` step (queries `/branches`
+      and selects the entry where `default: true`).
+    required: false
+    default: ""
+  pre-migrate-lsn:
+    description: >
+      Postgres LSN captured via `SELECT pg_current_wal_lsn()` immediately
+      before the migrate-before-cutover step. Empty = skip the DB rollback
+      leg (image-only — appropriate when no migration was attempted, or
+      operator-suppressed). When set, the prod Neon branch is restored to
+      this LSN between the core and vision rollback legs; pre-rollback
+      state is preserved as a `pre-rollback-*` Neon branch.
+    required: false
+    default: ""
+  failed-sha:
+    description: >
+      Commit SHA being rolled back FROM (the broken deployment). Recorded
+      on the audit row's `resource_id`/metadata.failed_sha so operators can
+      answer "which deploy got rolled back".
+    required: true
+  triggered-by:
+    description: >
+      Origin tag for the audit row's metadata.triggered_by. Allowed values:
+      "slo-gate", "manual", "step-failure", "migration-failure".
+    required: true
+  database-url:
+    description: >
+      Production DATABASE_URL — required for the audit-log INSERT step.
+      Composite actions cannot reference `secrets.*` directly; the calling
+      workflow forwards `${{ secrets.DATABASE_URL }}` (or the equivalent
+      composed value) here.
+    required: true
+  cloak-key:
+    description: >
+      Cloak vault key used by Stacks.Vault to encrypt audit-log metadata.
+      Forwarded from `${{ secrets.CLOAK_KEY }}` by the calling workflow.
+    required: true
+outputs:
+  core-rolled-back:
+    description: "true if core successfully rolled back, false if skipped (image already current), error if the leg failed."
+    value: ${{ steps.emit-outputs.outputs.core-rolled-back }}
+  modal-rolled-back:
+    description: "true if Modal vision rolled back, false if skipped (modal-prev-commit empty), error if the leg failed."
+    value: ${{ steps.emit-outputs.outputs.modal-rolled-back }}
+  db-rolled-back:
+    description: "true if the Neon prod branch was reset to pre-migrate-lsn, false if skipped (pre-migrate-lsn empty), error if the leg failed."
+    value: ${{ steps.emit-outputs.outputs.db-rolled-back }}
+runs:
+  using: composite
+  steps:
+    - id: validate-inputs
+      name: Validate inputs
+      shell: bash
+      run: |
+        set -uo pipefail
+        if [[ -z "${{ inputs.core-prev-image }}" ]]; then
+          echo "::error::core-prev-image is required"
+          exit 1
+        fi
+        if [[ -n "${{ inputs.modal-prev-commit }}" ]]; then
+          if [[ -z "${{ inputs.modal-token-id }}" || -z "${{ inputs.modal-token-secret }}" ]]; then
+            echo "::error::modal-token-id and modal-token-secret are required when modal-prev-commit is set"
+            exit 1
+          fi
+        fi
+        if [[ -n "${{ inputs.pre-migrate-lsn }}" ]]; then
+          missing=()
+          [[ -z "${{ inputs.neon-prod-project-id }}" ]] && missing+=("neon-prod-project-id")
+          [[ -z "${{ inputs.neon-prod-api-key }}" ]] && missing+=("neon-prod-api-key")
+          [[ -z "${{ inputs.neon-prod-branch-id }}" ]] && missing+=("neon-prod-branch-id")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::pre-migrate-lsn is set but the following required inputs are missing: ${missing[*]}"
+            exit 1
+          fi
+        fi
+
+    - id: run-rollback
+      name: Run rollback script
+      shell: bash
+      env:
+        CORE_APP: ${{ inputs.core-app }}
+        CORE_PREV_IMAGE: ${{ inputs.core-prev-image }}
+        MODAL_APP_NAME: ${{ inputs.modal-app }}
+        MODAL_PREV_COMMIT: ${{ inputs.modal-prev-commit }}
+        MODAL_TOKEN_ID: ${{ inputs.modal-token-id }}
+        MODAL_TOKEN_SECRET: ${{ inputs.modal-token-secret }}
+        FLY_API_TOKEN: ${{ inputs.fly-api-token }}
+        ROLLBACK_REASON: ${{ inputs.rollback-reason }}
+        ORIGIN_REMOTE: ${{ inputs.origin-remote }}
+        NEON_PROD_PROJECT_ID: ${{ inputs.neon-prod-project-id }}
+        NEON_PROD_API_KEY: ${{ inputs.neon-prod-api-key }}
+        NEON_PROD_BRANCH_ID: ${{ inputs.neon-prod-branch-id }}
+        PRE_MIGRATE_LSN: ${{ inputs.pre-migrate-lsn }}
+      run: |
+        set -o pipefail
+        bash "${{ github.action_path }}/../../../scripts/rollback-production.sh" 2>&1 | tee /tmp/rollback-output.log
+        exit "${PIPESTATUS[0]}"
+
+    - id: log-audit
+      name: Write audit row + emit telemetry
+      if: steps.run-rollback.outcome == 'success'
+      shell: bash
+      env:
+        MIX_ENV: prod
+        DATABASE_URL: ${{ inputs.database-url }}
+        CLOAK_KEY: ${{ inputs.cloak-key }}
+        FAILED_SHA: ${{ inputs.failed-sha }}
+        TARGET_IMAGE: ${{ inputs.core-prev-image }}
+        MODAL_PREV_COMMIT: ${{ inputs.modal-prev-commit }}
+        REASON: ${{ inputs.rollback-reason }}
+        TRIGGERED_BY: ${{ inputs.triggered-by }}
+      run: |
+        set -euo pipefail
+        cd apps/core
+        mix run -e '
+          nilify = fn
+            "" -> nil
+            v -> v
+          end
+
+          {:ok, _entry} =
+            Stacks.Audit.log_rollback(%{
+              failed_sha: nilify.(System.get_env("FAILED_SHA")),
+              target_image: nilify.(System.get_env("TARGET_IMAGE")),
+              modal_prev_commit: nilify.(System.get_env("MODAL_PREV_COMMIT")),
+              reason: nilify.(System.get_env("REASON")),
+              triggered_by: nilify.(System.get_env("TRIGGERED_BY"))
+            })
+        '
+
+    - id: emit-outputs
+      name: Emit composite outputs
+      if: always()
+      shell: bash
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/parse-rollback-output.sh" /tmp/rollback-output.log >> "$GITHUB_OUTPUT"
