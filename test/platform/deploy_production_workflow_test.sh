@@ -110,7 +110,7 @@ markers = {
     "record-prev-state": r"(prev[-_]?image|CORE_PREV_IMAGE|fly image show|modal app history|record[-_]prev)",
     "deploy-stack":      r"scripts/deploy-stack\.sh",
     "check-slo-gate":    r"scripts/check-slo-gate\.sh",
-    "rollback":          r"(scripts/rollback-production\.sh|rollback-production|rollback)",
+    "rollback":          r"(scripts/rollback-production\.sh|rollback-production|\brollback\b)",
     "upload-artifact":   r"actions/upload-artifact@",
     "step-summary":      r"GITHUB_STEP_SUMMARY",
 }
@@ -126,7 +126,7 @@ def pos(pat):
 order_errs = []
 p_deploy = pos(r"scripts/deploy-stack\.sh")
 p_gate = pos(r"scripts/check-slo-gate\.sh")
-p_roll = pos(r"(scripts/rollback-production\.sh|rollback-production|rollback)")
+p_roll = pos(r"(scripts/rollback-production\.sh|rollback-production|\brollback\b)")
 if p_deploy > 0 and p_gate > 0 and p_deploy > p_gate:
     order_errs.append("deploy-stack.sh must come before check-slo-gate.sh")
 if p_gate > 0 and p_roll > 0 and p_gate > p_roll:
@@ -275,6 +275,525 @@ if echo "$WF_CONTENT" | grep -qE 'inputs\.force_rollback'; then
     _record_pass "job references \${{ inputs.force_rollback }}"
 else
     _record_fail "job does not reference inputs.force_rollback"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 4 CONTRACT (Issue #137): Workflow shape after composite-action wiring
+# ════════════════════════════════════════════════════════════════════════════
+#
+# These cases assert the SHAPE the Phase 4 implementation must produce in
+# .github/workflows/deploy-production.yml:
+#   - manual_rollback workflow_dispatch input (Case M1)
+#   - Capture pre-migrate Neon LSN (prod) step (Case M2)
+#   - Run prod migrations (before image cutover) step (Case M3)
+#   - Rollback step uses ./.github/actions/rollback-production (Cases M4 + M5)
+#   - Manual-rollback short-circuit gating on deploy-side steps (Case M6)
+#   - actionlint clean (Case M7, best-effort)
+#
+# YAML parsing strategy mirrors test/platform/rollback_action_composite_test.sh:
+# probe for a Python with `yaml` importable, parse-once, and `jq` the JSON form.
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── YAML-capable Python probe (Phase 4 helper) ──────────────────────────────
+_pick_yaml_python_p4() {
+    local candidates=(
+        "$REPO_ROOT/.venv-tools/bin/python3"
+        "$REPO_ROOT/scripts/mcp/.venv/bin/python3"
+        "python3"
+    )
+    for cand in "${candidates[@]}"; do
+        if command -v "$cand" >/dev/null 2>&1 \
+            && "$cand" -c "import yaml" >/dev/null 2>&1; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    # Last resort: ephemeral venv with pyyaml.
+    local fallback_venv="${TMPDIR:-/tmp}/stacks-deploy-prod-test-venv"
+    if [[ ! -x "$fallback_venv/bin/python3" ]] \
+        || ! "$fallback_venv/bin/python3" -c "import yaml" >/dev/null 2>&1; then
+        python3 -m venv "$fallback_venv" >/dev/null 2>&1 || return 1
+        "$fallback_venv/bin/pip" install --quiet pyyaml >/dev/null 2>&1 || return 1
+    fi
+    echo "$fallback_venv/bin/python3"
+    return 0
+}
+
+YAML_PY="$(_pick_yaml_python_p4 || true)"
+if [[ -z "$YAML_PY" ]]; then
+    test_case "phase4_yaml_python_available" "Python with pyyaml is available for Phase 4 probes"
+    _record_fail "no Python interpreter with pyyaml available; Phase 4 contract cases cannot parse YAML"
+    summarise
+    exit $?
+fi
+
+# ── YAML parse cache: parse the workflow once, reuse across cases ───────────
+WF_JSON_TMP="$(mktemp -t deploy-prod-wf-json.XXXXXX)"
+trap 'rm -f "$WF_JSON_TMP"' EXIT
+"$YAML_PY" - "$WF" >"$WF_JSON_TMP" 2>/dev/null <<'PY' || echo "{}" >"$WF_JSON_TMP"
+import json, sys, yaml
+with open(sys.argv[1]) as f:
+    data = yaml.safe_load(f)
+print(json.dumps(data if data is not None else {}))
+PY
+
+wfq() {
+    # wfq <jq-filter>: jq the parsed workflow JSON.
+    local filter="$1"
+    jq -r "$filter" "$WF_JSON_TMP"
+}
+
+# Resolve the deploy-production job's steps once. The "on" key in YAML
+# becomes the literal string "on" in JSON. PyYAML may also coerce some
+# unquoted keys to booleans — we don't depend on `on:` anywhere below so
+# this is fine.
+JOB_STEPS_JQ='.jobs["deploy-production"].steps // []'
+
+# Helper: extract a step's index in the steps array by id, or -1.
+step_idx_by_id() {
+    local target="$1"
+    wfq "[$JOB_STEPS_JQ | to_entries[] | select(.value.id == \"$target\") | .key] | (.[0] // -1)"
+}
+
+# Helper: extract a step's index in the steps array by `run:` substring, or -1.
+step_idx_by_run_substr() {
+    local needle="$1"
+    wfq "[$JOB_STEPS_JQ | to_entries[] | select((.value.run // \"\") | contains(\"$needle\")) | .key] | (.[0] // -1)"
+}
+
+# Helper: extract a step's index by name substring (case-insensitive), or -1.
+step_idx_by_name_substr_ci() {
+    local needle_lower="$1"
+    wfq "[$JOB_STEPS_JQ | to_entries[] | select((.value.name // \"\" | ascii_downcase) | contains(\"$needle_lower\")) | .key] | (.[0] // -1)"
+}
+
+# ── Case M1: manual_rollback workflow_dispatch input declared ───────────────
+test_case "manual_rollback_input" "workflow_dispatch.inputs.manual_rollback declared with type: boolean, default: false"
+
+# `on` becomes the string "on" key in the parsed JSON, but PyYAML may also
+# coerce the bare `on:` literal to True under YAML 1.1. Probe both.
+MR_TYPE="$(wfq '(.on // .true).workflow_dispatch.inputs.manual_rollback.type // ""')"
+MR_DESC="$(wfq '(.on // .true).workflow_dispatch.inputs.manual_rollback.description // ""')"
+# Default needs special handling: YAML `default: false` parses to JSON
+# boolean false, and `// "__missing__"` would substitute since `false` is
+# falsy in jq. Use `has("default")` to distinguish missing from false.
+MR_HAS_DEFAULT="$(wfq '(.on // .true).workflow_dispatch.inputs.manual_rollback | has("default")')"
+MR_DEFAULT="$(wfq '(.on // .true).workflow_dispatch.inputs.manual_rollback.default')"
+
+if [[ "$MR_TYPE" == "boolean" ]]; then
+    _record_pass "manual_rollback type is boolean"
+else
+    _record_fail "manual_rollback type must be 'boolean' (got: '$MR_TYPE')"
+fi
+
+# Default must be present and equal to false (boolean or string form).
+if [[ "$MR_HAS_DEFAULT" != "true" ]]; then
+    _record_fail "manual_rollback default missing (input has no 'default' key)"
+else
+    case "$MR_DEFAULT" in
+        false|False|FALSE) _record_pass "manual_rollback default is false" ;;
+        *)                 _record_fail "manual_rollback default must be false (got: '$MR_DEFAULT')" ;;
+    esac
+fi
+
+if [[ -n "$MR_DESC" && "$MR_DESC" != "null" ]]; then
+    _record_pass "manual_rollback description is non-empty"
+else
+    _record_fail "manual_rollback description must be non-empty (got: '$MR_DESC')"
+fi
+
+# ── Case M2: Capture pre-migrate Neon LSN (prod) step ───────────────────────
+test_case "capture_lsn_step" "step id capture-lsn captures LSN + branch-id, runs before migrate"
+
+CAPTURE_IDX="$(step_idx_by_id capture-lsn)"
+if [[ "$CAPTURE_IDX" -ge 0 ]]; then
+    _record_pass "step id 'capture-lsn' present (index $CAPTURE_IDX)"
+
+    CAPTURE_NAME="$(wfq "$JOB_STEPS_JQ | .[$CAPTURE_IDX].name // \"\"")"
+    if [[ "$CAPTURE_NAME" == *"pre-migrate Neon LSN"* ]]; then
+        _record_pass "capture-lsn step name contains 'pre-migrate Neon LSN' (operator-readable)"
+    else
+        _record_fail "capture-lsn step name must contain 'pre-migrate Neon LSN' (got: '$CAPTURE_NAME')"
+    fi
+
+    CAPTURE_RUN="$(wfq "$JOB_STEPS_JQ | .[$CAPTURE_IDX].run // \"\"")"
+    if [[ "$CAPTURE_RUN" == *"pg_current_wal_lsn"* ]]; then
+        _record_pass "capture-lsn run: references pg_current_wal_lsn"
+    else
+        _record_fail "capture-lsn run: must reference pg_current_wal_lsn"
+    fi
+    if [[ "$CAPTURE_RUN" == *"console.neon.tech/api/v2/projects"* ]]; then
+        _record_pass "capture-lsn run: references console.neon.tech/api/v2/projects (branch-id resolution)"
+    else
+        _record_fail "capture-lsn run: must reference console.neon.tech/api/v2/projects"
+    fi
+    if [[ "$CAPTURE_RUN" == *"branches"* ]]; then
+        _record_pass "capture-lsn run: references 'branches' (Neon API path segment)"
+    else
+        _record_fail "capture-lsn run: must reference 'branches' for branch-id resolution"
+    fi
+    if [[ "$CAPTURE_RUN" == *"lsn="* ]]; then
+        _record_pass "capture-lsn run: writes lsn= to GITHUB_OUTPUT"
+    else
+        _record_fail "capture-lsn run: must write 'lsn=' to GITHUB_OUTPUT"
+    fi
+    if [[ "$CAPTURE_RUN" == *"branch-id="* ]]; then
+        _record_pass "capture-lsn run: writes branch-id= to GITHUB_OUTPUT"
+    else
+        _record_fail "capture-lsn run: must write 'branch-id=' to GITHUB_OUTPUT"
+    fi
+
+    # env: must include DATABASE_URL (psql needs it).
+    CAPTURE_ENV_DBURL="$(wfq "$JOB_STEPS_JQ | .[$CAPTURE_IDX].env.\"DATABASE_URL\" // \"__missing__\"")"
+    if [[ "$CAPTURE_ENV_DBURL" == "__missing__" ]]; then
+        _record_fail "capture-lsn env: must include DATABASE_URL"
+    else
+        _record_pass "capture-lsn env: DATABASE_URL is wired"
+    fi
+
+    # if: must reference manual_rollback (skip on manual rollback path).
+    CAPTURE_IF="$(wfq "$JOB_STEPS_JQ | .[$CAPTURE_IDX].if // \"\"")"
+    if [[ "$CAPTURE_IF" == *"manual_rollback"* ]]; then
+        _record_pass "capture-lsn if: gates on manual_rollback (got: '$CAPTURE_IF')"
+    else
+        _record_fail "capture-lsn must have if: that references manual_rollback (got: '$CAPTURE_IF')"
+    fi
+else
+    _record_fail "step id 'capture-lsn' missing — Phase 4 must add it"
+fi
+
+# ── Case M3: Run prod migrations (before image cutover) step ────────────────
+test_case "migrate_prod_step" "step id migrate-prod runs mix ecto.migrate, gated on !manual_rollback"
+
+MIGRATE_IDX="$(step_idx_by_id migrate-prod)"
+if [[ "$MIGRATE_IDX" -ge 0 ]]; then
+    _record_pass "step id 'migrate-prod' present (index $MIGRATE_IDX)"
+
+    MIGRATE_NAME_LOWER="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].name // \"\" | ascii_downcase")"
+    # Substring `migrat` matches both 'migrate' and 'migrations' — the
+    # canonical Phase 4 name is `Run prod migrations (before image cutover)`.
+    if [[ "$MIGRATE_NAME_LOWER" == *"migrat"* ]]; then
+        _record_pass "migrate-prod name contains 'migrat' (matches both 'migrate' and 'migrations')"
+    else
+        _record_fail "migrate-prod name must contain 'migrate' or 'migrations' (got: '$MIGRATE_NAME_LOWER')"
+    fi
+
+    MIGRATE_RUN="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].run // \"\"")"
+    if [[ "$MIGRATE_RUN" == *"mix ecto.migrate"* ]]; then
+        _record_pass "migrate-prod run: invokes 'mix ecto.migrate'"
+    else
+        _record_fail "migrate-prod run: must invoke 'mix ecto.migrate'"
+    fi
+
+    # Either working-directory: apps/core OR run: cd's into apps/core.
+    MIGRATE_WD="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].\"working-directory\" // \"\"")"
+    if [[ "$MIGRATE_WD" == "apps/core" ]]; then
+        _record_pass "migrate-prod working-directory: apps/core"
+    elif [[ "$MIGRATE_RUN" == *"cd apps/core"* ]]; then
+        _record_pass "migrate-prod run: cd's into apps/core"
+    else
+        _record_fail "migrate-prod must use working-directory: apps/core OR cd apps/core (got wd: '$MIGRATE_WD')"
+    fi
+
+    # env: must include MIX_ENV: prod, DATABASE_URL, CLOAK_KEY.
+    MIGRATE_MIXENV="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"MIX_ENV\" // \"__missing__\"")"
+    if [[ "$MIGRATE_MIXENV" == "prod" ]]; then
+        _record_pass "migrate-prod env: MIX_ENV=prod"
+    else
+        _record_fail "migrate-prod env: MIX_ENV must be 'prod' (got: '$MIGRATE_MIXENV')"
+    fi
+    MIGRATE_DBURL="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"DATABASE_URL\" // \"__missing__\"")"
+    if [[ "$MIGRATE_DBURL" == "__missing__" ]]; then
+        _record_fail "migrate-prod env: must include DATABASE_URL"
+    else
+        _record_pass "migrate-prod env: DATABASE_URL is wired"
+    fi
+    MIGRATE_CLOAK="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"CLOAK_KEY\" // \"__missing__\"")"
+    if [[ "$MIGRATE_CLOAK" == "__missing__" ]]; then
+        _record_fail "migrate-prod env: must include CLOAK_KEY"
+    else
+        _record_pass "migrate-prod env: CLOAK_KEY is wired"
+    fi
+
+    # if: must reference manual_rollback (skip on manual rollback path).
+    MIGRATE_IF="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].if // \"\"")"
+    if [[ "$MIGRATE_IF" == *"manual_rollback"* ]]; then
+        _record_pass "migrate-prod if: gates on manual_rollback (got: '$MIGRATE_IF')"
+    else
+        _record_fail "migrate-prod must have if: that references manual_rollback (got: '$MIGRATE_IF')"
+    fi
+else
+    _record_fail "step id 'migrate-prod' missing — Phase 4 must add it"
+fi
+
+# Order: capture-lsn < migrate-prod < deploy-stack.
+DEPLOY_STACK_IDX="$(step_idx_by_run_substr "deploy-stack.sh")"
+if [[ "$CAPTURE_IDX" -ge 0 && "$MIGRATE_IDX" -ge 0 ]]; then
+    if [[ "$CAPTURE_IDX" -lt "$MIGRATE_IDX" ]]; then
+        _record_pass "step order: capture-lsn (#$CAPTURE_IDX) < migrate-prod (#$MIGRATE_IDX)"
+    else
+        _record_fail "step order wrong: capture-lsn must precede migrate-prod (capture=#$CAPTURE_IDX migrate=#$MIGRATE_IDX)"
+    fi
+fi
+if [[ "$MIGRATE_IDX" -ge 0 && "$DEPLOY_STACK_IDX" -ge 0 ]]; then
+    if [[ "$MIGRATE_IDX" -lt "$DEPLOY_STACK_IDX" ]]; then
+        _record_pass "step order: migrate-prod (#$MIGRATE_IDX) < deploy-stack (#$DEPLOY_STACK_IDX)"
+    else
+        _record_fail "step order wrong: migrate-prod must precede deploy-stack (migrate=#$MIGRATE_IDX deploy=#$DEPLOY_STACK_IDX)"
+    fi
+fi
+
+# ── Case M4: Rollback step uses composite action (not inline bash) ──────────
+test_case "rollback_uses_composite_action" "rollback step uses ./.github/actions/rollback-production"
+
+ROLLBACK_IDX="$(step_idx_by_id rollback)"
+if [[ "$ROLLBACK_IDX" -ge 0 ]]; then
+    _record_pass "step id 'rollback' present (index $ROLLBACK_IDX)"
+
+    ROLLBACK_USES="$(wfq "$JOB_STEPS_JQ | .[$ROLLBACK_IDX].uses // \"\"")"
+    if [[ "$ROLLBACK_USES" == "./.github/actions/rollback-production" ]]; then
+        _record_pass "rollback step uses ./.github/actions/rollback-production"
+    else
+        _record_fail "rollback step uses: must be './.github/actions/rollback-production' (got: '$ROLLBACK_USES')"
+    fi
+
+    ROLLBACK_RUN="$(wfq "$JOB_STEPS_JQ | .[$ROLLBACK_IDX].run // \"__missing__\"")"
+    if [[ "$ROLLBACK_RUN" == "__missing__" ]]; then
+        _record_pass "rollback step has no inline run: (action invocation only)"
+    else
+        _record_fail "rollback step must NOT have a run: field (got: '$(printf '%s' "$ROLLBACK_RUN" | head -c 80)…')"
+    fi
+
+    ROLLBACK_IF="$(wfq "$JOB_STEPS_JQ | .[$ROLLBACK_IDX].if // \"\"")"
+    if [[ "$ROLLBACK_IF" == *"failure()"* ]]; then
+        _record_pass "rollback if: contains failure()"
+    else
+        _record_fail "rollback if: must contain failure() (got: '$ROLLBACK_IF')"
+    fi
+    if [[ "$ROLLBACK_IF" == *"manual_rollback"* ]]; then
+        _record_pass "rollback if: contains manual_rollback"
+    else
+        _record_fail "rollback if: must reference inputs.manual_rollback (got: '$ROLLBACK_IF')"
+    fi
+else
+    _record_fail "step id 'rollback' missing — Phase 4 must rename + restructure the inline rollback step"
+fi
+
+# Old inline `bash scripts/rollback-production.sh` step must be GONE.
+INLINE_ROLLBACK_RUN_IDX="$(step_idx_by_run_substr "scripts/rollback-production.sh")"
+if [[ "$INLINE_ROLLBACK_RUN_IDX" -lt 0 ]]; then
+    _record_pass "no step's run: directly invokes scripts/rollback-production.sh (composite action wraps it)"
+else
+    _record_fail "inline rollback step at index $INLINE_ROLLBACK_RUN_IDX still invokes scripts/rollback-production.sh — must be replaced by composite action"
+fi
+
+# ── Case M5: Rollback step's with: block wires all required inputs ──────────
+test_case "rollback_with_inputs" "rollback step's with: block wires all 17 composite-action inputs"
+
+# `with` value lookups for the rollback step. Each accepts varying valid forms.
+_rb_with() {
+    # _rb_with <input-key>: prints the value at .with.<key>, or empty.
+    local key="$1"
+    if [[ "$ROLLBACK_IDX" -ge 0 ]]; then
+        wfq "$JOB_STEPS_JQ | .[$ROLLBACK_IDX].with.\"$key\" // \"\""
+    else
+        echo ""
+    fi
+}
+
+# core-app: any expression containing CORE_APP (env or literal).
+RB_CORE_APP="$(_rb_with core-app)"
+if [[ "$RB_CORE_APP" == *"CORE_APP"* ]]; then
+    _record_pass "with.core-app references CORE_APP"
+else
+    _record_fail "with.core-app must reference CORE_APP env (got: '$RB_CORE_APP')"
+fi
+
+# core-prev-image: env.CORE_PREV_IMAGE.
+RB_CORE_PREV="$(_rb_with core-prev-image)"
+if [[ "$RB_CORE_PREV" == *"CORE_PREV_IMAGE"* ]]; then
+    _record_pass "with.core-prev-image references CORE_PREV_IMAGE"
+else
+    _record_fail "with.core-prev-image must reference env.CORE_PREV_IMAGE (got: '$RB_CORE_PREV')"
+fi
+
+# modal-app: env.MODAL_APP_NAME OR literal thestacks-vision.
+RB_MODAL_APP="$(_rb_with modal-app)"
+if [[ "$RB_MODAL_APP" == *"MODAL_APP_NAME"* || "$RB_MODAL_APP" == *"thestacks-vision"* ]]; then
+    _record_pass "with.modal-app references MODAL_APP_NAME or thestacks-vision"
+else
+    _record_fail "with.modal-app must reference env.MODAL_APP_NAME or 'thestacks-vision' (got: '$RB_MODAL_APP')"
+fi
+
+# modal-prev-commit: env.MODAL_PREV_COMMIT.
+RB_MODAL_PREV="$(_rb_with modal-prev-commit)"
+if [[ "$RB_MODAL_PREV" == *"MODAL_PREV_COMMIT"* ]]; then
+    _record_pass "with.modal-prev-commit references MODAL_PREV_COMMIT"
+else
+    _record_fail "with.modal-prev-commit must reference env.MODAL_PREV_COMMIT (got: '$RB_MODAL_PREV')"
+fi
+
+# modal-token-id: secrets.MODAL_TOKEN_ID.
+RB_MODAL_TID="$(_rb_with modal-token-id)"
+if [[ "$RB_MODAL_TID" == *"secrets."*"MODAL_TOKEN_ID"* ]]; then
+    _record_pass "with.modal-token-id references secrets.MODAL_TOKEN_ID"
+else
+    _record_fail "with.modal-token-id must reference secrets.MODAL_TOKEN_ID (got: '$RB_MODAL_TID')"
+fi
+
+# modal-token-secret: secrets.MODAL_TOKEN_SECRET.
+RB_MODAL_TSEC="$(_rb_with modal-token-secret)"
+if [[ "$RB_MODAL_TSEC" == *"secrets."*"MODAL_TOKEN_SECRET"* ]]; then
+    _record_pass "with.modal-token-secret references secrets.MODAL_TOKEN_SECRET"
+else
+    _record_fail "with.modal-token-secret must reference secrets.MODAL_TOKEN_SECRET (got: '$RB_MODAL_TSEC')"
+fi
+
+# fly-api-token: secrets.FLY_API_TOKEN.
+RB_FLY="$(_rb_with fly-api-token)"
+if [[ "$RB_FLY" == *"secrets."*"FLY_API_TOKEN"* ]]; then
+    _record_pass "with.fly-api-token references secrets.FLY_API_TOKEN"
+else
+    _record_fail "with.fly-api-token must reference secrets.FLY_API_TOKEN (got: '$RB_FLY')"
+fi
+
+# rollback-reason: non-trivial expression (contains an expression delimiter).
+RB_REASON="$(_rb_with rollback-reason)"
+if [[ -n "$RB_REASON" && "$RB_REASON" != "null" ]] \
+    && { [[ "$RB_REASON" == *"manual_rollback"* ]] || [[ "$RB_REASON" == *"\${{"* ]] || [[ "$RB_REASON" == *"format("* ]]; }; then
+    _record_pass "with.rollback-reason has a non-trivial expression"
+else
+    _record_fail "with.rollback-reason must contain a non-trivial expression (e.g. ternary on manual_rollback) (got: '$RB_REASON')"
+fi
+
+# neon-prod-project-id: secrets.NEON_PROD_PROJECT_ID.
+RB_NEON_PID="$(_rb_with neon-prod-project-id)"
+if [[ "$RB_NEON_PID" == *"secrets."*"NEON_PROD_PROJECT_ID"* ]]; then
+    _record_pass "with.neon-prod-project-id references secrets.NEON_PROD_PROJECT_ID"
+else
+    _record_fail "with.neon-prod-project-id must reference secrets.NEON_PROD_PROJECT_ID (got: '$RB_NEON_PID')"
+fi
+
+# neon-prod-api-key: secrets.NEON_PROD_API_KEY.
+RB_NEON_KEY="$(_rb_with neon-prod-api-key)"
+if [[ "$RB_NEON_KEY" == *"secrets."*"NEON_PROD_API_KEY"* ]]; then
+    _record_pass "with.neon-prod-api-key references secrets.NEON_PROD_API_KEY"
+else
+    _record_fail "with.neon-prod-api-key must reference secrets.NEON_PROD_API_KEY (got: '$RB_NEON_KEY')"
+fi
+
+# neon-prod-branch-id: steps.capture-lsn.outputs.branch-id.
+RB_NEON_BID="$(_rb_with neon-prod-branch-id)"
+if [[ "$RB_NEON_BID" == *"steps.capture-lsn.outputs.branch-id"* ]]; then
+    _record_pass "with.neon-prod-branch-id references steps.capture-lsn.outputs.branch-id"
+else
+    _record_fail "with.neon-prod-branch-id must reference steps.capture-lsn.outputs.branch-id (got: '$RB_NEON_BID')"
+fi
+
+# pre-migrate-lsn: steps.capture-lsn.outputs.lsn.
+RB_LSN="$(_rb_with pre-migrate-lsn)"
+if [[ "$RB_LSN" == *"steps.capture-lsn.outputs.lsn"* ]]; then
+    _record_pass "with.pre-migrate-lsn references steps.capture-lsn.outputs.lsn"
+else
+    _record_fail "with.pre-migrate-lsn must reference steps.capture-lsn.outputs.lsn (got: '$RB_LSN')"
+fi
+
+# failed-sha: github.sha.
+RB_FAILED_SHA="$(_rb_with failed-sha)"
+if [[ "$RB_FAILED_SHA" == *"github.sha"* ]]; then
+    _record_pass "with.failed-sha references github.sha"
+else
+    _record_fail "with.failed-sha must reference github.sha (got: '$RB_FAILED_SHA')"
+fi
+
+# triggered-by: non-trivial expression.
+RB_TRIGGERED="$(_rb_with triggered-by)"
+if [[ -n "$RB_TRIGGERED" && "$RB_TRIGGERED" != "null" ]] \
+    && { [[ "$RB_TRIGGERED" == *"manual_rollback"* ]] || [[ "$RB_TRIGGERED" == *"\${{"* ]] || [[ "$RB_TRIGGERED" == *"&&"* ]]; }; then
+    _record_pass "with.triggered-by has a non-trivial expression"
+else
+    _record_fail "with.triggered-by must contain a non-trivial expression (e.g. ternary on manual_rollback) (got: '$RB_TRIGGERED')"
+fi
+
+# database-url: env.DATABASE_URL OR secrets.DATABASE_URL.
+RB_DBURL="$(_rb_with database-url)"
+if [[ "$RB_DBURL" == *"env.DATABASE_URL"* || "$RB_DBURL" == *"secrets.DATABASE_URL"* ]]; then
+    _record_pass "with.database-url references env.DATABASE_URL or secrets.DATABASE_URL"
+else
+    _record_fail "with.database-url must reference env.DATABASE_URL or secrets.DATABASE_URL (got: '$RB_DBURL')"
+fi
+
+# cloak-key: secrets.CLOAK_KEY.
+RB_CLOAK="$(_rb_with cloak-key)"
+if [[ "$RB_CLOAK" == *"secrets."*"CLOAK_KEY"* ]]; then
+    _record_pass "with.cloak-key references secrets.CLOAK_KEY"
+else
+    _record_fail "with.cloak-key must reference secrets.CLOAK_KEY (got: '$RB_CLOAK')"
+fi
+
+# ── Case M6: Manual-rollback short-circuit gating on deploy-side steps ──────
+test_case "manual_rollback_short_circuit" "deploy-side steps are gated on !inputs.manual_rollback"
+
+# Find the deploy-stack step by run: substring (it has no id).
+DEPLOY_STACK_IF="$(wfq "$JOB_STEPS_JQ | .[] | select((.run // \"\") | contains(\"deploy-stack.sh\")) | .if // \"\"" | head -n1)"
+if [[ "$DEPLOY_STACK_IF" == *"manual_rollback"* ]]; then
+    _record_pass "deploy-stack step if: references manual_rollback (got: '$DEPLOY_STACK_IF')"
+else
+    _record_fail "deploy-stack step must have if: that references manual_rollback (got: '$DEPLOY_STACK_IF')"
+fi
+
+# Find the gate step by id `gate` (canonical).
+GATE_IF="$(wfq "$JOB_STEPS_JQ | .[] | select(.id == \"gate\") | .if // \"\"" | head -n1)"
+if [[ "$GATE_IF" == *"manual_rollback"* ]]; then
+    _record_pass "gate step if: references manual_rollback (got: '$GATE_IF')"
+else
+    _record_fail "gate step must have if: that references manual_rollback (got: '$GATE_IF')"
+fi
+
+# Setup steps must NOT have a manual_rollback gate (they need to run on both
+# paths so the composite action's `log-audit` step can compile the Elixir
+# tree). Emit one assertion per setup step we want to verify is unchanged.
+_assert_setup_step_no_manual_rollback() {
+    # _assert_setup_step_no_manual_rollback <name-substring-lowercase> <kind: name|run|uses>
+    local needle="$1"
+    local kind="$2"
+    local idx
+    case "$kind" in
+        name) idx="$(step_idx_by_name_substr_ci "$needle")" ;;
+        run)  idx="$(step_idx_by_run_substr "$needle")" ;;
+        uses) idx="$(wfq "[$JOB_STEPS_JQ | to_entries[] | select((.value.uses // \"\") | contains(\"$needle\")) | .key] | (.[0] // -1)")" ;;
+        *)    _record_fail "_assert_setup_step_no_manual_rollback: unknown kind '$kind'"; return ;;
+    esac
+    if [[ "$idx" -lt 0 ]]; then
+        _record_fail "setup step matching '$needle' (kind=$kind) not found — cannot verify gating"
+        return
+    fi
+    local step_if
+    step_if="$(wfq "$JOB_STEPS_JQ | .[$idx].if // \"\"")"
+    if [[ "$step_if" == *"manual_rollback"* ]]; then
+        _record_fail "setup step '$needle' must NOT be gated on manual_rollback (got if: '$step_if')"
+    else
+        _record_pass "setup step '$needle' is not gated on manual_rollback"
+    fi
+}
+
+# These setup steps must run on both paths (manual rollback still needs the
+# Elixir tree compiled for the composite action's `log-audit` step).
+_assert_setup_step_no_manual_rollback "actions/checkout" uses
+_assert_setup_step_no_manual_rollback "erlef/setup-beam" uses
+_assert_setup_step_no_manual_rollback "mix deps.get" run
+_assert_setup_step_no_manual_rollback "compose database_url" name
+
+# ── Case M7: actionlint clean (best-effort) ─────────────────────────────────
+test_case "actionlint_clean_phase4" "actionlint passes on deploy-production.yml when available"
+if command -v actionlint >/dev/null 2>&1; then
+    if AL_OUT="$(actionlint "$WF" 2>&1)"; then
+        _record_pass "actionlint passed on $WF"
+    else
+        _record_fail "actionlint failed: $AL_OUT"
+    fi
+else
+    _record_pass "actionlint not on PATH; skipped"
 fi
 
 summarise
