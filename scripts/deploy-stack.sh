@@ -713,6 +713,15 @@ wait "${_PROXY_PID}" 2>/dev/null || true
 echo "PASS deploy: health check passed"
 
 # ── Migrate ──────────────────────────────────────────────────────────────────
+# In-container migrate as defense-in-depth: deploy-production.yml's
+# `Run prod migrations (before image cutover)` step is the primary
+# migration path (runs against prod DATABASE_URL from the GHA runner
+# BEFORE the image cutover, so a partial migration aborts the deploy
+# while the old image still serves traffic). On the healthy path this
+# call finds no pending migrations and returns :ok immediately. The
+# in-container call is preserved as a safety net for paths where the
+# runner-side step was somehow skipped (operator override, future code
+# change, preview deploys that don't run the prod-only runner step).
 echo ""
 echo "==> Running migrations on ${CORE_APP}..."
 machine_id="$(fly_machine_started_id "${CORE_APP}")"

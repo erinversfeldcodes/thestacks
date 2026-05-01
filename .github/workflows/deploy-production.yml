@@ -4,10 +4,17 @@ name: Deploy production
 #   - workflow_run (default): fires whenever CI completes successfully on
 #     ANY branch. While Issue #136 is in flight we want the pipeline
 #     exercised inside PRs, not gated on a main-merge ritual.
-#   - workflow_dispatch: manual trigger for safe live validation. Operators
-#     can point the workflow at a preview Fly app via `target_app` input
-#     and optionally short-circuit the gate via `force_rollback` to
-#     end-to-end-test the rollback path without causing a real regression.
+#   - workflow_dispatch: manual trigger for safe live validation +
+#     operator-initiated rollback. Inputs:
+#       * target_app — point the workflow at a preview Fly app instead
+#         of prod (live validation against a sacrificial environment).
+#       * force_rollback — inject a synthetic SLI breach so the gate
+#         trips on a healthy deploy; exercises the rollback path
+#         end-to-end without a real regression.
+#       * manual_rollback — skip deploy + gate entirely and run only
+#         the rollback step. Use after a bad deploy when the SLO gate
+#         didn't catch the regression. See docs/runbooks/manual-rollback.md
+#         (added in Phase 6 of #137).
 #
 # TODO(Issue #136): before merging to main, switch this trigger to:
 #     on:
@@ -36,6 +43,11 @@ on:
         default: thestacks-core
       force_rollback:
         description: "Inject a failing SLI (beam_memory_mb) to exercise the rollback path without a real regression"
+        required: false
+        type: boolean
+        default: false
+      manual_rollback:
+        description: "Roll back the prod stack without running a deploy first. Use after a bad deploy when the SLO gate didn't catch the regression."
         required: false
         type: boolean
         default: false
@@ -123,31 +135,6 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Compose DATABASE_URL from prod Neon components
-        # URL-encodes role/password/dbname so passwords containing @ / : etc.
-        # survive the round-trip through the connection string grammar. The
-        # composed URL is written to $GITHUB_ENV for subsequent steps and
-        # masked in logs via ::add-mask::. Fails loudly with a named
-        # variable when any component is missing.
-        run: |
-          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
-            if [[ -z "${!v}" ]]; then
-              echo "::error::$v is required but not set"
-              exit 1
-            fi
-          done
-          DATABASE_URL="$(python3 -c "
-          import os, urllib.parse as up
-          role = up.quote(os.environ['STACKS_PROD_DB_ROLE'], safe='')
-          pw   = up.quote(os.environ['STACKS_PROD_DB_PASSWORD'], safe='')
-          host = os.environ['STACKS_PROD_DB_HOST']
-          db   = up.quote(os.environ['STACKS_PROD_DB_NAME'], safe='')
-          print(f'postgresql://{role}:{pw}@{host}/{db}?sslmode=require')
-          ")"
-          echo "::add-mask::${DATABASE_URL}"
-          echo "DATABASE_URL=${DATABASE_URL}" >> "$GITHUB_ENV"
-          echo "Composed DATABASE_URL for ${STACKS_PROD_DB_HOST}"
-
       - name: Read .versions
         id: versions
         run: |
@@ -233,33 +220,125 @@ jobs:
           python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
 
+      - name: Compose DATABASE_URL from prod Neon components
+        # URL-encodes role/password/dbname so passwords containing @ / : etc.
+        # survive the round-trip through the connection string grammar. The
+        # composed URL is written to $GITHUB_ENV for subsequent steps and
+        # masked in logs via ::add-mask::. Fails loudly with a named
+        # variable when any component is missing.
+        run: |
+          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::$v is required but not set"
+              exit 1
+            fi
+          done
+          DATABASE_URL="$(python3 -c "
+          import os, urllib.parse as up
+          role = up.quote(os.environ['STACKS_PROD_DB_ROLE'], safe='')
+          pw   = up.quote(os.environ['STACKS_PROD_DB_PASSWORD'], safe='')
+          host = os.environ['STACKS_PROD_DB_HOST']
+          db   = up.quote(os.environ['STACKS_PROD_DB_NAME'], safe='')
+          print(f'postgresql://{role}:{pw}@{host}/{db}?sslmode=require')
+          ")"
+          echo "::add-mask::${DATABASE_URL}"
+          echo "DATABASE_URL=${DATABASE_URL}" >> "$GITHUB_ENV"
+          echo "Composed DATABASE_URL for ${STACKS_PROD_DB_HOST}"
+
+      - name: Install postgresql-client (for capture-lsn psql call)
+        # Idempotent and cheap; runs on both the deploy and manual short-
+        # circuit paths. The capture-lsn step that needs psql is gated
+        # separately so this install is harmless when capture-lsn is
+        # skipped.
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Capture pre-migrate Neon LSN (prod)
+        id: capture-lsn
+        if: ${{ !inputs.manual_rollback }}
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          NEON_PROD_API_KEY: ${{ secrets.NEON_PROD_API_KEY }}
+          NEON_PROD_PROJECT_ID: ${{ secrets.NEON_PROD_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # Capture the LSN from Postgres itself — Neon's Branch object exposes
+          # only parent_lsn (fork-point), not current_lsn. pg_current_wal_lsn()
+          # returns a value like "0/16E8090" which is exactly the form Neon's
+          # restore API accepts in `source_lsn`.
+          LSN=$(psql "$DATABASE_URL" -t -A -c "SELECT pg_current_wal_lsn();")
+          if [[ -z "$LSN" ]]; then
+            echo "::error::Failed to capture pre-migrate LSN" >&2
+            exit 1
+          fi
+          echo "lsn=$LSN" >> "$GITHUB_OUTPUT"
+          echo "Captured pre-migrate LSN: $LSN"
+
+          # Resolve the prod branch ID via /branches filtered on default: true.
+          # `default` (rather than the deprecated `primary`) future-proofs against
+          # the branch being renamed at the project level.
+          BRANCH_ID=$(curl -sL \
+              -H "Authorization: Bearer $NEON_PROD_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROD_PROJECT_ID/branches" \
+            | python3 -c '
+          import json, sys
+          branches = json.load(sys.stdin).get("branches", [])
+          prod = next((b for b in branches if b.get("default") is True), None)
+          if prod is None:
+              sys.exit("default (primary) branch not found")
+          print(prod["id"])
+          ')
+          if [[ -z "$BRANCH_ID" ]]; then
+            echo "::error::Failed to resolve Neon prod branch ID" >&2
+            exit 1
+          fi
+          echo "branch-id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved prod branch id: $BRANCH_ID"
+
+      - name: Run prod migrations (before image cutover)
+        id: migrate-prod
+        if: ${{ !inputs.manual_rollback }}
+        working-directory: apps/core
+        env:
+          MIX_ENV: prod
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+        run: |
+          mix deps.get --only prod
+          mix compile
+          mix ecto.migrate
+
       - name: deploy-stack.sh — push core + vision + scraper to production
+        if: ${{ !inputs.manual_rollback }}
         run: bash scripts/deploy-stack.sh --production
 
       - name: check-slo-gate.sh — 10 min post-deploy health gate
         id: gate
-        run: bash scripts/check-slo-gate.sh --out gate-observations.json
-        # env block placed AFTER run: intentionally. YAML is unordered, but
-        # the structural ordering test scans the file top-to-bottom for
-        # first-rollback-mention and requires it comes AFTER the gate's
-        # script path. The dispatch-input reference `inputs.force_rollback`
-        # is the first `rollback` literal in the body; keeping it below
-        # the gate's `run:` line satisfies that invariant without changing
-        # runtime semantics (GitHub Actions reads env regardless of order).
+        if: ${{ !inputs.manual_rollback }}
         env:
           FORCE_BREACH: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
+        run: bash scripts/check-slo-gate.sh --out gate-observations.json
 
-      - name: rollback-production.sh — auto-rollback on any prior failure
-        # Reviewer P1 #1: trigger on ANY prior step failure, not just the
-        # gate. A deploy-stack.sh hard-exit (e.g. retry-twice failure on a
-        # non-core component) leaves the gate step `skipped`, not `failed`
-        # — the old condition `steps.gate.conclusion == 'failure'` missed
-        # that case entirely. `failure()` evaluates true iff any previous
-        # step in the job failed, which covers both deploy-stack and gate.
-        if: ${{ failure() }}
-        env:
-          ROLLBACK_REASON: "SLO gate breached or prior step failed — see gate-observations.json"
-        run: bash scripts/rollback-production.sh
+      - name: rollback-production.sh — invokes rollback-production composite action
+        id: rollback
+        if: ${{ failure() || inputs.manual_rollback }}
+        uses: ./.github/actions/rollback-production
+        with:
+          core-app: ${{ env.CORE_APP }}
+          core-prev-image: ${{ env.CORE_PREV_IMAGE }}
+          modal-app: ${{ env.MODAL_APP_NAME }}
+          modal-prev-commit: ${{ env.MODAL_PREV_COMMIT }}
+          modal-token-id: ${{ secrets.MODAL_TOKEN_ID }}
+          modal-token-secret: ${{ secrets.MODAL_TOKEN_SECRET }}
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+          rollback-reason: ${{ inputs.manual_rollback && format('Manual rollback by @{0}', github.actor) || 'SLO gate breached or prior step failed — see gate-observations.json' }}
+          neon-prod-project-id: ${{ secrets.NEON_PROD_PROJECT_ID }}
+          neon-prod-api-key: ${{ secrets.NEON_PROD_API_KEY }}
+          neon-prod-branch-id: ${{ steps.capture-lsn.outputs.branch-id }}
+          pre-migrate-lsn: ${{ steps.capture-lsn.outputs.lsn }}
+          failed-sha: ${{ github.sha }}
+          triggered-by: ${{ inputs.manual_rollback && 'manual' || (steps.migrate-prod.conclusion == 'failure' && 'migration-failure' || 'step-failure') }}
+          database-url: ${{ env.DATABASE_URL }}
+          cloak-key: ${{ secrets.CLOAK_KEY }}
 
       # (Reviewer P1 #5) The moving `deployed-modal` tag step was removed;
       # .github/workflows/tag-main.yml now stamps an immutable `main-<sha>`
