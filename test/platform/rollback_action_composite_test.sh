@@ -370,11 +370,16 @@ for ENV_KEY in DATABASE_URL CLOAK_KEY; do
 done
 
 # ── Case 8: actionlint clean (best-effort) ──────────────────────────────────
-test_case "actionlint_clean" "actionlint passes on action.yml when available"
+# actionlint v1.7.x lints workflow YAML; composite action.yml files are validated
+# only as part of the workflows that use them. So we lint deploy-production.yml
+# (which `uses: ./.github/actions/rollback-production`); any schema/expression
+# error inside the composite action surfaces there.
+test_case "actionlint_clean" "actionlint passes on the workflow that consumes action.yml"
+DEPLOY_YML="$REPO_ROOT/.github/workflows/deploy-production.yml"
 if command -v actionlint >/dev/null 2>&1; then
-    if [[ -f "$ACTION_YML" ]]; then
-        if ACTIONLINT_OUT="$(actionlint "$ACTION_YML" 2>&1)"; then
-            _record_pass "actionlint passed on $ACTION_YML"
+    if [[ -f "$ACTION_YML" && -f "$DEPLOY_YML" ]]; then
+        if ACTIONLINT_OUT="$(actionlint "$DEPLOY_YML" 2>&1)"; then
+            _record_pass "actionlint passed on $DEPLOY_YML (validates composite action via uses:)"
         else
             _record_fail "actionlint failed: $ACTIONLINT_OUT"
         fi
