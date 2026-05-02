@@ -116,23 +116,39 @@ runs:
     - id: validate-inputs
       name: Validate inputs
       shell: bash
+      # Inputs flow through env: rather than inline ${{...}} interpolation so a
+      # malicious value (e.g. shell metacharacters) cannot escape the bash
+      # context. Defense in depth — these specific inputs aren't directly
+      # attacker-controlled (image SHAs from `fly image show`, secrets, LSN
+      # from `psql`), but semgrep flags inline `${{ inputs.* }}` in run: as
+      # injection-prone regardless. Same env-indirection pattern as the
+      # `run-rollback` and `log-audit` steps below.
+      env:
+        CORE_PREV_IMAGE: ${{ inputs.core-prev-image }}
+        MODAL_PREV_COMMIT: ${{ inputs.modal-prev-commit }}
+        MODAL_TOKEN_ID: ${{ inputs.modal-token-id }}
+        MODAL_TOKEN_SECRET: ${{ inputs.modal-token-secret }}
+        PRE_MIGRATE_LSN: ${{ inputs.pre-migrate-lsn }}
+        NEON_PROD_PROJECT_ID: ${{ inputs.neon-prod-project-id }}
+        NEON_PROD_API_KEY: ${{ inputs.neon-prod-api-key }}
+        NEON_PROD_BRANCH_ID: ${{ inputs.neon-prod-branch-id }}
       run: |
         set -uo pipefail
-        if [[ -z "${{ inputs.core-prev-image }}" ]]; then
+        if [[ -z "$CORE_PREV_IMAGE" ]]; then
           echo "::error::core-prev-image is required"
           exit 1
         fi
-        if [[ -n "${{ inputs.modal-prev-commit }}" ]]; then
-          if [[ -z "${{ inputs.modal-token-id }}" || -z "${{ inputs.modal-token-secret }}" ]]; then
+        if [[ -n "$MODAL_PREV_COMMIT" ]]; then
+          if [[ -z "$MODAL_TOKEN_ID" || -z "$MODAL_TOKEN_SECRET" ]]; then
             echo "::error::modal-token-id and modal-token-secret are required when modal-prev-commit is set"
             exit 1
           fi
         fi
-        if [[ -n "${{ inputs.pre-migrate-lsn }}" ]]; then
+        if [[ -n "$PRE_MIGRATE_LSN" ]]; then
           missing=()
-          [[ -z "${{ inputs.neon-prod-project-id }}" ]] && missing+=("neon-prod-project-id")
-          [[ -z "${{ inputs.neon-prod-api-key }}" ]] && missing+=("neon-prod-api-key")
-          [[ -z "${{ inputs.neon-prod-branch-id }}" ]] && missing+=("neon-prod-branch-id")
+          [[ -z "$NEON_PROD_PROJECT_ID" ]] && missing+=("neon-prod-project-id")
+          [[ -z "$NEON_PROD_API_KEY" ]] && missing+=("neon-prod-api-key")
+          [[ -z "$NEON_PROD_BRANCH_ID" ]] && missing+=("neon-prod-branch-id")
           if [[ ${#missing[@]} -gt 0 ]]; then
             echo "::error::pre-migrate-lsn is set but the following required inputs are missing: ${missing[*]}"
             exit 1
