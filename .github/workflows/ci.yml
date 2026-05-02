@@ -131,11 +131,13 @@ jobs:
         id: v
         run: |
           source .versions
-          echo "otp=${OTP_VERSION}"       >> "$GITHUB_OUTPUT"
-          echo "elixir=${ELIXIR_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "node=${NODE_VERSION}"     >> "$GITHUB_OUTPUT"
-          echo "python=${PYTHON_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "postgres=${POSTGRES_VERSION}" >> "$GITHUB_OUTPUT"
+          {
+            echo "otp=${OTP_VERSION}"
+            echo "elixir=${ELIXIR_VERSION}"
+            echo "node=${NODE_VERSION}"
+            echo "python=${PYTHON_VERSION}"
+            echo "postgres=${POSTGRES_VERSION}"
+          } >> "$GITHUB_OUTPUT"
 
   changes:
     needs: gate-pre-push-report
@@ -155,6 +157,7 @@ jobs:
       e2e: ${{ steps.filter.outputs.e2e }}
       migrations: ${{ steps.filter.outputs.migrations }}
       licenses: ${{ steps.filter.outputs.licenses }}
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -186,6 +189,9 @@ jobs:
               - 'mix.lock'
               - 'frontend/package-lock.json'
               - 'e2e/package-lock.json'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/actions/**'
 
   test-elixir:
     needs: [changes, versions]
@@ -355,6 +361,36 @@ jobs:
         with:
           github_token: ${{ github.token }}
       - run: scripts/lint-proto.sh
+
+  lint-actions:
+    # Issue #137 Phase 5: actionlint backfill across .github/workflows/*.yml +
+    # .github/actions/**/action.yml. Pinned to v1.7.4 (latest stable as of
+    # 2026-04). Bumping the pin is a one-line edit but should be paired with
+    # a fresh local re-run of `actionlint` in case the new version surfaces
+    # findings the previous one missed.
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        # Use the upstream-published install script. Pins to a specific
+        # version + the install dir so the binary lands at a predictable
+        # path on $GITHUB_PATH. The script verifies the SHA256 checksum
+        # against the release manifest.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.4/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run actionlint
+        # No-arg invocation auto-discovers .github/workflows/*.yml. Composite
+        # actions under .github/actions/**/action.yml are validated via the
+        # workflows that consume them (actionlint follows `uses:` references).
+        # Any non-zero exit fails the job — the inline shellcheck warnings
+        # we previously triaged are now fixed at source rather than
+        # suppressed, so this command should produce no output.
+        run: actionlint
 
   test-dbt:
     needs: [changes, versions]
@@ -651,8 +687,11 @@ jobs:
             exit 0
           fi
           echo "Linting:"
+          # Intentionally unquoted so each path is its own argv entry. Both
+          # `printf` and `lint-migrations.sh` rely on the shell expanding
+          # ${changed} into multiple words.
+          # shellcheck disable=SC2086
           printf '  %s\n' ${changed}
-          # Intentionally unquoted so each path is its own argv entry.
           # shellcheck disable=SC2086
           scripts/lint-migrations.sh ${changed}
 
@@ -785,7 +824,7 @@ jobs:
           npm install
           npx playwright install --with-deps chromium
       - name: Deploy preview stack + warm vision pipeline
-        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit ${PIPESTATUS[0]}
+        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit "${PIPESTATUS[0]}"
       - name: Pin Fly hostname to IPv4 in /etc/hosts
         # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
         # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
@@ -811,19 +850,20 @@ jobs:
       - name: Warm Fly machines and Neon database
         run: |
           # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
-          for i in {1..20}; do
+          # `_` is the bash convention for an intentionally unused loop variable.
+          for _ in {1..20}; do
             curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
           done
-          for i in {1..10}; do
+          for _ in {1..10}; do
             curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
           done
-          for i in {1..5}; do
+          for _ in {1..5}; do
             curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
               >/dev/null 2>&1 &
           done
-          for i in {1..3}; do
+          for _ in {1..3}; do
             DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
