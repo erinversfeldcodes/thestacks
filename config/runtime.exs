@@ -94,13 +94,20 @@ else
 end
 
 # ── Prod-only (release) ───────────────────────────────────────────────────────
+# This block has two layers:
+#
+#   1. Migrate-essential config (DATABASE_URL + Repo + ObanRepo) runs
+#      unconditionally — both `mix ecto.migrate` from the GHA runner AND
+#      the running prod container need it.
+#   2. Server-only config (VISION_SERVICE_URL, SECRET_KEY_BASE, endpoint
+#      binding, mailer, clustering, etc.) runs only when PHX_SERVER is
+#      set. Dockerfile.core sets `ENV PHX_SERVER=true` (line 92) so the
+#      running container always validates these. `mix ecto.migrate`
+#      from the GHA runner does NOT set PHX_SERVER, so server-only
+#      validations skip — unblocking Phase 4 of #137 (runner-side
+#      migrate before image cutover) without weakening prod boot
+#      validation.
 if config_env() == :prod do
-  vision_service_url =
-    System.get_env("VISION_SERVICE_URL") ||
-      raise "environment variable VISION_SERVICE_URL is missing."
-
-  config :core, :vision_service_url, vision_service_url
-
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -170,52 +177,65 @@ if config_env() == :prod do
     pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "80"),
     socket_options: maybe_ipv6
 
-  secret_key_base =
-    System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
+  # ── Server-only config — gated on PHX_SERVER ────────────────────────────────
+  # Dockerfile.core sets ENV PHX_SERVER=true so the running container hits
+  # this branch and validates everything below. `mix ecto.migrate` from the
+  # GHA runner doesn't set PHX_SERVER, so it skips these checks and migrates
+  # cleanly without needing service URLs / endpoint config it never uses.
+  if System.get_env("PHX_SERVER") do
+    vision_service_url =
+      System.get_env("VISION_SERVICE_URL") ||
+        raise "environment variable VISION_SERVICE_URL is missing."
 
-  host = System.get_env("PHX_HOST") || "thestacks.fly.dev"
-  port = String.to_integer(System.get_env("PORT") || "4000")
+    config :core, :vision_service_url, vision_service_url
 
-  config :core, CoreWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
-    http: [
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: port
-    ],
-    secret_key_base: secret_key_base
+    secret_key_base =
+      System.get_env("SECRET_KEY_BASE") ||
+        raise """
+        environment variable SECRET_KEY_BASE is missing.
+        You can generate one by calling: mix phx.gen.secret
+        """
 
-  config :core, upload_dir: "/tmp/uploads"
+    host = System.get_env("PHX_HOST") || "thestacks.fly.dev"
+    port = String.to_integer(System.get_env("PORT") || "4000")
 
-  if System.get_env("EMAIL_PROVIDER") == "resend" do
-    config :core, Stacks.Email.Mailer,
-      adapter: Swoosh.Adapters.Resend,
-      api_key: System.fetch_env!("RESEND_API_KEY")
-  end
+    config :core, CoreWeb.Endpoint,
+      url: [host: host, port: 443, scheme: "https"],
+      http: [
+        ip: {0, 0, 0, 0, 0, 0, 0, 0},
+        port: port
+      ],
+      secret_key_base: secret_key_base
 
-  # Erlang clustering on Fly.io — only active when FLY_APP_NAME is set.
-  # rel/env.sh.eex sets RELEASE_DISTRIBUTION=name and RELEASE_NODE=<app>@<ipv6>.
-  # Phoenix.PubSub's pg adapter broadcasts across all connected nodes automatically
-  # once libcluster connects them, so SSE streams on any machine receive events
-  # from Oban jobs on any other machine.
-  if fly_app = System.get_env("FLY_APP_NAME") do
-    config :libcluster,
-      topologies: [
-        fly: [
-          strategy: Cluster.Strategy.DNSPoll,
-          config: [
-            polling_interval: 5_000,
-            query: "#{fly_app}.internal",
-            node_basename: fly_app
+    config :core, upload_dir: "/tmp/uploads"
+
+    if System.get_env("EMAIL_PROVIDER") == "resend" do
+      config :core, Stacks.Email.Mailer,
+        adapter: Swoosh.Adapters.Resend,
+        api_key: System.fetch_env!("RESEND_API_KEY")
+    end
+
+    # Erlang clustering on Fly.io — only active when FLY_APP_NAME is set.
+    # rel/env.sh.eex sets RELEASE_DISTRIBUTION=name and RELEASE_NODE=<app>@<ipv6>.
+    # Phoenix.PubSub's pg adapter broadcasts across all connected nodes automatically
+    # once libcluster connects them, so SSE streams on any machine receive events
+    # from Oban jobs on any other machine.
+    if fly_app = System.get_env("FLY_APP_NAME") do
+      config :libcluster,
+        topologies: [
+          fly: [
+            strategy: Cluster.Strategy.DNSPoll,
+            config: [
+              polling_interval: 5_000,
+              query: "#{fly_app}.internal",
+              node_basename: fly_app
+            ]
           ]
         ]
-      ]
-  end
+    end
 
-  # Vision pipeline (Modal) can take 60–300s on cold starts. The SSE stream
-  # must stay open long enough for the job to complete and broadcast its result.
-  config :core, :sse_max_timeout_ms, 360_000
+    # Vision pipeline (Modal) can take 60–300s on cold starts. The SSE stream
+    # must stay open long enough for the job to complete and broadcast its result.
+    config :core, :sse_max_timeout_ms, 360_000
+  end
 end
