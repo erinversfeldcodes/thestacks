@@ -77,6 +77,33 @@ success "All Brewfile packages installed"
 PG_BIN="$(brew --prefix postgresql@16)/bin"
 export PATH="$PG_BIN:$PATH"
 
+# ── 2a. Docker buildx CLI plugin ─────────────────────────────────────────────
+# `brew install docker-buildx` (in Brewfile) drops the binary at
+# $(brew --prefix docker-buildx)/bin/docker-buildx, but `docker buildx`
+# only auto-discovers plugins in ~/.docker/cli-plugins/. Symlinking
+# bridges the two so Dockerfile.core's BuildKit-only `RUN --mount=...`
+# syntax actually works locally — and so scripts/security.sh's dockle
+# stage runs the real CIS scan instead of taking its skip path.
+# Idempotent: ln -sf overwrites any stale link without erroring.
+step "Docker buildx CLI plugin"
+if command -v docker &>/dev/null && brew list docker-buildx &>/dev/null; then
+    BUILDX_BIN="$(brew --prefix docker-buildx)/bin/docker-buildx"
+    BUILDX_PLUGIN="$HOME/.docker/cli-plugins/docker-buildx"
+    mkdir -p "$HOME/.docker/cli-plugins"
+    if [[ -x "$BUILDX_BIN" ]]; then
+        ln -sf "$BUILDX_BIN" "$BUILDX_PLUGIN"
+        if docker buildx version &>/dev/null; then
+            success "docker buildx ready ($(docker buildx version | head -1 | awk '{print $2}'))"
+        else
+            warn "Symlinked docker-buildx but \`docker buildx version\` still fails — investigate manually"
+        fi
+    else
+        warn "docker-buildx binary not at $BUILDX_BIN — brew install may have failed"
+    fi
+else
+    warn "docker or docker-buildx not installed — Dockerfile.core (BuildKit) won't build locally"
+fi
+
 # ── 2b. Nix ──────────────────────────────────────────────────────────────────
 # flake.nix pins exact tool versions (Elixir, OTP, Node, Python) matching
 # CI and Docker. Nix is required for direnv's `use flake` to work.
@@ -487,6 +514,7 @@ command -v trufflehog     &>/dev/null || MISSING+=("trufflehog (brew install tru
 command -v syft           &>/dev/null || MISSING+=("syft (brew install syft)")
 command -v grype          &>/dev/null || MISSING+=("grype (brew install grype)")
 command -v dockle         &>/dev/null || MISSING+=("dockle (brew install goodwithtech/r/dockle)")
+docker buildx version &>/dev/null     || MISSING+=("docker buildx (brew install docker-buildx; setup.sh symlinks the plugin)")
 command -v squawk         &>/dev/null || MISSING+=("squawk-cli (npm install -g squawk-cli)")
 command -v check-model-has-description &>/dev/null || MISSING+=("dbt-checkpoint (pip install git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8)")
 command -v jwt_tool       &>/dev/null || MISSING+=("jwt_tool (run: git clone https://github.com/ticarpi/jwt_tool ~/.local/share/jwt_tool)")
