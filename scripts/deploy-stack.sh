@@ -617,6 +617,36 @@ if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROO
 fi
 echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
+# ── Run prod migrations BEFORE image cutover ────────────────────────────────
+# Issue #137 phase 4: a partially-failing migration must abort the deploy
+# while the old image is still serving traffic. Running migrate here, after
+# the Elixir codegen above (which the compile depends on) and BEFORE the
+# `fly deploy` cutover below, gives that guarantee — `set -e` propagates a
+# migrate failure as a script failure, the workflow aborts before any
+# image swap, and the old image keeps serving.
+#
+# Prod-only: preview deploys still run their migrations in-container as
+# part of the post-deploy step (line 731). Phase 7 iteration consolidated
+# this from a separate `migrate-prod` workflow step into deploy-stack.sh
+# to avoid duplicating compile + codegen between the workflow and this
+# script. The in-container migrate at line 731 stays as defense-in-depth.
+if [[ "${PROD_MODE}" == 1 ]]; then
+    echo ""
+    echo "==> Running prod migrations (before image cutover)..."
+    if [[ -z "${DATABASE_URL:-}" ]]; then
+        echo "FAIL deploy: DATABASE_URL is required for prod migrate (compose it before invoking deploy-stack.sh --production)"
+        exit 1
+    fi
+    if ! (cd "$REPO_ROOT/apps/core" && \
+            MIX_ENV=prod mix deps.get --only prod && \
+            MIX_ENV=prod mix compile && \
+            MIX_ENV=prod mix ecto.migrate); then
+        echo "FAIL deploy: prod migration failed — old image still serving traffic"
+        exit 1
+    fi
+    echo "PASS deploy: prod migrations applied"
+fi
+
 # ── Build frontend assets ─────────────────────────────────────────────────────
 echo ""
 echo "==> Rebuilding frontend assets via esbuild..."
@@ -712,14 +742,16 @@ kill "${_PROXY_PID}" 2>/dev/null || true
 wait "${_PROXY_PID}" 2>/dev/null || true
 echo "PASS deploy: health check passed"
 
-# ── Migrate ──────────────────────────────────────────────────────────────────
-# In-container migrate as defense-in-depth: deploy-production.yml's
-# `Run prod migrations (before image cutover)` step is the primary
-# migration path (runs against prod DATABASE_URL from the GHA runner
-# BEFORE the image cutover, so a partial migration aborts the deploy
-# while the old image still serves traffic). On the healthy path this
-# call finds no pending migrations and returns :ok immediately. The
-# in-container call is preserved as a safety net for paths where the
+# ── Migrate (post-deploy, defense-in-depth) ─────────────────────────────────
+# In-container migrate as defense-in-depth. The primary prod-migrate path
+# is the runner-side `mix ecto.migrate` block above (right after the
+# Elixir codegen, before the `fly deploy` cutover) — that's where a
+# partial migration aborts the deploy while the old image still serves
+# traffic. On the healthy prod path, by the time this in-container call
+# runs the schema is already at the target version, so `Ecto.Migrator`
+# finds no pending migrations and returns :ok immediately.
+#
+# The in-container call is preserved as a safety net for paths where the
 # runner-side step was somehow skipped (operator override, future code
 # change, preview deploys that don't run the prod-only runner step).
 echo ""

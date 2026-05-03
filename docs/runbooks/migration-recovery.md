@@ -10,16 +10,22 @@
 
 The operator opens this runbook when one or more of these signals fire:
 
-- The `migrate-prod` step in `.github/workflows/deploy-production.yml`
-  exits non-zero. The workflow's `Run prod migrations (before image
-  cutover)` step is responsible — it runs `mix ecto.migrate` from the
-  GitHub Actions runner against the prod `DATABASE_URL` BEFORE
-  `fly deploy` swaps the core image.
+- The `deploy-stack.sh` step in `.github/workflows/deploy-production.yml`
+  exits non-zero, and its log shows the failure happened in the
+  "Running prod migrations (before image cutover)" block at
+  `scripts/deploy-stack.sh:643`. That block runs `mix ecto.migrate`
+  from the GitHub Actions runner against the prod `DATABASE_URL`
+  BEFORE the core `fly deploy` cutover — a partial migration aborts
+  the script before any image swap, so the old image keeps serving
+  traffic.
 - The auto-rollback fires (`if: failure() || inputs.manual_rollback` on
   the `rollback-production composite action` step).
 - The composite action's `triggered-by` input evaluates to
-  `"migration-failure"` — recorded in the audit row's
-  `metadata.triggered_by`. Distinct from `"slo-gate"` and `"manual"`.
+  `"step-failure"` — recorded in the audit row's
+  `metadata.triggered_by`. (Migration failures are no longer
+  distinguishable from other `deploy-stack.sh` failures at the
+  workflow level since the consolidation; `metadata.reason` and the
+  workflow logs carry the precise cause.)
 - Schema state may be partially applied. Some `ALTER TABLE` statements
   in the failing migration committed before the failure point; others
   did not. Postgres does not wrap a multi-statement migration in a
@@ -42,8 +48,14 @@ handles the migration-failure case explicitly:
 End state: image N-1 + schema N-1 + vision-at-prev-commit, fully consistent.
 
 The audit row for this path lands with `metadata.triggered_by =
-"migration-failure"`, distinguishing it in the audit log from
-SLO-gate-triggered or operator-initiated rollbacks.
+"step-failure"` and `metadata.reason` describing the SLO-gate context
+or the prior-step failure. (Before the Phase 7 consolidation,
+migrate-prod was a discrete workflow step and `triggered_by` could
+distinguish `"migration-failure"` from `"step-failure"`. After
+moving the migrate inside `deploy-stack.sh`, all in-script failures
+surface uniformly as `step-failure`; check the workflow logs and
+`metadata.reason` to identify whether the failure was migrate,
+fly deploy, or something else.)
 
 ---
 
@@ -62,7 +74,8 @@ Verify all of:
   currently-serving image.
 - An audit row exists in `audit.audit_log` with
   `action = "system.rollback"` and
-  `metadata.triggered_by = "migration-failure"`.
+  `metadata.triggered_by = "step-failure"` (with `metadata.reason`
+  identifying the migration as the failing step).
 - The `[:stacks, :system, :rollback]` telemetry event fired (visible in
   Axiom).
 - `/api/health` returns 200.
