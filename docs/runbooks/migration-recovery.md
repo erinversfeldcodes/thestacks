@@ -179,7 +179,7 @@ the rollback itself was wrong.
 To inspect:
 
 1. Open the Neon console:
-   `https://console.neon.tech/app/projects/$NEON_PROD_PROJECT_ID/branches`.
+   `https://console.neon.tech/app/projects/$NEON_PROJECT_ID/branches`.
 2. Find the branch named `pre-rollback-<sha7>-<UTC-timestamp>`.
 3. Read its size, parent LSN, and creation time.
 

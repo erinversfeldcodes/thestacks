@@ -257,10 +257,24 @@ jobs:
         if: ${{ !inputs.manual_rollback }}
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
-          NEON_PROD_API_KEY: ${{ secrets.NEON_PROD_API_KEY }}
-          NEON_PROD_PROJECT_ID: ${{ secrets.NEON_PROD_PROJECT_ID }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
         run: |
           set -euo pipefail
+          # Fast-fail before any work if the Neon secrets aren't staged in
+          # the GitHub repo. Without this, an empty NEON_API_KEY +
+          # NEON_PROJECT_ID would silently slip through to a curl call with
+          # an empty Bearer token + an empty projects/{id}/ URL segment,
+          # producing the misleading "default (primary) branch not found"
+          # error from the Python parser below — which sounds like a
+          # Neon-side problem but is actually a missing-secrets gap. Both
+          # secrets must be added via `gh secret set NEON_API_KEY` and
+          # `gh secret set NEON_PROJECT_ID` before this workflow can fire.
+          if [[ -z "${NEON_API_KEY:-}" || -z "${NEON_PROJECT_ID:-}" ]]; then
+            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as GitHub repo secrets. See issue #137 'Required secrets (new)' for the staging procedure." >&2
+            exit 1
+          fi
+
           # Capture the LSN from Postgres itself — Neon's Branch object exposes
           # only parent_lsn (fork-point), not current_lsn. pg_current_wal_lsn()
           # returns a value like "0/16E8090" which is exactly the form Neon's
@@ -277,8 +291,8 @@ jobs:
           # `default` (rather than the deprecated `primary`) future-proofs against
           # the branch being renamed at the project level.
           BRANCH_ID=$(curl -sL \
-              -H "Authorization: Bearer $NEON_PROD_API_KEY" \
-              "https://console.neon.tech/api/v2/projects/$NEON_PROD_PROJECT_ID/branches" \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches" \
             | python3 -c '
           import json, sys
           branches = json.load(sys.stdin).get("branches", [])
@@ -331,9 +345,9 @@ jobs:
           modal-token-secret: ${{ secrets.MODAL_TOKEN_SECRET }}
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
           rollback-reason: ${{ inputs.manual_rollback && format('Manual rollback by @{0}', github.actor) || 'SLO gate breached or prior step failed — see gate-observations.json' }}
-          neon-prod-project-id: ${{ secrets.NEON_PROD_PROJECT_ID }}
-          neon-prod-api-key: ${{ secrets.NEON_PROD_API_KEY }}
-          neon-prod-branch-id: ${{ steps.capture-lsn.outputs.branch-id }}
+          neon-project-id: ${{ secrets.NEON_PROJECT_ID }}
+          neon-api-key: ${{ secrets.NEON_API_KEY }}
+          neon-branch-id: ${{ steps.capture-lsn.outputs.branch-id }}
           pre-migrate-lsn: ${{ steps.capture-lsn.outputs.lsn }}
           failed-sha: ${{ github.sha }}
           triggered-by: ${{ inputs.manual_rollback && 'manual' || (steps.migrate-prod.conclusion == 'failure' && 'migration-failure' || 'step-failure') }}

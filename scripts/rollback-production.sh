@@ -39,11 +39,11 @@
 #                          Neon branch is restored to this LSN between core
 #                          and vision rollback so image and DB revert
 #                          together. Empty/unset = skip (logged WARN).
-#   NEON_PROD_PROJECT_ID   Neon project ID for the production project.
+#   NEON_PROJECT_ID   Neon project ID for the production project.
 #                          REQUIRED when PRE_MIGRATE_LSN is set.
-#   NEON_PROD_API_KEY      Neon API key scoped to the production project.
+#   NEON_API_KEY      Neon API key scoped to the production project.
 #                          REQUIRED when PRE_MIGRATE_LSN is set.
-#   NEON_PROD_BRANCH_ID    Neon branch ID for the prod default branch.
+#   NEON_BRANCH_ID    Neon branch ID for the prod default branch.
 #                          REQUIRED when PRE_MIGRATE_LSN is set.
 #   GITHUB_SHA             Used to derive the preserve_under_name suffix
 #                          (`pre-rollback-<sha7>-<ts>`). Optional; falls
@@ -51,8 +51,8 @@
 #
 # Exit non-zero if:
 #   - CORE_PREV_IMAGE is unset,
-#   - PRE_MIGRATE_LSN is set but any of NEON_PROD_PROJECT_ID,
-#     NEON_PROD_API_KEY, NEON_PROD_BRANCH_ID is missing (validated BEFORE
+#   - PRE_MIGRATE_LSN is set but any of NEON_PROJECT_ID,
+#     NEON_API_KEY, NEON_BRANCH_ID is missing (validated BEFORE
 #     any rollback work begins),
 #   - `fly deploy` fails (we do NOT attempt the modal step in this case),
 #   - the Neon restore call fails (we do NOT attempt the modal step — the
@@ -84,9 +84,9 @@ fi
 # the image already swapped while the DB-restore leg is unrunnable.
 if [[ -n "${PRE_MIGRATE_LSN:-}" ]]; then
     _MISSING_NEON_VARS=()
-    [[ -z "${NEON_PROD_PROJECT_ID:-}" ]] && _MISSING_NEON_VARS+=("NEON_PROD_PROJECT_ID")
-    [[ -z "${NEON_PROD_API_KEY:-}" ]] && _MISSING_NEON_VARS+=("NEON_PROD_API_KEY")
-    [[ -z "${NEON_PROD_BRANCH_ID:-}" ]] && _MISSING_NEON_VARS+=("NEON_PROD_BRANCH_ID")
+    [[ -z "${NEON_PROJECT_ID:-}" ]] && _MISSING_NEON_VARS+=("NEON_PROJECT_ID")
+    [[ -z "${NEON_API_KEY:-}" ]] && _MISSING_NEON_VARS+=("NEON_API_KEY")
+    [[ -z "${NEON_BRANCH_ID:-}" ]] && _MISSING_NEON_VARS+=("NEON_BRANCH_ID")
     if [[ ${#_MISSING_NEON_VARS[@]} -gt 0 ]]; then
         echo "FAIL rollback: PRE_MIGRATE_LSN is set but the following Neon vars are missing: ${_MISSING_NEON_VARS[*]}" >&2
         exit 1
@@ -157,15 +157,15 @@ else
     echo ""
     echo "==> Restoring Neon prod branch to LSN ${PRE_MIGRATE_LSN} (backup: ${PRESERVE_NAME})..."
     _NEON_BODY=$(jq -nc \
-        --arg src "$NEON_PROD_BRANCH_ID" \
+        --arg src "$NEON_BRANCH_ID" \
         --arg lsn "$PRE_MIGRATE_LSN" \
         --arg name "$PRESERVE_NAME" \
         '{source_branch_id: $src, source_lsn: $lsn, preserve_under_name: $name}')
     HTTP=$(curl -sL -o /tmp/neon-restore.json -w "%{http_code}" -X POST \
-        -H "Authorization: Bearer ${NEON_PROD_API_KEY}" \
+        -H "Authorization: Bearer ${NEON_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "$_NEON_BODY" \
-        "https://console.neon.tech/api/v2/projects/${NEON_PROD_PROJECT_ID}/branches/${NEON_PROD_BRANCH_ID}/restore") || {
+        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${NEON_BRANCH_ID}/restore") || {
         echo "FAIL rollback: Neon restore curl call failed (transport-level)" >&2
         exit 1
     }
