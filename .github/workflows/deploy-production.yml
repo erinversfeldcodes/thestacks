@@ -330,9 +330,44 @@ jobs:
           FORCE_BREACH: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
         run: bash scripts/check-slo-gate.sh --out gate-observations.json
 
+      - name: First-deploy bootstrap notice (no rollback target)
+        # Skip-rollback path for the genuine bootstrap case: a brand-new
+        # prod stack where no `main-<sha>` git tag has been stamped yet
+        # AND the Fly app doesn't exist (so `fly image show` returns
+        # empty). With both CORE_PREV_IMAGE and MODAL_PREV_COMMIT empty,
+        # the rollback action would fast-fail on `core-prev-image is
+        # required` — but there's genuinely nothing to roll back TO.
+        #
+        # Two sub-paths:
+        #   - Auto-rollback path (failure()): emit a warning and let the
+        #     job stay failed (the upstream failure() that triggered us
+        #     is the real signal; there's nothing actionable about the
+        #     missing rollback target itself).
+        #   - Manual-rollback path (inputs.manual_rollback): the
+        #     operator deliberately asked for a rollback, so silently
+        #     succeeding would be wrong. Exit 1 to surface the
+        #     bootstrap mismatch as a workflow failure.
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
+        env:
+          MANUAL_ROLLBACK: ${{ inputs.manual_rollback }}
+        run: |
+          echo "Bootstrap path detected — no prior image to roll back to:"
+          echo "  CORE_PREV_IMAGE is empty (Fly app didn't exist before this deploy attempt)"
+          echo "  MODAL_PREV_COMMIT is empty (no main-<sha> git tags exist yet)"
+          echo "Once the first successful deploy lands and tag-main.yml stamps a"
+          echo "main-<sha> tag, subsequent deploys will have a valid rollback target."
+          if [[ "${MANUAL_ROLLBACK}" == "true" ]]; then
+            echo "::error::Manual rollback was triggered but there is no prior image to roll back to."
+            exit 1
+          fi
+          echo "::warning::Auto-rollback skipped — bootstrap deploy with no prior image. The deploy failure above is the real signal; investigate that directly."
+
       - name: rollback-production.sh — invokes rollback-production composite action
         id: rollback
-        if: ${{ failure() || inputs.manual_rollback }}
+        # Gated on CORE_PREV_IMAGE being non-empty in addition to the
+        # failure() / manual_rollback triggers — bootstrap path (no prior
+        # image) is handled separately by the notice step above.
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
         uses: ./.github/actions/rollback-production
         with:
           core-app: ${{ env.CORE_APP }}
