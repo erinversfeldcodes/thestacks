@@ -83,7 +83,7 @@ Before triggering, verify:
    confirm via `gh secret list`):
    - `FLY_API_TOKEN`
    - `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
-   - `NEON_PROD_PROJECT_ID`, `NEON_PROD_API_KEY`
+   - `NEON_PROJECT_ID`, `NEON_API_KEY`
    - `CLOAK_KEY`
    - `STACKS_PROD_DB_ROLE`, `STACKS_PROD_DB_PASSWORD`,
      `STACKS_PROD_DB_HOST`, `STACKS_PROD_DB_NAME`

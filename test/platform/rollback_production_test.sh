@@ -180,9 +180,9 @@ CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \
 MODAL_PREV_COMMIT="deadbeefcafef00d" \
 ROLLBACK_REASON="SLO breach: LSN restore happy path" \
 PRE_MIGRATE_LSN="0/16E8090" \
-NEON_PROD_PROJECT_ID="stale-cherry-12345" \
-NEON_PROD_API_KEY="neon_api_xxx" \
-NEON_PROD_BRANCH_ID="br-prod-default-uuid" \
+NEON_PROJECT_ID="stale-cherry-12345" \
+NEON_API_KEY="neon_api_xxx" \
+NEON_BRANCH_ID="br-prod-default-uuid" \
 GITHUB_SHA="deadbeefcafebabe1234567890abcdef12345678" \
     run_rollback
 assert_exit_zero "$RC" "rollback exits 0 when fly + curl + modal all succeed"
@@ -263,9 +263,9 @@ CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \
 MODAL_PREV_COMMIT="deadbeefcafef00d" \
 ROLLBACK_REASON="migration failure: schema half-applied" \
 PRE_MIGRATE_LSN="0/16E8090" \
-NEON_PROD_PROJECT_ID="stale-cherry-12345" \
-NEON_PROD_API_KEY="neon_api_xxx" \
-NEON_PROD_BRANCH_ID="br-prod-default-uuid" \
+NEON_PROJECT_ID="stale-cherry-12345" \
+NEON_API_KEY="neon_api_xxx" \
+NEON_BRANCH_ID="br-prod-default-uuid" \
 GITHUB_SHA="deadbeefcafebabe1234567890abcdef12345678" \
 FLY_CURRENT_IMAGE_STUB="registry.fly.io/stacks-core:deployment-01abc" \
     run_rollback
@@ -307,9 +307,9 @@ CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \
 MODAL_PREV_COMMIT="deadbeefcafef00d" \
 ROLLBACK_REASON="Neon API failure test" \
 PRE_MIGRATE_LSN="0/16E8090" \
-NEON_PROD_PROJECT_ID="stale-cherry-12345" \
-NEON_PROD_API_KEY="neon_api_xxx" \
-NEON_PROD_BRANCH_ID="br-prod-default-uuid" \
+NEON_PROJECT_ID="stale-cherry-12345" \
+NEON_API_KEY="neon_api_xxx" \
+NEON_BRANCH_ID="br-prod-default-uuid" \
 GITHUB_SHA="deadbeefcafebabe1234567890abcdef12345678" \
 CURL_STUB_EXIT=22 \
     run_rollback
@@ -327,24 +327,24 @@ fi
 assert_contains "$OUT" "FAIL rollback: Neon restore" \
     "stdout/stderr includes a FAIL rollback: Neon restore error line"
 
-# ── Case 9: missing NEON_PROD_API_KEY when LSN is set → fail-fast ────────────
+# ── Case 9: missing NEON_API_KEY when LSN is set → fail-fast ────────────
 # When PRE_MIGRATE_LSN is set, the three Neon vars (PROJECT_ID, API_KEY,
 # BRANCH_ID) are required. Validate-fast: error before any rollback work
 # starts so we don't half-roll-back the image and then realise we can't
-# restore the DB. We lock NEON_PROD_API_KEY here as the canonical case;
+# restore the DB. We lock NEON_API_KEY here as the canonical case;
 # implementer should apply the same shape to PROJECT_ID and BRANCH_ID.
-test_case "missing_neon_api_key_fails_fast" "PRE_MIGRATE_LSN set + NEON_PROD_API_KEY unset → exit non-zero before any rollback"
+test_case "missing_neon_api_key_fails_fast" "PRE_MIGRATE_LSN set + NEON_API_KEY unset → exit non-zero before any rollback"
 CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \
 MODAL_PREV_COMMIT="deadbeefcafef00d" \
 ROLLBACK_REASON="missing Neon API key validation test" \
 PRE_MIGRATE_LSN="0/16E8090" \
-NEON_PROD_PROJECT_ID="stale-cherry-12345" \
-NEON_PROD_BRANCH_ID="br-prod-default-uuid" \
+NEON_PROJECT_ID="stale-cherry-12345" \
+NEON_BRANCH_ID="br-prod-default-uuid" \
     run_rollback
-# NEON_PROD_API_KEY explicitly NOT set above ↑
-assert_exit_nonzero "$RC" "rollback exits non-zero when NEON_PROD_API_KEY is unset"
-assert_contains "$OUT" "NEON_PROD_API_KEY" \
-    "error message names the missing variable (NEON_PROD_API_KEY)"
+# NEON_API_KEY explicitly NOT set above ↑
+assert_exit_nonzero "$RC" "rollback exits non-zero when NEON_API_KEY is unset"
+assert_contains "$OUT" "NEON_API_KEY" \
+    "error message names the missing variable (NEON_API_KEY)"
 if grep -q ' fly deploy ' "$INVOCATION_LOG"; then
     _record_fail "fly deploy was invoked before validation failure (must validate before any rollback work)"
 else

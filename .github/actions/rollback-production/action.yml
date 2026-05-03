@@ -49,18 +49,18 @@ inputs:
     description: "Git remote to clone the previous Modal commit from."
     required: false
     default: "https://github.com/erinversfeld/thestacks.git"
-  neon-prod-project-id:
+  neon-project-id:
     description: >
       Neon project ID for the production project. Required when
       pre-migrate-lsn is set; the restore endpoint is path-scoped to a
       project + branch.
     required: false
     default: ""
-  neon-prod-api-key:
+  neon-api-key:
     description: "Neon API key scoped to the production project."
     required: false
     default: ""
-  neon-prod-branch-id:
+  neon-branch-id:
     description: >
       Neon branch ID for the prod project's default branch. Resolved by the
       workflow's `Capture pre-migrate Neon LSN` step (queries `/branches`
@@ -129,9 +129,9 @@ runs:
         MODAL_TOKEN_ID: ${{ inputs.modal-token-id }}
         MODAL_TOKEN_SECRET: ${{ inputs.modal-token-secret }}
         PRE_MIGRATE_LSN: ${{ inputs.pre-migrate-lsn }}
-        NEON_PROD_PROJECT_ID: ${{ inputs.neon-prod-project-id }}
-        NEON_PROD_API_KEY: ${{ inputs.neon-prod-api-key }}
-        NEON_PROD_BRANCH_ID: ${{ inputs.neon-prod-branch-id }}
+        NEON_PROJECT_ID: ${{ inputs.neon-project-id }}
+        NEON_API_KEY: ${{ inputs.neon-api-key }}
+        NEON_BRANCH_ID: ${{ inputs.neon-branch-id }}
       run: |
         set -uo pipefail
         if [[ -z "$CORE_PREV_IMAGE" ]]; then
@@ -146,9 +146,9 @@ runs:
         fi
         if [[ -n "$PRE_MIGRATE_LSN" ]]; then
           missing=()
-          [[ -z "$NEON_PROD_PROJECT_ID" ]] && missing+=("neon-prod-project-id")
-          [[ -z "$NEON_PROD_API_KEY" ]] && missing+=("neon-prod-api-key")
-          [[ -z "$NEON_PROD_BRANCH_ID" ]] && missing+=("neon-prod-branch-id")
+          [[ -z "$NEON_PROJECT_ID" ]] && missing+=("neon-project-id")
+          [[ -z "$NEON_API_KEY" ]] && missing+=("neon-api-key")
+          [[ -z "$NEON_BRANCH_ID" ]] && missing+=("neon-branch-id")
           if [[ ${#missing[@]} -gt 0 ]]; then
             echo "::error::pre-migrate-lsn is set but the following required inputs are missing: ${missing[*]}"
             exit 1
@@ -168,9 +168,9 @@ runs:
         FLY_API_TOKEN: ${{ inputs.fly-api-token }}
         ROLLBACK_REASON: ${{ inputs.rollback-reason }}
         ORIGIN_REMOTE: ${{ inputs.origin-remote }}
-        NEON_PROD_PROJECT_ID: ${{ inputs.neon-prod-project-id }}
-        NEON_PROD_API_KEY: ${{ inputs.neon-prod-api-key }}
-        NEON_PROD_BRANCH_ID: ${{ inputs.neon-prod-branch-id }}
+        NEON_PROJECT_ID: ${{ inputs.neon-project-id }}
+        NEON_API_KEY: ${{ inputs.neon-api-key }}
+        NEON_BRANCH_ID: ${{ inputs.neon-branch-id }}
         PRE_MIGRATE_LSN: ${{ inputs.pre-migrate-lsn }}
       run: |
         set -o pipefail

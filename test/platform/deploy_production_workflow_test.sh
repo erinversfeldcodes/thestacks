@@ -666,28 +666,28 @@ else
     _record_fail "with.rollback-reason must contain a non-trivial expression (e.g. ternary on manual_rollback) (got: '$RB_REASON')"
 fi
 
-# neon-prod-project-id: secrets.NEON_PROD_PROJECT_ID.
-RB_NEON_PID="$(_rb_with neon-prod-project-id)"
-if [[ "$RB_NEON_PID" == *"secrets."*"NEON_PROD_PROJECT_ID"* ]]; then
-    _record_pass "with.neon-prod-project-id references secrets.NEON_PROD_PROJECT_ID"
+# neon-project-id: secrets.NEON_PROJECT_ID.
+RB_NEON_PID="$(_rb_with neon-project-id)"
+if [[ "$RB_NEON_PID" == *"secrets."*"NEON_PROJECT_ID"* ]]; then
+    _record_pass "with.neon-project-id references secrets.NEON_PROJECT_ID"
 else
-    _record_fail "with.neon-prod-project-id must reference secrets.NEON_PROD_PROJECT_ID (got: '$RB_NEON_PID')"
+    _record_fail "with.neon-project-id must reference secrets.NEON_PROJECT_ID (got: '$RB_NEON_PID')"
 fi
 
-# neon-prod-api-key: secrets.NEON_PROD_API_KEY.
-RB_NEON_KEY="$(_rb_with neon-prod-api-key)"
-if [[ "$RB_NEON_KEY" == *"secrets."*"NEON_PROD_API_KEY"* ]]; then
-    _record_pass "with.neon-prod-api-key references secrets.NEON_PROD_API_KEY"
+# neon-api-key: secrets.NEON_API_KEY.
+RB_NEON_KEY="$(_rb_with neon-api-key)"
+if [[ "$RB_NEON_KEY" == *"secrets."*"NEON_API_KEY"* ]]; then
+    _record_pass "with.neon-api-key references secrets.NEON_API_KEY"
 else
-    _record_fail "with.neon-prod-api-key must reference secrets.NEON_PROD_API_KEY (got: '$RB_NEON_KEY')"
+    _record_fail "with.neon-api-key must reference secrets.NEON_API_KEY (got: '$RB_NEON_KEY')"
 fi
 
-# neon-prod-branch-id: steps.capture-lsn.outputs.branch-id.
-RB_NEON_BID="$(_rb_with neon-prod-branch-id)"
+# neon-branch-id: steps.capture-lsn.outputs.branch-id.
+RB_NEON_BID="$(_rb_with neon-branch-id)"
 if [[ "$RB_NEON_BID" == *"steps.capture-lsn.outputs.branch-id"* ]]; then
-    _record_pass "with.neon-prod-branch-id references steps.capture-lsn.outputs.branch-id"
+    _record_pass "with.neon-branch-id references steps.capture-lsn.outputs.branch-id"
 else
-    _record_fail "with.neon-prod-branch-id must reference steps.capture-lsn.outputs.branch-id (got: '$RB_NEON_BID')"
+    _record_fail "with.neon-branch-id must reference steps.capture-lsn.outputs.branch-id (got: '$RB_NEON_BID')"
 fi
 
 # pre-migrate-lsn: steps.capture-lsn.outputs.lsn.

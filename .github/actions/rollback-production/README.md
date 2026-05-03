@@ -61,9 +61,9 @@ DB, then vision (which is stateless w.r.t. the DB schema).
 | `modal-token-id` | `""` | **Required when** `modal-prev-commit` is set; else unused. |
 | `modal-token-secret` | `""` | **Required when** `modal-prev-commit` is set. |
 | `origin-remote` | `https://github.com/erinversfeld/thestacks.git` | Git remote for Modal commit checkout. |
-| `neon-prod-project-id` | `""` | **Required when** `pre-migrate-lsn` is set. |
-| `neon-prod-api-key` | `""` | **Required when** `pre-migrate-lsn` is set. |
-| `neon-prod-branch-id` | `""` | **Required when** `pre-migrate-lsn` is set. |
+| `neon-project-id` | `""` | **Required when** `pre-migrate-lsn` is set. |
+| `neon-api-key` | `""` | **Required when** `pre-migrate-lsn` is set. |
+| `neon-branch-id` | `""` | **Required when** `pre-migrate-lsn` is set. |
 | `pre-migrate-lsn` | `""` | Empty = skip DB rollback (image-only — see below). |
 
 ### Outputs
@@ -147,9 +147,9 @@ jobs:
           modal-token-id: ${{ secrets.MODAL_TOKEN_ID }}
           modal-token-secret: ${{ secrets.MODAL_TOKEN_SECRET }}
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
-          neon-prod-project-id: ${{ secrets.NEON_PROD_PROJECT_ID }}
-          neon-prod-api-key: ${{ secrets.NEON_PROD_API_KEY }}
-          neon-prod-branch-id: ${{ steps.prev.outputs.neon-branch-id }}
+          neon-project-id: ${{ secrets.NEON_PROJECT_ID }}
+          neon-api-key: ${{ secrets.NEON_API_KEY }}
+          neon-branch-id: ${{ steps.prev.outputs.neon-branch-id }}
           pre-migrate-lsn: ""  # manual rollbacks skip DB by default
           rollback-reason: "Manual rollback by @${{ github.actor }}"
           failed-sha: ${{ github.sha }}
