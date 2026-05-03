@@ -91,14 +91,17 @@ inputs:
   database-url:
     description: >
       Production DATABASE_URL — required for the audit-log INSERT step.
-      Composite actions cannot reference `secrets.*` directly; the calling
-      workflow forwards `${{ secrets.DATABASE_URL }}` (or the equivalent
-      composed value) here.
+      Composite actions cannot reference secrets directly; the calling
+      workflow forwards secrets.DATABASE_URL (or the equivalent composed
+      value) here. Note: do not use literal expression syntax in this
+      description — the GH Actions runner parses any such string as an
+      expression and rejects the manifest.
     required: true
   cloak-key:
     description: >
       Cloak vault key used by Stacks.Vault to encrypt audit-log metadata.
-      Forwarded from `${{ secrets.CLOAK_KEY }}` by the calling workflow.
+      Forwarded from secrets.CLOAK_KEY by the calling workflow. (Same
+      reason as database-url for not using expression syntax here.)
     required: true
 outputs:
   core-rolled-back:
