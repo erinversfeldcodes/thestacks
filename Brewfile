@@ -32,6 +32,14 @@ brew "just"
 brew "colima"
 brew "docker"
 brew "docker-compose"
+# docker-buildx is a CLI plugin (not auto-bundled with brew docker on
+# macOS). Required by Dockerfile.core's `RUN --mount=type=cache` syntax.
+# Without it, `DOCKER_BUILDKIT=1 docker build` errors with "BuildKit is
+# enabled but the buildx component is missing or broken" and the dockle
+# stage of scripts/security.sh has to take its skip path. setup.sh
+# symlinks the brew-installed binary into ~/.docker/cli-plugins/ so
+# `docker buildx` resolves correctly.
+brew "docker-buildx"
 
 # ── Deployment ────────────────────────────────────────────────────────────────
 brew "superfly/tap/flyctl"
