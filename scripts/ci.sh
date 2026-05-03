@@ -286,9 +286,18 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
 
         if command -v docker &>/dev/null; then
             echo "==> OWASP ZAP baseline scan..."
+            # Pinned to 2.16.1 — the upstream `:stable` tag drifted to a
+            # state where the Automation Framework writes its summary file
+            # to a path zap-baseline.py doesn't expect (`/home/zap/zap_out.json`)
+            # and `--autooff` mode times out downloading add-ons before the
+            # scan starts. 2.16.1 is the last known-good version where
+            # baseline.py + AF + add-on bundle line up. Bumping the pin is
+            # a one-line edit; pair with a fresh local re-run to confirm
+            # the new tag still produces the `FAIL-NEW: 0` line the grep
+            # below depends on.
             zap_out="$(docker run --rm \
                 --mount type=tmpfs,destination=/zap/wrk \
-                ghcr.io/zaproxy/zaproxy:stable \
+                ghcr.io/zaproxy/zaproxy:2.16.1 \
                 zap-baseline.py -t "${_core_url}" 2>&1)" || true
             echo "${zap_out}"
             if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
