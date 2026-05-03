@@ -136,8 +136,7 @@ manual-rollback path:
 | `Compose DATABASE_URL` | runs |
 | `Install postgresql-client` | runs (cheap; harmless on this path) |
 | `Capture pre-migrate Neon LSN` | **skipped** (`if: !inputs.manual_rollback`) |
-| `Run prod migrations` | **skipped** |
-| `deploy-stack.sh` | **skipped** |
+| `deploy-stack.sh` | **skipped** (the script's internal migrate runs at deploy-stack.sh:643 before the core fly deploy; both skip together when the workflow step skips) |
 | `check-slo-gate.sh` | **skipped** |
 | `rollback-production composite action` | **fires** (`if: failure() || inputs.manual_rollback`) |
 | `upload-artifact gate-observations` | runs (warns: no file produced) |

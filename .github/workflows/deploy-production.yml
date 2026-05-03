@@ -215,6 +215,10 @@ jobs:
           echo "COMMIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
 
       - name: Generate proto artifacts
+        # Generates Python (vision sidecar) + Rust (scraper) + Elm
+        # (frontend) proto types. Elixir + Ecto codegen runs inside
+        # deploy-stack.sh (lines 605-617) — bundled there alongside the
+        # runner-side `mix ecto.migrate` it pairs with.
         run: |
           python3 scripts/gen_python_proto.py --language rust
           python3 scripts/gen_python_proto.py --language python
@@ -308,18 +312,12 @@ jobs:
           echo "branch-id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
           echo "Resolved prod branch id: $BRANCH_ID"
 
-      - name: Run prod migrations (before image cutover)
-        id: migrate-prod
-        if: ${{ !inputs.manual_rollback }}
-        working-directory: apps/core
-        env:
-          MIX_ENV: prod
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
-        run: |
-          mix deps.get --only prod
-          mix compile
-          mix ecto.migrate
+      # Migrations now run inside deploy-stack.sh (right after Elixir
+      # codegen + before the core fly deploy cutover). Consolidating
+      # them there avoids duplicating the compile + codegen between a
+      # workflow step and the script. Failure semantics unchanged: a
+      # migrate failure aborts the script before any image swap, so the
+      # old image keeps serving traffic.
 
       - name: deploy-stack.sh — push core + vision + scraper to production
         if: ${{ !inputs.manual_rollback }}
@@ -350,7 +348,14 @@ jobs:
           neon-branch-id: ${{ steps.capture-lsn.outputs.branch-id }}
           pre-migrate-lsn: ${{ steps.capture-lsn.outputs.lsn }}
           failed-sha: ${{ github.sha }}
-          triggered-by: ${{ inputs.manual_rollback && 'manual' || (steps.migrate-prod.conclusion == 'failure' && 'migration-failure' || 'step-failure') }}
+          # `migration-failure` was previously distinguishable when migrate
+          # ran as a discrete workflow step. After consolidating into
+          # deploy-stack.sh (Phase 7 iteration), the failure surface is
+          # the deploy-stack step as a whole — migrate failures are no
+          # longer separable from other deploy-stack failures at the
+          # workflow level. Operators can still read the precise cause
+          # from the workflow logs and the audit row's `reason` field.
+          triggered-by: ${{ inputs.manual_rollback && 'manual' || 'step-failure' }}
           database-url: ${{ env.DATABASE_URL }}
           cloak-key: ${{ secrets.CLOAK_KEY }}
 

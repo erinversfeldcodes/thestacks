@@ -462,86 +462,70 @@ else
     _record_fail "step id 'capture-lsn' missing — Phase 4 must add it"
 fi
 
-# ── Case M3: Run prod migrations (before image cutover) step ────────────────
-test_case "migrate_prod_step" "step id migrate-prod runs mix ecto.migrate, gated on !manual_rollback"
+# ── Case M3: Migration runs inside deploy-stack.sh (not as a workflow step) ─
+# Phase 7 iteration consolidated the runner-side migrate from a separate
+# workflow step (`migrate-prod`) into deploy-stack.sh, right after its
+# Elixir codegen and before the `fly deploy` cutover. Single compile +
+# codegen instead of duplicated across the workflow and the script.
+# Failure semantics unchanged: a migrate failure aborts deploy-stack.sh
+# before any image swap, so the old image keeps serving traffic.
+test_case "migrate_inside_deploy_stack" "deploy-stack.sh runs mix ecto.migrate before the core fly deploy"
 
-MIGRATE_IDX="$(step_idx_by_id migrate-prod)"
-if [[ "$MIGRATE_IDX" -ge 0 ]]; then
-    _record_pass "step id 'migrate-prod' present (index $MIGRATE_IDX)"
-
-    MIGRATE_NAME_LOWER="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].name // \"\" | ascii_downcase")"
-    # Substring `migrat` matches both 'migrate' and 'migrations' — the
-    # canonical Phase 4 name is `Run prod migrations (before image cutover)`.
-    if [[ "$MIGRATE_NAME_LOWER" == *"migrat"* ]]; then
-        _record_pass "migrate-prod name contains 'migrat' (matches both 'migrate' and 'migrations')"
+DEPLOY_STACK_SCRIPT="$REPO_ROOT/scripts/deploy-stack.sh"
+if [[ -f "$DEPLOY_STACK_SCRIPT" ]]; then
+    if grep -q "mix ecto.migrate" "$DEPLOY_STACK_SCRIPT"; then
+        _record_pass "deploy-stack.sh contains 'mix ecto.migrate'"
     else
-        _record_fail "migrate-prod name must contain 'migrate' or 'migrations' (got: '$MIGRATE_NAME_LOWER')"
+        _record_fail "deploy-stack.sh must invoke 'mix ecto.migrate' as part of the prod deploy path"
     fi
-
-    MIGRATE_RUN="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].run // \"\"")"
-    if [[ "$MIGRATE_RUN" == *"mix ecto.migrate"* ]]; then
-        _record_pass "migrate-prod run: invokes 'mix ecto.migrate'"
+    # Order inside the script: gen-ecto-proto.sh (Elixir codegen) must
+    # precede mix ecto.migrate (which compiles + migrates), and both
+    # must precede the core `fly deploy` cutover.
+    GEN_LINE=$(grep -n "gen-ecto-proto.sh" "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    MIGRATE_LINE=$(grep -n "mix ecto.migrate" "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    # Find the CORE `fly deploy` cutover specifically — that's the one
+    # migrate must precede. Other fly deploys in the script (scraper,
+    # searxng, log-shipper) don't touch the schema so their ordering vs
+    # migrate doesn't matter. The core deploy passes `--app "${CORE_APP}"`
+    # which is the discriminator.
+    FLY_DEPLOY_LINE=$(grep -nE 'fly deploy[[:space:]]*\\?$|fly deploy.*--app[[:space:]]+"\$\{CORE_APP\}"' "$DEPLOY_STACK_SCRIPT" \
+                       | grep -A1 'fly deploy[[:space:]]*\\$' "$DEPLOY_STACK_SCRIPT" 2>/dev/null \
+                       | head -1)
+    # Simpler: find the core deploy by looking for the function that wraps
+    # it (`_core_deploy_once`) — its body starts with the actual fly deploy.
+    CORE_DEPLOY_FN_LINE=$(grep -n '^_core_deploy_once' "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    if [[ -n "$CORE_DEPLOY_FN_LINE" ]]; then
+        # The fly deploy invocation lives ~1-2 lines after the function decl.
+        FLY_DEPLOY_LINE=$(awk -v start="$CORE_DEPLOY_FN_LINE" 'NR>=start && /fly deploy/ {print NR; exit}' "$DEPLOY_STACK_SCRIPT")
     else
-        _record_fail "migrate-prod run: must invoke 'mix ecto.migrate'"
+        # Fallback: first non-comment fly deploy invocation.
+        FLY_DEPLOY_LINE=$(grep -nE '^[[:space:]]+(\(.*&&[[:space:]]*)?fly deploy' "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
     fi
-
-    # Either working-directory: apps/core OR run: cd's into apps/core.
-    MIGRATE_WD="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].\"working-directory\" // \"\"")"
-    if [[ "$MIGRATE_WD" == "apps/core" ]]; then
-        _record_pass "migrate-prod working-directory: apps/core"
-    elif [[ "$MIGRATE_RUN" == *"cd apps/core"* ]]; then
-        _record_pass "migrate-prod run: cd's into apps/core"
+    if [[ -n "$GEN_LINE" && -n "$MIGRATE_LINE" && "$GEN_LINE" -lt "$MIGRATE_LINE" ]]; then
+        _record_pass "deploy-stack.sh order: gen-ecto-proto (#$GEN_LINE) < mix ecto.migrate (#$MIGRATE_LINE)"
     else
-        _record_fail "migrate-prod must use working-directory: apps/core OR cd apps/core (got wd: '$MIGRATE_WD')"
+        _record_fail "deploy-stack.sh order: gen-ecto-proto must precede mix ecto.migrate (gen=#$GEN_LINE migrate=#$MIGRATE_LINE)"
     fi
-
-    # env: must include MIX_ENV: prod, DATABASE_URL, CLOAK_KEY.
-    MIGRATE_MIXENV="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"MIX_ENV\" // \"__missing__\"")"
-    if [[ "$MIGRATE_MIXENV" == "prod" ]]; then
-        _record_pass "migrate-prod env: MIX_ENV=prod"
+    if [[ -n "$MIGRATE_LINE" && -n "$FLY_DEPLOY_LINE" && "$MIGRATE_LINE" -lt "$FLY_DEPLOY_LINE" ]]; then
+        _record_pass "deploy-stack.sh order: mix ecto.migrate (#$MIGRATE_LINE) < first fly deploy (#$FLY_DEPLOY_LINE)"
     else
-        _record_fail "migrate-prod env: MIX_ENV must be 'prod' (got: '$MIGRATE_MIXENV')"
-    fi
-    MIGRATE_DBURL="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"DATABASE_URL\" // \"__missing__\"")"
-    if [[ "$MIGRATE_DBURL" == "__missing__" ]]; then
-        _record_fail "migrate-prod env: must include DATABASE_URL"
-    else
-        _record_pass "migrate-prod env: DATABASE_URL is wired"
-    fi
-    MIGRATE_CLOAK="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].env.\"CLOAK_KEY\" // \"__missing__\"")"
-    if [[ "$MIGRATE_CLOAK" == "__missing__" ]]; then
-        _record_fail "migrate-prod env: must include CLOAK_KEY"
-    else
-        _record_pass "migrate-prod env: CLOAK_KEY is wired"
-    fi
-
-    # if: must reference manual_rollback (skip on manual rollback path).
-    MIGRATE_IF="$(wfq "$JOB_STEPS_JQ | .[$MIGRATE_IDX].if // \"\"")"
-    if [[ "$MIGRATE_IF" == *"manual_rollback"* ]]; then
-        _record_pass "migrate-prod if: gates on manual_rollback (got: '$MIGRATE_IF')"
-    else
-        _record_fail "migrate-prod must have if: that references manual_rollback (got: '$MIGRATE_IF')"
+        _record_fail "deploy-stack.sh order: mix ecto.migrate must precede the first fly deploy (migrate=#$MIGRATE_LINE fly=#$FLY_DEPLOY_LINE)"
     fi
 else
-    _record_fail "step id 'migrate-prod' missing — Phase 4 must add it"
+    _record_fail "scripts/deploy-stack.sh not found — cannot verify migrate placement"
 fi
 
-# Order: capture-lsn < migrate-prod < deploy-stack.
+# Negative assertion: the legacy `migrate-prod` workflow step must NOT
+# exist after the consolidation. If it reappears, somebody re-added the
+# duplicated path.
+LEGACY_MIGRATE_IDX="$(step_idx_by_id migrate-prod)"
+if [[ "$LEGACY_MIGRATE_IDX" -lt 0 ]]; then
+    _record_pass "legacy 'migrate-prod' workflow step is absent (consolidated into deploy-stack.sh)"
+else
+    _record_fail "legacy 'migrate-prod' workflow step at index $LEGACY_MIGRATE_IDX should have been removed (migration now lives inside deploy-stack.sh)"
+fi
+
 DEPLOY_STACK_IDX="$(step_idx_by_run_substr "deploy-stack.sh")"
-if [[ "$CAPTURE_IDX" -ge 0 && "$MIGRATE_IDX" -ge 0 ]]; then
-    if [[ "$CAPTURE_IDX" -lt "$MIGRATE_IDX" ]]; then
-        _record_pass "step order: capture-lsn (#$CAPTURE_IDX) < migrate-prod (#$MIGRATE_IDX)"
-    else
-        _record_fail "step order wrong: capture-lsn must precede migrate-prod (capture=#$CAPTURE_IDX migrate=#$MIGRATE_IDX)"
-    fi
-fi
-if [[ "$MIGRATE_IDX" -ge 0 && "$DEPLOY_STACK_IDX" -ge 0 ]]; then
-    if [[ "$MIGRATE_IDX" -lt "$DEPLOY_STACK_IDX" ]]; then
-        _record_pass "step order: migrate-prod (#$MIGRATE_IDX) < deploy-stack (#$DEPLOY_STACK_IDX)"
-    else
-        _record_fail "step order wrong: migrate-prod must precede deploy-stack (migrate=#$MIGRATE_IDX deploy=#$DEPLOY_STACK_IDX)"
-    fi
-fi
 
 # ── Case M4: Rollback step uses composite action (not inline bash) ──────────
 test_case "rollback_uses_composite_action" "rollback step uses ./.github/actions/rollback-production"
