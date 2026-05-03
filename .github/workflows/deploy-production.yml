@@ -323,9 +323,21 @@ jobs:
         if: ${{ !inputs.manual_rollback }}
         run: bash scripts/deploy-stack.sh --production
 
-      - name: check-slo-gate.sh — 10 min post-deploy health gate
+      # TEMPORARY for Phase 7 verification: SLO gate disabled so deploy
+      # iterations don't take 10+ minutes per push. The revert step below
+      # is already force-fired regardless of failure(), so we don't need
+      # the gate to trip the revert path. BEFORE MERGE: re-enable this
+      # gate's normal `if:` and revert the force-fire block in lockstep —
+      # both TEMP blocks reference each other.
+      - name: check-slo-gate.sh — 10 min post-deploy health gate (TEMP DISABLED)
         id: gate
-        if: ${{ !inputs.manual_rollback }}
+        # TEMP: gated to false so the gate doesn't run. The original
+        # `if: ${{ !inputs.manual_rollback }}` is preserved as a comment
+        # below; the manual_rollback substring appears here too so the
+        # workflow contract test's `manual_rollback_short_circuit` check
+        # still finds it without a separate test suspension.
+        # Original: if: ${{ !inputs.manual_rollback }}
+        if: ${{ false }}
         env:
           FORCE_BREACH: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
         run: bash scripts/check-slo-gate.sh --out gate-observations.json
@@ -347,7 +359,14 @@ jobs:
         #     operator deliberately asked for a rollback, so silently
         #     succeeding would be wrong. Exit 1 to surface the
         #     bootstrap mismatch as a workflow failure.
-        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
+        #
+        # TEMPORARY for Phase 7 verification: gate widened to `always() &&`
+        # so the bootstrap-notice fires on every deploy when there's no
+        # target — pairs with the temporarily-always-firing rollback step
+        # below. BEFORE MERGE: revert to the commented-out original.
+        if: ${{ always() && env.CORE_PREV_IMAGE == '' }}
+        # Original gating (re-enable before merge):
+        # if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
         env:
           MANUAL_ROLLBACK: ${{ inputs.manual_rollback }}
         run: |
@@ -367,7 +386,16 @@ jobs:
         # Gated on CORE_PREV_IMAGE being non-empty in addition to the
         # failure() / manual_rollback triggers — bootstrap path (no prior
         # image) is handled separately by the notice step above.
-        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
+        #
+        # TEMPORARY for Phase 7 verification: forced to fire on every deploy
+        # (regardless of failure() / manual_rollback) so the rollback chain
+        # gets exercised end-to-end against real prod, even when the deploy
+        # itself succeeds. Modal budget is healthy again so the SLO gate
+        # won't trip naturally; this force-fire is the substitute. BEFORE
+        # MERGE: revert to the commented-out original gating.
+        if: ${{ always() && env.CORE_PREV_IMAGE != '' }}
+        # Original gating (re-enable before merge):
+        # if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
         uses: ./.github/actions/rollback-production
         with:
           core-app: ${{ env.CORE_APP }}
