@@ -36,9 +36,8 @@ defmodule Core.Application do
           Stacks.Books.TitleSearchCache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
-          Core.PromEx,
-          CoreWeb.Endpoint
-        ] ++ pipeline_children()
+          Core.PromEx
+        ] ++ endpoint_children() ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
     Supervisor.start_link(children, opts)
@@ -96,6 +95,21 @@ defmodule Core.Application do
       |> Map.new(&{&1, inet6_pool})
 
     {Finch, name: Stacks.Finch, pools: pools}
+  end
+
+  # Phoenix endpoint child — default-on, with an explicit opt-out for
+  # one-shot `mix run -e` administrative tasks (e.g. the rollback action's
+  # audit-log step). When STACKS_SKIP_ENDPOINT is set, the endpoint stays
+  # out of the supervision tree — otherwise booting it logs an `[error]
+  # Could not warm up static assets: cache_manifest.json` annotation
+  # because the GHA runner has no digested static assets, polluting the
+  # run UI with a red error even when the script completes successfully.
+  defp endpoint_children do
+    if System.get_env("STACKS_SKIP_ENDPOINT") in [nil, ""] do
+      [CoreWeb.Endpoint]
+    else
+      []
+    end
   end
 
   # Broadway pipelines run as supervised GenStage processes. In test mode,

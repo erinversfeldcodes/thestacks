@@ -213,21 +213,32 @@ else
     _record_fail "rollback step still scoped only to steps.gate.conclusion"
 fi
 
-# ── Reviewer P1 #5: tag-on-merge workflow exists + record-prev-state uses it ─
-test_case "tag_main_workflow" "tag-main.yml exists, triggers on push.main, has contents: write"
+# ── Reviewer P1 #5: tag-on-deploy-success workflow + record-prev-state ───────
+# tag-main fires on Deploy production / workflow_run success — failed deploys
+# never get a tag, so `main-*` markers always point at known-good prod.
+test_case "tag_main_workflow" "tag-main.yml fires on Deploy production success, has contents: write"
 TAG_WF="$REPO_ROOT/.github/workflows/tag-main.yml"
 if [[ -f "$TAG_WF" ]]; then
     _record_pass "tag-main.yml file exists"
     TAG_CONTENT="$(cat "$TAG_WF")"
-    # push trigger on main branch
+    # workflow_run trigger on Deploy production
     if echo "$TAG_CONTENT" | python3 -c '
 import re, sys
 txt = sys.stdin.read()
-sys.exit(0 if re.search(r"push:\s*\n\s*branches:\s*\n\s*-\s*main\b", txt) else 1)
+has_run = bool(re.search(r"workflow_run:", txt))
+has_target = bool(re.search(r"workflows:\s*\[\s*\"Deploy production\"\s*\]", txt) or \
+                  re.search(r"workflows:\s*\n\s*-\s*\"?Deploy production\"?", txt))
+sys.exit(0 if (has_run and has_target) else 1)
 ' ; then
-        _record_pass "tag-main.yml triggers on push.branches: [main]"
+        _record_pass "tag-main.yml triggers on workflow_run: Deploy production"
     else
-        _record_fail "tag-main.yml missing push.branches: [main] trigger"
+        _record_fail "tag-main.yml missing workflow_run trigger targeting Deploy production"
+    fi
+    # success-only conclusion guard
+    if echo "$TAG_CONTENT" | grep -qE "workflow_run\.conclusion\s*==\s*'success'"; then
+        _record_pass "tag-main.yml gates on workflow_run.conclusion == 'success'"
+    else
+        _record_fail "tag-main.yml does not gate on workflow_run.conclusion == 'success'"
     fi
     # permissions contents: write
     if echo "$TAG_CONTENT" | python3 -c '
@@ -735,18 +746,11 @@ fi
 
 # Find the gate step by id `gate` (canonical).
 GATE_IF="$(wfq "$JOB_STEPS_JQ | .[] | select(.id == \"gate\") | .if // \"\"" | head -n1)"
-# TEMPORARY for Phase 7 verification: gate step's `if:` is force-disabled
-# (`${{ false }}`) to skip the 10-min SLO wait while the rollback chain
-# is exercised. The manual_rollback gating assertion is suspended until
-# the workflow gating is reverted. BEFORE MERGE: re-enable in lockstep
-# with the workflow's TEMP block.
-_record_pass "TEMP: gate if: assertion suspended for Phase 7 force-fire (got: '$GATE_IF')"
-# Original assertion (re-enable in lockstep with the workflow):
-# if [[ "$GATE_IF" == *"manual_rollback"* ]]; then
-#     _record_pass "gate step if: references manual_rollback (got: '$GATE_IF')"
-# else
-#     _record_fail "gate step must have if: that references manual_rollback (got: '$GATE_IF')"
-# fi
+if [[ "$GATE_IF" == *"manual_rollback"* ]]; then
+    _record_pass "gate step if: references manual_rollback (got: '$GATE_IF')"
+else
+    _record_fail "gate step must have if: that references manual_rollback (got: '$GATE_IF')"
+fi
 
 # Setup steps must NOT have a manual_rollback gate (they need to run on both
 # paths so the composite action's `log-audit` step can compile the Elixir
