@@ -1,40 +1,51 @@
 name: Tag main
 
-# Reviewer P1 #5: every commit that lands on main gets a deterministic
-# lightweight tag (`main-<short-sha>`) so deploy-production's record-prev-state
-# step has a stable source of truth for the prev Modal commit. The old
-# `deployed-modal~1` approach was brittle — a tag force-push races with a
-# concurrent deploy and can either point at the wrong commit or vanish.
+# Every SUCCESSFUL production deploy gets a deterministic lightweight tag
+# (`main-<short-sha>`) so the next deploy's `record-prev-state` step has a
+# stable source of truth for the prev Modal commit. Trigger is `workflow_run`
+# on Deploy production / success — failed deploys deliberately do NOT get a
+# tag, so `main-*` tags become "verified-deployed" markers. That makes the
+# rollback target always the last KNOWN-GOOD prod, not just the last attempt.
 #
-# A plain moving ref like `deployed-modal` that ANY workflow rewrites is
-# inherently shifting; giving every main commit its own fixed tag removes the
-# race entirely. `record-prev-state` just queries the two most-recent
-# main-<sha> tags by committer date and uses the older one.
+# Sequencing: deploy-production runs first; on success this workflow stamps
+# the tag. The next deploy's record-prev-state takes the most-recent
+# `main-*` tag, which is now guaranteed to be the previous successful deploy
+# (no race with the current deploy's own tag).
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["Deploy production"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   tag-main:
+    # Only stamp a tag when the upstream Deploy production run succeeded.
+    # workflow_run fires on every completion (success/failure/cancelled);
+    # we filter to success so failed deploys never get a "verified" tag.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
+          # Check out the exact commit the deploy ran against, not the
+          # current HEAD (workflow_run defaults to the workflow file from
+          # the default branch but the commit can be anything in history).
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Create lightweight tag for this main commit
+      - name: Create lightweight tag for the just-deployed commit
+        env:
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          short="$(git rev-parse --short=12 HEAD)"
+          short="$(git rev-parse --short=12 "$DEPLOYED_SHA")"
           tag="main-${short}"
           if git rev-parse --verify "refs/tags/${tag}" >/dev/null 2>&1; then
               echo "Tag ${tag} already exists — nothing to do."
               exit 0
           fi
-          git tag "${tag}" "${GITHUB_SHA}"
+          git tag "${tag}" "$DEPLOYED_SHA"
           git push origin "refs/tags/${tag}"
-          echo "Tagged ${GITHUB_SHA} as ${tag}"
+          echo "Tagged ${DEPLOYED_SHA} as ${tag}"

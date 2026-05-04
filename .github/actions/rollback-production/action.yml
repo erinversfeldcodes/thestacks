@@ -206,6 +206,10 @@ runs:
       shell: bash
       env:
         MIX_ENV: prod
+        # The audit step only needs Repo + Vault — keep CoreWeb.Endpoint
+        # out of the supervision tree so its missing-cache_manifest warning
+        # doesn't surface as a red error annotation in the workflow run.
+        STACKS_SKIP_ENDPOINT: "1"
         DATABASE_URL: ${{ inputs.database-url }}
         CLOAK_KEY: ${{ inputs.cloak-key }}
         FAILED_SHA: ${{ inputs.failed-sha }}

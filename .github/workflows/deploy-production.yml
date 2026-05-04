@@ -202,16 +202,14 @@ jobs:
 
           # Reviewer P1 #5: source the prev Modal commit from the immutable
           # `main-<sha>` tags produced by .github/workflows/tag-main.yml on
-          # every merge to main. This replaces the old
-          # `deployed-modal~1^{commit}` pattern — a moving ref rewritten by
-          # each deploy race-conditions with concurrent deploys and can
-          # point at the wrong commit.
+          # every SUCCESSFUL deploy (tag-main fires on this workflow's
+          # workflow_run / success — failed deploys never get a tag).
           #
-          # Take the two most-recent `main-*` tags by committer date; the
-          # older of the pair is the prev (the newer is the current HEAD
-          # we're about to deploy). `git tag --list 'main-*'` followed by
-          # `--sort=-committerdate` gives newest-first.
-          prev_tag="$(git tag --list 'main-*' --sort=-committerdate | head -2 | tail -1)"
+          # Take the most-recent `main-*` tag by committer date — that's the
+          # last verified-deployed commit, which is exactly what we want as
+          # the revert target. The current HEAD has no tag yet (tag-main
+          # only stamps after this workflow succeeds), so no race.
+          prev_tag="$(git tag --list 'main-*' --sort=-committerdate | head -1)"
           if [[ -n "$prev_tag" ]]; then
               prev_modal="$(git rev-parse --verify "${prev_tag}^{commit}" 2>/dev/null || true)"
           else
@@ -333,26 +331,14 @@ jobs:
         if: ${{ !inputs.manual_rollback }}
         run: bash scripts/deploy-stack.sh --production
 
-      # TEMPORARY for Phase 7 verification: SLO gate disabled so deploy
-      # iterations don't take 10+ minutes per push. The revert step below
-      # is already force-fired regardless of failure(), so we don't need
-      # the gate to trip the revert path. BEFORE MERGE: re-enable this
-      # gate's normal `if:` and revert the force-fire block in lockstep —
-      # both TEMP blocks reference each other.
-      #
-      # The actual gate logic moved to .github/actions/check-slo-gate so
+      # The actual gate logic lives in .github/actions/check-slo-gate so
       # the verify step (later in the job) can invoke the same SLI
       # definitions without duplicating the script invocation. Operators
       # can also run scripts/check-slo-gate.sh directly to distinguish
       # genuinely-unhealthy state from probe flakiness.
-      - name: check-slo-gate — 10 min post-deploy health gate (TEMP DISABLED)
+      - name: check-slo-gate — 10 min post-deploy health gate
         id: gate
-        # TEMP: gated to false so the gate doesn't run. Original `if:`
-        # below; manual_rollback appears here so the workflow contract
-        # test's `manual_rollback_short_circuit` check still finds it
-        # without a separate test suspension.
-        # Original: if: ${{ !inputs.manual_rollback }}
-        if: ${{ false }}
+        if: ${{ !inputs.manual_rollback }}
         uses: ./.github/actions/check-slo-gate
         with:
           out-path: gate-observations.json
