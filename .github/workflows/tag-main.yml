@@ -29,17 +29,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Check out the default branch (NOT the workflow_run head_sha). We only
+      # need git history to create a lightweight tag pointing at the deployed
+      # SHA — we never execute any code from that SHA's working tree. This
+      # dodges the `workflow-run-target-code-checkout` semgrep rule
+      # (https://sg.run/A0p6) which flags the dangerous pattern of running
+      # workflow_run handlers against checked-out incoming-PR code with
+      # access to repo secrets. Since deploy-production only fires on
+      # `push: branches: [main]`, the head_sha is always a maintainer-merged
+      # main commit, but checking out main keeps the threat model trivial.
       - uses: actions/checkout@v4
         with:
-          # Check out the exact commit the deploy ran against, not the
-          # current HEAD (workflow_run defaults to the workflow file from
-          # the default branch but the commit can be anything in history).
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
       - name: Create lightweight tag for the just-deployed commit
         env:
           DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          # Verify the SHA exists in the cloned history before tagging. With
+          # fetch-depth: 0 it should always be reachable from main, but be
+          # defensive in case of force-pushes or unusual states.
+          if ! git rev-parse --verify "${DEPLOYED_SHA}^{commit}" >/dev/null 2>&1; then
+              echo "::error::Deployed SHA ${DEPLOYED_SHA} not found in repo history"
+              exit 1
+          fi
           short="$(git rev-parse --short=12 "$DEPLOYED_SHA")"
           tag="main-${short}"
           if git rev-parse --verify "refs/tags/${tag}" >/dev/null 2>&1; then
