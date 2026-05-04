@@ -11,13 +11,14 @@
 #
 # Structural checks (no runtime execution of the workflow):
 #   1. File exists.
-#   2. Top-level trigger is `on.workflow_run` (NOT `push.main` — that's a
-#      pre-merge change flagged in the issue).
-#   3. workflow_run.workflows lists CI; workflow_run.types lists completed.
-#   4. A job named `deploy-production` exists with a recognisable step
+#   2. Top-level trigger is `on.push.branches: [main]` plus
+#      `workflow_dispatch`. workflow_run is NOT used (PR-level branch
+#      protection already gates CI-must-pass before merge, so the prod
+#      deploy fires directly on the merge commit).
+#   3. A job named `deploy-production` exists with a recognisable step
 #      sequence: checkout → record-prev-state → deploy-stack.sh →
 #      check-slo-gate.sh → conditional rollback → upload-artifact → summary.
-#   5. References the expected secrets (superset of deploy-preview + METRICS_SCRAPE_TOKEN).
+#   4. References the expected secrets (superset of deploy-preview + METRICS_SCRAPE_TOKEN).
 
 set -uo pipefail
 
@@ -38,8 +39,8 @@ else
     exit $?
 fi
 
-# ── workflow_run trigger ────────────────────────────────────────────────────
-test_case "workflow_run_trigger" "triggered by workflow_run on CI completion (not push.main yet)"
+# ── push.main trigger ────────────────────────────────────────────────────────
+test_case "push_main_trigger" "triggered by push to main + workflow_dispatch (workflow_run removed at merge)"
 PARSE_OUT=$(python3 - "$WF" <<'PY' 2>&1
 import re, sys
 
@@ -51,21 +52,27 @@ with open(path) as f:
 # deliberately uses regex for the same reason. Phase 3 keeps the convention.
 findings = []
 
-# Must contain `on:` block with `workflow_run:`
+# Must contain `on:` block with `push:` + `branches: [main]`.
 if not re.search(r"^on:\s*$", txt, re.MULTILINE):
     findings.append("no top-level `on:` block")
-if not re.search(r"^\s+workflow_run:\s*$", txt, re.MULTILINE):
-    findings.append("on.workflow_run not present")
-# Must list the upstream workflow (CI). Accept either block list or inline.
-if not re.search(r"workflows:\s*\n\s*-\s*CI\b", txt) and not re.search(r"workflows:\s*\[.*CI.*\]", txt):
-    findings.append("workflow_run.workflows does not list CI")
-# Must include `types:` with `completed`.
-if not re.search(r"types:\s*\n\s*-\s*completed\b", txt) and not re.search(r"types:\s*\[.*completed.*\]", txt):
-    findings.append("workflow_run.types does not list completed")
+if not re.search(r"^\s+push:\s*$", txt, re.MULTILINE):
+    findings.append("on.push not present")
+# Accept either inline (`branches: [main]`) or block (`branches:\n  - main`).
+if not re.search(r"branches:\s*\[\s*main\s*\]", txt) and \
+   not re.search(r"branches:\s*\n\s*-\s*main\b", txt):
+    findings.append("on.push.branches does not list main")
+# workflow_dispatch must still be present (operator manual trigger).
+if not re.search(r"^\s+workflow_dispatch:\s*$", txt, re.MULTILINE):
+    findings.append("on.workflow_dispatch not present")
 
-# Guardrail: must NOT yet be a push.main trigger — that's a pre-merge change.
-if re.search(r"^on:\s*\n(?:.*\n)*?\s+push:\s*\n\s*branches:\s*\n?\s*-?\s*main\b", txt, re.MULTILINE):
-    findings.append("on.push.main trigger is present — should still be workflow_run at this stage")
+# Guardrail: workflow_run must be GONE — PR-level branch protection gates
+# CI-must-pass before merge, so prod deploy fires directly on the merge
+# commit (no separate workflow_run signal needed).
+if re.search(r"^\s+workflow_run:\s*$", txt, re.MULTILINE):
+    findings.append("on.workflow_run is still present — should be removed at merge time")
+# Guardrail: pull_request must be GONE (was a Phase 7 iteration trigger).
+if re.search(r"^\s+pull_request:\s*$", txt, re.MULTILINE):
+    findings.append("on.pull_request is still present — should be removed at merge time")
 
 if findings:
     print("FINDINGS:" + "||".join(findings))
@@ -74,7 +81,7 @@ print("OK")
 PY
 )
 RC=$?
-assert_exit_zero "$RC" "trigger shape is workflow_run on CI.completed"
+assert_exit_zero "$RC" "trigger shape is push.branches=[main] + workflow_dispatch"
 if [[ "$PARSE_OUT" == FINDINGS:* ]]; then
     for f in ${PARSE_OUT#FINDINGS:}; do
         _record_fail "trigger finding: $f"
@@ -251,20 +258,20 @@ else
 fi
 
 # ── workflow_dispatch feature: both triggers + inputs declared + referenced ──
-test_case "workflow_dispatch_feature" "workflow has both workflow_run and workflow_dispatch triggers with expected inputs"
+test_case "workflow_dispatch_feature" "workflow has push + workflow_dispatch triggers with expected inputs"
 if echo "$WF_CONTENT" | python3 -c '
 import re, sys
 txt = sys.stdin.read()
 # Both triggers must appear under on:
-has_run = bool(re.search(r"workflow_run:", txt))
+has_push = bool(re.search(r"^\s+push:\s*$", txt, re.MULTILINE))
 has_dispatch = bool(re.search(r"workflow_dispatch:", txt))
 has_target_app = bool(re.search(r"target_app:", txt))
 has_force_rollback = bool(re.search(r"force_rollback:", txt))
-sys.exit(0 if (has_run and has_dispatch and has_target_app and has_force_rollback) else 1)
+sys.exit(0 if (has_push and has_dispatch and has_target_app and has_force_rollback) else 1)
 ' ; then
     _record_pass "workflow declares both triggers and both inputs"
 else
-    _record_fail "workflow missing workflow_run, workflow_dispatch, target_app, or force_rollback"
+    _record_fail "workflow missing push, workflow_dispatch, target_app, or force_rollback"
 fi
 if echo "$WF_CONTENT" | grep -qE 'inputs\.target_app'; then
     _record_pass "job references \${{ inputs.target_app }}"
