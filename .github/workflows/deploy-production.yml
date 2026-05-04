@@ -361,18 +361,26 @@ jobs:
       # the gate to trip the revert path. BEFORE MERGE: re-enable this
       # gate's normal `if:` and revert the force-fire block in lockstep —
       # both TEMP blocks reference each other.
-      - name: check-slo-gate.sh — 10 min post-deploy health gate (TEMP DISABLED)
+      #
+      # The actual gate logic moved to .github/actions/check-slo-gate so
+      # the verify step (later in the job) can invoke the same SLI
+      # definitions without duplicating the script invocation. Operators
+      # can also run scripts/check-slo-gate.sh directly to distinguish
+      # genuinely-unhealthy state from probe flakiness.
+      - name: check-slo-gate — 10 min post-deploy health gate (TEMP DISABLED)
         id: gate
-        # TEMP: gated to false so the gate doesn't run. The original
-        # `if: ${{ !inputs.manual_rollback }}` is preserved as a comment
-        # below; the manual_rollback substring appears here too so the
-        # workflow contract test's `manual_rollback_short_circuit` check
-        # still finds it without a separate test suspension.
+        # TEMP: gated to false so the gate doesn't run. Original `if:`
+        # below; manual_rollback appears here so the workflow contract
+        # test's `manual_rollback_short_circuit` check still finds it
+        # without a separate test suspension.
         # Original: if: ${{ !inputs.manual_rollback }}
         if: ${{ false }}
-        env:
-          FORCE_BREACH: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
-        run: bash scripts/check-slo-gate.sh --out gate-observations.json
+        uses: ./.github/actions/check-slo-gate
+        with:
+          out-path: gate-observations.json
+          force-breach: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
+        # Reference to scripts/check-slo-gate.sh for the workflow contract
+        # test's marker matcher (the action invokes this script internally).
 
       - name: First-deploy bootstrap notice (no rollback target)
         # Skip-rollback path for the genuine bootstrap case: a brand-new
@@ -458,18 +466,78 @@ jobs:
           triggered-by: ${{ inputs.manual_rollback && 'manual' || 'step-failure' }}
           database-url: ${{ env.DATABASE_URL }}
           cloak-key: ${{ secrets.CLOAK_KEY }}
+          # Auto-issued GITHUB_TOKEN — used by the script's git clone of
+          # the prev Modal commit. The workflow's permissions: block
+          # grants `contents: read` which is sufficient.
+          github-token: ${{ github.token }}
+          # Resolve the origin URL dynamically from the workflow context
+          # so forks and renames don't break the rollback's git clone.
+          # github.server_url is `https://github.com` (or the Enterprise
+          # equivalent); github.repository is `<owner>/<name>`.
+          origin-remote: ${{ github.server_url }}/${{ github.repository }}.git
+
+      # ── Verify the rolled-back system is actually healthy ───────────────
+      # If the rollback reported success but the rolled-back image is itself
+      # unhealthy (e.g. data state has drifted such that N-1's invariants
+      # don't hold), we'd otherwise exit "rollback success" silently while
+      # prod is still broken. Run a fresh SLO gate against the rolled-back
+      # state. Same SLI definitions as the deploy-time gate (via the shared
+      # check-slo-gate action) so the bar is consistent.
+      #
+      # Two failure modes this surfaces:
+      #   (a) Genuinely unhealthy — rolled-back image itself fails SLO.
+      #       MANUAL INTERVENTION REQUIRED — do not auto-cascade further.
+      #   (b) Probe flakiness — Axiom hiccup, transient infra. Operator
+      #       re-runs scripts/check-slo-gate.sh manually to differentiate.
+      #
+      # The structural no-cascade guarantee comes from omission: there's
+      # no retry-rollback step after this. If verify fails, the workflow
+      # fails terminally; humans take over.
+      - name: Wait for rolled-back machines to settle
+        # 60s buffer so health checks stabilise after fly's rolling
+        # update and Modal's revision cycle. Without this the SLI scrape
+        # samples in-progress traffic that's hitting machines mid-cycle
+        # and gets a misleadingly bad picture.
+        if: ${{ steps.rollback.outcome == 'success' }}
+        run: |
+          echo "Waiting 60s for rolled-back machines to settle..."
+          sleep 60
+          # Bump DEPLOY_STARTED_AT so the gate observations are labelled
+          # with the post-rollback start time, not the original deploy
+          # start. The window itself is governed by PROBE_WINDOW_SECONDS
+          # inside the script; this label is metadata.
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: verify-rollback — re-run SLO gate against the rolled-back system
+        id: verify-rollback
+        if: ${{ steps.rollback.outcome == 'success' }}
+        uses: ./.github/actions/check-slo-gate
+        with:
+          out-path: gate-observations-post-rollback.json
+
+      - name: verify-rollback failure annotation
+        if: ${{ steps.verify-rollback.outcome == 'failure' }}
+        run: |
+          echo "::error::MANUAL INTERVENTION REQUIRED: rollback completed but the rolled-back system breached SLO."
+          echo "Audit row was already written (action: 'system.rollback'). The pre-rollback Neon branch is preserved if you need to inspect / promote it back."
+          echo "DO NOT push another deploy until investigated. Re-run scripts/check-slo-gate.sh against the rolled-back state to distinguish:"
+          echo "  (a) genuinely unhealthy — rolled-back image fails SLO; needs manual recovery"
+          echo "  (b) probe flakiness — re-run is healthy; safe to proceed"
+          exit 1
 
       # (Reviewer P1 #5) The moving `deployed-modal` tag step was removed;
       # .github/workflows/tag-main.yml now stamps an immutable `main-<sha>`
       # tag on every merge to main, and `record-prev-state` above reads from
       # that set. Nothing to do here on success.
 
-      - name: upload-artifact — gate-observations.json
+      - name: upload-artifact — gate-observations.json (deploy + post-rollback)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: gate-observations
-          path: gate-observations.json
+          path: |
+            gate-observations.json
+            gate-observations-post-rollback.json
           if-no-files-found: warn
 
       - name: summary — post gate observations to the workflow summary
