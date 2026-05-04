@@ -766,9 +766,14 @@ if [[ -n "${machine_id}" ]]; then
     echo "PASS deploy: migrations applied"
 
     # ── Seed ─────────────────────────────────────────────────────────────────
-    # Only production runs a seed step here. Preview stacks inherit the dev
-    # fixture set via Neon copy-on-write from `staging` (see #142), so
-    # nothing needs to happen on the preview side.
+    # Production: seed_prod creates exactly one owner from PROD_OWNER_*.
+    # Preview: only re-seed if THIS PR has unmerged changes to seeds.exs.
+    # The staging branch (parent of every preview/<pr>) is auto-reseeded on
+    # push to main by .github/workflows/reseed-staging.yml, so previews of
+    # PRs that don't touch seeds.exs inherit fresh fixtures via Neon's
+    # copy-on-write — no per-preview cost. PRs that DO touch seeds.exs
+    # carry unmerged fixture changes that staging can't reflect yet, so
+    # those previews run the seed against their preview branch.
     if [[ "$PROD_MODE" -eq 1 ]]; then
         echo ""
         echo "==> Seeding ${CORE_APP} (prod owner only)..."
@@ -777,6 +782,38 @@ if [[ -n "${machine_id}" ]]; then
             --app "${CORE_APP}" --timeout 60 2>&1 \
             || { echo "FAIL deploy: prod seed failed"; exit 1; }
         echo "PASS deploy: prod owner seed applied"
+    else
+        # Detect unmerged changes to seeds.exs. Default to "changed" if we
+        # can't determine (no origin/main reachable, no git repo) — safer
+        # to over-seed (idempotent) than silently miss new fixtures.
+        SEEDS_FILE="apps/core/priv/repo/seeds.exs"
+        seeds_changed=1  # default-on; flipped to 0 only when we confirm no diff
+        if (cd "$REPO_ROOT" && git rev-parse --verify origin/main >/dev/null 2>&1); then
+            if (cd "$REPO_ROOT" && git diff --quiet origin/main HEAD -- "$SEEDS_FILE" 2>/dev/null); then
+                seeds_changed=0
+            fi
+        else
+            echo "    (origin/main not fetched — will run preview seed unconditionally)"
+        fi
+
+        if [[ $seeds_changed -eq 0 ]]; then
+            echo ""
+            echo "==> Skipping preview seed: ${SEEDS_FILE} matches origin/main"
+            echo "    Preview branch inherited fixtures from staging via Neon CoW."
+            echo "    (staging is kept fresh by reseed-staging.yml on every push to main)"
+        else
+            echo ""
+            echo "==> Seeding ${CORE_APP} (preview dev fixtures — seeds.exs differs from main)..."
+            # ALLOW_SEEDS gates Stacks.Release.seed/0 — set inline so the env-var
+            # check inside the eval'd code sees it. 180s timeout covers the
+            # ~hundreds of insert_all rows; longer than the 60s migrate timeout
+            # because seeds do far more work.
+            fly machine exec "${machine_id}" \
+                "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
+                --app "${CORE_APP}" --timeout 180 2>&1 \
+                || { echo "FAIL deploy: preview seed failed"; exit 1; }
+            echo "PASS deploy: preview dev fixtures seeded"
+        fi
     fi
 else
     echo "WARN deploy: could not find running machine to run migrations/seeds"
@@ -991,9 +1028,92 @@ else
     echo "PASS warmup: ${#warmup_ids[@]} canaries queued — Oban vision jobs will scale Modal in parallel with the gate"
 fi
 
-# Brief pause so the Oban vision queue can pick up the jobs before the gate
-# starts probing. 15 seconds is enough for Oban to pull + start them; Modal
-# cold-start runs in parallel with check-slo-gate.sh from there.
+# ── Vision pipeline completion probe ─────────────────────────────────────────
+# The warmup above only proves /api/upload accepts uploads — not that vision
+# actually processes them. Async-pipeline failures (Modal cold-start hang,
+# HMAC mismatch, vision sidecar crash) historically only surfaced at E2E
+# time, with confusing 4-5min timeouts on `upload-verify`. This probe
+# consumes the SSE stream of one canary and waits for the Oban vision job
+# to reach a terminal state (`resolved` or `rejected`). If vision doesn't
+# complete in 180s, the deploy fails fast with a clear pointer at vision
+# health rather than letting downstream tests timeout mysteriously.
+#
+# Note: this runs AFTER the parallel warmup so Modal is already scaling up.
+# 180s is generous enough for cold-start (1-3 min observed) but short
+# enough that a genuinely-broken pipeline surfaces here, not in E2E.
+if [[ ${#warmup_ids[@]} -gt 0 ]]; then
+    probe_id="${warmup_ids[0]}"
+    echo ""
+    echo "==> Vision pipeline completion probe (image_id=${probe_id})..."
+    echo "    Waiting up to 180s for terminal status (resolved|rejected)..."
+
+    probe_log="$(mktemp)"
+    # SSE: --no-buffer streams events as they arrive; --max-time bounds
+    # total wait. The endpoint emits status lines like
+    # `data: {"status":"processing", ...}` and we grep for the terminal
+    # states. Background curl + monitor stdout in a tee so we can kill it
+    # as soon as a terminal status appears.
+    (curl -4 -sN --max-time 180 \
+        -H "Authorization: Bearer ${smoke_token}" \
+        -H "Accept: text/event-stream" \
+        "${CORE_URL}/api/upload/${probe_id}/stream" 2>/dev/null \
+        > "${probe_log}") &
+    probe_pid=$!
+
+    probe_terminal=""
+    probe_started=$(date +%s)
+    while [[ -z "${probe_terminal}" ]]; do
+        if [[ -f "${probe_log}" ]]; then
+            if grep -q '"status":"resolved"' "${probe_log}" 2>/dev/null; then
+                probe_terminal="resolved"
+                break
+            fi
+            if grep -q '"status":"rejected"' "${probe_log}" 2>/dev/null; then
+                probe_terminal="rejected"
+                break
+            fi
+        fi
+        # Timeout guard — bash arithmetic seconds since start
+        if (( $(date +%s) - probe_started >= 180 )); then
+            break
+        fi
+        # Curl exited (connection closed or completed) without a terminal
+        # status — break out so we can inspect the log.
+        if ! kill -0 "${probe_pid}" 2>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+
+    # Clean up the background curl regardless of outcome.
+    kill "${probe_pid}" 2>/dev/null || true
+    wait "${probe_pid}" 2>/dev/null || true
+
+    if [[ "${probe_terminal}" == "resolved" ]]; then
+        echo "PASS probe: vision pipeline reached 'resolved' for ${probe_id}"
+    elif [[ "${probe_terminal}" == "rejected" ]]; then
+        # 'rejected' is a valid vision outcome (image classified as not_a_book
+        # etc.) — the pipeline worked end-to-end. The first canary in the
+        # warmup set is barcode_isbn_clean.jpg which should resolve, so a
+        # rejected here is unusual but not a deploy-blocking failure.
+        echo "PASS probe: vision pipeline reached 'rejected' for ${probe_id} (pipeline functional)"
+    else
+        echo "FAIL probe: vision pipeline did NOT reach a terminal status within 180s" >&2
+        echo "  Last 20 lines of SSE stream from ${CORE_URL}/api/upload/${probe_id}/stream:" >&2
+        tail -20 "${probe_log}" >&2 || true
+        echo "" >&2
+        echo "  Investigate: Modal logs for ${MODAL_APP} (modal app logs --app ${MODAL_APP})," >&2
+        echo "  HMAC secret alignment between core (VISION_HMAC_SECRET) and Modal," >&2
+        echo "  and recent commits to apps/vision/." >&2
+        rm -f "${probe_log}"
+        exit 1
+    fi
+    rm -f "${probe_log}"
+fi
+
+# Brief pause so the Oban vision queue can pick up the remaining jobs before
+# the gate starts probing. The probe above already let one job complete; the
+# others are mid-processing and will finish in parallel with the gate.
 sleep 15
 
 # ── Output ───────────────────────────────────────────────────────────────────
