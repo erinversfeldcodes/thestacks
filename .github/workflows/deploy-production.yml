@@ -1,9 +1,10 @@
 name: Deploy production
 
 # Triggers:
-#   - workflow_run (default): fires whenever CI completes successfully on
-#     ANY branch. While Issue #136 is in flight we want the pipeline
-#     exercised inside PRs, not gated on a main-merge ritual.
+#   - push to main: every merge to main is a production deploy. The
+#     PR-level branch protection rule already gates CI-must-be-green
+#     before merge, so the production deploy doesn't need to wait on
+#     a separate workflow_run signal.
 #   - workflow_dispatch: manual trigger for safe live validation +
 #     operator-initiated rollback. Inputs:
 #       * target_app — point the workflow at a preview Fly app instead
@@ -15,25 +16,8 @@ name: Deploy production
 #         the rollback step. Use after a bad deploy when the SLO gate
 #         didn't catch the regression. See docs/runbooks/manual-rollback.md
 #         (added in Phase 6 of #137).
-#
-# TODO(Issue #136): before merging to main, switch this trigger to:
-#     on:
-#       push:
-#         branches: [main]
-#       workflow_dispatch: (keep)
-#   (remove workflow_run entirely).
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-  # TEMPORARY for Issue #136 iteration: workflow_run only fires from the
-  # default branch's copy of this file, so it will not trigger until the
-  # workflow lands on main. The pull_request trigger below makes the
-  # workflow fire on PR pushes (in parallel with CI — no gating during
-  # debug). BEFORE MERGE: delete this pull_request trigger.
-  pull_request:
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -59,12 +43,6 @@ permissions:
 
 jobs:
   deploy-production:
-    # Accept three trigger events:
-    #   workflow_run: gate on CI success (the production-ready path)
-    #   workflow_dispatch: operator manual; always runs
-    #   pull_request: TEMPORARY for iteration; runs in parallel with CI,
-    #     no CI-success gating during debug (delete before merge).
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
