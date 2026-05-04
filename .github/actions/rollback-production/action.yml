@@ -103,6 +103,15 @@ inputs:
       Forwarded from secrets.CLOAK_KEY by the calling workflow. (Same
       reason as database-url for not using expression syntax here.)
     required: true
+  github-token:
+    description: >
+      GITHUB_TOKEN forwarded from the calling workflow so the script's
+      git-clone of the prev Modal commit can authenticate against
+      private repos. Calling workflow should pass `github.token`. The
+      token's `contents: read` scope is sufficient. Required when
+      modal-prev-commit is set and the origin-remote is a private repo.
+    required: false
+    default: ""
 outputs:
   core-rolled-back:
     description: "true if core successfully rolled back, false if skipped (image already current), error if the leg failed."
@@ -175,8 +184,19 @@ runs:
         NEON_API_KEY: ${{ inputs.neon-api-key }}
         NEON_BRANCH_ID: ${{ inputs.neon-branch-id }}
         PRE_MIGRATE_LSN: ${{ inputs.pre-migrate-lsn }}
+        GH_TOKEN_FOR_CLONE: ${{ inputs.github-token }}
       run: |
         set -o pipefail
+        # Configure git so the script's clone of the prev Modal commit
+        # authenticates against private origin repos. `actions/checkout@v4`
+        # only sets up auth in the workspace's .git/config — a fresh
+        # `git clone` to a tmpdir doesn't inherit that. Setting
+        # `url.insteadOf` globally makes any github.com clone use the
+        # token. No-op if no token was provided (public-repo case or
+        # tests with INVOCATION_LOG set).
+        if [[ -n "${GH_TOKEN_FOR_CLONE:-}" ]]; then
+          git config --global "url.https://x-access-token:${GH_TOKEN_FOR_CLONE}@github.com/.insteadOf" "https://github.com/"
+        fi
         bash "${{ github.action_path }}/../../../scripts/rollback-production.sh" 2>&1 | tee /tmp/rollback-output.log
         exit "${PIPESTATUS[0]}"
 

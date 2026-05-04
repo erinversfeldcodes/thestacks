@@ -1,0 +1,45 @@
+name: "Check SLO gate (post-deploy health)"
+description: >
+  Wraps scripts/check-slo-gate.sh. Scrapes /internal/metrics for the
+  PROBE_WINDOW_SECONDS window (default 600s = 10 min), runs
+  probe-production.sh in parallel, computes SLIs against thresholds.
+  Exit 0 iff every SLI is healthy. Same SLI definitions used at both
+  deploy-time gating AND post-rollback verification — operators can
+  also re-run the underlying script manually to distinguish
+  genuinely-unhealthy state from probe flakiness.
+inputs:
+  out-path:
+    description: "Path to write the gate-observations.json artifact."
+    required: false
+    default: gate-observations.json
+  probe-window-seconds:
+    description: >
+      Window size in seconds. Default 600 (10 min). Use the same value
+      across deploy-time and post-rollback verification so the SLI
+      definitions stay aligned.
+    required: false
+    default: "600"
+  force-breach:
+    description: >
+      For testing only. When set to a known SLI name (e.g.
+      "beam_memory_mb"), forces that SLI to report breached=true
+      regardless of actual measurements. Used by the workflow's
+      force_rollback dispatch input to exercise the rollback path
+      without a real regression.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: check-slo-gate
+      name: Run SLO gate script
+      shell: bash
+      # Inputs flow through env: rather than inline ${{...}} interpolation
+      # so a malicious value cannot escape the bash context. Defense in
+      # depth — same env-indirection pattern used by the rollback action.
+      env:
+        OUT_PATH: ${{ inputs.out-path }}
+        PROBE_WINDOW_SECONDS: ${{ inputs.probe-window-seconds }}
+        FORCE_BREACH: ${{ inputs.force-breach }}
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/check-slo-gate.sh" --out "$OUT_PATH"
