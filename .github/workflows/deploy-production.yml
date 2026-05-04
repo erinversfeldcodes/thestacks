@@ -400,13 +400,7 @@ jobs:
         #     succeeding would be wrong. Exit 1 to surface the
         #     bootstrap mismatch as a workflow failure.
         #
-        # TEMPORARY for Phase 7 verification: gate widened to `always() &&`
-        # so the bootstrap-notice fires on every deploy when there's no
-        # target — pairs with the temporarily-always-firing rollback step
-        # below. BEFORE MERGE: revert to the commented-out original.
-        if: ${{ always() && env.CORE_PREV_IMAGE == '' }}
-        # Original gating (re-enable before merge):
-        # if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
         env:
           MANUAL_ROLLBACK: ${{ inputs.manual_rollback }}
         run: |
@@ -432,15 +426,7 @@ jobs:
         # failure() / manual_rollback triggers — bootstrap path (no prior
         # image) is handled separately by the notice step above.
         #
-        # TEMPORARY for Phase 7 verification: forced to fire on every deploy
-        # (regardless of failure() / manual_rollback) so the rollback chain
-        # gets exercised end-to-end against real prod, even when the deploy
-        # itself succeeds. Modal budget is healthy again so the SLO gate
-        # won't trip naturally; this force-fire is the substitute. BEFORE
-        # MERGE: revert to the commented-out original gating.
-        if: ${{ always() && env.CORE_PREV_IMAGE != '' }}
-        # Original gating (re-enable before merge):
-        # if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
         uses: ./.github/actions/rollback-production
         with:
           core-app: ${{ env.CORE_APP }}
