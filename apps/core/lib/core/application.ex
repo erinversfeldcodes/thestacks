@@ -40,8 +40,14 @@ defmodule Core.Application do
         ] ++ endpoint_children() ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
-    Supervisor.start_link(children, opts)
+    result = Supervisor.start_link(children, opts)
+    boot_id = Ecto.UUID.generate()
+    :persistent_term.put({Stacks.Application, :boot_id}, boot_id)
+    result
   end
+
+  @doc "Returns the unique identifier for this application boot."
+  def boot_id, do: :persistent_term.get({Stacks.Application, :boot_id})
 
   # Start Core.ObanRepo only when Oban is actually configured to use it.
   # In prod, config.exs points Oban at Core.ObanRepo for HTTP-handler /

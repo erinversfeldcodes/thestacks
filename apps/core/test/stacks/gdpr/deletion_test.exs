@@ -23,8 +23,12 @@ defmodule Stacks.GDPR.DeletionTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Admin.SessionContext
+  alias Stacks.AdminSession
   alias Stacks.Audit
   alias Stacks.GDPR.Deletion
+  alias Stacks.MFA
+  alias Stacks.MFA.UserMFA
 
   describe "delete_user_data/1 GUC integration" do
     test "delete_user_data records the GDPR erasure GUC value in the multi result" do
@@ -76,6 +80,23 @@ defmodule Stacks.GDPR.DeletionTest do
                  "UPDATE audit.audit_log SET action = $1 WHERE id = $2",
                  ["leak.test", Ecto.UUID.dump!(other_entry.id)]
                )
+    end
+  end
+
+  describe "delete_user_data/1 cascade deletion" do
+    test "deletes user_mfa and admin_sessions when user is deleted" do
+      user = insert(:user)
+
+      {:ok, %{secret: secret, recovery_codes: codes}} = MFA.begin_enrollment(user)
+      valid_code = NimbleTOTP.verification_code(secret)
+      {:ok, mfa} = MFA.confirm_enrollment(user, valid_code, secret, codes)
+
+      {:ok, session} = SessionContext.create(user, "127.0.0.1", Core.Application.boot_id())
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      assert is_nil(Repo.get(UserMFA, mfa.id))
+      assert is_nil(Repo.get(AdminSession, session.id))
     end
   end
 end

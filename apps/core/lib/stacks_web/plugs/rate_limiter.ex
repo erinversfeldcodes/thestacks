@@ -63,6 +63,8 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @password_change_limit 20
   @social_limit 20
   @public_limit 30
+  # Admin endpoints — tighter than auth; break-glass access is not high-throughput.
+  @admin_limit 30
 
   def init(opts), do: opts
 
@@ -107,6 +109,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:social), do: @social_limit
   defp get_limit(:public), do: @public_limit
+  defp get_limit(:admin), do: Application.get_env(:core, :rate_limit_admin, @admin_limit)
   defp get_limit(_), do: @global_limit
 
   # Upload and social buckets key on user ID so the limit is per-user, not per-IP.
