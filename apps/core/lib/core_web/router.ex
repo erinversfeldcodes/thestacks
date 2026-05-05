@@ -63,6 +63,15 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RequireRole, role: "owner"
   end
 
+  pipeline :admin do
+    plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireMFA
+  end
+
+  pipeline :rate_limit_admin do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :admin
+  end
+
   pipeline :partner_auth do
     plug StacksWeb.PartnerAuthPlug
   end
@@ -255,6 +264,26 @@ defmodule CoreWeb.Router do
     post "/events", PartnerEventController, :create
     get "/events", PartnerEventController, :index
     delete "/events/:id", PartnerEventController, :delete
+  end
+
+  # Admin auth — public (no admin token needed)
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :rate_limit_auth]
+    post "/auth/login", AdminAuthController, :login
+    post "/auth/verify_mfa", AdminAuthController, :verify_mfa
+  end
+
+  # Admin auth — requires valid admin session with MFA verified
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin]
+    delete "/auth/logout", AdminAuthController, :logout
+  end
+
+  # MFA enrollment — requires regular owner auth (no MFA yet)
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :authenticated, :require_owner, :rate_limit_auth]
+    post "/auth/mfa/setup", AdminAuthController, :mfa_setup
+    post "/auth/mfa/confirm", AdminAuthController, :mfa_confirm
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth
