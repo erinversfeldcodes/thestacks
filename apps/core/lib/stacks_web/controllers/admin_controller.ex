@@ -114,11 +114,6 @@ defmodule StacksWeb.AdminController do
           conn
           |> put_status(422)
           |> json(%{error: "erase_failed"})
-
-        {:error, _} ->
-          conn
-          |> put_status(422)
-          |> json(%{error: "erase_failed"})
       end
     end
   end

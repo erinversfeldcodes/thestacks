@@ -855,3 +855,13 @@ sources:
             description: Client IP address at time of action.
           - name: occurred_at
             description: Timestamp when the action occurred (used for freshness).
+          - name: endpoint
+            description: API endpoint path that generated the audit event.
+          - name: latency_ms
+            description: Request latency in milliseconds.
+          - name: success
+            description: Whether the request completed successfully.
+          - name: row_count
+            description: Number of rows returned or affected.
+          - name: operator_session_id
+            description: Admin session ID for break-glass access events.
