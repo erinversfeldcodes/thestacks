@@ -786,6 +786,86 @@ _assert_setup_step_no_manual_rollback "erlef/setup-beam" uses
 _assert_setup_step_no_manual_rollback "mix deps.get" run
 _assert_setup_step_no_manual_rollback "compose database_url" name
 
+# ════════════════════════════════════════════════════════════════════════════
+# ISSUE #138 PHASE 1 CONTRACT: prober secrets wired (replace owner-leak path)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Phase 1 of #138 introduces a dedicated `prober@thestacks.app` user so the
+# probe-production.sh login no longer reuses the owner password. The workflow
+# must:
+#   - Surface STACKS_PROBER_EMAIL / STACKS_PROBER_PASSWORD as env vars sourced
+#     from secrets of the same names.
+#   - Wire PROBE_SEED_EMAIL → STACKS_PROBER_EMAIL (NOT PROD_OWNER_EMAIL).
+#   - Wire PROBE_SEED_PASSWORD → STACKS_PROBER_PASSWORD (NOT PROD_OWNER_PASSWORD).
+#   - Invoke `seed_prober` alongside `seed_prod` in the deploy flow (the seed
+#     call lives inside scripts/deploy-stack.sh OR is invoked from the
+#     workflow; either path satisfies the contract — we accept a reference
+#     anywhere in the workflow text or in deploy-stack.sh).
+# ────────────────────────────────────────────────────────────────────────────
+
+test_case "prober_secrets_wired" "deploy-production.yml uses STACKS_PROBER_* secrets, not PROD_OWNER_*, for prober login"
+
+if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_EMAIL"* ]]; then
+    _record_pass "workflow references secrets.STACKS_PROBER_EMAIL"
+else
+    _record_fail "workflow must reference secrets.STACKS_PROBER_EMAIL (Phase 1 of #138)"
+fi
+
+if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_PASSWORD"* ]]; then
+    _record_pass "workflow references secrets.STACKS_PROBER_PASSWORD"
+else
+    _record_fail "workflow must reference secrets.STACKS_PROBER_PASSWORD (Phase 1 of #138)"
+fi
+
+# PROBE_SEED_EMAIL must be wired to the prober secret, not the owner secret.
+PROBE_SEED_EMAIL_LINE="$(printf '%s\n' "$WF_CONTENT" | grep -E '^\s*PROBE_SEED_EMAIL:' | head -1 || true)"
+if [[ -n "$PROBE_SEED_EMAIL_LINE" ]]; then
+    if [[ "$PROBE_SEED_EMAIL_LINE" == *"STACKS_PROBER_EMAIL"* ]]; then
+        _record_pass "PROBE_SEED_EMAIL is wired to secrets.STACKS_PROBER_EMAIL"
+    else
+        _record_fail "PROBE_SEED_EMAIL must reference secrets.STACKS_PROBER_EMAIL (got: '$PROBE_SEED_EMAIL_LINE')"
+    fi
+    if [[ "$PROBE_SEED_EMAIL_LINE" == *"PROD_OWNER_EMAIL"* ]]; then
+        _record_fail "PROBE_SEED_EMAIL must NOT reference PROD_OWNER_EMAIL — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_EMAIL_LINE')"
+    else
+        _record_pass "PROBE_SEED_EMAIL no longer references PROD_OWNER_EMAIL"
+    fi
+else
+    _record_fail "PROBE_SEED_EMAIL env binding not found in workflow"
+fi
+
+PROBE_SEED_PASSWORD_LINE="$(printf '%s\n' "$WF_CONTENT" | grep -E '^\s*PROBE_SEED_PASSWORD:' | head -1 || true)"
+if [[ -n "$PROBE_SEED_PASSWORD_LINE" ]]; then
+    if [[ "$PROBE_SEED_PASSWORD_LINE" == *"STACKS_PROBER_PASSWORD"* ]]; then
+        _record_pass "PROBE_SEED_PASSWORD is wired to secrets.STACKS_PROBER_PASSWORD"
+    else
+        _record_fail "PROBE_SEED_PASSWORD must reference secrets.STACKS_PROBER_PASSWORD (got: '$PROBE_SEED_PASSWORD_LINE')"
+    fi
+    if [[ "$PROBE_SEED_PASSWORD_LINE" == *"PROD_OWNER_PASSWORD"* ]]; then
+        _record_fail "PROBE_SEED_PASSWORD must NOT reference PROD_OWNER_PASSWORD — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_PASSWORD_LINE')"
+    else
+        _record_pass "PROBE_SEED_PASSWORD no longer references PROD_OWNER_PASSWORD"
+    fi
+else
+    _record_fail "PROBE_SEED_PASSWORD env binding not found in workflow"
+fi
+
+# Some `seed_prober` reference must exist somewhere in the deploy chain.
+# Accept either an in-workflow invocation OR a reference in
+# scripts/deploy-stack.sh (which is the existing home for `seed_prod`).
+DEPLOY_STACK_SCRIPT_PHASE1="$REPO_ROOT/scripts/deploy-stack.sh"
+SEED_PROBER_FOUND="no"
+if [[ "$WF_CONTENT" == *"seed_prober"* ]]; then
+    SEED_PROBER_FOUND="yes-workflow"
+elif [[ -f "$DEPLOY_STACK_SCRIPT_PHASE1" ]] \
+    && grep -q "seed_prober" "$DEPLOY_STACK_SCRIPT_PHASE1"; then
+    SEED_PROBER_FOUND="yes-deploy-stack"
+fi
+case "$SEED_PROBER_FOUND" in
+    yes-*) _record_pass "seed_prober is invoked in the deploy chain ($SEED_PROBER_FOUND)" ;;
+    no)    _record_fail "seed_prober must be invoked alongside seed_prod (in deploy-production.yml or scripts/deploy-stack.sh) — Phase 1 of #138" ;;
+esac
+
 # ── Case M7: actionlint clean (best-effort) ─────────────────────────────────
 test_case "actionlint_clean_phase4" "actionlint passes on deploy-production.yml when available"
 if command -v actionlint >/dev/null 2>&1; then

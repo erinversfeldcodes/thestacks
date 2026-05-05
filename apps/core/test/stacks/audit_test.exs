@@ -3,7 +3,9 @@ defmodule Stacks.AuditTest do
 
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Audit
+  alias Stacks.Audit.Entry, as: AuditEntry
 
   describe "log/3" do
     test "inserts an audit entry successfully" do
@@ -188,6 +190,118 @@ defmodule Stacks.AuditTest do
       assert {:error, _reason} = Audit.log_rollback(bad_attrs)
 
       refute_receive {:telemetry_event, [:stacks, :system, :rollback], _, _}, 50
+    end
+  end
+
+  describe "log/3 with admin-call fields (Issue #138 Phase 1)" do
+    # Phase 1 extends audit.audit_log with five additive nullable columns
+    # carrying admin-call shape: endpoint, latency_ms, success, row_count,
+    # operator_session_id. Stacks.Audit.log/3 must accept and persist them
+    # via :opts. Until the migration + module update land, these tests fail
+    # because the columns don't exist (Postgrex.Error: undefined_column).
+
+    # Helper: read the most recent audit_log row's raw column values via
+    # Repo.query (decouples from any not-yet-regenerated Ecto schema).
+    defp fetch_admin_columns(entry_id) do
+      {:ok, %{rows: [row], columns: cols}} =
+        Repo.query(
+          """
+          SELECT endpoint, latency_ms, success, row_count, operator_session_id
+            FROM audit.audit_log
+           WHERE id = $1
+          """,
+          [Ecto.UUID.dump!(entry_id)]
+        )
+
+      Enum.zip(cols, row) |> Enum.into(%{})
+    end
+
+    test "persists endpoint, latency_ms, success, row_count, operator_session_id from opts" do
+      user = insert(:user)
+      session_id = Ecto.UUID.generate()
+
+      assert {:ok, entry} =
+               Audit.log(user.id, "admin.users.by_email",
+                 endpoint: "/api/admin/users/by_email",
+                 latency_ms: 17,
+                 success: true,
+                 row_count: 1,
+                 operator_session_id: session_id
+               )
+
+      cols = fetch_admin_columns(entry.id)
+
+      assert cols["endpoint"] == "/api/admin/users/by_email"
+      assert cols["latency_ms"] == 17
+      assert cols["success"] == true
+      assert cols["row_count"] == 1
+      assert cols["operator_session_id"] == session_id
+    end
+
+    test "persists success=false for failed admin calls" do
+      user = insert(:user)
+
+      assert {:ok, entry} =
+               Audit.log(user.id, "admin.users.by_email",
+                 endpoint: "/api/admin/users/by_email",
+                 latency_ms: 5,
+                 success: false,
+                 row_count: 0,
+                 operator_session_id: Ecto.UUID.generate()
+               )
+
+      cols = fetch_admin_columns(entry.id)
+      assert cols["success"] == false
+      assert cols["row_count"] == 0
+    end
+
+    test "omitting admin-call opts leaves columns null (backwards-compatible with existing callers)" do
+      user = insert(:user)
+
+      # Old-style call site — no admin-call opts.
+      assert {:ok, entry} = Audit.log(user.id, "user.login", resource_type: "user")
+
+      cols = fetch_admin_columns(entry.id)
+      assert cols["endpoint"] == nil
+      assert cols["latency_ms"] == nil
+      assert cols["success"] == nil
+      assert cols["row_count"] == nil
+      assert cols["operator_session_id"] == nil
+    end
+
+    test "Stacks.Audit.Entry Ecto schema declares all five new fields" do
+      # Once `mix proto.sync` regenerates the Ecto schema from the updated
+      # proto, __schema__(:fields) must contain the five new field atoms.
+      # Until then this fails because the schema lacks them.
+      fields = AuditEntry.__schema__(:fields)
+
+      for f <- [:endpoint, :latency_ms, :success, :row_count, :operator_session_id] do
+        assert f in fields,
+               "expected Stacks.Audit.Entry.__schema__(:fields) to contain #{inspect(f)}, got: #{inspect(fields)}"
+      end
+    end
+
+    test "result map echoes the admin-call fields back to the caller" do
+      # The :ok tuple should reflect what the caller passed in (mirrors how
+      # Audit.log/3 already echoes :metadata in plaintext form). Lets the
+      # AuditAdminCall plug rely on the return value without re-querying.
+      user = insert(:user)
+      session_id = Ecto.UUID.generate()
+
+      assert {:ok, entry} =
+               Audit.log(user.id, "admin.audit_log",
+                 endpoint: "/api/admin/audit_log",
+                 latency_ms: 42,
+                 success: true,
+                 row_count: 7,
+                 operator_session_id: session_id
+               )
+
+      assert entry.endpoint == "/api/admin/audit_log"
+      assert entry.latency_ms == 42
+      assert entry.success == true
+      assert entry.row_count == 7
+      assert entry.operator_session_id == session_id
     end
   end
 end
