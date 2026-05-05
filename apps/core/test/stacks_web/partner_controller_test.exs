@@ -1,9 +1,10 @@
 defmodule StacksWeb.PartnerControllerTest do
-  use CoreWeb.ConnCase, async: true
+  use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Admin.SessionContext
   alias Stacks.Partners
 
   @valid_reg %{
@@ -12,10 +13,23 @@ defmodule StacksWeb.PartnerControllerTest do
     contact_email: "hi@bookedup.com"
   }
 
-  defp owner_conn(conn) do
-    owner = insert(:user, role: "owner")
-    {:ok, token, _} = Guardian.encode_and_sign(owner)
-    {put_req_header(conn, "authorization", "Bearer #{token}"), owner}
+  defp setup_admin_conn(conn) do
+    user = insert(:owner_user)
+    boot_id = Core.Application.boot_id()
+    raw_ip = "127.0.0.1"
+    {:ok, session} = SessionContext.create(user, raw_ip, boot_id)
+    {:ok, session} = SessionContext.mark_mfa_verified(session)
+
+    {:ok, token, _} =
+      Guardian.encode_and_sign(user, %{},
+        token_type: "admin",
+        session_id: session.id,
+        boot_id: boot_id,
+        ttl: {30, :minute}
+      )
+
+    conn = put_req_header(conn, "authorization", "Bearer #{token}")
+    {conn, user, session}
   end
 
   defp user_conn(conn) do
@@ -43,18 +57,18 @@ defmodule StacksWeb.PartnerControllerTest do
   end
 
   describe "GET /api/admin/partners" do
-    test "owner sees pending partners (200)", %{conn: conn} do
+    test "owner sees pending partners with admin JWT (200)", %{conn: conn} do
       Partners.register_partner(@valid_reg)
-      {conn, _owner} = owner_conn(conn)
+      {conn, _user, _session} = setup_admin_conn(conn)
       conn = get(conn, "/api/admin/partners")
       assert %{"partners" => partners} = json_response(conn, 200)
       assert length(partners) == 1
     end
 
-    test "returns 403 for non-owner", %{conn: conn} do
+    test "returns 401 for regular user JWT (no MFA)", %{conn: conn} do
       conn = user_conn(conn)
       conn = get(conn, "/api/admin/partners")
-      assert json_response(conn, 403)
+      assert conn.status == 401
     end
 
     test "returns 401 without auth", %{conn: conn} do
@@ -64,35 +78,35 @@ defmodule StacksWeb.PartnerControllerTest do
   end
 
   describe "PUT /api/admin/partners/:id/approve" do
-    test "owner approves and gets key once (200)", %{conn: conn} do
+    test "admin approves and gets key once (200)", %{conn: conn} do
       {:ok, partner} = Partners.register_partner(@valid_reg)
-      {conn, _owner} = owner_conn(conn)
+      {conn, _user, _session} = setup_admin_conn(conn)
       conn = put(conn, "/api/admin/partners/#{partner.id}/approve")
       assert %{"data" => %{"api_key" => key}} = json_response(conn, 200)
       assert String.starts_with?(key, "stacks_pk_")
     end
 
-    test "returns 403 for non-owner", %{conn: conn} do
+    test "returns 401 for regular user JWT (no MFA)", %{conn: conn} do
       {:ok, partner} = Partners.register_partner(@valid_reg)
       conn = user_conn(conn)
       conn = put(conn, "/api/admin/partners/#{partner.id}/approve")
-      assert json_response(conn, 403)
+      assert conn.status == 401
     end
   end
 
   describe "PUT /api/admin/partners/:id/reject" do
-    test "owner rejects partner (200)", %{conn: conn} do
+    test "admin rejects partner (200)", %{conn: conn} do
       {:ok, partner} = Partners.register_partner(@valid_reg)
-      {conn, _owner} = owner_conn(conn)
+      {conn, _user, _session} = setup_admin_conn(conn)
       conn = put(conn, "/api/admin/partners/#{partner.id}/reject", %{reason: "Not suitable"})
       assert %{"ok" => true} = json_response(conn, 200)
     end
 
-    test "returns 403 for non-owner", %{conn: conn} do
+    test "returns 401 for regular user JWT (no MFA)", %{conn: conn} do
       {:ok, partner} = Partners.register_partner(@valid_reg)
       conn = user_conn(conn)
       conn = put(conn, "/api/admin/partners/#{partner.id}/reject")
-      assert json_response(conn, 403)
+      assert conn.status == 401
     end
   end
 

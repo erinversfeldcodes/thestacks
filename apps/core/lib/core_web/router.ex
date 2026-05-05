@@ -66,6 +66,7 @@ defmodule CoreWeb.Router do
   pipeline :admin do
     plug StacksWeb.Plugs.AdminAuthPipeline
     plug StacksWeb.Plugs.RequireMFA
+    plug StacksWeb.Plugs.AuditAdminCall
   end
 
   pipeline :rate_limit_admin do
@@ -236,21 +237,25 @@ defmodule CoreWeb.Router do
     delete "/users/:id/block", SocialController, :unblock
   end
 
-  # Metrics dashboard — owner role required
+  # Metrics dashboard — MFA-verified admin session required
   scope "/api", StacksWeb do
-    pipe_through [:api, :authenticated, :require_owner]
+    pipe_through [:api, :admin, :rate_limit_admin]
     get "/metrics", MetricsController, :index
     get "/metrics/quality-trends", MetricsController, :quality_trends
     get "/metrics/source-health", MetricsController, :source_health
     get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
+  end
 
-    get "/admin/sources", SourceAdminController, :index
-    put "/admin/sources/:id/approve", SourceAdminController, :approve
-    put "/admin/sources/:id/reject", SourceAdminController, :reject
+  # Source and partner admin — MFA-verified admin session required
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :rate_limit_admin]
+    get "/sources", SourceAdminController, :index
+    put "/sources/:id/approve", SourceAdminController, :approve
+    put "/sources/:id/reject", SourceAdminController, :reject
 
-    get "/admin/partners", PartnerController, :index
-    put "/admin/partners/:id/approve", PartnerController, :approve
-    put "/admin/partners/:id/reject", PartnerController, :reject
+    get "/partners", PartnerController, :index
+    put "/partners/:id/approve", PartnerController, :approve
+    put "/partners/:id/reject", PartnerController, :reject
   end
 
   # Partner API — authenticated via API key, no user auth
@@ -284,6 +289,17 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated, :require_owner, :rate_limit_auth]
     post "/auth/mfa/setup", AdminAuthController, :mfa_setup
     post "/auth/mfa/confirm", AdminAuthController, :mfa_confirm
+  end
+
+  # Admin data endpoints — requires valid admin session with MFA verified + audit logging
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :rate_limit_admin]
+    get "/users/by_email", AdminController, :by_email
+    get "/users/by_id", AdminController, :by_id
+    get "/audit_log", AdminController, :audit_log
+    get "/platform_stats", AdminController, :platform_stats
+    get "/gdpr_export", AdminController, :gdpr_export
+    post "/gdpr_erase", AdminController, :gdpr_erase
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

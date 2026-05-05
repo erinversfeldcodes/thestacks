@@ -3,6 +3,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
 
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Admin.SessionContext
   alias Stacks.MFA
@@ -74,6 +75,25 @@ defmodule StacksWeb.AdminAuthControllerTest do
         })
 
       assert %{"error" => "mfa_not_enrolled"} = json_response(conn, 403)
+    end
+
+    test "writes admin.login audit row on successful login", %{conn: conn} do
+      user = insert(:owner_user, email: "auditlogin@example.com")
+      setup_mfa_for_user(user)
+
+      post(conn, "/api/admin/auth/login", %{
+        email: "auditlogin@example.com",
+        password: "password123"
+      })
+
+      {:ok, %{rows: rows, columns: cols}} =
+        Repo.query(
+          "SELECT action FROM audit.audit_log WHERE action = 'admin.login' ORDER BY occurred_at DESC LIMIT 1"
+        )
+
+      assert [[action]] = rows
+      assert action == "admin.login"
+      _ = cols
     end
   end
 
@@ -171,6 +191,27 @@ defmodule StacksWeb.AdminAuthControllerTest do
         })
 
       assert %{"error" => "already_verified"} = json_response(conn, 409)
+    end
+
+    test "writes admin.mfa_verified audit row on successful MFA", %{
+      conn: conn,
+      session: session,
+      secret: secret
+    } do
+      totp_code = NimbleTOTP.verification_code(secret)
+
+      post(conn, "/api/admin/auth/verify_mfa", %{
+        session_id: session.id,
+        totp_code: totp_code
+      })
+
+      {:ok, %{rows: rows}} =
+        Repo.query(
+          "SELECT action FROM audit.audit_log WHERE action = 'admin.mfa_verified' ORDER BY occurred_at DESC LIMIT 1"
+        )
+
+      assert [[action]] = rows
+      assert action == "admin.mfa_verified"
     end
   end
 
