@@ -2,8 +2,8 @@ defmodule StacksWeb.MetricsController do
   @moduledoc """
   Authenticated controller for the admin metrics dashboard.
 
-  Only accessible to users with `role: "owner"`. The role check is enforced
-  by the `RequireRole` plug in the router pipeline — not repeated per action.
+  Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
+  by `AdminAuthController.login/2` — not repeated per action.
   """
 
   use CoreWeb, :controller

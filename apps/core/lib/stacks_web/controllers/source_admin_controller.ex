@@ -2,8 +2,8 @@ defmodule StacksWeb.SourceAdminController do
   @moduledoc """
   Admin controller for managing discovered sources.
 
-  Only accessible to users with `role: "owner"`. The role check is enforced
-  by the `RequireRole` plug in the router pipeline.
+  Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
+  by `AdminAuthController.login/2` — not repeated per action.
   """
 
   use CoreWeb, :controller

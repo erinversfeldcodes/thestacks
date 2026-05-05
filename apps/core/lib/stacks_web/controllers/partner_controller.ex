@@ -14,7 +14,7 @@ defmodule StacksWeb.PartnerController do
   end
 
   def approve(conn, %{"id" => partner_id}) do
-    user = Guardian.Plug.current_resource(conn)
+    user = conn.assigns.current_user
 
     case Partners.approve_partner(partner_id, user.id) do
       {:ok, {_partner, raw_key}} ->
@@ -29,7 +29,7 @@ defmodule StacksWeb.PartnerController do
   end
 
   def reject(conn, %{"id" => partner_id}) do
-    user = Guardian.Plug.current_resource(conn)
+    user = conn.assigns.current_user
     reason = Map.get(conn.body_params, "reason")
 
     case Partners.reject_partner(partner_id, user.id, reason) do

@@ -17,6 +17,7 @@ defmodule StacksWeb.AdminAuthController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
+  alias Stacks.Audit
   alias Stacks.MFA
 
   @doc "POST /api/admin/auth/login"
@@ -28,6 +29,12 @@ defmodule StacksWeb.AdminAuthController do
       boot_id = Core.Application.boot_id()
       raw_ip = get_raw_ip(conn)
       {:ok, session} = SessionContext.create(user, raw_ip, boot_id)
+
+      Audit.log(user.id, "admin.login",
+        resource_type: "admin_session",
+        operator_session_id: session.id
+      )
+
       json(conn, %{session_id: session.id})
     else
       {:error, :invalid_credentials} ->
@@ -54,6 +61,11 @@ defmodule StacksWeb.AdminAuthController do
          {:ok, user} <- load_session_user(session),
          :ok <- verify_mfa_code(user, params) do
       {:ok, session} = SessionContext.mark_mfa_verified(session)
+
+      Audit.log(user.id, "admin.mfa_verified",
+        resource_type: "admin_session",
+        operator_session_id: session.id
+      )
 
       {:ok, token, _claims} =
         Guardian.encode_and_sign(user, %{},
