@@ -30,6 +30,10 @@ defmodule Stacks.GDPR.Deletion do
   @spec delete_user_data(binary()) :: {:ok, map()} | {:error, atom(), term(), map()}
   def delete_user_data(user_id) do
     Multi.new()
+    |> Multi.run(:set_gdpr_guc, fn repo, _ ->
+      repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
+      {:ok, :set}
+    end)
     |> Multi.run(:bookshelves, fn repo, _ ->
       bookshelves = repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id)
       {:ok, bookshelves}
@@ -63,6 +67,10 @@ defmodule Stacks.GDPR.Deletion do
     end)
     |> Multi.run(:audit, fn _repo, _ ->
       Audit.log(nil, "user.data_deleted", resource_type: "user", resource_id: user_id)
+    end)
+    |> Multi.run(:reset_gdpr_guc, fn repo, _ ->
+      repo.query!("RESET app.audit_gdpr_erasure")
+      {:ok, :reset}
     end)
     |> Repo.transaction()
   end

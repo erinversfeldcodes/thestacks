@@ -147,6 +147,146 @@ defmodule Stacks.ReleaseTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Issue #138 Phase 1 — seed_prober/0
+  #
+  # `seed_prober/0` is the production-safe seed for the dedicated probe
+  # user. Mirrors `seed_prod/0`'s shape but creates a non-owner user so the
+  # probe-production.sh credentials never carry owner privileges. Reads
+  # `STACKS_PROBER_EMAIL` / `STACKS_PROBER_PASSWORD` from the environment.
+  #
+  # Invariants under test:
+  #   - Idempotent — second call no-ops on existing user, doesn't rotate
+  #     password or change role.
+  #   - Creates a user with role: "user" (NOT "owner") and
+  #     email_confirmed: true so the probe's first login attempt doesn't
+  #     get email_unconfirmed.
+  #   - Raises RuntimeError when env vars are missing (mirrors seed_prod).
+  #
+  # Until the function exists, every test fails with
+  # `(UndefinedFunctionError) function Stacks.Release.seed_prober/0 is
+  # undefined or private`.
+  # ---------------------------------------------------------------------------
+
+  @prober_email_var "STACKS_PROBER_EMAIL"
+  @prober_password_var "STACKS_PROBER_PASSWORD"
+
+  defp setup_prober_env(email, password) do
+    prior_email = System.get_env(@prober_email_var)
+    prior_password = System.get_env(@prober_password_var)
+
+    if email == :delete do
+      System.delete_env(@prober_email_var)
+    else
+      System.put_env(@prober_email_var, email)
+    end
+
+    if password == :delete do
+      System.delete_env(@prober_password_var)
+    else
+      System.put_env(@prober_password_var, password)
+    end
+
+    ExUnit.Callbacks.on_exit(fn ->
+      restore_env(@prober_email_var, prior_email)
+      restore_env(@prober_password_var, prior_password)
+    end)
+
+    :ok
+  end
+
+  describe "seed_prober/0 env var validation" do
+    test "raises when STACKS_PROBER_EMAIL is missing" do
+      setup_prober_env(:delete, "long-enough-pw")
+
+      assert_raise RuntimeError, ~r/STACKS_PROBER_EMAIL/, fn ->
+        Release.seed_prober()
+      end
+    end
+
+    test "raises when STACKS_PROBER_EMAIL is empty" do
+      setup_prober_env("", "long-enough-pw")
+
+      assert_raise RuntimeError, ~r/STACKS_PROBER_EMAIL/, fn ->
+        Release.seed_prober()
+      end
+    end
+
+    test "raises when STACKS_PROBER_PASSWORD is missing" do
+      setup_prober_env("prober@thestacks.app", :delete)
+
+      assert_raise RuntimeError, ~r/STACKS_PROBER_PASSWORD/, fn ->
+        Release.seed_prober()
+      end
+    end
+
+    test "raises when STACKS_PROBER_PASSWORD is empty" do
+      setup_prober_env("prober@thestacks.app", "")
+
+      assert_raise RuntimeError, ~r/STACKS_PROBER_PASSWORD/, fn ->
+        Release.seed_prober()
+      end
+    end
+  end
+
+  describe "seed_prober/0 user creation" do
+    test "creates prober@thestacks.app with role :user and email_confirmed: true" do
+      email = "prober-create@stacks.test"
+      password = "correct-horse-battery-staple"
+
+      setup_prober_env(email, password)
+
+      assert :ok = Release.seed_prober()
+
+      user = Accounts.get_user_by_email(email)
+      assert %User{} = user
+      assert user.email == email
+      assert user.role == "user", "prober must have role 'user' (NOT 'owner')"
+      assert user.email_confirmed == true
+      assert Argon2.verify_pass(password, user.password_hash)
+    end
+
+    test "email is normalised (downcased) when stored" do
+      email = "Prober-Mixed-Case@Stacks.Test"
+      password = "correct-horse-battery-staple"
+
+      setup_prober_env(email, password)
+
+      assert :ok = Release.seed_prober()
+
+      user = Accounts.get_user_by_email(String.downcase(email))
+      assert %User{} = user
+      assert user.email == String.downcase(email)
+      assert user.role == "user"
+    end
+  end
+
+  describe "seed_prober/0 idempotency" do
+    test "is idempotent — second call does not create a duplicate or rotate the password" do
+      email = "prober-idem@stacks.test"
+      password = "correct-horse-battery-staple"
+
+      setup_prober_env(email, password)
+
+      assert :ok = Release.seed_prober()
+      user_before = Accounts.get_user_by_email(email)
+      assert %User{} = user_before
+      hash_before = user_before.password_hash
+
+      # Second call must be a no-op.
+      assert :ok = Release.seed_prober()
+
+      user_after = Accounts.get_user_by_email(email)
+      assert %User{} = user_after
+      assert user_after.id == user_before.id
+      assert user_after.password_hash == hash_before
+      assert user_after.role == "user"
+
+      # Only one row exists for that email.
+      assert Repo.aggregate(from_user_by_email_query(email), :count, :id) == 1
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
 

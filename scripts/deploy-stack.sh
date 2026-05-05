@@ -557,6 +557,8 @@ fly secrets set \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
     ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
+    ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
+    ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 
@@ -776,12 +778,20 @@ if [[ -n "${machine_id}" ]]; then
     # those previews run the seed against their preview branch.
     if [[ "$PROD_MODE" -eq 1 ]]; then
         echo ""
-        echo "==> Seeding ${CORE_APP} (prod owner only)..."
+        echo "==> Seeding ${CORE_APP} (prod owner + prober)..."
         fly machine exec "${machine_id}" \
             "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prod()'\"" \
             --app "${CORE_APP}" --timeout 60 2>&1 \
             || { echo "FAIL deploy: prod seed failed"; exit 1; }
         echo "PASS deploy: prod owner seed applied"
+
+        if [[ -n "${STACKS_PROBER_EMAIL:-}" && -n "${STACKS_PROBER_PASSWORD:-}" ]]; then
+            fly machine exec "${machine_id}" \
+                "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prober()'\"" \
+                --app "${CORE_APP}" --timeout 60 2>&1 \
+                || { echo "FAIL deploy: prober seed failed"; exit 1; }
+            echo "PASS deploy: prober seed applied"
+        fi
     else
         # Detect unmerged changes to seeds.exs. Default to "changed" if we
         # can't determine (no origin/main reachable, no git repo) — safer
