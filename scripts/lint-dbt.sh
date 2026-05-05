@@ -23,11 +23,10 @@ if [[ ! -f dbt/target/manifest.json ]]; then
 fi
 
 # Column-level checks (check-model-has-all-columns, check-source-has-all-columns)
-# require catalog.json. Generate it if missing.
-if [[ ! -f dbt/target/catalog.json ]]; then
-    echo "Generating dbt catalog for column-level checks..."
-    (cd dbt && dbt docs generate --quiet)
-fi
+# require catalog.json. Always regenerate so it reflects the current DB schema
+# rather than a potentially stale artifact from a prior run.
+echo "Generating dbt catalog for column-level checks..."
+(cd dbt && dbt docs generate --quiet)
 
 FAILED=()
 WARNED=()
