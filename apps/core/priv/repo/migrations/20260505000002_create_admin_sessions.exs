@@ -21,7 +21,13 @@ defmodule Core.Repo.Migrations.CreateAdminSessions do
     create index(:admin_sessions, [:user_id], prefix: "op")
     create index(:admin_sessions, [:expires_at], prefix: "op")
 
-    execute("GRANT INSERT, SELECT, UPDATE ON op.admin_sessions TO stacks_app")
+    execute("""
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
+        GRANT INSERT, SELECT, UPDATE ON op.admin_sessions TO stacks_app;
+      END IF;
+    END $$;
+    """)
 
     execute(
       """

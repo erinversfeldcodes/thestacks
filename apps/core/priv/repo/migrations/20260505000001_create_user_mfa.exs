@@ -19,7 +19,13 @@ defmodule Core.Repo.Migrations.CreateUserMfa do
 
     create unique_index(:user_mfa, [:user_id], prefix: "op")
 
-    execute("GRANT INSERT, SELECT, UPDATE ON op.user_mfa TO stacks_app")
+    execute("""
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
+        GRANT INSERT, SELECT, UPDATE ON op.user_mfa TO stacks_app;
+      END IF;
+    END $$;
+    """)
 
     # stacks_dbt intentionally NOT granted SELECT on op.user_mfa.
     # The totp_secret column stores Cloak-encrypted ciphertext (bytea) and the
