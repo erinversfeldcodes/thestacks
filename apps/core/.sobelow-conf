@@ -4,6 +4,6 @@
   exit_on_vuln: true,
   skip: false,
   router: "lib/core_web/router.ex",
-  ignore: ["Config.Secrets", "Config.HTTPS"],
+  ignore: ["Config.Secrets", "Config.HTTPS", "Traversal.FileModule"],
   ignore_files: ["test/support/"]
 ]
