@@ -141,6 +141,30 @@ defmodule StacksWeb.UploadController do
     end
   end
 
+  @doc """
+  PUT /api/upload/:image_id/data — receive file bytes for the init/commit upload flow.
+
+  No authentication: the image_id UUID (128-bit random) is effectively unguessable,
+  and `commit_upload` verifies ownership before enqueuing work. Phoenix stores the
+  bytes via the configured storage backend (R2 in production, Local in dev/preview).
+  """
+  @spec upload_data(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def upload_data(conn, %{"image_id" => image_id}) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn, length: 20_971_520)
+
+    case Books.store_upload_bytes(image_id, body) do
+      :ok ->
+        send_resp(conn, 200, "")
+
+      {:error, reason} ->
+        Logger.error(
+          "UploadController.upload_data: storage failed for #{image_id}: #{inspect(reason)}"
+        )
+
+        conn |> put_status(500) |> json(%{error: "storage_failed"})
+    end
+  end
+
   @doc "GET /api/upload/:image_id/stream — stream SSE status updates for an uploaded image."
   @spec stream(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def stream(conn, %{"image_id" => image_id}) do
