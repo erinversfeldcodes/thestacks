@@ -16,7 +16,7 @@ echo "==> Generating Ecto schemas from proto..."
 # reliable fix is to stop the Elixir process that owns the pool.
 # proto.sync (run above) exits before this point, so any BEAM processes still
 # connected to postgres are orphaned from a previous mix coveralls run.
-_lingering_pids=$(lsof -i TCP:5432 2>/dev/null | awk '/beam\.smp/ {print $2}' | sort -u)
+_lingering_pids=$(lsof -i TCP:5432 2>/dev/null | awk '/beam\.smp/ {print $2}' | sort -u || true)
 if [[ -n "$_lingering_pids" ]]; then
     echo "==> Killing lingering BEAM processes: $_lingering_pids"
     echo "$_lingering_pids" | xargs kill -TERM 2>/dev/null || true

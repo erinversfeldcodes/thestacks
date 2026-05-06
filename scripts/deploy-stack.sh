@@ -1064,9 +1064,8 @@ if [[ ${#warmup_ids[@]} -gt 0 ]]; then
     # states. Background curl + monitor stdout in a tee so we can kill it
     # as soon as a terminal status appears.
     (curl -4 -sN --max-time 180 \
-        -H "Authorization: Bearer ${smoke_token}" \
         -H "Accept: text/event-stream" \
-        "${CORE_URL}/api/upload/${probe_id}/stream" 2>/dev/null \
+        "${CORE_URL}/api/upload/${probe_id}/stream?token=${smoke_token}" 2>/dev/null \
         > "${probe_log}") &
     probe_pid=$!
 
@@ -1109,7 +1108,7 @@ if [[ ${#warmup_ids[@]} -gt 0 ]]; then
         echo "PASS probe: vision pipeline reached 'rejected' for ${probe_id} (pipeline functional)"
     else
         echo "FAIL probe: vision pipeline did NOT reach a terminal status within 180s" >&2
-        echo "  Last 20 lines of SSE stream from ${CORE_URL}/api/upload/${probe_id}/stream:" >&2
+        echo "  Last 20 lines of SSE stream from ${CORE_URL}/api/upload/${probe_id}/stream?token=<JWT>:" >&2
         tail -20 "${probe_log}" >&2 || true
         echo "" >&2
         echo "  Investigate: Modal logs for ${MODAL_APP} (modal app logs --app ${MODAL_APP})," >&2
