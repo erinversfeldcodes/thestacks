@@ -269,6 +269,20 @@ defmodule Stacks.Books do
     end
   end
 
+  @doc """
+  Store raw image bytes for an upload initiated via `init_upload/2`.
+
+  Called by `UploadController.upload_data/2` when the browser PUTs file bytes
+  to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
+  """
+  @spec store_upload_bytes(binary(), binary()) :: :ok | {:error, term()}
+  def store_upload_bytes(image_id, bytes) when is_binary(bytes) do
+    case Stacks.Storage.upload_image(image_id, bytes) do
+      {:ok, _key} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp insert_uploaded_image(image_id, storage_key, user_id, status \\ "pending") do
     now = DateTime.utc_now()
 
@@ -309,13 +323,19 @@ defmodule Stacks.Books do
   def init_upload(user_id, opts \\ []) do
     image_id = Ecto.UUID.generate()
     storage_key = "uploads/#{image_id}"
-    content_type = Keyword.get(opts, :content_type, "image/jpeg")
     ttl_seconds = Keyword.get(opts, :ttl_seconds, 900)
 
+    # Use a Phoenix-served upload URL rather than an R2 presigned URL.
+    # Direct browser→R2 PUT requires the R2 bucket to allow the request
+    # origin in its CORS policy. Preview deployments use *.fly.dev origins
+    # which may not be in the bucket allowlist, causing silent CORS failures.
+    # Proxying through Phoenix is same-origin from the browser's perspective,
+    # so no CORS preflight is needed. Phoenix then stores to the configured
+    # backend (R2 in production, Local in dev/preview).
+    upload_url = "/api/upload/#{image_id}/data"
+
     with {:ok, _image} <-
-           insert_uploaded_image(image_id, storage_key, user_id, "awaiting_upload"),
-         {:ok, upload_url} <-
-           Stacks.Storage.presigned_put_url(storage_key, ttl_seconds, content_type: content_type) do
+           insert_uploaded_image(image_id, storage_key, user_id, "awaiting_upload") do
       {:ok, %{image_id: image_id, upload_url: upload_url, expires_in: ttl_seconds}}
     end
   end
