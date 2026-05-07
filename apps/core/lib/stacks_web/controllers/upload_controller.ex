@@ -3,6 +3,8 @@ defmodule StacksWeb.UploadController do
 
   use CoreWeb, :controller
 
+  require Logger
+
   import Ecto.Query
 
   alias Core.Repo
