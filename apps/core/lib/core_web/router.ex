@@ -138,6 +138,16 @@ defmodule CoreWeb.Router do
     post "/upload/:image_id/commit", UploadController, :commit
   end
 
+  # Upload data PUT — no user auth. The image_id UUID (128-bit random) is the
+  # effective auth token: anyone who can guess it can PUT data, but commit_upload
+  # verifies ownership before enqueuing vision work. Proxying through Phoenix
+  # (same origin as the SPA) avoids R2 CORS preflight failures when the browser
+  # origin (*.fly.dev, localhost) is not in the R2 bucket's CORS allowlist.
+  scope "/api", StacksWeb do
+    pipe_through :api
+    put "/upload/:image_id/data", UploadController, :upload_data
+  end
+
   scope "/api", StacksWeb do
     pipe_through [:sse_api, :sse_auth]
     get "/upload/:image_id/stream", UploadController, :stream

@@ -993,23 +993,67 @@ fi
 
 # Fire all canaries in parallel so Modal sees the same scale-out demand
 # shape the gate will generate. Collect image_ids from the 202 responses.
-echo "    Uploading ${#warmup_canaries[@]} canaries in parallel..."
+echo "    Uploading ${#warmup_canaries[@]} canaries in parallel (init → PUT → commit)..."
 warmup_dir="$(mktemp -d)"
 upload_pids=()
 for img in "${warmup_canaries[@]}"; do
     (
         img_name="$(basename "$img")"
-        body_file="${warmup_dir}/upload_${img_name}"
-        http_code="$(curl -4 -s -o "${body_file}" -w "%{http_code}" \
-            --max-time 30 \
-            -X POST "${CORE_URL}/api/upload" \
+
+        # Step 1: init — get image_id + upload_url
+        init_body="${warmup_dir}/init_${img_name}"
+        init_code="$(curl -4 -s -o "${init_body}" -w "%{http_code}" \
+            --max-time 15 \
+            -X POST "${CORE_URL}/api/upload/init" \
             -H "Authorization: Bearer ${smoke_token}" \
-            -F "image=@${img}" 2>/dev/null || true)"
-        if [[ "${http_code}" == "202" ]]; then
-            img_id="$(python3 -c \
-                "import json,sys; print(json.load(open('${body_file}')).get('image_id',''))" \
-                2>/dev/null || true)"
+            -H "Content-Type: application/json" \
+            -d '{"content_type":"image/jpeg"}' 2>/dev/null || true)"
+
+        if [[ "${init_code}" != "201" ]]; then
+            echo "    ${img_name}: init returned ${init_code} — skipping"
+            exit 0
+        fi
+
+        img_id="$(python3 -c \
+            "import json,sys; print(json.load(open('${init_body}')).get('image_id',''))" \
+            2>/dev/null || true)"
+        upload_url="$(python3 -c \
+            "import json,sys; print(json.load(open('${init_body}')).get('upload_url',''))" \
+            2>/dev/null || true)"
+
+        if [[ -z "${img_id}" || -z "${upload_url}" ]]; then
+            echo "    ${img_name}: init response missing image_id or upload_url — skipping"
+            exit 0
+        fi
+
+        # Resolve relative upload_url against CORE_URL
+        if [[ "${upload_url}" == /* ]]; then
+            upload_url="${CORE_URL}${upload_url}"
+        fi
+
+        # Step 2: PUT file bytes to upload_url
+        put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            -X PUT "${upload_url}" \
+            -H "Content-Type: image/jpeg" \
+            --data-binary "@${img}" 2>/dev/null || true)"
+
+        if [[ "${put_code}" != "200" ]]; then
+            echo "    ${img_name}: PUT to upload_url returned ${put_code} — skipping"
+            exit 0
+        fi
+
+        # Step 3: commit — enqueue vision job
+        commit_body="${warmup_dir}/commit_${img_name}"
+        commit_code="$(curl -4 -s -o "${commit_body}" -w "%{http_code}" \
+            --max-time 15 \
+            -X POST "${CORE_URL}/api/upload/${img_id}/commit" \
+            -H "Authorization: Bearer ${smoke_token}" 2>/dev/null || true)"
+
+        if [[ "${commit_code}" == "202" ]]; then
             echo "${img_id}" > "${warmup_dir}/id_${img_name}"
+        else
+            echo "    ${img_name}: commit returned ${commit_code} — skipping"
         fi
     ) &
     upload_pids+=("$!")
