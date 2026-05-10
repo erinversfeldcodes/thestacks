@@ -368,7 +368,7 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             _placement="$(curl -sf "${_core_url}/api/bookshelves/library" \
                 -H "Authorization: Bearer ${_u1}" 2>/dev/null \
                 | python3 -c \
-                    "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+                    "import json,sys; d=json.load(sys.stdin); s=d.get('shelves',[]); p=[pl for sh in s for pl in sh.get('placements',[])]; print(p[0]['id'] if p else '')" \
                 2>/dev/null || true)"
             if [[ -n "${_placement}" ]]; then
                 _idor_code="$(curl -o /dev/null -s -w "%{http_code}" \
