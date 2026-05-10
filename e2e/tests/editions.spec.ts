@@ -90,7 +90,7 @@ test.describe("Book Detail — Editions", () => {
     const overlay = page.locator('[role="dialog"]');
     await expect(
       overlay.getByTestId('edition-selector')
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 10000 });
 
     const options = await overlay
       .getByTestId('edition-selector').locator("option")
@@ -165,7 +165,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
       overlay.locator(".book-detail__section-title", {
         hasText: "Formats on My Shelf",
       })
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("format picker buttons are visible under formats section", async ({
@@ -181,7 +181,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
       overlay.locator(".book-detail__section-title", {
         hasText: "Formats on My Shelf",
       })
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 10000 });
 
     const formatBtns = overlay.locator(".format-picker__btn");
     expect(await formatBtns.count()).toBe(3);

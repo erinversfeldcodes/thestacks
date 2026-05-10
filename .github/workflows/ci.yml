@@ -976,7 +976,7 @@ jobs:
             candidate="$(curl -sf "${CORE_URL}/api/bookshelves/${bookshelf}" \
               -H "Authorization: Bearer ${U1}" 2>/dev/null \
               | python3 -c \
-                "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+                "import json,sys; d=json.load(sys.stdin); s=d.get('shelves',[]); p=[pl for sh in s for pl in sh.get('placements',[])]; print(p[0]['id'] if p else '')" \
               2>/dev/null || true)"
             if [[ -n "${candidate}" ]]; then
               PLACEMENT="${candidate}"
