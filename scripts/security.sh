@@ -35,8 +35,13 @@ hadolint deploy/Dockerfile.scraper
 checkov --directory deploy/
 
 # Vulnerability scanning (filesystem)
+# .venv-tools/ (dev CLIs: checkov, dbt, sqlfluff) and scripts/mcp/.venv (MCP server)
+# are excluded for the same reason as apps/vision/.venv: transitive deps of dev tools
+# are not application attack surface and generate false-positive CVE noise.
 trivy fs . --severity CRITICAL,HIGH --exit-code 1 \
     --skip-dirs apps/vision/.venv \
+    --skip-dirs .venv-tools \
+    --skip-dirs scripts/mcp/.venv \
     --skip-files apps/core/erl_crash.dump
 
 # TruffleHog — deep entropy-based secret scanning
@@ -54,6 +59,8 @@ if command -v syft &>/dev/null && command -v grype &>/dev/null; then
     syft . -o cyclonedx-json \
         --exclude ./apps/scraper/target \
         --exclude ./apps/vision/.venv \
+        --exclude ./.venv-tools \
+        --exclude ./scripts/mcp/.venv \
         --exclude ./_build \
         --exclude ./.claude/worktrees \
         2>/dev/null > /tmp/stacks-sbom.json

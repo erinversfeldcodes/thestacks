@@ -65,7 +65,7 @@ defmodule StacksWeb.UploadControllerTest do
              } = json_response(conn, 201)
 
       assert is_binary(image_id)
-      assert String.starts_with?(url, "https://") or String.starts_with?(url, "file://")
+      assert url == "/api/upload/#{image_id}/data"
       assert is_integer(expires_in) and expires_in > 0
     end
 
