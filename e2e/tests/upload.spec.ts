@@ -2,7 +2,7 @@ import path from "path";
 import { test, expect, Page } from "@playwright/test";
 import { suiteAuthFile } from "./helpers";
 
-// The vision pipeline runs classify + extract on VisionModel (A10G GPU) then
+// The vision pipeline runs classify + extract on VisionModel (H100 GPU) then
 // resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
 const PIPELINE_TIMEOUT = 300_000;
 
@@ -12,6 +12,9 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
   test(
     "identifies The Name of the Rose from barcode_isbn_clean.jpg via local OCR",
     async ({ page }) => {
+      // Extra headroom beyond 240 s SSE wait + 60 s enrichment poll.
+      test.setTimeout(330_000);
+
       await page.goto("/upload");
 
       const fileChooserPromise = page.waitForEvent("filechooser");
@@ -26,15 +29,61 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
         { timeout: 30_000 }
       );
 
+      // Capture the GET /api/books/:id call Elm makes after SSE resolves so we
+      // can retrieve the book ID and the initial title for fast-path detection.
+      const bookResponsePromise = page.waitForResponse(
+        (resp) =>
+          /\/api\/books\/[^/?]+$/.test(resp.url()) && resp.status() === 200,
+        { timeout: 240_000 }
+      );
+
       // Pipeline result: either fresh verify view or "Already in Your Library"
       // (if the book was placed in a prior run). Both prove the barcode was read.
       const verify = page.getByTestId('upload-verify');
       const duplicate = page.getByText('Already in Your Library');
       await expect(verify.or(duplicate)).toBeVisible({ timeout: 240_000 });
 
-      // The Name of the Rose appears in both views (verify shows it in book
-      // details; duplicate shows it in "You own '...' as an edition").
-      await expect(page.getByText(/Name of the Rose/i)).toBeVisible();
+      if (await verify.isVisible()) {
+        const bookJson = await (await bookResponsePromise).json();
+        const bookId: string = bookJson.book?.id ?? bookJson.id;
+        const initialTitle: string =
+          bookJson.book?.title ?? bookJson.title ?? "";
+
+        if (/^ISBN \d{13}$/.test(initialTitle)) {
+          // Barcode OCR fast path: IdentifyBookJob resolves immediately with a
+          // placeholder title while EnrichBookJob fetches real metadata async.
+          // Assert the partial data appears in the verify view first…
+          await expect(page.locator(".upload-verify__title")).toContainText(
+            initialTitle
+          );
+
+          // …then confirm EnrichBookJob updated the record (the verify view
+          // won't re-render once Elm is in Verifying state, so we poll the API).
+          await expect
+            .poll(
+              () =>
+                page.evaluate(async (id) => {
+                  const auth = JSON.parse(
+                    localStorage.getItem("stacks-auth") || "{}"
+                  );
+                  const resp = await fetch(`/api/books/${id}`, {
+                    headers: { Authorization: `Bearer ${auth.token}` },
+                  });
+                  if (!resp.ok) return "";
+                  const data = await resp.json();
+                  return (data.book?.title ?? "") as string;
+                }, bookId),
+              { timeout: 60_000, intervals: [2000, 3000, 5000] }
+            )
+            .toMatch(/Name of the Rose/i);
+        } else {
+          // Book already existed in DB with enriched title (repeat run).
+          expect(initialTitle).toMatch(/Name of the Rose/i);
+        }
+      } else {
+        // Duplicate path: book was placed in a prior run — title already enriched.
+        await expect(page.getByText(/Name of the Rose/i)).toBeVisible();
+      }
     }
   );
 });
@@ -310,19 +359,18 @@ test.describe("Upload pipeline", () => {
         { timeout: 60_000 }
       );
 
-      await expect(page.getByTestId('upload-verify')).toBeVisible({
-        timeout: PIPELINE_TIMEOUT,
-      });
+      const verify = page.getByTestId("upload-verify");
+      const error = page.getByTestId("upload-error");
+      await expect(verify.or(error)).toBeVisible({ timeout: PIPELINE_TIMEOUT });
+      if (await error.isVisible()) {
+        throw new Error(
+          `Upload pipeline failed: ${await error.textContent()}`
+        );
+      }
 
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "We think this is"
-      );
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Crystal City"
-      );
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Russell"
-      );
+      await expect(verify).toContainText("We think this is");
+      await expect(verify).toContainText("Crystal City");
+      await expect(verify).toContainText("Russell");
     }
   );
 
@@ -345,19 +393,18 @@ test.describe("Upload pipeline", () => {
         { timeout: 60_000 }
       );
 
-      await expect(page.getByTestId('upload-verify')).toBeVisible({
-        timeout: PIPELINE_TIMEOUT,
-      });
+      const verify = page.getByTestId("upload-verify");
+      const error = page.getByTestId("upload-error");
+      await expect(verify.or(error)).toBeVisible({ timeout: PIPELINE_TIMEOUT });
+      if (await error.isVisible()) {
+        throw new Error(
+          `Upload pipeline failed: ${await error.textContent()}`
+        );
+      }
 
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "We think this is"
-      );
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Flyboys"
-      );
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Bradley"
-      );
+      await expect(verify).toContainText("We think this is");
+      await expect(verify).toContainText("Flyboys");
+      await expect(verify).toContainText("Bradley");
     }
   );
 
@@ -368,7 +415,6 @@ test.describe("Upload pipeline", () => {
 
       await page.goto("/upload");
 
-      // Trigger the file chooser via the "Choose Photo" button.
       const fileChooserPromise = page.waitForEvent("filechooser");
       await page.click("button.btn--primary");
       const fileChooser = await fileChooserPromise;
@@ -376,29 +422,23 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
-      // Upload is accepted; spinner switches to "Processing image..."
       await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
         "Processing image...",
         { timeout: 60_000 }
       );
 
-      // Wait for the vision pipeline to complete and the verification step to render.
-      await expect(page.getByTestId('upload-verify')).toBeVisible({
-        timeout: PIPELINE_TIMEOUT,
-      });
+      const verify = page.getByTestId("upload-verify");
+      const error = page.getByTestId("upload-error");
+      await expect(verify.or(error)).toBeVisible({ timeout: PIPELINE_TIMEOUT });
+      if (await error.isVisible()) {
+        throw new Error(
+          `Upload pipeline failed: ${await error.textContent()}`
+        );
+      }
 
-      // Verification heading should be present.
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "We think this is"
-      );
-
-      // Title and author should match the book in the image.
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Born Again Bodies"
-      );
-      await expect(page.getByTestId('upload-verify')).toContainText(
-        "Griffith"
-      );
+      await expect(verify).toContainText("We think this is");
+      await expect(verify).toContainText("Born Again Bodies");
+      await expect(verify).toContainText("Griffith");
     }
   );
 });
