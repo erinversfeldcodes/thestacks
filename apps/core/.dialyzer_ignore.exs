@@ -13,11 +13,16 @@
 # defensive programming — it normalises any future Accounts.authenticate error
 # to :invalid_credentials. Dialyzer correctly identifies it as currently
 # unreachable given the function's typespec, but we keep it for safety.
+#
+# postgrex 0.22.x generates extension modules (e.g. Interval) at compile time
+# via macros. Dialyzer cannot resolve the macro-generated private functions
+# called from type_module.ex, producing spurious call_to_missing warnings.
 [
   ~r/Function ExUnit\./,
   ~r/Function NimbleTOTP\./,
   ~r/Unknown type: NimbleTOTP\./,
   ~r/Unknown type: Stacks\.AdminSession\.t/,
   ~r/Unknown type: Stacks\.MFA\.UserMFA\.t/,
-  ~r/admin_auth_controller\.ex.*pattern_match_cov/
+  ~r/admin_auth_controller\.ex.*pattern_match_cov/,
+  ~r/Postgrex\.Extensions\.Interval\./
 ]

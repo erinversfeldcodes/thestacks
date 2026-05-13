@@ -7,7 +7,11 @@ config :core, Core.Repo,
   database: "stacks_test#{System.get_env("MIX_TEST_PARTITION")}",
   parameters: [search_path: "public,op"],
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: System.schedulers_online() * 2,
+  # Prevent parallel preload tasks from being dropped during peak sandbox
+  # contention (28 concurrent cases, each preloading multiple associations).
+  queue_target: 5_000,
+  queue_interval: 10_000
 
 # Core.ObanRepo shares Core.Repo's database in test — the prod
 # separation is purely for connection-pool isolation, not schema
