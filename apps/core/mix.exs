@@ -74,6 +74,7 @@ defmodule Core.MixProject do
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:timex, "~> 3.7"},
       {:nimble_csv, "~> 1.2"},
+      {:nimble_pool, "~> 1.1"},
       {:libcluster, "~> 3.3"},
       {:nimble_totp, "~> 0.1"}
     ]

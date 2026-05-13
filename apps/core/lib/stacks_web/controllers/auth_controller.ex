@@ -57,6 +57,12 @@ defmodule StacksWeb.AuthController do
         conn
         |> put_status(401)
         |> json(%{error: "invalid_credentials"})
+
+      {:error, :argon2_busy} ->
+        conn
+        |> put_status(503)
+        |> put_resp_header("retry-after", "5")
+        |> json(%{error: "service_busy"})
     end
   end
 
