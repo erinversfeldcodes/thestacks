@@ -19,6 +19,7 @@ defmodule Core.Application do
           Stacks.Vault,
           {Phoenix.PubSub, name: Core.PubSub},
           finch_spec(),
+          Stacks.Accounts.ArgonPool,
           Stacks.CircuitBreakers,
           StacksWeb.Plugs.RateLimiter.Server,
           Stacks.AI.BudgetTracker,

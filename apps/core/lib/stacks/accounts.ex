@@ -15,6 +15,7 @@ defmodule Stacks.Accounts do
 
   alias Core.Repo
   alias Ecto.Multi
+  alias Stacks.Accounts.ArgonPool
   alias Stacks.Accounts.User
   alias Stacks.Events
   alias Stacks.Workers.VisibilityRecapJob
@@ -235,7 +236,8 @@ defmodule Stacks.Accounts do
   - `{:error, :email_unconfirmed}` — valid credentials but email not confirmed
   """
   @spec authenticate(String.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :invalid_credentials | :email_unconfirmed}
+          {:ok, User.t()}
+          | {:error, :invalid_credentials | :email_unconfirmed | :argon2_busy}
   def authenticate(email, password) do
     with {:ok, user} <- check_password(get_user_by_email(email), password),
          :ok <- check_email_confirmed(user) do
@@ -244,16 +246,18 @@ defmodule Stacks.Accounts do
   end
 
   defp check_password(nil, _password) do
-    # Run hash to prevent timing attacks
-    Argon2.no_user_verify()
+    # Run a dummy hash through the pool to prevent timing-based email enumeration.
+    # We always return :invalid_credentials regardless of pool status — a busy pool
+    # is a marginally faster response but not meaningfully exploitable.
+    _ = ArgonPool.run(fn -> Argon2.no_user_verify() end)
     {:error, :invalid_credentials}
   end
 
   defp check_password(user, password) do
-    if Argon2.verify_pass(password, user.password_hash) do
-      {:ok, user}
-    else
-      {:error, :invalid_credentials}
+    case ArgonPool.run(fn -> Argon2.verify_pass(password, user.password_hash) end) do
+      true -> {:ok, user}
+      false -> {:error, :invalid_credentials}
+      {:error, :argon2_busy} -> {:error, :argon2_busy}
     end
   end
 
@@ -311,7 +315,7 @@ defmodule Stacks.Accounts do
   is verified before the email is updated.
   """
   @spec update_profile(User.t(), map()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password}
+          {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy}
   def update_profile(%User{} = user, attrs) do
     if Map.has_key?(attrs, "email") do
       update_profile_with_email(user, attrs)
@@ -392,12 +396,17 @@ defmodule Stacks.Accounts do
   applying the new password. Returns `{:error, :invalid_password}` on mismatch.
   """
   @spec change_password(User.t(), String.t(), String.t()) ::
-          {:ok, User.t()} | {:error, :invalid_password} | {:error, Ecto.Changeset.t()}
+          {:ok, User.t()}
+          | {:error, :invalid_password | :argon2_busy}
+          | {:error, Ecto.Changeset.t()}
   def change_password(%User{} = user, current_password, new_password) do
-    with :ok <- verify_password(user, current_password) do
+    with :ok <- verify_password(user, current_password),
+         changeset <- password_length_changeset(user, new_password),
+         true <- changeset.valid? || {:error, changeset},
+         {:ok, hash} <- pool_hash_password(new_password) do
       result =
         user
-        |> password_change_changeset(%{"password" => new_password})
+        |> Ecto.Changeset.change(%{password_hash: hash})
         |> Repo.update()
 
       case result do
@@ -526,14 +535,28 @@ defmodule Stacks.Accounts do
 
   defp verify_password(%User{password_hash: hash}, current_password)
        when is_binary(current_password) do
-    if Argon2.verify_pass(current_password, hash) do
-      :ok
-    else
-      {:error, :invalid_password}
+    case ArgonPool.run(fn -> Argon2.verify_pass(current_password, hash) end) do
+      true -> :ok
+      false -> {:error, :invalid_password}
+      {:error, :argon2_busy} -> {:error, :argon2_busy}
     end
   end
 
   defp verify_password(_user, _), do: {:error, :invalid_password}
+
+  defp password_length_changeset(user, password) do
+    user
+    |> cast(%{password: password}, [:password])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+  end
+
+  defp pool_hash_password(password) do
+    case ArgonPool.run(fn -> Argon2.hash_pwd_salt(password) end) do
+      hash when is_binary(hash) -> {:ok, hash}
+      {:error, _} = err -> err
+    end
+  end
 
   defp maybe_assign_owner_role(attrs) do
     user_count = Repo.aggregate(User, :count, :id)
