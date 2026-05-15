@@ -52,11 +52,13 @@ defmodule Stacks.BooksTest do
       assert %{isbn: ["has an invalid checksum"]} = errors_on(changeset)
     end
 
-    test "accepts isbn-10 with valid checksum" do
+    test "accepts isbn-10 with valid checksum and normalises to isbn-13" do
       attrs = %{"isbn" => "0306406152", "title" => "Valid ISBN-10"}
       assert {:ok, book} = Books.create(attrs)
       assert [edition] = book.editions
-      assert edition.isbn == "0306406152"
+      # ISBN-10 "0306406152" normalises to ISBN-13 on storage so that
+      # find_existing/1 (which searches by ISBN-13) can round-trip correctly.
+      assert edition.isbn == "9780306406157"
     end
   end
 
