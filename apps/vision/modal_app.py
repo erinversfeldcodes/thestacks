@@ -27,14 +27,21 @@ import modal
 # Local / production deploys use the default.
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 
-# AWQ-quantized 4-bit Qwen2.5-VL. Weights ~4 GB vs ~15 GB for the
-# bfloat16 original, ~2x faster token generation with <1% quality loss
-# on vision benchmarks. The freed VRAM (24 GB A10G - ~5 GB weights -
-# overhead) supports higher concurrent batching without OOM.
+# AWQ-quantized 4-bit Qwen2.5-VL-72B. Weights ~38 GB vs ~145 GB for the
+# bfloat16 original. Selected over the 7B variant for substantially better
+# handling of geometrically degraded inputs — mirrored, rotated, and
+# partially-cropped book covers. The 7B variant could not reliably read
+# mirrored text even with explicit re-orientation prompting; the 72B has
+# meaningfully better rotation/mirror invariance from training scale alone.
 #
-# Override via MODEL_NAME env var if the official Qwen AWQ release is
-# ever deprecated or a faster community quant emerges.
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
+# Fits on a single H100 (80 GB): ~38 GB weights + ~5 GB activations/CUDA
+# workspace + ~35 GB KV cache pool at gpu_memory_utilization=0.90. KV cache
+# headroom is materially smaller than at 7B, so `@modal.concurrent` below
+# is reduced from 8 → 2.
+#
+# Override via MODEL_NAME env var if a faster community quant emerges or
+# if we need to roll back to 7B for cost.
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-72B-Instruct-AWQ")
 
 
 def _download_model() -> None:
@@ -228,44 +235,49 @@ _ANALYZE_PROMPT = (
     # :stop]` p95 > ~200 ms higher than the historical us-east median),
     # reconsider: pin back with a min_containers=1 keep-warm, or move to
     # L40S which has broader availability.
-    # Swapped from A10G (24 GB, Ampere bf16) to H100 (80 GB, Hopper w/ FP8
-    # tensor cores). Telemetry showed vision inference was the only
-    # remaining lever on `upload_p95_ms` - cache was already hitting at
-    # near-100% on repeat canaries, so single-book warm inference at
-    # 800-2200 ms and mixed_text at ~4 s is the ceiling. awq_marlin
-    # targets Hopper's FP8 path on H100 where A10G could only use bf16,
-    # giving ~3-4x throughput on Qwen2.5-VL-7B-AWQ. Expected p95 impact:
-    # ~300-700 ms single-book, ~1.2-1.5 s mixed_text.
-    # Cap autoscaled containers at 10. With max_inputs=8 each, that's up
-    # to 80 concurrent inferences - well above the Oban :vision queue
-    # ceiling of 60. At peak ~$40-50/hr (10 * ~$4-5/hr H100); amortises
-    # well below that at real utilisation because Modal charges per
-    # active container-second and `scaledown_window=1200` lets idle
-    # containers release. Re-evaluate `max_containers` if monthly bill
-    # runs hotter than expected - H100 is ~4x A10G's per-second cost.
+    # H100 (80 GB, Hopper w/ FP8 tensor cores) is required for the 72B AWQ
+    # model — the weights alone are ~38 GB, so the 24 GB A10G is no longer
+    # viable. awq_marlin targets Hopper's FP8 path, giving meaningfully
+    # better throughput than the bf16 fallback would on the same hardware.
+    # Expected per-call latency at 72B AWQ on warm H100: ~2-4 s for single
+    # book covers, ~6-10 s for text-heavy screenshots. Cold-start adds
+    # ~60-90 s (weights load from local image cache, not HF).
+    #
+    # Cap autoscaled containers at 10. With max_inputs=2 each, that's up
+    # to 20 concurrent inferences — below the Oban :vision queue ceiling
+    # of 60, so the queue absorbs bursts that the GPU pool cannot. At
+    # peak ~$40-50/hr (10 * ~$4-5/hr H100); amortises well below that at
+    # real utilisation because Modal charges per active container-second
+    # and `scaledown_window=1200` lets idle containers release.
+    # Re-evaluate `max_containers` if monthly bill runs hotter than
+    # expected. The 72B is the same H100 hourly rate as 7B was — cost
+    # delta vs the prior 7B setup comes from longer per-call execution
+    # time and from the lower max_inputs forcing more containers under
+    # the same offered load.
     max_containers=10,
-    # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
-    # jobs are serialised on a single H100) + inference (~60s for long inputs).
-    timeout=300,
+    # 600s allows for cold-start (~60-90 s for 72B weights load) + queue
+    # wait (up to ~180 s when concurrent jobs are serialised on a single
+    # H100 at the new max_inputs=2 cap) + inference (~30 s p95 for long
+    # inputs at 72B). Doubled from 300 s at the 7B → 72B swap.
+    timeout=600,
     # Keep the container alive for 20 minutes after the last request.
     # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
     # all chromium tests complete). 20 min window ensures the GPU is still warm
     # when upload tests start, avoiding a cold-start that would exceed the test timeout.
     scaledown_window=1200,
 )
-# Accept up to 8 in-flight calls per container. Qwen2.5-VL-7B at bfloat16
-# on an A10G uses ~15 GB VRAM for weights; the 24 GB A10G has ~9 GB left
-# for activations + KV cache. At 672-px inputs + short prompts, each
-# concurrent request's KV cache is <1 GB, so 8 concurrent fits
-# comfortably without OOM risk.
+# Accept up to 2 in-flight calls per container. Qwen2.5-VL-72B AWQ takes
+# ~38 GB of the 80 GB H100, leaving ~35 GB for the KV cache pool after
+# activations/workspace. At 4096 max_model_len each concurrent request
+# reserves ~12 GB of KV state at 72B (vs <1 GB at 7B); 2 in-flight is the
+# safe ceiling. Bursts above that autoscale into additional containers via
+# `max_containers=10` below — slower than warm-batching but bounded.
 #
-# Was 4 originally — the probe now fires 6 canaries in parallel per
-# iteration, so 4 forced two to queue and pushed iterations to ~27s as
-# Modal also occasionally autoscaled cold containers under the burst.
-# 8 absorbs the full burst on a single warm container, keeping iteration
-# time bounded by the slowest canary's inference rather than Modal-side
-# queueing.
-@modal.concurrent(max_inputs=8)
+# Was 8 with the 7B model; dropped in lockstep with the 7B → 72B swap. If
+# the upload probe shows iteration times growing because of in-container
+# queueing rather than cold-start, drop max_model_len to 3072 to claw back
+# enough KV headroom for max_inputs=3.
+@modal.concurrent(max_inputs=2)
 class VisionModel:
     @modal.enter()
     async def load(self) -> None:
@@ -304,10 +316,15 @@ class VisionModel:
                                             headroom without wasting KV
                                             VRAM on the full 32k context
                                             window Qwen advertises.
-          * gpu_memory_utilization=0.90   — leaves ~2 GB of A10G headroom
-                                            for activations + CUDA graph
-                                            workspace, everything else
-                                            goes to the KV cache pool.
+          * gpu_memory_utilization=0.90   — at 72B AWQ on H100 80 GB this
+                                            leaves ~8 GB headroom for
+                                            activations + CUDA graph
+                                            workspace after ~38 GB of
+                                            weights; everything else
+                                            (~35 GB) goes to the KV cache
+                                            pool. If load triggers OOM at
+                                            startup, drop to 0.85 first
+                                            before reducing max_model_len.
           * limit_mm_per_prompt={"image": 1}
                                           — our prompts always carry
                                             exactly one image; tells vLLM
