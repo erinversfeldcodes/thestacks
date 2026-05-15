@@ -993,7 +993,23 @@ defmodule Stacks.Books do
     |> validate_required(@edition_required_fields)
     |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
     |> validate_isbn_checksum()
+    |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
+  end
+
+  # Normalise any ISBN-10 input to ISBN-13 before storage so that
+  # find_existing/1 (which always searches by ISBN-13) can round-trip
+  # correctly. Without this, a title-search returning an ISBN-10 would be
+  # stored as-is, find_existing would miss it, and re-inserts would hit the
+  # unique constraint instead of deduplicating cleanly.
+  # Only runs when the changeset is still valid (format + checksum already passed).
+  defp normalize_edition_isbn(%{valid?: false} = changeset), do: changeset
+
+  defp normalize_edition_isbn(changeset) do
+    case get_change(changeset, :isbn) do
+      nil -> changeset
+      isbn -> put_change(changeset, :isbn, to_isbn13(isbn))
+    end
   end
 
   @doc false

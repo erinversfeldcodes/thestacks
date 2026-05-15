@@ -458,9 +458,12 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
          doubled Modal RPCs (and cold-start exposure) with no dependency
          between the two calls.
 
-    Non-book payloads are forced to `books: []` regardless of what the
-    model returned — the prompt asks for empty extraction on non-books but
-    the wire contract enforces it defensively.
+    Confident `not_book` payloads are forced to `books: []` regardless of what
+    the model returned — the wire contract enforces it defensively. `book` and
+    `ambiguous` classifications both preserve extracted books: the prompt
+    permits partial signal (a half-visible ISBN, one legible word) to survive
+    on ambiguous covers, and the per-book `confidence` field lets enrichment
+    weight or skip weak candidates downstream.
     """
     log = logger.bind(endpoint="/analyze")
 
@@ -489,7 +492,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     log.info("calling vision model for analyze (classify + extract)")
     parsed = await client.analyze(vlm_b64)
     classification, confidence = _parse_classification(parsed)
-    books = _parse_extracted_books(parsed) if classification == _CLF_BOOK else []
+    books = _parse_extracted_books(parsed) if classification != _CLF_NOT_BOOK else []
     log.info(
         "analyze complete",
         classification=classification,

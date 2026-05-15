@@ -135,41 +135,73 @@ _EXTRACT_PROMPT = (
 # (~2-4s observed at upload p95=7.7s).
 #
 # Prompt engineering notes:
-#   - The two sub-prompts were added sequentially so the model never sees
-#     them together in fine-tuning data. The combined prompt re-asserts
-#     the classification criteria FIRST so the model doesn't leak
-#     extraction detail into the `classification` branch.
-#   - Extraction is conditional on `"book"` classification, but we ask
-#     the model to emit `"books": []` for every non-book so the caller
-#     never needs a second call. Non-book inputs still return a well-
-#     formed payload — `main.py` treats it as a non-book and discards
-#     `books` regardless of content (defensive parse — the prompt is a
-#     guideline, not a wire contract).
+#   - STEP 1 (orient) is the load-bearing line for reversed / rotated /
+#     mirrored covers — Qwen2.5-VL will read upside-down text when asked
+#     and often won't when not.
+#   - Extraction is permitted on "ambiguous" so partial signal (a half-
+#     visible ISBN, one legible word of a title) survives the pipeline.
+#     The caller filters books only for confident "not_book".
+#   - Per-book `confidence` lets enrichment deprioritise weak guesses
+#     before hitting Google Books / Open Library (Issue #167).
+#   - `reasoning` is retained as a soft chain-of-thought scratchpad. On
+#     hard cases (rotated, partially-cropped covers) the model performs
+#     better when it can emit a short justification before committing to
+#     the structured answer. Logged on the /classify callback path; not
+#     yet wired into /analyze logging but cheap to add.
+#   - The JSON field order — classification, confidence, reasoning, books —
+#     is fixed so `_can_early_terminate` can abort streaming once it sees
+#     `"classification": "not_book"` followed by a confidence value.
 #   - Single JSON object, no nested code fences. `_parse_json` already
 #     handles the "model wrapped the response in ```json" case.
 _ANALYZE_PROMPT = (
-    "Examine this image and determine whether it shows or mentions a book, then "
-    "extract every book you can identify.\n\n"
-    "CLASSIFICATION — set `classification` to one of:\n"
-    '  - "book"       — the image shows a physical book (cover with readable\n'
-    "                   title/author, spine, or barcode) OR is a screenshot/photo\n"
-    "                   of text that explicitly names a specific book title or author.\n"
-    '  - "not_book"   — no book is present and no book is named in legible text.\n'
-    "                   Examples: animals, food, landscapes, logos, abstract art,\n"
-    "                   a rectangle resembling a cover but with no legible title/author.\n"
-    '  - "ambiguous"  — you genuinely cannot tell (blurred/cropped image where\n'
-    "                   something book-like is partially visible).\n\n"
-    "EXTRACTION — populate `books` with every book identifiable from the image:\n"
-    "  - Physical books: use visible text + cover artwork (illustration style,\n"
-    "    subject matter, period, imagery) as complementary identification signals.\n"
-    "  - Text screenshots: extract every book title/author mentioned in the text.\n"
-    '  - If classification is "not_book" or "ambiguous": return `books`: [].\n\n'
+    "You are inspecting an image to identify any books it contains. Work through "
+    "these steps:\n\n"
+    "STEP 1 — Orient the image.\n"
+    "If text or imagery appears upside-down, mirrored, sideways, or rotated, "
+    "mentally re-orient before reading. Cropped or partially-visible covers still "
+    "count; read whatever portion is legible.\n\n"
+    "STEP 2 — Classify the image. Set `classification` to one of:\n"
+    '  - "book"      — A physical book (cover, spine, or barcode visible) OR a\n'
+    "                  screenshot/photo of text that names a specific book title or\n"
+    "                  author. Marginal or partial covers with ANY legible title,\n"
+    '                  author, or ISBN are still "book".\n'
+    '  - "not_book"  — No book present and no book named in legible text. Examples:\n'
+    "                  animals, food, landscapes, logos, abstract art, a rectangle\n"
+    "                  resembling a cover with nothing readable on it.\n"
+    '  - "ambiguous" — You cannot tell because the image is unreadable (heavy blur,\n'
+    "                  total occlusion, lighting too poor to make out anything\n"
+    "                  book-like).\n\n"
+    "STEP 3 — Extract books. Populate `books` with every book you can partially or\n"
+    'fully identify. INCLUDE entries even when classification is "ambiguous" if ANY\n'
+    "signal is recoverable (a partial ISBN, one legible word of a title, etc.).\n"
+    'Only return `books: []` for a confident "not_book".\n\n'
+    "For each book provide:\n"
+    '  - `title`           — best reading of the title, or "" if unreadable.\n'
+    '  - `author`          — best reading of the author, or "" if unreadable.\n'
+    "  - `confidence`      — your confidence in this specific book identification,\n"
+    "                        0.0-1.0. Use 0.9+ only when title AND author are\n"
+    "                        clearly legible.\n"
+    "  - `potential_isbns` — every 10- or 13-digit numeric string visible on the\n"
+    "                        cover, spine, or barcode that could plausibly be an\n"
+    "                        ISBN. Include both ISBN-10 and ISBN-13 if both are\n"
+    "                        printed. Do NOT filter by checksum — the caller\n"
+    "                        validates. Strip hyphens and spaces.\n"
+    "  - `raw_text`        — verbatim transcription of the most identifying text\n"
+    "                        you read (title block, author line, or screenshot\n"
+    "                        quote). One short string, not a full page dump.\n\n"
+    "If the cover artwork is more legible than the text (e.g. recognisable\n"
+    "illustration style, period setting), use it as a corroborating signal — but\n"
+    "only commit to a title/author combination you can actually read or strongly\n"
+    "recognise. Do not invent.\n\n"
     "Respond with ONLY valid JSON — no explanation, no code fences:\n"
     "{\n"
     '  "classification": "book" | "not_book" | "ambiguous",\n'
     '  "confidence": 0.95,\n'
     '  "reasoning": "one sentence explaining the classification",\n'
-    '  "books": [{"title": "...", "author": "...", "potential_isbns": [], "raw_text": "..."}]\n'
+    '  "books": [\n'
+    '    {"title": "...", "author": "...", "confidence": 0.9,'
+    ' "potential_isbns": ["..."], "raw_text": "..."}\n'
+    "  ]\n"
     "}"
 )
 

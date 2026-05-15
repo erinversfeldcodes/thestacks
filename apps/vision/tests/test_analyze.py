@@ -108,12 +108,26 @@ def test_analyze_forces_empty_books_on_not_book() -> None:
     assert mock_analyze.await_count == 1
 
 
-def test_analyze_forces_empty_books_on_ambiguous() -> None:
-    """AMBIGUOUS classification → books forced to [] same as NOT_BOOK."""
+def test_analyze_preserves_books_on_ambiguous() -> None:
+    """AMBIGUOUS classification → books are preserved.
+
+    The prompt instructs the model to extract partial signal (a half-visible
+    ISBN, one legible word of a title) on ambiguous covers so enrichment
+    downstream can still attempt resolution. Only confident `not_book` forces
+    `books: []` on the wire.
+    """
     analyze_output = {
         "classification": "ambiguous",
         "confidence": 0.45,
-        "books": [],
+        "books": [
+            {
+                "title": "partial title",
+                "author": "",
+                "confidence": 0.3,
+                "potential_isbns": ["9780000000000"],
+                "raw_text": "partial title",
+            }
+        ],
     }
     with (
         patch(
@@ -132,7 +146,9 @@ def test_analyze_forces_empty_books_on_ambiguous() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
-    assert data["books"] == []
+    assert len(data["books"]) == 1
+    assert data["books"][0]["title"] == "partial title"
+    assert data["books"][0]["potential_isbns"] == ["9780000000000"]
 
 
 def test_analyze_with_empty_extraction_returns_empty_books() -> None:
