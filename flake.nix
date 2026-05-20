@@ -44,6 +44,12 @@
             python312
             python312Packages.pip
             python312Packages.mypy
+            # pyyaml is required by bash test suites under test/platform/*_test.sh.
+            # Without it on the Nix path, fresh clones must run setup.sh before
+            # those tests can run (the .venv-tools fallback is provisioned by
+            # setup.sh only). Pinning here removes the implicit ordering dep.
+            # If python312 is bumped, this must move in lockstep.
+            python312Packages.pyyaml
             # zbar is the C library behind pyzbar (used by the vision
             # sidecar's local OCR pre-pass). pyzbar dlopens libzbar.so.0
             # via ctypes — without zbar in the dev shell + the right
