@@ -222,6 +222,49 @@ jobs:
               - 'proto/**'
               - 'dbt/**'
 
+  # Split from test-elixir: lint runs CPU-only (no postgres service, no frontend
+  # build needed), so it parallelises cleanly with test-elixir and gets its own
+  # timeout budget. dialyzer's PLT generation can take ~4 min on a cold cache
+  # whenever mix.lock changes — running it inside test-elixir was eating the
+  # 15-min budget before the test suite could finish.
+  lint-elixir:
+    needs: [changes, versions]
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-
+      - run: mix deps.get
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      # Elixir-side proto artifacts only — lint doesn't need the Elm decoders.
+      # Without these the generated Ecto schemas + ProtoJSON modules don't
+      # exist, and dialyzer/credo would error on the undefined references.
+      - name: Generate Elixir proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+      - run: scripts/lint-elixir.sh
+
   test-elixir:
     needs: [changes, versions]
     if: needs.changes.outputs.elixir == 'true'
@@ -261,11 +304,6 @@ jobs:
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
-      - uses: actions/cache@v4
-        with:
-          path: priv/plts
-          key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
       - uses: actions/setup-node@v4
         with:
@@ -283,7 +321,6 @@ jobs:
         run: |
           npm install
           npm run deploy
-      - run: scripts/lint-elixir.sh
       - run: scripts/test-elixir.sh
 
   test-elm:
