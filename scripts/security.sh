@@ -56,6 +56,13 @@ fi
 
 # Syft + Grype — SBOM generation and CVE scanning
 if command -v syft &>/dev/null && command -v grype &>/dev/null; then
+    # Exclude rebar.lock files inside our hex deps: each Erlang package
+    # publishes its own rebar.lock pinning the versions IT was built against,
+    # which syft reads as if those versions were installed in our project.
+    # Mix's top-level mix.lock is authoritative — the actual installed
+    # versions are in deps/<pkg>/ebin/<pkg>.app. Without this exclude, syft
+    # surfaces phantom older cowlib (and similar) versions and grype fails
+    # the gate on advisories that don't apply to anything we ship.
     syft . -o cyclonedx-json \
         --exclude ./apps/scraper/target \
         --exclude ./apps/vision/.venv \
@@ -63,6 +70,7 @@ if command -v syft &>/dev/null && command -v grype &>/dev/null; then
         --exclude ./scripts/mcp/.venv \
         --exclude ./_build \
         --exclude ./.claude/worktrees \
+        --exclude './deps/*/rebar.lock' \
         2>/dev/null > /tmp/stacks-sbom.json
     grype sbom:/tmp/stacks-sbom.json --fail-on high
     rm -f /tmp/stacks-sbom.json
