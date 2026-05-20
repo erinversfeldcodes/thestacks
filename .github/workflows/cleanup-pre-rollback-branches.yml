@@ -1,0 +1,244 @@
+name: Cleanup pre-rollback Neon branches
+
+# Deletes preserved `pre-rollback-*` Neon branches older than 30 days from
+# the prod Neon project. The composite rollback action (Issue #137,
+# `.github/actions/rollback-production/action.yml` → `scripts/rollback-
+# production.sh`) creates a `pre-rollback-<sha7>-<UTC-ts>` branch on every
+# auto-rollback because Neon's self-restore API requires
+# `preserve_under_name`. Without cleanup these accumulate without bound.
+#
+# Retention: 30 days. Long enough that an operator who only notices "the
+# rollback itself was wrong" days later can still promote the preserved
+# branch back to default; short enough to bound storage cost. If you
+# change the retention, update issues/162-cleanup-pre-rollback-neon-
+# branches.md and the comment in scripts/rollback-production.sh.
+#
+# Triggers:
+#   - schedule: Sundays 06:00 UTC. Off-peak; one cleanup per week is
+#     plenty for prod's auto-rollback cadence.
+#   - workflow_dispatch with `dry_run` (default true) so the first manual
+#     invocation, and any operator dry-run, is observably safe.
+#
+# Failure modes:
+#   - 5xx during list → hard fail (next scheduled run picks it up).
+#   - 4xx during individual delete → log + continue; exit non-zero at end
+#     so the failure is visible in the Actions UI. Retry next week.
+#   - Missing/unparseable creation_time → skip the branch and log; never
+#     delete on incomplete data.
+
+on:
+  schedule:
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview deletions without calling DELETE on Neon (recommended for the first invocation)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-pre-rollback-branches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      # workflow_dispatch.inputs.dry_run is unset on the schedule trigger;
+      # default to "false" there so the cron does real work. Operators
+      # opting into the manual path get the safe default via the input.
+      DRY_RUN: ${{ inputs.dry_run == true && 'true' || (github.event_name == 'schedule' && 'false' || 'true') }}
+    steps:
+      - name: Cleanup stale pre-rollback branches
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${NEON_API_KEY:-}" || -z "${NEON_PROJECT_ID:-}" ]]; then
+            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as repo secrets (introduced in Issue #137)." >&2
+            exit 1
+          fi
+
+          echo "Cleanup mode: dry_run=${DRY_RUN}"
+
+          # 30-day cutoff in epoch seconds (UTC). GNU date is available on
+          # ubuntu-latest. Anything with creation_time strictly older than
+          # this is eligible for deletion.
+          CUTOFF_EPOCH="$(date -u -d '30 days ago' +%s)"
+          echo "Cutoff (epoch seconds, UTC): ${CUTOFF_EPOCH} ($(date -u -d "@${CUTOFF_EPOCH}" -Is))"
+
+          # ── List all branches, following Neon's cursor pagination ─────
+          # Neon's /branches endpoint returns at most 100 entries per page
+          # and exposes a `pagination.next_cursor` field (also surfaced as
+          # `pagination.cursor` in older API responses). Follow whichever
+          # is present until empty. The accumulated list is written as a
+          # NDJSON stream of branch objects to /tmp/branches.ndjson.
+          : > /tmp/branches.ndjson
+          cursor=""
+          page=0
+          while :; do
+            page=$((page + 1))
+            url="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?limit=100"
+            if [[ -n "${cursor}" ]]; then
+              # cursor values are opaque; URL-encode defensively.
+              encoded_cursor="$(jq -rn --arg c "${cursor}" '$c|@uri')"
+              url="${url}&cursor=${encoded_cursor}"
+            fi
+
+            # -sS surfaces transport errors without progress noise.
+            # -w writes the HTTP status on a final line we can split off.
+            # -o writes the body to a file. We DO NOT use -f here because
+            # we want to inspect the body on a non-2xx (for the error
+            # message) before exiting.
+            http_code="$(curl -sS \
+              -o /tmp/branches-page.json \
+              -w '%{http_code}' \
+              -H "Authorization: Bearer ${NEON_API_KEY}" \
+              -H "accept: application/json" \
+              "${url}")"
+
+            if [[ "${http_code}" =~ ^5 ]]; then
+              echo "::error::Neon list returned HTTP ${http_code} on page ${page} — failing loudly so next scheduled run picks it up." >&2
+              echo "::error::body: $(head -c 500 /tmp/branches-page.json 2>/dev/null || true)" >&2
+              exit 1
+            fi
+            if [[ "${http_code}" != "200" ]]; then
+              echo "::error::Neon list returned HTTP ${http_code} on page ${page} (expected 200)." >&2
+              echo "::error::body: $(head -c 500 /tmp/branches-page.json 2>/dev/null || true)" >&2
+              exit 1
+            fi
+
+            # Reject the page if it isn't valid JSON (transient proxy
+            # corruption etc.) — treat as a hard fail so we don't silently
+            # skip branches that should have been pruned.
+            if ! jq -e . /tmp/branches-page.json >/dev/null 2>&1; then
+              echo "::error::Neon list page ${page} was not valid JSON." >&2
+              exit 1
+            fi
+
+            jq -c '.branches[]?' /tmp/branches-page.json >> /tmp/branches.ndjson
+
+            # Try both field names. `// empty` keeps cursor unset (empty
+            # string after the read) when neither key is present.
+            cursor="$(jq -r '.pagination.next_cursor // .pagination.cursor // empty' /tmp/branches-page.json)"
+            if [[ -z "${cursor}" || "${cursor}" == "null" ]]; then
+              break
+            fi
+            echo "Following pagination cursor for page $((page + 1))..."
+          done
+
+          total_branches="$(wc -l < /tmp/branches.ndjson | tr -d ' ')"
+          echo "Listed ${total_branches} branches across ${page} page(s)."
+
+          # ── Filter to pre-rollback-* candidates and partition by age ──
+          # We emit two NDJSON streams: stale (older than cutoff) and kept
+          # (younger than cutoff or unparseable creation_time). Branches
+          # with missing/unparseable creation_time are written to a third
+          # "skipped" stream and counted separately — they never get
+          # deleted on incomplete data.
+          : > /tmp/stale.ndjson
+          : > /tmp/kept.ndjson
+          : > /tmp/skipped.ndjson
+
+          # jq does NOT have a built-in for parsing arbitrary ISO-8601
+          # strings (fromdateiso8601 only handles the strict
+          # "%Y-%m-%dT%H:%M:%SZ" form, which is what Neon emits, but
+          # fractional seconds and offset variants would silently fail).
+          # We attempt strict parse first; on failure, route to skipped.
+          while IFS= read -r branch; do
+            [[ -z "${branch}" ]] && continue
+            name="$(jq -r '.name // empty' <<<"${branch}")"
+            id="$(jq -r '.id // empty' <<<"${branch}")"
+            ctime="$(jq -r '.creation_time // empty' <<<"${branch}")"
+
+            # Only consider pre-rollback-* branches; anything else is none
+            # of this workflow's business.
+            case "${name}" in
+              pre-rollback-*) ;;
+              *) continue ;;
+            esac
+
+            if [[ -z "${id}" ]]; then
+              echo "::warning::skipping pre-rollback branch with empty id (name=${name})"
+              echo "${branch}" >> /tmp/skipped.ndjson
+              continue
+            fi
+            if [[ -z "${ctime}" ]]; then
+              echo "::warning::skipping ${id} (${name}): missing creation_time"
+              echo "${branch}" >> /tmp/skipped.ndjson
+              continue
+            fi
+
+            # Parse creation_time to epoch seconds. GNU date -d accepts
+            # ISO-8601 with Z or +HH:MM offsets. If parsing fails we skip.
+            if ! ctime_epoch="$(date -u -d "${ctime}" +%s 2>/dev/null)"; then
+              echo "::warning::skipping ${id} (${name}): unparseable creation_time=${ctime}"
+              echo "${branch}" >> /tmp/skipped.ndjson
+              continue
+            fi
+
+            if (( ctime_epoch < CUTOFF_EPOCH )); then
+              echo "${branch}" >> /tmp/stale.ndjson
+            else
+              echo "${branch}" >> /tmp/kept.ndjson
+            fi
+          done < /tmp/branches.ndjson
+
+          stale_count="$(wc -l < /tmp/stale.ndjson | tr -d ' ')"
+          kept_count="$(wc -l < /tmp/kept.ndjson | tr -d ' ')"
+          skipped_count="$(wc -l < /tmp/skipped.ndjson | tr -d ' ')"
+          echo "Candidates: ${stale_count} stale, ${kept_count} kept (<30d), ${skipped_count} skipped (incomplete data)."
+
+          # ── Delete (or dry-run) the stale candidates ──────────────────
+          delete_failures=0
+          pruned=0
+          while IFS= read -r branch; do
+            [[ -z "${branch}" ]] && continue
+            id="$(jq -r '.id' <<<"${branch}")"
+            name="$(jq -r '.name' <<<"${branch}")"
+            ctime="$(jq -r '.creation_time' <<<"${branch}")"
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              echo "would delete ${id} ${name} ${ctime}"
+              continue
+            fi
+
+            echo "deleting ${id} ${name} ${ctime}"
+            http_code="$(curl -sS \
+              -o /tmp/delete-body.json \
+              -w '%{http_code}' \
+              -X DELETE \
+              -H "Authorization: Bearer ${NEON_API_KEY}" \
+              -H "accept: application/json" \
+              "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${id}")"
+
+            if [[ "${http_code}" == "200" || "${http_code}" == "202" ]]; then
+              pruned=$((pruned + 1))
+              continue
+            fi
+
+            # 4xx → log + continue + flag end-of-run failure.
+            # 5xx during a single delete is treated the same way: per-
+            # branch failures are non-fatal so one bad branch can't block
+            # the rest of the sweep. The end-of-run exit code makes the
+            # failure visible.
+            delete_failures=$((delete_failures + 1))
+            echo "::error::delete failed for ${id} (${name}): HTTP ${http_code} — $(head -c 300 /tmp/delete-body.json 2>/dev/null || true)"
+          done < /tmp/stale.ndjson
+
+          # ── Summary ───────────────────────────────────────────────────
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            echo "DRY RUN: would have pruned ${stale_count} branches (kept ${kept_count} younger than 30d)"
+          else
+            echo "pruned ${pruned} branches (kept ${kept_count} younger than 30d)"
+          fi
+          if (( skipped_count > 0 )); then
+            echo "::warning::${skipped_count} branch(es) were skipped due to incomplete creation_time — investigate if this persists."
+          fi
+
+          if (( delete_failures > 0 )); then
+            echo "::error::${delete_failures} delete(s) failed — see per-branch errors above. Retry next week or invoke manually."
+            exit 1
+          fi
