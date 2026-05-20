@@ -465,62 +465,91 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp parse_open_library(data, isbn) when is_map(data) and map_size(data) > 0 do
-    key = "ISBN:#{isbn}"
-
-    case Map.get(data, key) do
-      nil ->
-        {:error, :not_found}
-
-      book_data ->
-        authors =
-          book_data
-          |> Map.get("authors", [])
-          |> Enum.map_join(", ", & &1["name"])
-
-        ol_key = book_data["key"]
-
-        work_key =
-          Map.get(book_data, "works", [])
-          |> List.first()
-          |> then(fn
-            %{"key" => k} -> k
-            _ -> nil
-          end)
-
-        open_library_work_id =
-          cond do
-            is_binary(work_key) ->
-              work_key |> String.split("/") |> List.last()
-
-            is_binary(ol_key) and String.contains?(ol_key, "/works/") ->
-              ol_key |> String.split("/") |> List.last()
-
-            true ->
-              nil
-          end
-
-        {:ok,
-         %{
-           title: book_data["title"],
-           author: authors,
-           description: get_in(book_data, ["excerpts", Access.at(0), "text"]),
-           cover_image_url: get_in(book_data, ["cover", "large"]),
-           publisher:
-             book_data
-             |> Map.get("publishers", [])
-             |> List.first()
-             |> then(&if(is_map(&1), do: &1["name"], else: &1)),
-           publication_year: parse_year(book_data["publish_date"]),
-           page_count: book_data["number_of_pages"],
-           subjects: extract_subjects(book_data["subjects"]),
-           open_library_id: ol_key,
-           open_library_work_id: open_library_work_id,
-           source: :open_library
-         }}
+    case Map.get(data, "ISBN:#{isbn}") do
+      nil -> {:error, :not_found}
+      book_data -> {:ok, build_open_library_metadata(book_data)}
     end
   end
 
   defp parse_open_library(_, _), do: {:error, :not_found}
+
+  # Open Library sparsely populates records — any of `authors`,
+  # `publishers`, `works`, `excerpts` may be present with value `nil`.
+  # Map.get/3's default only kicks in when the key is MISSING, so we
+  # coalesce nil → [] before iterating. Without this, a `"authors": null`
+  # payload raises Protocol.UndefinedError out of Enum.map_join, the
+  # resolver Task crashes silently, race_resolve falls through to
+  # `:not_found`, and the 1h negative cache poisons the ISBN.
+  defp build_open_library_metadata(book_data) do
+    ol_key = book_data["key"]
+
+    %{
+      title: book_data["title"],
+      author: ol_authors(book_data),
+      description: ol_description(book_data),
+      cover_image_url: get_in(book_data, ["cover", "large"]),
+      publisher: ol_publisher(book_data),
+      publication_year: parse_year(book_data["publish_date"]),
+      page_count: book_data["number_of_pages"],
+      subjects: extract_subjects(book_data["subjects"]),
+      open_library_id: ol_key,
+      open_library_work_id: ol_work_id(book_data, ol_key),
+      source: :open_library
+    }
+  end
+
+  defp ol_authors(book_data) do
+    book_data
+    |> Map.get("authors")
+    |> list_or_empty()
+    |> Enum.map_join(", ", &(&1["name"] || ""))
+  end
+
+  defp ol_publisher(book_data) do
+    book_data
+    |> Map.get("publishers")
+    |> list_or_empty()
+    |> List.first()
+    |> then(&if(is_map(&1), do: &1["name"], else: &1))
+  end
+
+  defp ol_description(book_data) do
+    case list_or_empty(Map.get(book_data, "excerpts")) do
+      [%{"text" => text} | _] -> text
+      _ -> nil
+    end
+  end
+
+  defp ol_work_id(book_data, ol_key) do
+    work_key =
+      book_data
+      |> Map.get("works")
+      |> list_or_empty()
+      |> List.first()
+      |> then(fn
+        %{"key" => k} -> k
+        _ -> nil
+      end)
+
+    derive_work_id(work_key, ol_key)
+  end
+
+  defp derive_work_id(work_key, _ol_key) when is_binary(work_key),
+    do: work_key |> String.split("/") |> List.last()
+
+  defp derive_work_id(_work_key, ol_key) when is_binary(ol_key) do
+    if String.contains?(ol_key, "/works/"),
+      do: ol_key |> String.split("/") |> List.last(),
+      else: nil
+  end
+
+  defp derive_work_id(_work_key, _ol_key), do: nil
+
+  # Coalesce nil/non-list values to an empty list. Open Library returns
+  # `null` (not the absent key) for several optional fields on sparse
+  # records, and Map.get/3's default only fires for absent keys.
+  defp list_or_empty(value) when is_list(value), do: value
+  defp list_or_empty(_), do: []
 
   defp parse_google_books(%{"items" => [item | _]}) do
     info = item["volumeInfo"] || %{}
