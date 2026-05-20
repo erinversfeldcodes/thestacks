@@ -171,6 +171,167 @@ defmodule Stacks.ModerationTest do
     end
   end
 
+  describe "run_pipeline/1 — confidence threshold (Issue #167)" do
+    # Low-confidence candidates inflate Google Books / Open Library traffic
+    # and burn EnrichBookJob retry budget on guesses the vision model
+    # itself flagged as weak. The pipeline now skips candidates with
+    # confidence below the configured threshold (:core,
+    # :enrichment_confidence_threshold — default 0.5) before any
+    # external lookup or enqueue happens. Missing confidence is treated
+    # as historical (process normally) to keep pre-prompt-v2 payloads working.
+
+    setup do
+      test_pid = self()
+      handler_id = "test-skip-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [[:stacks, :enrichment, :candidate, :skipped]],
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      :ok
+    end
+
+    test "high-confidence candidate (>= threshold) is processed normally" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.HighConfidenceClient)
+
+        # `book_attrs` supplies a title so the storage path succeeds even
+        # though the test isbn_http_client returns no metadata.
+        context = %{
+          image_b64: @test_image_b64,
+          book_attrs: %{"title" => "High Confidence Book"}
+        }
+
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
+        assert [edition | _] = book.editions
+        assert edition.isbn == "9780743273565"
+
+        # No skip event should be emitted for a high-confidence candidate.
+        refute_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped], _, _},
+                       100
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "low-confidence candidate (< threshold) is skipped and emits telemetry" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.LowConfidenceClient)
+
+        context = %{image_b64: @test_image_b64}
+        # All candidates were skipped — pipeline reports isbn_not_found.
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+
+        # No EnrichBookJob should be enqueued for skipped candidates.
+        refute_enqueued(worker: Stacks.Workers.EnrichBookJob)
+
+        assert_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped],
+                        %{count: 1, confidence: 0.2},
+                        %{isbn: "9780743273565", reason: :low_confidence, threshold: 0.5}}
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "candidate with missing confidence is processed normally (historical)" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NoConfidenceClient)
+
+        context = %{
+          image_b64: @test_image_b64,
+          book_attrs: %{"title" => "Historical Pre-v2"}
+        }
+
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
+        assert [edition | _] = book.editions
+        assert edition.isbn == "9780743273565"
+
+        refute_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped], _, _},
+                       100
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "candidate with explicit nil confidence is processed normally" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NilConfidenceClient)
+
+        context = %{
+          image_b64: @test_image_b64,
+          book_attrs: %{"title" => "Explicit Nil Confidence"}
+        }
+
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
+        assert [edition | _] = book.editions
+        assert edition.isbn == "9780743273565"
+
+        refute_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped], _, _},
+                       100
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "threshold is configurable via :core, :enrichment_confidence_threshold" do
+      original_client = Application.get_env(:core, :vision_client)
+      original_threshold = Application.get_env(:core, :enrichment_confidence_threshold)
+
+      try do
+        # Raise the bar above the candidate's confidence so the same
+        # input that's accepted with the default threshold is now skipped.
+        Application.put_env(:core, :enrichment_confidence_threshold, 0.9)
+        Application.put_env(:core, :vision_client, __MODULE__.MidConfidenceClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+
+        assert_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped],
+                        %{count: 1, confidence: 0.7},
+                        %{isbn: "9780743273565", reason: :low_confidence, threshold: 0.9}}
+      after
+        Application.put_env(:core, :vision_client, original_client)
+
+        if original_threshold == nil do
+          Application.delete_env(:core, :enrichment_confidence_threshold)
+        else
+          Application.put_env(:core, :enrichment_confidence_threshold, original_threshold)
+        end
+      end
+    end
+
+    test "telemetry metadata isbn falls back to nil when candidate has no potential_isbns" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.LowConfidenceNoIsbnClient)
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+
+        assert_receive {:telemetry_event, [:stacks, :enrichment, :candidate, :skipped],
+                        %{count: 1, confidence: 0.1},
+                        %{isbn: nil, reason: :low_confidence, threshold: 0.5}}
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   describe "run_pipeline/1 — local-OCR fast path" do
     # When vision's /analyze short-circuits via the barcode pre-pass, it
     # returns `model_used: "local_ocr"`. We should skip the synchronous
@@ -430,6 +591,165 @@ defmodule Stacks.ModerationTest do
              "author" => nil,
              "potential_isbns" => [],
              "raw_text" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Inline mock modules for confidence-threshold tests (Issue #167).
+  # ---------------------------------------------------------------------------
+
+  defmodule HighConfidenceClient do
+    @moduledoc "Candidate confidence above the default 0.5 threshold."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil,
+             "confidence" => 0.9
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule LowConfidenceClient do
+    @moduledoc "Candidate confidence below the default 0.5 threshold."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil,
+             "confidence" => 0.2
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule NoConfidenceClient do
+    @moduledoc "Candidate payload with no confidence key — historical shape."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule NilConfidenceClient do
+    @moduledoc "Candidate with explicit nil confidence."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil,
+             "confidence" => nil
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule MidConfidenceClient do
+    @moduledoc "Candidate confidence between 0.5 and 0.9 — exercises configurable threshold."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => nil,
+             "author" => nil,
+             "potential_isbns" => ["9780743273565"],
+             "raw_text" => nil,
+             "confidence" => 0.7
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule LowConfidenceNoIsbnClient do
+    @moduledoc "Low-confidence candidate with no potential_isbns — exercises nil ISBN telemetry metadata."
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [
+           %{
+             "title" => "Some Title",
+             "author" => nil,
+             "potential_isbns" => [],
+             "raw_text" => nil,
+             "confidence" => 0.1
            }
          ],
          "model_used" => "mock"

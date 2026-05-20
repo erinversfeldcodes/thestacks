@@ -170,6 +170,13 @@ defmodule Stacks.Moderation do
   end
 
   defp resolve_and_store(candidate, idx, context) do
+    case check_confidence(candidate, idx) do
+      :ok -> do_resolve_and_store(candidate, idx, context)
+      {:skip, reason} -> {:rejected, candidate_identifier(candidate), reason}
+    end
+  end
+
+  defp do_resolve_and_store(candidate, idx, context) do
     case resolve_candidate(candidate, idx) do
       {:ok, isbn, metadata} ->
         case store_book(isbn, metadata, context) do
@@ -188,6 +195,57 @@ defmodule Stacks.Moderation do
         Logger.warning("Moderation: candidate #{idx} failed to resolve: #{inspect(reason)}")
         {:rejected, candidate_identifier(candidate), reason}
     end
+  end
+
+  # Confidence gate (Issue #167): the vision model returns a per-candidate
+  # `confidence` score (0.0–1.0). Candidates below the configured threshold
+  # are skipped here, before any external (Open Library / Google Books) or
+  # internal (EnrichBookJob enqueue) work is done — low-confidence guesses
+  # otherwise inflate API traffic and burn the worker's retry budget on
+  # candidates the model itself flagged as weak.
+  #
+  # Candidates with NO `confidence` field (or `nil`) are treated as
+  # historical (pre-prompt-v2 vision payloads): process normally rather
+  # than fail-closed, so old in-flight jobs don't regress.
+  defp check_confidence(candidate, idx) do
+    case candidate_confidence(candidate) do
+      nil ->
+        :ok
+
+      confidence when is_number(confidence) ->
+        threshold = enrichment_confidence_threshold()
+
+        if confidence < threshold do
+          isbn = candidate_isbn(candidate)
+
+          :telemetry.execute(
+            [:stacks, :enrichment, :candidate, :skipped],
+            %{count: 1, confidence: confidence},
+            %{isbn: isbn, reason: :low_confidence, threshold: threshold}
+          )
+
+          Logger.info(
+            "Moderation: candidate #{idx} skipped — confidence #{confidence} below threshold #{threshold}"
+          )
+
+          {:skip, :low_confidence}
+        else
+          :ok
+        end
+    end
+  end
+
+  defp candidate_confidence(%{"confidence" => confidence}), do: confidence
+  defp candidate_confidence(_), do: nil
+
+  defp candidate_isbn(%{"potential_isbns" => [isbn | _]})
+       when is_binary(isbn) and isbn != "",
+       do: isbn
+
+  defp candidate_isbn(_), do: nil
+
+  defp enrichment_confidence_threshold do
+    Application.get_env(:core, :enrichment_confidence_threshold, 0.5)
   end
 
   # Best-effort identifier for the rejected list payload. Prefer the candidate's
