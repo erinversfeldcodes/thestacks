@@ -237,7 +237,12 @@
         password_hash: %{dbt_exclude: true},
         password_reset_token: %{dbt_exclude: true},
         password_reset_sent_at: %{dbt_exclude: true},
-        email_confirmation_token: %{dbt_exclude: true}
+        email_confirmation_token: %{dbt_exclude: true},
+        # Per-account login lockout counters (Issue #161) — security telemetry,
+        # exclude from dbt analytics to avoid leaking attack patterns downstream.
+        failed_login_count: %{default: 0, null: false, dbt_exclude: true},
+        failed_login_first_at: %{dbt_exclude: true},
+        locked_until: %{dbt_exclude: true}
       }
     },
 
@@ -1003,7 +1008,12 @@
         :password_hash,
         :email_confirmation_token,
         :password_reset_token,
-        :password_reset_sent_at
+        :password_reset_sent_at,
+        # Per-account lockout counters (Issue #161) — internal security state,
+        # never exposed in user JSON responses.
+        :failed_login_count,
+        :failed_login_first_at,
+        :locked_until
       ],
       field_overrides: %{}
     },
