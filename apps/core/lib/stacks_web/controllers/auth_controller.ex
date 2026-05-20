@@ -58,6 +58,17 @@ defmodule StacksWeb.AuthController do
         |> put_status(401)
         |> json(%{error: "invalid_credentials"})
 
+      {:error, {:account_locked, retry_after_seconds}} ->
+        # Per-account login lockout (Issue #161). 423 Locked is the standard
+        # status for a resource that exists but is temporarily unavailable
+        # due to lock state. We surface retry_after_seconds in BOTH the
+        # standard Retry-After header (for HTTP-compliant clients) and in
+        # the JSON body (for SPA UIs that need to render a countdown).
+        conn
+        |> put_resp_header("retry-after", Integer.to_string(retry_after_seconds))
+        |> put_status(423)
+        |> json(%{error: "account_locked", retry_after_seconds: retry_after_seconds})
+
       {:error, :argon2_busy} ->
         conn
         |> put_status(503)

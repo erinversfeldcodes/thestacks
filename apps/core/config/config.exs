@@ -120,4 +120,27 @@ config :core, :ai_budget,
   daily_limit_cents: 500,
   monthly_limit_cents: 5_000
 
+# ── Enrichment confidence threshold (Issue #167) ────────────────────────────
+# Vision-extracted candidates with a per-book `confidence` below this value
+# are skipped before ISBN resolution / external lookups / EnrichBookJob
+# enqueue. Candidates with no `confidence` field (historical, pre-prompt-v2
+# payloads) are processed normally.
+config :core, :enrichment_confidence_threshold, 0.5
+
+# ── Per-account login lockout (Issue #161) ──────────────────────────────────
+# Defends against credential-stuffing by locking the account after N failed
+# logins within a rolling window, regardless of source IP. Lockout duration
+# doubles on each subsequent lock within 24 hours up to a cap.
+#
+#   :login_lockout_threshold              — failed attempts before lock (default 10)
+#   :login_lockout_window_seconds         — rolling window for the counter (default 600 / 10 min)
+#   :login_lockout_duration_seconds       — initial lock length (default 900 / 15 min)
+#   :login_lockout_max_duration_seconds   — cap after exponential backoff (default 7200 / 2 hr)
+#   :login_lockout_backoff_window_seconds — window inside which repeat locks compound (default 86_400 / 24 hr)
+config :core, :login_lockout_threshold, 10
+config :core, :login_lockout_window_seconds, 600
+config :core, :login_lockout_duration_seconds, 900
+config :core, :login_lockout_max_duration_seconds, 7_200
+config :core, :login_lockout_backoff_window_seconds, 86_400
+
 import_config "#{config_env()}.exs"

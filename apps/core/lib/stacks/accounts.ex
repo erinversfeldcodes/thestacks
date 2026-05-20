@@ -12,6 +12,7 @@ defmodule Stacks.Accounts do
   @dialyzer :no_opaque
 
   import Ecto.Changeset
+  import Ecto.Query, only: [from: 2]
 
   alias Core.Repo
   alias Ecto.Multi
@@ -234,10 +235,27 @@ defmodule Stacks.Accounts do
   Returns `{:ok, user}` on success. On failure, returns one of:
   - `{:error, :invalid_credentials}` — wrong email or password
   - `{:error, :email_unconfirmed}` — valid credentials but email not confirmed
+  - `{:error, {:account_locked, retry_after_seconds}}` — per-account lockout active
+  - `{:error, :argon2_busy}` — Argon2 worker pool exhausted
+
+  Order of checks (Issue #161):
+  1. Look up user by email. Unknown email → constant-time dummy-hash branch
+     (`Argon2.no_user_verify/0`) so attackers cannot enumerate emails by timing.
+  2. If `locked_until` is in the future → return `:account_locked` immediately,
+     WITHOUT entering the ArgonPool. Locked attempts must not consume pool
+     slots or attacker-controllable Argon2 work.
+  3. Otherwise run the Argon2 verify. On failure, increment the per-account
+     failure counter (rolling window) and possibly set a new `locked_until`
+     with exponential backoff. On success, zero the counter and clear any
+     stale `locked_until`.
   """
   @spec authenticate(String.t(), String.t()) ::
           {:ok, User.t()}
-          | {:error, :invalid_credentials | :email_unconfirmed | :argon2_busy}
+          | {:error,
+             :invalid_credentials
+             | :email_unconfirmed
+             | :argon2_busy
+             | {:account_locked, pos_integer()}}
   def authenticate(email, password) do
     with {:ok, user} <- check_password(get_user_by_email(email), password),
          :ok <- check_email_confirmed(user) do
@@ -254,12 +272,191 @@ defmodule Stacks.Accounts do
   end
 
   defp check_password(user, password) do
-    case ArgonPool.run(fn -> Argon2.verify_pass(password, user.password_hash) end) do
-      true -> {:ok, user}
-      false -> {:error, :invalid_credentials}
-      {:error, :argon2_busy} -> {:error, :argon2_busy}
+    now = DateTime.utc_now()
+
+    # CRITICAL: lockout check is performed BEFORE ArgonPool. A locked
+    # account must not be able to consume pool slots, and we must not
+    # leak whether the attacker-controlled password is right or wrong
+    # while the account is locked.
+    case lockout_status(user, now) do
+      {:locked, retry_after_seconds} ->
+        {:error, {:account_locked, retry_after_seconds}}
+
+      :unlocked ->
+        verify_and_record(user, password, now)
     end
   end
+
+  defp verify_and_record(user, password, now) do
+    case ArgonPool.run(fn -> Argon2.verify_pass(password, user.password_hash) end) do
+      true ->
+        {:ok, clear_failed_logins(user, now)}
+
+      false ->
+        _ = record_failed_login(user, now)
+        {:error, :invalid_credentials}
+
+      {:error, :argon2_busy} ->
+        {:error, :argon2_busy}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Per-account login lockout (Issue #161)
+  # ---------------------------------------------------------------------------
+
+  @spec lockout_status(User.t(), DateTime.t()) :: :unlocked | {:locked, pos_integer()}
+  defp lockout_status(%User{locked_until: nil}, _now), do: :unlocked
+
+  defp lockout_status(%User{locked_until: locked_until}, now) do
+    case DateTime.compare(locked_until, now) do
+      :gt ->
+        # max(1, diff) so we never return 0 (would defeat the point of
+        # retry_after) and never negative (clock skew at the boundary).
+        seconds = max(1, DateTime.diff(locked_until, now, :second))
+        {:locked, seconds}
+
+      _ ->
+        # Lock is in the past — treat as expired/unlocked. The row will
+        # be cleared on the next successful login (or stays as historical
+        # data we can use for backoff calculations).
+        :unlocked
+    end
+  end
+
+  # Successful login: reset counter, clear lock, clear window start.
+  # Returns the updated user (or the original on unexpected failure — caller
+  # already has a valid authentication).
+  defp clear_failed_logins(%User{failed_login_count: 0, locked_until: nil} = user, _now), do: user
+
+  defp clear_failed_logins(%User{} = user, _now) do
+    from(u in User, where: u.id == ^user.id)
+    |> Repo.update_all(
+      set: [
+        failed_login_count: 0,
+        failed_login_first_at: nil,
+        locked_until: nil,
+        updated_at: DateTime.utc_now()
+      ]
+    )
+
+    %{user | failed_login_count: 0, failed_login_first_at: nil, locked_until: nil}
+  end
+
+  # Failed login: increment the counter inside the rolling window. If we hit
+  # the threshold, set `locked_until` with exponential backoff based on any
+  # prior recent lock.
+  defp record_failed_login(%User{} = user, now) do
+    threshold = login_lockout_threshold()
+    window_seconds = login_lockout_window_seconds()
+
+    {new_count, new_first_at} = next_failure_window(user, now, window_seconds)
+
+    if new_count >= threshold do
+      duration = next_lockout_duration_seconds(user, now)
+      locked_until = DateTime.add(now, duration, :second)
+
+      from(u in User, where: u.id == ^user.id)
+      |> Repo.update_all(
+        set: [
+          failed_login_count: new_count,
+          failed_login_first_at: new_first_at,
+          locked_until: locked_until,
+          updated_at: now
+        ]
+      )
+    else
+      from(u in User, where: u.id == ^user.id)
+      |> Repo.update_all(
+        set: [
+          failed_login_count: new_count,
+          failed_login_first_at: new_first_at,
+          updated_at: now
+        ]
+      )
+    end
+
+    :ok
+  end
+
+  # Compute the new {count, first_at} for the rolling failure window.
+  # - If there's no prior failure or the prior window has expired, start fresh
+  #   at count=1.
+  # - Otherwise increment the existing count, keeping the original first_at so
+  #   the window is anchored to the FIRST failure.
+  defp next_failure_window(%User{failed_login_first_at: nil}, now, _window_seconds) do
+    {1, now}
+  end
+
+  defp next_failure_window(
+         %User{failed_login_count: count, failed_login_first_at: first_at},
+         now,
+         window_seconds
+       ) do
+    window_start = DateTime.add(now, -window_seconds, :second)
+
+    case DateTime.compare(first_at, window_start) do
+      :lt ->
+        # Prior window has elapsed — fresh window.
+        {1, now}
+
+      _ ->
+        # Still inside the window — increment.
+        {count + 1, first_at}
+    end
+  end
+
+  # Compute the duration of the next lock. If the user has a recent prior lock
+  # (within `:login_lockout_backoff_window_seconds`), double the previous
+  # duration up to the configured cap.
+  #
+  # We derive "previous duration" from the existing locked_until value, treating
+  # any locked_until set within the backoff window as evidence of a prior lock.
+  # When locked_until is nil OR older than the backoff window, start at the
+  # initial duration.
+  defp next_lockout_duration_seconds(%User{locked_until: nil}, _now),
+    do: login_lockout_duration_seconds()
+
+  defp next_lockout_duration_seconds(%User{locked_until: prior_lock} = user, now) do
+    backoff_window = login_lockout_backoff_window_seconds()
+    horizon = DateTime.add(now, -backoff_window, :second)
+
+    if DateTime.compare(prior_lock, horizon) == :gt do
+      # The previous lock was within the backoff window — compound.
+      # We can't know the prior duration exactly without a history table,
+      # so derive it from the failed_login_first_at anchor: the prior
+      # duration is approximately (prior_lock - failed_login_first_at).
+      prior_duration =
+        if user.failed_login_first_at do
+          max(
+            login_lockout_duration_seconds(),
+            DateTime.diff(prior_lock, user.failed_login_first_at, :second)
+          )
+        else
+          login_lockout_duration_seconds()
+        end
+
+      min(prior_duration * 2, login_lockout_max_duration_seconds())
+    else
+      # Prior lock is too old to count — restart at the initial duration.
+      login_lockout_duration_seconds()
+    end
+  end
+
+  defp login_lockout_threshold,
+    do: Application.get_env(:core, :login_lockout_threshold, 10)
+
+  defp login_lockout_window_seconds,
+    do: Application.get_env(:core, :login_lockout_window_seconds, 600)
+
+  defp login_lockout_duration_seconds,
+    do: Application.get_env(:core, :login_lockout_duration_seconds, 900)
+
+  defp login_lockout_max_duration_seconds,
+    do: Application.get_env(:core, :login_lockout_max_duration_seconds, 7_200)
+
+  defp login_lockout_backoff_window_seconds,
+    do: Application.get_env(:core, :login_lockout_backoff_window_seconds, 86_400)
 
   defp check_email_confirmed(%User{email_confirmed: true}), do: :ok
   defp check_email_confirmed(%User{}), do: {:error, :email_unconfirmed}

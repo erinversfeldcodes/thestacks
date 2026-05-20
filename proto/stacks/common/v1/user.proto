@@ -125,4 +125,20 @@ message User {
   // Per-step onboarding completion flags (JSON object, e.g. {"profile": true, ...}).
   // DB-only — not sent on the wire directly; use onboarding_status endpoint instead.
   string onboarding_steps = 26 [json_name = "onboarding_steps"];
+
+  // Number of consecutive failed login attempts since the last reset.
+  // Used by per-account login lockout (Issue #161). Resets to 0 on a successful
+  // login or when the rolling failure window elapses without further failures.
+  // DB-only — never sent on the wire.
+  int32 failed_login_count = 27 [json_name = "failed_login_count"];
+
+  // Timestamp of the first failure in the current rolling window.
+  // Used to roll the counter when the failure window has elapsed. DB-only.
+  google.protobuf.Timestamp failed_login_first_at = 28 [json_name = "failed_login_first_at"];
+
+  // When non-null and in the future, the account is locked. NULL = unlocked.
+  // Lockout duration starts at :login_lockout_duration_seconds and doubles on
+  // each subsequent lockout within 24 hours up to :login_lockout_max_duration_seconds.
+  // DB-only — never sent on the wire (clients learn lock state from the 423 response).
+  google.protobuf.Timestamp locked_until = 29 [json_name = "locked_until"];
 }
