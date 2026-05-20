@@ -921,6 +921,13 @@ jobs:
           done
           wait
           sleep 2
+      # Pre-flight check: verify Open Library can resolve the ISBNs the upload
+      # suite depends on. If OL is down or rate-limiting when this deploy
+      # starts, the upload suite will fail with an unhelpful "title never
+      # enriched" timeout 6+ minutes later. Failing fast here saves CI time
+      # and gives the operator an actionable error.
+      - name: Preflight — external resolver health
+        run: bash scripts/preflight-resolver-health.sh
       - name: Run E2E against deployed stack
         run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Smoke — circuit breakers

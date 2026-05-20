@@ -122,6 +122,17 @@ defmodule Stacks.Books.ISBNResolverCache do
   def put(isbn, {:error, :not_found} = result) when is_binary(isbn) do
     ets_put(isbn, result, @negative_ttl_ms)
     db_put(isbn, result, @negative_ttl_ms)
+
+    # Diagnostic signal: a negative cache hit lives for 1 h and will
+    # short-circuit subsequent ISBN resolutions for the same ISBN. If
+    # EnrichBookJob is stuck returning :not_found despite a healthy
+    # upstream, this event marks the moment the poison was planted.
+    :telemetry.execute(
+      [:stacks, :isbn_resolver_cache, :negative_stored],
+      %{count: 1, ttl_ms: @negative_ttl_ms},
+      %{isbn: isbn}
+    )
+
     :ok
   end
 

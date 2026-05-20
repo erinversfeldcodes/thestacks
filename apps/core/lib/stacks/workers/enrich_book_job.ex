@@ -85,7 +85,15 @@ defmodule Stacks.Workers.EnrichBookJob do
   end
 
   defp enrich(isbn) do
-    case Books.resolve_isbn(isbn) do
+    result = Books.resolve_isbn(isbn)
+
+    :telemetry.execute(
+      [:stacks, :enrichment, :resolver, :outcome],
+      %{count: 1},
+      %{isbn: isbn, outcome: outcome_tag(result), source: source_tag(result)}
+    )
+
+    case result do
       {:ok, metadata} ->
         apply_metadata(isbn, metadata)
 
@@ -98,6 +106,20 @@ defmodule Stacks.Workers.EnrichBookJob do
     end
   end
 
+  # Classify the resolver result into a small, stable tag set so that
+  # log/telemetry consumers (and the diagnostic tests in
+  # enrichment_diagnostics_test.exs) can distinguish the four scenarios
+  # outlined in the issue: cache poisoning (:not_found), blown fuses
+  # (:circuit_open), transient 5xx storm (:other_error), and the
+  # apply_metadata edge cases (:ok but no enriched log line downstream).
+  defp outcome_tag({:ok, _}), do: :ok
+  defp outcome_tag({:error, :not_found}), do: :not_found
+  defp outcome_tag({:error, :circuit_open}), do: :circuit_open
+  defp outcome_tag({:error, _}), do: :other_error
+
+  defp source_tag({:ok, %{source: source}}), do: source
+  defp source_tag(_), do: nil
+
   defp apply_metadata(isbn, metadata) do
     case Books.find_existing(isbn) do
       nil ->
@@ -109,49 +131,106 @@ defmodule Stacks.Workers.EnrichBookJob do
         # BookEdition (cover/publisher/publication_year/page_count) —
         # update both rows in a single transaction so the user sees
         # enriched metadata atomically rather than a half-filled row.
-        Repo.transaction(fn ->
-          update_book(book, metadata)
-          update_primary_edition(isbn, metadata)
-        end)
-        |> case do
-          {:ok, _} ->
-            Logger.info("EnrichBookJob: enriched ISBN #{isbn} with metadata")
-            :ok
-
-          {:error, reason} ->
-            Logger.warning("EnrichBookJob: update failed for ISBN #{isbn}: #{inspect(reason)}")
-            {:error, :update_failed}
-        end
+        #
+        # Bug-fix history: previous versions used Repo.update!/1 here.
+        # A raise inside the transaction propagated out, Oban retried
+        # the job 5×, every retry hit the same bug, and the job was
+        # silently abandoned — leaving the book stuck on its
+        # placeholder title for an hour. Both helpers now return
+        # `{:ok, struct}` / `{:error, changeset}` and we propagate
+        # failure via Repo.rollback/1 so the transaction surfaces a
+        # tidy `{:error, _}` instead of a process-leaking raise.
+        book
+        |> run_update_transaction(isbn, metadata)
+        |> handle_update_result(isbn)
     end
+  end
+
+  defp run_update_transaction(book, isbn, metadata) do
+    Repo.transaction(fn ->
+      with {:ok, _} <- update_book(book, metadata),
+           {:ok, _} <- update_primary_edition(isbn, metadata) do
+        :ok
+      else
+        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp handle_update_result({:ok, _}, isbn) do
+    Logger.info("EnrichBookJob: enriched ISBN #{isbn} with metadata")
+    :ok
+  end
+
+  defp handle_update_result({:error, %Ecto.Changeset{errors: errors}}, isbn) do
+    Logger.warning("EnrichBookJob: update failed for ISBN #{isbn}: #{inspect(errors)}")
+    {:error, :update_failed}
+  end
+
+  defp handle_update_result({:error, reason}, isbn) do
+    Logger.warning("EnrichBookJob: update failed for ISBN #{isbn}: #{inspect(reason)}")
+    {:error, :update_failed}
   end
 
   defp update_book(%Book{} = book, metadata) do
     attrs = %{
-      "title" => metadata[:title] || book.title,
-      "description" => metadata[:description] || book.description
+      "title" => presence_or(metadata[:title], book.title),
+      "description" => presence_or(metadata[:description], book.description)
     }
 
     book
     |> Books.book_changeset(attrs)
-    |> Repo.update!()
+    |> Repo.update()
   end
 
   defp update_primary_edition(isbn, metadata) do
     case Repo.one(from e in BookEdition, where: e.isbn == ^isbn, limit: 1) do
       nil ->
-        :ok
+        {:ok, nil}
 
       edition ->
         attrs = %{
           "cover_image_url" => metadata[:cover_image_url] || edition.cover_image_url,
           "publisher" => metadata[:publisher] || edition.publisher,
-          "publication_year" => metadata[:publication_year] || edition.publication_year,
-          "page_count" => metadata[:page_count] || edition.page_count
+          "publication_year" =>
+            coerce_integer(metadata[:publication_year]) || edition.publication_year,
+          "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count
         }
 
         edition
         |> Books.book_edition_changeset(attrs)
-        |> Repo.update!()
+        |> Repo.update()
     end
   end
+
+  # Treat blank or whitespace-only strings as absent so we fall back to
+  # the existing column value. Without this, OL responses carrying
+  # `"title": ""` would replace a real placeholder with an empty title,
+  # tripping `validate_required(:title)` on book_changeset.
+  defp presence_or(value, fallback) when is_binary(value) do
+    case String.trim(value) do
+      "" -> fallback
+      _ -> value
+    end
+  end
+
+  defp presence_or(nil, fallback), do: fallback
+  defp presence_or(value, _fallback), do: value
+
+  # Coerce values destined for `:integer` Ecto fields. OL and Google
+  # Books occasionally return `page_count` / `publish_date` as strings
+  # (`"lots"`, `"unknown"`, `"200"`); a non-coercible value would fail
+  # the changeset cast and (with the old `Repo.update!`) raise out of
+  # the transaction. Returning `nil` here lets the `||` fallback in the
+  # caller keep the existing column value.
+  defp coerce_integer(value) when is_integer(value), do: value
+
+  defp coerce_integer(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp coerce_integer(_), do: nil
 end
