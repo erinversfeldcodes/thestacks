@@ -171,17 +171,24 @@ _ANALYZE_PROMPT = (
     '  - "book"      — A physical book (cover, spine, or barcode visible) OR a\n'
     "                  screenshot/photo of text that names a specific book title or\n"
     "                  author. Marginal or partial covers with ANY legible title,\n"
-    '                  author, or ISBN are still "book".\n'
+    "                  author, or ISBN which are still recognisable as belonging\n"
+    '                  to books are still "book".\n'
     '  - "not_book"  — No book present and no book named in legible text. Examples:\n'
-    "                  animals, food, landscapes, logos, abstract art, a rectangle\n"
-    "                  resembling a cover with nothing readable on it.\n"
+    "                  a photo or illustration of an animal, food, a person, or a\n"
+    "                  landscape; artwork, geometric shapes, patterns, logos, or\n"
+    "                  abstract designs without book text; a screenshot of text that\n"
+    "                  does not name a specific title or author; a rectangle\n"
+    "                  resembling a cover in composition but with no readable\n"
+    "                  title, author name, or ISBN.\n"
     '  - "ambiguous" — You cannot tell because the image is unreadable (heavy blur,\n'
     "                  total occlusion, lighting too poor to make out anything\n"
     "                  book-like).\n\n"
     "STEP 3 — Extract books. Populate `books` with every book you can partially or\n"
     'fully identify. INCLUDE entries even when classification is "ambiguous" if ANY\n'
     "signal is recoverable (a partial ISBN, one legible word of a title, etc.).\n"
-    'Only return `books: []` for a confident "not_book".\n\n'
+    "If the image is a screenshot of text (social media post, article, reading\n"
+    "list), extract every book mentioned in the text — not just the first or the\n"
+    'main one. Only return `books: []` for a confident "not_book".\n\n'
     "For each book provide:\n"
     '  - `title`           — best reading of the title, or "" if unreadable.\n'
     '  - `author`          — best reading of the author, or "" if unreadable.\n'
