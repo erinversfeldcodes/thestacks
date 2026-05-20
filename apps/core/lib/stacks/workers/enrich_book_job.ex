@@ -106,16 +106,22 @@ defmodule Stacks.Workers.EnrichBookJob do
     end
   end
 
-  # Classify the resolver result into a small, stable tag set so that
+  # Classify the resolver result into a closed tag set so that
   # log/telemetry consumers (and the diagnostic tests in
-  # enrichment_diagnostics_test.exs) can distinguish the four scenarios
-  # outlined in the issue: cache poisoning (:not_found), blown fuses
-  # (:circuit_open), transient 5xx storm (:other_error), and the
-  # apply_metadata edge cases (:ok but no enriched log line downstream).
+  # enrichment_diagnostics_test.exs) can distinguish each failure mode
+  # observed in production: cache poisoning (:not_found), blown fuses
+  # (:circuit_open), unexpected 5xx (:unexpected_status), malformed JSON
+  # (:malformed_response), transport failure (:transport_error), and
+  # outright timeout (:timeout). No catch-all — every atom in
+  # `Stacks.Books.ISBNResolver.error_reason()` has a matching clause so
+  # dialyzer rejects any new resolver reason that goes unmapped here.
   defp outcome_tag({:ok, _}), do: :ok
   defp outcome_tag({:error, :not_found}), do: :not_found
   defp outcome_tag({:error, :circuit_open}), do: :circuit_open
-  defp outcome_tag({:error, _}), do: :other_error
+  defp outcome_tag({:error, :unexpected_status}), do: :unexpected_status
+  defp outcome_tag({:error, :malformed_response}), do: :malformed_response
+  defp outcome_tag({:error, :transport_error}), do: :transport_error
+  defp outcome_tag({:error, :timeout}), do: :timeout
 
   defp source_tag({:ok, %{source: source}}), do: source
   defp source_tag(_), do: nil

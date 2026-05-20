@@ -259,6 +259,12 @@ sources:
             description: Token for password reset flow.
           - name: password_reset_sent_at
             description: Timestamp when password reset email was sent.
+          - name: failed_login_count
+            description: Failed-login counter for per-account lockout (Issue #161).
+          - name: failed_login_first_at
+            description: Timestamp of the first failure in the current rolling window (Issue #161).
+          - name: locked_until
+            description: When non-null and in the future, the account is locked (Issue #161).
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
