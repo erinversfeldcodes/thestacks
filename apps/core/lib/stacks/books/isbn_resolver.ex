@@ -7,8 +7,23 @@ defmodule Stacks.Books.ISBNResolver do
 
   require Logger
 
+  alias Stacks.Books.HttpClientBehaviour
   alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCache
+
+  @typedoc """
+  Closed set of error reasons returned by `resolve/1`. Extends the
+  underlying `HttpClientBehaviour.error_reason()` with two resolver-level
+  reasons: `:not_found` (no upstream returned a match) and
+  `:circuit_open` (the relevant Fuse breaker is blown). Adding a new
+  reason here requires adding a matching clause in
+  `Stacks.Workers.EnrichBookJob.outcome_tag/1` — dialyzer enforces the
+  exhaustiveness end-to-end.
+  """
+  @type error_reason ::
+          HttpClientBehaviour.error_reason()
+          | :not_found
+          | :circuit_open
 
   @open_library_url "https://openlibrary.org/api/books"
   @open_library_search_url "https://openlibrary.org/search.json"
@@ -50,7 +65,7 @@ defmodule Stacks.Books.ISBNResolver do
   Circuit-open responses are NOT cached — the fuse is the signal to
   retry later, not to memoise.
   """
-  @spec resolve(String.t()) :: {:ok, map()} | {:error, :not_found | :circuit_open}
+  @spec resolve(String.t()) :: {:ok, map()} | {:error, error_reason()}
   def resolve(isbn) do
     if cache_enabled?() do
       case ISBNResolverCache.get(isbn) do

@@ -230,7 +230,8 @@ defmodule Stacks.Books do
   Delegates to the internal ISBNResolver. Use this instead of calling
   ISBNResolver directly from other contexts.
   """
-  @spec resolve_isbn(String.t()) :: {:ok, map()} | {:error, :not_found}
+  @spec resolve_isbn(String.t()) ::
+          {:ok, map()} | {:error, ISBNResolver.error_reason()}
   def resolve_isbn(isbn) do
     ISBNResolver.resolve(isbn)
   end
