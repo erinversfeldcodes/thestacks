@@ -31,10 +31,15 @@ defmodule Stacks.Moderation do
   per-failure rather than silently dropped. `rejected` is a list of
   `{isbn_or_title, reason}` tuples (the first element is the candidate's
   potential ISBN if available, otherwise its title).
+
+  `:uncertain` is the Issue #169 rejection reason: the analyze pass produced
+  no candidate with enough confidence to proceed, even after the selective
+  verification gate (or the max candidate confidence fell below
+  `:verification_threshold_low` and the gate rejected immediately).
   """
   @type pipeline_result ::
           {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
-          | {:error, term()}
+          | {:error, :not_a_book | :isbn_not_found | :uncertain | term()}
 
   @doc """
   Runs the full moderation pipeline for an uploaded image.
@@ -83,7 +88,7 @@ defmodule Stacks.Moderation do
         context_with_source =
           Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
 
-        resolve_and_store_all(books, context_with_source)
+        dispatch_post_analyze(books, context_with_source)
 
       {:ok, %{"classification" => _}} ->
         {:error, :not_a_book}
@@ -91,6 +96,223 @@ defmodule Stacks.Moderation do
       error ->
         error
     end
+  end
+
+  # Issue #169 — selective verification gate.
+  #
+  # Composes with #167's per-candidate gate (`check_confidence/2`): #167
+  # filters individual low-confidence candidates BEFORE enrichment, while
+  # this gate operates on the SET of candidates' max confidence to decide
+  # whether to short-circuit, verify, or pass through.
+  #
+  #   max_confidence >= verification_threshold_high → proceed as today
+  #   max_confidence < verification_threshold_low  → reject as :uncertain
+  #   otherwise (uncertain band)                   → call /verify per
+  #     candidate; pick the best match; reject as :uncertain if none clear
+  #     verification_threshold_match.
+  #
+  # When every candidate is missing a `confidence` field (historical,
+  # pre-prompt-v2 payloads) the gate is skipped entirely — mirrors the
+  # historical-payload contract from #167's `check_confidence/2`.
+  #
+  # Verification requires `image_url` in the context — `image_b64` uploads
+  # (legacy in-flight jobs) skip the gate because the sidecar /verify
+  # endpoint only accepts URLs. For those uploads the legacy behaviour is
+  # preserved: low-confidence candidates already get filtered by #167's
+  # per-candidate gate.
+  defp dispatch_post_analyze(books, context) do
+    case max_candidate_confidence(books) do
+      :unknown ->
+        resolve_and_store_all(books, context)
+
+      max_confidence when is_number(max_confidence) ->
+        gate_by_confidence(max_confidence, books, context)
+    end
+  end
+
+  defp gate_by_confidence(max_confidence, books, context) do
+    high = verification_threshold_high()
+    low = verification_threshold_low()
+
+    cond do
+      max_confidence >= high ->
+        resolve_and_store_all(books, context)
+
+      max_confidence < low ->
+        :telemetry.execute(
+          [:stacks, :verification, :rejected],
+          %{count: 1},
+          %{reason: :uncertain}
+        )
+
+        Logger.info(
+          "Moderation: max candidate confidence #{max_confidence} below threshold_low #{low} — rejecting as :uncertain"
+        )
+
+        {:error, :uncertain}
+
+      true ->
+        run_verification_gate(books, context)
+    end
+  end
+
+  # Returns the highest non-nil candidate confidence, or `:unknown` if no
+  # candidate carries a confidence value (historical payload).
+  defp max_candidate_confidence(books) do
+    confidences =
+      books
+      |> Enum.map(&candidate_confidence/1)
+      |> Enum.reject(&is_nil/1)
+
+    case confidences do
+      [] -> :unknown
+      _ -> Enum.max(confidences)
+    end
+  end
+
+  # For each candidate in the uncertain band, title-search → call /verify →
+  # collect verify outcomes. The candidate with the highest verify
+  # confidence that ALSO clears `verification_threshold_match` AND
+  # `is_same_book == true` wins. If no candidate clears the threshold,
+  # the whole pipeline rejects as `:uncertain`.
+  defp run_verification_gate(books, context) do
+    case Map.get(context, :image_url) do
+      nil ->
+        # No URL → cannot call /verify (sidecar needs a URL, not bytes).
+        # Fall through to the standard pipeline; #167's per-candidate gate
+        # still filters low-confidence candidates one at a time.
+        Logger.info("Moderation: verification gate skipped — no image_url in context")
+        resolve_and_store_all(books, context)
+
+      uploaded_image_url when is_binary(uploaded_image_url) ->
+        verify_candidates(books, uploaded_image_url, context)
+    end
+  end
+
+  defp verify_candidates(books, uploaded_image_url, context) do
+    match_threshold = verification_threshold_match()
+
+    outcomes =
+      books
+      |> Enum.map(&verify_one_candidate(&1, uploaded_image_url))
+      |> Enum.reject(&is_nil/1)
+
+    matches =
+      Enum.filter(outcomes, fn outcome ->
+        outcome.is_same_book and outcome.verify_confidence >= match_threshold
+      end)
+
+    case matches do
+      [] ->
+        :telemetry.execute(
+          [:stacks, :verification, :rejected],
+          %{count: 1},
+          %{reason: :no_match}
+        )
+
+        Logger.info(
+          "Moderation: verification rejected — no candidate cleared threshold #{match_threshold}"
+        )
+
+        {:error, :uncertain}
+
+      _ ->
+        winner = Enum.max_by(matches, & &1.verify_confidence)
+
+        :telemetry.execute(
+          [:stacks, :verification, :match],
+          %{count: 1},
+          %{isbn: winner.isbn, verify_confidence: winner.verify_confidence}
+        )
+
+        Logger.info(
+          "Moderation: verification picked ISBN #{winner.isbn} (verify_confidence=#{winner.verify_confidence})"
+        )
+
+        resolve_and_store_all([winner.candidate], context)
+    end
+  end
+
+  # Title-search to find a candidate ISBN + cover URL, call /verify, and
+  # return a normalised outcome map. Returns nil when no candidate ISBN
+  # can be resolved (no point in calling /verify without a cover to
+  # compare against — there's nothing to verify).
+  defp verify_one_candidate(candidate, uploaded_image_url) do
+    first_pass_confidence = candidate_confidence(candidate) || 0.0
+
+    case lookup_candidate_cover(candidate) do
+      {:ok, isbn, cover_url} ->
+        :telemetry.execute(
+          [:stacks, :verification, :triggered],
+          %{count: 1},
+          %{isbn: isbn, first_pass_confidence: first_pass_confidence}
+        )
+
+        case AIClient.verify(uploaded_image_url, cover_url, isbn) do
+          {:ok, %{"is_same_book" => is_same_book, "confidence" => confidence}} ->
+            %{
+              candidate: candidate_with_isbn(candidate, isbn),
+              isbn: isbn,
+              is_same_book: is_same_book == true,
+              verify_confidence: confidence || 0.0
+            }
+
+          {:error, reason} ->
+            Logger.warning(
+              "Moderation: /verify failed for ISBN #{isbn}: #{inspect(reason)} — treating as non-match"
+            )
+
+            %{
+              candidate: candidate_with_isbn(candidate, isbn),
+              isbn: isbn,
+              is_same_book: false,
+              verify_confidence: 0.0
+            }
+        end
+
+      :error ->
+        Logger.info(
+          "Moderation: verification skipped — no candidate cover URL found for candidate #{inspect(candidate_identifier(candidate))}"
+        )
+
+        nil
+    end
+  end
+
+  # Resolves a candidate to {isbn, cover_url} suitable for the /verify call.
+  # Prefers the candidate's own potential_isbns (then fetches a cover via OL
+  # cover URL); otherwise title-searches OL/GB to find both an ISBN and a
+  # cover URL.
+  defp lookup_candidate_cover(%{"potential_isbns" => [isbn | _]} = _candidate)
+       when is_binary(isbn) and isbn != "" do
+    {:ok, isbn, ol_cover_url(isbn)}
+  end
+
+  defp lookup_candidate_cover(candidate) do
+    title = candidate["title"]
+    author = candidate["author"]
+    raw_text = candidate["raw_text"]
+
+    case title_fallback(title, author, raw_text) do
+      {:ok, isbn, metadata} ->
+        # OL title search returns metadata without a cover URL — fall back to
+        # the deterministic OL cover URL derived from the ISBN. GB results
+        # populate :cover_image_url directly, in which case we use it.
+        cover_url = metadata[:cover_image_url] || ol_cover_url(isbn)
+        {:ok, isbn, cover_url}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp ol_cover_url(isbn), do: "https://covers.openlibrary.org/b/isbn/#{isbn}-L.jpg"
+
+  # Stamp the resolved ISBN onto the candidate map so downstream
+  # `resolve_candidate/2` finds it via the potential_isbns shortcut and
+  # doesn't re-run the title search.
+  defp candidate_with_isbn(candidate, isbn) do
+    Map.put(candidate, "potential_isbns", [isbn])
   end
 
   # Expands compound candidates where the vision model joined multiple book titles
@@ -246,6 +468,38 @@ defmodule Stacks.Moderation do
 
   defp enrichment_confidence_threshold do
     Application.get_env(:core, :enrichment_confidence_threshold, 0.5)
+  end
+
+  @doc """
+  Upper bound of the Issue #169 verification band. Candidates with a max
+  confidence at or above this value flow through without a `/verify` call.
+  Configurable via `config :core, :verification_threshold_high` —
+  default 0.7.
+  """
+  @spec verification_threshold_high() :: float()
+  def verification_threshold_high do
+    Application.get_env(:core, :verification_threshold_high, 0.7)
+  end
+
+  @doc """
+  Lower bound of the Issue #169 verification band. Candidates with a max
+  confidence below this value are rejected as `:uncertain` immediately —
+  no title search, no `/verify` call. Configurable via
+  `config :core, :verification_threshold_low` — default 0.3.
+  """
+  @spec verification_threshold_low() :: float()
+  def verification_threshold_low do
+    Application.get_env(:core, :verification_threshold_low, 0.3)
+  end
+
+  @doc """
+  Threshold the `/verify` response's own confidence must clear (alongside
+  `is_same_book == true`) to count as a match. Configurable via
+  `config :core, :verification_threshold_match` — default 0.7.
+  """
+  @spec verification_threshold_match() :: float()
+  def verification_threshold_match do
+    Application.get_env(:core, :verification_threshold_match, 0.7)
   end
 
   # Best-effort identifier for the rejected list payload. Prefer the candidate's

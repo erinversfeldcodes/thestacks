@@ -127,6 +127,18 @@ config :core, :ai_budget,
 # payloads) are processed normally.
 config :core, :enrichment_confidence_threshold, 0.5
 
+# ── Selective vision verification (Issue #169) ──────────────────────────────
+# When the analyze pass returns candidates with confidence below
+# `:verification_threshold_high`, the moderation pipeline calls the sidecar
+# `/verify` endpoint to cross-check each candidate's title-searched cover
+# against the uploaded image. Candidates with max confidence below
+# `:verification_threshold_low` are rejected outright as `:uncertain` (no
+# verification call). `:verification_threshold_match` is the threshold the
+# `/verify` response's own confidence must clear to count as a match.
+config :core, :verification_threshold_high, 0.7
+config :core, :verification_threshold_low, 0.3
+config :core, :verification_threshold_match, 0.7
+
 # ── Per-account login lockout (Issue #161) ──────────────────────────────────
 # Defends against credential-stuffing by locking the account after N failed
 # logins within a rolling window, regardless of source IP. Lockout duration
