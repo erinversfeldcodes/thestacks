@@ -145,3 +145,33 @@ message AssociateCallback {
   // Cover image URL (echoed from AssociateRequest).
   string cover_image_url = 7 [json_name = "cover_image_url"];
 }
+
+// VerifyRequest — sidecar /verify endpoint. Asks the VLM whether two
+// image URLs depict the same book. Used by the core Moderation pipeline
+// when the analyze pass returns books with confidence below the
+// verification threshold.
+message VerifyRequest {
+  // R2 URL of the user-uploaded image. The sidecar downloads + decodes.
+  string uploaded_image_url = 1 [json_name = "uploaded_image_url"];
+
+  // URL of the candidate book cover from Open Library or Google Books.
+  // The sidecar downloads + decodes this too.
+  string candidate_cover_url = 2 [json_name = "candidate_cover_url"];
+
+  // ISBN of the candidate (for logging/telemetry only — the model
+  // does not see this; only the two images).
+  string candidate_isbn = 3 [json_name = "candidate_isbn"];
+}
+
+// VerifyResponse — VLM's same-book judgment.
+message VerifyResponse {
+  // True if the model thinks both images depict the same book.
+  bool is_same_book = 1 [json_name = "is_same_book"];
+
+  // Confidence in the is_same_book judgment, 0.0-1.0.
+  double confidence = 2 [json_name = "confidence"];
+
+  // One-sentence justification (chain-of-thought scratchpad, also
+  // useful for diagnostic logs).
+  string reasoning = 3 [json_name = "reasoning"];
+}

@@ -81,5 +81,31 @@ class VisionClient:
             return {"classification": "ambiguous", "confidence": 0.0, "books": []}
         return result
 
+    async def verify(self, uploaded_b64: str, candidate_b64: str) -> dict[str, object]:
+        """Two-image same-book comparison via Modal `VisionModel.verify`.
+
+        Both inputs are base64-encoded PNG/JPEG bytes. Returns the parsed
+        payload shape documented on `_VERIFY_PROMPT` in modal_app.py:
+        `is_same_book`, `confidence`, `reasoning`.
+
+        The candidate ISBN passed by the caller of /verify is logging-only —
+        it never reaches this method or the VLM.
+        """
+        try:
+            model = self._modal_cls()
+            result = await asyncio.wait_for(
+                model.verify.remote.aio(uploaded_b64, candidate_b64),
+                timeout=float(settings.request_timeout_seconds),
+            )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Vision model request failed: {exc}"
+            ) from exc
+        if not isinstance(result, dict):
+            return {"is_same_book": False, "confidence": 0.0, "reasoning": ""}
+        return result
+
     async def close(self) -> None:
         pass  # Modal client manages its own connection lifecycle
