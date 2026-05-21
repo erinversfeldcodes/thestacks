@@ -92,6 +92,16 @@ defmodule Stacks.Workers.IdentifyBookJob do
         mark_rejected(image_id, "isbn_not_found")
         {:cancel, "isbn_not_found"}
 
+      # Issue #169 — selective vision verification could not confirm any
+      # candidate above the threshold. Distinct rejection reason so the
+      # upload UI can surface a user-actionable message ("try a clearer
+      # photo / enter ISBN manually") rather than the generic
+      # `isbn_not_found` copy.
+      {:error, :uncertain} ->
+        Logger.warning("IdentifyBookJob: image #{image_id} rejected as uncertain")
+        mark_rejected(image_id, "uncertain")
+        {:cancel, "uncertain"}
+
       {:error, reason} ->
         Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
         {:error, reason}

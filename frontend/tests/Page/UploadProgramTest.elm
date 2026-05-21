@@ -177,6 +177,7 @@ suite =
         [ uploadHappyPath
         , uploadIsbnRejection
         , uploadNotABook
+        , uploadUncertain
         , uploadPollTimeout
         , uploadPollTimeoutViaLimit
         , uploadDuplicateDetected
@@ -232,6 +233,37 @@ uploadNotABook =
                 |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved Nothing False))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "That Doesn't Look Like a Book" ]
+
+
+{-| Build an SSE stream event JSON string with an explicit rejection
+reason. Used by the uncertain-rejection program test introduced in
+Issue #169 (selective vision verification).
+-}
+simulateRejectionEvent : String -> String
+simulateRejectionEvent reason =
+    Encode.encode 0
+        (Encode.object
+            [ ( "imageId", Encode.string "img-test-001" )
+            , ( "status", Encode.string "rejected" )
+            , ( "isDuplicate", Encode.bool False )
+            , ( "rejectionReason", Encode.string reason )
+            , ( "bookId", Encode.null )
+            , ( "bookIds", Encode.list Encode.string [] )
+            ]
+        )
+
+
+uploadUncertain : Test
+uploadUncertain =
+    test "upload_uncertain: stream returns Rejected with reason uncertain -> shows uncertain message and manual-ISBN CTA" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateRejectionEvent "uncertain"))
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "We're not sure which book this is — try a clearer photo or enter the ISBN manually." ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Enter ISBN Manually" ]
 
 
 uploadPollTimeout : Test

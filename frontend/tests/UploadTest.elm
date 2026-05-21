@@ -174,6 +174,45 @@ suite =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
+            , -- US-1.1.2 | Suite 10: Elm (#169 selective vision verification)
+              test "uncertain rejection reason sets result to Uncertain" <|
+                \_ ->
+                    let
+                        rawJson =
+                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"uncertain\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+
+                        ( model, _, _ ) =
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                    in
+                    model.result |> Expect.equal Uncertain
+            , -- US-1.1.2 | Suite 10: Elm (#169 selective vision verification)
+              -- Regression guard: pending IDs and collected books must be cleared on
+              -- uncertain rejection so that a retry starts from a clean slate.
+              test "uncertain rejection clears pendingBookIds and collectedBooks" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelInFlight =
+                            { base
+                                | uploadState = Success "img-1"
+                                , pendingBookIds = [ "book-1", "book-2" ]
+                                , collectedBooks = [ dummyBook ]
+                            }
+
+                        rawJson =
+                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"uncertain\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+
+                        ( model, _, _ ) =
+                            Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal Uncertain
+                        , \m -> m.pendingBookIds |> Expect.equal []
+                        , \m -> m.collectedBooks |> Expect.equal []
+                        ]
+                        model
             , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
               -- Regression guard: pending IDs and collected books must be cleared on
               -- rejection so that a retry starts from a clean slate rather than

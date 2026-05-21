@@ -297,6 +297,32 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
+  describe "perform/1 — uncertain path (Issue #169)" do
+    test "marks image rejected with reason 'uncertain' and returns {:cancel, uncertain}", %{
+      user: user,
+      image: image
+    } do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.UncertainClient)
+
+        assert {:cancel, "uncertain"} =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64
+                 })
+
+        updated = Repo.get!(UploadedImage, image.id)
+        assert updated.status == "rejected"
+        assert updated.rejection_reason == "uncertain"
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
   describe "perform/1 — generic pipeline failure" do
     test "returns {:error, reason} when pipeline fails with an unexpected error", %{
       user: user,
@@ -465,6 +491,36 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     @impl true
     def call_vision("analyze", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
+  end
+
+  defmodule UncertainClient do
+    @moduledoc """
+    Vision client whose analyze response carries a max confidence below
+    #169's :verification_threshold_low (0.3) — exercises the immediate
+    :uncertain rejection path. The candidate ISBN is present so the
+    pipeline can't fall back to :isbn_not_found.
+    """
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("analyze", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.95,
+           "books" => [
+             %{
+               "title" => "Mystery Book",
+               "author" => nil,
+               "potential_isbns" => ["9780000000000"],
+               "raw_text" => nil,
+               "confidence" => 0.2
+             }
+           ],
+           "model_used" => "mock"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
   defmodule MultiBookClient do
