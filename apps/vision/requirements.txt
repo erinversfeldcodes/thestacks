@@ -5,3 +5,4 @@ uvicorn[standard]==0.41.0
 modal>=0.73.0
 pyzbar>=0.1.9
 Pillow>=10.0.0
+pytesseract>=0.3.10

@@ -160,6 +160,36 @@ _EXTRACT_PROMPT = (
 #     `"classification": "not_book"` followed by a confidence value.
 #   - Single JSON object, no nested code fences. `_parse_json` already
 #     handles the "model wrapped the response in ```json" case.
+_VERIFY_PROMPT = (
+    "You are comparing two book-cover images to decide whether they depict "
+    "the same book. The FIRST image is what a user uploaded; the SECOND is "
+    "a reference cover fetched from Open Library or Google Books for a "
+    "candidate identification.\n\n"
+    "STEP 1 — Orient both images.\n"
+    "If either appears upside-down, mirrored, sideways, or rotated, mentally "
+    "re-orient before reading. The user's image may itself be a screenshot "
+    "of a video, a screen, or another image — in that case the book within "
+    "may be inverted or mirrored relative to the surrounding frame.\n\n"
+    "STEP 2 — Compare.\n"
+    "Look for matches across: title text (exact or partial), author text, "
+    "cover illustration style, subject matter, period, colour palette, "
+    "typography, and overall composition. Two editions of the same book "
+    "may have different cover art — title text is the most reliable signal "
+    "when present; cover artwork is corroborating.\n\n"
+    "STEP 3 — Decide.\n"
+    "Set `is_same_book` to true ONLY if you are confident both images "
+    "depict the same book. If you cannot tell — different art with no "
+    "readable title overlap, partial obstruction, or any genuine "
+    "uncertainty — return `false`. A confident wrong answer is worse than "
+    "admitting uncertainty.\n\n"
+    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
+    "{\n"
+    '  "is_same_book": true,\n'
+    '  "confidence": 0.92,\n'
+    '  "reasoning": "one sentence explaining the decision"\n'
+    "}"
+)
+
 _ANALYZE_PROMPT = (
     "You are inspecting an image to identify any books it contains. Work through "
     "these steps:\n\n"
@@ -341,11 +371,22 @@ class VisionModel:
                                             pool. If load triggers OOM at
                                             startup, drop to 0.85 first
                                             before reducing max_model_len.
-          * limit_mm_per_prompt={"image": 1}
-                                          — our prompts always carry
-                                            exactly one image; tells vLLM
-                                            not to reserve space for
-                                            multi-image batches.
+          * limit_mm_per_prompt={"image": 2}
+                                          — /classify, /extract, /analyze
+                                            carry exactly one image;
+                                            /verify (Issue #169) carries
+                                            two — uploaded user image plus
+                                            a candidate cover from Open
+                                            Library / Google Books. Raised
+                                            from 1 to 2 with the addition
+                                            of /verify. Two 672px images
+                                            consume marginally more
+                                            attention budget than one but
+                                            stay well within the ~35 GB
+                                            KV-cache pool (per-request KV
+                                            cost grows with image-token
+                                            count, not with the prompt-
+                                            slot limit itself).
 
         PagedAttention is vLLM's default attention impl and requires no
         flag — it's what makes the KV cache pool work block-by-block
@@ -362,7 +403,7 @@ class VisionModel:
             enable_prefix_caching=True,
             max_model_len=4096,
             gpu_memory_utilization=0.90,
-            limit_mm_per_prompt={"image": 1},
+            limit_mm_per_prompt={"image": 2},
             trust_remote_code=True,
         )
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -380,6 +421,18 @@ class VisionModel:
     @modal.method()
     async def analyze(self, image_b64: str) -> dict[str, Any]:
         return await self._infer(image_b64, _ANALYZE_PROMPT)
+
+    @modal.method()
+    async def verify(self, uploaded_b64: str, candidate_b64: str) -> dict[str, Any]:
+        """Two-image same-book comparison (Issue #169).
+
+        Both inputs are base64-encoded PNG/JPEG bytes. The first image is
+        the user's uploaded photo; the second is a candidate cover from
+        Open Library or Google Books. Returns a parsed JSON dict matching
+        the VerifyResponse shape:
+            {"is_same_book": bool, "confidence": float, "reasoning": str}
+        """
+        return await self._infer_two_image(uploaded_b64, candidate_b64, _VERIFY_PROMPT)
 
     async def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import base64
@@ -446,6 +499,76 @@ class VisionModel:
 
         response = final_output.outputs[0].text.strip()
         return _parse_json_with_not_book_fallback(response)
+
+    async def _infer_two_image(
+        self,
+        first_b64: str,
+        second_b64: str,
+        prompt: str,
+    ) -> dict[str, Any]:
+        """Two-image inference. Mirrors `_infer` but passes both images
+        through the chat template and `multi_modal_data` so the VLM can
+        attend across them. Used by `/verify` (Issue #169).
+
+        The Qwen2.5-VL chat template accepts a list of `{"type": "image"}`
+        entries in user content; vLLM fills each `image_pad` slot in order
+        from the `multi_modal_data["image"]` list. The two-image case is
+        gated by `engine_args.limit_mm_per_prompt={"image": 2}` (set in
+        `load`).
+        """
+        import base64
+        import io
+        import uuid
+
+        from PIL import Image as PILImage
+        from vllm import SamplingParams
+
+        first_raw = base64.b64decode(first_b64, validate=True)
+        second_raw = base64.b64decode(second_b64, validate=True)
+        first_image = PILImage.open(io.BytesIO(first_raw)).convert("RGB")
+        second_image = PILImage.open(io.BytesIO(second_raw)).convert("RGB")
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},  # first image — uploaded by the user
+                    {"type": "image"},  # second image — candidate cover
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        text_prompt = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+
+        sampling_params = SamplingParams(
+            max_tokens=512,
+            temperature=0.0,
+        )
+
+        request_id = str(uuid.uuid4())
+        final_output = None
+
+        # No early-termination here. Unlike `_infer` (which can abort once
+        # it sees `classification: not_book`), the verify payload is short
+        # and structured — we always want the full `is_same_book` +
+        # `confidence` + `reasoning` triple before deciding.
+        async for output in self.engine.generate(
+            {
+                "prompt": text_prompt,
+                "multi_modal_data": {"image": [first_image, second_image]},
+            },
+            sampling_params=sampling_params,
+            request_id=request_id,
+        ):
+            final_output = output
+
+        if final_output is None or not final_output.outputs:
+            return {}
+
+        response = final_output.outputs[0].text.strip()
+        return _parse_json(response)
 
 
 def _parse_json(text: str) -> dict[str, Any]:
@@ -540,8 +663,12 @@ _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
-    # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
-    .apt_install("libzbar0")
+    # libzbar0 — pyzbar's C library for barcode decoding (local OCR pre-pass).
+    # tesseract-ocr + tesseract-ocr-osd — driven by pytesseract from
+    # app/services/orientation.py for OSD-based rotation detection.
+    # The OSD traineddata file is NOT shipped in tesseract-ocr's main
+    # Debian package; the osd package supplies it.
+    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-osd")
     .pip_install(
         "fastapi==0.135.1",
         "starlette==0.52.1",
@@ -556,6 +683,10 @@ _fastapi_image = (
         # reliably decode machine-readable barcodes and causes E2E test timeouts.
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
+        # pytesseract drives the orientation correction module
+        # (app/services/orientation.py). It shells out to the
+        # `tesseract` binary installed above for OSD + image_to_data.
+        "pytesseract>=0.3.10",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )

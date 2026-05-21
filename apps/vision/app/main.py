@@ -25,7 +25,10 @@ from app.proto.gen.vision import (
     ExtractedBook,
     ExtractRequest,
     ExtractResponse,
+    VerifyRequest,
+    VerifyResponse,
 )
+from app.services import orientation
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
 from app.services.url_validator import validate_image_url
@@ -471,9 +474,18 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
+    # Programmatic orientation correction (Issue #168) runs BEFORE the
+    # local OCR pre-pass and the VLM dispatch. Both downstream consumers
+    # benefit from an upright, non-mirrored image: pyzbar's barcode
+    # decoder degrades sharply on rotated/mirrored EAN-13s, and the VLM
+    # vision encoder isn't trained on mirrored text at all.
+    decoded_bytes = base64.b64decode(image_b64, validate=True)
+    corrected_bytes = orientation.correct(decoded_bytes)
+    if corrected_bytes is not decoded_bytes:
+        image_b64 = base64.b64encode(corrected_bytes).decode()
+
     if settings.local_ocr_enabled:
-        decoded = base64.b64decode(image_b64, validate=True)
-        isbn = local_isbn_scan(decoded)
+        isbn = local_isbn_scan(corrected_bytes)
         if isbn is not None:
             log.info("local OCR pre-pass hit", isbn=isbn)
             return AnalyzeResponse(
@@ -505,6 +517,68 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         confidence=confidence,
         books=books,
         model_used=settings.model_name,
+    )
+
+
+@app.post(
+    "/verify",
+    response_model=VerifyResponse,
+    status_code=200,
+    dependencies=[Depends(verify_hmac)],
+)
+async def verify(request: Request, body: VerifyRequest) -> VerifyResponse:
+    """Same-book verification (Issue #169).
+
+    Used by core's confidence-gated branch when a low-confidence /analyze
+    result needs cross-checking against a candidate cover from Open Library
+    or Google Books. Downloads both images, runs orientation correction on
+    the uploaded image only (the candidate cover is sourced from a canonical
+    upright archive), and asks the VLM whether both depict the same book.
+
+    The `candidate_isbn` field is logging/telemetry only — it is NEVER
+    forwarded to the VLM, to prevent prompt-injected ISBN bias.
+    """
+    log = logger.bind(endpoint="/verify", candidate_isbn=body.candidate_isbn)
+
+    # SSRF + size guards live inside _download_image (same as /analyze).
+    uploaded_bytes = await _download_image(body.uploaded_image_url)
+    candidate_bytes = await _download_image(body.candidate_cover_url)
+
+    # Orientation correction runs on the UPLOADED image only. Candidate
+    # covers come from Open Library / Google Books, which serve covers
+    # upright; running OSD on those would cost CPU for no gain and risk
+    # mis-rotating low-text candidates. The uploaded image is whatever
+    # the user picked off their phone — phone photo + EXIF strip means
+    # rotation/mirror correction is essential before the VLM compare.
+    uploaded_bytes = orientation.correct(uploaded_bytes)
+
+    uploaded_b64 = base64.b64encode(uploaded_bytes).decode()
+    candidate_b64 = base64.b64encode(candidate_bytes).decode()
+
+    client: VisionClient = request.app.state.vision_client
+    log.info("calling vision model for verify")
+    parsed = await client.verify(uploaded_b64, candidate_b64)
+
+    # Defensive parse — the VLM may misbehave, but the public wire
+    # contract must always return a well-formed VerifyResponse.
+    raw_confidence = parsed.get("confidence", 0.0)
+    confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    reasoning_raw = parsed.get("reasoning", "")
+    reasoning = str(reasoning_raw)[:500] if reasoning_raw is not None else ""
+
+    is_same_book = bool(parsed.get("is_same_book", False))
+
+    log.info(
+        "verify complete",
+        is_same_book=is_same_book,
+        confidence=confidence,
+    )
+    return VerifyResponse(
+        is_same_book=is_same_book,
+        confidence=confidence,
+        reasoning=reasoning,
     )
 
 
