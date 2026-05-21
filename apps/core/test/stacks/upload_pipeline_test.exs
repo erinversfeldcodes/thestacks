@@ -52,6 +52,14 @@ defmodule Stacks.UploadPipelineTest do
     book = insert(:book, title: "The Great Gatsby")
     insert(:book_edition, book: book, isbn: "9780743273565")
 
+    # Reset OL/GB fuses defensively — other tests in the suite (and other
+    # suites running before this one in CI's full `mix test`) can leave the
+    # circuit breakers blown, which makes ISBNResolver short-circuit to
+    # :circuit_open before reaching the MockHttpClient that these tests set
+    # up. The fuses are global ETS state; only :ok return values matter.
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+
     {:ok, user: user, token: token, book: book}
   end
 
