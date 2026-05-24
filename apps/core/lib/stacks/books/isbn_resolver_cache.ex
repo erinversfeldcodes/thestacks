@@ -108,8 +108,28 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-  Store a resolution result. Positive results get a 24 h TTL, negative
-  get 1 h. Other terms (e.g. `{:error, :circuit_open}`) are not cached.
+  Store a resolution result.
+
+  Caching policy:
+
+    * `{:ok, _metadata}` → cached for the positive TTL (24 h).
+    * `{:error, :not_found}` → cached for the negative TTL (1 h). This is
+      the only error worth memoising: a checksum-valid ISBN that genuinely
+      isn't in either upstream's catalogue won't suddenly appear within
+      the hour.
+    * **All other errors are NOT cached** — they signal a transient
+      upstream condition (HTTP 429/5xx, transport timeout, malformed JSON,
+      blown circuit). Caching any of them poisons subsequent enrichment
+      retries for the negative TTL, leaving placeholder titles stuck in
+      the UI even after the upstream recovers. We let the fuse + Oban
+      retries handle these instead — the upstream is the signal to retry
+      later, not to memoise.
+
+  Skips emit `[:stacks, :books, :isbn_resolver_cache, :put_skipped]`
+  with `%{isbn: isbn, reason: error_atom}` so the "cache correctly
+  refused to poison" path is observable in Fly logs alongside the
+  `cache_lookup` and `cache_put` lines.
+
   Writes to both ETS and Postgres (subject to `:persistent_cache_enabled`).
   """
   @spec put(String.t(), term()) :: :ok
@@ -131,6 +151,29 @@ defmodule Stacks.Books.ISBNResolverCache do
       [:stacks, :isbn_resolver_cache, :negative_stored],
       %{count: 1, ttl_ms: @negative_ttl_ms},
       %{isbn: isbn}
+    )
+
+    :ok
+  end
+
+  # Transient resolver errors — see closed set in
+  # `Stacks.Books.ISBNResolver.error_reason/0`. We deliberately enumerate
+  # rather than catch-all so a future resolver reason fails the pattern
+  # match loudly (dialyzer enforces the same exhaustiveness in
+  # `EnrichBookJob.outcome_tag/1`).
+  def put(isbn, {:error, reason})
+      when is_binary(isbn) and
+             reason in [
+               :circuit_open,
+               :unexpected_status,
+               :timeout,
+               :transport_error,
+               :malformed_response
+             ] do
+    :telemetry.execute(
+      [:stacks, :books, :isbn_resolver_cache, :put_skipped],
+      %{count: 1},
+      %{isbn: isbn, reason: reason}
     )
 
     :ok

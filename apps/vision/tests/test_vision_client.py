@@ -24,8 +24,6 @@ def _make_modal_mock(return_value: dict[str, object]) -> MagicMock:
     instance_mock = MagicMock()
     instance_mock.extract = method_mock
     instance_mock.classify = method_mock
-    instance_mock.analyze = method_mock
-    instance_mock.verify = method_mock
     cls_mock = MagicMock(return_value=instance_mock)
     return cls_mock
 
@@ -118,114 +116,19 @@ async def test_classify_remote_error_returns_502(client: VisionClient) -> None:
     assert exc_info.value.status_code == 502
 
 
-async def test_analyze_returns_dict(client: VisionClient) -> None:
-    """Successful Modal call returns the combined classify+extract payload."""
-    cls_mock = _make_modal_mock(
-        {
-            "classification": "book",
-            "confidence": 0.95,
-            "books": [{"title": "Test", "potential_isbns": ["9780000000002"]}],
-        }
-    )
-    with patch.object(client, "_modal_cls", cls_mock):
-        result = await client.analyze(_VALID_IMAGE)
-    assert result["classification"] == "book"
-    books = result["books"]
-    assert isinstance(books, list)
-    assert books[0]["potential_isbns"] == ["9780000000002"]
-
-
-async def test_analyze_timeout_returns_504(client: VisionClient) -> None:
-    """Modal timeout on analyze surfaces as 504."""
-    aio_mock = AsyncMock(side_effect=TimeoutError())
-    method_mock = MagicMock()
-    method_mock.remote.aio = aio_mock
-    instance_mock = MagicMock()
-    instance_mock.analyze = method_mock
-    cls_mock = MagicMock(return_value=instance_mock)
-
-    with (
-        patch.object(client, "_modal_cls", cls_mock),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.analyze(_VALID_IMAGE)
-    assert exc_info.value.status_code == 504
-
-
-async def test_analyze_remote_error_returns_502(client: VisionClient) -> None:
-    """Modal remote execution failure on analyze surfaces as 502."""
-    aio_mock = AsyncMock(side_effect=RuntimeError("container crashed"))
-    method_mock = MagicMock()
-    method_mock.remote.aio = aio_mock
-    instance_mock = MagicMock()
-    instance_mock.analyze = method_mock
-    cls_mock = MagicMock(return_value=instance_mock)
-
-    with (
-        patch.object(client, "_modal_cls", cls_mock),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.analyze(_VALID_IMAGE)
-    assert exc_info.value.status_code == 502
-
-
-async def test_analyze_non_dict_returns_safe_default(client: VisionClient) -> None:
-    """Defensive fallback: non-dict Modal result → ambiguous + empty books."""
+async def test_classify_non_dict_returns_safe_default(client: VisionClient) -> None:
+    """Defensive fallback: non-dict Modal classify result → ambiguous default."""
     cls_mock = _make_modal_mock({})
-    # Override so method.remote.aio returns a non-dict sentinel.
-    cls_mock.return_value.analyze.remote.aio = AsyncMock(return_value="oops")
+    cls_mock.return_value.classify.remote.aio = AsyncMock(return_value="oops")
     with patch.object(client, "_modal_cls", cls_mock):
-        result = await client.analyze(_VALID_IMAGE)
-    assert result == {"classification": "ambiguous", "confidence": 0.0, "books": []}
+        result = await client.classify(_VALID_IMAGE)
+    assert result == {"classification": "ambiguous", "confidence": 0.0}
 
 
-async def test_verify_returns_dict(client: VisionClient) -> None:
-    """Successful Modal verify call returns the parsed dict directly."""
-    cls_mock = _make_modal_mock({"is_same_book": True, "confidence": 0.91, "reasoning": "matches"})
-    with patch.object(client, "_modal_cls", cls_mock):
-        result = await client.verify(_VALID_IMAGE, _VALID_IMAGE)
-    assert result["is_same_book"] is True
-    assert result["confidence"] == 0.91
-
-
-async def test_verify_timeout_returns_504(client: VisionClient) -> None:
-    """Modal timeout on verify surfaces as 504."""
-    aio_mock = AsyncMock(side_effect=TimeoutError())
-    method_mock = MagicMock()
-    method_mock.remote.aio = aio_mock
-    instance_mock = MagicMock()
-    instance_mock.verify = method_mock
-    cls_mock = MagicMock(return_value=instance_mock)
-
-    with (
-        patch.object(client, "_modal_cls", cls_mock),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.verify(_VALID_IMAGE, _VALID_IMAGE)
-    assert exc_info.value.status_code == 504
-
-
-async def test_verify_remote_error_returns_502(client: VisionClient) -> None:
-    """Modal remote execution failure on verify surfaces as 502."""
-    aio_mock = AsyncMock(side_effect=RuntimeError("container crashed"))
-    method_mock = MagicMock()
-    method_mock.remote.aio = aio_mock
-    instance_mock = MagicMock()
-    instance_mock.verify = method_mock
-    cls_mock = MagicMock(return_value=instance_mock)
-
-    with (
-        patch.object(client, "_modal_cls", cls_mock),
-        pytest.raises(HTTPException) as exc_info,
-    ):
-        await client.verify(_VALID_IMAGE, _VALID_IMAGE)
-    assert exc_info.value.status_code == 502
-
-
-async def test_verify_non_dict_returns_safe_default(client: VisionClient) -> None:
-    """Defensive fallback: non-dict Modal verify result → safe default shape."""
+async def test_extract_non_dict_returns_safe_default(client: VisionClient) -> None:
+    """Defensive fallback: non-dict Modal extract result → empty books."""
     cls_mock = _make_modal_mock({})
-    cls_mock.return_value.verify.remote.aio = AsyncMock(return_value="oops")
+    cls_mock.return_value.extract.remote.aio = AsyncMock(return_value="oops")
     with patch.object(client, "_modal_cls", cls_mock):
-        result = await client.verify(_VALID_IMAGE, _VALID_IMAGE)
-    assert result == {"is_same_book": False, "confidence": 0.0, "reasoning": ""}
+        result = await client.extract([_VALID_IMAGE])
+    assert result == {"books": []}

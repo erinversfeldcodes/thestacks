@@ -26,6 +26,25 @@ defmodule Stacks.Workers.EnrichBookJob do
 
   require Logger
 
+  # Aggressive early backoff. Default Oban backoff is
+  # `(attempt - 1) ** 4 + 15 + (rand * 30)` seconds — attempt 2 lands at
+  # 15-45 s after attempt 1, which routinely exceeds the upload UI's
+  # 60 s enrichment-poll budget when OL/GB are transiently slow. Our
+  # cache-poison fix means a transient resolver error no longer locks
+  # the ISBN out for an hour, so retrying fast is safe. Stair-step
+  # 3 → 6 → 12 → 24 s gets attempt 4 in by ~45 s, fitting comfortably
+  # inside the test poll while still ceiling at 48 s on attempt 5.
+  @impl Oban.Worker
+  def backoff(%Oban.Job{attempt: attempt}) do
+    case attempt do
+      1 -> 3
+      2 -> 6
+      3 -> 12
+      4 -> 24
+      _ -> 48
+    end
+  end
+
   import Ecto.Query
 
   alias Core.Repo
@@ -154,7 +173,8 @@ defmodule Stacks.Workers.EnrichBookJob do
 
   defp run_update_transaction(book, isbn, metadata) do
     Repo.transaction(fn ->
-      with {:ok, _} <- update_book(book, metadata),
+      with {:ok, author} <- Books.find_or_create_author(metadata[:author]),
+           {:ok, _} <- update_book(book, metadata, author),
            {:ok, _} <- update_primary_edition(isbn, metadata) do
         :ok
       else
@@ -178,11 +198,26 @@ defmodule Stacks.Workers.EnrichBookJob do
     {:error, :update_failed}
   end
 
-  defp update_book(%Book{} = book, metadata) do
-    attrs = %{
+  # Bug-fix history: previous versions cast only `title` and
+  # `description` from the resolver metadata. The resolver returns
+  # `author` as a string (e.g. `"Umberto Eco"`), but `op.books` stores it
+  # as `author_id` (FK to `op.authors`), so the author silently vanished
+  # on enrichment — placeholder books ended up with a real title but
+  # `author: null` in the API. The fix runs `find_or_create_author/1` in
+  # the transaction and links the resulting row via `author_id`. When the
+  # resolver has no author (nil/empty), we leave the existing `author_id`
+  # alone rather than null it out.
+  defp update_book(%Book{} = book, metadata, author) do
+    base = %{
       "title" => presence_or(metadata[:title], book.title),
       "description" => presence_or(metadata[:description], book.description)
     }
+
+    attrs =
+      case author do
+        nil -> base
+        %{id: id} -> Map.put(base, "author_id", id)
+      end
 
     book
     |> Books.book_changeset(attrs)

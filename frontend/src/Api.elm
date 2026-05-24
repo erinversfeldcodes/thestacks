@@ -61,6 +61,7 @@ module Api exposing
     , publishBlogPost
     , putFileToR2
     , register
+    , rejectIdentification
     , rejectSource
     , removeBook
     , saveConsent
@@ -357,6 +358,32 @@ commitUpload imageId token toMsg =
         , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/upload/:image\_id/reject-identification — tell the server the
+current identification was wrong; the server will delete any placement
+created from it and re-run the vision pipeline excluding the listed books.
+Returns 202 on accept; the SSE stream emits new events as the new
+IdentifyBookJob runs.
+-}
+rejectIdentification :
+    { imageId : String, rejectedBookIds : List String, token : String }
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+rejectIdentification { imageId, rejectedBookIds, token } toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/reject-identification"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
+                )
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }

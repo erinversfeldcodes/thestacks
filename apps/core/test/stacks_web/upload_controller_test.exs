@@ -304,4 +304,192 @@ defmodule StacksWeb.UploadControllerTest do
       assert String.contains?(conn2.resp_body, book.id)
     end
   end
+
+  describe "POST /api/upload/:image_id/reject-identification" do
+    test "returns 202, enqueues IdentifyBookJob with excluded_books, and removes the prior placement",
+         %{conn: conn, user: user} do
+      author = insert(:author, name: "F. Scott Fitzgerald")
+      book = insert(:book, title: "The Great Gatsby", author: author)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          user_id: user.id,
+          book_id: book.id,
+          book_ids: [book.id],
+          storage_path: "uploads/#{Ecto.UUID.generate()}"
+        )
+
+      # Simulate the prior placement created when the user confirmed
+      # the (now-rejected) identification. We expect the reject action
+      # to soft-delete this so the retry can place a fresh book.
+      {:ok, _placement} = Stacks.Shelving.place_book(user.id, book.id, "library")
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{
+               "status" => "pending",
+               "excluded_books" => ["The Great Gatsby by F. Scott Fitzgerald"]
+             } = json_response(conn, 202)
+
+      assert_enqueued(
+        worker: IdentifyBookJob,
+        args: %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "excluded_books" => ["The Great Gatsby by F. Scott Fitzgerald"]
+        }
+      )
+
+      # Placement should be soft-deleted (removed_at set).
+      assert Stacks.Shelving.get_placement_for_book(user.id, book.id) == nil
+    end
+
+    test "falls back to title-only descriptor when the book has no author", %{
+      conn: conn,
+      user: user
+    } do
+      book = insert(:book, title: "Untitled Volume", author: nil)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"excluded_books" => ["Untitled Volume"]} = json_response(conn, 202)
+    end
+
+    test "no prior placement is a no-op (still returns 202)", %{conn: conn, user: user} do
+      author = insert(:author, name: "Some Author")
+      book = insert(:book, title: "Some Book", author: author)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"status" => "pending"} = json_response(conn, 202)
+    end
+
+    test "returns 401 without auth token" do
+      conn =
+        build_conn()
+        |> post("/api/upload/#{Ecto.UUID.generate()}/reject-identification", %{
+          "rejected_book_ids" => []
+        })
+
+      assert json_response(conn, 401)
+    end
+
+    test "returns 404 when image_id belongs to a different user", %{conn: _conn, user: user} do
+      other = insert(:user)
+      author = insert(:author, name: "X")
+      book = insert(:book, title: "Y", author: author)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+      image = insert(:uploaded_image, status: "resolved", user_id: other.id)
+
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      requester_conn = build_conn() |> put_req_header("authorization", "Bearer #{token}")
+
+      conn =
+        post(requester_conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 404 when image_id is unknown", %{conn: conn} do
+      conn =
+        post(conn, "/api/upload/#{Ecto.UUID.generate()}/reject-identification", %{
+          "rejected_book_ids" => [Ecto.UUID.generate()]
+        })
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "returns 422 when no rejected_book_ids resolve to a known book", %{
+      conn: conn,
+      user: user
+    } do
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      # All-unresolvable: random UUIDs that don't correspond to any book.
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [Ecto.UUID.generate(), Ecto.UUID.generate()]
+        })
+
+      assert %{"error" => "no_resolvable_books"} = json_response(conn, 422)
+
+      refute_enqueued(worker: IdentifyBookJob, args: %{"image_id" => image.id})
+    end
+
+    test "enqueues IdentifyBookJob with excluded_isbns resolved from rejected_book_ids",
+         %{conn: conn, user: user} do
+      # Rejection-retry plumbing: the controller resolves each book_id
+      # to its primary edition ISBN and threads the list through the
+      # Oban args so Moderation / ISBNResolver can suppress matches.
+      author = insert(:author, name: "Orson Scott Card")
+      book = insert(:book, title: "Crystal City", author: author)
+      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"status" => "pending"} = json_response(conn, 202)
+
+      assert_enqueued(
+        worker: IdentifyBookJob,
+        args: %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "excluded_books" => ["Crystal City by Orson Scott Card"],
+          "excluded_isbns" => ["9781429964500"]
+        }
+      )
+    end
+
+    test "deduplicates excluded_isbns when the same book_id appears twice in the rejected list",
+         %{conn: conn, user: user} do
+      # The frontend posts a cumulative list. If a book_id is double-
+      # listed (e.g. retry round 2 sends [book_a, book_a, book_b] because
+      # the user clicked the same suggestion twice), the controller
+      # dedupes the resolved ISBN list.
+      author = insert(:author, name: "A")
+      book = insert(:book, title: "B", author: author)
+      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id, book.id]
+        })
+
+      assert %{"status" => "pending"} = json_response(conn, 202)
+
+      assert_enqueued(
+        worker: IdentifyBookJob,
+        args: %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "excluded_isbns" => ["9780743273565"]
+        }
+      )
+    end
+  end
 end

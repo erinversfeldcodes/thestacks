@@ -49,10 +49,14 @@ export const E2E_SUITES = [
 ];
 
 /**
- * Ensure at least one book is placed on the library shelf.
- * If the library is empty, finds an unplaced book from the catalogue
- * and places it via the API. Must be called after navigating to the app
- * (needs localStorage access for the auth token).
+ * Ensure at least one PLACED book is visible on the FIRST PAGE of the
+ * catalogue, so badge-rendering assertions can succeed without scrolling
+ * or paginating. The catalogue endpoint paginates at per_page=24 by
+ * default; existing placements past position 24 won't render a badge on
+ * the default catalogue view, so checking "any placements exist" is not
+ * enough. We instead fetch the same first page the UI will render and
+ * verify at least one of those books is in the user's placements,
+ * placing one from that page if not.
  */
 export async function ensureBookOnLibrary(page: Page): Promise<void> {
   await page.goto("/library");
@@ -60,17 +64,14 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
     if (!auth.token) return false;
 
-    // Check if library already has books
-    const shelfResp = await fetch("/api/bookshelves/library", {
-      headers: { Authorization: `Bearer ${auth.token}` },
-    });
-    if (!shelfResp.ok) return false;
-    const shelfData = await shelfResp.json();
-    // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
-    const allPlacements = (shelfData.shelves ?? []).flatMap((s: any) => s.placements ?? []);
-    if (allPlacements.length > 0) return true;
+    // Fetch the first page the catalogue UI will render (default per_page=24).
+    const firstPageResp = await fetch("/api/catalogue");
+    if (!firstPageResp.ok) return false;
+    const firstPage = await firstPageResp.json();
+    const visibleBooks: { id: string }[] = firstPage.books ?? [];
+    if (visibleBooks.length === 0) return false;
 
-    // Library is empty — find an unplaced book and place it
+    // Set of book IDs already placed by this user across all shelves.
     const mineResp = await fetch("/api/placements/mine", {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
@@ -78,12 +79,14 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
       ? await mineResp.json()
       : { placements: [] };
     const placedIds = new Set(
-      mineData.placements.map((p: any) => p.book_id)
+      (mineData.placements ?? []).map((p: any) => p.book_id)
     );
 
-    const catResp = await fetch("/api/catalogue?per_page=200");
-    const catData = await catResp.json();
-    const unplaced = catData.books.find((b: any) => !placedIds.has(b.id));
+    // If any visible book is already placed, the badge will render.
+    if (visibleBooks.some((b) => placedIds.has(b.id))) return true;
+
+    // Otherwise, place the first visible-but-unplaced book on the library.
+    const unplaced = visibleBooks.find((b) => !placedIds.has(b.id));
     if (!unplaced) return false;
 
     const placeResp = await fetch("/api/bookshelves/library/placements", {
@@ -98,7 +101,7 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
   });
 
   if (!placed) {
-    console.log("WARN: could not ensure a book on library shelf");
+    console.log("WARN: could not ensure a placed book is visible on the catalogue first page");
   }
 }
 

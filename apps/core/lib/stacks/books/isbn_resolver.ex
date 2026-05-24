@@ -32,7 +32,16 @@ defmodule Stacks.Books.ISBNResolver do
   # Hard deadline for the parallel OL + GB race. Each individual upstream
   # has its own HTTP client timeout, but this cap protects the upload job
   # from a truly stuck external service.
-  @race_timeout_ms 5_000
+  #
+  # Bumped 5_000 → 8_000 after the Google Books API quota was exhausted
+  # in the chore/enable-pipelines preview (`quota_limit_value: "0"`):
+  # with GB returning a fast 429, the race effectively became a solo OL
+  # call, and OL p95 has crept above 5s during peak periods. Hitting the
+  # 5s race deadline on a healthy OL call was forcing `EnrichBookJob` to
+  # retry against the (now cache-safe) transient-error path. 8s keeps
+  # the upload hot path well under the 30s Finch timeout while removing
+  # most of the transient race-timeout false negatives.
+  @race_timeout_ms 8_000
 
   defp google_books_api_key do
     Application.get_env(:core, :google_books_api_key)
@@ -154,22 +163,60 @@ defmodule Stacks.Books.ISBNResolver do
   the same extracted title (common on probe workloads and real users
   uploading the same book cover or text post multiple times) skip
   OL/GB entirely.
-  """
-  @spec search_by_title(String.t(), String.t() | nil, String.t() | nil) ::
-          {:ok, String.t(), map()} | {:error, :not_found}
-  def search_by_title(title, author \\ nil, raw_text \\ nil) do
-    if title_cache_enabled?() do
-      case TitleSearchCache.get(title, author, raw_text) do
-        {:ok, cached} ->
-          cached
 
-        :miss ->
-          result = do_search_by_title(title, author, raw_text)
-          TitleSearchCache.put(title, author, raw_text, result)
-          result
-      end
-    else
-      do_search_by_title(title, author, raw_text)
+  ## Options
+
+    * `:excluded_isbns` — list of ISBN strings to skip when matching OL/GB
+      search results. Used by the rejection-retry flow: the user has
+      already said "no" to a book whose ISBN we resolved, so any OL/GB
+      hit that maps to that same ISBN is suppressed and we fall through
+      to the next candidate query variant. Comparison is hyphen/space-
+      insensitive (so `"978-0-12-345678-9"` matches `"9780123456789"`).
+
+  ## Cache behaviour
+
+  When `excluded_isbns` is non-empty, the `TitleSearchCache` is bypassed
+  entirely. A cached entry was computed without the exclusion list and
+  would return the very ISBN the caller asked us to skip. Bypassing
+  rather than keying-with-exclusions keeps the cache table compact —
+  retry requests are rare relative to first-attempt requests, so the
+  extra OL/GB call on a retry is an acceptable trade for not exploding
+  the cache key space.
+  """
+  @spec search_by_title(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
+          {:ok, String.t(), map()} | {:error, :not_found}
+  def search_by_title(title, author \\ nil, raw_text \\ nil, opts \\ []) do
+    excluded_isbns = Keyword.get(opts, :excluded_isbns, [])
+    excluded_descriptors = Keyword.get(opts, :excluded_book_descriptors, [])
+
+    if excluded_isbns != [] or excluded_descriptors != [] do
+      Logger.info(
+        "ISBNResolver.search_by_title: title=#{inspect(title)} excluded_isbns=#{inspect(excluded_isbns)} excluded_descriptors=#{inspect(excluded_descriptors)}"
+      )
+    end
+
+    cond do
+      excluded_isbns != [] or excluded_descriptors != [] ->
+        # Bypass the cache: a memoised entry was computed without the
+        # exclusion list and would happily return the very ISBN/book we
+        # were asked to skip. Don't write the result back either — the
+        # next first-attempt caller (no exclusions) would inherit a
+        # result that's already been narrowed.
+        do_search_by_title(title, author, raw_text, excluded_isbns, excluded_descriptors)
+
+      title_cache_enabled?() ->
+        case TitleSearchCache.get(title, author, raw_text) do
+          {:ok, cached} ->
+            cached
+
+          :miss ->
+            result = do_search_by_title(title, author, raw_text, [], [])
+            TitleSearchCache.put(title, author, raw_text, result)
+            result
+        end
+
+      true ->
+        do_search_by_title(title, author, raw_text, [], [])
     end
   end
 
@@ -177,7 +224,7 @@ defmodule Stacks.Books.ISBNResolver do
     Application.get_env(:core, :title_search_cache_enabled, true)
   end
 
-  defp do_search_by_title(title, author, raw_text) do
+  defp do_search_by_title(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     trimmed_title = trim_last_word(title)
     surname = author_surname(author)
     raw_keywords = normalize_raw_text(raw_text)
@@ -227,7 +274,9 @@ defmodule Stacks.Books.ISBNResolver do
       |> Enum.uniq()
       |> Enum.reject(fn {t, _} -> is_nil(t) or String.trim(t) == "" end)
 
-    Enum.find_value(candidates, {:error, :not_found}, &try_candidate/1)
+    Enum.find_value(candidates, {:error, :not_found}, fn candidate ->
+      try_candidate(candidate, excluded_isbns, excluded_descriptors)
+    end)
   end
 
   # Race OL + GB per candidate query. The `resolve/1` path already does
@@ -241,18 +290,108 @@ defmodule Stacks.Books.ISBNResolver do
   # The existing `await_first_success/2` helper matches `{:ok, _}` —
   # OL/GB title searches return a 3-tuple `{:ok, isbn, metadata}`, so
   # wrap+unwrap around the race rather than duplicate the helper.
-  defp try_candidate({t, a}) do
-    ol = Task.async(fn -> wrap_3tuple(open_library_title_search(t, a)) end)
-    gb = Task.async(fn -> wrap_3tuple(google_books_search(t, a)) end)
+  #
+  # When `excluded_isbns` or `excluded_descriptors` is non-empty, an
+  # OL/GB hit whose ISBN matches an entry, OR whose (title, author)
+  # pair matches a "Title by Author" descriptor, is mapped to `nil` so
+  # `Enum.find_value/3` skips to the next candidate query variant.
+  # The function already tries progressively broader queries, so this
+  # naturally falls through to the next non-excluded match without
+  # changing the candidate list.
+  #
+  # Descriptor matching is the load-bearing case when the user rejects
+  # a book that has multiple editions in OL/GB (e.g. two Tor editions
+  # of the same Orson Scott Card title): ISBN exclusion alone walks
+  # from one edition to the next; (title, author) exclusion treats all
+  # editions as the same book and skips past them.
+  defp try_candidate({t, a}, excluded_isbns, excluded_descriptors) do
+    ol =
+      Task.async(fn ->
+        wrap_3tuple(open_library_title_search(t, a, excluded_isbns, excluded_descriptors))
+      end)
+
+    gb =
+      Task.async(fn ->
+        wrap_3tuple(google_books_search(t, a, excluded_isbns, excluded_descriptors))
+      end)
 
     case await_first_success([ol, gb], {:error, :not_found}) do
-      {:ok, {isbn, metadata}} -> {:ok, isbn, metadata}
-      _ -> nil
+      {:ok, {isbn, metadata}} ->
+        cond do
+          excluded_isbn?(isbn, excluded_isbns) -> nil
+          excluded_descriptor?(metadata, excluded_descriptors) -> nil
+          true -> {:ok, isbn, metadata}
+        end
+
+      _ ->
+        nil
     end
   end
 
   defp wrap_3tuple({:ok, isbn, metadata}), do: {:ok, {isbn, metadata}}
   defp wrap_3tuple(other), do: other
+
+  # Hyphen/space-insensitive ISBN membership check. The upstream stores
+  # rejected ISBNs as `book.primary_edition.isbn` (usually a clean
+  # 13-digit string), but the OL/GB search-result ISBNs sometimes
+  # arrive with formatting hyphens. Normalise both sides before compare.
+  defp excluded_isbn?(_isbn, []), do: false
+
+  defp excluded_isbn?(isbn, excluded_isbns) do
+    normalised = normalise_isbn_for_compare(isbn)
+
+    normalised != "" and
+      Enum.any?(excluded_isbns, &(normalise_isbn_for_compare(&1) == normalised))
+  end
+
+  defp normalise_isbn_for_compare(value) when is_binary(value),
+    do: value |> String.replace(~r/[\s\-]/, "") |> String.upcase()
+
+  defp normalise_isbn_for_compare(_), do: ""
+
+  # (title, author) pair membership check. Upstream rejected books arrive
+  # as "Title by Author" strings (see `UploadController.describe_book/1`).
+  # OL/GB metadata gives us discrete title + author fields; rebuild the
+  # same "Title by Author" form and compare normalised (lowercase, strip
+  # punctuation, collapse whitespace) on both sides. This catches the
+  # "two editions of the same book under different ISBNs" case where
+  # ISBN-only exclusion would walk from one edition to the next forever.
+  defp excluded_descriptor?(_metadata, []), do: false
+
+  defp excluded_descriptor?(metadata, excluded_descriptors) do
+    case metadata_descriptor(metadata) do
+      "" ->
+        false
+
+      descriptor ->
+        normalised = normalise_descriptor_for_compare(descriptor)
+
+        Enum.any?(
+          excluded_descriptors,
+          &(normalise_descriptor_for_compare(&1) == normalised)
+        )
+    end
+  end
+
+  defp metadata_descriptor(%{title: title, author: author})
+       when is_binary(title) and title != "" do
+    case author do
+      bin when is_binary(bin) and bin != "" -> "#{title} by #{bin}"
+      _ -> title
+    end
+  end
+
+  defp metadata_descriptor(_), do: ""
+
+  defp normalise_descriptor_for_compare(value) when is_binary(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/[^[:alnum:]\s]/u, " ")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  defp normalise_descriptor_for_compare(_), do: ""
 
   # Strip subtitle after `:`, `–`, or `—` (handles long academic titles like
   # "Born Again Bodies: Flesh and Spirit in American Christianity" → "Born Again Bodies").
@@ -320,14 +459,17 @@ defmodule Stacks.Books.ISBNResolver do
   # Returns {isbn, metadata} with partial metadata from the search result,
   # so store_book can skip the secondary ISBN lookup (which often fails for
   # obscure editions). Prefers ISBN-13 over ISBN-10.
-  defp open_library_title_search(title, author) do
+  defp open_library_title_search(title, author, excluded_isbns, excluded_descriptors) do
     case :fuse.ask(@open_library_fuse, :sync) do
-      :blown -> {:error, :circuit_open}
-      :ok -> do_open_library_title_search(title, author)
+      :blown ->
+        {:error, :circuit_open}
+
+      :ok ->
+        do_open_library_title_search(title, author, excluded_isbns, excluded_descriptors)
     end
   end
 
-  defp do_open_library_title_search(title, author) do
+  defp do_open_library_title_search(title, author, excluded_isbns, excluded_descriptors) do
     base = [
       {"title", title},
       {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
@@ -339,7 +481,16 @@ defmodule Stacks.Books.ISBNResolver do
 
     case make_request(url) do
       {:ok, %{"docs" => docs}} when is_list(docs) ->
-        Enum.find_value(docs, {:error, :not_found}, &build_ol_metadata/1)
+        # Iterate docs and skip any whose ISBN or (title, author) matches
+        # an upstream exclusion. The first non-excluded doc with an ISBN
+        # wins. Without this, build_ol_metadata returns the first ISBN
+        # doc unconditionally and `try_candidate` ends up calling the
+        # SAME OL URL across all candidate query variants — the
+        # exclusion at the try_candidate level only ever sees the same
+        # top doc and never iterates past it.
+        Enum.find_value(docs, {:error, :not_found}, fn doc ->
+          build_ol_metadata(doc, excluded_isbns, excluded_descriptors)
+        end)
 
       {:error, _} ->
         Stacks.CircuitBreakers.melt(@open_library_fuse)
@@ -350,7 +501,7 @@ defmodule Stacks.Books.ISBNResolver do
     end
   end
 
-  defp build_ol_metadata(doc) do
+  defp build_ol_metadata(doc, excluded_isbns, excluded_descriptors) do
     isbns = Map.get(doc, "isbn", [])
 
     isbn =
@@ -360,27 +511,28 @@ defmodule Stacks.Books.ISBNResolver do
     if isbn do
       author_str = doc |> Map.get("author_name", []) |> Enum.join(", ")
 
-      {:ok, isbn,
-       %{
-         title: doc["title"],
-         author: if(author_str != "", do: author_str, else: nil),
-         subjects: doc |> Map.get("subject", []) |> Enum.take(5),
-         publication_year: doc["first_publish_year"],
-         source: :open_library
-       }}
+      metadata = %{
+        title: doc["title"],
+        author: if(author_str != "", do: author_str, else: nil),
+        subjects: doc |> Map.get("subject", []) |> Enum.take(5),
+        publication_year: doc["first_publish_year"],
+        source: :open_library
+      }
+
+      apply_ol_exclusion(:open_library, isbn, metadata, excluded_isbns, excluded_descriptors)
     else
       nil
     end
   end
 
-  defp google_books_search(title, author) do
+  defp google_books_search(title, author, excluded_isbns, excluded_descriptors) do
     case :fuse.ask(@google_books_fuse, :sync) do
       :blown -> {:error, :circuit_open}
-      :ok -> do_google_books_search(title, author)
+      :ok -> do_google_books_search(title, author, excluded_isbns, excluded_descriptors)
     end
   end
 
-  defp do_google_books_search(title, author) do
+  defp do_google_books_search(title, author, excluded_isbns, excluded_descriptors) do
     query =
       if author && author != "" do
         "intitle:#{URI.encode(title)}+inauthor:#{URI.encode(author)}"
@@ -388,11 +540,17 @@ defmodule Stacks.Books.ISBNResolver do
         "intitle:#{URI.encode(title)}"
       end
 
-    url = google_books_url("q=#{query}&maxResults=1")
+    # Pull 5 items (was 1) so we can iterate past excluded matches when
+    # the user has rejected the top hit. Empty exclusions → same
+    # effective behaviour as before; non-empty → walk past the rejected
+    # book to the next plausible candidate.
+    url = google_books_url("q=#{query}&maxResults=5")
 
     case make_request(url) do
-      {:ok, %{"items" => [item | _]}} ->
-        parse_google_books_search_item(item)
+      {:ok, %{"items" => items}} when is_list(items) ->
+        Enum.find_value(items, {:error, :not_found}, fn item ->
+          parse_google_books_search_item(item, excluded_isbns, excluded_descriptors)
+        end)
 
       {:error, _} ->
         Stacks.CircuitBreakers.melt(@google_books_fuse)
@@ -403,7 +561,7 @@ defmodule Stacks.Books.ISBNResolver do
     end
   end
 
-  defp parse_google_books_search_item(item) do
+  defp parse_google_books_search_item(item, excluded_isbns, excluded_descriptors) do
     info = item["volumeInfo"] || %{}
 
     isbn =
@@ -417,22 +575,58 @@ defmodule Stacks.Books.ISBNResolver do
     if isbn do
       authors = info |> Map.get("authors", []) |> Enum.join(", ")
 
-      {:ok, isbn,
-       %{
-         title: info["title"],
-         author: authors,
-         description: info["description"],
-         cover_image_url: get_in(info, ["imageLinks", "thumbnail"]),
-         publisher: info["publisher"],
-         publication_year: parse_year(info["publishedDate"]),
-         page_count: info["pageCount"],
-         subjects: info["categories"] || [],
-         google_books_id: item["id"],
-         source: :google_books
-       }}
+      metadata = %{
+        title: info["title"],
+        author: authors,
+        description: info["description"],
+        cover_image_url: get_in(info, ["imageLinks", "thumbnail"]),
+        publisher: info["publisher"],
+        publication_year: parse_year(info["publishedDate"]),
+        page_count: info["pageCount"],
+        subjects: info["categories"] || [],
+        google_books_id: item["id"],
+        source: :google_books
+      }
+
+      apply_ol_exclusion(:google_books, isbn, metadata, excluded_isbns, excluded_descriptors)
     else
-      {:error, :not_found}
+      nil
     end
+  end
+
+  # Shared exclusion gate for OL/GB title-search hits. Returns nil when
+  # the candidate matches an upstream rejection (ISBN or title+author
+  # descriptor), or {:ok, isbn, metadata} otherwise. Diagnostic
+  # `Logger.info` only fires when at least one exclusion list is
+  # non-empty so first-attempt queries don't log noise.
+  defp apply_ol_exclusion(source, isbn, metadata, excluded_isbns, excluded_descriptors) do
+    has_exclusions? = excluded_isbns != [] or excluded_descriptors != []
+
+    cond do
+      excluded_isbn?(isbn, excluded_isbns) ->
+        if has_exclusions?, do: log_resolver_skip(source, isbn, metadata, :excluded_isbn)
+        nil
+
+      excluded_descriptor?(metadata, excluded_descriptors) ->
+        if has_exclusions?, do: log_resolver_skip(source, isbn, metadata, :excluded_descriptor)
+        nil
+
+      true ->
+        if has_exclusions?, do: log_resolver_accept(source, isbn, metadata)
+        {:ok, isbn, metadata}
+    end
+  end
+
+  defp log_resolver_skip(source, isbn, metadata, reason) do
+    Logger.info(
+      "ISBNResolver.#{source}: skip isbn=#{isbn} title=#{inspect(metadata.title)} author=#{inspect(metadata.author)} reason=#{reason}"
+    )
+  end
+
+  defp log_resolver_accept(source, isbn, metadata) do
+    Logger.info(
+      "ISBNResolver.#{source}: ACCEPT isbn=#{isbn} title=#{inspect(metadata.title)} author=#{inspect(metadata.author)}"
+    )
   end
 
   defp resolve_open_library(isbn) do

@@ -21,12 +21,6 @@ warn_unused_configs = true
 module = "pyzbar.*"
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-# pytesseract has no type stubs and no py.typed marker — ignore missing imports.
-# Used by app/services/orientation.py for OSD-based rotation + mirror detection.
-module = "pytesseract.*"
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

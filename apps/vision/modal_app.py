@@ -1,9 +1,27 @@
 """
 Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
 
+Inference stack:
+  * Backend  — HuggingFace Transformers + accelerate (no vLLM).
+  * Model    — Qwen/Qwen2.5-VL-7B-Instruct loaded in bfloat16.
+  * GPU      — A10G. 7B bf16 weights fit with comfortable headroom; the
+                A10G is materially cheaper than H100 and matches the
+                empirically-clean baseline (commit dfef1333).
+  * Concurrency — single inference per container at a time. ``classify``
+                  and ``extract`` are sync ``@modal.method`` calls; Modal
+                  serialises them on the underlying CUDA context. Bursts
+                  scale out horizontally via ``max_containers=10`` rather
+                  than vertically via ``@modal.concurrent``.
+  * Flow     — two GPU calls per upload (``classify`` then, on a positive
+                classification, ``extract``). The FastAPI ``/analyze``
+                endpoint in ``app/main.py`` orchestrates the two calls and
+                short-circuits on confident ``not_book`` / ``ambiguous``.
+
 This file defines two Modal functions:
 
-  1. VisionModel  — GPU class (A10G) for running Qwen2.5-VL inference.
+  1. VisionModel  — GPU class (A10G) running Qwen2.5-VL-7B-Instruct in
+                    bfloat16. Exposes ``classify`` and ``extract`` Modal
+                    methods. Single-image inference only.
   2. vision_api   — CPU function hosting the FastAPI app via @modal.asgi_app().
                     HTTPS endpoint: https://erinversfeldcodes--{MODAL_APP_NAME}-vision-api.modal.run
 
@@ -26,72 +44,31 @@ import modal
 # Per-PR deploys override this via the MODAL_APP_NAME env var.
 # Local / production deploys use the default.
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
-
-# AWQ-quantized 4-bit Qwen2.5-VL-72B. Weights ~38 GB vs ~145 GB for the
-# bfloat16 original. Selected over the 7B variant for substantially better
-# handling of geometrically degraded inputs — mirrored, rotated, and
-# partially-cropped book covers. The 7B variant could not reliably read
-# mirrored text even with explicit re-orientation prompting; the 72B has
-# meaningfully better rotation/mirror invariance from training scale alone.
-#
-# Fits on a single H100 (80 GB): ~38 GB weights + ~5 GB activations/CUDA
-# workspace + ~35 GB KV cache pool at gpu_memory_utilization=0.90. KV cache
-# headroom is materially smaller than at 7B, so `@modal.concurrent` below
-# is reduced from 8 → 2.
-#
-# Override via MODEL_NAME env var if a faster community quant emerges or
-# if we need to roll back to 7B for cost.
-MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-VL-72B-Instruct-AWQ")
+MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 
 def _download_model() -> None:
-    """Pre-download model weights into the container image.
+    """Pre-download model weights into the container image during build.
 
     Runs once at `modal deploy` time (or when the image is invalidated).
-    vLLM loads from the local HuggingFace cache directory, so
-    `snapshot_download` is sufficient — no need to construct the model
-    object at build time (which would also require GPU).
+    The downloaded weights are cached in the image layer — every subsequent
+    container start loads from local disk rather than re-downloading.
     """
-    from huggingface_hub import snapshot_download
-    from transformers import AutoProcessor
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-    snapshot_download(MODEL_NAME)
     AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
+    Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libzbar0")
     .pip_install(
-        # vLLM v1 engine (default in 0.9.x+). Upgraded from 0.7.3 to
-        # unlock prefix caching for multimodal prompts — the v0 engine
-        # (used by 0.7.3) silently disabled prefix caching for VLMs,
-        # forcing a full prefill on the ~250-token `_ANALYZE_PROMPT`
-        # instruction prefix on every request. v1 caches that prefix
-        # across requests.
-        #
-        # Draft-model speculative decoding was also attempted here; it
-        # is unsupported for VLMs on vLLM 0.9 (V0 asserts on init when
-        # combining spec-dec + multimodal; V1 doesn't support draft-
-        # model spec-dec yet). Keep this in mind before re-enabling.
-        #
-        # Pinned to a tested 0.9.x release. Bump only after revalidating
-        # the AsyncLLMEngine API surface + Qwen2.5-VL + AWQ combination.
-        # All three have been in flux across minor versions.
-        "vllm==0.9.0",
-        # AWQ kernel backend. `autoawq` ships the optimised CUDA kernels
-        # vLLM dispatches to when `quantization="awq_marlin"` is set.
-        "autoawq>=0.2.0",
-        # Transformers pinned to the compatibility window for vLLM 0.9.x.
-        # Historical pitfalls that forced earlier narrow ranges:
-        #   * 4.48.x and earlier: no `qwen2_5_vl` architecture (added 4.49.0).
-        #   * 4.50.0 (only): removed `Qwen2Tokenizer.all_special_tokens_extended`
-        #     which older vLLM versions called directly.
-        # vLLM 0.9.x tolerates a wider range; 4.52 is a safe middle.
-        # Re-pin in lockstep with vllm when bumping either.
-        "transformers==4.52.0",
+        "transformers>=4.50.0",
         "qwen-vl-utils>=0.0.10",
-        "huggingface_hub>=0.26.0",
+        "torch>=2.4.0",
+        "torchvision",
+        "accelerate>=0.34.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
     )
@@ -111,463 +88,191 @@ _CLASSIFY_PROMPT = (
     "  - Artwork, geometric shapes, patterns, logos, or abstract designs without book text.\n"
     "  - A screenshot of text that does not name a specific title or author.\n"
     "  - An image resembling a book cover in composition (rectangle, colours, shapes) but\n"
-    "    with no readable title, author name, or ISBN — this is NOT a book.\n\n"
+    "    with no readable title, author name, or ISBN — this is NOT a book.\n"
+    "  - A still from a TV show, film, news segment, advertisement, video game, or other "
+    "video/screen content where a book is NOT the dominant subject (even if a book happens "
+    "to be visible in the frame, e.g. on a desk, shelf, or held by a presenter, but the "
+    "primary subject of the image is the show / channel / brand / scene around it).\n\n"
     'Answer "ambiguous" only when the image might show book content but you genuinely\n'
     "cannot tell — e.g. a blurred or cropped image where something rectangular is\n"
-    "partially visible but no text is legible.\n\n"
+    "partially visible but no text is legible; OR a screenshot where a book is present "
+    "and partially legible but you cannot determine whether it is the primary subject "
+    "vs. an incidental prop in a larger scene.\n\n"
     "Respond with ONLY valid JSON — no explanation, no code fences:\n"
     '{"classification": "book", "confidence": 0.95,'
     ' "reasoning": "one sentence explaining your decision"}'
 )
 
 _EXTRACT_PROMPT = (
-    "Extract all books visible or mentioned in this image. For each book, return its title, "
-    "author name, and any ISBN numbers visible. If the image is a screenshot of text "
-    "(social media post, article, reading list), extract all books mentioned in the text. "
-    "For physical book covers, use both the visible text and the cover artwork — illustration "
-    "style, subject matter, period, and imagery — as complementary signals to identify the "
-    "correct title and author accurately.\n\n"
-    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
-    '{"books": [{"title": "...", "author": "...", "potential_isbns": [], "raw_text": "..."}]}\n'
+    "You are a book identification assistant with expertise in OCR and cover recognition.\n\n"
+    "Extract all books visible or mentioned in this image. For EACH book:\n"
+    "- Read all visible text, including text that is mirrored, rotated, partially cropped, "
+    "or at an angle. If text appears reversed, mentally un-flip it before transcribing.\n"
+    "- Use ALL available signals together: visible text (title, author, subtitle, publisher), "
+    "cover artwork (illustration style, colour palette, period, subject matter, typography), "
+    "and any partial words or fragments — do NOT discard partial text.\n"
+    "- When the title appears cropped at the top or bottom of the cover, include any "
+    "visible prefix or suffix words even if only partially legible. Prefer the longest "
+    'plausible full title (e.g. "Train to Crystal City" not "Crystal City"; '
+    '"The Book Thief" not "Book Thief") over the shortest fragment.\n'
+    "- If the image is a screenshot of text (social media, article, reading list), extract "
+    "all book titles and authors mentioned in the text content.\n"
+    "- ONLY identify ACTUAL BOOKS. If the image is a still from a TV show, film, news "
+    "segment, advertisement, video game, or any video/screen content — even if a book "
+    "happens to be visible in the frame — return books:[] unless the book is the "
+    "dominant subject AND its title is clearly legible. Do NOT identify a TV show or "
+    "media-brand as a book, even when the OL/GB catalogue may contain a tie-in book with "
+    "the same name. Authors should be people, not production companies "
+    '(e.g. "Discovery Communications", "Warner Bros.", "Productions, Inc.") '
+    "— if the only plausible author is an organisation/brand, return books:[].\n\n"
+    "Reasoning approach:\n"
+    "1. Transcribe all readable text verbatim (including fragments), noting any orientation "
+    "issues.\n"
+    "2. Apply any necessary corrections (mirror, rotation) to produce clean text.\n"
+    "3. Cross-reference corrected text + cover art to identify the specific edition.\n"
+    "4. If uncertain between multiple books, pick the most likely and reflect that in "
+    "confidence.\n\n"
+    "Respond with ONLY valid JSON — no explanation, no markdown, no code fences:\n"
+    '{"books": [{'
+    '  "title": "Full title as it appears on the cover",'
+    '  "author": "Author full name or null if not visible",'
+    '  "confidence": 0.95,'
+    '  "raw_text": "Verbatim text fragments as seen, before any correction",'
+    '  "corrected_text": "Text after un-mirroring/rotating/inferring partial words",'
+    '  "identification_signals": ["cover text", "subtitle", "cover art", "partial OCR"],'
+    '  "potential_isbns": []'
+    "}]}\n"
     'If no books can be identified: {"books": []}'
 )
 
-# Single-pass prompt: one `model.generate()` yields both the classification
-# signal and the extracted book list. The caller (`app.main:/analyze`)
-# previously issued classify + extract back-to-back — two container
-# invocations, two round-trips. On real book uploads the second call runs
-# against a cold container more often than the first because the first
-# warmed the class but the Modal scheduler load-balances independently.
-# Consolidating halves inference count and removes the inter-call gap
-# (~2-4s observed at upload p95=7.7s).
-#
-# Prompt engineering notes:
-#   - STEP 1 (orient) is the load-bearing line for reversed / rotated /
-#     mirrored covers — Qwen2.5-VL will read upside-down text when asked
-#     and often won't when not.
-#   - Extraction is permitted on "ambiguous" so partial signal (a half-
-#     visible ISBN, one legible word of a title) survives the pipeline.
-#     The caller filters books only for confident "not_book".
-#   - Per-book `confidence` lets enrichment deprioritise weak guesses
-#     before hitting Google Books / Open Library (Issue #167).
-#   - `reasoning` is retained as a soft chain-of-thought scratchpad. On
-#     hard cases (rotated, partially-cropped covers) the model performs
-#     better when it can emit a short justification before committing to
-#     the structured answer. Logged on the /classify callback path; not
-#     yet wired into /analyze logging but cheap to add.
-#   - The JSON field order — classification, confidence, reasoning, books —
-#     is fixed so `_can_early_terminate` can abort streaming once it sees
-#     `"classification": "not_book"` followed by a confidence value.
-#   - Single JSON object, no nested code fences. `_parse_json` already
-#     handles the "model wrapped the response in ```json" case.
-_VERIFY_PROMPT = (
-    "You are comparing two book-cover images to decide whether they depict "
-    "the same book. The FIRST image is what a user uploaded; the SECOND is "
-    "a reference cover fetched from Open Library or Google Books for a "
-    "candidate identification.\n\n"
-    "STEP 1 — Orient both images.\n"
-    "If either appears upside-down, mirrored, sideways, or rotated, mentally "
-    "re-orient before reading. The user's image may itself be a screenshot "
-    "of a video, a screen, or another image — in that case the book within "
-    "may be inverted or mirrored relative to the surrounding frame.\n\n"
-    "STEP 2 — Compare.\n"
-    "Look for matches across: title text (exact or partial), author text, "
-    "cover illustration style, subject matter, period, colour palette, "
-    "typography, and overall composition. Two editions of the same book "
-    "may have different cover art — title text is the most reliable signal "
-    "when present; cover artwork is corroborating.\n\n"
-    "STEP 3 — Decide.\n"
-    "Set `is_same_book` to true ONLY if you are confident both images "
-    "depict the same book. If you cannot tell — different art with no "
-    "readable title overlap, partial obstruction, or any genuine "
-    "uncertainty — return `false`. A confident wrong answer is worse than "
-    "admitting uncertainty.\n\n"
-    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
-    "{\n"
-    '  "is_same_book": true,\n'
-    '  "confidence": 0.92,\n'
-    '  "reasoning": "one sentence explaining the decision"\n'
-    "}"
-)
 
-_ANALYZE_PROMPT = (
-    "You are inspecting an image to identify any books it contains. Work through "
-    "these steps:\n\n"
-    "STEP 1 — Orient the image.\n"
-    "If text or imagery appears upside-down, mirrored, sideways, or rotated, "
-    "mentally re-orient before reading. The image may itself be a screenshot of "
-    "a video, a screen, or another image — in that case the book within may be "
-    "inverted or mirrored relative to the surrounding frame. Examine the book "
-    "region specifically (not just the whole image) and flip it back before "
-    "reading. Cropped or partially-visible covers still count; read whatever "
-    "portion is legible.\n\n"
-    "STEP 2 — Classify the image. Set `classification` to one of:\n"
-    '  - "book"      — A physical book (cover, spine, or barcode visible) OR a\n'
-    "                  screenshot/photo of text that names a specific book title or\n"
-    "                  author. Marginal or partial covers with ANY legible title,\n"
-    "                  author, or ISBN which are still recognisable as belonging\n"
-    '                  to books are still "book".\n'
-    '  - "not_book"  — No book present and no book named in legible text. Examples:\n'
-    "                  a photo or illustration of an animal, food, a person, or a\n"
-    "                  landscape; artwork, geometric shapes, patterns, logos, or\n"
-    "                  abstract designs without book text; a screenshot of text that\n"
-    "                  does not name a specific title or author; a rectangle\n"
-    "                  resembling a cover in composition but with no readable\n"
-    "                  title, author name, or ISBN.\n"
-    '  - "ambiguous" — You cannot tell because the image is unreadable (heavy blur,\n'
-    "                  total occlusion, lighting too poor to make out anything\n"
-    "                  book-like).\n\n"
-    "STEP 3 — Extract books. Populate `books` with every book you can partially or\n"
-    'fully identify. INCLUDE entries even when classification is "ambiguous" if ANY\n'
-    "signal is recoverable (a partial ISBN, one legible word of a title, etc.).\n"
-    "If the image is a screenshot of text (social media post, article, reading\n"
-    "list), extract every book mentioned in the text — not just the first or the\n"
-    'main one. Only return `books: []` for a confident "not_book".\n\n'
-    "For each book provide:\n"
-    '  - `title`           — best reading of the title, or "" if unreadable.\n'
-    '  - `author`          — best reading of the author, or "" if unreadable.\n'
-    "  - `confidence`      — your confidence in this specific book identification,\n"
-    "                        0.0-1.0. Use 0.9+ only when title AND author are\n"
-    "                        clearly legible.\n"
-    "  - `potential_isbns` — every 10- or 13-digit numeric string visible on the\n"
-    "                        cover, spine, or barcode that could plausibly be an\n"
-    "                        ISBN. Include both ISBN-10 and ISBN-13 if both are\n"
-    "                        printed. Do NOT filter by checksum — the caller\n"
-    "                        validates. Strip hyphens and spaces.\n"
-    "  - `raw_text`        — verbatim transcription of the most identifying text\n"
-    "                        you read (title block, author line, or screenshot\n"
-    "                        quote). One short string, not a full page dump.\n\n"
-    "If the cover artwork is more legible than the text (e.g. recognisable\n"
-    "illustration style, period setting), use it as a corroborating signal.\n"
-    "When the title text is only partially legible, combine the partial reading\n"
-    "with visual signals from the cover (illustration style, subject matter,\n"
-    "period, colour palette, typography) to disambiguate between candidate books\n"
-    'sharing that text fragment. A single word like "crystal" or "train" can\n'
-    "belong to many books; the cover's visual treatment is usually unique to\n"
-    "one. Only commit to a title/author combination you can actually read or\n"
-    "strongly recognise. Do not invent.\n\n"
-    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
-    "{\n"
-    '  "classification": "book" | "not_book" | "ambiguous",\n'
-    '  "confidence": 0.95,\n'
-    '  "reasoning": "one sentence explaining the classification",\n'
-    '  "books": [\n'
-    '    {"title": "...", "author": "...", "confidence": 0.9,'
-    ' "potential_isbns": ["..."], "raw_text": "..."}\n'
-    "  ]\n"
-    "}"
-)
+def _build_extract_prompt(excluded_books: list[str] | None) -> str:
+    """Return the extract prompt, augmented with a rejection-retry constraint
+    when ``excluded_books`` is non-empty.
+
+    The frontend's "No, try again" flow re-uploads (logically) the same image
+    with the cumulative list of previously-identified books the user has
+    rejected. We append an explicit constraint instructing the model to NOT
+    return any of those titles, so it picks a different plausible candidate
+    or returns books:[] if none exists. When the list is empty, the baseline
+    prompt is returned unchanged.
+    """
+    if not excluded_books:
+        return _EXTRACT_PROMPT
+    bullets = "\n".join(f"  - {entry}" for entry in excluded_books)
+    constraint = (
+        "\n\nCONSTRAINT: This image has previously been identified as the "
+        "following book(s), and the user has rejected those identifications "
+        "as incorrect. Do NOT return any of these as a match. Pick a "
+        "different book that fits the image, or return books:[] if no "
+        "other plausible match exists.\n"
+        "Rejected (do NOT return):\n"
+        f"{bullets}\n"
+    )
+    return _EXTRACT_PROMPT + constraint
 
 
 @app.cls(
-    gpu="H100",
+    gpu="A10G",
     image=image,
-    # Region pinning was removed 2026-04-23 after gate observations showed
-    # `upload_p95_ms` regressing to 3556 ms (vs 2074 ms during local warm
-    # testing) with 0% vision failure rate and fuse closed — i.e., not a
-    # correctness issue, just Modal taking longer to schedule. The
-    # leading-order suspect was us-east H100 capacity pressure, where the
-    # scheduler blocks rather than falling back when the regional pool is
-    # exhausted.
+    # A10G economics: 7B bf16 fits comfortably (~15 GB weights of the
+    # 24 GB VRAM); single-inference-per-container under HF Transformers
+    # (no continuous batching here — that was vLLM). Cold start ~60 s
+    # to load the 7B weights from the local image cache.
     #
-    # Trade-off accepted: cross-region placement (e.g. us-west) adds ~60 ms
-    # Fly→Modal RTT per /analyze call. At a 2000-3000 ms p95 budget, 60 ms
-    # is rounding error; multi-second scheduling wait was not.
-    #
-    # Neon us-east-1 is unaffected — vision doesn't talk to Neon. Fly IAD
-    # (core) is still the sole upstream, so cross-region placement only
-    # affects the single Modal HTTPS round-trip per upload. If the p95
-    # worsens after unpinning (evidence: a `[:stacks, :vision, :request,
-    # :stop]` p95 > ~200 ms higher than the historical us-east median),
-    # reconsider: pin back with a min_containers=1 keep-warm, or move to
-    # L40S which has broader availability.
-    # H100 (80 GB, Hopper w/ FP8 tensor cores) is required for the 72B AWQ
-    # model — the weights alone are ~38 GB, so the 24 GB A10G is no longer
-    # viable. awq_marlin targets Hopper's FP8 path, giving meaningfully
-    # better throughput than the bf16 fallback would on the same hardware.
-    # Expected per-call latency at 72B AWQ on warm H100: ~2-4 s for single
-    # book covers, ~6-10 s for text-heavy screenshots. Cold-start adds
-    # ~60-90 s (weights load from local image cache, not HF).
-    #
-    # Cap autoscaled containers at 10. With max_inputs=2 each, that's up
-    # to 20 concurrent inferences — below the Oban :vision queue ceiling
-    # of 60, so the queue absorbs bursts that the GPU pool cannot. At
-    # peak ~$40-50/hr (10 * ~$4-5/hr H100); amortises well below that at
-    # real utilisation because Modal charges per active container-second
-    # and `scaledown_window=1200` lets idle containers release.
-    # Re-evaluate `max_containers` if monthly bill runs hotter than
-    # expected. The 72B is the same H100 hourly rate as 7B was — cost
-    # delta vs the prior 7B setup comes from longer per-call execution
-    # time and from the lower max_inputs forcing more containers under
-    # the same offered load.
+    # Cap autoscaled containers at 10. Without @modal.concurrent we run
+    # one inference per container at a time, so this also caps in-flight
+    # GPU work at 10. Re-evaluate `max_containers` if monthly bill runs
+    # hotter than expected or if upload queue depth saturates the cap.
     max_containers=10,
-    # 600s allows for cold-start (~60-90 s for 72B weights load) + queue
-    # wait (up to ~180 s when concurrent jobs are serialised on a single
-    # H100 at the new max_inputs=2 cap) + inference (~30 s p95 for long
-    # inputs at 72B). Doubled from 300 s at the 7B → 72B swap.
-    timeout=600,
+    # 300s allows for cold-start (~60s) + queue wait (up to 120s when
+    # concurrent jobs are serialised on a single A10G) + inference (~60s
+    # for long inputs).
+    timeout=300,
     # Keep the container alive for 20 minutes after the last request.
     # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
     # all chromium tests complete). 20 min window ensures the GPU is still warm
     # when upload tests start, avoiding a cold-start that would exceed the test timeout.
     scaledown_window=1200,
 )
-# Accept up to 2 in-flight calls per container. Qwen2.5-VL-72B AWQ takes
-# ~38 GB of the 80 GB H100, leaving ~35 GB for the KV cache pool after
-# activations/workspace. At 4096 max_model_len each concurrent request
-# reserves ~12 GB of KV state at 72B (vs <1 GB at 7B); 2 in-flight is the
-# safe ceiling. Bursts above that autoscale into additional containers via
-# `max_containers=10` below — slower than warm-batching but bounded.
-#
-# Was 8 with the 7B model; dropped in lockstep with the 7B → 72B swap. If
-# the upload probe shows iteration times growing because of in-container
-# queueing rather than cold-start, drop max_model_len to 3072 to claw back
-# enough KV headroom for max_inputs=3.
-@modal.concurrent(max_inputs=2)
 class VisionModel:
     @modal.enter()
-    async def load(self) -> None:
-        """Load the vLLM AsyncLLMEngine + tokenizer.
+    def load(self) -> None:
+        """Load the Qwen2.5-VL processor + model via HF Transformers.
 
-        AsyncLLMEngine (not the sync `LLM` wrapper) is required here: it
-        schedules concurrent `generate()` coroutines through a single
-        continuous-batching loop. `LLM.chat()` from multiple threads
-        would serialise behind the engine's internal lock — defeating
-        the whole point of Modal's `max_inputs=8`.
-
-        `load` is `async` so `AsyncLLMEngine.from_engine_args` runs with
-        an active event loop — the engine spawns an internal background
-        coroutine for the scheduler, which raises
-        `RuntimeError: no running event loop` if constructed from a sync
-        context. Modal supports async `@modal.enter`.
-
-        vLLM config choices:
-          * quantization="awq_marlin"     — 4-bit AWQ weights served
-                                            through the Marlin kernel,
-                                            ~1.5-2x faster than plain
-                                            "awq".
-          * enable_prefix_caching=True    — v1 engine supports prefix
-                                            caching for multimodal
-                                            models (v0 silently disabled
-                                            this for VLMs). Our
-                                            `_ANALYZE_PROMPT` is ~250
-                                            tokens, identical on every
-                                            call, so the prefix KV state
-                                            is cached after the first
-                                            request and reused for all
-                                            subsequent prefills.
-          * max_model_len=4096            — image tokens (~1500 at 672px)
-                                            + prompt (~250) + output
-                                            (~512) = ~2300. 4096 leaves
-                                            headroom without wasting KV
-                                            VRAM on the full 32k context
-                                            window Qwen advertises.
-          * gpu_memory_utilization=0.90   — at 72B AWQ on H100 80 GB this
-                                            leaves ~8 GB headroom for
-                                            activations + CUDA graph
-                                            workspace after ~38 GB of
-                                            weights; everything else
-                                            (~35 GB) goes to the KV cache
-                                            pool. If load triggers OOM at
-                                            startup, drop to 0.85 first
-                                            before reducing max_model_len.
-          * limit_mm_per_prompt={"image": 2}
-                                          — /classify, /extract, /analyze
-                                            carry exactly one image;
-                                            /verify (Issue #169) carries
-                                            two — uploaded user image plus
-                                            a candidate cover from Open
-                                            Library / Google Books. Raised
-                                            from 1 to 2 with the addition
-                                            of /verify. Two 672px images
-                                            consume marginally more
-                                            attention budget than one but
-                                            stay well within the ~35 GB
-                                            KV-cache pool (per-request KV
-                                            cost grows with image-token
-                                            count, not with the prompt-
-                                            slot limit itself).
-
-        PagedAttention is vLLM's default attention impl and requires no
-        flag — it's what makes the KV cache pool work block-by-block
-        and lets concurrent requests share VRAM efficiently.
+        ``Qwen2_5_VLForConditionalGeneration.from_pretrained`` loads the
+        bfloat16 weights from the local HuggingFace cache (baked into the
+        image at build time by ``_download_model``) onto the A10G via
+        ``device_map="auto"``. ``AutoProcessor`` loads the matching
+        image+text preprocessor. Sync — no async engine, no event-loop
+        bootstrap. Inference goes through ``model.generate`` (see
+        ``_infer``); concurrency is bounded by ``max_containers`` rather
+        than continuous batching.
         """
-        from transformers import AutoProcessor
-        from vllm import AsyncEngineArgs, AsyncLLMEngine
+        import torch
+        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
         self.processor = AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
-
-        engine_args = AsyncEngineArgs(
-            model=MODEL_NAME,
-            quantization="awq_marlin",
-            enable_prefix_caching=True,
-            max_model_len=4096,
-            gpu_memory_utilization=0.90,
-            limit_mm_per_prompt={"image": 2},
-            trust_remote_code=True,
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
         )
-        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
 
     @modal.method()
-    async def classify(self, image_b64: str) -> dict[str, Any]:
-        return await self._infer(image_b64, _CLASSIFY_PROMPT)
+    def classify(self, image_b64: str) -> dict[str, Any]:
+        return self._infer(image_b64, _CLASSIFY_PROMPT)
 
     @modal.method()
-    async def extract(self, images_b64: list[str]) -> dict[str, Any]:
+    def extract(
+        self,
+        images_b64: list[str],
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not images_b64:
             return {"books": []}
-        return await self._infer(images_b64[0], _EXTRACT_PROMPT)
+        prompt = _build_extract_prompt(excluded_books)
+        return self._infer(images_b64[0], prompt)
 
-    @modal.method()
-    async def analyze(self, image_b64: str) -> dict[str, Any]:
-        return await self._infer(image_b64, _ANALYZE_PROMPT)
-
-    @modal.method()
-    async def verify(self, uploaded_b64: str, candidate_b64: str) -> dict[str, Any]:
-        """Two-image same-book comparison (Issue #169).
-
-        Both inputs are base64-encoded PNG/JPEG bytes. The first image is
-        the user's uploaded photo; the second is a candidate cover from
-        Open Library or Google Books. Returns a parsed JSON dict matching
-        the VerifyResponse shape:
-            {"is_same_book": bool, "confidence": float, "reasoning": str}
-        """
-        return await self._infer_two_image(uploaded_b64, candidate_b64, _VERIFY_PROMPT)
-
-    async def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
-        import base64
-        import io
-        import uuid
-
-        from PIL import Image as PILImage
-        from vllm import SamplingParams
-
-        raw = base64.b64decode(image_b64, validate=True)
-        pil_image = PILImage.open(io.BytesIO(raw)).convert("RGB")
-
-        # Qwen2.5-VL chat template inserts <|vision_start|><|image_pad|>
-        # <|vision_end|> placeholders in the right spots; vLLM fills the
-        # image_pad positions with the actual visual embeddings derived
-        # from `multi_modal_data`.
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image"},
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ]
-        text_prompt = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-
-        sampling_params = SamplingParams(
-            max_tokens=512,
-            temperature=0.0,
-        )
-
-        request_id = str(uuid.uuid4())
-        final_output = None
-
-        # Stream the response. As soon as we detect a `not_book`
-        # classification (the model emits `classification` as the
-        # first JSON field), abort the remaining generation — the
-        # rejection branch in Moderation doesn't use `reasoning` for
-        # not_book (it surfaces a fixed "not a book" message to the
-        # user), and `books` is always `[]` for not_book anyway, so
-        # truncating after we've seen `confidence` is safe.
-        #
-        # For `book` / `ambiguous` classifications we keep streaming
-        # to EOS — the full structured response is needed downstream
-        # for reasoning, book extraction, etc.
-        async for output in self.engine.generate(
-            {
-                "prompt": text_prompt,
-                "multi_modal_data": {"image": pil_image},
-            },
-            sampling_params=sampling_params,
-            request_id=request_id,
-        ):
-            final_output = output
-            if output.outputs and _can_early_terminate(output.outputs[0].text):
-                await self.engine.abort(request_id)
-                break
-
-        if final_output is None or not final_output.outputs:
-            return {}
-
-        response = final_output.outputs[0].text.strip()
-        return _parse_json_with_not_book_fallback(response)
-
-    async def _infer_two_image(
-        self,
-        first_b64: str,
-        second_b64: str,
-        prompt: str,
-    ) -> dict[str, Any]:
-        """Two-image inference. Mirrors `_infer` but passes both images
-        through the chat template and `multi_modal_data` so the VLM can
-        attend across them. Used by `/verify` (Issue #169).
-
-        The Qwen2.5-VL chat template accepts a list of `{"type": "image"}`
-        entries in user content; vLLM fills each `image_pad` slot in order
-        from the `multi_modal_data["image"]` list. The two-image case is
-        gated by `engine_args.limit_mm_per_prompt={"image": 2}` (set in
-        `load`).
-        """
-        import base64
-        import io
-        import uuid
-
-        from PIL import Image as PILImage
-        from vllm import SamplingParams
-
-        first_raw = base64.b64decode(first_b64, validate=True)
-        second_raw = base64.b64decode(second_b64, validate=True)
-        first_image = PILImage.open(io.BytesIO(first_raw)).convert("RGB")
-        second_image = PILImage.open(io.BytesIO(second_raw)).convert("RGB")
+    def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
+        import torch
+        from qwen_vl_utils import process_vision_info
 
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image"},  # first image — uploaded by the user
-                    {"type": "image"},  # second image — candidate cover
+                    {"type": "image", "image": f"data:image/jpeg;base64,{image_b64}"},
                     {"type": "text", "text": prompt},
                 ],
             }
         ]
-        text_prompt = self.processor.apply_chat_template(
+
+        text = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = self.processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(self.model.device)
 
-        sampling_params = SamplingParams(
-            max_tokens=512,
-            temperature=0.0,
-        )
+        with torch.no_grad():
+            generated_ids = self.model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=False,
+                temperature=None,
+                top_p=None,
+            )
 
-        request_id = str(uuid.uuid4())
-        final_output = None
-
-        # No early-termination here. Unlike `_infer` (which can abort once
-        # it sees `classification: not_book`), the verify payload is short
-        # and structured — we always want the full `is_same_book` +
-        # `confidence` + `reasoning` triple before deciding.
-        async for output in self.engine.generate(
-            {
-                "prompt": text_prompt,
-                "multi_modal_data": {"image": [first_image, second_image]},
-            },
-            sampling_params=sampling_params,
-            request_id=request_id,
-        ):
-            final_output = output
-
-        if final_output is None or not final_output.outputs:
-            return {}
-
-        response = final_output.outputs[0].text.strip()
+        output_ids = [
+            out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
+        ]
+        response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
         return _parse_json(response)
 
 
@@ -594,62 +299,6 @@ def _parse_json(text: str) -> dict[str, Any]:
     return {}
 
 
-# Matches the model's `not_book` classification in a streaming JSON
-# prefix. We wait until `confidence` has started so the partial output
-# carries a usable confidence score for downstream logging; without
-# this check we might abort on `{"classification": "not_book"` before
-# the confidence token is emitted.
-_EARLY_TERMINATE_PATTERN = re.compile(
-    r'"classification"\s*:\s*"not_book"\s*,\s*"confidence"\s*:\s*[0-9.]+',
-    re.IGNORECASE,
-)
-
-
-def _can_early_terminate(partial_text: str) -> bool:
-    """True if the streaming output has emitted enough JSON to know the
-    classification is `not_book` AND carry a confidence score. Once we
-    know that, the rest of the generation is redundant — `books` is `[]`
-    for not_book by prompt contract, and `reasoning` on a rejection
-    isn't surfaced in the user-facing UX.
-    """
-    return bool(_EARLY_TERMINATE_PATTERN.search(partial_text))
-
-
-def _parse_json_with_not_book_fallback(text: str) -> dict[str, Any]:
-    """Parse the model output. If the JSON is complete, delegate to
-    `_parse_json`. If it was truncated by `_can_early_terminate` (we
-    aborted mid-generation), reconstruct a minimal valid payload:
-
-        {"classification": "not_book", "confidence": <parsed>, "books": []}
-
-    This keeps the caller's contract stable — it always sees a
-    well-formed `{"classification": ..., "books": [...]}` shape
-    regardless of whether we bailed early.
-    """
-    parsed = _parse_json(text)
-    if parsed.get("classification") == "not_book":
-        # Full parse worked even if we truncated, or the model completed
-        # normally on a not_book input. Ensure `books` is present.
-        parsed.setdefault("books", [])
-        return parsed
-
-    # Parse failed — likely because we aborted mid-JSON. Try to recover
-    # the classification+confidence from the partial buffer.
-    match = _EARLY_TERMINATE_PATTERN.search(text)
-    if match:
-        # Extract the confidence value out of the matched fragment.
-        conf_match = re.search(r"([0-9.]+)\s*$", match.group(0))
-        confidence = float(conf_match.group(1)) if conf_match else 0.0
-        return {
-            "classification": "not_book",
-            "confidence": confidence,
-            "books": [],
-        }
-
-    # Otherwise fall back to whatever `_parse_json` managed (possibly {}).
-    return parsed
-
-
 # ── FastAPI vision service (ASGI) ─────────────────────────────────────────────
 # Hosts the FastAPI app on Modal's serverless infrastructure.
 # Elixir core calls this endpoint via HMAC-authenticated HTTPS. In local dev
@@ -663,12 +312,8 @@ _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
-    # libzbar0 — pyzbar's C library for barcode decoding (local OCR pre-pass).
-    # tesseract-ocr + tesseract-ocr-osd — driven by pytesseract from
-    # app/services/orientation.py for OSD-based rotation detection.
-    # The OSD traineddata file is NOT shipped in tesseract-ocr's main
-    # Debian package; the osd package supplies it.
-    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-osd")
+    # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
+    .apt_install("libzbar0")
     .pip_install(
         "fastapi==0.135.1",
         "starlette==0.52.1",
@@ -683,10 +328,6 @@ _fastapi_image = (
         # reliably decode machine-readable barcodes and causes E2E test timeouts.
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
-        # pytesseract drives the orientation correction module
-        # (app/services/orientation.py). It shells out to the
-        # `tesseract` binary installed above for OSD + image_to_data.
-        "pytesseract>=0.3.10",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
@@ -694,10 +335,6 @@ _fastapi_image = (
 
 @app.function(
     image=_fastapi_image,
-    # Pin the ASGI entry point to us-east too. Otherwise the
-    # FastAPI→VisionModel call becomes a cross-region RPC inside Modal,
-    # adding ~60ms to every /analyze even when the GPU is warm.
-    region="us-east",
     secrets=[
         modal.Secret.from_name("thestacks-vision"),
         # Bake the app name into the ASGI container so VisionClient can look up

@@ -297,32 +297,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
-  describe "perform/1 — uncertain path (Issue #169)" do
-    test "marks image rejected with reason 'uncertain' and returns {:cancel, uncertain}", %{
-      user: user,
-      image: image
-    } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.UncertainClient)
-
-        assert {:cancel, "uncertain"} =
-                 perform_job(IdentifyBookJob, %{
-                   "user_id" => user.id,
-                   "image_id" => image.id,
-                   "image_b64" => @image_b64
-                 })
-
-        updated = Repo.get!(UploadedImage, image.id)
-        assert updated.status == "rejected"
-        assert updated.rejection_reason == "uncertain"
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-  end
-
   describe "perform/1 — generic pipeline failure" do
     test "returns {:error, reason} when pipeline fails with an unexpected error", %{
       user: user,
@@ -340,6 +314,87 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
                    "image_b64" => @image_b64
                  })
       after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
+  describe "perform/1 — excluded_books arg" do
+    # Rejection-retry: when the controller enqueues a fresh job after
+    # the user clicked "No, try again", the cumulative excluded_books
+    # list rides on the Oban args and must be forwarded to
+    # Moderation.run_pipeline via the context, which forwards it to
+    # the vision sidecar as part of the /analyze payload.
+
+    test "passes excluded_books from job args into the vision payload", %{
+      user: user,
+      image: image
+    } do
+      original = Application.get_env(:core, :vision_client)
+      :persistent_term.put({__MODULE__, :capture_pid}, self())
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
+
+        _ =
+          perform_job(IdentifyBookJob, %{
+            "user_id" => user.id,
+            "image_id" => image.id,
+            "image_b64" => @image_b64,
+            "excluded_books" => ["The Great Gatsby by F. Scott Fitzgerald"]
+          })
+
+        assert_receive {:vision_payload, payload}, 1_000
+        assert payload[:excluded_books] == ["The Great Gatsby by F. Scott Fitzgerald"]
+      after
+        :persistent_term.erase({__MODULE__, :capture_pid})
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "forwards excluded_isbns from job args into the moderation context" do
+      # Rejection-retry: excluded_isbns is consumed by the resolver (not
+      # the vision sidecar), so we assert behaviour via a single direct-
+      # ISBN candidate matching an excluded entry — the candidate is
+      # dropped before resolve_and_store runs, yielding isbn_not_found.
+      user = insert(:user)
+      image = insert(:uploaded_image, user_id: user.id)
+
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.SingleIsbnExcludableClient)
+
+        assert {:cancel, "isbn_not_found"} =
+                 perform_job(IdentifyBookJob, %{
+                   "user_id" => user.id,
+                   "image_id" => image.id,
+                   "image_b64" => @image_b64,
+                   "excluded_isbns" => ["9780743273565"]
+                 })
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "omits excluded_books from payload when arg is missing", %{user: user, image: image} do
+      original = Application.get_env(:core, :vision_client)
+      :persistent_term.put({__MODULE__, :capture_pid}, self())
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
+
+        _ =
+          perform_job(IdentifyBookJob, %{
+            "user_id" => user.id,
+            "image_id" => image.id,
+            "image_b64" => @image_b64
+          })
+
+        assert_receive {:vision_payload, payload}, 1_000
+        refute Map.has_key?(payload, :excluded_books)
+      after
+        :persistent_term.erase({__MODULE__, :capture_pid})
         Application.put_env(:core, :vision_client, original)
       end
     end
@@ -493,36 +548,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
   end
 
-  defmodule UncertainClient do
-    @moduledoc """
-    Vision client whose analyze response carries a max confidence below
-    #169's :verification_threshold_low (0.3) — exercises the immediate
-    :uncertain rejection path. The candidate ISBN is present so the
-    pipeline can't fall back to :isbn_not_found.
-    """
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.95,
-           "books" => [
-             %{
-               "title" => "Mystery Book",
-               "author" => nil,
-               "potential_isbns" => ["9780000000000"],
-               "raw_text" => nil,
-               "confidence" => 0.2
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
   defmodule MultiBookClient do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
@@ -577,6 +602,62 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
                "title" => nil,
                "author" => nil,
                "potential_isbns" => ["9780000000002"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ],
+           "model_used" => "mock"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule CapturePayloadClient do
+    @moduledoc """
+    Captures the outgoing /analyze payload (via the test PID stashed in
+    persistent_term) and returns a short-circuit empty-books response.
+    Used by the excluded_books arg tests so we can assert the worker
+    threaded the Oban arg into the moderation context → vision payload.
+    """
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("analyze", payload) do
+      case :persistent_term.get({Stacks.Workers.IdentifyBookJobTest, :capture_pid}, nil) do
+        nil -> :ok
+        pid -> send(pid, {:vision_payload, payload})
+      end
+
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.95,
+         "books" => [],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule SingleIsbnExcludableClient do
+    @moduledoc """
+    One direct-ISBN candidate — used by the `excluded_isbns` arg test
+    to verify that the args → context → drop-candidate plumbing works
+    end-to-end through the worker.
+    """
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("analyze", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.95,
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               "potential_isbns" => ["9780743273565"],
                "raw_text" => nil,
                "confidence" => 0.9
              }

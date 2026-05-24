@@ -18,6 +18,7 @@ defmodule Stacks.Workers.EnrichBookJobTest do
 
   alias Core.Repo
   alias Stacks.Books
+  alias Stacks.Books.Book
   alias Stacks.Books.MockHttpClient
   alias Stacks.Workers.EnrichBookJob
 
@@ -53,6 +54,41 @@ defmodule Stacks.Workers.EnrichBookJobTest do
 
       updated = Repo.get!(Stacks.Books.Book, book.id)
       assert updated.title == "The Great Gatsby"
+    end
+
+    test "links the resolver author to the book via author_id" do
+      # Regression: previously `update_book` only cast title/description,
+      # so an OL response with an authors list left `op.books.author_id`
+      # null. The deployed preview showed
+      # `curl /api/books/isbn/9780156001311` returning `"author": null`
+      # for "The Name of the Rose" despite OL carrying Umberto Eco.
+      isbn = "9780156001311"
+
+      {:ok, book} =
+        Books.create(%{
+          "isbn" => isbn,
+          "title" => "ISBN #{isbn}",
+          "visibility_tier" => "public"
+        })
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{isbn}" => %{
+             "title" => "The Name of the Rose",
+             "authors" => [%{"name" => "Umberto Eco"}],
+             "publish_date" => "1980"
+           }
+         }}
+      )
+
+      assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
+
+      updated = Repo.get!(Book, book.id) |> Repo.preload(:author)
+      assert updated.title == "The Name of the Rose"
+      assert updated.author_id != nil
+      assert updated.author.name == "Umberto Eco"
     end
 
     test "no-ops when book row for the ISBN doesn't exist" do

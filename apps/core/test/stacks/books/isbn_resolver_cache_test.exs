@@ -30,6 +30,40 @@ defmodule Stacks.Books.ISBNResolverCacheTest do
       assert :miss = ISBNResolverCache.get("9780000000002")
     end
 
+    test "transient resolver errors are NOT cached and emit :put_skipped" do
+      # Subscribe to the put_skipped telemetry event so we can assert the
+      # cache emitted the observability signal alongside the no-op.
+      handler_id = "test-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :books, :isbn_resolver_cache, :put_skipped],
+        fn _event, measurements, metadata, _config ->
+          send(test_pid, {:put_skipped, measurements, metadata})
+        end,
+        nil
+      )
+
+      try do
+        for reason <- [
+              :unexpected_status,
+              :timeout,
+              :transport_error,
+              :malformed_response,
+              :circuit_open
+            ] do
+          isbn = "978000000" <> String.pad_leading(Integer.to_string(:rand.uniform(9999)), 4, "0")
+          assert :ok = ISBNResolverCache.put(isbn, {:error, reason})
+          assert :miss = ISBNResolverCache.get(isbn)
+
+          assert_receive {:put_skipped, %{count: 1}, %{isbn: ^isbn, reason: ^reason}}, 200
+        end
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
+
     test "invalidate/1 removes a single entry" do
       ISBNResolverCache.put("9780000000003", {:ok, %{title: "x"}})
       assert {:ok, _} = ISBNResolverCache.get("9780000000003")

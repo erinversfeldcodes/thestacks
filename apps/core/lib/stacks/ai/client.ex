@@ -44,7 +44,6 @@ defmodule Stacks.AI.Client do
   alias Stacks.AI.ClientBehaviour
   alias Stacks.Proto.Vision.AssociateRequest
   alias Stacks.Proto.Vision.ExtractRequest
-  alias Stacks.Proto.Vision.VerifyRequest
 
   @behaviour ClientBehaviour
 
@@ -110,34 +109,6 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  @doc """
-  POST /verify — selective verification pass for low-confidence extractions.
-
-  Asks the vision sidecar to cross-check whether the uploaded image and the
-  candidate's cover image (returned by Open Library / Google Books title
-  search) depict the same book. Used by `Stacks.Moderation` when the
-  first-pass `/analyze` confidence falls into the configured uncertain band.
-
-  Returns `{:ok, %{"is_same_book" => bool, "confidence" => float,
-  "reasoning" => String.t()}}` on a 200 response. Errors propagate as
-  `{:error, reason}` — the underlying `call_vision/2` already exposes
-  transport, circuit-open, and non-2xx HTTP failures with the same
-  shape as the rest of the vision API surface.
-
-  Wire contract: `Stacks.Proto.Vision.VerifyRequest` /
-  `Stacks.Proto.Vision.VerifyResponse` (generated from vision.proto).
-  """
-  @spec verify(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def verify(uploaded_image_url, candidate_cover_url, candidate_isbn) do
-    payload = %VerifyRequest{
-      uploaded_image_url: uploaded_image_url,
-      candidate_cover_url: candidate_cover_url,
-      candidate_isbn: candidate_isbn
-    }
-
-    call_vision("verify", payload)
-  end
-
   defp auth_token(method, path) do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :vision_hmac_secret)
@@ -154,10 +125,6 @@ defmodule Stacks.AI.Client do
   # Stacks.Moderation.run_pipeline/1.
   defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("associate"), do: "associate"
-  # Selective verification (Issue #169): cross-checks a low-confidence
-  # candidate's title-searched cover against the uploaded image. See
-  # `Stacks.AI.Client.verify/3` and `Stacks.Moderation` for the gate.
-  defp endpoint_path("verify"), do: "verify"
 
   defp endpoint_path(other) do
     raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"

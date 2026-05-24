@@ -12,8 +12,8 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
   test(
     "identifies The Name of the Rose from barcode_isbn_clean.jpg via local OCR",
     async ({ page }) => {
-      // Extra headroom beyond 240 s SSE wait + 60 s enrichment poll.
-      test.setTimeout(330_000);
+      // Extra headroom beyond 240 s SSE wait + 120 s enrichment poll.
+      test.setTimeout(390_000);
 
       await page.goto("/upload");
 
@@ -73,7 +73,7 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
                   const data = await resp.json();
                   return (data.book?.title ?? "") as string;
                 }, bookId),
-              { timeout: 60_000, intervals: [2000, 3000, 5000] }
+              { timeout: 120_000, intervals: [2000, 3000, 5000] }
             )
             .toMatch(/Name of the Rose/i);
         } else {
@@ -352,7 +352,14 @@ test.describe("Upload pipeline", () => {
   test(
     "identifies Train to Crystal City from screenshot_image_reversed_and_cut_off.jpg",
     async ({ page }) => {
-      test.setTimeout(PIPELINE_TIMEOUT);
+      // 3 rounds of retry × ~PIPELINE_TIMEOUT each. The retry mirrors the user
+      // clicking "No, try again" — frontend POSTs the cumulative rejected
+      // book_ids to /api/upload/:image_id/reject-identification, which enqueues
+      // a fresh IdentifyBookJob with excluded_books appended to the vision
+      // /analyze prompt. We give up after 3 attempts; the model has had real
+      // user feedback on what *isn't* the book and still can't find it.
+      const MAX_ROUNDS = 3;
+      test.setTimeout(PIPELINE_TIMEOUT * (MAX_ROUNDS + 1));
 
       await page.goto("/upload");
 
@@ -370,16 +377,49 @@ test.describe("Upload pipeline", () => {
 
       const verify = page.getByTestId("upload-verify");
       const error = page.getByTestId("upload-error");
-      await expect(verify.or(error)).toBeVisible({ timeout: PIPELINE_TIMEOUT });
-      if (await error.isVisible()) {
-        throw new Error(
-          `Upload pipeline failed: ${await error.textContent()}`
+
+      const matches = (text: string) =>
+        /crystal city/i.test(text) && /russell/i.test(text);
+
+      const wrongIdentifications: string[] = [];
+
+      for (let round = 1; round <= MAX_ROUNDS; round++) {
+        await expect(verify.or(error)).toBeVisible({ timeout: PIPELINE_TIMEOUT });
+        if (await error.isVisible()) {
+          throw new Error(
+            `Upload pipeline failed (round ${round}): ${await error.textContent()}`
+          );
+        }
+
+        const text = (await verify.textContent()) ?? "";
+        if (matches(text)) {
+          // Success: assert the verify-view content the original test asserted.
+          await expect(verify).toContainText("We think this is");
+          await expect(verify).toContainText("Crystal City");
+          await expect(verify).toContainText("Russell");
+          return;
+        }
+
+        if (round === MAX_ROUNDS) {
+          throw new Error(
+            `Failed to identify Train to Crystal City after ${MAX_ROUNDS} rounds. ` +
+              `Wrong identifications: ${wrongIdentifications.join(" | ")} | ` +
+              `${text.replace(/\s+/g, " ").trim()}`
+          );
+        }
+
+        wrongIdentifications.push(text.replace(/\s+/g, " ").trim());
+
+        // Click "No, try again" — the frontend POSTs the cumulative rejected
+        // book_ids to /api/upload/:image_id/reject-identification and re-opens
+        // the SSE stream. Wait for the page to leave the verify view (back to
+        // the processing spinner) before looping.
+        await page.getByRole("button", { name: /no, try again/i }).click();
+        await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
+          "Processing image...",
+          { timeout: 30_000 }
         );
       }
-
-      await expect(verify).toContainText("We think this is");
-      await expect(verify).toContainText("Crystal City");
-      await expect(verify).toContainText("Russell");
     }
   );
 

@@ -402,14 +402,7 @@ jobs:
       # test_local_ocr.py silently returns None (local_isbn_scan's
       # safety contract on ImportError). Locally provided by nix's
       # `zbar` package; on Ubuntu CI runners it's `libzbar0`.
-      #
-      # tesseract-ocr + tesseract-ocr-osd are the binary + OSD traineddata
-      # for the orientation correction module (apps/vision/app/services/
-      # orientation.py). pytesseract shells out to the `tesseract` CLI; on
-      # PATH-miss it raises TesseractNotFoundError, which test_orientation.py
-      # surfaces as a hard test failure. Modal's _fastapi_image apt-installs
-      # the same pair (apps/vision/modal_app.py); CI mirrors it here.
-      - run: sudo apt-get update && sudo apt-get install -y libzbar0 tesseract-ocr tesseract-ocr-osd
+      - run: sudo apt-get update && sudo apt-get install -y libzbar0
       - working-directory: apps/vision
         run: pip install -r requirements.txt -r requirements-dev.txt
       # apps/vision/app/proto/gen/ is gitignored; lint and tests both

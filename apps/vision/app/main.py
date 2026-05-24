@@ -25,10 +25,7 @@ from app.proto.gen.vision import (
     ExtractedBook,
     ExtractRequest,
     ExtractResponse,
-    VerifyRequest,
-    VerifyResponse,
 )
-from app.services import orientation
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
 from app.services.url_validator import validate_image_url
@@ -449,24 +446,29 @@ def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
     dependencies=[Depends(verify_hmac)],
 )
 async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
-    """Single-request classification + extraction in ONE Modal inference.
+    """Two-call classification + extraction in the FastAPI layer.
 
     Flow:
       1. Local OCR pre-pass — a clean barcode decode implies BOOK without
          needing the vision model. ISBN barcodes have a checksum, so false
          positives on non-books are effectively zero.
-      2. Single `client.analyze` call — one `model.generate()` yields both
-         `classification` and `books` via the combined `_ANALYZE_PROMPT`.
-         Replaces the prior classify-then-extract sequential pair which
-         doubled Modal RPCs (and cold-start exposure) with no dependency
-         between the two calls.
+      2. Classify (one `client.classify` call, focused prompt). On
+         confident NOT_BOOK or AMBIGUOUS we short-circuit and return with
+         empty books — `extract` is never invoked. This is the load-bearing
+         contract for the bunny-screenshot regression case and also halves
+         the Modal cost on non-book inputs.
+      3. Extract (one `client.extract` call, focused prompt) — only on
+         confirmed BOOK classifications. The per-book `confidence` field
+         from the extract prompt feeds Issue #167's enrichment-skip gate
+         downstream.
 
-    Confident `not_book` payloads are forced to `books: []` regardless of what
-    the model returned — the wire contract enforces it defensively. `book` and
-    `ambiguous` classifications both preserve extracted books: the prompt
-    permits partial signal (a half-visible ISBN, one legible word) to survive
-    on ambiguous covers, and the per-book `confidence` field lets enrichment
-    weight or skip weak candidates downstream.
+    Previously this endpoint issued a single consolidated `client.analyze`
+    call. That collapsed prompt leaked classify reasoning into extract
+    reasoning and over-populated `books` on non-book inputs (e.g.
+    screenshot_bunny.jpg landed BOOK with empty books rather than
+    NOT_BOOK; rotated covers picked up confident wrong identifications).
+    The two-call flow restores the strict classification gate from
+    git ref dfef1333.
     """
     log = logger.bind(endpoint="/analyze")
 
@@ -474,18 +476,10 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
-    # Programmatic orientation correction (Issue #168) runs BEFORE the
-    # local OCR pre-pass and the VLM dispatch. Both downstream consumers
-    # benefit from an upright, non-mirrored image: pyzbar's barcode
-    # decoder degrades sharply on rotated/mirrored EAN-13s, and the VLM
-    # vision encoder isn't trained on mirrored text at all.
     decoded_bytes = base64.b64decode(image_b64, validate=True)
-    corrected_bytes = orientation.correct(decoded_bytes)
-    if corrected_bytes is not decoded_bytes:
-        image_b64 = base64.b64encode(corrected_bytes).decode()
 
     if settings.local_ocr_enabled:
-        isbn = local_isbn_scan(corrected_bytes)
+        isbn = local_isbn_scan(decoded_bytes)
         if isbn is not None:
             log.info("local OCR pre-pass hit", isbn=isbn)
             return AnalyzeResponse(
@@ -497,14 +491,50 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
 
     client: VisionClient = request.app.state.vision_client
 
-    # Resize for VLM AFTER the OCR pre-pass above. OCR needs full resolution
-    # to decode barcodes; the VLM does not and inference scales with pixel
-    # count, so 672px-max cuts Modal time materially.
+    # Resize for VLM ONCE — the same downsized b64 is reused for the
+    # classify and (if needed) extract calls. OCR needs full resolution
+    # to decode barcodes; the VLM does not and inference scales with
+    # pixel count, so 672px-max cuts Modal time materially.
     vlm_b64 = _resize_for_vlm(image_b64)
-    log.info("calling vision model for analyze (classify + extract)")
-    parsed = await client.analyze(vlm_b64)
-    classification, confidence = _parse_classification(parsed)
-    books = _parse_extracted_books(parsed) if classification != _CLF_NOT_BOOK else []
+
+    # STEP 1 — Classify (strict gate, no pressure to populate `books`).
+    log.info("calling vision model for classify")
+    classify_parsed = await client.classify(vlm_b64)
+    classification, confidence = _parse_classification(classify_parsed)
+
+    # Short-circuit on anything that isn't a confident BOOK. The earlier
+    # `_ANALYZE_PROMPT` consolidation tried to preserve partial-signal
+    # extraction on AMBIGUOUS; in practice that surfaced confident wrong
+    # identifications because the model reused cover-art cues without a
+    # strict gate. AMBIGUOUS now joins NOT_BOOK in returning empty books.
+    if classification != _CLF_BOOK:
+        log.info(
+            "analyze short-circuited at classify",
+            classification=classification,
+            confidence=confidence,
+        )
+        return AnalyzeResponse(
+            classification=classification,
+            confidence=confidence,
+            books=[],
+            model_used=settings.model_name,
+        )
+
+    # STEP 2 — Extract (only on confirmed BOOK).
+    # `excluded_books` carries the cumulative list of "Title by Author"
+    # identifications the user has already rejected for this image via the
+    # frontend's "No, try again" loop. The VisionModel.extract method
+    # appends a constraint clause to the extract prompt when the list is
+    # non-empty; an empty list leaves the prompt at its baseline.
+    log.info(
+        "calling vision model for extract",
+        excluded_books_count=len(body.excluded_books),
+    )
+    extract_parsed = await client.extract(
+        [vlm_b64],
+        excluded_books=list(body.excluded_books),
+    )
+    books = _parse_extracted_books(extract_parsed)
     log.info(
         "analyze complete",
         classification=classification,
@@ -517,68 +547,6 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         confidence=confidence,
         books=books,
         model_used=settings.model_name,
-    )
-
-
-@app.post(
-    "/verify",
-    response_model=VerifyResponse,
-    status_code=200,
-    dependencies=[Depends(verify_hmac)],
-)
-async def verify(request: Request, body: VerifyRequest) -> VerifyResponse:
-    """Same-book verification (Issue #169).
-
-    Used by core's confidence-gated branch when a low-confidence /analyze
-    result needs cross-checking against a candidate cover from Open Library
-    or Google Books. Downloads both images, runs orientation correction on
-    the uploaded image only (the candidate cover is sourced from a canonical
-    upright archive), and asks the VLM whether both depict the same book.
-
-    The `candidate_isbn` field is logging/telemetry only — it is NEVER
-    forwarded to the VLM, to prevent prompt-injected ISBN bias.
-    """
-    log = logger.bind(endpoint="/verify", candidate_isbn=body.candidate_isbn)
-
-    # SSRF + size guards live inside _download_image (same as /analyze).
-    uploaded_bytes = await _download_image(body.uploaded_image_url)
-    candidate_bytes = await _download_image(body.candidate_cover_url)
-
-    # Orientation correction runs on the UPLOADED image only. Candidate
-    # covers come from Open Library / Google Books, which serve covers
-    # upright; running OSD on those would cost CPU for no gain and risk
-    # mis-rotating low-text candidates. The uploaded image is whatever
-    # the user picked off their phone — phone photo + EXIF strip means
-    # rotation/mirror correction is essential before the VLM compare.
-    uploaded_bytes = orientation.correct(uploaded_bytes)
-
-    uploaded_b64 = base64.b64encode(uploaded_bytes).decode()
-    candidate_b64 = base64.b64encode(candidate_bytes).decode()
-
-    client: VisionClient = request.app.state.vision_client
-    log.info("calling vision model for verify")
-    parsed = await client.verify(uploaded_b64, candidate_b64)
-
-    # Defensive parse — the VLM may misbehave, but the public wire
-    # contract must always return a well-formed VerifyResponse.
-    raw_confidence = parsed.get("confidence", 0.0)
-    confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
-    confidence = max(0.0, min(1.0, confidence))
-
-    reasoning_raw = parsed.get("reasoning", "")
-    reasoning = str(reasoning_raw)[:500] if reasoning_raw is not None else ""
-
-    is_same_book = bool(parsed.get("is_same_book", False))
-
-    log.info(
-        "verify complete",
-        is_same_book=is_same_book,
-        confidence=confidence,
-    )
-    return VerifyResponse(
-        is_same_book=is_same_book,
-        confidence=confidence,
-        reasoning=reasoning,
     )
 
 

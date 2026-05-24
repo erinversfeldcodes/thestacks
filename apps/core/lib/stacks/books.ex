@@ -935,18 +935,37 @@ defmodule Stacks.Books do
 
   defp maybe_create_author(changeset, _attrs), do: changeset
 
-  defp find_or_create_author(nil), do: {:ok, nil}
-  defp find_or_create_author(""), do: {:ok, nil}
+  @doc """
+  Looks up an author row by exact `name`, inserting a new row if none
+  exists. Returns `{:ok, nil}` for nil or empty input — used during
+  enrichment, where Open Library / Google Books may legitimately not
+  carry an author. Returns `{:error, changeset}` only on insert failure
+  (e.g. row constraint).
 
-  defp find_or_create_author(name) when is_binary(name) do
-    case Repo.get_by(Author, name: name) do
-      nil ->
-        %Author{}
-        |> author_changeset(%{name: name})
-        |> Repo.insert()
+  Exposed (rather than kept private) so `Stacks.Workers.EnrichBookJob`
+  can link the resolver's author string to a real `op.authors` row when
+  filling in a placeholder book's `author_id`.
+  """
+  @spec find_or_create_author(String.t() | nil) ::
+          {:ok, Author.t() | nil} | {:error, Ecto.Changeset.t()}
+  def find_or_create_author(nil), do: {:ok, nil}
+  def find_or_create_author(""), do: {:ok, nil}
 
-      author ->
-        {:ok, author}
+  def find_or_create_author(name) when is_binary(name) do
+    case String.trim(name) do
+      "" ->
+        {:ok, nil}
+
+      trimmed ->
+        case Repo.get_by(Author, name: trimmed) do
+          nil ->
+            %Author{}
+            |> author_changeset(%{name: trimmed})
+            |> Repo.insert()
+
+          author ->
+            {:ok, author}
+        end
     end
   end
 
