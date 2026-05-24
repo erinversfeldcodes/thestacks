@@ -332,170 +332,138 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "run_pipeline/1 — selective verification gate (Issue #169)" do
-    # When the analyze pass returns candidates with max confidence in the
-    # uncertain band [verification_threshold_low, verification_threshold_high),
-    # the pipeline calls the sidecar /verify endpoint to cross-check each
-    # candidate's title-searched cover against the uploaded image. Candidates
-    # with max confidence < verification_threshold_low are rejected outright
-    # as :uncertain (no verification call). High-confidence candidates skip
-    # verification entirely.
+  describe "run_pipeline/1 — excluded_books forwarding" do
+    # Rejection-retry: when the user clicks "No, try again", the
+    # controller enqueues a new IdentifyBookJob with the cumulative
+    # list of already-rejected books. Moderation must forward that
+    # list to the vision sidecar via the `:excluded_books` payload
+    # key — the sidecar then steers the model away from those
+    # candidates.
 
     setup do
       test_pid = self()
-      handler_id = "test-verification-#{System.unique_integer([:positive])}"
+      handler_id = "test-excluded-#{System.unique_integer([:positive])}"
+      Process.put(:test_pid, test_pid)
 
-      :telemetry.attach_many(
-        handler_id,
-        [
-          [:stacks, :verification, :triggered],
-          [:stacks, :verification, :match],
-          [:stacks, :verification, :rejected]
-        ],
-        fn event, measurements, metadata, _ ->
-          send(test_pid, {:telemetry_event, event, measurements, metadata})
-        end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
-      :ok
+      {:ok, handler_id: handler_id, test_pid: test_pid}
     end
 
-    test "high-confidence path: no /verify call fires" do
+    test "forwards a non-empty list to the vision client payload" do
+      original = Application.get_env(:core, :vision_client)
+      test_pid = self()
+      Process.put(:moderation_capture_pid, test_pid)
+      :persistent_term.put({__MODULE__, :capture_pid}, test_pid)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
+
+        context = %{
+          image_b64: @test_image_b64,
+          excluded_books: ["The Great Gatsby by F. Scott Fitzgerald"]
+        }
+
+        # MockClient returns Gatsby; we only care about what the payload
+        # looked like, not whether the pipeline resolves. Capture and assert.
+        _ = Moderation.run_pipeline(context)
+
+        assert_receive {:vision_payload, payload}, 1_000
+        assert payload[:excluded_books] == ["The Great Gatsby by F. Scott Fitzgerald"]
+      after
+        :persistent_term.erase({__MODULE__, :capture_pid})
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "omits the key when excluded_books is empty or absent" do
+      original = Application.get_env(:core, :vision_client)
+      test_pid = self()
+      :persistent_term.put({__MODULE__, :capture_pid}, test_pid)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
+
+        context = %{image_b64: @test_image_b64}
+        _ = Moderation.run_pipeline(context)
+
+        assert_receive {:vision_payload, payload}, 1_000
+        refute Map.has_key?(payload, :excluded_books)
+      after
+        :persistent_term.erase({__MODULE__, :capture_pid})
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "omits the key when excluded_books is an empty list" do
+      original = Application.get_env(:core, :vision_client)
+      test_pid = self()
+      :persistent_term.put({__MODULE__, :capture_pid}, test_pid)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
+
+        context = %{image_b64: @test_image_b64, excluded_books: []}
+        _ = Moderation.run_pipeline(context)
+
+        assert_receive {:vision_payload, payload}, 1_000
+        refute Map.has_key?(payload, :excluded_books)
+      after
+        :persistent_term.erase({__MODULE__, :capture_pid})
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
+  describe "run_pipeline/1 — excluded_isbns forwarding" do
+    # Rejection-retry: when the controller resolves the cumulative
+    # rejected_book_ids list to ISBNs, the IdentifyBookJob threads the
+    # list into the moderation context as `:excluded_isbns`. Moderation
+    # must apply the list in two places:
+    #
+    #   1. Direct-ISBN candidates from /analyze whose `potential_isbns`
+    #      include an excluded ISBN are dropped BEFORE any DB/HTTP work.
+    #   2. The title-search fallback receives the list via
+    #      `ISBNResolver.search_by_title/4 :excluded_isbns` so OL/GB hits
+    #      that map to an already-rejected book are skipped.
+
+    test "VLM candidate whose direct ISBN matches an excluded entry is dropped" do
       original = Application.get_env(:core, :vision_client)
 
       try do
-        Application.put_env(:core, :vision_client, __MODULE__.HighConfidenceVerifyClient)
+        # Single candidate with the excluded ISBN — dropping it leaves
+        # no candidates to resolve, so the pipeline reports isbn_not_found.
+        Application.put_env(:core, :vision_client, __MODULE__.SingleIsbnCandidateClient)
 
         context = %{
-          image_url: "https://r2.example/uploads/abc",
-          book_attrs: %{"title" => "High Confidence Book"}
+          image_b64: @test_image_b64,
+          excluded_isbns: ["9780743273565"]
+        }
+
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "non-excluded VLM ISBN candidate is still resolved when excluded_isbns is set" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.SingleIsbnCandidateClient)
+
+        # `book_attrs` supplies a title so the storage path succeeds
+        # without needing the test isbn_http_client to return metadata.
+        # Mirrors the happy-path test setup higher in the file.
+        context = %{
+          image_b64: @test_image_b64,
+          excluded_isbns: ["9999999999999"],
+          book_attrs: %{"title" => "Non-Excluded Book"}
         }
 
         assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
         assert [edition | _] = book.editions
         assert edition.isbn == "9780743273565"
-
-        refute_receive {:telemetry_event, [:stacks, :verification, :triggered], _, _}, 100
       after
         Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "uncertain band: verification triggers and emits :triggered telemetry" do
-      # Pre-seed the candidate book so the title-search path can resolve to
-      # an ISBN/cover even with the mock isbn_http_client returning nothing.
-      book = insert(:book, title: "Train to Crystal City")
-      insert(:book_edition, book: book, isbn: "9781476732123")
-
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.UncertainBandMatchClient)
-
-        context = %{image_url: "https://r2.example/uploads/abc"}
-        # We don't care about the resolution outcome here — just that
-        # verification was triggered.
-        _ = Moderation.run_pipeline(context)
-
-        assert_receive {:telemetry_event, [:stacks, :verification, :triggered], %{count: 1},
-                        %{isbn: _, first_pass_confidence: 0.5}}
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "verification match: candidate is accepted and :match telemetry fires" do
-      # The candidate book pre-seeded so storage doesn't go through
-      # external HTTP lookups.
-      existing = insert(:book, title: "Train to Crystal City")
-      insert(:book_edition, book: existing, isbn: "9781476732123")
-
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.UncertainBandMatchClient)
-
-        context = %{image_url: "https://r2.example/uploads/abc"}
-        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
-        # find_existing returns the pre-seeded book; the resolved book's
-        # primary edition should match the candidate ISBN.
-        assert book.id == existing.id
-
-        assert_receive {:telemetry_event, [:stacks, :verification, :match], %{count: 1},
-                        %{isbn: _, verify_confidence: 0.92}}
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "verification rejects: returns :uncertain when no candidate verifies" do
-      # Pre-seed a candidate book so the title-search resolves, but the
-      # verify call returns is_same_book=false for every candidate.
-      candidate = insert(:book, title: "Train to Crystal City")
-      insert(:book_edition, book: candidate, isbn: "9781476732123")
-
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.UncertainBandMismatchClient)
-
-        context = %{image_url: "https://r2.example/uploads/abc"}
-        assert {:error, :uncertain} = Moderation.run_pipeline(context)
-
-        assert_receive {:telemetry_event, [:stacks, :verification, :rejected], %{count: 1},
-                        %{reason: :no_match}}
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "below threshold_low: immediate :uncertain rejection without /verify call" do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.BelowThresholdLowClient)
-
-        context = %{image_url: "https://r2.example/uploads/abc"}
-        assert {:error, :uncertain} = Moderation.run_pipeline(context)
-
-        assert_receive {:telemetry_event, [:stacks, :verification, :rejected], %{count: 1},
-                        %{reason: :uncertain}}
-
-        # And NO :triggered event — verification was short-circuited.
-        refute_receive {:telemetry_event, [:stacks, :verification, :triggered], _, _}, 50
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "threshold config override: verification_threshold_high is configurable" do
-      # Pre-seed the candidate so an accidental fall-through to the
-      # high-confidence branch is observable.
-      existing = insert(:book, title: "High Confidence Book")
-      insert(:book_edition, book: existing, isbn: "9780743273565")
-
-      original_client = Application.get_env(:core, :vision_client)
-      original_high = Application.get_env(:core, :verification_threshold_high)
-
-      try do
-        # Lower the high threshold so confidence 0.6 now SKIPS verification.
-        Application.put_env(:core, :verification_threshold_high, 0.5)
-        Application.put_env(:core, :vision_client, __MODULE__.ConfigOverrideClient)
-
-        context = %{image_url: "https://r2.example/uploads/abc"}
-        assert {:ok, %{resolved: [_book]}} = Moderation.run_pipeline(context)
-
-        refute_receive {:telemetry_event, [:stacks, :verification, :triggered], _, _}, 50
-      after
-        Application.put_env(:core, :vision_client, original_client)
-
-        if original_high == nil do
-          Application.delete_env(:core, :verification_threshold_high)
-        else
-          Application.put_env(:core, :verification_threshold_high, original_high)
-        end
       end
     end
   end
@@ -800,12 +768,9 @@ defmodule Stacks.ModerationTest do
 
   defmodule LowConfidenceClient do
     @moduledoc """
-    Candidate confidence below the #167 0.5 threshold but ABOVE the #169
-    verification_threshold_low (0.3). Verifies that #167's per-candidate
-    skip gate composes with #169's pipeline-level gate: 0.4 is in #169's
-    uncertain band, which falls through to resolve_and_store_all when
-    no image_url is set (image_b64 path) — at which point #167's gate
-    fires and skips the candidate.
+    Candidate confidence below the #167 0.5 threshold. Exercises the
+    per-candidate skip gate which fires before any external lookup or
+    EnrichBookJob enqueue.
     """
     @behaviour Stacks.AI.ClientBehaviour
 
@@ -908,31 +873,28 @@ defmodule Stacks.ModerationTest do
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
-  defmodule LowConfidenceNoIsbnClient do
+  defmodule CapturePayloadClient do
     @moduledoc """
-    Low-confidence candidate (between #169 threshold_low 0.3 and #167
-    threshold 0.5) with no potential_isbns — exercises nil ISBN
-    telemetry metadata on the #167 skip path. Confidence sits above
-    #169's threshold_low so the pipeline-level gate doesn't pre-empt
-    #167.
+    Vision client that snapshots the outgoing payload (via the test PID
+    stored in persistent_term) and then short-circuits with
+    `:isbn_not_found` so the pipeline returns quickly. Used by the
+    `excluded_books forwarding` tests to assert that the controller →
+    job → moderation → client wire shape carries the rejection list.
     """
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
-    def call_vision("analyze", _payload) do
+    def call_vision("analyze", payload) do
+      case :persistent_term.get({Stacks.ModerationTest, :capture_pid}, nil) do
+        nil -> :ok
+        pid -> send(pid, {:vision_payload, payload})
+      end
+
       {:ok,
        %{
          "classification" => "CLASSIFICATION_RESULT_BOOK",
          "confidence" => 0.95,
-         "books" => [
-           %{
-             "title" => "Some Title",
-             "author" => nil,
-             "potential_isbns" => [],
-             "raw_text" => nil,
-             "confidence" => 0.4
-           }
-         ],
+         "books" => [],
          "model_used" => "mock"
        }}
     end
@@ -940,12 +902,13 @@ defmodule Stacks.ModerationTest do
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
-  # ---------------------------------------------------------------------------
-  # Inline mock modules for Issue #169 — selective verification gate.
-  # ---------------------------------------------------------------------------
-
-  defmodule HighConfidenceVerifyClient do
-    @moduledoc "Candidate confidence ≥ verification_threshold_high. Verification must NOT trigger."
+  defmodule SingleIsbnCandidateClient do
+    @moduledoc """
+    Single candidate with a known checksum-valid ISBN — used by the
+    excluded_isbns drop-candidate test. When the ISBN matches an entry in
+    `excluded_isbns`, the candidate is dropped before resolve_and_store
+    runs and the pipeline reports isbn_not_found.
+    """
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
@@ -970,111 +933,12 @@ defmodule Stacks.ModerationTest do
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 
-  defmodule UncertainBandMatchClient do
-    @moduledoc "Candidate confidence in [low, high); /verify returns is_same_book=true."
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload) do
-      {:ok,
-       %{
-         "classification" => "CLASSIFICATION_RESULT_BOOK",
-         "confidence" => 0.5,
-         "books" => [
-           %{
-             "title" => "Train to Crystal City",
-             "author" => nil,
-             "potential_isbns" => ["9781476732123"],
-             "raw_text" => nil,
-             "confidence" => 0.5
-           }
-         ],
-         "model_used" => "mock"
-       }}
-    end
-
-    def call_vision("verify", _payload) do
-      {:ok,
-       %{
-         "is_same_book" => true,
-         "confidence" => 0.92,
-         "reasoning" => "title and cover match"
-       }}
-    end
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule UncertainBandMismatchClient do
-    @moduledoc "Candidate confidence in [low, high); /verify returns is_same_book=false."
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload) do
-      {:ok,
-       %{
-         "classification" => "CLASSIFICATION_RESULT_BOOK",
-         "confidence" => 0.5,
-         "books" => [
-           %{
-             "title" => "Train to Crystal City",
-             "author" => nil,
-             "potential_isbns" => ["9781476732123"],
-             "raw_text" => nil,
-             "confidence" => 0.5
-           }
-         ],
-         "model_used" => "mock"
-       }}
-    end
-
-    def call_vision("verify", _payload) do
-      {:ok,
-       %{
-         "is_same_book" => false,
-         "confidence" => 0.4,
-         "reasoning" => "different artwork"
-       }}
-    end
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule BelowThresholdLowClient do
-    @moduledoc "Candidate confidence < verification_threshold_low — immediate :uncertain rejection."
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload) do
-      {:ok,
-       %{
-         "classification" => "CLASSIFICATION_RESULT_BOOK",
-         "confidence" => 0.2,
-         "books" => [
-           %{
-             "title" => "Mystery Book",
-             "author" => nil,
-             "potential_isbns" => ["9780000000000"],
-             "raw_text" => nil,
-             "confidence" => 0.2
-           }
-         ],
-         "model_used" => "mock"
-       }}
-    end
-
-    # Should never be called — but defined so a misimplementation that does
-    # call /verify surfaces with a distinct response rather than crashing.
-    def call_vision("verify", _payload) do
-      {:ok,
-       %{"is_same_book" => false, "confidence" => 0.0, "reasoning" => "should not be called"}}
-    end
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule ConfigOverrideClient do
-    @moduledoc "Confidence 0.6 — uncertain band when high=0.7, high-confidence when high=0.5."
+  defmodule LowConfidenceNoIsbnClient do
+    @moduledoc """
+    Low-confidence candidate (below #167 threshold 0.5) with no
+    potential_isbns — exercises nil ISBN telemetry metadata on the
+    #167 skip path.
+    """
     @behaviour Stacks.AI.ClientBehaviour
 
     @impl true
@@ -1085,11 +949,11 @@ defmodule Stacks.ModerationTest do
          "confidence" => 0.95,
          "books" => [
            %{
-             "title" => "High Confidence Book",
+             "title" => "Some Title",
              "author" => nil,
-             "potential_isbns" => ["9780743273565"],
+             "potential_isbns" => [],
              "raw_text" => nil,
-             "confidence" => 0.6
+             "confidence" => 0.4
            }
          ],
          "model_used" => "mock"

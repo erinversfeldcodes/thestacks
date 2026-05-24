@@ -571,6 +571,29 @@ uploadEffects msg model maybeToken =
                 Err _ ->
                     SimulatedEffect.Cmd.none
 
+        Upload.RejectIdentification ->
+            case ( model.step, model.uploadState, maybeToken ) of
+                ( Upload.Verifying book, Types.RemoteData.Success imageId, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "POST"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/upload/" ++ imageId ++ "/reject-identification"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object
+                                    [ ( "rejected_book_ids"
+                                      , Encode.list Encode.string (model.rejectedBookIds ++ [ book.id ])
+                                      )
+                                    ]
+                                )
+                        , expect = SimulatedEffect.Http.expectWhatever Upload.RejectIdentificationCompleted
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         Upload.GotFile _ ->
             case maybeToken of
                 Just token ->

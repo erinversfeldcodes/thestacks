@@ -24,17 +24,20 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   @impl true
   def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key}
+        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key} = args
       }) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
     case Storage.get_image_url(storage_key) do
       {:ok, image_url} ->
-        context = %{
-          image_url: image_url,
-          user_id: user_id,
-          image_id: image_id
-        }
+        context =
+          %{
+            image_url: image_url,
+            user_id: user_id,
+            image_id: image_id
+          }
+          |> put_excluded_books(args)
+          |> put_excluded_isbns(args)
 
         run_pipeline(context, image_id)
 
@@ -50,19 +53,46 @@ defmodule Stacks.Workers.IdentifyBookJob do
   # ── Legacy path: image_b64 (backwards compat for in-flight jobs) ──────────
 
   def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64}
+        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64} = args
       }) do
     Logger.info(
       "IdentifyBookJob: processing image #{image_id} for user #{user_id} (legacy b64 path)"
     )
 
-    context = %{
-      image_b64: image_b64,
-      user_id: user_id,
-      image_id: image_id
-    }
+    context =
+      %{
+        image_b64: image_b64,
+        user_id: user_id,
+        image_id: image_id
+      }
+      |> put_excluded_books(args)
+      |> put_excluded_isbns(args)
 
     run_pipeline(context, image_id)
+  end
+
+  # Carries the cumulative rejected-books list from the args map into the
+  # moderation context. Missing or non-list values are normalised to an
+  # empty list so downstream callers can `Map.get(context, :excluded_books, [])`
+  # without worrying about shape.
+  defp put_excluded_books(context, args) do
+    case Map.get(args, "excluded_books") do
+      list when is_list(list) -> Map.put(context, :excluded_books, list)
+      _ -> context
+    end
+  end
+
+  # Carries the cumulative rejected-ISBNs list from the args map into the
+  # moderation context. The resolver layer consumes this to skip OL/GB
+  # search hits whose ISBN matches a previously-rejected book, preventing
+  # a slightly-different VLM title variant from collapsing back to the
+  # same wrong ISBN on every retry. Distinct from `excluded_books` (which
+  # is VLM-bound for the extract prompt) — this list is Elixir-side only.
+  defp put_excluded_isbns(context, args) do
+    case Map.get(args, "excluded_isbns") do
+      list when is_list(list) -> Map.put(context, :excluded_isbns, list)
+      _ -> context
+    end
   end
 
   defp run_pipeline(context, image_id) do
@@ -91,16 +121,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
         Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
         mark_rejected(image_id, "isbn_not_found")
         {:cancel, "isbn_not_found"}
-
-      # Issue #169 — selective vision verification could not confirm any
-      # candidate above the threshold. Distinct rejection reason so the
-      # upload UI can surface a user-actionable message ("try a clearer
-      # photo / enter ISBN manually") rather than the generic
-      # `isbn_not_found` copy.
-      {:error, :uncertain} ->
-        Logger.warning("IdentifyBookJob: image #{image_id} rejected as uncertain")
-        mark_rejected(image_id, "uncertain")
-        {:cancel, "uncertain"}
 
       {:error, reason} ->
         Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")

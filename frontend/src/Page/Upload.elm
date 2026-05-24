@@ -30,7 +30,6 @@ type UploadResult
     | Identified (List Book)
     | IdentificationFailed
     | NotABook
-    | Uncertain
     | ManualISBNEntry
     | DuplicateDetected Book
 
@@ -81,6 +80,12 @@ type alias Model =
     -- True once a terminal SSE event (resolved/rejected) has been received.
     -- Used to suppress spurious StreamError after the server closes the connection.
     , sseTerminalReceived : Bool
+
+    -- Cumulative list of book IDs the user has rejected via "No, try again"
+    -- for the current image upload. Reset on Reset or a successful Confirm.
+    -- The server uses this list to exclude already-rejected books from the
+    -- vision pipeline's next pass.
+    , rejectedBookIds : List String
     }
 
 
@@ -112,6 +117,7 @@ type Msg
     | Reset
     | ConfirmIdentification
     | RejectIdentification
+    | RejectIdentificationCompleted (Result Http.Error ())
     | ShelfSelected String
     | ConfirmPlacement
     | PlacementCompleted (Result Http.Error Placement)
@@ -140,6 +146,7 @@ init =
     , mergeIsbn = ""
     , mergeFormatLabel = ""
     , sseTerminalReceived = False
+    , rejectedBookIds = []
     }
 
 
@@ -280,13 +287,6 @@ update msg model maybeToken =
                             case response.rejectionReason of
                                 Just "not_a_book" ->
                                     ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
-
-                                Just "uncertain" ->
-                                    -- Selective vision verification (#169): low or
-                                    -- mid-band confidence with no cover-verified
-                                    -- candidate. Surface a distinct user message
-                                    -- with an actionable manual-ISBN fallback.
-                                    ( { model | result = Uncertain, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
                                     ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
@@ -527,7 +527,48 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         RejectIdentification ->
-            ( init, Cmd.none, NoOut )
+            case ( model.step, model.uploadState, maybeToken ) of
+                ( Verifying book, Success imageId, Just token ) ->
+                    let
+                        newRejected =
+                            model.rejectedBookIds ++ [ book.id ]
+                    in
+                    ( { model
+                        | rejectedBookIds = newRejected
+                        , step = Uploading
+                        , result = NoResult
+                        , pendingBookIds = []
+                        , collectedBooks = []
+                        , failedBookIds = []
+                        , placementState = NotAsked
+                        , sseTerminalReceived = False
+                      }
+                    , Api.rejectIdentification
+                        { imageId = imageId
+                        , rejectedBookIds = newRejected
+                        , token = token
+                        }
+                        RejectIdentificationCompleted
+                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                    )
+
+                _ ->
+                    -- No image / no token / not in Verifying step — fall back to
+                    -- the legacy full reset so we never wedge in a half-state.
+                    ( init, Cmd.none, NoOut )
+
+        RejectIdentificationCompleted result ->
+            case result of
+                Ok () ->
+                    -- The HTTP 202 only acknowledges the request. The SSE stream
+                    -- is the real signal source for the re-run vision pipeline.
+                    ( model, Cmd.none, NoOut )
+
+                Err _ ->
+                    -- The server didn't accept the rejection. Surface the
+                    -- failure on the same screen the user would see on a
+                    -- pipeline failure rather than wedging in the spinner.
+                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
         ShelfSelected shelf ->
             ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
@@ -549,6 +590,7 @@ update msg model maybeToken =
                     ( { model
                         | step = Complete book model.selectedShelf
                         , placementState = Success placementStub
+                        , rejectedBookIds = []
                       }
                     , Cmd.none
                     , NoOut
@@ -616,9 +658,6 @@ view model maybeToken =
 
                                 NotABook ->
                                     viewNotABook
-
-                                Uncertain ->
-                                    viewUncertain
 
                                 ManualISBNEntry ->
                                     viewManualEntry model
@@ -794,27 +833,6 @@ viewNotABook =
                 "We couldn't detect a book in that image. Please try a photo of a book cover."
             ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Again" ]
-        , button [ class "btn btn--secondary", onClick EnterManualMode ]
-            [ text "Enter ISBN Manually" ]
-        ]
-
-
-{-| Issue #169 — selective vision verification. When the analyze
-pipeline returns mid-band-confidence candidates that fail cover
-verification (or max confidence is below the verification floor),
-the upload is rejected with reason `"uncertain"`. The user gets a
-distinct, actionable message rather than the bare "Could Not
-Identify" copy used for hard ISBN failures.
--}
-viewUncertain : Html Msg
-viewUncertain =
-    div [ class "upload-result upload-result--uncertain", testId "upload-uncertain" ]
-        [ h2 [] [ text "Not Sure Which Book" ]
-        , p []
-            [ text
-                "We're not sure which book this is — try a clearer photo or enter the ISBN manually."
-            ]
-        , button [ class "btn btn--primary", onClick Reset ] [ text "Try Another Photo" ]
         , button [ class "btn btn--secondary", onClick EnterManualMode ]
             [ text "Enter ISBN Manually" ]
         ]

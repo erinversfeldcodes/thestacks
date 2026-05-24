@@ -404,4 +404,100 @@ defmodule Stacks.Books.ISBNResolverTest do
       assert {:ok, _, _} = ISBNResolver.search_by_title("Gatsby", nil, "")
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # search_by_title/4 — excluded_isbns (rejection-retry plumbing)
+  # ---------------------------------------------------------------------------
+
+  describe "search_by_title/4 — excluded_isbns" do
+    # Rejection-retry: when a user clicks "No, try again" on the
+    # identified book, the controller resolves the rejected book ids to
+    # ISBNs and threads the list through to the resolver. Without this,
+    # a slightly-different VLM title variant on the retry can collapse
+    # back to the same wrong OL/GB top match and we'd loop on the same
+    # incorrect identification.
+
+    test "skips OL search results whose ISBN matches an excluded entry" do
+      excluded = "9781429964500"
+      # OL returns the excluded ISBN as its (only) top match. With the
+      # exclusion in effect, the candidate is treated as no match and
+      # the resolver falls through to {:error, :not_found}.
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: [excluded])]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, :not_found} =
+               ISBNResolver.search_by_title("Crystal City", "Card", nil,
+                 excluded_isbns: [excluded]
+               )
+    end
+
+    test "exclusion match is hyphen/space-insensitive" do
+      excluded_with_hyphens = "978-1-4299-6450-0"
+      stored_isbn = "9781429964500"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: [stored_isbn])]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, :not_found} =
+               ISBNResolver.search_by_title("Crystal City", "Card", nil,
+                 excluded_isbns: [excluded_with_hyphens]
+               )
+    end
+
+    test "returns {:error, :not_found} when all candidate variants resolve to excluded ISBNs" do
+      excluded = "9780743273565"
+
+      # Every candidate query variant (title+author, title, etc.) returns
+      # the same excluded ISBN — exhaustion path.
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: [excluded])]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, :not_found} =
+               ISBNResolver.search_by_title("Gatsby", "Fitzgerald", nil,
+                 excluded_isbns: [excluded]
+               )
+    end
+
+    test "non-excluded ISBN is returned normally even when excluded_isbns is set" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: ["9780743273565"])]}}
+      )
+
+      assert {:ok, "9780743273565", _meta} =
+               ISBNResolver.search_by_title("Gatsby", "Fitzgerald", nil,
+                 excluded_isbns: ["9999999999999"]
+               )
+    end
+
+    test "empty excluded_isbns list behaves identically to no opts" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, isbn_with, _} =
+               ISBNResolver.search_by_title("Gatsby", "Fitzgerald", nil, excluded_isbns: [])
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, isbn_without, _} = ISBNResolver.search_by_title("Gatsby", "Fitzgerald")
+      assert isbn_with == isbn_without
+    end
+  end
 end

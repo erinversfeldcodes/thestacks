@@ -177,7 +177,6 @@ suite =
         [ uploadHappyPath
         , uploadIsbnRejection
         , uploadNotABook
-        , uploadUncertain
         , uploadPollTimeout
         , uploadPollTimeoutViaLimit
         , uploadDuplicateDetected
@@ -190,6 +189,7 @@ suite =
         , uploadMergeFormatFailure
         , uploadReset
         , uploadDragOver
+        , uploadRejectIdentificationRetries
         ]
 
 
@@ -233,37 +233,6 @@ uploadNotABook =
                 |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved Nothing False))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "That Doesn't Look Like a Book" ]
-
-
-{-| Build an SSE stream event JSON string with an explicit rejection
-reason. Used by the uncertain-rejection program test introduced in
-Issue #169 (selective vision verification).
--}
-simulateRejectionEvent : String -> String
-simulateRejectionEvent reason =
-    Encode.encode 0
-        (Encode.object
-            [ ( "imageId", Encode.string "img-test-001" )
-            , ( "status", Encode.string "rejected" )
-            , ( "isDuplicate", Encode.bool False )
-            , ( "rejectionReason", Encode.string reason )
-            , ( "bookId", Encode.null )
-            , ( "bookIds", Encode.list Encode.string [] )
-            ]
-        )
-
-
-uploadUncertain : Test
-uploadUncertain =
-    test "upload_uncertain: stream returns Rejected with reason uncertain -> shows uncertain message and manual-ISBN CTA" <|
-        \() ->
-            startUpload
-                |> simulateUploadAccepted
-                |> ProgramTest.update (StreamEvent (simulateRejectionEvent "uncertain"))
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "We're not sure which book this is — try a clearer photo or enter the ISBN manually." ]
-                |> ProgramTest.expectViewHas
-                    [ Selector.text "Enter ISBN Manually" ]
 
 
 uploadPollTimeout : Test
@@ -529,3 +498,41 @@ uploadMultiBookPartialFailure =
                 |> ProgramTest.update Upload.ConfirmPlacement
                 |> ProgramTest.expectViewHas
                     [ Selector.text "First Book" ]
+
+
+{-| "No, try again" must keep the image, append the rejected book id to
+the cumulative rejection list, dispatch POST .../reject-identification
+with that list, and transition the verify step back into the processing
+state so the user sees the upload spinner while the new IdentifyBookJob
+runs and emits a fresh SSE sequence.
+-}
+uploadRejectIdentificationRetries : Test
+uploadRejectIdentificationRetries =
+    test "upload_reject_identification: click 'No, try again' on Verifying step -> POST reject-identification with [bookId] -> view returns to processing spinner" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") False))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Wrong Guess" "Wrong Author")
+                -- Verifying step is now active.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "We think this is…" ]
+                -- Click "No, try again" — this fires RejectIdentification.
+                |> ProgramTest.clickButton "No, try again"
+                -- The server acknowledges the rejection with 202.
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/upload/img-test-001/reject-identification"
+                    (Http.GoodStatus_
+                        { url = "/api/upload/img-test-001/reject-identification"
+                        , statusCode = 202
+                        , statusText = "Accepted"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                -- Model is back in the Uploading step, processing spinner is showing
+                -- while we wait for the re-run vision pipeline to emit SSE events.
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Processing image..." ]

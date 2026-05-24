@@ -136,6 +136,14 @@ defmodule CoreWeb.Router do
     # verifies the client's direct-to-R2 upload + enqueues the job.
     post "/upload/init", UploadController, :init
     post "/upload/:image_id/commit", UploadController, :commit
+    # Rejection-retry — user clicks "No, try again" on an identified
+    # book. Backend stays stateless w.r.t. the rejection list: the
+    # frontend supplies the cumulative list of rejected book IDs and
+    # we enqueue a fresh IdentifyBookJob with the list forwarded to
+    # the vision model as exclusions.
+    post "/upload/:image_id/reject-identification",
+         UploadController,
+         :reject_identification
   end
 
   # Upload data PUT — no user auth. The image_id UUID (128-bit random) is the

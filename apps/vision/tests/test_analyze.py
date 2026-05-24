@@ -1,17 +1,23 @@
-"""Tests for the /analyze endpoint — consolidated classify + extract.
+"""Tests for the /analyze endpoint — two-call classify-then-extract flow.
 
-/analyze now runs classification + extraction in a SINGLE Modal inference
-via `VisionClient.analyze`. These tests verify:
+The endpoint now orchestrates ``VisionClient.classify`` and
+``VisionClient.extract`` at the FastAPI layer (no single-pass
+``client.analyze``). These tests verify:
 
-- BOOK classification → response includes books extracted in the same call
-- NOT_BOOK classification → books is forced to [] regardless of model output
-- AMBIGUOUS classification → books is forced to []
-- Input validation: missing image/image_url → 422
-- HMAC auth is enforced (delegated to the same verify_hmac plug)
-
-Local OCR pre-pass is disabled by pointing `local_ocr_enabled` at False
-within each test (when needed). The default test settings already have
-local OCR disabled in conftest.
+- BOOK classification → ``extract`` is invoked and returned books surface
+  in the response.
+- NOT_BOOK classification → short-circuit; ``extract`` is NEVER called and
+  books is [].
+- AMBIGUOUS classification → short-circuit; ``extract`` is NEVER called
+  and books is []. (Different from the prior single-pass behaviour, which
+  preserved partial-signal books on AMBIGUOUS — see the docstring on the
+  ``/analyze`` handler for the rationale.)
+- BOOK + empty extract → response carries empty books, ``model_used``
+  is the VLM model name (not ``local_ocr``).
+- Local OCR short-circuit (barcode hit) → neither classify nor extract
+  is called; ``model_used`` is ``local_ocr``.
+- Input validation: missing image/image_url → 422; invalid base64 → 422.
+- HMAC auth is enforced (delegated to the same verify_hmac plug).
 """
 
 import base64
@@ -36,10 +42,9 @@ def _make_header(path: str = "/analyze") -> dict[str, str]:
 
 
 def test_analyze_returns_books_for_book_classification() -> None:
-    """Happy path: single analyze call yields classification + books."""
-    analyze_output = {
-        "classification": "book",
-        "confidence": 0.95,
+    """Happy path: classify=book → extract is called and books surface."""
+    classify_output = {"classification": "book", "confidence": 0.95}
+    extract_output = {
         "books": [
             {
                 "title": "The Great Gatsby",
@@ -48,14 +53,19 @@ def test_analyze_returns_books_for_book_classification() -> None:
                 "raw_text": None,
                 "confidence": 0.9,
             }
-        ],
+        ]
     }
     with (
         patch(
-            "app.services.vision_client.VisionClient.analyze",
+            "app.services.vision_client.VisionClient.classify",
             new_callable=AsyncMock,
-            return_value=analyze_output,
-        ) as mock_analyze,
+            return_value=classify_output,
+        ) as mock_classify,
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ) as mock_extract,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -70,29 +80,30 @@ def test_analyze_returns_books_for_book_classification() -> None:
     assert data["confidence"] == 0.95
     assert len(data["books"]) == 1
     assert data["books"][0]["potential_isbns"] == ["9780743273565"]
-    # Exactly ONE Modal invocation — the whole point of the consolidation.
-    assert mock_analyze.await_count == 1
+    # Two calls — one classify, one extract.
+    assert mock_classify.await_count == 1
+    assert mock_extract.await_count == 1
 
 
-def test_analyze_forces_empty_books_on_not_book() -> None:
-    """NOT_BOOK classification → books is [] even if model returned data.
+def test_analyze_short_circuits_on_not_book() -> None:
+    """NOT_BOOK classification → extract is NEVER called; books is [].
 
-    The prompt asks the model for `books: []` on non-books, but we enforce
-    it defensively on the server side — model output is a guideline, not a
-    wire contract.
+    Load-bearing contract for the screenshot_bunny.jpg regression — the
+    single-pass merge previously returned BOOK with empty books on this
+    fixture, surfacing the wrong error message to the user. The strict
+    classify gate restores the dfef1333 behaviour.
     """
-    analyze_output = {
-        "classification": "not_book",
-        "confidence": 0.92,
-        # Model misbehaves and returns data anyway — we must discard it.
-        "books": [{"title": "hallucinated", "author": "x", "potential_isbns": []}],
-    }
+    classify_output = {"classification": "not_book", "confidence": 0.92}
     with (
         patch(
-            "app.services.vision_client.VisionClient.analyze",
+            "app.services.vision_client.VisionClient.classify",
             new_callable=AsyncMock,
-            return_value=analyze_output,
-        ) as mock_analyze,
+            return_value=classify_output,
+        ) as mock_classify,
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+        ) as mock_extract,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -105,36 +116,31 @@ def test_analyze_forces_empty_books_on_not_book() -> None:
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_NOT_BOOK"
     assert data["books"] == []
-    assert mock_analyze.await_count == 1
+    assert mock_classify.await_count == 1
+    mock_extract.assert_not_called()
 
 
-def test_analyze_preserves_books_on_ambiguous() -> None:
-    """AMBIGUOUS classification → books are preserved.
+def test_analyze_short_circuits_on_ambiguous() -> None:
+    """AMBIGUOUS classification → extract is NEVER called; books is [].
 
-    The prompt instructs the model to extract partial signal (a half-visible
-    ISBN, one legible word of a title) on ambiguous covers so enrichment
-    downstream can still attempt resolution. Only confident `not_book` forces
-    `books: []` on the wire.
+    Decision (2026-05): treat AMBIGUOUS as a short-circuit rather than
+    extracting partial-signal candidates. The intermediate single-pass
+    behaviour preserved ambiguous extractions, which empirically led to
+    confident wrong identifications (e.g. rotated covers). When classify
+    can't tell, the cost of a confident-wrong extract outweighs the value
+    of a low-confidence partial hit.
     """
-    analyze_output = {
-        "classification": "ambiguous",
-        "confidence": 0.45,
-        "books": [
-            {
-                "title": "partial title",
-                "author": "",
-                "confidence": 0.3,
-                "potential_isbns": ["9780000000000"],
-                "raw_text": "partial title",
-            }
-        ],
-    }
+    classify_output = {"classification": "ambiguous", "confidence": 0.45}
     with (
         patch(
-            "app.services.vision_client.VisionClient.analyze",
+            "app.services.vision_client.VisionClient.classify",
             new_callable=AsyncMock,
-            return_value=analyze_output,
-        ),
+            return_value=classify_output,
+        ) as mock_classify,
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+        ) as mock_extract,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -146,28 +152,31 @@ def test_analyze_preserves_books_on_ambiguous() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
-    assert len(data["books"]) == 1
-    assert data["books"][0]["title"] == "partial title"
-    assert data["books"][0]["potential_isbns"] == ["9780000000000"]
+    assert data["books"] == []
+    assert mock_classify.await_count == 1
+    mock_extract.assert_not_called()
 
 
 def test_analyze_with_empty_extraction_returns_empty_books() -> None:
     """BOOK classification + zero extractable candidates → empty books list.
 
     The pipeline's "we think it's a book but couldn't read it" case. Core
-    maps this to :isbn_not_found.
+    maps this to :isbn_not_found. ``model_used`` must remain the VLM model
+    name — only the local OCR short-circuit reports ``local_ocr``.
     """
-    analyze_output: dict[str, object] = {
-        "classification": "book",
-        "confidence": 0.85,
-        "books": [],
-    }
+    classify_output = {"classification": "book", "confidence": 0.85}
+    extract_output: dict[str, object] = {"books": []}
     with (
         patch(
-            "app.services.vision_client.VisionClient.analyze",
+            "app.services.vision_client.VisionClient.classify",
             new_callable=AsyncMock,
-            return_value=analyze_output,
+            return_value=classify_output,
         ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ) as mock_extract,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -180,6 +189,50 @@ def test_analyze_with_empty_extraction_returns_empty_books() -> None:
     data = response.json()
     assert data["classification"] == "CLASSIFICATION_RESULT_BOOK"
     assert data["books"] == []
+    assert data["model_used"] == settings.model_name
+    assert mock_extract.await_count == 1
+
+
+def test_analyze_local_ocr_short_circuit_skips_vlm() -> None:
+    """A clean barcode decode short-circuits the VLM entirely.
+
+    Neither classify nor extract should be invoked. ``model_used`` is
+    ``local_ocr`` and confidence is pinned to 1.0 (ISBN barcodes carry a
+    checksum, so a successful decode is effectively zero-false-positive).
+    """
+    with (
+        patch(
+            "app.main.local_isbn_scan",
+            create=True,
+            return_value="9780156001311",
+        ) as mock_scan,
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+        ) as mock_classify,
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+        ) as mock_extract,
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/analyze",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["classification"] == "CLASSIFICATION_RESULT_BOOK"
+    assert data["model_used"] == "local_ocr"
+    assert data["confidence"] == 1.0
+    assert len(data["books"]) == 1
+    assert data["books"][0]["potential_isbns"] == ["9780156001311"]
+    assert data["books"][0]["confidence"] == 1.0
+    mock_scan.assert_called()
+    mock_classify.assert_not_called()
+    mock_extract.assert_not_called()
 
 
 def test_analyze_missing_input_returns_422() -> None:
@@ -209,3 +262,80 @@ def test_analyze_rejects_missing_hmac() -> None:
     with TestClient(app) as client:
         response = client.post("/analyze", json={"image": _VALID_IMAGE})
     assert response.status_code in (401, 403)
+
+
+def test_analyze_with_excluded_books_appends_constraint() -> None:
+    """`excluded_books` is forwarded to VisionClient.extract as a kwarg.
+
+    The Modal-side VisionModel.extract is responsible for appending the
+    constraint clause to the prompt — at the FastAPI layer we verify that
+    the list arrives intact on the underlying client call. This guards the
+    rejection-retry wiring without coupling the assertion to the exact
+    Modal-side prompt template.
+    """
+    classify_output = {"classification": "book", "confidence": 0.95}
+    extract_output: dict[str, object] = {"books": []}
+    excluded = ["Foo by Bar", "Baz by Qux"]
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value=classify_output,
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ) as mock_extract,
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/analyze",
+            json={"image": _VALID_IMAGE, "excluded_books": excluded},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    assert mock_extract.await_count == 1
+    # Positional arg 0 is the images list; the excluded_books kwarg carries
+    # the rejected identifications.
+    call = mock_extract.await_args
+    assert call is not None
+    assert call.kwargs.get("excluded_books") == excluded
+
+
+def test_analyze_empty_excluded_books_passes_empty_list() -> None:
+    """When `excluded_books` is omitted, the request reaches VisionClient.extract
+    with an empty list (the baseline / unconstrained prompt path).
+
+    The proto default for the repeated field is an empty list, so the
+    request body without the key arrives as ``excluded_books=[]`` at the
+    handler. We verify the empty list is forwarded so the Modal-side
+    branch that appends the constraint is NOT taken.
+    """
+    classify_output = {"classification": "book", "confidence": 0.85}
+    extract_output: dict[str, object] = {"books": []}
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value=classify_output,
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ) as mock_extract,
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/analyze",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+
+    assert response.status_code == 200
+    assert mock_extract.await_count == 1
+    call = mock_extract.await_args
+    assert call is not None
+    assert call.kwargs.get("excluded_books") == []
