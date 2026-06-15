@@ -5,7 +5,7 @@ Develop and maintain the Phoenix/Elixir core: API endpoints, Oban job workers, e
 
 ## Technology Stack
 - **Framework:** Phoenix 1.7+ (JSON API mode, no LiveView)
-- **Language:** Elixir 1.17+ with OTP 27
+- **Language:** Elixir 1.18+ with OTP 28
 - **Database:** Ecto for PostgreSQL (3 schemas: op, wh, audit)
 - **Job queue:** Oban (job processing + event bus)
 - **Auth:** Guardian JWT (HS256)
@@ -15,48 +15,42 @@ Develop and maintain the Phoenix/Elixir core: API endpoints, Oban job workers, e
 
 ## Owned Domains
 
-### Contexts (bounded domains in `apps/core/lib/core/`)
+### Contexts (bounded domains in `apps/core/lib/stacks/`)
 - `Stacks.Books` — CRUD, ISBN resolution, enrichment orchestration
-- `Stacks.Shelving` — Shelf placements, history tracking, shelf transitions
+- `Stacks.Shelving` — Bookshelf placements, history tracking, bookshelf transitions
 - `Stacks.Partners` — Registration, approval, API key management, inventory/event/space ingest
-- `Stacks.Partners.Inventory` — Inventory sync, CSV import, ISBN resolution for unknowns
-- `Stacks.Partners.Events` — Event creation, updates, archival
-- `Stacks.Partners.Spaces` — Space registration, updates
-- `Stacks.Partners.Validation` — Schema validation, blocklist, ISBN checksum
-- `Stacks.Partners.Metrics` — Aggregate engagement queries
 - `Stacks.Events` — Event bus: emit/1, replay/3, subscriber registry, upcaster
-- `Stacks.Enrichment` — Fan-out to scrapers, review aggregation, author intelligence
-- `Stacks.Moderation` — Content moderation pipeline (4-step)
-- `Stacks.ThirdSpaces` — Cork board, user-submitted spaces
-- `Stacks.GDPR` — Export, deletion, consent, retention
-- `Stacks.Search` — Book/author search
+- `Stacks.Enrichment` — Fan-out to scrapers, review aggregation, author intelligence (+ `Stacks.Enrichment.{Authors,Reviews,Prices,PricePipeline,ScraperClient,RssFetcher,Handlers.*}`)
+- `Stacks.Moderation` — Content moderation pipeline
+- `Stacks.GDPR.{Consent,Deletion,Export,ImageRetention}` — Export, deletion, consent, retention (no umbrella context module)
 - `Stacks.Audit` — Immutable audit logging
-- `Stacks.Marketplace` — Listings, offers, transactions (future)
+- `Stacks.Marketplace` — Listings, offers, transactions
+- `Stacks.Feeds` — Atom 1.0 feeds for public bookshelves
+- Infrastructure modules (`Core.Repo`, `Core.Application`, etc.) live in `apps/core/lib/core/`; do not add new domain code there.
 
-### Controllers (in `apps/core/lib/core_web/`)
-- `BookController`, `ShelfController`, `SearchController`
-- `PartnerAPI.InventoryController`, `PartnerAPI.EventController`, `PartnerAPI.SpaceController`, `PartnerAPI.MetricsController`
-- `PartnerDashboard.*` (web form equivalents of API endpoints)
-- `GDPRController`, `MetricsController`, `FeedController`
+### Controllers (in `apps/core/lib/stacks_web/controllers/`, namespace `StacksWeb.*`)
+- `BookController`, `BookshelfController`, `BookshelfPlacementController`, `ShelfController`, `SearchController`
+- `PartnerController`, `PartnerRegistrationController`, `PartnerInventoryController`, `PartnerEventController` (flat namespace — no `PartnerAPI.` prefix)
+- `AuthController`, `AdminController`, `AdminAuthController`, `OnboardingController`
+- `GDPRController`, `MetricsController`, `FeedController`, `UploadController`, `UserSettingsController`
+- `BlogController`, `CommentController`, `GroupController`, `GroupFeedController`, `GroupMemberController`, `SocialController`
+- `ListingController`, `ThirdSpaceController`, `VisibilityGrantController`, `EmailVerificationController`, `OptOutController`, `CatalogueController`, `CostController`, `BookAvailabilityController`, `SourceAdminController`, `InternalController`
 
-### Oban Workers (in `apps/core/lib/core/workers/`)
-- Vision + ISBN: `IdentifyBookJob`, `EnrichBookJob`
-- Enrichment: `FetchReviewsJob`, `TriggerPriceScrapeJob`, `DiscoverAuthorSourcesJob`, `FetchAuthorRSSJob`
-- Discovery: `SourceDiscoveryJob`, `ScoreSourceJob`, `DiscoverThirdSpacesJob`, `DiscoverBookstoreEventsJob`
-- Partner: `PartnerISBNResolveJob`, `ArchivePartnerEventsJob`, `PartnerMetricsSnapshotJob`, `PartnerApprovalNotificationJob`
-- Moderation: `ModerationPipelineJob`
-- Events: `EventSubscriberWorker`
-- GDPR: `DataExportJob`, `AccountDeletionJob`, `ImageRetentionJob`
-- Feeds: `RegenerateFeedJob`
-- Marketplace: `ListingExpiryJob`, `PaymentCallbackJob`, `ShipmentTrackingJob`
-- Metrics: `MetricsSnapshotJob`
+### Oban Workers (in `apps/core/lib/stacks/workers/`, namespace `Stacks.Workers.*`)
+- Vision + ISBN: `IdentifyBookJob`, `EnrichBookJob`, `PostBookAssociationWorker`
+- Enrichment: `FetchReviewsJob`, `TriggerPriceScrapeJob`, `DiscoverAuthorSourcesJob`, `FetchAuthorRSSJob`, `RecalculateWearJob`
+- Discovery: `SourceDiscoveryJob`, `ScoreSourceJob`, `DiscoverBookstoreEventsJob`, `GeographicDiscoveryJob`, `RssLivenessJob`
+- GDPR: `DataExportJob`, `AccountDeletionJob`, `ConfirmDeletionJob`, `ImageRetentionJob`
+- Feeds & social: `RegenerateFeedJob`, `VisibilityRecapJob`
+- Marketplace: `ListingExpiryJob`
+- Ops: `CacheSweepJob`, `RefreshCostsJob`, `EmailDeliveryJob`, `DbtRefreshJob`, `DbtRefreshHandler`
 
-### Plugs (in `apps/core/lib/core_web/plugs/`)
-- `SecurityHeadersPlug`, `RateLimiterPlug`, `CORSPlug`
+### Plugs (in `apps/core/lib/stacks_web/plugs/`)
+- `SecurityHeaders`, `RateLimiter`, `AgeGate`, `ConsentCheck`, `DepsCheck`, `RouteGroup`
+- `AuthPipeline`, `OptionalAuthPipeline`, `AdminAuthPipeline`, `SseAuthPipeline`, `AuthErrorHandler`
 - `PartnerAuthPlug` (API key extraction, hash verification, status check)
-- `PartnerRateLimiterPlug` (100/min, 10k/day per partner)
-- `SchemaValidationPlug` (Protobuf-generated JSON schema validation)
-- `RequestSizeValidation`
+- `RequireConfirmedEmail`, `RequireMfa`, `RequireRole`, `ViewAsPlug`
+- `MetricsAuth`, `AuditAdminCall`
 
 ## Event Bus Pattern
 
@@ -85,7 +79,8 @@ end
 ./docs/agents/standards/code-quality.md
 ./docs/agents/standards/testing.md
 ./docs/agents/standards/security.md
-./docs/technical-architecture.md (sections 1-7, 10, 18, 21, 23)
+./docs/agents/standards/migrations.md
+./docs/technical-architecture.md (Stack Overview, Authentication & API Security, Event-Driven Architecture, Partner Integration, Schema Contracts (Protobuf), GDPR & Data Security)
 ./docs/implementation-mapping.md
 ```
 
@@ -111,9 +106,12 @@ mix test [path]
 mix format
 mix credo --strict
 mix sobelow
+mix dialyzer
 mix ecto.migrate
 mix ecto.rollback
 mix ecto.reset
+mix proto.sync           # regenerate Ecto schemas / dbt models / proto JSON from proto/
+mix proto.sync --check   # CI drift check
 ```
 
 ---

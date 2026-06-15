@@ -1,8 +1,8 @@
-# US-1.2.3 — Browse the WishList Shelf
+# US-1.2.3 — Browse the WishList Bookshelf
 
 ## 1. User Story
 
-> **As a** user, **I want to** browse my WishList shelf **so that** I can see all the books I aspire to own and read.
+> **As a** user, **I want to** browse my WishList bookshelf **so that** I can see all the books I aspire to own and read.
 
 **What the user wants to accomplish:** View their desired books in a dreamy, aspirational setting.
 
@@ -14,11 +14,11 @@
 - **Wallpaper:** Watercolour floral wallpaper -- soft washes of lavender, blush, sage, and cream. Loose, painterly blooms.
 - **Walls:** Soft blue-grey walls visible above and below the shelving.
 - **Lighting:** Morning light -- cool and gentle, as if the curtains have just been drawn.
-- **Shelf label:** "Wish List" on the brass plate.
+- **Bookshelf label:** "Wish List" on the brass plate.
 - **Books:** Spines are pristine -- sharp edges, clean texture, bright colours. These books are idealised; you haven't touched them yet.
 
 **Acceptance Criteria:**
-- WishList shelf loads with all wishlist books displayed as spines.
+- WishList bookshelf loads with all wishlist books displayed as spines.
 - Bookcase renders with at least 4 shelf rows.
 - Spine view and list view toggleable.
 - Empty state shows aspirational message.
@@ -30,9 +30,9 @@
 ### Happy Path
 1. User navigates to `/wishlist`.
 2. `Main.elm` matches `WishList` route -> `Page.Bookshelf.init wishListConfig maybeToken userId`.
-3. Model initialises with `books = Loading`; API request fires to `GET /api/bookshelves/wishlist`.
+3. Model initialises with `shelves = Loading`; API request fires to `GET /api/bookshelves/wishlist`.
 4. Empty bookcase renders during loading.
-5. On success, placements grouped and rendered as clickable spines.
+5. On success, each returned shelf renders its `placements` as clickable spines.
 6. Clicking a spine opens the book detail overlay.
 
 ### Sad Paths
@@ -56,7 +56,7 @@
 - **Pipeline**: `:api` -> `:authenticated` -> `:view_as`
 - **Controller**: `StacksWeb.BookshelfController.show/2`
 - **Request body**: N/A
-- **Response (success)**: `{ bookshelf: "wishlist", count: N, placements: [...] }` -- HTTP 200
+- **Response (success)**: `{ bookshelf: "wishlist", count: N, shelves: [{id, position, placements: [...]}, ...] }` -- HTTP 200
 - **Response (error)**: `{ error: "invalid bookshelf name" }` -- HTTP 404
 - **FallbackController handling**: Same as US-1.2.1
 
@@ -139,7 +139,7 @@ N/A
 
 ### Init
 - **`initPage` branch**: `WishList` route -> `Page.Bookshelf.init wishListConfig maybeToken userId`
-- **API calls on init**: `Api.getBookshelf "wishlist" token BooksLoaded`
+- **API calls on init**: `Api.getBookshelf "wishlist" token ShelvesLoaded`
 - **Initial model state**: Same structure as Library, with `config = wishListConfig`
 
 ### Config (WishList-specific)
@@ -194,8 +194,8 @@ Identical to US-1.2.1. All `Msg` variants behave the same way regardless of conf
 
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
-| `page.load_time{route="/wishlist"}` | Elm Performance API | Histogram (ms) | Time from navigation to `BooksLoaded (Ok _)` rendering complete | p50 < 400ms, p95 < 1200ms |
-| `shelf.render_time{shelf="wishlist"}` | Elm Performance API | Histogram (ms) | Time to run `groupIntoRows 990` and render all shelf rows | p95 < 100ms for 200 books |
+| `page.load_time{route="/wishlist"}` | Elm Performance API | Histogram (ms) | Time from navigation to `ShelvesLoaded (Ok _)` rendering complete | p50 < 400ms, p95 < 1200ms |
+| `shelf.render_time{shelf="wishlist"}` | Elm Performance API | Histogram (ms) | Time to render all shelf rows from the nested shelves response | p95 < 100ms for 200 books |
 | `shelf.book_count{shelf="wishlist"}` | API response | Gauge | `count` field in API response | Informational (capacity planning) |
 | `user.books_clicked_per_session{shelf="wishlist"}` | Elm event tracking | Counter per session | Increment on each `BookClicked` msg | Informational (engagement) |
 | `user.view_mode_toggles_per_session` | Elm event tracking | Counter per session | Increment on each `ViewModeChanged` msg | Informational (feature usage) |

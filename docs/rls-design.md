@@ -1,6 +1,8 @@
 # Row-Level Security Design
 
-This document captures the intended PostgreSQL Row-Level Security (RLS) policies for The Stacks `op` schema. Policies are **ready to paste** into a migration but are **not yet active** — they will be enabled once Issue #047 (visibility contexts) passes its test suite.
+This document captures the PostgreSQL Row-Level Security (RLS) policies for The Stacks `op` schema. It is the companion reference for [ADR-006](decisions/006-rls-plus-application-visibility.md), which establishes RLS as the defence-in-depth backstop to the application-layer gate in [`Stacks.Visibility`](../apps/core/lib/stacks/visibility.ex) (`resolve_visibility/2` → `:visible | :hidden`).
+
+A first slice of policies — bookshelves, bookshelf_placements, user_blocks, and visibility_grants — was activated by migration [`20260319000008_enable_rls_policies.exs`](../apps/core/priv/repo/migrations/20260319000008_enable_rls_policies.exs) alongside Issue #047 (`issues/complete/047-visibility-infrastructure.md`). Policies for the remaining tables documented below are designed but **not yet activated** — they remain future work.
 
 ---
 
@@ -14,21 +16,36 @@ All API requests arrive through the Phoenix application. Before executing any qu
 SET LOCAL app.current_user_id = '<uuid>';
 ```
 
-Policies read this variable via `current_setting('app.current_user_id')::uuid`. The helper expression is intentionally verbose (no wrapper function) so every policy is self-contained and auditable without cross-referencing function definitions.
+Policies read this variable via `current_setting('app.current_user_id', true)` with a NULL guard so that sessions without the variable set (migrations, test sandbox) are not blocked. The cast to `uuid` happens only after the NULL check. The expression is inlined in every policy (no wrapper function) so each policy is self-contained and auditable.
 
-### When RLS will be enabled
+### Database roles
 
-RLS is an **enforcement layer on top of** the existing application-level visibility logic. It will be enabled after:
+Per [`20260305000020_create_db_roles.exs`](../apps/core/priv/repo/migrations/20260305000020_create_db_roles.exs) (and the login fix in `20260310000001_fix_db_role_login.exs`), three least-privilege roles exist:
 
-1. Issue #047 — visibility context helpers pass their test suite
-2. A dedicated migration file (to be created in Issue #047) runs `ALTER TABLE … ENABLE ROW LEVEL SECURITY` for each table listed here
-3. The Elixir connection pool is updated to call `SET LOCAL app.current_user_id` at the start of every transaction (also Issue #047)
+- `stacks_app` — CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`. The Phoenix app connects as this role in production. RLS policies are evaluated against it.
+- `stacks_dbt` — SELECT on `op` + `audit`, CRUD on `wh`. Used by dbt transforms.
+- `stacks_readonly` — SELECT on `op` + `wh`. Used for analytics/debugging.
 
-Until then, application logic in the `Stacks.*` contexts is the sole enforcement point.
+There is intentionally no `stacks_owner` role — schema migrations run as the hosting provider's owner account (`neondb_owner` on Neon, `postgres` locally).
 
 ### Superuser bypass
 
 `FORCE ROW LEVEL SECURITY` is applied to every table so that even the application database role (which may have `BYPASSRLS` disabled at the role level) cannot bypass policies. The Elixir pool user must NOT be a superuser in production.
+
+---
+
+## Tables with RLS active
+
+The following tables have RLS policies enabled today (migration `20260319000008`). The exact policies in code use the NULL-guarded form `current_setting('app.current_user_id', true) IS NULL OR …` so the test sandbox and migration runner can operate without setting the session variable. The policy sketches below show the production-mode predicate; consult the migration for the full text.
+
+| Table | Policies |
+|-------|----------|
+| `op.bookshelves` | `bookshelves_owner` (USING + WITH CHECK on `user_id`), `bookshelves_platform_select` (SELECT where `visibility = 'platform'`) |
+| `op.bookshelf_placements` | `bookshelf_placements_owner` (USING + WITH CHECK via parent bookshelf ownership), `bookshelf_placements_platform_select` (SELECT where both placement and parent bookshelf are `'platform'`) |
+| `op.user_blocks` | `user_blocks_owner` (USING + WITH CHECK on `blocker_id`) |
+| `op.visibility_grants` | `visibility_grants_granter` (USING + WITH CHECK on `granted_by_id`), `visibility_grants_grantee_select` (SELECT where `granted_to_id` matches) |
+
+All four tables also have `FORCE ROW LEVEL SECURITY` applied so even the application database role cannot bypass policies.
 
 ---
 
@@ -54,6 +71,10 @@ These tables contain public catalogue data or operational monitoring data with n
 ---
 
 ## Tables requiring RLS
+
+The first four subsections — `op.bookshelves`, `op.bookshelf_placements`, `op.user_blocks`, and `op.visibility_grants` — are **active in production** (see migration `20260319000008`). The remaining subsections (`op.blog_posts` onwards) document the **designed-but-not-yet-activated** policies for marketplace, blog, and groups tables; they are reference material for a follow-up migration.
+
+The policy SQL shown here is the production-mode predicate. The activated migration wraps each predicate with the `current_setting('app.current_user_id', true) IS NULL OR …` NULL guard described above.
 
 ---
 
@@ -121,7 +142,7 @@ CREATE POLICY bookshelf_placements_platform_select ON op.bookshelf_placements
 
 ---
 
-### `op.blog_posts`
+### `op.blog_posts` (not yet activated)
 
 **Access rules:**
 - Author (`user_id`) can CRUD their own posts.
@@ -146,7 +167,7 @@ CREATE POLICY blog_posts_platform_select ON op.blog_posts
 
 ---
 
-### `op.offer_threads`
+### `op.offer_threads` (not yet activated)
 
 **Access rules:**
 - The buyer (`buyer_id`) can INSERT threads and SELECT/UPDATE their own threads.
@@ -187,7 +208,7 @@ CREATE POLICY offer_threads_seller_update ON op.offer_threads
 
 ---
 
-### `op.offer_messages`
+### `op.offer_messages` (not yet activated)
 
 **Access rules:**
 - Participants in the parent thread (buyer and seller) can INSERT and SELECT messages.
@@ -235,7 +256,7 @@ CREATE POLICY offer_messages_seller ON op.offer_messages
 
 ---
 
-### `op.listings`
+### `op.listings` (not yet activated)
 
 **Access rules:**
 - Seller (`seller_id`) can CRUD their own listings.
@@ -260,7 +281,7 @@ CREATE POLICY listings_platform_select ON op.listings
 
 ---
 
-### `op.groups`
+### `op.groups` (not yet activated)
 
 **Access rules:**
 - Owner (`owner_id`) can CRUD their own groups.
@@ -294,7 +315,7 @@ CREATE POLICY groups_platform_select ON op.groups
 
 ---
 
-### `op.group_members`
+### `op.group_members` (not yet activated)
 
 **Access rules:**
 - Group owner and moderators can INSERT, UPDATE, DELETE membership records for their group.
@@ -391,20 +412,12 @@ CREATE POLICY visibility_grants_grantee_select ON op.visibility_grants
 
 ---
 
-## Migration template
+## Migration template (for the remaining tables)
 
-When Issue #047 is ready, paste the following into a new migration file. Add `SET LOCAL app.current_user_id` to the Ecto sandbox/pool configuration at the same time.
+The first wave (`bookshelves`, `bookshelf_placements`, `user_blocks`, `visibility_grants`) is already enabled by [`20260319000008_enable_rls_policies.exs`](../apps/core/priv/repo/migrations/20260319000008_enable_rls_policies.exs). A future migration that activates the remaining policies should follow the same NULL-guard pattern. Paste the following into a new migration file:
 
 ```sql
--- Run inside a migration or via psql as a superuser.
--- Order matters: referenced tables before referencing tables.
-
--- Core bookshelf tables
-ALTER TABLE op.bookshelves ENABLE ROW LEVEL SECURITY;
-ALTER TABLE op.bookshelves FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE op.bookshelf_placements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE op.bookshelf_placements FORCE ROW LEVEL SECURITY;
+-- Run inside a migration. Order matters: referenced tables before referencing tables.
 
 -- Blog
 ALTER TABLE op.blog_posts ENABLE ROW LEVEL SECURITY;
@@ -427,13 +440,9 @@ ALTER TABLE op.groups FORCE ROW LEVEL SECURITY;
 ALTER TABLE op.group_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE op.group_members FORCE ROW LEVEL SECURITY;
 
-ALTER TABLE op.user_blocks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE op.user_blocks FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE op.visibility_grants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE op.visibility_grants FORCE ROW LEVEL SECURITY;
-
--- Then: CREATE POLICY statements from each section above.
+-- Then: CREATE POLICY statements from each section above, wrapping each
+-- predicate with `current_setting('app.current_user_id', true) IS NULL OR …`
+-- to keep migrations and the Ecto sandbox unblocked.
 ```
 
 ---
@@ -442,7 +451,7 @@ ALTER TABLE op.visibility_grants FORCE ROW LEVEL SECURITY;
 
 | Limitation | Tracking |
 |------------|----------|
-| Group-visibility content (visibility = 'group') is enforced at the application layer only; RLS does not currently join through group_members for these cases | Issue #047 |
-| `current_setting('app.current_user_id')` raises an error if the variable is not set (e.g. during migrations). Wrap with `current_setting('app.current_user_id', true)` and handle NULL to allow safe migration runs | Issue #047 |
+| RLS is currently active only for `bookshelves`, `bookshelf_placements`, `user_blocks`, and `visibility_grants`. Blog, marketplace, and groups tables rely on application-layer enforcement via `Stacks.Visibility` (`resolve_visibility/2`) until a follow-up migration ships | Future |
+| Group-visibility content (visibility = 'group') is enforced at the application layer only; RLS does not currently join through group_members for these cases | See Issue #150 (`issues/complete/150-visibility-grants-crud.md`) |
 | Transactions table does not have a direct `user_id` column — ownership is derived via `listing_id → listings.seller_id`. An RLS policy requires a subquery; consider adding a denormalised `seller_id` column for performance | Future |
-| `op.bookshelf_placement_history` is an append-only audit trail — add a SELECT-only policy mirroring `bookshelf_placements_owner` once RLS is enabled | Issue #047 |
+| `op.bookshelf_placement_history` is an append-only audit trail — add a SELECT-only policy mirroring `bookshelf_placements_owner` | Future |

@@ -185,7 +185,7 @@ Or add `e2e` group to `scripts/ci.sh` alongside `elm`.
 
 ## Dependencies
 
-- Issue #011 (elm-program-test) complete — program tests confirm update logic is correct before Playwright tests the browser wiring
+- Issue #011 (elm-program-test) complete ✅ — program tests confirm update logic is correct before Playwright tests the browser wiring
 - Issue #002 (Elm frontend) complete ✅ — static build must exist for Playwright to load
 
 ## Sequencing note

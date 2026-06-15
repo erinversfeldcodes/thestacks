@@ -146,8 +146,8 @@ Author data is returned as part of the book detail endpoint. Enrichment data (RS
 - **Service**: Brave Search API (primary), SearXNG (fallback)
 - **Client module**: `Stacks.Discovery.BraveClient`, `Stacks.Discovery.SearxngClient`
 - **Auth**: Brave: `X-Subscription-Token` API key; SearXNG: none (self-hosted)
-- **Circuit breaker**: Brave daily budget (67 queries/day)
-- **Fallback**: Falls back from Brave to SearXNG when budget exhausted
+- **Circuit breakers**: `:brave_fuse` and `:searxng_fuse` (managed by `Stacks.CircuitBreakers`); Brave also enforces a daily budget (67 queries/day) returning `{:error, :daily_budget_exhausted}`
+- **Fallback**: Falls back from Brave to SearXNG when fuse opens or daily budget exhausted
 
 ---
 
@@ -208,7 +208,7 @@ N/A — `Components.AuthorCard` is a pure view function.
 - **Brave Search API call counts**: per-query counts and latencies for author source discovery — tracked via `BraveClient` daily budget counter (`:persistent_term` + `:counters`)
 - **SearXNG call counts**: fallback queries when Brave budget exhausted — self-hosted, no rate limit
 - **RSS fetch success/failure rates**: per-author RSS feed fetch outcomes recorded in `op.source_health_checks`
-- **Circuit breaker state**: Brave daily budget (67 queries/day) acts as a soft circuit breaker — `{:error, :daily_budget_exhausted}` triggers SearXNG fallback
+- **Circuit breaker state**: `:brave_fuse` and `:searxng_fuse` open/closed transitions; Brave daily budget (67 queries/day) returns `{:error, :daily_budget_exhausted}` which triggers SearXNG fallback
 - **Event handler execution times**: `AuthorDiscoveryHandler` and `DbtRefreshHandler` processing latency for `book.created` and `enrichment.author_updated` events
 - **dbt refresh job duration**: time to rebuild `int_author_activity` model
 

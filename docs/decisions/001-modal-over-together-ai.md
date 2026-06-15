@@ -66,7 +66,7 @@ config :the_stacks, :ai,
 
 **Model version pinning:** Models are pinned by name in config. The Qwen2.5-VL-7B-Instruct weights are downloaded to Modal's volume at `modal deploy` time. A production upgrade process requires:
 1. Pinning to a specific HuggingFace commit SHA
-2. Running the vision benchmark suite (Issue #005) against the new model
+2. Running the vision benchmark suite (Issue #025) against the new model
 3. Only upgrading if accuracy is maintained or improved
 
 See `docs/technical-architecture.md` section 5 (AI Safety & Guardrails) for the full model version pinning process.

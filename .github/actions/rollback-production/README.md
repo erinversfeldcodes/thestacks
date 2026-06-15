@@ -65,6 +65,7 @@ DB, then vision (which is stateless w.r.t. the DB schema).
 | `neon-api-key` | `""` | **Required when** `pre-migrate-lsn` is set. |
 | `neon-branch-id` | `""` | **Required when** `pre-migrate-lsn` is set. |
 | `pre-migrate-lsn` | `""` | Empty = skip DB rollback (image-only — see below). |
+| `github-token` | `""` | Forwarded to `git clone` of the prev Modal commit (`url.insteadOf` rewrite) so private repos authenticate. Pass `${{ github.token }}`. `contents: read` is sufficient. Required when `modal-prev-commit` is set and `origin-remote` is a private repo. |
 
 ### Outputs
 
@@ -114,10 +115,12 @@ action exited before reaching `log-audit`.
 
 ## How to invoke from `workflow_dispatch`
 
-The Phase 4 workflow change adds a `manual_rollback` boolean to
-`deploy-production.yml`'s `workflow_dispatch:` inputs. When set, the
-workflow short-circuits the deploy + gate steps and goes straight to
-this composite action:
+`deploy-production.yml`'s `workflow_dispatch:` inputs include a
+`manual_rollback` boolean. When set, the workflow gates the deploy +
+SLO-gate steps with `if: ${{ !inputs.manual_rollback }}` and goes
+straight to this composite action (which fires on
+`(failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != ''`).
+A standalone job invocation looks like:
 
 ```yaml
 on:
@@ -156,12 +159,12 @@ jobs:
           triggered-by: manual
           database-url: ${{ secrets.DATABASE_URL }}
           cloak-key: ${{ secrets.CLOAK_KEY }}
+          github-token: ${{ github.token }}
 ```
 
 For the full operator procedure (when to manual-rollback, what to
 expect, post-rollback checks) see the runbook at
-[`docs/runbooks/manual-rollback.md`](../../../docs/runbooks/manual-rollback.md)
-(landing in Phase 6 of Issue #137).
+[`docs/runbooks/manual-rollback.md`](../../../docs/runbooks/manual-rollback.md).
 
 ## See also
 
@@ -172,5 +175,5 @@ expect, post-rollback checks) see the runbook at
 - [`apps/core/lib/stacks/audit.ex`](../../../apps/core/lib/stacks/audit.ex)
   — `Stacks.Audit.log_rollback/1`, the audit + telemetry helper invoked
   by the `log-audit` step.
-- Issue [#137](../../../issues/137-rollback-action-composite.md) —
+- Issue [#137](../../../issues/complete/137-rollback-action-composite.md) —
   full design rationale and DoD checklist.

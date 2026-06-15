@@ -183,8 +183,8 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 ## 12. Elm Frontend State Machine (Detail)
 
 ### Route
-- **Route variant**: `Route.BookDetail bookId` -- but this is NOT used as a navigated route. The overlay is triggered by `OutMsg` from shelf pages and rendered as a layer on top.
-- **URL**: URL does NOT change when the overlay opens.
+- **Route variant**: `Route.BookDetail bookId` (`/books/:id`) exists and coexists with the overlay (see ADR-005 closing note). The route is reachable via direct URL entry / deep link and renders the same `Page.BookDetail` content as a full page; the in-app interaction path opens the overlay instead. When a deep link is followed, `Main.elm` opens the overlay (`openOverlay`) for the matching `BookDetail bookId` route rather than navigating away.
+- **URL**: URL does NOT change when the overlay is opened by clicking a spine / search result / catalogue item.
 - **Public or authenticated**: Book detail API is `:optional_auth` (public books visible to all; placement/writing only for authenticated users).
 
 ### Init
@@ -268,3 +268,16 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | `wh.mart_community_read_count` reads | Raw SQL read from dbt mart on every book detail request. Lightweight indexed lookup. |
 | R2 presigned URLs | Presigned URL generation | Cover image display | `edition.cover_image_url` is pre-stored; no runtime R2 presigned URL generation. However, if cover URLs point to R2, each browser fetch incurs R2 egress. |
 | BookDetailCache (ETS) | Memory (bytes) | Cached book entries x TTL (5 min) | In-process ETS cache. No external cost, but consumes Fly.io instance memory. |
+
+---
+
+## 16. Cross-References
+
+- **ADR**: [ADR-005 — Book Detail as Overlay, Not a Routed Page](../decisions/005-book-detail-overlay-not-route.md) — establishes the overlay pattern, dismissal contract (X / backdrop click / Escape via `keydown` subscription in `Main.elm`), and the explicit allowance for a coexisting `/books/:id` route.
+- **Issue**: [#057a — Elm: Book Detail Overlay](../../issues/complete/057a-elm-book-detail-overlay.md) — the implementation issue that converted `Page.BookDetail` from a full page to a dismissable overlay.
+- **Related stories**:
+  - US-1.1.8 (multi-format merge) — the format selector / edition picker rendered inside the overlay reuses the per-edition format model defined here.
+  - US-1.6.1 (move book) — `ConfirmMove` action from the overlay's shelf mover.
+  - US-1.6.4 (remove book) — `ConfirmRemove` action from the overlay's danger zone.
+  - US-19.1.1 (accessibility / focus trapping) — ARIA contract and focus-return behaviour referenced by ADR-005.
+- **Elm modules**: `Page.BookDetail` (overlay view + update); `Main.elm` holds `Maybe BookDetailOverlay`, wires `OverlayBookDetailMsg`, and handles the Escape `keydown` subscription that fires `RequestCloseOverlay`.

@@ -15,7 +15,7 @@
 - **Setting:** An intimate reading nook with an armchair, floor, and atmospheric lighting.
 - **Books:** Displayed as spines in a casual, slightly haphazard pile -- rotated 90 degrees, stacked horizontally with slight random offsets.
 - **Spine wear:** Uses `Softened` wear level in the current implementation.
-- **Shelf label:** "Reading Pile" as text within the scene.
+- **Bookshelf label:** "Reading Pile" as text within the scene.
 
 **Acceptance Criteria:**
 - Reading Pile loads with currently-reading books in a pile layout (not shelf rows).
@@ -46,7 +46,7 @@
 ### Elm State Machine
 - **Page module**: `Page.Bookshelf.ReadingPile` (separate module, NOT using shared `Page.Bookshelf`)
 - **Model fields involved**: `books : RemoteData Http.Error (List Placement)`, `showAgeGate : Bool`, `selectedBookId : Maybe String`
-- **Msg flow**: `init` fires `Api.getBookshelf "reading_pile" token BooksLoaded` -> `BooksLoaded (Ok placements)` -> `Success placements` -> pile renders
+- **Msg flow**: `init` fires `Api.getBookshelf "reading_pile" token BooksLoaded` -> `BooksLoaded (Ok shelves)` -> `books = Success (List.concatMap .placements shelves)` -> pile renders
 - **RemoteData states**: `NotAsked` -> `Loading` -> `Success` / `Failure`
 - **OutMsg pattern**: `NavigateTo (BookDetail bookId)` on second click of selected book; `NoOut` otherwise
 
@@ -59,7 +59,7 @@
 - **Pipeline**: `:api` -> `:authenticated` -> `:view_as`
 - **Controller**: `StacksWeb.BookshelfController.show/2`
 - **Request body**: N/A
-- **Response (success)**: `{ bookshelf: "reading_pile", count: N, placements: [...] }` -- HTTP 200
+- **Response (success)**: `{ bookshelf: "reading_pile", count: N, shelves: [{id, position, placements: [...]}, ...] }` -- HTTP 200 (Reading Pile flattens these into one pile via `List.concatMap .placements`).
 - **Response (error)**: Same as other bookshelves
 - **FallbackController handling**: Same as US-1.2.1
 
@@ -68,7 +68,7 @@
 ## 4. Auth & Middleware Guards
 
 - **Plugs fired** (in order): `SecurityHeaders` -> `AuthPipeline` -> `ViewAsPlug`
-- **Visibility checks**: Same bookshelf-level and placement-level filtering as other shelves.
+- **Visibility checks**: Same bookshelf-level and placement-level filtering as other bookshelves.
 - **Age gate**: Client-side age gate on 403.
 - **Ownership checks**: `ViewAsPlug.authorize_view_as(conn, user.id)`
 
@@ -145,7 +145,7 @@ N/A
 - **API calls on init**: `Api.getBookshelf "reading_pile" token BooksLoaded`
 - **Initial model state**: `{ books = Loading, showAgeGate = False, selectedBookId = Nothing }`
 
-### Key architectural differences from shelf bookshelves (Library/AntiLibrary/WishList)
+### Key architectural differences from the unified bookshelves (Library/AntiLibrary/WishList)
 - **Separate module**: `Page.Bookshelf.ReadingPile` is NOT a config variant of `Page.Bookshelf` -- it is its own module with a different Model, Msg type, and view.
 - **No ViewModeToggle**: Reading Pile has no list view option.
 - **No RSS link**: No RSS feed support in this view.
@@ -153,7 +153,7 @@ N/A
 - **Deselect on background click**: `onClick Deselect` on the page container clears selection; `stopPropagationOn "click"` on each book prevents deselection when clicking a book.
 
 ### Update cycle
-- **Msg `BooksLoaded (Ok placements)`**: `books` -> `Success placements`
+- **Msg `BooksLoaded (Ok shelves)`**: `books` -> `Success (List.concatMap .placements shelves)` (pile flattens the nested shelves)
 - **Msg `BookHovered bookId`**: `selectedBookId` -> `Just bookId`
 - **Msg `BookClicked book`**: If `selectedBookId == Just book.id`, fires `NavigateTo (BookDetail book.id)`; otherwise sets `selectedBookId = Just book.id`
 - **Msg `Deselect`**: `selectedBookId` -> `Nothing`

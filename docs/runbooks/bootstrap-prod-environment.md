@@ -58,7 +58,7 @@ What this does: seeds a single `main-*` tag pointing at `HEAD~1`, so
 that the next time `deploy-production.yml` runs, the line
 
 ```sh
-git tag --list 'main-*' --sort=-committerdate | head -2 | tail -1
+git tag --list 'main-*' --sort=-committerdate | head -1
 ```
 
 returns a real SHA (the bootstrap tag) for `MODAL_PREV_COMMIT` rather
@@ -76,11 +76,11 @@ After pushing the tag, confirm the workflow can resolve it:
 
 1. **Dry-resolve locally.** From the same checkout:
    ```bash
-   git tag --list 'main-*' --sort=-committerdate | head -2 | tail -1
+   git tag --list 'main-*' --sort=-committerdate | head -1
    ```
-   should print the SHA that `main-bootstrap` points at (i.e.
-   `git rev-parse main^`). If it prints nothing, the tag wasn't
-   pushed.
+   should print `main-bootstrap` (the tag name). `git rev-parse
+   main-bootstrap^{commit}` should print the SHA of `main^`. If
+   `head -1` prints nothing, the tag wasn't pushed.
 
 2. **Trigger a workflow_dispatch on `deploy-production.yml`** with the
    `target_app` input pointed at the new environment's Fly app.
@@ -94,11 +94,11 @@ After pushing the tag, confirm the workflow can resolve it:
    It should print a non-empty SHA matching the bootstrap tag's
    commit. An empty value means the tag wasn't visible to the
    workflow (check that `actions/checkout@v4` was invoked with
-   `fetch-depth: 0` and `fetch-tags: true`, both already set in
-   the existing workflow).
+   `fetch-depth: 0`, already set in the existing workflow — this
+   pulls all tags along with the full history).
 
 3. **Confirm the rollback composite is wired.** The
-   `.github/actions/rollback-stack` step should appear in the workflow
+   `.github/actions/rollback-production` step should appear in the workflow
    summary. If the SLO gate passes, the composite never fires; if the
    gate fails, the composite runs and the resolved `MODAL_PREV_COMMIT`
    is what it reverts the vision service to.
@@ -123,14 +123,14 @@ against the bootstrap tag's SHA. Concretely:
 After the first successful deploy stamps a real `main-<sha>` tag (via
 `tag-main.yml`), subsequent rollbacks resolve `MODAL_PREV_COMMIT` from
 that real tag rather than the bootstrap. The bootstrap tag stops
-mattering after the second successful deploy.
+mattering after the first successful deploy.
 
 ---
 
 ## Cleanup
 
-After the second successful deploy stamps a real `main-<sha>` tag,
-`main-bootstrap` is no longer the second-newest tag in the
+After the first successful deploy stamps a real `main-<sha>` tag,
+`main-bootstrap` is no longer the most-recent tag in the
 `committerdate`-sorted listing. It stops affecting `record-prev-state`
 without any further action.
 
@@ -144,7 +144,7 @@ git tag -d main-bootstrap           # delete local tag
 
 Keep it if you expect to need a clean "deploy from a known-bootstrap
 state" pointer; delete it otherwise. There is no operational reason to
-keep it after the second real `main-<sha>` tag lands.
+keep it after the first real `main-<sha>` tag lands.
 
 ---
 

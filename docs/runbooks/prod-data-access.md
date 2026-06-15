@@ -21,7 +21,7 @@ Content-Type: application/json
 }
 ```
 
-Response includes a `session_token` (short-lived, MFA not yet verified).
+Response includes a `session_id` (short-lived, MFA not yet verified).
 
 ### Step 2 — Verify MFA
 
@@ -30,10 +30,12 @@ POST /api/admin/auth/verify_mfa
 Content-Type: application/json
 
 {
-  "session_token": "<token-from-step-1>",
-  "code": "<6-digit-TOTP-code>"
+  "session_id": "<session-id-from-step-1>",
+  "totp_code": "<6-digit-TOTP-code>"
 }
 ```
+
+(Substitute `"recovery_code": "<recovery-code>"` for `totp_code` if using a one-time recovery code instead.)
 
 Response includes a `token` with `typ: "admin_session"` and a 30-minute TTL.
 
@@ -45,26 +47,26 @@ Include the token in all subsequent requests:
 Authorization: Bearer <admin_session_token>
 ```
 
-Available endpoints (all under `/api/admin`):
+Available endpoints (all admin-authenticated; data endpoints under `/api/admin`, metrics dashboard under `/api`):
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /users/by_email?email=` | Look up a user by email |
-| `GET /users/by_id?id=` | Look up a user by UUID |
-| `GET /audit_log?user_id=&from=&to=` | View audit events for a user |
-| `GET /platform_stats` | Platform-wide aggregate stats |
-| `GET /gdpr_export?user_id=` | Export all data for a user |
-| `POST /gdpr_erase` | Erase a user (requires `reason`) |
-| `GET /metrics` | Admin metrics dashboard |
-| `GET /metrics/quality-trends` | Data quality trend sparklines |
-| `GET /metrics/source-health` | Per-source health status |
-| `GET /metrics/enrichment-gaps` | Enrichment gap counts |
-| `GET /sources` | List discovered sources |
-| `PUT /sources/:id/approve` | Approve a source |
-| `PUT /sources/:id/reject` | Reject a source |
-| `GET /partners` | List partner applications |
-| `PUT /partners/:id/approve` | Approve a partner |
-| `PUT /partners/:id/reject` | Reject a partner |
+| `GET /api/admin/users/by_email?email=` | Look up a user by email |
+| `GET /api/admin/users/by_id?id=` | Look up a user by UUID |
+| `GET /api/admin/audit_log?user_id=&from=&to=` | View audit events for a user |
+| `GET /api/admin/platform_stats` | Platform-wide aggregate stats |
+| `GET /api/admin/gdpr_export?user_id=` | Export all data for a user |
+| `POST /api/admin/gdpr_erase` | Erase a user (requires `reason`) |
+| `GET /api/metrics` | Admin metrics dashboard |
+| `GET /api/metrics/quality-trends` | Data quality trend sparklines |
+| `GET /api/metrics/source-health` | Per-source health status |
+| `GET /api/metrics/enrichment-gaps` | Enrichment gap counts |
+| `GET /api/admin/sources` | List discovered sources |
+| `PUT /api/admin/sources/:id/approve` | Approve a source |
+| `PUT /api/admin/sources/:id/reject` | Reject a source |
+| `GET /api/admin/partners` | List partner applications |
+| `PUT /api/admin/partners/:id/approve` | Approve a partner |
+| `PUT /api/admin/partners/:id/reject` | Reject a partner |
 
 ### Step 4 — Log out
 

@@ -25,8 +25,8 @@
 1. User navigates to `/upload`.
 2. User sees the drop zone with "Drag a photo of a book cover here" prompt and a "Choose Photo" button. Below the drop zone, an "Enter ISBN manually instead" link is visible.
 3. User drops or selects an image file (`image/*` MIME type).
-4. The drop zone shows a spinner with "Processing image..." while upload is in flight (`uploadState = Loading`), then continues showing the spinner while polling (`uploadState = Success imageId`).
-5. Polling completes with `Resolved` status. The system fetches the identified book via `Api.getBook`.
+4. The drop zone shows a spinner with "Processing image..." while the three-step presigned-URL upload is in flight (`uploadState = Loading` through `UploadInitialised` → `R2PutCompleted` → `UploadAccepted`), then continues showing the spinner while the SSE stream is open (`uploadState = Success imageId`).
+5. The SSE stream delivers a terminal `Resolved` event. The system fetches the identified book via `Api.getBook`.
 6. **Verification view** (`step = Verifying book`): "We think this is..." heading, book cover image (or "No cover" placeholder), title, author. Two buttons: "Yes, that's it" and "No, try again".
 7. User clicks "Yes, that's it" (`ConfirmIdentification`). State transitions to `step = ChoosingShelf book`.
 8. **Shelf picker view**: heading "Add "[Title]" to a shelf", five shelf buttons (Library, Antilibrary, Wish List, Reading Pile, Looking for a Home). WishList is pre-selected. An "Add to Wish List" primary button and "Cancel" ghost button.
@@ -35,48 +35,67 @@
 11. **Success view**: "[Title] added to [Shelf Name]". Two buttons: "Add another" (`Reset`) and "View on shelf" (`GoToShelf`).
 
 ### Sad Paths
-- **Upload HTTP failure**: `uploadState = Failure err` -- "Upload failed. Please try again." with "Try Again" button.
-- **Poll timeout** (150 polls at 2s intervals = ~300s): `result = IdentificationFailed` -- "Could Not Identify Book" with "Try Another Photo" and "Enter ISBN Manually" buttons.
-- **ISBN not found on vision pipeline**: poll returns `Rejected` status -- same IdentificationFailed view.
-- **Not a book image**: poll returns `Resolved` with empty `bookIds` -- `result = NotABook` -- "That Doesn't Look Like a Book" with "Try Again" button.
+- **Upload HTTP failure**: any of init / R2 PUT / commit returns an error -> `uploadState = Failure err` -- "Upload failed. Please try again." with "Try Again" button.
+- **SSE stream error before terminal event**: `StreamError` Msg fires while `sseTerminalReceived == False` -> `result = IdentificationFailed` -- "Could Not Identify Book" with "Try Another Photo" and "Enter ISBN Manually" buttons. (The server caps the stream at `:sse_max_timeout_ms`, default 60s.)
+- **ISBN not found on vision pipeline**: stream delivers `Rejected` with reason other than `not_a_book` -- same IdentificationFailed view.
+- **Not a book image**: stream delivers `Rejected` with reason `not_a_book` (or `Resolved` with empty `bookIds`) -- `result = NotABook` -- "That Doesn't Look Like a Book" with "Try Again" button.
 - **Placement API failure**: `placementState = Failure err` -- "Failed to add book. Please try again." with retry button.
 - **Unauthenticated**: "You need to sign in to add books." with "Sign In" link to `/login`.
 
 ### Elm State Machine
 - **Page module**: `Page.Upload`
-- **Model fields involved**: `file`, `uploadState`, `pollCount`, `result`, `step`, `selectedShelf`, `placementState`, `pendingBookIds`, `collectedBooks`
+- **Model fields involved**: `file`, `uploadState`, `result`, `step`, `selectedShelf`, `placementState`, `pendingBookIds`, `collectedBooks`, `failedBookIds`, `sseTerminalReceived`, `isDragging`, `manualIsbn`
 - **Msg flow**:
-  - `GotFile file` -> sets `uploadState = Loading`, calls `Api.uploadImage`
-  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`, starts `sleepThenPoll`
-  - `CheckStatus` -> calls `Api.pollUploadStatus`
-  - `StatusReceived (Ok {status: Resolved, bookIds, isDuplicate})` -> calls `Api.getBook` for each ID
-  - `GotIdentifiedBook bookId (Ok response)` -> when all fetched, sets `result = Identified`, `step = Verifying book`
+  - `GotFile file` -> sets `uploadState = Loading`, calls `Api.initUpload`
+  - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putFileToR2 init_.uploadUrl file ...`
+  - `R2PutCompleted imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
+  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream?token=..."` OutMsg so Main subscribes to SSE
+  - `StreamEvent rawJson` -> decodes via `Api.streamEventDecoder` and recurses into `StatusReceived (Ok pollResponse)`
+  - `StreamError` -> if `sseTerminalReceived` then no-op, else `result = IdentificationFailed`
+  - `StatusReceived (Ok {status: Resolved, bookIds, isDuplicate})` -> calls `Api.getBook` for each ID (single id with `isDuplicate == Just True` routes to `GotDuplicateBook` instead)
+  - `GotIdentifiedBook bookId (Ok response)` -> when all fetched, sets `result = Identified [book]`, `step = Verifying book`
   - `ConfirmIdentification` -> `step = ChoosingShelf book`
   - `ShelfSelected shelf` -> updates `selectedShelf`
   - `ConfirmPlacement` -> calls `Api.placeBook`
   - `PlacementCompleted (Ok _)` -> `step = Complete book shelfName`
 - **RemoteData states**: `uploadState` goes NotAsked -> Loading -> Success (imageId) or Failure; `placementState` goes NotAsked -> Loading -> Success or Failure
-- **OutMsg pattern**: `NavigateTo Route.Route` on `GoToShelf` (propagated to Main for navigation)
+- **OutMsg pattern**: `OpenStream String` on `UploadAccepted` (Main wires the SSE EventSource); `NavigateTo Route.Route` on `GoToShelf` (propagated to Main for navigation)
 
 ---
 
 ## 3. API Calls
 
-### `POST /api/upload`
+The canonical upload flow is a three-step presigned-URL handshake followed by an SSE stream for identification progress. (`POST /api/upload` still exists as a deprecated multipart fallback and rollback target — see `UploadController.create/2`.)
+
+### `POST /api/upload/init`
 - **Auth**: Required (Bearer token)
 - **Pipeline**: `:api` -> `:authenticated` -> `:rate_limit_upload`
-- **Controller**: `StacksWeb.UploadController.create/2`
-- **Request body**: multipart form with `image` file part
-- **Response (success)**: `{ status: "accepted", image_id: "<uuid>" }` -- HTTP 202
-- **Response (error)**: `{ error: "upload_failed" }` -- HTTP 500; `{ error: "no image provided" }` -- HTTP 422
+- **Controller**: `StacksWeb.UploadController.init/2`
+- **Request body**: `{ content_type: "image/jpeg" }` (optional, defaults to `image/jpeg`)
+- **Response (success)**: `{ image_id, upload_url, expires_in }` -- HTTP 201
+- **Response (error)**: `{ error: "init_failed" }` -- HTTP 500
 
-### `GET /api/upload/:image_id/status`
+### `PUT /api/upload/:image_id/data`
+- **Auth**: None on the route. The 128-bit random `image_id` is the effective bearer; `commit` re-verifies ownership before doing real work. Phoenix proxies the bytes to the configured storage backend to avoid R2 CORS preflight from browser origins.
+- **Pipeline**: `:api`
+- **Controller**: `StacksWeb.UploadController.upload_data/2`
+- **Request body**: raw image bytes (up to 20 MB)
+- **Response (success)**: HTTP 200 with empty body
+- **Response (error)**: `{ error: "storage_failed" }` -- HTTP 500
+
+### `POST /api/upload/:image_id/commit`
 - **Auth**: Required (Bearer token)
-- **Pipeline**: `:api` -> `:authenticated`
-- **Controller**: `StacksWeb.UploadController.status/2`
+- **Pipeline**: `:api` -> `:authenticated` -> `:rate_limit_upload`
+- **Controller**: `StacksWeb.UploadController.commit/2`
 - **Request body**: None
-- **Response (success)**: `{ image_id, status: "pending"|"resolved"|"rejected", book_id, book_ids, rejection_reason, is_duplicate }` -- HTTP 200
-- **Response (error)**: `{ error: "not found" }` -- HTTP 404; `{ error: "invalid image_id" }` -- HTTP 422
+- **Response (success)**: `{ status: "accepted", image_id }` -- HTTP 202 (flips the row from `awaiting_upload` to `pending` and enqueues `IdentifyBookJob`)
+- **Response (error)**: `{ error: "not_found" }` -- HTTP 404; `{ error: "not_yet_uploaded" }` -- HTTP 409; `{ error: "already_committed" }` -- HTTP 409; `{ error: "commit_failed" }` -- HTTP 500
+
+### `GET /api/upload/:image_id/stream`
+- **Auth**: Required (Bearer token; passed as `?token=` query param so EventSource can authenticate).
+- **Pipeline**: `:sse_api` -> `:sse_auth`
+- **Controller**: `StacksWeb.UploadController.stream/2`
+- **Response**: `text/event-stream`. Emits the current image status immediately, then streams pubsub updates until the row reaches `resolved` or `rejected` (or `:sse_max_timeout_ms` elapses, default 60s). Each `message` event payload is the same shape the Elm client decodes via `Api.streamEventDecoder`: `{ image_id, status: "pending"|"resolved"|"rejected", book_id, book_ids, rejection_reason, is_duplicate }`.
 
 ### `GET /api/books/:id`
 - **Auth**: Optional (Bearer token)
@@ -98,13 +117,14 @@
 
 ## 4. Auth & Middleware Guards
 
-- **Plugs fired** (upload): `SecurityHeaders` -> `AuthPipeline` -> `RateLimiter (bucket: :upload)`
-- **Plugs fired** (status poll): `SecurityHeaders` -> `AuthPipeline`
+- **Plugs fired** (init / commit): `SecurityHeaders` -> `AuthPipeline` -> `RateLimiter (bucket: :upload)`
+- **Plugs fired** (raw PUT to `/upload/:image_id/data`): `SecurityHeaders` only — no auth (the unguessable `image_id` is the bearer; commit re-verifies ownership)
+- **Plugs fired** (SSE stream): `:sse_api` -> `:sse_auth` (token passed as `?token=` query param)
 - **Plugs fired** (book detail): `SecurityHeaders` -> `OptionalAuthPipeline`
 - **Plugs fired** (placement): `SecurityHeaders` -> `AuthPipeline`
 - **Visibility checks**: `Visibility.resolve_visibility/2` is called in `BookController.show/2` -- returns `:hidden` for books the viewer cannot see.
 - **Age gate**: `AgeGate.enforce/2` is called in `BookController.show/2` -- halts the conn if age verification is required and not yet provided.
-- **Ownership checks**: `UploadController.status/2` checks `Shelving.book_on_any_shelf?(user.id, book_id)` to set `is_duplicate` flag. Placement creation in `Shelving.place_book/3` verifies user owns the target bookshelf.
+- **Ownership checks**: `UploadController.commit/2` and `UploadController.stream/2` both reject when the `uploaded_images` row's `user_id` does not match the caller. The `is_duplicate` flag in the streamed payload is set when `Shelving.book_on_any_shelf?(user.id, book_id)` is true. Placement creation in `Shelving.place_book/3` verifies the user owns the target bookshelf.
 
 ---
 
@@ -133,10 +153,10 @@
 - **Fields set**: `status` = "resolved", `book_id` = first book UUID, `book_ids` = all book UUIDs, `updated_at`
 - **Performed by**: `IdentifyBookJob.mark_resolved/2` via `Repo.update_all`
 
-### Read: Poll image status
+### Read: Stream image status
 - **Table(s)**: `op.uploaded_images`
-- **Query**: `SELECT status, book_id, book_ids, rejection_reason FROM op.uploaded_images WHERE id = ?`
-- **Schema module**: Raw Ecto query (not schema-based), using `from(i in "uploaded_images", ...)`
+- **Query**: One initial `Repo.get` for the image row when the SSE connection opens; subsequent updates are pushed via Phoenix.PubSub (no further polling).
+- **Schema module**: `Stacks.Books.UploadedImage`
 
 ### Read: Check duplicate
 - **Table(s)**: `op.bookshelf_placements` JOIN `op.bookshelves`
@@ -310,25 +330,31 @@
 ### Init
 - **`initPage` branch**: Creates `Page.Upload.init` model
 - **API calls on init**: None (upload is user-initiated)
-- **Initial model state**: `file = Nothing`, `uploadState = NotAsked`, `pollCount = 0`, `result = NoResult`, `step = Uploading`, `selectedShelf = "wishlist"`, `manualIsbn = ""`, `isDragging = False`, all RemoteData fields `NotAsked`
+- **Initial model state**: `file = Nothing`, `uploadState = NotAsked`, `result = NoResult`, `step = Uploading`, `selectedShelf = "wishlist"`, `manualIsbn = ""`, `isDragging = False`, `sseTerminalReceived = False`, all RemoteData fields `NotAsked`
 
 ### Update cycle
 
 | Msg | Model change | Cmd | OutMsg |
 |-----|-------------|-----|--------|
-| `GotFile file` | `file = Just file`, `uploadState = Loading`, `step = Uploading`, `isDragging = False` | `Api.uploadImage file token UploadAccepted` | `NoOut` |
+| `GotFile file` | `file = Just file`, `uploadState = Loading`, `step = Uploading`, `isDragging = False` | `Api.initUpload (File.mime file) token (UploadInitialised file token)` | `NoOut` |
 | `DragOver` | `isDragging = True` | None | `NoOut` |
 | `DragLeave` | `isDragging = False` | None | `NoOut` |
 | `FilepickerRequested` | (none) | `Select.files ["image/*"]` | `NoOut` |
-| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | `sleepThenPoll` (2000ms delay then `CheckStatus`) | `NoOut` |
+| `UploadInitialised _ _ (Ok init_)` | (none) | `Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)` | `NoOut` |
+| `UploadInitialised _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
+| `R2PutCompleted imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
+| `R2PutCompleted _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
+| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream?token=..."` |
 | `UploadAccepted (Err err)` | `uploadState = Failure err` | None | `NoOut` |
-| `CheckStatus` | `pollCount += 1` | `Api.pollUploadStatus imageId token StatusReceived` | `NoOut` |
-| `StatusReceived (Ok {Resolved, bookIds})` | `pendingBookIds = ids` | `Api.getBook` for each ID | `NoOut` |
-| `StatusReceived (Ok {Pending})` | (none) | `sleepThenPoll` | `NoOut` |
-| `StatusReceived (Ok {Rejected})` | `result = IdentificationFailed` | None | `NoOut` |
+| `StreamEvent rawJson` | (decoded payload re-dispatched as `StatusReceived (Ok pollResponse)`; malformed events are ignored) | None | `NoOut` |
+| `StreamError` | If `sseTerminalReceived` then no-op; else `result = IdentificationFailed` | None | `NoOut` |
+| `StatusReceived (Ok {Resolved, bookIds})` | `pendingBookIds = ids`, `sseTerminalReceived = True` | `Api.getBook` for each ID (single id with `isDuplicate == Just True` -> `GotDuplicateBook`) | `NoOut` |
+| `StatusReceived (Ok {Pending})` | (none) | None | `NoOut` |
+| `StatusReceived (Ok {Rejected, reason: "not_a_book"})` | `result = NotABook`, `sseTerminalReceived = True` | None | `NoOut` |
+| `StatusReceived (Ok {Rejected})` | `result = IdentificationFailed`, `sseTerminalReceived = True` | None | `NoOut` |
 | `GotIdentifiedBook id (Ok resp)` | When all fetched: `result = Identified [book]`, `step = Verifying book` | None | `NoOut` |
 | `ConfirmIdentification` | `step = ChoosingShelf book` | None | `NoOut` |
-| `RejectIdentification` | Resets to `init` | None | `NoOut` |
+| `RejectIdentification` | (kicks off `POST /api/upload/:id/reject-identification` with the cumulative rejected-id list) | `Api.rejectIdentification ...` | `NoOut` |
 | `ShelfSelected shelf` | `selectedShelf = shelf` | None | `NoOut` |
 | `ConfirmPlacement` | `placementState = Loading` | `Api.placeBook selectedShelf book.id token PlacementCompleted` | `NoOut` |
 | `PlacementCompleted (Ok _)` | `step = Complete book selectedShelf`, `placementState = Success` | None | `NoOut` |
@@ -355,12 +381,12 @@
 - **Metric name**: `upload_request_count`
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
 - **Type**: counter
-- **Labels/dimensions**: endpoint (`POST /api/upload`), status_code (202, 422, 500)
+- **Labels/dimensions**: endpoint (`POST /api/upload/init`, `PUT /api/upload/:image_id/data`, `POST /api/upload/:image_id/commit`), status_code (200, 201, 202, 404, 409, 500)
 
-- **Metric name**: `upload_status_poll_count`
+- **Metric name**: `upload_stream_count`
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
 - **Type**: counter
-- **Labels/dimensions**: endpoint (`GET /api/upload/:image_id/status`), status_code (200, 404, 422)
+- **Labels/dimensions**: endpoint (`GET /api/upload/:image_id/stream`), status_code (200, 401, 404)
 
 - **Metric name**: `book_detail_request_count`
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
@@ -477,9 +503,9 @@
 
 ### API Response Latencies
 
-- **Metric name**: Status poll latency
-- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` for `GET /api/upload/:image_id/status`
-- **Target/SLA**: p95 < 100ms (simple DB read)
+- **Metric name**: Stream open / first-byte latency
+- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` duration for `GET /api/upload/:image_id/stream` (the initial DB read + first SSE event flush; the long-poll body time is dominated by the vision pipeline, not the SSE handler)
+- **Target/SLA**: p95 < 100ms to first event (simple DB read + SSE handshake)
 - **Dashboard**: API latency section
 
 - **Metric name**: Book detail fetch latency
@@ -504,9 +530,9 @@
 - **Target/SLA**: > 90% (most confirmed books should be placed)
 - **Dashboard**: Upload funnel section
 
-- **Metric name**: Poll count before resolution
-- **How measured**: Elm-side `pollCount` at time of `StatusReceived Resolved`. Not yet instrumented server-side.
-- **Target/SLA**: median < 15 polls (30s), p95 < 30 polls (60s)
+- **Metric name**: Stream open duration to terminal event
+- **How measured**: Server-side: SSE handler elapsed time from connection accept to emitting a `resolved` or `rejected` event (capped at `:sse_max_timeout_ms`). `:telemetry.execute([:stacks, :upload, :terminal], %{count: 1}, %{outcome: :timeout})` fires on the timeout path; the success/rejection paths fall out of `[:phoenix, :endpoint, :stop]` duration for the stream endpoint.
+- **Target/SLA**: median < 30s, p95 < 60s
 - **Dashboard**: Upload pipeline section
 
 ### Cache Metrics

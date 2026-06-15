@@ -14,25 +14,26 @@
 - No other platform features are affected
 
 **Operator sees:**
-- Metrics dashboard: "AI Budget" tracker showing > 80% of daily or monthly limit consumed
-- Oban `vision` queue: jobs in `scheduled` state, not `executing` (snoozed, not failed)
-- Logs: `[warn] BudgetTracker: daily limit reached, snoozing vision jobs for 1h`
-- The `Stacks.AI.BudgetTracker` GenServer state shows `daily_spent_cents >= daily_limit_cents`
+- Metrics dashboard: cost dashboard showing daily or monthly Modal spend at/over the configured cap
+- Oban `vision` queue: `IdentifyBookJob` jobs failing with `{:error, :daily_limit_exceeded}` or `{:error, :monthly_limit_exceeded}` and retrying (up to `max_attempts: 3`)
+- Telemetry event `[:stacks, :budget, :limit_exceeded]` firing with `%{type: :daily | :monthly}`
+- The `Stacks.AI.BudgetTracker` GenServer state shows `daily_total_cents >= daily_limit_cents` (config) or `monthly_total_cents >= monthly_limit_cents`
+- If the cap was raised on Modal's side and *Modal itself* has disabled the workspace for non-payment or quota: vision HTTP calls return `404` with a body like `modal-http: workspace <name> is disabled` (see [`modal-outage.md`](modal-outage.md) — recovery is the same as a Modal outage)
 
 ---
 
 ## Impact
 
 **Broken / Degraded:**
-- Photo-based book identification snoozes for up to 1 hour (then retries when budget resets)
-- Vision jobs accumulate in the Oban queue in `scheduled` state
+- Photo-based book identification fails fast (no Modal call is made) — `Stacks.AI.Client.call_vision/2` short-circuits on `BudgetTracker.check_budget(:modal)` before the HTTP request
+- `IdentifyBookJob` jobs accumulate `retryable` state until they exhaust `max_attempts: 3`, then sit in `discarded`
 
 **Still working:**
 - Manual ISBN entry — fully functional
 - All shelving operations
 - Search, prices, reviews
 - All marketplace features
-- Budget for review summarisation (Together AI) is tracked separately — may or may not be exhausted
+- Together AI summarisation budget is tracked under a separate provider key (`:together_ai`) in the same tracker — may or may not be exhausted
 
 ---
 
@@ -44,26 +45,33 @@
 fly ssh console -a thestacks-core
 ```
 ```elixir
-iex> Stacks.AI.BudgetTracker.status()
-# Returns something like:
+iex> Stacks.AI.BudgetTracker.current_state()
+# Returns:
 # %{
-#   daily_spent_cents: 502,     # R5.02 spent today
-#   daily_limit_cents: 500,     # R5.00 daily limit
-#   monthly_spent_cents: 3750,  # R37.50 spent this month
-#   monthly_limit_cents: 10_000, # R100.00 monthly limit
-#   provider_stats: %{
-#     modal: %{calls: 10, spent_cents: 502},
-#     together_ai: %{calls: 37, spent_cents: 185}
-#   },
-#   reset_at: ~U[2026-03-20 00:00:00Z]  # Daily reset time
+#   daily_total_cents: 502,     # R5.02 spent today
+#   monthly_total_cents: 3750,  # R37.50 spent this month
+#   providers: %{
+#     "modal" => 502,
+#     "together_ai" => 185
+#   }
 # }
+
+# Compare against configured limits (config :core, :ai_budget in apps/core/config/config.exs):
+iex> Application.get_env(:core, :ai_budget)
+# [daily_limit_cents: 500, monthly_limit_cents: 5_000]
+
+# Confirm the tracker actually says "exceeded" for Modal:
+iex> Stacks.AI.BudgetTracker.check_budget(:modal)
+# {:error, :daily_limit_exceeded} | {:error, :monthly_limit_exceeded} | :ok
 ```
+
+Note: `current_state/0` does not expose a reset time. The daily counter resets at the next midnight UTC tick (`schedule_midnight_reset/0`); the monthly counter is not auto-reset in code and rolls over only via deploy/restart.
 
 ### Step 2: Determine if this is a legitimate budget exhaustion or a runaway loop
 
 **Legitimate:** Budget exhausted because the platform had an unusually active day. Check active user count against expected cost per upload.
 
-Expected cost: ~R0.50–R2.50 per vision identification (Modal A10G, Qwen2.5-VL-7B). Daily limit of R5.00 = ~2–10 identifications per day.
+Per [ADR-001](../decisions/001-modal-over-together-ai.md) (partially superseded by [ADR-015](../decisions/015-vision-service-architecture.md)) the caps are R5/day and R50/month. Expected cost per vision identification is in the range of cents on the current H100 + AWQ-quantized vLLM v1 setup (see ADR-015) — well under the per-call cost assumed when ADR-001 was written. The daily cap of R5 still represents a usage spike if hit.
 
 If the daily limit is too low for normal usage, the limit needs to be raised (see Response section).
 
@@ -82,23 +90,24 @@ A runaway loop would show hundreds of vision jobs inserted in a short window.
 ### Step 3: Check for retry loop specifically
 
 ```sql
--- Are there vision jobs with very high attempt counts?
+-- Are there vision jobs near the attempt ceiling?
+-- IdentifyBookJob is configured with `max_attempts: 3`.
 SELECT id, attempt, max_attempts, args->>'image_id' as image_id, errors
 FROM oban_jobs
 WHERE queue = 'vision'
-  AND attempt > 3
+  AND attempt >= 2
 ORDER BY attempt DESC LIMIT 10;
 ```
 
-High attempt counts on the same job suggest a retry loop — the job is failing and retrying, each retry calling the Modal vision service and consuming budget.
+High attempt counts on the same job suggest a retry loop — the job is failing and retrying, and each retry that actually reaches Modal (i.e. budget was OK at the time) consumes another R0.x of spend. Note that the budget gate in `Stacks.AI.Client.call_vision/2` short-circuits *before* the HTTP call, so once the cap is hit the retries are free; the damage was done by retries that ran *before* the cap was reached.
 
 ### Step 4: Identify which users are uploading heavily
 
 ```sql
--- Top uploaders today (requires joining uploaded_images with users)
+-- Top uploaders today
 SELECT u.email, count(*) as uploads
-FROM uploaded_images ui
-JOIN users u ON u.id = ui.user_id  -- Assumes uploaded_images has user_id; check schema
+FROM op.uploaded_images ui
+JOIN op.users u ON u.id = ui.user_id
 WHERE ui.uploaded_at > NOW() - INTERVAL '24 hours'
 GROUP BY u.email
 ORDER BY uploads DESC LIMIT 10;
@@ -110,32 +119,21 @@ If a single user uploaded 50 photos in one day, that explains the budget exhaust
 
 ## Response
 
-### Immediate (do nothing if budget reset is soon)
+### Immediate (do nothing if daily reset is soon)
 
-Check when the daily budget resets:
-```elixir
-iex> Stacks.AI.BudgetTracker.status() |> Map.get(:reset_at)
-```
+If it's within 1–2 hours of midnight UTC: no action needed. The `BudgetTracker.handle_info(:reset_daily, …)` callback zeroes `daily_total_cents` and the per-provider map at the next scheduled tick, and `IdentifyBookJob` retries will start succeeding again on their own. Discarded jobs (those that already burnt `max_attempts: 3`) will not be re-run automatically — see Recovery.
 
-If reset is within 1–2 hours: no action needed. Oban vision jobs are snoozed and will resume automatically after midnight UTC.
+### If the daily/monthly limit is genuinely too low
 
-### If the daily limit is genuinely too low
-
-The limit is configured in `apps/core/lib/stacks/ai/budget_tracker.ex`:
+Limits are configured in `apps/core/config/config.exs`:
 
 ```elixir
-@daily_limit_cents 500      # R5/day
-@monthly_limit_cents 10_000  # R100/month
+config :core, :ai_budget,
+  daily_limit_cents: 500,    # R5/day  (per ADR-001)
+  monthly_limit_cents: 5_000  # R50/month (per ADR-001)
 ```
 
-To raise the limit without a code deploy, if the value is runtime-configurable:
-
-```bash
-fly secrets set AI_DAILY_BUDGET_CENTS=1000 -a thestacks-core  # R10/day
-fly secrets set AI_MONTHLY_BUDGET_CENTS=20000 -a thestacks-core  # R200/month
-```
-
-If the limit is compile-time only, a code change and deploy is required.
+There is no runtime override (no `fly secrets` env var consulted by `BudgetTracker.get_limit/2`). Raising the cap requires editing config and redeploying. If you also need to raise Modal's own workspace cap, do that in the Modal dashboard first — otherwise vision calls will start returning `404 modal-http: workspace … is disabled` once Elixir-side spend exceeds whatever Modal is willing to bill.
 
 ### If a retry loop is consuming budget
 
@@ -180,38 +178,52 @@ Consider temporarily blocking the specific user's upload access while investigat
 ## Recovery
 
 **Automatic (most common):**
-- Budget resets at midnight UTC (daily) or 1st of month (monthly).
-- `Stacks.AI.BudgetTracker` resets its counters automatically.
-- Oban vision jobs resume processing from `scheduled` state.
-- No operator action required.
+- The daily counter resets at the next midnight UTC tick scheduled by `BudgetTracker.schedule_midnight_reset/0`.
+- The monthly counter does **not** auto-reset in code — it rolls over on the next deploy/restart (the GenServer starts with `monthly_total_cents: 0`). If you genuinely hit the monthly cap and cannot wait, you'll need to bounce the app.
+- Oban `vision` jobs that are still `retryable` will then make progress on the next attempt; jobs already in `discarded` need to be re-enqueued manually.
 
-**Manual reset (if needed urgently — e.g., budget was raised):**
+**Manual reset (no public reset function — restart the process):**
+
+There is no `reset_daily/0` or `reset_monthly/0` on `BudgetTracker`. To force a reset:
+
 ```bash
 fly ssh console -a thestacks-core
 ```
 ```elixir
-iex> Stacks.AI.BudgetTracker.reset_daily()
-# or
-iex> Stacks.AI.BudgetTracker.reset_monthly()
+# Restart the GenServer — the supervisor will bring it back up with zeroed state.
+iex> Process.exit(Process.whereis(Stacks.AI.BudgetTracker), :kill)
+iex> Stacks.AI.BudgetTracker.current_state()
+# %{daily_total_cents: 0, monthly_total_cents: 0, providers: %{}}
 ```
+
+(Or `fly apps restart thestacks-core` if you'd rather just bounce the whole release.)
 
 **Verify recovery:**
 ```elixir
-iex> Stacks.AI.BudgetTracker.status()
-# Should show daily_spent_cents < daily_limit_cents
+iex> Stacks.AI.BudgetTracker.check_budget(:modal)
+# :ok
+iex> Stacks.AI.BudgetTracker.current_state()
+# daily_total_cents < daily_limit_cents
 ```
 
 ```sql
 -- Verify vision jobs are draining
 SELECT state, count(*) FROM oban_jobs WHERE queue = 'vision' GROUP BY state;
--- 'scheduled' count should fall, 'completed' count should rise
+-- 'retryable' count should fall, 'completed' count should rise
 ```
 
 ---
 
 ## Post-Incident
 
-- If the daily limit is consistently hit before midnight: raise the limit and update the cost model in `docs/capacity-model.md`.
-- If a retry loop caused the exhaustion: add a max-cost-per-job guard in the vision worker (`Stacks.Jobs.IdentifyBookJob`) that discards the job if the image has already consumed > R2.00.
-- Consider per-user upload limits in addition to global budget limits.
-- Review the `Stacks.AI.BudgetTracker` warning threshold (currently 80%) — if it's not alerting early enough, lower it to 60%.
+- If the daily limit is consistently hit before midnight: raise the limit in `apps/core/config/config.exs` (and on the Modal dashboard) and update the cost model in [`../capacity-model.md`](../capacity-model.md).
+- If a retry loop caused the exhaustion: add a max-cost-per-job guard in `Stacks.Workers.IdentifyBookJob` that discards the job once an image has already consumed more than a configured cents budget.
+- Consider per-user upload limits in addition to global budget limits (the existing `Stacks_web.Plugs.RateLimiter` is per-endpoint, not per-cost).
+- `Stacks.AI.BudgetTracker` does not currently emit a warning threshold telemetry event — only `[:stacks, :budget, :limit_exceeded]` at 100%. If we want earlier warning, add a `[:stacks, :budget, :threshold_crossed]` event around 80% in `handle_cast({:record_cost, …})`.
+
+## Cross-references
+
+- [`docs/decisions/001-modal-over-together-ai.md`](../decisions/001-modal-over-together-ai.md) — origin of the R5/R50 caps (partially superseded by ADR-015 for vision infra, but the budget envelope still applies).
+- [`docs/decisions/015-vision-service-architecture.md`](../decisions/015-vision-service-architecture.md) — current vision service (H100, AWQ vLLM v1, `/analyze`).
+- [`docs/runbooks/modal-outage.md`](modal-outage.md) — when Modal returns 5xx/timeouts or a `modal-http: workspace … is disabled` 404, recovery follows the Modal outage playbook, not this one.
+- [`docs/runbooks/vision-hallucination.md`](vision-hallucination.md) — sibling runbook for bad VLM output rather than absent VLM output.

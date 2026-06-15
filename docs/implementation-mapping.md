@@ -527,7 +527,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Bookshelf.Library` module. Shared `Shelf.View` component with theme config (`ShelfTheme` type: `{ wood: DarkWalnut, backdrop: GreenDamask }`). Renders list of spines via `Components.Spine`. |
+| **Frontend (Elm)** | Unified `Page.Bookshelf` module (config-driven for Library/AntiLibrary/WishList — see 2026-03-16 refactor). Library variant theme: `{ wood: DarkWalnut, backdrop: GreenDamask }`. Renders list of spines via `Components.Spine`. |
 | **Backend (Phoenix)** | `Stacks.Shelving` context -- `Shelving.get_bookshelf_books/2` with bookshelf_name `:library`. `StacksWeb.BookshelfController.show/2`. |
 | **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`, `op.authors`. |
 | **Jobs (Oban)** | None. |
@@ -547,7 +547,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Bookshelf.AntiLibrary` module. `ShelfTheme` config: `{ wood: LightOak, backdrop: BotanicalPrints }`. Same `Shelf.View` component as Library. |
+| **Frontend (Elm)** | Unified `Page.Bookshelf` module (config-driven). AntiLibrary variant theme: `{ wood: LightOak, backdrop: BotanicalPrints }`. Same view code path as Library. |
 | **Backend (Phoenix)** | Same `Stacks.Shelving` context, bookshelf_name `:antilibrary`. |
 | **Database** | Same as US-1.2.1. |
 | **Jobs (Oban)** | None. |
@@ -567,7 +567,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Bookshelf.WishList` module. `ShelfTheme` config: `{ wood: BlueGrey, backdrop: WatercolourFlorals }`. |
+| **Frontend (Elm)** | Unified `Page.Bookshelf` module (config-driven). WishList variant theme: `{ wood: BlueGrey, backdrop: WatercolourFlorals }`. |
 | **Backend (Phoenix)** | Same `Stacks.Shelving` context, bookshelf_name `:wishlist`. |
 | **Database** | Same as US-1.2.1. |
 | **Jobs (Oban)** | None. |
@@ -708,7 +708,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.ShelfMover` -- dropdown or contextual menu showing valid target shelves. Animation of book sliding to new shelf. Confirmation toast. |
-| **Backend (Phoenix)** | `Stacks.Shelving.move_book/3` -- validates transition, updates placement, writes history. `StacksWeb.BookshelfPlacementController.update/2`. |
+| **Backend (Phoenix)** | `Stacks.Shelving.move_book/3` -- validates transition, updates placement, writes history. `StacksWeb.BookshelfPlacementController.move/2` (`PUT /api/placements/:id/move`). |
 | **Database** | **Write:** `op.bookshelf_placements` (update shelf_id), `op.bookshelf_placement_history` (insert movement record). **Read:** `op.bookshelf_placements` (current location). |
 | **Jobs (Oban)** | `Stacks.Workers.RecalculateWearJob` triggered on move (wear may change). |
 | **External Services** | None. |
@@ -1260,7 +1260,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Partner.Register` -- registration form (name, type, location, description, links). `Page.Metrics.PartnerRequests` -- owner approval UI as pinned index cards. |
-| **Backend (Phoenix)** | `Stacks.Partners` context -- `register/1`, `approve/1`, `decline/1`, `suspend/1`. `StacksWeb.PartnerController.create/2`. API key generation on approval (32-byte random hex, Argon2 hash stored). Event emission: `partner.registered`, `partner.approved`. |
+| **Backend (Phoenix)** | `Stacks.Partners` context -- `register/1`, `approve/1`, `decline/1`, `suspend/1`. `StacksWeb.PartnerRegistrationController.create/2` (`POST /api/partners/register`); approval/decline/suspend live on `StacksWeb.PartnerController`. API key generation on approval (32-byte random hex, Argon2 hash stored). Event emission: `partner.registered`, `partner.approved`. |
 | **Database** | **Write:** `partners` (name, type, country_code, city, api_key_hash, status). **Write:** `audit_log`, `event_log`. |
 | **Jobs (Oban)** | `Stacks.Workers.PartnerApprovalNotificationJob` -- notify partner on approval/decline. |
 | **External Services** | None. |
@@ -1300,12 +1300,12 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Book detail view: `Components.PartnerAvailability` -- "Available at [Shop] for R149" sidebar section. Shelf view: green dot on spine for partner-stocked books. |
-| **Backend (Phoenix)** | `Stacks.Partners.Inventory` context -- `sync/2` (upsert/remove). `StacksWeb.PartnerAPI.InventoryController`. Schema validation via Protobuf-generated JSON schema (`InventorySyncRequest`). Event emission: `inventory.updated`. ISBN resolution via existing `Stacks.Books.ISBNResolver` for unknown ISBNs. |
+| **Backend (Phoenix)** | `Stacks.Partners.Inventory` context -- `sync/2` (upsert/remove). `StacksWeb.PartnerInventoryController`. Schema validation via Protobuf-generated JSON schema (`InventorySyncRequest`). Event emission: `inventory.updated`. ISBN resolution via existing `Stacks.Books.ISBNResolver` for unknown ISBNs. |
 | **Database** | **Write:** `partner_inventory` (isbn, price_cents, currency, condition, quantity). **Read:** `books` (ISBN lookup). **Write:** `event_log`. |
 | **Jobs (Oban)** | `Stacks.Workers.PartnerISBNResolveJob` -- resolve unknown ISBNs from partner inventory. Reuses existing ISBN pipeline. |
 | **External Services** | Open Library, Google Books (for unknown ISBN resolution). |
 | **dbt Models** | `stg_partner_inventory`, `int_partner_availability`, `mart_partner_stock_coverage`. |
-| **Infrastructure** | Protobuf schema (`proto/stacks/partner/inventory.proto`). |
+| **Infrastructure** | Protobuf schema (`proto/stacks/internal/v1/partner.proto`). |
 | **Dependencies** | US-9.1.1 (partner approved), US-9.6.2 (validation). US-1.1.1 (ISBN resolution pipeline). Protobuf schemas. |
 
 ---
@@ -1320,7 +1320,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Partner.InventoryImport` -- file upload area, template download link, preview table (matched/pending/invalid rows), confirm button. |
-| **Backend (Phoenix)** | `Stacks.Partners.Inventory.CSVImport` -- parse, validate per-row, generate preview, then delegate to `sync/2` on confirmation. `StacksWeb.PartnerDashboard.InventoryController.import/2`. |
+| **Backend (Phoenix)** | `Stacks.Partners.Inventory.CSVImport` -- parse, validate per-row, generate preview, then delegate to `sync/2` on confirmation. `StacksWeb.PartnerInventoryController.import/2` (dashboard action on the same controller). |
 | **Database** | Same as US-9.2.1. |
 | **Jobs (Oban)** | Same as US-9.2.1 (ISBN resolution for unknowns). |
 | **External Services** | Same as US-9.2.1. |
@@ -1340,12 +1340,12 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Third Spaces cork board: `Components.PartnerEventCard` -- hand-lettered flyer style. Book detail: "Upcoming event at [Shop]" in sidebar when ISBN matches. |
-| **Backend (Phoenix)** | `Stacks.Partners.Events` context -- `create/2`, `update/2`, `cancel/1`. `StacksWeb.PartnerAPI.EventController`. Schema validation via Protobuf (`PartnerEvent`). Event emission: `event.created`. Auto-archive past events via scheduled job. |
+| **Backend (Phoenix)** | `Stacks.Partners.Events` context -- `create/2`, `update/2`, `cancel/1`. `StacksWeb.PartnerEventController`. Schema validation via Protobuf (`PartnerEvent`). Event emission: `event.created`. Auto-archive past events via scheduled job. |
 | **Database** | **Write:** `partner_events` (title, event_type, event_date, location, related_isbns). **Write:** `event_log`. |
 | **Jobs (Oban)** | `Stacks.Workers.ArchivePartnerEventsJob` -- scheduled daily, archives past events. |
 | **External Services** | None. |
 | **dbt Models** | `stg_partner_events`, `int_partner_event_calendar`. |
-| **Infrastructure** | Protobuf schema (`proto/stacks/partner/events.proto`). |
+| **Infrastructure** | Protobuf schema (`proto/stacks/internal/v1/partner.proto`). |
 | **Dependencies** | US-9.1.1 (partner approved), US-9.6.2 (validation). |
 
 ---
@@ -1360,7 +1360,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Partner.Events` -- event list (upcoming/past/cancelled). `Page.Partner.EventForm` -- date picker, location, ISBN autocomplete, description. |
-| **Backend (Phoenix)** | Same context as US-9.3.1, different controller: `StacksWeb.PartnerDashboard.EventController`. |
+| **Backend (Phoenix)** | Same context and controller as US-9.3.1 (`StacksWeb.PartnerEventController` — dashboard form actions live on the same controller). |
 | **Database** | Same as US-9.3.1. |
 | **Jobs (Oban)** | Same as US-9.3.1. |
 | **External Services** | None. |
@@ -1380,12 +1380,12 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Third Spaces cork board: `Components.PartnerSpaceCard` -- vintage postcard style, distinct from user-submitted. Shows name, type, distance, amenities, outbound links. |
-| **Backend (Phoenix)** | `Stacks.Partners.Spaces` context -- `register/2`, `update/2`. `StacksWeb.PartnerAPI.SpaceController`. Schema validation via Protobuf (`Space`). Event emission: `space.registered`. Owner approval for first submission. |
+| **Backend (Phoenix)** | `Stacks.Partners.Spaces` context -- `register/2`, `update/2`. `StacksWeb.PartnerController` (space actions). Schema validation via Protobuf (`Space`). Event emission: `space.registered`. Owner approval for first submission. |
 | **Database** | **Write:** `partner_spaces` (name, type, address, amenities, opening_hours, links). **Write:** `event_log`. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
 | **dbt Models** | `stg_partner_spaces`. |
-| **Infrastructure** | Protobuf schema (`proto/stacks/partner/spaces.proto`). |
+| **Infrastructure** | Protobuf schema (`proto/stacks/internal/v1/partner.proto`). |
 | **Dependencies** | US-9.1.1 (partner approved), US-9.6.2 (validation). |
 
 ---
@@ -1420,7 +1420,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Partner.Metrics` -- counters with 30-day sparklines. Inventory impressions, event views, space card views, outbound link clicks. |
-| **Backend (Phoenix)** | `Stacks.Partners.Metrics` context -- aggregate queries on `event_log` filtered by partner. Counts rounded to nearest 10. `StacksWeb.PartnerAPI.MetricsController`. `StacksWeb.PartnerDashboard.MetricsController`. |
+| **Backend (Phoenix)** | `Stacks.Partners.Metrics` context -- aggregate queries on `event_log` filtered by partner. Counts rounded to nearest 10. `StacksWeb.PartnerController` (metrics action). |
 | **Database** | **Read:** `event_log` (filtered by aggregate_id matching partner's content). `partner_inventory`, `partner_events`, `partner_spaces`. |
 | **Jobs (Oban)** | `Stacks.Workers.PartnerMetricsSnapshotJob` -- scheduled daily, pre-aggregates metrics for dashboard performance. |
 | **External Services** | None. |
@@ -1500,7 +1500,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Partner.Profile` -- form with current values, live preview of partner card (as shown on Third Spaces and book detail). "Pending Approval" badge on fields requiring re-approval. |
-| **Backend (Phoenix)** | `Stacks.Partners.update_profile/2` -- partitions fields into immediate-effect (description, hours, website, logo) and approval-required (name, address). Approval-required changes create a pending update visible to owner. `StacksWeb.PartnerDashboard.ProfileController`. |
+| **Backend (Phoenix)** | `Stacks.Partners.update_profile/2` -- partitions fields into immediate-effect (description, hours, website, logo) and approval-required (name, address). Approval-required changes create a pending update visible to owner. `StacksWeb.PartnerController` (profile action). |
 | **Database** | **Write:** `partners` (immediate fields). `partners` pending fields stored separately (JSONB `pending_changes` column or separate table). `audit_log`. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -1972,7 +1972,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-------|------------|
 | **Summary** | `.proto` files as single source of truth for all structured data contracts. `buf` for linting and breaking change detection in CI. JSON on the wire. |
 | **Affects stories** | All partner stories (US-9.x), internal event bus, service-to-service contracts. |
-| **Proto files** | `proto/stacks/partner/` (inventory, events, spaces), `proto/stacks/internal/` (event_bus, enrichment), `proto/stacks/common/` (book, location). |
+| **Proto files** | `proto/stacks/internal/v1/` (partner, event_bus, audit, scraper, vision), `proto/stacks/common/v1/` (book, location, user, listing, marketplace, blog, etc.), `proto/stacks/api/v1/` (request/response envelopes), `proto/stacks/monitoring/v1/`, `proto/stacks/infra/v1/`. |
 | **Code generation** | Elixir, Rust, Python: generated at build time, gitignored. Elm: generated JSON decoders gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`. |
 | **Schema codegen (Issue #080)** | `mix proto.sync` generates Ecto migrations, Ecto schemas, and dbt staging models from `.proto` messages tagged with `(stacks.persisted) = true`. `mix proto.sync --check` in CI catches drift. Covers raw ingestion tables only — domain tables remain hand-written. This is the "contract-enforced input" pillar of ADR 010 — the proto defines the shape, and the staging model is mechanically derived from that contract. See ADR 009. |
 | **CI** | `buf lint proto/` + `buf breaking proto/ --against '.git#branch=main'` + `mix proto.sync --check` in every PR. |

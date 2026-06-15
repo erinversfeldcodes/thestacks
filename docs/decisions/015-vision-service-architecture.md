@@ -1,10 +1,32 @@
 # ADR 015: Vision Service Architecture (April 2026)
 
-**Status:** Accepted
+**Status:** Superseded in part (see 2026-05 update below) — the vLLM / H100 / AWQ / single-`/analyze`-endpoint stack described here was rolled back to the HF Transformers + A10G + bf16 + separate `classify`/`extract` baseline. The architectural reasoning (telemetry-driven evaluation, cache layer, gate threshold rationale, deferred experimental framework) remains in force.
 **Date:** 2026-04-23
 **Deciders:** Platform owner
 **Technical area:** Vision inference, Modal app
-**Supersedes:** Portions of [ADR 001](001-modal-over-together-ai.md) (GPU class, quantization, engine)
+**Supersedes:** Portions of [ADR 001](001-modal-over-together-ai.md) (originally GPU class, quantization, engine — see update note below for what is and isn't still in effect)
+
+---
+
+## Update — 2026-05 rollback to bf16 / A10G baseline
+
+The inference-stack changes recorded in the Decision section below (vLLM 0.9.0 V1 engine, AWQ 4-bit quantization, H100 GPU, single `/analyze` endpoint, streaming early-terminate via `engine.abort`, `@modal.concurrent(max_inputs=8)`, region unpinning rationale) were **reverted** in commit `07179b9` ("refactor: revert more complex changes and refine original approach"), returning `apps/vision/modal_app.py` to the dfef1333 baseline shape:
+
+- **Backend:** HuggingFace Transformers + accelerate (no vLLM, no async engine).
+- **Model:** `Qwen/Qwen2.5-VL-7B-Instruct` loaded in **bfloat16** (no AWQ).
+- **GPU:** **A10G** (24 GB, Ampere bf16) — not H100.
+- **Endpoints:** two separate `@modal.method`s, `classify` and `extract`, orchestrated by the FastAPI `/analyze` route in `app/main.py` which short-circuits on confident `not_book` / `ambiguous`. The single-prompt `_ANALYZE_PROMPT` design was dropped.
+- **Concurrency:** single inference per container; `@modal.concurrent` is **not** used. Bursts scale horizontally via `max_containers=10`. The `_infer` early-terminate-via-`engine.abort` optimisation does not apply — there is no streaming iterator under HF `model.generate`.
+- **Region:** unpinned (status quo retained).
+- **Scaledown:** `scaledown_window=1200` retained.
+
+What is still in effect from this ADR:
+- The telemetry/cache reasoning that justified looking at GPU/engine changes in the first place.
+- The `upload_p95_ms` gate threshold discussion (3000 ms interim, 2000 ms target) — see `scripts/check-slo-gate.sh` lines ~627–648.
+- The deferred experimental-framework Future Work, which is the right place to evaluate any future engine/quantization/GPU change.
+- The speculative-decoding write-up — still load-bearing as a "do not re-introduce without reading this" record.
+
+Treat everything in the original Decision section below as a **historical record of an experiment that did not stick**, not as a description of current code. The canonical current implementation is `apps/vision/modal_app.py` (read the module docstring there first). When in doubt, the code wins.
 
 ---
 

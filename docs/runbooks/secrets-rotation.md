@@ -11,7 +11,7 @@
 Covers rotation of the prod secrets that the `deploy-production.yml` workflow reads from GitHub Secrets and stages onto the `thestacks-core` Fly app. Two classes:
 
 1. **Neon DB credentials** — composed from four component secrets.
-2. **Single-value app secrets** — `METRICS_SCRAPE_TOKEN`, `VISION_HMAC_SECRET`, `GUARDIAN_SECRET_KEY`, `SECRET_KEY_BASE`, `CLOAK_KEY`, `SCRAPER_HMAC_SECRET`, `PROD_OWNER_*`, `R2_*`, external API keys.
+2. **Single-value app secrets** — `METRICS_SCRAPE_TOKEN`, `VISION_HMAC_SECRET`, `GUARDIAN_SECRET_KEY`, `SECRET_KEY_BASE`, `CLOAK_KEY`, `SCRAPER_HMAC_SECRET`, `SEARXNG_SECRET_KEY`, `PROD_OWNER_*`, `STACKS_PROBER_*`, `STACKS_APP_DB_PASSWORD`, `STACKS_DBT_DB_PASSWORD`, `LOG_SHIPPER_ACCESS_TOKEN`, `AXIOM_TOKEN`, `R2_*`, external API keys (`RESEND_API_KEY`, `VISION_TOGETHER_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_BOOKS_API_KEY`).
 
 ## General order for all rotations
 
@@ -101,9 +101,11 @@ Owner: principle-engineer should review before CLOAK_KEY rotation.
 ### `VISION_HMAC_SECRET`, `SCRAPER_HMAC_SECRET`
 HMAC for signed callbacks between core ↔ vision ↔ scraper. Rotating requires both sides updated simultaneously (one secret shared). Core-before-vision ordering from `docs/runbooks/vision-service-rollback.md` applies.
 
+`deploy-stack.sh` resyncs the `thestacks-vision` Modal secret on every prod deploy via `modal secret create thestacks-vision ... --force`, so `VISION_HMAC_SECRET` lands on Modal in the same workflow run as it lands on Fly core.
+
 1. Generate new secret.
 2. Update GH secret.
-3. Trigger deploy-production.yml — deploys both Modal (vision) and Fly (core) with the new value.
+3. Trigger deploy-production.yml — deploys both Modal (vision, app: `thestacks-vision`) and Fly (core) with the new value.
 4. Any in-flight callbacks signed with the old secret will be rejected and Oban-retried — expect a minute of noise.
 
 ### `PROD_OWNER_PASSWORD`
@@ -116,16 +118,28 @@ The owner account password. Handled at app level, not infrastructure.
 Rotating `PROD_OWNER_PASSWORD` in GH Secrets is useful for keeping the "if we ever need to re-seed from scratch" value current; it's not how you rotate the live owner's password.
 
 ### External API keys (`GOOGLE_BOOKS_API_KEY`, `VISION_TOGETHER_API_KEY`, `BRAVE_SEARCH_API_KEY`, `RESEND_API_KEY`)
-Rotate at the provider's console, update the GH secret, trigger deploy. No special ordering.
+Rotate at the provider's console, update the GH secret, trigger deploy. No special ordering. If `RESEND_API_KEY` rotation causes email delivery to break, see `docs/runbooks/email-delivery-failure.md`.
 
 ### `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`
-Cloudflare R2 credentials for image storage.
+Cloudflare R2 credentials for image storage. `R2_ACCOUNT_ID` and `R2_BUCKET_NAME` are also staged by `deploy-stack.sh` but are identifiers, not secrets — only update them if the bucket or account changes.
 
 1. Create new key pair in Cloudflare dashboard (don't delete the old one yet).
 2. Update both GH secrets.
 3. Trigger deploy.
 4. Verify uploads succeed post-deploy (smoke test or synthetic probe).
 5. Once verified, revoke the old key pair in Cloudflare.
+
+### `STACKS_APP_DB_PASSWORD`, `STACKS_DBT_DB_PASSWORD`
+Passwords for the `stacks_app` and `stacks_dbt` Postgres roles. Used by migrations to (re)create the roles on hosted databases that enforce password strength. Rotate by updating the GH secret and triggering a deploy — the migration is idempotent and resets the password on the next run. Not the same as `STACKS_PROD_DB_PASSWORD`, which is the owner role used by the runtime connection.
+
+### `STACKS_PROBER_EMAIL`, `STACKS_PROBER_PASSWORD`
+Credentials for the dedicated prober user seeded by `Stacks.Release.seed_prober/0`. Same caveat as `PROD_OWNER_PASSWORD` — updating the GH secret alone does not change the live password (seed is insert-if-missing). Rotate via the app's change-password flow or a one-off `mix` task.
+
+### `LOG_SHIPPER_ACCESS_TOKEN`, `AXIOM_TOKEN`, `AXIOM_DATASET`
+Credentials for the `thestacks-log-shipper` Fly app (Vector → Axiom). Staged on every prod deploy via `deploy-stack.sh`. An empty `LOG_SHIPPER_ACCESS_TOKEN` is graceful — the shipper deploy is skipped with a WARN and logs simply stop persisting until the next deploy with a populated token.
+
+### `SEARXNG_SECRET_KEY`
+Request-signing secret for the internal SearXNG Fly app (`thestacks-searxng`). Update GH secret, trigger deploy. SearXNG is in the SLO gate's hot path via `/internal/deps-check`, so verify `/api/health` and dep-check pass post-deploy.
 
 ---
 
@@ -153,6 +167,10 @@ If a secret is known or suspected to be compromised:
 ## Related
 
 - `.github/workflows/deploy-production.yml` — where the secrets are consumed
-- `scripts/deploy-stack.sh` — stages them onto Fly via `fly secrets set`
+- `scripts/deploy-stack.sh` — stages them onto Fly via `fly secrets set` and resyncs the Modal `thestacks-vision` secret
 - `docs/deployment/NEON_BRANCH_TOPOLOGY.md` — DB branch model
+- `docs/runbooks/neon-outage.md` — DB unavailability (separate from a rotation that broke the credential)
+- `docs/runbooks/modal-outage.md` — Modal vision unavailability
+- `docs/runbooks/email-delivery-failure.md` — Resend / email path
+- `docs/runbooks/vision-service-rollback.md` — core ↔ vision deploy ordering (applies to HMAC rotation)
 - `docs/agents/standards/security.md` — general secret-handling standards

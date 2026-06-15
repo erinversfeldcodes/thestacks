@@ -1,8 +1,12 @@
 # The Stacks — Testing Standards
 
+> Companion to `docs/agents/standards/code-quality.md`. The full execution-environment matrix and rationale live in `docs/technical-architecture.md` Section 16 — Testing Strategy. Agent-specific testing expectations (Elixir, Elm, Rust, Python, dbt, security) live in each agent spec under `docs/agents/`.
+
 ## Philosophy
 
 Tests validate that users can accomplish their goals. Every test traces back to a user story or a system resilience requirement. We test through the stack, not around it.
+
+The lint suite — including format checks for every changed file — runs automatically via the `Stop` Claude Code hook (`.claude/settings.json`), so a passing test run isn't enough on its own: the hook must also exit cleanly before a session can finish.
 
 ---
 
@@ -143,52 +147,55 @@ Screenshot comparisons for shelf rendering, spine sizing, cork board layout. Sep
 
 ## Execution Environments
 
+The 12 layers run across four execution contexts (see `docs/technical-architecture.md` Section 16 — Testing Strategy). The same test code targets all four; what changes is which services are real and which are mocked.
+
 | Environment | `TEST_TARGET` | Mocks | Use When |
 |-------------|---------------|-------|----------|
-| Fully local | `local` | All external services mocked | Day-to-day development, offline |
-| Local -> dev | `dev` | None — hits real services | Validating real integrations |
-| CI | `ci` | All external services mocked | Pull request checks |
-| CI -> preview | `preview` | None — hits real services | Pre-production validation |
+| Fully local (offline) | `local` (default) | All external services mocked | Day-to-day development, offline |
+| Local -> deployed | `deployed` + `BASE_URL=…` | None — hits a deployed dev stack | Validating real integrations |
+| CI | `local` (default) | All external services mocked | Pull request checks |
+| CI -> preview | `deployed` + `BASE_URL=…` | None — hits the preview deployment | Pre-production validation |
 
 ### Mock Wiring
+The default `MIX_ENV=test` configuration wires the mock client; deployed runs are driven by the `TEST_TARGET=deployed` / `BASE_URL` envelope checked in `scripts/test-deployed.sh`.
 ```elixir
-# config/test.exs
-config :stacks, :vision_client,
-  if(System.get_env("TEST_TARGET") in ["dev", "preview"],
-    do: Stacks.Vision.HTTPClient,
-    else: Stacks.Vision.MockClient
-  )
+# apps/core/config/test.exs
+config :core, :vision_client, Stacks.AI.MockClient
 ```
+
+Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` — when set, it points the browser at the deployed stack and bumps the per-step timeout to 90 s for cold-start tolerance.
 
 ---
 
 ## Test Commands (just)
 
 ```bash
-just test              # All local tests
-just test-elixir       # mix test
-just test-elm          # elm-test + elm-program-test
-just test-rust         # cargo test
-just test-python       # pytest
-just test-e2e          # playwright
-just test-load         # k6
-just test-dbt          # dbt test
+just test              # All local tests (test-elixir + test-elm + test-rust + test-python + test-dbt)
+just test-elixir       # scripts/test-elixir.sh — runs `mix coveralls` from apps/core/
+just test-elm          # scripts/test-elm.sh — elm-test (uses avh4/elm-program-test)
+just test-rust         # scripts/test-rust.sh — cargo test
+just test-python       # scripts/test-python.sh — pytest
+just test-e2e          # Playwright against a local `just dev` stack
+just test-e2e-ci       # scripts/test-e2e.sh — Playwright with service lifecycle management
+just test-dbt          # scripts/test-dbt.sh — dbt run + test (staging layer)
 just test-security     # all security scans
-just test-chaos        # chaos scenarios
+just test-deployed     # scripts/test-deployed.sh — requires TEST_TARGET=deployed
 
-# With environment targeting
-TEST_TARGET=dev just test
-TEST_TARGET=preview just test
+# Deployed targeting (preview/dev stack)
+TEST_TARGET=deployed BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
+E2E_SERVICES=none BASE_URL=https://stacks-core-preview-…fly.dev just test-e2e-ci
 ```
 
 ---
 
 ## Coverage Requirements
 
+Line coverage is enforced by `excoveralls` — `test_coverage: [tool: ExCoveralls, minimum_coverage: 80]` is set in `apps/core/mix.exs`, and `mix coveralls` must be run from `apps/core/` (excoveralls is only declared in that mix.exs, not at the umbrella root). The threshold is configuration, not a CLI flag.
+
 | Layer | Minimum | Notes |
 |-------|---------|-------|
-| Acceptance | 100% of user stories | Every US-X.Y.Z has a test |
-| Unit | 80% line coverage | Focus on business logic, not boilerplate |
+| Acceptance | 100% of user stories | Every US-X.Y.Z has a test under `apps/core/test/acceptance/` |
+| Unit | 80% line coverage | Enforced by `mix coveralls` (`apps/core/mix.exs`); focus on business logic, not boilerplate |
 | Integration | Every service boundary | Phoenix <-> Vision, Phoenix <-> Scraper, Phoenix <-> Open Library |
 | Contract | Every API endpoint | Request + response shape validation |
 | Property-based | Every parser, validator, codec, and invariant | Untrusted input never crashes. Round-trips hold. |
@@ -201,25 +208,36 @@ TEST_TARGET=preview just test
 
 ## Test Naming Convention
 
+Elixir tests live under `apps/core/test/` mirroring the context tree (`stacks/`, `stacks_web/`); Playwright specs live at the repo-top `e2e/tests/`; load scripts live alongside the suites that drive them.
+
 ```
-test/
-├── acceptance/           # US-X.Y.Z tests
-│   ├── us_1_1_1_upload_book_test.exs
-│   └── us_9_2_1_push_inventory_test.exs
-├── integration/          # Service boundary tests
-│   ├── vision_client_test.exs
-│   └── partner_api_test.exs
-├── unit/                 # Pure function tests
-│   ├── isbn_test.exs
-│   └── price_parser_test.exs
-├── chaos/                # Resilience scenarios
-│   ├── vision_outage_test.exs
-│   └── db_stress_test.exs
-├── load/                 # k6 scripts
-│   └── book_detail.js
-└── e2e/                  # Playwright
-    └── upload_flow.spec.ts
+apps/core/test/
+├── acceptance/                       # US-X.Y.Z tests
+│   └── us_1_1_1_upload_book_test.exs
+├── stacks/                           # Context unit + integration tests
+│   ├── books_test.exs
+│   ├── accounts_property_test.exs    # property-based tests live next to the module
+│   └── …
+├── stacks_web/                       # Controller / Phoenix-layer tests
+├── support/                          # ConnCase, DataCase, Factory, fakes
+│   ├── conn_case.ex
+│   ├── data_case.ex
+│   └── factory.ex
+└── test_helper.exs
+
+e2e/                                  # Playwright (repo-top, not under test/)
+├── playwright.config.ts
+└── tests/
+    ├── upload.spec.ts
+    ├── upload-pipeline.spec.ts
+    └── …
 ```
+
+### Image Fixtures
+End-to-end and vision tests share image fixtures at the repo-top `images/` directory: `barcode_isbn_clean.jpg`, `not_a_book.jpg`, `screenshot_mildly_obscured.jpg`, `screenshot_mixed_text.jpg`, `screenshot_image_reversed.jpg`, `screenshot_image_reversed_and_cut_off.jpg`. Reuse these — do not commit new sample photos without first checking they aren't already represented.
+
+### Factories
+`Stacks.Factory` (`apps/core/test/support/factory.ex`, built on `ExMachina.Ecto`) is the single source of test data. Use `insert(:bookshelf, …)` — **never** `:shelf` — and place books with `insert(:placement, bookshelf: bookshelf, …)`, not `shelf:`. A "bookshelf" is a named virtual collection (library, antilibrary, wishlist, reading_pile, looking_for_home); a "shelf" is a physical horizontal row within one and is a distinct schema.
 
 ---
 

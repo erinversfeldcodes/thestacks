@@ -5,13 +5,13 @@
 **Deciders:** Platform owner
 **Technical area:** Data engineering, data architecture, dbt, event-driven architecture
 **Supersedes:** None (this ADR names an existing pattern and refines the rationale)
-**Related:** ADR 007 (Protobuf as contract), ADR 009 (proto-to-schema codegen), ADR 002 (Oban over Kafka)
+**Related:** ADR 007 (Protobuf as contract), ADR 009 (proto-to-schema codegen), ADR 014 (proto-first context interfaces), ADR 002 (Oban over Kafka)
 
 ---
 
 ## Context
 
-The Stacks uses a three-schema PostgreSQL architecture (`op`, `wh`, `audit`) with dbt transforming operational data into analytical views across three layers (staging → intermediate → marts). The staging layer is complete (25 views); intermediate and marts are planned for Issue #052.
+The Stacks uses a three-schema PostgreSQL architecture (`op`, `wh`, `audit`) with dbt transforming operational data into analytical views across three layers (staging → intermediate → marts). The staging layer (34 proto-generated views), the intermediate layer, and the marts layer are now all in place (Issues #052a/b/c).
 
 Before committing to the intermediate/mart buildout, we evaluated which data architecture pattern best describes what we're building and should guide design decisions going forward.
 
@@ -72,7 +72,7 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
    | Event type | Triggers selective rebuild of |
    |------------|------------------------------|
    | `shelf.book_placed`, `shelf.book_moved` | `mart_community_read_count` |
-   | `enrichment.prices_scraped` | `int_price_history`, `mart_book_prices` |
+   | `enrichment.prices_scraped` | `int_price_trends`, `mart_book_prices` |
    | `enrichment.reviews_scraped` | `int_review_sentiment`, `mart_book_reviews` |
    | `post.published`, `post.updated` | `int_blog_engagement`, `mart_blog_activity` |
    | `source_health.recorded` | `int_source_health`, `mart_data_quality_trend` |
@@ -81,7 +81,7 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
 
    | Model | Why incremental |
    |-------|----------------|
-   | `int_price_history` | `price_snapshots` grows as editions × stores × days |
+   | `int_price_trends` | `price_snapshots` grows as editions × stores × days |
    | `mart_data_quality_trend` | 12-week rolling window — append new, drop oldest |
    | `mart_community_read_count` | 5-min refresh; only changed placements matter |
    | `mart_platform_searchable` | 5-min refresh; only changed/new books matter |
@@ -131,7 +131,11 @@ When any of these are violated, revisit the "Scaling Beyond PostgreSQL" path in 
 - Kleppmann, M. (2017). *Designing Data-Intensive Applications*. O'Reilly. Chapters 4 (Encoding and Evolution), 11 (Stream Processing), 12 (The Future of Data Systems).
 - ADR 007: Protobuf as Schema Contract
 - ADR 009: Proto-to-Schema Codegen for Raw Ingestion Tables
+- ADR 014: Proto-First Context Interfaces
 - ADR 002: Oban over Kafka (no external message broker)
-- Issue #052: dbt Intermediate + Mart Models
+- Issue #052 (a/b/c): dbt Intermediate + Mart Models, refresh job, data-quality incremental
 - Issue #068: Source Health Monitoring
+- Issue #080: Proto-to-Schema Codegen
+- Issue #082: Proto Sync — schema.yml Generation
+- Issue #131: Proto as Single Source of Truth
 - `docs/data-quality.md`: Quality dimensions and SLAs

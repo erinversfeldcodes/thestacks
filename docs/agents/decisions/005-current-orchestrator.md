@@ -3,6 +3,7 @@
 **Trial branch**: `trial/005-current-orchestrator` (executed with hybrid-style parallel Agent invocations)
 **Date**: 2026-03-13
 **Assessor**: Orchestrator (self-assessment — qualitative scores deferred to human)
+**Status**: historical — see `agent-teams-evaluation.md` for the final decision
 
 ---
 

@@ -1,14 +1,14 @@
-# US-1.6.1 — Move a Book Between Shelves
+# US-1.6.1 — Move a Book Between Bookshelves
 
 ## 1. User Story
 
-> **As a** user, **I want to** move a book from one shelf to another **so that** I can track my reading journey as a book progresses from wish to read.
+> **As a** user, **I want to** move a book from one bookshelf to another **so that** I can track my reading journey as a book progresses from wish to read.
 
 **What the user wants to accomplish:** Record the natural journey of a book: WishList to AntiLibrary to Reading Pile to Library -- and optionally onward to Looking for a Home when they're ready to part with it.
 
 **How they accomplish it:**
-1. On the book detail overlay, the user clicks "Choose Bookshelf" to open the shelf mover.
-2. They select the target shelf from a dropdown. All five bookshelves are available: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home (the current shelf is excluded from the list).
+1. On the book detail overlay (see ADR-005), the user clicks "Choose Bookshelf" to open the shelf mover.
+2. They select the target bookshelf from a dropdown. All five bookshelves are available: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home (the current bookshelf is excluded from the list).
 3. They click "Move" to confirm.
 4. The system moves the placement, records a PlacementHistory entry, emits events, and logs an audit entry -- all atomically via Ecto.Multi.
 5. The overlay updates to show the new current bookshelf.
@@ -33,8 +33,8 @@
 ### Happy Path
 1. User opens book detail overlay (US-1.4.1).
 2. User clicks "Choose Bookshelf" button -> `OpenBookshelfMover` msg -> `bookshelfMoverOpen = True`.
-3. `Components.ShelfMover.shelfMover` renders with dropdown of available shelves (current shelf excluded).
-4. User selects a target shelf -> `SelectBookshelf shelfName` -> `selectedBookshelf` updated.
+3. `Components.ShelfMover.shelfMover` renders with dropdown of available bookshelves (current bookshelf excluded).
+4. User selects a target bookshelf -> `SelectBookshelf shelfName` -> `selectedBookshelf` updated.
 5. User clicks "Move" -> `ConfirmMove` msg.
 6. `Api.moveBook placement.id selectedBookshelf token MoveCompleted` fires; `moveState = Loading`.
 7. API call: `PUT /api/placements/:id/move` with `{ bookshelf: "target_name" }`.
@@ -43,14 +43,14 @@
 
 ### Sad Paths
 - **Not owner**: API returns 403 -> `MoveCompleted (Err (Http.BadStatus 403))` -> "Failed to move book. Please try again."
-- **Invalid shelf name**: API returns 422 -> same error display.
+- **Invalid bookshelf name**: API returns 422 -> same error display.
 - **No placement**: If `model.placement == Nothing`, `ConfirmMove` is a no-op.
 - **No token**: `ConfirmMove` is a no-op.
 
 ### Elm State Machine
 - **Page module**: `Page.BookDetail`
 - **Model fields involved**: `bookshelfMoverOpen : Bool`, `selectedBookshelf : String`, `currentBookshelf : String`, `moveState : RemoteData Http.Error ()`, `placement : Maybe Placement`
-- **Msg flow**: `OpenBookshelfMover` -> user selects shelf -> `SelectBookshelf` -> `ConfirmMove` -> API call -> `MoveCompleted`
+- **Msg flow**: `OpenBookshelfMover` -> user selects bookshelf -> `SelectBookshelf` -> `ConfirmMove` -> API call -> `MoveCompleted`
 - **RemoteData states**: `moveState`: `NotAsked` -> `Loading` -> `Success ()` / `Failure err`
 - **OutMsg pattern**: `NoOut` for all move-related messages.
 
@@ -174,13 +174,13 @@ Move state initialises as `moveState = NotAsked` in `Page.BookDetail.init`.
 ### Update cycle
 - **Msg `OpenBookshelfMover`**: `bookshelfMoverOpen` -> `True`
 - **Msg `CloseBookshelfMover`**: `bookshelfMoverOpen` -> `False`
-- **Msg `SelectBookshelf shelf`**: `selectedBookshelf` -> `shelf`
+- **Msg `SelectBookshelf bookshelf`**: `selectedBookshelf` -> `bookshelf`
 - **Msg `ConfirmMove`**: Requires `model.placement /= Nothing` and `maybeToken /= Nothing`; fires `Api.moveBook`; `bookshelfMoverOpen` -> `False`; `moveState` -> `Loading`
 - **Msg `MoveCompleted (Ok _)`**: `moveState` -> `Success ()`; `currentBookshelf` -> `selectedBookshelf`; `selectedBookshelf` -> `firstAvailableBookshelf newBookshelf`; `placement.bookshelfName` updated; `bookshelfMoverOpen` -> `False`
 - **Msg `MoveCompleted (Err err)`**: `moveState` -> `Failure err`
 
 ### ShelfMover component
-`Components.ShelfMover.shelfMover` renders:
+`Components.ShelfMover.shelfMover` (component name retained from earlier vocabulary; the dropdown lists bookshelves, not physical shelves) renders:
 - A `span.shelf-mover__label` "Move to:"
 - A `select.shelf-mover__select` with `aria-label="Target bookshelf"` containing all 5 bookshelves (current excluded)
 - A `button.shelf-mover__btn` "Move"

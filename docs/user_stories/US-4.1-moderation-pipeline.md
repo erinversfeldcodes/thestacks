@@ -18,16 +18,15 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 
 ### Happy Path
 1. User uploads a photo via the upload page.
-2. Image is stored (R2/local), and a `VisionProcessJob` is enqueued.
-3. The pipeline runs `Stacks.Moderation.run_pipeline/1`:
-   - Step 1: `call_vision("is_book", ...)` — returns `"book"` classification.
-   - Step 2: `call_vision("extract_isbn", ...)` — returns book candidates with ISBNs/titles.
-   - Step 3: Compound title expansion, ISBN resolution (direct or title search), BISAC classification, visibility tier assignment.
+2. Image is stored (R2/local), and an `IdentifyBookJob` is enqueued.
+3. The pipeline runs `Stacks.Moderation.run_pipeline/1` via a single `call_vision("analyze", ...)` to `POST /analyze` (the sidecar fuses classify + extract in one Modal invocation):
+   - Returns `classification` (`CLASSIFICATION_RESULT_BOOK` | `CLASSIFICATION_RESULT_NOT_BOOK` | `CLASSIFICATION_RESULT_AMBIGUOUS`) plus, when `BOOK`, a `books` list of candidates with `potential_isbns`, `title`, `author`, `raw_text`, `confidence`.
+   - Pipeline then: compound title expansion (split on " OR "), ISBN resolution (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`), BISAC subject classification, visibility tier assignment.
 4. Book is created with `visibility_tier: "public"` or `"age_gated"`.
 5. User sees the book appear on their shelf.
 
 ### Sad Paths
-- **Not a book**: Vision classifies as `"not_book"` or `"ambiguous"` -> `{:error, :not_a_book}`. User sees rejection message.
+- **Not a book**: Vision returns `CLASSIFICATION_RESULT_NOT_BOOK` or `CLASSIFICATION_RESULT_AMBIGUOUS` -> `{:error, :not_a_book}` (per ADR-006-ambiguous-classification, both map to the same rejection). User sees rejection message.
 - **No ISBN found**: Extraction returns empty books list or title search fails -> `{:error, :isbn_not_found}`. User sees "Could not identify a book ISBN."
 - **Vision service unavailable**: `AIClient.call_vision` fails -> error propagated. Upload status shows failure.
 - **Compound titles**: Vision joins multiple titles with " OR " -> pipeline splits them and resolves each independently.
@@ -101,21 +100,20 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 
 ## 7. Background Jobs (Oban)
 
-### VisionProcessJob (implied)
-- **Worker**: Vision processing job (enqueued by upload controller)
-- **Queue**: `:vision`
-- **Args**: `%{ image_id, user_id, image_url or image_b64 }`
+### IdentifyBookJob
+- **Worker**: `Stacks.Workers.IdentifyBookJob`
+- **Queue**: `:default`
+- **Args**: `%{ "image_id" => uuid, "user_id" => uuid, "storage_key" => key, ... }` — the worker resolves a presigned URL via `Stacks.Storage` before invoking the pipeline
 - **Max attempts**: Configurable
 - **What it does**: Calls `Stacks.Moderation.run_pipeline/1` which:
-  1. Calls `AIClient.call_vision("is_book", %{image_url: url})` — maps to `POST /classify` on sidecar
-  2. If book: calls `AIClient.call_vision("extract_isbn", %{image_url: url})` — maps to `POST /extract` on sidecar
-  3. Expands compound candidates (titles joined with " OR ")
-  4. For each candidate: resolves ISBN (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`)
-  5. Maps subjects to BISAC codes via `subjects_to_bisac/1`
-  6. Determines visibility tier via `determine_visibility_tier/1`:
+  1. Calls `AIClient.call_vision("analyze", %{image_url: url})` — maps to `POST /analyze` on the sidecar (one request that returns both classification and book candidates)
+  2. On `CLASSIFICATION_RESULT_BOOK` with a non-empty `books` list, expands compound candidates (titles joined with " OR ")
+  3. For each candidate: resolves ISBN (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`)
+  4. Maps subjects to BISAC codes via `subjects_to_bisac/1`
+  5. Determines visibility tier via `determine_visibility_tier/1`:
      - Adult BISAC codes (FIC005000, FIC027000, FIC069000) -> `"age_gated"`
      - All others -> `"public"`
-  7. Creates or finds the book via `Books.create/1` or `Books.find_existing/1`
+  6. Creates or finds the book via `Books.create/1` or `Books.find_existing/1`
 - **On success**: Book(s) created, events emitted, upload status set to "complete"
 - **On failure**: Upload status set to "failed" with reason
 
@@ -125,8 +123,8 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 
 ### Vision sidecar (Python/FastAPI)
 - **Service**: Vision sidecar (`apps/vision/`)
-- **Endpoint**: `POST /classify` (is_book check) and `POST /extract` (text extraction)
-- **Client module**: `Stacks.AI.Client`
+- **Endpoint**: `POST /analyze` — single fused classify + extract call. The sidecar still exposes `POST /classify` and `POST /extract` for direct/legacy use, but the moderation pipeline uses `/analyze` only.
+- **Client module**: `Stacks.AI.Client` (`endpoint_path("analyze")` → `/analyze`)
 - **Auth**: HMAC (`X-Internal-Token`)
 - **Circuit breaker**: Fuse on the vision client
 - **Fallback**: Pipeline fails; upload marked as failed
@@ -207,8 +205,8 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 
 ## 13. Operational Metrics
 
-- **Oban job counts for `VisionProcessJob`**: enqueued, completed, failed, retried — tracked via `mart_job_stats` and Oban telemetry
-- **Vision sidecar call counts and latencies**: per-endpoint (`POST /classify`, `POST /extract`) duration, success/failure rates. Two calls per upload (classification + extraction if book detected).
+- **Oban job counts for `IdentifyBookJob`**: enqueued, completed, failed, retried — tracked via `mart_job_stats` and Oban telemetry
+- **Vision sidecar call counts and latencies**: `POST /analyze` duration, success/failure rates. One call per upload (the sidecar internally short-circuits the extract step when classification is not BOOK).
 - **Circuit breaker state**: vision client fuse events — open/closed transitions when sidecar is unavailable or slow
 - **ISBN resolution call counts**: Open Library and Google Books API hit rates, latencies, and fallback rates (one fails, other succeeds)
 - **Pipeline step pass/fail rates**: Step 1 (is_book) rejection rate, Step 2 (ISBN extraction) failure rate, Step 3 (BISAC classification) age-gate rate

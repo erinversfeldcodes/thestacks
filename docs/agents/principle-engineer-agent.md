@@ -135,7 +135,7 @@ Create issues using the template in `issues/`:
 
 ### Standard Review (per-phase or per-issue)
 
-1. **Completion Assessment** — Read the issue and its plan. Check if features described actually exist in the codebase.
+1. **Completion Assessment** — Load the issue via `mcp__project-tools__get_issue(NNN)` and plan state via `mcp__project-tools__get_plan_status(NNN)` (do not read `issues/NNN-*.md` or `plans/NNN-*.md` directly). Check if features described actually exist in the codebase.
 2. **Standards Compliance** — Read `docs/agents/standards/`. Grep for violations.
 3. **Architecture Alignment** — Read `docs/technical-architecture.md`. Verify implementation matches.
 4. **Critical Questions** — Generate and investigate the hard questions above. Document findings.
