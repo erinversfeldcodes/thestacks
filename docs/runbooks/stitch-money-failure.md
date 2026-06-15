@@ -6,6 +6,16 @@
 
 ---
 
+> **Status: Deferred — not yet integrated.**
+>
+> Per [ADR-013: Marketplace as Classifieds Board, Not E-Commerce](../decisions/013-marketplace-classifieds-first.md), Stitch Money payment integration ([Issue #054b](../../issues/054b-marketplace-payment-integration.md)) is deferred indefinitely. Phase 1 marketplace is a classifieds board — buyers and sellers transact off-platform via contact info on the listing.
+>
+> No `Stacks.Payments.StitchClient`, `CheckoutController`, or `Stacks.Marketplace.Payment` module currently exists. The `op.transactions` table exists in the schema but no application code reads from or writes to it. There is no `STITCH_API_KEY` or `STITCH_WEBHOOK_SECRET` configured on Fly.io.
+>
+> This runbook is retained as a reference for when #054b is picked up. The diagnosis/response/recovery steps below assume an integration that has not been built yet — do not attempt to run them against current production. Until then, marketplace failures are listing-related, not payment-related (`Stacks.Marketplace` listings work; transactions don't).
+
+---
+
 ## Symptoms
 
 **User sees:**

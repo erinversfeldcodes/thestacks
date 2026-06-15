@@ -48,7 +48,7 @@ production (primary)                    staging (primary)
 | Branch | Project | Created by | Contains | Destroyed |
 |--------|---------|-----------|----------|-----------|
 | `production` | `thestacks` | Neon project setup (one-time) | Migrations + real user data | Never |
-| `staging` | `thestacks-staging` | One-time bootstrap (`mix ecto.migrate` + `seeds.exs`) | Migrations + dev fixtures | Never (maintained manually) |
+| `staging` | `thestacks-staging` | One-time bootstrap (`mix ecto.migrate` + `seeds.exs`) | Migrations + dev fixtures | Never (refreshed by `.github/workflows/reseed-staging.yml` on every push to `main`, plus `workflow_dispatch`) |
 | `preview/<pr>` | `thestacks-staging` | `deploy-stack.sh` (preview mode) | Copy-on-write clone of `staging` at branch time | `cleanup-preview.sh` on PR close, or manually |
 
 ## Configuration
@@ -88,6 +88,11 @@ Everything under `preview/*` older than the oldest open PR is safe to remove.
 ## Related
 
 - `scripts/deploy-stack.sh` — preview-branch creation
+- `scripts/deploy-preview.sh` — wraps `deploy-stack.sh` for the CI preview job
 - `scripts/cleanup-preview.sh` — preview-branch destruction on PR close
+- `.github/workflows/reseed-staging.yml` — refreshes `staging` from `seeds.exs` on every push to `main`
+- `.github/workflows/cleanup-pre-rollback-branches.yml` — 30-day GC for `pre-rollback-*` branches preserved during prod rollbacks
+- `docs/runbooks/bootstrap-prod-environment.md` — one-time setup of the `thestacks` production project
 - `docs/runbooks/secrets-rotation.md` — rotating prod DB credentials
 - `docs/runbooks/neon-outage.md` — what to do when Neon is down
+- Issue #142 (`issues/complete/142-bootstrap-staging-neon-branch.md`) — original bootstrap of the `staging` branch

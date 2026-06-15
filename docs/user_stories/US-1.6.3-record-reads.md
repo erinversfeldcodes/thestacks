@@ -7,7 +7,7 @@
 **What the user wants to accomplish:** Have re-reads recorded and reflected in the book's visual presentation.
 
 **How they accomplish it:**
-1. A book already in the Library can be moved back to the Reading Pile and then returned to the Library.
+1. A book already in the Library bookshelf can be moved back to the Reading Pile and then returned to the Library.
 2. Each round trip increments the read count.
 3. The spine wear progresses from "well-read" to "well-loved" after multiple reads.
 

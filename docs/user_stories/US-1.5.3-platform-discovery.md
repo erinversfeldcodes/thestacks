@@ -4,7 +4,7 @@
 
 > **As a** user, **I want** my searches to surface results beyond my own collection **so that** I can discover books available from other users, local partners, and the wider platform without leaving the search flow.
 
-**What the user wants to accomplish:** When searching for a book, see not just their own shelves but also marketplace listings, partner inventory, other users' public shelves, and related Third Spaces events -- all in one place.
+**What the user wants to accomplish:** When searching for a book, see not just their own bookshelves but also marketplace listings, partner inventory, other users' public bookshelves, and related Third Spaces events -- all in one place.
 
 **How they accomplish it:**
 1. The user types a query in the search bar (US-1.5.1).
@@ -15,8 +15,8 @@
 
 **What they see on the page:**
 - Search dropdown divided into "Your Collection" and "On the Platform" sections.
-- External results show contextual labels (marketplace, partner inventory, public shelf, event).
-- Results respect visibility rules: only public shelf content appears.
+- External results show contextual labels (marketplace, partner inventory, public bookshelf, event).
+- Results respect visibility rules: only public bookshelf content appears.
 
 **Acceptance Criteria:**
 - Platform-wide results appear alongside personal collection results.
@@ -76,7 +76,7 @@ A unified search endpoint or parallel API calls would return:
 - Books matching the query (already implemented)
 - Active marketplace listings matching the query
 - Partner inventory matches
-- Public shelf placements from other users
+- Public bookshelf placements from other users
 - Third Spaces events with matching ISBNs/descriptions
 
 ---
@@ -84,7 +84,7 @@ A unified search endpoint or parallel API calls would return:
 ## 4. Auth & Middleware Guards
 
 - **Plugs fired**: `SecurityHeaders` -> `AuthPipeline` (search), `SecurityHeaders` -> `OptionalAuthPipeline` (catalogue/listings)
-- **Visibility checks**: `Visibility.can_view?(book, viewer)` filters all results. Public shelf placements would additionally filter by bookshelf visibility and placement visibility.
+- **Visibility checks**: `Visibility.can_view?(book, viewer)` filters all results. Public bookshelf placements would additionally filter by bookshelf visibility and placement visibility.
 - **Age gate**: Not enforced on search results.
 - **Ownership checks**: N/A
 
@@ -144,7 +144,7 @@ N/A
 
 ## 11. dbt Model Dependencies
 
-N/A currently. Future platform-wide search might leverage dbt marts for pre-aggregated search indexes.
+N/A currently. Future platform-wide search would likely leverage `dbt/models/marts/mart_platform_searchable.sql` (incremental mart of `int_book_detail_view`) for pre-aggregated, platform-visible book search records.
 
 ---
 
@@ -166,9 +166,9 @@ To implement this story fully:
 - Add `platformResults : RemoteData Http.Error (List PlatformResult)` to Model
 - Add `PlatformSearchCompleted (Result Http.Error (List PlatformResult))` Msg
 - Fire parallel API calls: one for personal collection, one for platform-wide results
-- Add `type PlatformResult = ListingResult Listing | PublicShelfResult ShelfEntry | PartnerResult PartnerEntry | EventResult Event`
+- Add `type PlatformResult = ListingResult Listing | PublicBookshelfResult BookshelfEntry | PartnerResult PartnerEntry | EventResult Event`
 - Split view into "Your Collection" and "On the Platform" sections
-- Add contextual labels: "Listed by [username] for R120", "In stock at [partner]", "On [username]'s shelf"
+- Add contextual labels: "Listed by [username] for R120", "In stock at [partner]", "On [username]'s bookshelf"
 - Add shimmer placeholder while platform results load
 
 ### View
@@ -208,6 +208,6 @@ Same as US-1.5.1 in current implementation. See US-1.5.1 for full CSS class deta
 | Cost Service | Unit | Volume Driver | Notes |
 |-------------|------|--------------|-------|
 | Fly.io compute (core) | CPU-ms per request | Number of platform discovery searches | Currently single search query. Planned: parallel API calls to search + catalogue + listings endpoints multiply server-side CPU cost per user search. |
-| Neon DB (PostgreSQL) | Compute Units (CU) per query | Full-text search queries + listing queries + public shelf queries | Current: single GIN index scan on `title_tsv`. Planned: additional queries against `op.listings` (active listings), `op.bookshelf_placements` (public shelf placements), and partner inventory tables. Each additional query source adds CU cost. |
+| Neon DB (PostgreSQL) | Compute Units (CU) per query | Full-text search queries + listing queries + public bookshelf queries | Current: single GIN index scan on `title_tsv`. Planned: additional queries against `op.listings` (active listings), `op.bookshelf_placements` (public bookshelf placements), and partner inventory tables. Each additional query source adds CU cost. |
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | Visibility filtering across multiple tables | Platform-wide results require visibility checks on books, placements, bookshelves, and listings. More rows to filter than personal-only search. |
 | Partner APIs (future) | API calls | Real-time inventory checks from partner bookshops | Planned: external HTTP calls to partner APIs for live inventory. Cost depends on partner API pricing and call volume. |

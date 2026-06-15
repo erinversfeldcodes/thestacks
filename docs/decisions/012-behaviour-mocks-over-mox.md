@@ -9,7 +9,7 @@
 
 ## Context
 
-The Stacks has six external service clients that must be swappable for testing:
+The Stacks has seven external service clients that must be swappable for testing:
 
 | Client | External Service | Introduced |
 |--------|-----------------|-----------|

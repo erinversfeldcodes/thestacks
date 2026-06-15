@@ -99,7 +99,7 @@ Same as US-1.1.1, but during the `Moderation.store_book/3` step, the age-gating 
 2. Calls `subjects_to_bisac(subjects)` to map Open Library subjects to BISAC codes
 3. Calls `determine_visibility_tier(bisac_codes)`:
    - Checks BISAC codes against `adult_codes = ["FIC005000", "FIC027000", "FIC069000"]`
-   - `FIC005000` = Erotica, `FIC027000` = Romance, `FIC069000` = unspecified adult fiction
+   - `FIC005000` = Erotica, `FIC027000` = Romance / Erotic Romance, `FIC069000` = Erotic Fiction
    - If any match: returns `"age_gated"`
    - Otherwise: returns `"public"`
 4. Sets `visibility_tier` in the book attributes passed to `Books.create/1`
@@ -284,3 +284,16 @@ Identical to US-1.1.1. The age-gating decision adds no external API calls or com
 ### Per-Upload Cost Estimate (Age-Gated Books)
 - Same as US-1.1.1: **~R0.50-R2.50 (~$0.03-$0.14 USD) per upload**
 - No additional cost for the age-gating decision itself
+
+---
+
+## 16. Cross-References
+
+- **US-4.2 — Age Verification** (`docs/user_stories/US-4.2-age-verification.md`): the user-facing age verification flow that lets a verified user pass `AgeGate.enforce/2`. The `PUT /api/settings/age_verification` endpoint sets `users.age_verified = true`, which this story's age gate consults.
+- **US-1.1.1 — Book Upload** (`docs/user_stories/`): parent flow whose `IdentifyBookJob` invokes `Moderation.store_book/3` where the visibility tier is decided.
+- **ADR 006 — Row-Level Security Plus Application-Layer Visibility** (`docs/decisions/006-rls-plus-application-visibility.md`): the defence-in-depth visibility model that `Stacks.Visibility` and `AgeGate` together implement. Book-level `visibility_tier` sits alongside the bookshelf/placement visibility ceilings described there.
+- **Implementation modules**:
+  - `apps/core/lib/stacks/moderation.ex` — `determine_visibility_tier/1`, `subjects_to_bisac/1`
+  - `apps/core/lib/stacks_web/plugs/age_gate.ex` — `AgeGate.enforce/2`
+  - `apps/core/lib/stacks/books.ex` — `list_catalogue/1`, `maybe_exclude_age_gated/2`, `book_changeset` (validates `visibility_tier` ∈ `["public", "age_gated"]`)
+  - `apps/core/lib/stacks/visibility.ex` — `check_age_gate/2` (per-resource visibility resolver)

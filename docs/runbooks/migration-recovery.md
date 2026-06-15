@@ -13,7 +13,7 @@ The operator opens this runbook when one or more of these signals fire:
 - The `deploy-stack.sh` step in `.github/workflows/deploy-production.yml`
   exits non-zero, and its log shows the failure happened in the
   "Running prod migrations (before image cutover)" block at
-  `scripts/deploy-stack.sh:643`. That block runs `mix ecto.migrate`
+  `scripts/deploy-stack.sh:637`. That block runs `mix ecto.migrate`
   from the GitHub Actions runner against the prod `DATABASE_URL`
   BEFORE the core `fly deploy` cutover — a partial migration aborts
   the script before any image swap, so the old image keeps serving

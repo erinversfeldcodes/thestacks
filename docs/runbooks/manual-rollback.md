@@ -90,9 +90,11 @@ Before triggering, verify:
 3. **`main-<sha>` git tags exist.** The `record-prev-state` step resolves
    `CORE_PREV_IMAGE` and `MODAL_PREV_COMMIT` from the two most-recent
    `main-*` tags (newest = current HEAD; second-newest = rollback
-   target). On a brand-new prod stack there are no tags — see issue
-   #163 for the bootstrap procedure (runbook pending). The one-liner
-   is `git tag main-bootstrap "$(git rev-parse main^)" && git push
+   target). Successful prod deploys are tagged automatically by
+   `.github/workflows/tag-main.yml`. On a brand-new prod stack there
+   are no tags — see `docs/runbooks/bootstrap-prod-environment.md` for
+   the bootstrap procedure. The one-liner is
+   `git tag main-bootstrap "$(git rev-parse main^)" && git push
    origin main-bootstrap`.
 4. **Read the behavioural contract above** and confirm the
    image-only revert (and any per-row edge cases under image N-1) is
@@ -136,7 +138,7 @@ manual-rollback path:
 | `Compose DATABASE_URL` | runs |
 | `Install postgresql-client` | runs (cheap; harmless on this path) |
 | `Capture pre-migrate Neon LSN` | **skipped** (`if: !inputs.manual_rollback`) |
-| `deploy-stack.sh` | **skipped** (the script's internal migrate runs at deploy-stack.sh:643 before the core fly deploy; both skip together when the workflow step skips) |
+| `deploy-stack.sh` | **skipped** (the script's internal migrate runs at deploy-stack.sh:645 before the core fly deploy; both skip together when the workflow step skips) |
 | `check-slo-gate.sh` | **skipped** |
 | `rollback-production composite action` | **fires** (`if: failure() || inputs.manual_rollback`) |
 | `upload-artifact gate-observations` | runs (warns: no file produced) |
@@ -294,6 +296,9 @@ git push origin main-bootstrap
 - `docs/runbooks/vision-service-rollback.md` — vision-side rollback
   ordering and wire-format constraints (deploy core before vision; same
   invariant applies to rollback).
+- `docs/runbooks/bootstrap-prod-environment.md` — seeding the first
+  `main-<sha>` tag on a fresh prod stack so `record-prev-state` has a
+  rollback target.
 - `.github/actions/rollback-production/action.yml` — composite action
   contract and input semantics.
 - `scripts/rollback-production.sh` — the underlying script the composite

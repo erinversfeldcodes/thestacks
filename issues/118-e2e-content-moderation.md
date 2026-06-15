@@ -63,7 +63,7 @@ Validate the full moderation lifecycle: image classification, ISBN extraction, B
 - US-4.2: No events emitted for age verification (confirm no side effects)
 
 ### 6. Background Job Tests
-- `VisionProcessJob` enqueued on upload with correct args (`image_id`, `user_id`)
+- `IdentifyBookJob` enqueued on upload with correct args (`image_id`, `user_id`)
 - Pipeline step 1: `call_vision("is_book", ...)` invoked with correct image URL
 - Pipeline step 2: `call_vision("extract_isbn", ...)` invoked when step 1 returns "book"
 - Pipeline step 3: BISAC code mapping via `subjects_to_bisac/1`
@@ -102,7 +102,7 @@ Validate the full moderation lifecycle: image classification, ISBN extraction, B
 - `AgeVerificationUpdated (Ok _)` -> Success state, "Age verified" message
 
 ### 12. Metrics & Telemetry Tests
-- Oban telemetry for `VisionProcessJob`: enqueued, completed, failed counts
+- Oban telemetry for `IdentifyBookJob`: enqueued, completed, failed counts
 - Vision sidecar call latency tracked per endpoint
 - Pipeline step pass/fail rates: step 1 rejection, step 2 failure, step 3 age-gate rates
 - AgeGate enforcement counts: 403 blocked vs pass-through

@@ -14,39 +14,37 @@ Develop and maintain the Elm frontend SPA: bookshelves, book detail views, spine
 ## Owned Domains
 
 ### Pages (in `frontend/src/Page/`)
-- `Page.Shelf.Library` — Dark walnut shelves, green damask wallpaper
-- `Page.Shelf.AntiLibrary` — Lighter oak, botanical prints
-- `Page.Shelf.WishList` — Blue-grey, watercolour florals
-- `Page.Shelf.ReadingPile` — Cosy armchair + side table, books in a pile (face-on, spines visible)
-- `Page.Shelf.LookingForHome` — Future marketplace shelf
-- `Page.Book.Detail` — Full book view with enrichment sidebar (reviews, prices, author, events, partner availability)
-- `Page.Book.Upload` — Upload modal (drag-and-drop, shelf selector, processing animation)
+- `Page.Bookshelf` — Unified config-driven module for Library, AntiLibrary, and WishList bookshelves (replaces the old `Page.Bookshelf.Library` / `.AntiLibrary` / `.WishList` modules)
+- `Page.Bookshelf.ReadingPile` — Cosy armchair + side table, books in a pile (unique layout, kept separate)
+- `Page.Bookshelf.LookingForHome` — Future marketplace bookshelf (unique layout, kept separate)
+- `Page.Bookshelf.Helpers` — Shared helpers for bookshelf pages
+- `Page.BookDetail` — Book view rendered as an overlay (see `docs/decisions/005-book-detail-overlay-not-route.md`), with enrichment sidebar
+- `Page.Upload` — Upload flow (drag-and-drop, ISBN extraction, processing animation)
 - `Page.ThirdSpaces` — Cork notice board (partner events as flyers, spaces as postcards, user suggestions)
-- `Page.Metrics` — Curator's desk (operational metrics, partner requests)
-- `Page.Search` — Search and sort across shelves
-- `Page.Settings` — Privacy, consent, audit log
-- `Page.Partner.Register` — Partner registration form
-- `Page.Partner.Dashboard` — Partner inventory, events, spaces, metrics, key management
-- `Page.Partner.InventoryImport` — CSV upload with preview table
-- `Page.Partner.Events` — Event list + form
-- `Page.Partner.Metrics` — Aggregate engagement sparklines
+- `Page.Catalogue`, `Page.Search` — Browse and search across bookshelves
+- `Page.CostTransparency` — Operating-cost ledger
+- `Page.Login` — Login + secret-bookshelf passage animation
+- `Page.Settings` (+ `Page.Settings.{AgeVerification,Consent,Notifications,Password,Privacy,Profile}`) — Account and consent settings
+- `Page.Groups` (+ `Page.Groups.Detail`) — Reading groups
+- `Page.Blog.{Archive,Editor,Post}` — Blog
+- `Page.Admin.{Metrics,ScraperConfig,SourceApproval}` — Operator desk (metrics, scraper config, partner approvals)
+- `Page.Marketplace.{Browse,CreateListing,ListingDetail,MyListings}` — Looking-for-home marketplace
+
+Domain terminology: the five named categories above (Library, AntiLibrary, WishList, ReadingPile, LookingForHome) are **bookshelves**, not shelves — never conflate them with a physical horizontal shelf within a bookshelf.
 
 ### Components (in `frontend/src/Components/`)
-- `Components.Spine` — Book spine rendering (thickness by page count, wear texture by engagement)
-- `Components.Shelf` — Horizontal shelf row with slide-in animation
-- `Components.BookPile` — Face-on pile on side table (spines visible, not covers)
-- `Components.CorkBoard` — Pin-board layout for third spaces
-- `Components.PartnerEventCard` — Hand-lettered flyer style
-- `Components.PartnerSpaceCard` — Vintage postcard style
-- `Components.CommunitySpaceCard` — Handwritten style, "suggested by a reader"
-- `Components.PartnerAvailability` — "Available at [Shop] for R149" sidebar widget
-- `Components.UploadModal` — Parchment background, dotted border, processing states
-- `Components.ConsentBanner` — First-visit consent collection
+- `Components.Spine` — Book spine rendering (thickness by page count, wear texture by engagement); exposes `spineWidth`
+- `Components.BookList`, `Components.PlacementCard`, `Components.EmptyBookshelf`, `Components.ShelfMover`, `Components.RemoveBookModal`, `Components.FormatPicker`, `Components.VisibilityBadge`, `Components.ViewModeToggle`, `Components.ViewAsBar` — Bookshelf surface affordances
+- `Components.BookAssociations`, `Components.AuthorCard`, `Components.ReviewSummary`, `Components.PriceInfo` — Book detail enrichment widgets
+- `Components.ISBNInput` — ISBN entry (exposes `validateISBN10`, `validateISBN13`)
+- `Components.SearchBar`, `Components.SortSelector`, `Components.FilterPanel` — Browse/search controls
+- `Components.FeedItem`, `Components.RSSLink` — Group feed surfaces
+- `Components.AgeGate`, `Components.OnboardingOverlay`, `Components.UserMenu` — First-visit / account chrome
 
-### Navigation
-- Horizontal slide between adjacent shelves (Library <-> AntiLibrary <-> WishList)
-- Room transition (fade through dark) for different metaphors (Reading Pile, Third Spaces, Metrics)
-- Each shelf has its own wallpaper, wood finish, and colour palette
+### Navigation & animation
+- `Navigation.Route`, `Navigation.SwipeNavigation` define routing and swipe gestures
+- `Animation.SlideTransition` for horizontal slide between adjacent bookshelves; `Animation.RoomTransition` for fade-through-dark between metaphors (Reading Pile, Third Spaces, etc.)
+- Each bookshelf has its own wallpaper, wood finish, and colour palette
 
 ## Key Patterns
 
@@ -63,7 +61,7 @@ viewBookDetail : RemoteData Http.Error BookDetail -> Html Msg
 ```
 
 ### Protobuf-generated JSON decoders
-Decoders in `frontend/src/Api/Generated/` are checked in (generated from `.proto` files). Do not hand-write decoders for any type that has a `.proto` definition.
+Decoders are generated from `.proto` files into `proto/gen/elm/` by `scripts/gen-elm-proto.sh` (which invokes `scripts/gen-elm-proto.py` and runs `elm-format` on the output). The directory is **gitignored** and regenerated at build time — never hand-edit and never commit. Do not hand-write decoders for any type that has a `.proto` definition. `Types/ProtoHelpers.elm` holds shared decoder utilities; `Types/RemoteData.elm` is the local RemoteData implementation.
 
 ### No ports unless absolutely necessary
 Elm's type safety is the main value proposition. Ports break it. File uploads use elm/file (which is a port internally but has a typed API).
@@ -80,7 +78,9 @@ Elm's type safety is the main value proposition. Ports break it. File uploads us
 ```
 ./docs/agents/standards/code-quality.md
 ./docs/agents/standards/testing.md
-./docs/technical-architecture.md (section 14 — Frontend Architecture)
+./docs/agents/reviewers/elm-reviewer.md
+./docs/decisions/005-book-detail-overlay-not-route.md (book detail rendered as overlay, not a route)
+./docs/technical-architecture.md (Frontend Architecture section)
 ./docs/user-stories.md (for UI descriptions)
 ```
 
@@ -91,18 +91,24 @@ Elm's type safety is the main value proposition. Ports break it. File uploads us
 - **rust-agent:** None direct (scraper is backend-only)
 
 ## Testing Strategy
-- **elm-program-test:** Primary. Tests full app Model-Update-View cycle without a browser. Covers user story interaction flows.
-- **Playwright:** E2E smoke tests for real-browser concerns (CSS rendering, file uploads, animations). Separate, optional.
+- **elm-program-test (`avh4/elm-program-test`):** Primary for interaction flows. Tests in `frontend/tests/` (e.g. `Page/SearchProgramTest.elm`, `Page/UploadProgramTest.elm`, `NavigationProgramTest.elm`); shared infra in `tests/TestHelpers.elm`.
+- **elm-test:** Pure unit tests for decoders, helpers, and components (e.g. `BookDecoder.elm`, `SpineTest.elm`, `ISBNValidation.elm`).
+- **Playwright:** E2E smoke tests for real-browser concerns (CSS rendering, file uploads, animations).
 - **No unit tests for view functions** — elm-program-test covers these implicitly.
+- **Test module exposing:** pages and types under test must expose `Msg(..)` and relevant union constructors (e.g. `Types.Book.VisibilityTier(..)`); elm-review's `NoExposingEverything` will otherwise narrow them.
 
 ## Pre-approved Commands
 ```bash
-cd frontend && elm make src/Main.elm
-cd frontend && elm-test
-cd frontend && elm-format src/ --validate
-cd frontend && npx elm-program-test
-cd frontend && npx playwright test
+cd frontend && elm make src/Main.elm --output=elm.js   # also: npm run build
+cd frontend && npm test                                # wraps elm-test
+cd frontend && npx elm-format src/ tests/ --validate
+cd frontend && npx elm-review src/ tests/              # config in frontend/elm-review/
+scripts/lint-elm.sh                                    # canonical local lint
+scripts/test-elm.sh                                    # canonical local test runner
+scripts/gen-elm-proto.sh [--check]                     # regenerate proto/gen/elm/
 ```
+
+Note: the deployment pipeline bundles `elm.js` via esbuild (`scripts/deploy-stack.sh` uses `esbuild-plugin-elm`); during local development plain `elm make` is sufficient.
 
 ---
 

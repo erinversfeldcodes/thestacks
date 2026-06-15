@@ -10,7 +10,7 @@
 1. The user uploads photos or enters an ISBN (US-1.1.1 or US-1.1.5).
 2. The ISBN resolves successfully, but a book with that ISBN already exists in the user's collection.
 3. The system displays the existing book and its current shelf location.
-4. The user can: (a) move the existing book to a different shelf, (b) do nothing and close the modal, or (c) view the book's detail overlay.
+4. The user can: (a) merge a new format edition into the existing book (US-1.1.8), (b) add the upload as a separate entry, (c) navigate to the existing book's detail page, or (d) go back to the upload drop zone.
 
 ---
 
@@ -19,8 +19,8 @@
 ### Happy Path
 1. User uploads an image or enters an ISBN.
 2. Vision pipeline resolves the ISBN. The `IdentifyBookJob` creates/finds the book and stores `book_ids` on the uploaded image.
-3. Elm polls `GET /api/upload/:image_id/status`. The controller calls `Shelving.book_on_any_shelf?(user.id, book_id)` which returns `true`.
-4. Poll response includes `is_duplicate: true`.
+3. Elm subscribes to the SSE stream `GET /api/upload/:image_id/stream`. The controller calls `Shelving.book_on_any_shelf?(user.id, book_id)` which returns `true`.
+4. The SSE event payload includes `is_duplicate: true`.
 5. Elm receives `StatusReceived (Ok {status: Resolved, isDuplicate: Just True, bookIds: [id]})`.
 6. Elm calls `Api.getBook id (Just token) GotDuplicateBook` (using the `GotDuplicateBook` callback instead of `GotIdentifiedBook`).
 7. `GotDuplicateBook (Ok response)` sets `result = DuplicateDetected response.book`.
@@ -47,16 +47,16 @@
 
 ## 3. API Calls
 
-### `GET /api/upload/:image_id/status`
-- **Auth**: Required (Bearer token)
-- **Pipeline**: `:api` -> `:authenticated`
-- **Controller**: `StacksWeb.UploadController.status/2`
+### `GET /api/upload/:image_id/stream`
+- **Auth**: Required (Bearer token, accepted via `?token=` query string for EventSource)
+- **Pipeline**: `:api` -> `:authenticated` -> `:rate_limit_upload`
+- **Controller**: `StacksWeb.UploadController.stream/2` (Server-Sent Events)
 - **Duplicate detection logic**:
   ```
   effective_ids = effective_book_ids(book_ids_strs, book_id_str)
   is_duplicate = Enum.any?(effective_ids, &Shelving.book_on_any_shelf?(user.id, &1))
   ```
-- **Response**: `{ ..., is_duplicate: true, book_ids: ["<uuid>"] }` -- HTTP 200
+- **Response**: `text/event-stream` chunks of the shape `data: { ..., is_duplicate: true, book_ids: ["<uuid>"] }\n\n` -- HTTP 200
 
 ### `GET /api/books/:id`
 - **Auth**: Optional (Bearer token)
@@ -68,10 +68,10 @@
 
 ## 4. Auth & Middleware Guards
 
-- **Plugs fired**: `SecurityHeaders` -> `AuthPipeline` (for status poll with duplicate check)
+- **Plugs fired**: `SecurityHeaders` -> `AuthPipeline` (for the SSE stream with duplicate check)
 - **Visibility checks**: `Visibility.resolve_visibility/2` called in `BookController.show/2`
 - **Age gate**: `AgeGate.enforce/2` called in `BookController.show/2`
-- **Ownership checks**: `Shelving.book_on_any_shelf?(user.id, book_id)` in `UploadController.status/2` is the core duplicate detection mechanism -- it checks if the authenticated user already has a placement for this book on any of their bookshelves
+- **Ownership checks**: `Shelving.book_on_any_shelf?(user.id, book_id)` in `UploadController.stream/2` is the core duplicate detection mechanism -- it checks if the authenticated user already has a placement for this book on any of their bookshelves
 
 ---
 
@@ -119,12 +119,12 @@ N/A for the detection step.
 
 ## 7. Background Jobs (Oban)
 
-The background job (`IdentifyBookJob`) runs as in US-1.1.1 to identify the book. The duplicate detection itself is synchronous, performed during the `GET /api/upload/:image_id/status` poll:
+The background job (`IdentifyBookJob`) runs as in US-1.1.1 to identify the book. The duplicate detection itself is synchronous, performed during the `GET /api/upload/:image_id/stream` SSE response:
 
-1. `IdentifyBookJob` resolves the ISBN and creates/finds the book -> stores `book_ids` on the uploaded image
-2. `UploadController.status/2` reads the `book_ids` from the uploaded image record
+1. `IdentifyBookJob` resolves the ISBN and creates/finds the book (`Books.find_existing/1`) -> stores `book_ids` on the uploaded image
+2. `UploadController.stream/2` reads the `book_ids` from the uploaded image record (and from PubSub `:upload_complete` messages for in-flight identifications)
 3. For each book_id, calls `Shelving.book_on_any_shelf?(user.id, book_id)`
-4. Sets `is_duplicate: true` in the poll response if any match
+4. Sets `is_duplicate: true` in the SSE payload if any match
 
 No additional background job is enqueued for duplicate detection.
 
@@ -195,10 +195,10 @@ Same as US-1.1.1.
 
 ### HTTP Request Metrics
 
-- **Metric name**: `upload_status_poll_count`
+- **Metric name**: `upload_stream_request_count`
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
 - **Type**: counter
-- **Labels/dimensions**: endpoint (`GET /api/upload/:image_id/status`), status_code (200)
+- **Labels/dimensions**: endpoint (`GET /api/upload/:image_id/stream`), status_code (200)
 
 - **Metric name**: `book_detail_request_count`
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
@@ -208,7 +208,7 @@ Same as US-1.1.1.
 ### Duplicate Detection Metrics
 
 - **Metric name**: `duplicate_detection_count`
-- **Source**: Not yet instrumented. `Shelving.book_on_any_shelf?/2` is called in `UploadController.status/2` but does not emit Telemetry.
+- **Source**: Not yet instrumented. `Shelving.book_on_any_shelf?/2` is called in `UploadController.stream/2` but does not emit Telemetry.
 - **Type**: counter
 - **Labels/dimensions**: result (duplicate, not_duplicate)
 
@@ -219,7 +219,7 @@ Same as US-1.1.1.
 
 ### Oban Job Metrics
 
-Same as US-1.1.1 — the `IdentifyBookJob` runs normally. Duplicate detection happens synchronously during the status poll, not in the background job.
+Same as US-1.1.1 — the `IdentifyBookJob` runs normally. Duplicate detection happens synchronously during the SSE stream response, not in the background job.
 
 ### Event Emission Metrics
 
@@ -242,19 +242,19 @@ Same as US-1.1.1 — the `IdentifyBookJob` runs normally. Duplicate detection ha
 ### Duplicate Detection Timing
 
 - **Metric name**: Duplicate check latency
-- **How measured**: Ecto Telemetry for the `Shelving.book_on_any_shelf?/2` query. Not separately instrumented — included in the overall status poll response time.
+- **How measured**: Ecto Telemetry for the `Shelving.book_on_any_shelf?/2` query. Not separately instrumented — included in the overall stream response time.
 - **Target/SLA**: < 5ms (simple `EXISTS` query with index on `book_id` and `bookshelf_id`)
-- **Dashboard**: API latency section (part of status poll p95)
+- **Dashboard**: API latency section (part of stream response p95)
 
-- **Metric name**: Status poll with duplicate check latency
-- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` for `GET /api/upload/:image_id/status`
-- **Target/SLA**: p95 < 100ms (the duplicate check adds negligible time to the poll)
+- **Metric name**: Stream response with duplicate check latency
+- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` for `GET /api/upload/:image_id/stream`
+- **Target/SLA**: p95 < 100ms for the initial event (the duplicate check adds negligible time)
 - **Dashboard**: API latency section
 
 ### User Experience Metrics
 
 - **Metric name**: Duplicate detection rate
-- **How measured**: `count(polls returning is_duplicate = true) / count(polls returning resolved)` from `event_log` or server logs. Not yet instrumented as a real-time metric.
+- **How measured**: `count(stream payloads with is_duplicate = true) / count(stream payloads with status = resolved)` from server logs. Not yet instrumented as a real-time metric.
 - **Target/SLA**: Informational — expected to increase as users build larger collections
 - **Dashboard**: Upload funnel section
 

@@ -264,3 +264,5 @@ python-agent for harness, metrics, compare, and report generator implementation.
 
 ## Progress Notes
 Originally scoped as a one-off benchmark script. Redesigned as a reusable evaluation framework based on industry model evaluation best practices: stratified corpus, locked ground truth, versioned prompts, per-stratum metrics, cost as a first-class metric, committed results.
+
+**Architecture drift note (2026-06-15):** This issue still references Together AI for vision inference and token-count cost reporting. Per ADR 001 (`docs/decisions/001-modal-over-together-ai.md`), vision inference now runs on Modal (`apps/vision/modal_app.py`). When this work starts, the framework will need to target Modal (per-second GPU time) for the cost metric rather than Together AI response headers.

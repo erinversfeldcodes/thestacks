@@ -40,28 +40,30 @@ Without a schema contract, these JSON interfaces drift. A field is renamed in th
 
 **Use Protobuf (`.proto` files) as the single source of truth for structured data schemas. Use `buf` for linting, generation, and breaking change detection. Use JSON on the wire — Protobuf is the *schema*, not the serialisation format.**
 
-**Directory structure:**
+**Directory structure (illustrative — actual layout uses `v1/` version subdirectories per `buf` STANDARD lint rules):**
 ```
 proto/
   buf.yaml          # buf config + breaking change rules
-  buf.gen.yaml      # Code generation targets
+  buf.gen.yaml      # Retained for buf lint/breaking only — `buf generate` is NOT the active codegen path
+  persisted.exs     # Manifest mapping proto messages → DB tables (ADR 009)
   stacks/
-    partner/
-      inventory.proto  # Partner inventory push schema
-      events.proto     # Partner events push schema
-      spaces.proto     # Partner spaces push schema
-    internal/
-      event_bus.proto  # Event envelope (event_log payload schema)
-      enrichment.proto # Enrichment job schemas
-    common/
-      book.proto       # Shared book/edition types
-      location.proto   # Shared location types
+    partner/         # Partner-facing schemas (inventory/events/spaces push)
+    internal/v1/     # Inter-service: event_bus, vision, scraper, partner, audit
+    common/v1/       # Shared types: book, location, listing, blog, upload, etc.
+    api/v1/          # Phoenix JSON API request/response envelopes
+    monitoring/v1/   # Observability/metrics
+    infra/v1/        # Infrastructure-facing contracts
   gen/
-    elixir/    # Generated Elixir structs (gitignored)
-    elm/       # Generated Elm decoders (gitignored — regenerated at build time via scripts/gen-elm-proto.sh)
-    rust/      # Generated Rust types (gitignored)
-    python/    # Generated Python Pydantic models (gitignored)
+    elm/             # Generated Elm decoders (gitignored — regenerated at build time via scripts/gen-elm-proto.sh)
 ```
+
+Generated Elixir / Python / Rust types are emitted into each service's own tree
+(e.g. `apps/core/lib/stacks/gen/`, `apps/vision/app/proto/gen/`,
+`apps/scraper/src/proto/gen/`) by custom scripts — `scripts/gen-elixir-proto.sh`,
+`scripts/gen-python-proto.sh`, `scripts/gen-rust-proto.sh`. The custom pipeline
+exists to avoid the Modal protobuf<7 conflict and to produce output that
+integrates cleanly with each service's conventions. `buf generate` plugin
+entries in `buf.gen.yaml` are intentionally commented out.
 
 **Why JSON on the wire:**
 The HTTP API is JSON. Debug tools (curl, browser dev tools, Fly.io logs) all show JSON. Binary Protobuf would require a separate decode step to read logs. The Protobuf schemas define the *field names, types, and required/optional status* — the JSON serialisation is derived from those definitions at code-generation time.

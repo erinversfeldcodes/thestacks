@@ -42,7 +42,7 @@ The naive alternative is a flat `books` table where each row has an ISBN. This a
 - No ISBN — ISBN lives exclusively on `book_editions`
 
 **`op.book_editions` contains:**
-- `isbn UNIQUE NOT NULL` — the hard gate (see ADR for ISBN Hard Gate)
+- `isbn UNIQUE NOT NULL` — the hard gate (see `docs/technical-architecture.md` and `docs/user_stories/US-1.1.2-isbn-hard-gate.md`)
 - `book_id` — FK to `books`
 - `format` — `ENUM('hardcover', 'softcover', 'kindle', 'ebook', 'audiobook', 'other')`
 - `is_primary BOOLEAN` — determines which edition's cover and page count are used for shelf rendering
@@ -90,3 +90,12 @@ The naive alternative is a flat `books` table where each row has an ISBN. This a
 
 **Known limitation:**
 - If two editions of the same work have substantially different content (annotated editions, abridged audiobooks) they share the same work record. No variant/edition-type distinction is modelled at the work level. This is acceptable for Phase 1.
+
+---
+
+## Related
+
+- ADR-009 (proto-to-schema codegen) — `Stacks.Books.Book` and `Stacks.Books.BookEdition` schemas in `apps/core/lib/stacks/gen/books/` are generated from `proto/`.
+- ADR-010 (contract-first derived data) — dbt staging models `stg_books` and `stg_book_editions` are proto-generated.
+- Issue #042 (`issues/complete/042-works-editions-migration.md`) — the migration that introduced the split.
+- Issue #046 (`issues/complete/046-update-contexts-works-editions.md`) — context-layer updates to use the new model.

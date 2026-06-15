@@ -1,10 +1,10 @@
-# US-1.5.1 — Search Across Shelves
+# US-1.5.1 — Search Across Bookshelves
 
 ## 1. User Story
 
-> **As a** user, **I want to** search for a book across all my shelves **so that** I can quickly find any book in my collection regardless of which shelf it's on.
+> **As a** user, **I want to** search for a book across all my bookshelves **so that** I can quickly find any book in my collection regardless of which bookshelf it's on.
 
-**What the user wants to accomplish:** Locate a specific book without having to browse each shelf individually.
+**What the user wants to accomplish:** Locate a specific book without having to browse each bookshelf individually.
 
 **How they accomplish it:**
 1. The user clicks the search icon in the top navigation bar (or presses a keyboard shortcut).

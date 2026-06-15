@@ -24,8 +24,10 @@
 N/A -- this story IS the rejection path. There is no happy outcome for a non-book image.
 
 ### Sad Paths
-- **Not a book**: User uploads non-book image -> vision pipeline classifies as `not_book` -> `IdentifyBookJob` calls `mark_rejected(image_id, "not_a_book")` -> poll returns `Resolved` with empty `bookIds` (or `Rejected` with reason) -> Elm sets `result = NotABook` -> rejection UI is shown.
-- **Recovery**: User clicks "Try Again" (`Reset`) to upload a different image.
+- **Not a book**: User uploads non-book image -> vision pipeline classifies as `CLASSIFICATION_RESULT_NOT_BOOK` (or `CLASSIFICATION_RESULT_AMBIGUOUS`) -> `IdentifyBookJob` calls `mark_rejected(image_id, "not_a_book")` -> poll returns `Resolved` with empty `bookIds` (or `Rejected` with reason) -> Elm sets `result = NotABook` -> rejection UI is shown.
+- **Recovery**: User clicks "Try Again" (`Reset`) to upload a different image, or "Enter ISBN Manually" to switch to manual entry.
+
+See ADR-006 (`docs/decisions/006-ambiguous-classification-as-rejection.md`) for why AMBIGUOUS is treated as a permanent rejection rather than auto-retried.
 
 ### Elm State Machine
 - **Page module**: `Page.Upload`
@@ -97,35 +99,35 @@ No handlers are registered for `image.rejected` in `Stacks.Events.Registry`. The
 - **Non-book rejection flow**:
   1. Fetches presigned URL from `Storage.get_image_url/1`
   2. Calls `Moderation.run_pipeline/1`
-  3. Pipeline calls `check_is_book_url(image_url)` which sends `POST /classify` to the vision sidecar
-  4. Vision sidecar responds with `%{"classification" => "not_book"}` (or any value other than `"book"`)
-  5. `check_is_book_url/1` returns `{:error, :not_a_book}`
+  3. Pipeline issues a single `POST /analyze` call via `AIClient.call_vision("analyze", payload)` -- the sidecar's FastAPI `/analyze` route orchestrates classify-then-extract internally.
+  4. Vision sidecar's `classify` step responds with `CLASSIFICATION_RESULT_NOT_BOOK` (or `CLASSIFICATION_RESULT_AMBIGUOUS`); the `/analyze` route short-circuits **inside the sidecar** and returns the classification with `books: []` -- the expensive `extract` call is never invoked.
+  5. `Moderation.analyze/2` matches the catchall `%{"classification" => _}` clause (anything other than `CLASSIFICATION_RESULT_BOOK`) and returns `{:error, :not_a_book}`.
   6. Pipeline short-circuits -- **no extraction or ISBN lookup occurs**
   7. `IdentifyBookJob` matches `{:error, :not_a_book}`, calls `mark_rejected(image_id, "not_a_book")`
   8. Returns `{:cancel, "image does not contain a book"}`
 
 Key design decision: the `{:cancel, ...}` return prevents Oban retries. A non-book image will still be a non-book on the second attempt.
 
-The classification step is deliberately permissive: ambiguous images (where `classification` is anything other than explicitly `"book"`) are treated as not-a-book. However, the vision sidecar itself is tuned to return `"book"` for ambiguous cases, so the Elixir side's strict matching is a safety net, not the primary filter.
+The Elixir-side catchall flattens both `CLASSIFICATION_RESULT_NOT_BOOK` and `CLASSIFICATION_RESULT_AMBIGUOUS` to `{:error, :not_a_book}` -- per ADR-006 (ambiguous-classification-as-rejection), AMBIGUOUS is treated as a permanent rejection from the user's perspective. The VLM prompt in `apps/vision/modal_app.py` includes explicit `not_book` examples (pets, food, landscapes, screenshots without book references) to make confident NOT_BOOK calls the common case; AMBIGUOUS covers blurry/partial spines where re-upload is the natural recovery.
 
 ---
 
 ## 8. External Service Calls
 
-### Vision Sidecar -- Classification
-- **Service**: Modal vision sidecar (Qwen2.5-VL-7B-Instruct)
-- **Endpoint**: `POST /classify`
-- **Client module**: `Stacks.AI.Client` via `call_vision("is_book", payload)`
-- **Endpoint mapping**: `endpoint_path("is_book")` returns `"classify"`
+### Vision Sidecar -- Analyze (classify + extract)
+- **Service**: Modal vision sidecar (Qwen2.5-VL-7B-Instruct on A10G + bf16 -- see ADR-015 `docs/decisions/015-vision-service-architecture.md` for the rolled-back vLLM/H100/AWQ stack and the current baseline)
+- **Endpoint**: `POST /analyze` (FastAPI route in `apps/vision/app/main.py` that orchestrates `classify` then conditionally `extract`)
+- **Client module**: `Stacks.AI.Client` via `call_vision("analyze", payload)`
+- **Endpoint mapping**: `endpoint_path("analyze")` returns `"analyze"`
 - **Auth**: HMAC (`X-Internal-Token` header)
-- **Circuit breaker**: `:vision_service` fuse; melts on non-200 responses
+- **Circuit breaker**: `:vision_fuse`; melts on non-200 responses
 - **Budget check**: `BudgetTracker.check_budget(:modal)` called before request
 - **Timeout**: 210 seconds receive timeout
-- **Request payload**: `%{image_url: presigned_url}` (new path) or `%{image: base64_data}` (legacy path)
-- **Response**: `%{"classification" => "not_book", "confidence" => float, "model_used" => str}`
+- **Request payload**: `%{image_url: presigned_url}` (new path) or `%{image: base64_data}` (legacy path), plus an optional `excluded_books` exclusion list for rejection retries
+- **Response (non-book)**: `%{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK" | "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => float, "books" => [], "model_used" => str}`
 - **Mock in test**: `Stacks.AI.MockClient`
 
-No extraction (`POST /extract`) or ISBN resolution calls are made when classification fails.
+When the sidecar's internal `classify` step returns NOT_BOOK or AMBIGUOUS, the `/analyze` route short-circuits and the `extract` step is **never invoked** -- no ISBN resolution calls (Open Library / Google Books) are made downstream either.
 
 ---
 
@@ -175,6 +177,7 @@ Same as US-1.1.1.
   - `h2`: "That Doesn't Look Like a Book"
   - `p`: "We couldn't detect a book in that image. Please try a photo of a book cover."
   - Primary button: "Try Again" (`onClick Reset`)
+  - Secondary button: "Enter ISBN Manually" (`onClick EnterManualMode`) -- routes into the US-1.1.5 manual-entry flow
 - **CSS classes**: `upload-result`, `upload-result--not-book`
 - **ARIA attributes**: Inherits `aria-live="polite"` from parent `div.upload-status-region`
 
@@ -206,12 +209,12 @@ Note: Non-book rejection jobs should be significantly shorter than successful id
 ### Circuit Breaker Metrics
 
 - **Metric name**: `vision_fuse_melt_count`
-- **Source**: Not yet instrumented. `:fuse.melt(:vision_service)` is called on non-200 responses from the vision sidecar. A classification that returns `"not_book"` is a successful 200 response and does NOT trigger a fuse melt.
+- **Source**: Not yet instrumented. `:fuse.melt(:vision_fuse)` is called on non-200 responses from the vision sidecar. A 200 response carrying `CLASSIFICATION_RESULT_NOT_BOOK` or `CLASSIFICATION_RESULT_AMBIGUOUS` does NOT trigger a fuse melt -- those are successful pipeline outcomes.
 - **Type**: counter
-- **Labels/dimensions**: fuse_name (`:vision_service`)
+- **Labels/dimensions**: fuse_name (`:vision_fuse`)
 
 - **Metric name**: `vision_fuse_state`
-- **Source**: `:fuse.ask(:vision_service, :sync)` polled periodically. Not yet instrumented as Telemetry.
+- **Source**: `:fuse.ask(:vision_fuse, :sync)` polled periodically. Not yet instrumented as Telemetry.
 - **Type**: gauge
 - **Labels/dimensions**: fuse_name
 
@@ -284,14 +287,14 @@ Note: Non-book rejection jobs should be significantly shorter than successful id
 ## 15. Cost Tracking
 
 ### Vision Classification (Modal GPU)
-- **Service**: Modal (A10G GPU, Qwen2.5-VL-7B-Instruct)
-- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("is_book", ...)` — classification runs and returns `"not_book"`
+- **Service**: Modal (A10G GPU, Qwen2.5-VL-7B-Instruct, bf16)
+- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("analyze", ...)` — the sidecar's `/analyze` route runs `classify` and returns `CLASSIFICATION_RESULT_NOT_BOOK` or `CLASSIFICATION_RESULT_AMBIGUOUS`
 - **Unit cost**: ~R0.25-R1.25 per classification (~$0.03-$0.14/min GPU time). Non-book rejections use only the classification step (shorter than full identification), estimated 15-30s.
 - **Volume estimate**: 1 call per upload. This cost is incurred even though the image is rejected.
 - **Tracked by**: `Stacks.AI.BudgetTracker` (`:modal` provider), `op.platform_costs` table, `mart_cost_tracking` dbt mart
 
 ### No Extraction Cost
-- The pipeline short-circuits after classification — `POST /extract` is NOT called for non-book images. This saves the extraction GPU time (~3-8s).
+- The sidecar's `/analyze` route short-circuits internally after classification — the `extract` step is NOT invoked for non-book or ambiguous images. This saves the extraction GPU time (~3-8s).
 
 ### No ISBN Resolution Cost
 - Open Library and Google Books APIs are NOT called. No ISBN-related external calls occur.

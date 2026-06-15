@@ -4,94 +4,109 @@
 Develop and maintain the Rust bookshop price scraper microservice: TOML-driven per-store configurations, HTTP scraping, price extraction, and the HTTP interface consumed by the Phoenix core.
 
 ## Technology Stack
-- **Language:** Rust (latest stable)
-- **HTTP server:** axum (for the microservice API)
-- **HTTP client:** reqwest (for scraping)
-- **HTML parsing:** scraper (CSS selector-based)
-- **Config:** TOML files per store per country
+- **Language:** Rust edition 2024 (rust-version 1.85+)
+- **HTTP server:** axum 0.8 (for the microservice API)
+- **HTTP client:** reqwest 0.12 (for scraping, rustls-tls)
+- **HTML parsing:** scraper 0.26 (CSS selector-based)
+- **Config:** TOML files per store per country (parsed via `toml` + `serde`)
+- **Auth:** HMAC-SHA256 (`hmac`, `sha2`, `hex`) between core and scraper
+- **Concurrency primitives:** `tokio`, `dashmap` (in-memory store registry / rate limiter state)
+- **Schema contracts:** Protobuf-generated request/response types in `src/proto/generated/`
 - **Error handling:** thiserror (library errors), anyhow (application errors)
-- **Testing:** cargo test, proptest (property-based), cargo-fuzz (fuzzing)
+- **Testing:** cargo test, `tower` (`ServiceExt`) for axum integration tests, `tempfile`
 - **Linting:** cargo fmt, cargo clippy
 
 ## Owned Domains
 
-### Microservice Endpoints (in `apps/scraper/src/`)
-- `POST /scrape` — Accepts a book ISBN + store ID, returns price data
-- `POST /scrape/batch` — Accepts multiple ISBN + store pairs
-- `GET /stores` — Returns available store configurations
-- `GET /health` — Health check
+### Microservice Endpoints (in `apps/scraper/src/main.rs`)
+- `GET /health` — Health check (no auth)
+- `POST /scrape` — Accepts `{ isbn, store }`, returns `ScrapeResponse` (HMAC auth required)
+- `POST /config/reload` — Reloads all TOML configs from the scrapers directory (HMAC auth required)
 
-### TOML Configurations (in `scrapers/`)
+Request/response shapes are defined in `proto/scraper.proto` and code-generated into `src/proto/generated/`. All authed routes require an `X-Internal-Token` header verified by `hmac_auth_middleware` against `SCRAPER_HMAC_SECRET`.
+
+### TOML Configurations (in `apps/scraper/scrapers/`)
 ```
 scrapers/
-├── za/
-│   ├── exclusive_books.toml
-│   ├── takealot.toml
-│   ├── loot.toml
-│   └── ...
-├── uk/
-│   └── ...
-└── schema.toml              # TOML schema documentation
+└── za/
+    ├── exclusive_books.toml
+    └── takealot.toml
 ```
 
-Each store config:
+Each store config matches the `ScraperConfig` struct in `src/config.rs`:
 ```toml
-[store]
+[source]
 name = "Exclusive Books"
-base_url = "https://www.exclusivebooks.co.za"
+type = "bookshop"
 country = "ZA"
+url = "https://www.exclusivebooks.co.za"
+has_physical_location = true
 currency = "ZAR"
-has_physical = true
 
 [search]
-url_template = "{base_url}/search?q={isbn}"
 method = "GET"
+path = "/search"
+query_param = "q"
+query_template = "{isbn}"
 
 [selectors]
-price = ".product-price .current-price"
-in_stock = ".availability-status"
-title = ".product-title h1"
-product_url = "link[rel=canonical]"
+price = ".product-price, .price"
+title = ".product-name, .product-title"
+in_stock = ".availability, .stock-status"
+currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 10
+retry_after_seconds = 60
 respect_robots_txt = true
 ```
 
-### Modules
-- `src/main.rs` — axum server, routes
-- `src/config.rs` — TOML parsing and validation
-- `src/scraper.rs` — Core scraping logic (HTTP + selector extraction)
-- `src/store.rs` — Store registry, configuration loading
-- `src/price.rs` — Price parsing (currency-aware, handles "R 149.99", "R149", etc.)
-- `src/error.rs` — Error types (thiserror)
-- `src/rate_limiter.rs` — Per-store rate limiting
+### Modules (`apps/scraper/src/`)
+- `main.rs` — axum server, routes, HMAC auth middleware
+- `lib.rs` — public module exports
+- `auth.rs` — HMAC-SHA256 token generation and verification
+- `config.rs` — TOML parsing into `ScraperConfig`
+- `scraper.rs` — `Engine`: HTTP fetch + CSS selector extraction
+- `stores/mod.rs` — `StoreRegistry` (dashmap-backed), directory loader
+- `price.rs` — Currency-aware price parsing (handles "R 149.99", "R149", etc.)
+- `robots.rs` — robots.txt fetch + parse + cache
+- `rate_limiter.rs` — Per-store rate limiting
+- `error.rs` — Error types (thiserror)
+- `proto/` — Generated Protobuf types (do not hand-edit `proto/generated/`)
 
 ## Key Patterns
 
 ### robots.txt compliance
-Always check robots.txt before scraping. Cache the result. If disallowed, skip the store and log.
+Always check robots.txt before scraping (`src/robots.rs`). Cache the result. If disallowed, skip the store and log.
 
 ### Rate limiting as courtesy
-Per-store rate limits defined in TOML. Never exceed. Default: 10 req/min.
+Per-store rate limits defined in TOML (`[rate_limit]`). Never exceed. Default: 10 req/min.
 
 ### User-agent honesty
 Identify as The Stacks scraper with a contact URL. No spoofing.
 
-### Price parsing resilience
-Prices come in many formats. Property-based tests (proptest) ensure the parser handles them all.
+### HMAC auth on every internal call
+All non-health requests from the Phoenix core must include `X-Internal-Token` signed over `METHOD + path` using `SCRAPER_HMAC_SECRET`. The scraper rejects with 401 on missing, malformed, or mis-signed tokens.
+
+### Schema-first request/response
+`ScrapeRequest`, `ScrapeResponse`, and `ConfigReloadResponse` come from `proto/scraper.proto` (see ADR-007, ADR-014). Do not hand-edit generated types in `src/proto/generated/`.
 
 ## Context Loading Requirements
 ```
 ./docs/agents/standards/code-quality.md
 ./docs/agents/standards/testing.md
+./docs/agents/standards/security.md
+./docs/agents/reviewers/rust-reviewer.md
 ./docs/technical-architecture.md (sections 11, 20)
+./docs/decisions/007-protobuf-as-contract.md
+./docs/decisions/011-broadway-for-price-enrichment.md
 ```
 
 ## Integration Handoffs
-- **elixir-agent:** HTTP interface contract. Phoenix calls the scraper via Oban workers (TriggerPriceScrapeJob).
-- **platform-agent:** Dockerfile, Fly Machine config.
+- **elixir-agent:** HTTP interface contract. Phoenix calls the scraper via Broadway-coordinated workers (see ADR-011); HMAC token is generated core-side and verified scraper-side.
+- **platform-agent:** Dockerfile, Fly Machine config; `SCRAPER_HMAC_SECRET` and `SCRAPER_PORT` are required env vars.
 - **database-agent:** Price data format must match `price_snapshots` table schema.
+- **protobuf-agent:** Owns `proto/scraper.proto`; coordinate schema changes through `mix proto.sync`.
 
 ## Pre-approved Commands
 ```bash
@@ -99,8 +114,6 @@ cd apps/scraper && cargo build
 cd apps/scraper && cargo test
 cd apps/scraper && cargo fmt -- --check
 cd apps/scraper && cargo clippy -- -D warnings
-cd apps/scraper && cargo audit
-cd apps/scraper && cargo fuzz run [target]
 ```
 
 ---

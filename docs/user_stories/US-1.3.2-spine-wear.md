@@ -22,6 +22,8 @@ This is automatic -- wear state is determined by the book's shelf and reading hi
 - Wear is visually distinct between Pristine and Softened states.
 - ARIA labels include wear state information.
 
+**Related:** US-1.3.1 (spine thickness, the other physical-rendering dimension); ADR-008 (`docs/decisions/008-community-wear-state.md`) governs the eventual community-driven wear semantics for Looking-for-a-Home.
+
 ---
 
 ## 2. UI Interaction Flow
@@ -88,7 +90,13 @@ N/A -- wear level changes as a side effect of `placement.moved` events, but the 
 
 ## 7. Background Jobs (Oban)
 
-N/A
+### `Stacks.Workers.RecalculateWearJob`
+- **Queue**: `:default`, `max_attempts: 3`
+- **Args**: `%{"placement_id" => placement_id}`
+- **Behaviour**: Calls `Shelving.spine_data/1` to recalculate `wear_level` from `PlacementHistory` move count. Logs the new wear level. Returns `{:cancel, "placement not found"}` if the placement is gone.
+- **Trigger**: Currently invoked manually / via tests. Future: would be enqueued from `placement.moved` event handlers to keep server-side wear cached.
+
+Note: The frontend does not yet consume the server-side wear level (see Section 3). The job logs but does not persist a derived wear value.
 
 ---
 
@@ -172,6 +180,9 @@ This server-side model is richer than the current frontend model and could be us
 
 ### Texture system
 The wear level does not currently modify the texture rendering. Both `Pristine` and `Softened` render identically in terms of colours and textures. The visual differentiation described in the user story (rounded corners, muted colours, creases) would be implemented via CSS classes keyed on wear level -- this is a future enhancement.
+
+### Looking-for-a-Home community wear (ADR-008, aspirational)
+Per `docs/decisions/008-community-wear-state.md`, the Looking-for-a-Home bookshelf is intended to display **community-driven wear** derived from `wh.mart_community_read_count` rather than per-owner reading history. The full five-level palette (`Pristine | Softened | Cracking | WellRead | WellLoved`) and the reader-count thresholds (5 / 20 / 100 / 500) live in that ADR. `Stacks.Books.community_read_count/1` exposes the mart query, but the Elm `WearLevel` type still only encodes `Pristine | Softened`, so the community-wear rendering remains aspirational.
 
 ### Update cycle
 N/A -- pure rendering.
