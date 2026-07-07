@@ -21,6 +21,10 @@ defmodule Stacks.Telemetry.Reporter do
       the only place L2 write failures surface (the caller already
       received `:ok`), so every terminal outcome must produce a line.
 
+    * `[:stacks, :books, :title_search_cache, :invalidated]`
+      Log shape: `cache_invalidated cache=<name> isbn=<isbn> count=<n> l1=<n> l2=<n>`
+      Emitted when a user rejection invalidates title-search memos by ISBN.
+
   Attach once at boot (`Core.Application.start/2`). The handler IDs are
   unique per event so `:telemetry.detach/1` can remove individual hooks
   if needed.
@@ -36,6 +40,9 @@ defmodule Stacks.Telemetry.Reporter do
   @cache_put_events [
     [:stacks, :books, :isbn_resolver_cache, :put],
     [:stacks, :books, :title_search_cache, :put]
+  ]
+  @cache_invalidated_events [
+    [:stacks, :books, :title_search_cache, :invalidated]
   ]
 
   @doc """
@@ -53,6 +60,13 @@ defmodule Stacks.Telemetry.Reporter do
     )
 
     attach_many("stacks-cache-put", @cache_put_events, &__MODULE__.handle_cache_put/4)
+
+    attach_many(
+      "stacks-cache-invalidated",
+      @cache_invalidated_events,
+      &__MODULE__.handle_cache_invalidated/4
+    )
+
     :ok
   end
 
@@ -85,6 +99,14 @@ defmodule Stacks.Telemetry.Reporter do
   @doc false
   def handle_cache_put([_, _, cache, :put], _measurements, metadata, _config) do
     Logger.info("cache_put cache=#{cache} tier=#{metadata[:tier]} outcome=#{metadata[:outcome]}")
+  end
+
+  @doc false
+  def handle_cache_invalidated([_, _, cache, :invalidated], measurements, metadata, _config) do
+    Logger.info(
+      "cache_invalidated cache=#{cache} isbn=#{metadata[:isbn]} " <>
+        "count=#{measurements[:count]} l1=#{metadata[:l1_count]} l2=#{metadata[:l2_count]}"
+    )
   end
 
   defp native_to_ms(nil), do: nil

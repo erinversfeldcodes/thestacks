@@ -135,6 +135,53 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
+  Invalidate every cache entry whose positive result resolved to `isbn`.
+
+  Called when a user rejects an identification: the
+  `(title, author, raw_text) → ISBN` memo that produced the wrong pick
+  must not survive its 24 h TTL and poison the first round of the next
+  upload of the same image (retry rounds carry `excluded_isbns` and
+  bypass the cache; round one does not).
+
+  Matching is exact ISBN equality after normalisation — hyphens and
+  whitespace stripped, upcased (ISBN-10 check digit `x`) — on BOTH the
+  argument and the stored ISBN. No ISBN-10 ↔ ISBN-13 conversion happens
+  here; cross-edition invalidation is the caller's job (pass every
+  edition ISBN of the rejected book).
+
+  Tier mechanics:
+
+    * **L1 (ETS)** — scan-and-delete: only entries whose stored value is
+      `{:ok, matching_isbn, _}` are removed, so the rest of the warm
+      cache survives. Per-node only; other Fly machines' L1 entries
+      converge when they expire (≤24 h), and cannot be repopulated from
+      L2 because the authoritative row is deleted below.
+    * **L2 (Postgres)** — a single `DELETE` on `outcome = 'found'` rows
+      whose `isbn` column matches after in-SQL normalisation
+      (`regexp_replace` + `upper`). Sequential scan is fine at this
+      table's scale (bounded by distinct title-search inputs per 24 h).
+
+  Emits `[:stacks, :books, :title_search_cache, :invalidated]` with
+  measurements `%{count: n}` (total entries removed across both tiers)
+  and metadata `%{isbn: normalised_isbn, l1_count: _, l2_count: _}`.
+  """
+  @spec invalidate_by_isbn(String.t()) :: :ok
+  def invalidate_by_isbn(isbn) when is_binary(isbn) do
+    case normalise_isbn(isbn) do
+      "" ->
+        :ok
+
+      normalised ->
+        l1_count = ets_delete_by_isbn(normalised)
+        l2_count = db_delete_by_isbn(normalised)
+        emit_invalidated(normalised, l1_count, l2_count)
+        :ok
+    end
+  end
+
+  def invalidate_by_isbn(_isbn), do: :ok
+
+  @doc """
   Await all in-flight async L2 write tasks from the shared
   `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
   DB-level effects after a `put/4` must call this first, or the async
@@ -197,6 +244,29 @@ defmodule Stacks.Books.TitleSearchCache do
     :ok
   rescue
     ArgumentError -> :ok
+  end
+
+  # Scan-and-delete L1 entries whose positive result matches the
+  # (already normalised) ISBN. Full table scan is acceptable: the table
+  # is bounded by distinct title-search inputs within the TTL window,
+  # and invalidation only runs on user-initiated rejections.
+  defp ets_delete_by_isbn(normalised_isbn) do
+    @table
+    |> :ets.tab2list()
+    |> Enum.count(fn
+      {key, {:ok, stored_isbn, _metadata}, _expires_at} ->
+        if normalise_isbn(stored_isbn) == normalised_isbn do
+          :ets.delete(@table, key)
+          true
+        else
+          false
+        end
+
+      _entry ->
+        false
+    end)
+  rescue
+    ArgumentError -> 0
   end
 
   # ---------------------------------------------------------------------------
@@ -297,6 +367,37 @@ defmodule Stacks.Books.TitleSearchCache do
       :ok
   end
 
+  # Delete L2 rows whose stored ISBN matches after in-SQL normalisation
+  # (strip hyphens/whitespace, upcase). `outcome = 'found'` rows are the
+  # only ones carrying an ISBN; negative rows store "".
+  defp db_delete_by_isbn(normalised_isbn) do
+    if persistent_enabled?() do
+      {count, _} =
+        Repo.delete_all(
+          from(e in TitleSearchCacheEntry,
+            where: e.outcome == "found",
+            where:
+              fragment(
+                "upper(regexp_replace(?, '[\\s-]', '', 'g')) = ?",
+                e.isbn,
+                ^normalised_isbn
+              )
+          )
+        )
+
+      count
+    else
+      0
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "TitleSearchCache L2 delete_by_isbn failed for #{normalised_isbn}: #{inspect(error)}"
+      )
+
+      0
+  end
+
   # ---------------------------------------------------------------------------
   # Key / normalisation
   # ---------------------------------------------------------------------------
@@ -324,6 +425,15 @@ defmodule Stacks.Books.TitleSearchCache do
     str
     |> String.trim()
     |> String.downcase()
+  end
+
+  # ISBN normalisation for invalidation matching: strip hyphens and
+  # whitespace, upcase (ISBN-10 check digit `x`). Mirrors the in-SQL
+  # normalisation in `db_delete_by_isbn/1`.
+  defp normalise_isbn(isbn) when is_binary(isbn) do
+    isbn
+    |> String.replace(~r/[\s-]/, "")
+    |> String.upcase()
   end
 
   # ---------------------------------------------------------------------------
@@ -403,6 +513,14 @@ defmodule Stacks.Books.TitleSearchCache do
       [:stacks, :books, :title_search_cache, :put],
       %{count: 1},
       %{tier: :l2, outcome: outcome, cache_key: cache_key}
+    )
+  end
+
+  defp emit_invalidated(isbn, l1_count, l2_count) do
+    :telemetry.execute(
+      [:stacks, :books, :title_search_cache, :invalidated],
+      %{count: l1_count + l2_count},
+      %{isbn: isbn, l1_count: l1_count, l2_count: l2_count}
     )
   end
 

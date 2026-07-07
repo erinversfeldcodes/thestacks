@@ -10,6 +10,7 @@ defmodule StacksWeb.UploadController do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
+  alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
   alias Stacks.Shelving
   alias Stacks.Workers.IdentifyBookJob
@@ -183,6 +184,11 @@ defmodule StacksWeb.UploadController do
     3. Removes any active placement the user holds for the rejected
        book(s) so the retry can place a fresh one. Soft-delete via
        `Stacks.Shelving.remove_book/2`. Missing placements are a no-op.
+    3b. Invalidates `Stacks.Books.TitleSearchCache` entries for EVERY
+       edition ISBN of each rejected book — the memoised title-search
+       result that produced the wrong pick would otherwise keep winning
+       round 1 of any fresh upload of the same image for up to 24 h.
+       Best-effort: a failure here logs a warning but never fails the 202.
     4. Enqueues a fresh `IdentifyBookJob` with both `excluded_books`
        (strings, steer the VLM) and `excluded_isbns` (strings, steer the
        resolver away from previously-returned matches at the title-search
@@ -202,6 +208,7 @@ defmodule StacksWeb.UploadController do
          excluded when excluded != [] <- resolve_excluded_books(rejected_ids) do
       excluded_isbns = resolve_excluded_isbns(rejected_ids)
       remove_placements_for_books(user.id, rejected_ids)
+      invalidate_title_search_cache(rejected_ids)
       {:ok, _job} = enqueue_retry(user.id, image, excluded, excluded_isbns)
 
       conn
@@ -294,6 +301,46 @@ defmodule StacksWeb.UploadController do
   end
 
   defp describe_book(_), do: nil
+
+  # Kill the poisoned title-search memo(s) for the rejected book(s).
+  # Uses ALL edition ISBNs (not just the primary) so an entry cached
+  # against any edition of the rejected work is invalidated too.
+  # Best-effort by design: cache invalidation failing must not fail the
+  # user-facing 202 — the retry job carries excluded_isbns and bypasses
+  # the cache regardless; this protects the FIRST round of future uploads.
+  defp invalidate_title_search_cache(book_ids) when is_list(book_ids) do
+    book_ids
+    |> Enum.uniq()
+    |> Enum.flat_map(&book_edition_isbns/1)
+    |> Enum.uniq()
+    |> Enum.each(&TitleSearchCache.invalidate_by_isbn/1)
+  rescue
+    error ->
+      Logger.warning(
+        "reject_identification: TitleSearchCache invalidation failed: #{inspect(error)}"
+      )
+
+      :ok
+  end
+
+  defp invalidate_title_search_cache(_), do: :ok
+
+  defp book_edition_isbns(book_id) when is_binary(book_id) do
+    case Ecto.UUID.cast(book_id) do
+      {:ok, uuid} -> extract_edition_isbns(Books.get_book_detail(uuid))
+      :error -> []
+    end
+  end
+
+  defp book_edition_isbns(_), do: []
+
+  defp extract_edition_isbns(%{editions: editions}) when is_list(editions) do
+    editions
+    |> Enum.map(& &1.isbn)
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
+
+  defp extract_edition_isbns(_), do: []
 
   defp remove_placements_for_books(user_id, book_ids) do
     Enum.each(book_ids, fn book_id ->

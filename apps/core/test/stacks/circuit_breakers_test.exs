@@ -361,7 +361,8 @@ defmodule Stacks.CircuitBreakersTest do
     end
 
     test "search_by_title failures also contribute to :open_library_fuse melt count" do
-      # Pre-blow :google_books_fuse so try_candidate stops at OL without touching GB.
+      # Pre-blow :google_books_fuse so the sequential GB fallback
+      # short-circuits at the fuse without an HTTP call.
       :fuse.melt(:google_books_fuse)
       :fuse.melt(:google_books_fuse)
       :fuse.melt(:google_books_fuse)
@@ -498,7 +499,61 @@ defmodule Stacks.CircuitBreakersTest do
   end
 
   # ---------------------------------------------------------------------------
-  # 8. Probe-based recovery
+  # 8. Probe URL construction — probe auth must match production auth
+  # ---------------------------------------------------------------------------
+
+  describe "probe URL construction" do
+    # Regression: probe_google_books/0 used to hit the GB API without the
+    # API key. Keyless GB requests ALWAYS fail (Google's anonymous pool
+    # returns 429, quota_limit_value: "0"), so probe-based recovery was
+    # structurally impossible — once blown, :google_books_fuse stayed
+    # blown until the 5-min backstop and then re-blew under the next
+    # burst. The probe must build its URL through the same helper the
+    # resolver uses (ISBNResolver.google_books_url/1) so probe auth
+    # always matches production auth.
+    setup do
+      original_key = Application.get_env(:core, :google_books_api_key)
+
+      on_exit(fn ->
+        if original_key do
+          Application.put_env(:core, :google_books_api_key, original_key)
+        else
+          Application.delete_env(:core, :google_books_api_key)
+        end
+      end)
+
+      :ok
+    end
+
+    test "google_books_probe_url/0 includes the configured API key" do
+      Application.put_env(:core, :google_books_api_key, "probe-test-key")
+
+      url = CircuitBreakers.google_books_probe_url()
+
+      assert url =~ "https://www.googleapis.com/books/v1/volumes?"
+      assert url =~ "q=frankenstein"
+      assert url =~ "&key=probe-test-key"
+    end
+
+    test "google_books_probe_url/0 omits &key= when no key is configured" do
+      Application.delete_env(:core, :google_books_api_key)
+
+      url = CircuitBreakers.google_books_probe_url()
+
+      assert url =~ "q=frankenstein"
+      refute url =~ "key="
+    end
+
+    test "probe URL is built by the same helper production requests use" do
+      Application.put_env(:core, :google_books_api_key, "probe-test-key")
+
+      assert CircuitBreakers.google_books_probe_url() ==
+               ISBNResolver.google_books_url("q=frankenstein&maxResults=1")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # 9. Probe-based recovery
   # ---------------------------------------------------------------------------
 
   describe "probe-based recovery" do

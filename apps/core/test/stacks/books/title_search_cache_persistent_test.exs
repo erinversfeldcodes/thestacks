@@ -135,4 +135,60 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
       assert Repo.all(TitleSearchCacheEntry) == []
     end
   end
+
+  describe "invalidate_by_isbn/1 L2" do
+    test "deletes matching L2 rows (normalised both sides) and leaves the rest" do
+      :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "978-1-4299-6450-0", %{}})
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
+      TitleSearchCache.await_pending_writes()
+
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+
+      # Poisoned row is gone from Postgres; unrelated row survives.
+      assert [row] = Repo.all(TitleSearchCacheEntry)
+      assert row.isbn == "9780441172719"
+
+      # Both tiers now miss — even after the ETS entry is wiped, L2
+      # fallthrough cannot resurrect the invalidated result.
+      :ets.delete_all_objects(:title_search_cache)
+      assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
+      assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+
+    test "does not delete negative (not_found) rows" do
+      :ok = TitleSearchCache.put("Fake", "Fake", nil, {:error, :not_found})
+      TitleSearchCache.await_pending_writes()
+
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+
+      assert [row] = Repo.all(TitleSearchCacheEntry)
+      assert row.outcome == "not_found"
+    end
+
+    test "telemetry count reflects entries removed across both tiers" do
+      ref = make_ref()
+      test_pid = self()
+
+      :telemetry.attach(
+        "invalidated-l2-test-#{inspect(ref)}",
+        [:stacks, :books, :title_search_cache, :invalidated],
+        fn _event, measurements, metadata, _config ->
+          send(test_pid, {:invalidated, ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("invalidated-l2-test-#{inspect(ref)}") end)
+
+      :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "9781429964500", %{}})
+      TitleSearchCache.await_pending_writes()
+
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+
+      # One ETS entry + one Postgres row.
+      assert_receive {:invalidated, ^ref, %{count: 2}, metadata}
+      assert metadata.l1_count == 1
+      assert metadata.l2_count == 1
+    end
+  end
 end

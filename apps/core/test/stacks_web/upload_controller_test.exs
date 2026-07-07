@@ -7,6 +7,7 @@ defmodule StacksWeb.UploadControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
   alias Stacks.Storage.Mock, as: StorageMock
   alias Stacks.Workers.IdentifyBookJob
@@ -490,6 +491,45 @@ defmodule StacksWeb.UploadControllerTest do
           "excluded_isbns" => ["9780743273565"]
         }
       )
+    end
+
+    test "invalidates poisoned TitleSearchCache entries for ALL edition ISBNs of the rejected book",
+         %{conn: conn, user: user} do
+      TitleSearchCache.invalidate_all()
+
+      author = insert(:author, name: "Orson Scott Card")
+      book = insert(:book, title: "Crystal City", author: author)
+      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+      insert(:book_edition, book: book, isbn: "9780765341297", is_primary: false)
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      # Poisoned round-1 memos: a junk title-search result that resolved
+      # to the rejected book's primary edition, plus one cached against a
+      # secondary edition ISBN.
+      :ok =
+        TitleSearchCache.put(
+          "The Tramp's Crystal City",
+          nil,
+          nil,
+          {:ok, "9781429964500", %{title: "Crystal City"}}
+        )
+
+      :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "9780765341297", %{}})
+
+      # Unrelated warm entry must survive the rejection.
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"status" => "pending"} = json_response(conn, 202)
+
+      assert :miss = TitleSearchCache.get("The Tramp's Crystal City", nil, nil)
+      assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
+      assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
   end
 end

@@ -16,9 +16,22 @@
 #   - Open Library  → hard required. Any miss FAILS the script.
 #   - Google Books  → advisory only. Misses are WARN but do not fail.
 #
+# Two layers of checks:
+#   1. Endpoint health — the exact endpoints ISBNResolver.search_by_title/4
+#      hits (OL /search.json, GB /volumes). Catches whole-upstream outages
+#      and, for Google Books, quota exhaustion: GB returns 429/403 with
+#      quota_limit_value: "0" when the daily quota is dead (observed on
+#      this branch), which silently degrades the resolver to OL-only.
+#      GB being down/quota-dead is a WARN — it is the fallback source and
+#      E2E can pass without it — but the operator should know the run's
+#      resolution quality is degraded.
+#   2. ISBN resolution — the specific ISBNs the E2E upload suite depends on.
+#
 # Exit codes:
-#   0  every ISBN resolved a title from Open Library
-#   1  one or more ISBNs failed to resolve from Open Library
+#   0  Open Library healthy (search endpoint up + every ISBN resolved);
+#      Google Books issues are WARN-only
+#   1  Open Library search endpoint down or one or more ISBNs failed to
+#      resolve from Open Library
 #
 set -euo pipefail
 
@@ -47,6 +60,87 @@ ISBNS=(
 
 OL_FAILED=()
 GB_WARN=()
+
+# ── Layer 1: endpoint health ─────────────────────────────────────────────────
+# Query terms are arbitrary well-known books — these checks assert the
+# ENDPOINTS answer sanely, not that a specific record exists.
+
+# curl helper: prints the response body followed by a final line holding
+# the HTTP status code. "000" on transport-level failure.
+fetch_with_code() {
+  local url="$1"
+  curl -sS -w '\n%{http_code}' --max-time 10 "${url}" 2>/dev/null || printf '\n000'
+}
+
+check_open_library_search_endpoint() {
+  local url="https://openlibrary.org/search.json?title=the+great+gatsby&fields=key,title,isbn&limit=1"
+  local response body http_code doc_count
+  response="$(fetch_with_code "${url}")"
+  http_code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+
+  if [[ "${http_code}" != "200" ]]; then
+    echo "FAIL preflight: Open Library search endpoint returned HTTP ${http_code} (expected 200)"
+    echo "  Rerun manually: curl -sS \"${url}\""
+    OL_FAILED+=("search-endpoint")
+    return 1
+  fi
+
+  doc_count=$(printf '%s' "${body}" | jq -r '.docs | length' 2>/dev/null || echo 0)
+  if [[ "${doc_count}" -lt 1 ]]; then
+    echo "FAIL preflight: Open Library search endpoint returned 200 but no docs — search index degraded"
+    echo "  Rerun manually: curl -sS \"${url}\""
+    OL_FAILED+=("search-endpoint")
+    return 1
+  fi
+
+  echo "PASS Open Library  search endpoint  ->  HTTP 200, ${doc_count} doc(s)"
+  return 0
+}
+
+check_google_books_volumes_endpoint() {
+  local url="https://www.googleapis.com/books/v1/volumes?q=intitle:gatsby&maxResults=1"
+  local response body http_code item_count reason
+  response="$(fetch_with_code "${url}")"
+  http_code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+
+  case "${http_code}" in
+    200)
+      item_count=$(printf '%s' "${body}" | jq -r '.items | length' 2>/dev/null || echo 0)
+      if [[ "${item_count}" -lt 1 ]]; then
+        echo "WARN preflight: Google Books volumes endpoint returned 200 but no items (advisory only)"
+        GB_WARN+=("volumes-endpoint")
+      else
+        echo "PASS Google Books  volumes endpoint  ->  HTTP 200, ${item_count} item(s)"
+      fi
+      ;;
+    429|403)
+      # GB signals quota exhaustion as 429 (rateLimitExceeded) or 403
+      # (quotaExceeded/dailyLimitExceeded). Say so explicitly — this is
+      # the "quota-dead 503s" failure mode that poisons E2E tuning runs.
+      reason=$(printf '%s' "${body}" | jq -r '.error.errors[0].reason // .error.status // "unknown"' 2>/dev/null || echo "unknown")
+      echo "WARN preflight: Google Books QUOTA EXHAUSTED — HTTP ${http_code} (reason: ${reason})."
+      echo "  The resolver will run OL-only this cycle: GB fallback + subtitle evidence unavailable."
+      echo "  Advisory only — E2E can pass without GB, but resolution quality is degraded."
+      GB_WARN+=("quota-exhausted")
+      ;;
+    *)
+      echo "WARN preflight: Google Books volumes endpoint returned HTTP ${http_code} (advisory only)"
+      echo "  Rerun manually: curl -sS \"${url}\""
+      GB_WARN+=("volumes-endpoint")
+      ;;
+  esac
+  return 0
+}
+
+echo "Preflight: endpoint health (OL search required, GB volumes advisory)..."
+echo
+check_open_library_search_endpoint || true
+check_google_books_volumes_endpoint
+echo
+
+# ── Layer 2: per-ISBN resolution ─────────────────────────────────────────────
 
 check_open_library() {
   local isbn="$1"
@@ -106,17 +200,17 @@ done
 
 echo
 if (( ${#OL_FAILED[@]} > 0 )); then
-  echo "Summary: FAIL — ${#OL_FAILED[@]}/${#ISBNS[@]} ISBN(s) did not resolve via Open Library: ${OL_FAILED[*]}"
+  echo "Summary: FAIL — ${#OL_FAILED[@]} Open Library check(s) failed: ${OL_FAILED[*]}"
   if (( ${#GB_WARN[@]} > 0 )); then
-    echo "Summary: Google Books also missed: ${GB_WARN[*]} (advisory)"
+    echo "Summary: Google Books also degraded: ${GB_WARN[*]} (advisory)"
   fi
   echo "Action: rerun the curl line above manually to confirm. If OL is down, either retry the deploy or escalate."
   exit 1
 fi
 
 if (( ${#GB_WARN[@]} > 0 )); then
-  echo "Summary: PASS — Open Library resolved all ${#ISBNS[@]} ISBN(s). Google Books missed ${#GB_WARN[@]} (advisory, not blocking)."
+  echo "Summary: PASS (with warnings) — Open Library healthy. Google Books degraded: ${GB_WARN[*]} (advisory, not blocking)."
 else
-  echo "Summary: PASS — Open Library and Google Books resolved all ${#ISBNS[@]} ISBN(s)."
+  echo "Summary: PASS — Open Library and Google Books healthy; all ${#ISBNS[@]} ISBN(s) resolved."
 fi
 exit 0
