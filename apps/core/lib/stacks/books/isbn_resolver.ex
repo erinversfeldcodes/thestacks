@@ -662,73 +662,46 @@ defmodule Stacks.Books.ISBNResolver do
     )
   end
 
-  # Plausibility floor for scored title-search picks. Max-wins alone has
-  # no notion of "all the candidates are garbage": a corrupted query can
-  # fuzzy-match pure noise (observed in production: VLM title "The
-  # Tramp's Crystal City" resolved to "The Crystal Ball a Mystery Story
-  # for Girls" at score 1.5) and the resolver would still commit to it.
-  #
-  # Floor arithmetic: a bare title-token coincidence on a short title
-  # scores 3.0–3.5 (the overlap coefficient is generous to short
-  # candidate titles — the Crystal City fixtures pin Card/Tarantino/
-  # Etchemendy at 3.5), while garbage fuzzy matches land around 1.5.
-  # 2.5 splits the two populations. The floor is WAIVED when the
-  # candidate has author corroboration (author component scored > 0):
-  # a scored author match at any total is strong positive evidence.
-  @min_plausible_score 2.5
-
   # Pick the highest-scoring candidate from one provider's result list.
   #
+  # The scoring, plausibility floor, and author-corroboration waiver all
+  # live in `CandidateScorer.pick_best/3` — the SAME seam the offline
+  # eval harness (`mix eval.resolver`) exercises, so tuning experiments
+  # run against exactly the production pick logic. This function only
+  # adapts shapes and logs decisions.
+  #
   # Every candidate — including a lone one — is scored against the
-  # original VLM signals by `CandidateScorer.score/2` and checked
-  # against the plausibility floor. Single candidates used to skip
-  # scoring entirely, but that let a single garbage GB fuzzy-match win
-  # unchallenged. `Enum.sort_by/3` is stable, so on a score tie the
-  # provider's own ranking decides — exactly the old first-doc-wins
-  # behaviour.
+  # original VLM signals and checked against the plausibility floor.
+  # Single candidates used to skip scoring entirely, but that let a
+  # single garbage GB fuzzy-match win unchallenged.
   #
   # A below-floor best candidate is treated as no-match ({:error,
   # :not_found} — the same shape as "no docs matched"), so
   # `try_candidate` returns nil and `Enum.find_value` falls through to
   # the next (broader) query variant, ultimately {:error, :not_found}.
-  defp pick_best_candidate([], _source, _signals), do: {:error, :not_found}
-
-  defp pick_best_candidate([{:ok, isbn, meta} = only], source, signals) do
-    score = CandidateScorer.score(meta, signals)
-
-    if plausible?(score, meta, signals) do
-      only
-    else
-      log_floored_decision(source, 1, {score, isbn, meta})
-      {:error, :not_found}
-    end
-  end
-
   defp pick_best_candidate(candidates, source, signals) do
-    [{best_score, isbn, meta} = best | rest] =
-      candidates
-      |> Enum.map(fn {:ok, isbn, meta} -> {CandidateScorer.score(meta, signals), isbn, meta} end)
-      |> Enum.sort_by(&elem(&1, 0), :desc)
+    pairs = Enum.map(candidates, fn {:ok, isbn, meta} -> {isbn, meta} end)
 
-    log_scored_decision(source, length(candidates), best, List.first(rest))
+    case CandidateScorer.pick_best(pairs, signals) do
+      :empty ->
+        {:error, :not_found}
 
-    if plausible?(best_score, meta, signals) do
-      {:ok, isbn, meta}
-    else
-      log_floored_decision(source, length(candidates), best)
-      {:error, :not_found}
+      {:ok, {_score, isbn, meta} = best, runner_up} ->
+        if length(pairs) > 1, do: log_scored_decision(source, length(pairs), best, runner_up)
+        {:ok, isbn, meta}
+
+      {:floored, best, runner_up} ->
+        if length(pairs) > 1, do: log_scored_decision(source, length(pairs), best, runner_up)
+        log_floored_decision(source, length(pairs), best)
+        {:error, :not_found}
     end
-  end
-
-  defp plausible?(score, meta, signals) do
-    score >= @min_plausible_score or CandidateScorer.author_match?(meta, signals)
   end
 
   defp log_floored_decision(source, count, {score, isbn, meta}) do
     Logger.info(
       "ISBNResolver.#{source}: floored best of #{count} candidate(s); best=#{isbn} " <>
         "title=#{inspect(meta.title)} score=#{Float.round(score, 2)} < " <>
-        "floor=#{@min_plausible_score}, no author corroboration — treating as no match"
+        "floor=#{CandidateScorer.default_floor()}, no author corroboration — treating as no match"
     )
   end
 

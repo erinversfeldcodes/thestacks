@@ -346,4 +346,170 @@ defmodule Stacks.Books.CandidateScorerTest do
              ) == 0.0
     end
   end
+
+  # The production failure the penalty exists to fix (Klara and the
+  # Sun, chore/enable-pipelines): a GB "Study Guide: ..." derivative
+  # whose title absorbs the author tokens (raw_text 4/4 vs the real
+  # work's 2/4) and whose author GB mislabels as Ishiguro himself, so
+  # it collects the author bonus AND the floor waiver. Pinned in the
+  # eval corpus as `klara_study_guide` (`mix eval.resolver`).
+  @klara_signals %{
+    title: "Klara and the Sun",
+    author: "Kazuo Ishiguro",
+    raw_text: "KLARA AND THE SUN KAZUO ISHIGURO"
+  }
+
+  @klara_real %{
+    title: "Klara and the Sun",
+    subtitle: nil,
+    author: "Kazuo Ishiguro",
+    subjects: ["Fiction", "Science fiction"]
+  }
+
+  @klara_derivative %{
+    title: "Study Guide: Klara and the Sun by Kazuo Ishiguro",
+    subtitle: nil,
+    author: "Kazuo Ishiguro",
+    subjects: ["Study Aids"]
+  }
+
+  describe "score/3 — derivative-title penalty" do
+    test "with the penalty disabled the derivative outscores the real work (the bug)" do
+      off = [weights: [derivative_penalty: 0.0]]
+
+      real = CandidateScorer.score(@klara_real, @klara_signals, off)
+      derivative = CandidateScorer.score(@klara_derivative, @klara_signals, off)
+
+      # Pin the inversion: derivative 5.5 (overlap 3.0 + raw 4/4 = 1.5
+      # + author 1.0) vs real 5.25 (overlap 3.0 + raw 2/4 = 0.75 +
+      # author 1.0 + exact 0.5).
+      assert_in_delta derivative, 5.5, 0.001
+      assert_in_delta real, 5.25, 0.001
+    end
+
+    test "the default penalty flips the pick to the real work" do
+      real = CandidateScorer.score(@klara_real, @klara_signals)
+      derivative = CandidateScorer.score(@klara_derivative, @klara_signals)
+
+      assert real > derivative
+      # 5.5 - 2.0 default penalty
+      assert_in_delta derivative, 3.5, 0.001
+    end
+
+    test "no penalty when the SIGNAL title also carries the marker (user photographed an actual study guide)" do
+      signals = %{
+        title: "Study Guide: Klara and the Sun by Kazuo Ishiguro",
+        author: nil,
+        raw_text: nil
+      }
+
+      # Exact-title match on the derivative itself — the penalty must
+      # not fire, so the score includes the full overlap + exact bonus.
+      assert CandidateScorer.score(@klara_derivative, signals) >=
+               CandidateScorer.score(@klara_real, signals)
+    end
+
+    test "penalty matches title tokens only — a marker in the subjects does not penalise" do
+      signals = %{title: "Klara and the Sun", author: nil, raw_text: nil}
+
+      with_marker_subject = %{
+        title: "Klara and the Sun",
+        subtitle: nil,
+        author: nil,
+        subjects: ["Study Aids"]
+      }
+
+      without = %{with_marker_subject | subjects: []}
+
+      assert CandidateScorer.score(with_marker_subject, signals) >=
+               CandidateScorer.score(without, signals)
+    end
+
+    test "weights are overridable per call" do
+      derivative = CandidateScorer.score(@klara_derivative, @klara_signals)
+
+      heavier =
+        CandidateScorer.score(@klara_derivative, @klara_signals,
+          weights: [derivative_penalty: 4.0]
+        )
+
+      assert_in_delta derivative - heavier, 2.0, 0.001
+    end
+  end
+
+  # `pick_best/3` is the seam shared by `ISBNResolver.pick_best_candidate/3`
+  # and `mix eval.resolver` — pick + plausibility floor + author waiver.
+  describe "pick_best/3" do
+    test "empty candidate list is :empty" do
+      assert CandidateScorer.pick_best([], @crystal_city_signals) == :empty
+    end
+
+    test "picks the max-scoring candidate and returns the runner-up" do
+      candidates = [
+        {"9781429964500", @card_candidate},
+        {"9781451693669", @russell_candidate}
+      ]
+
+      assert {:ok, {best_score, "9781451693669", _meta}, {runner_score, "9781429964500", _}} =
+               CandidateScorer.pick_best(candidates, @crystal_city_signals)
+
+      assert_in_delta best_score, 5.5, 0.001
+      assert_in_delta runner_score, 3.5, 0.001
+    end
+
+    test "a lone below-floor candidate without author corroboration is floored" do
+      garbage = %{
+        title: "The Crystal Ball a Mystery Story for Girls",
+        subtitle: nil,
+        author: "Roy J. Snell",
+        subjects: ["Fiction"]
+      }
+
+      signals = %{
+        title: "The Tramp's Crystal City",
+        author: nil,
+        raw_text: "THE TRAMP'S CRYSTAL CITY"
+      }
+
+      assert {:floored, {score, "9781532774393", _meta}, nil} =
+               CandidateScorer.pick_best([{"9781532774393", garbage}], signals)
+
+      assert score < CandidateScorer.default_floor()
+    end
+
+    test "author corroboration waives the floor" do
+      candidate = %{
+        title: "Completely Different Title",
+        subtitle: nil,
+        author: "Jan Jarboe Russell",
+        subjects: []
+      }
+
+      signals = %{title: "Zork", author: "Jan Jarboe Russell", raw_text: nil}
+
+      assert {:ok, {_score, "9781451693669", _meta}, nil} =
+               CandidateScorer.pick_best([{"9781451693669", candidate}], signals)
+    end
+
+    test "the floor is overridable per call (tuning experiments)" do
+      # The junk record from the July production sessions: subset title
+      # overlap + raw_text = exactly 3.0, nothing else. Above the 2.5
+      # default floor, below an experimental 3.25 one.
+      junk = %{title: "Crystal City-CC", subtitle: nil, author: nil, subjects: []}
+
+      signals = %{
+        title: "The Tramp's Crystal City",
+        author: nil,
+        raw_text: "THE TRAMP'S CRYSTAL CITY"
+      }
+
+      assert {:ok, {score, "0812444647", _}, nil} =
+               CandidateScorer.pick_best([{"0812444647", junk}], signals)
+
+      assert_in_delta score, 3.0, 0.001
+
+      assert {:floored, {_score, "0812444647", _}, nil} =
+               CandidateScorer.pick_best([{"0812444647", junk}], signals, floor: 3.25)
+    end
+  end
 end
