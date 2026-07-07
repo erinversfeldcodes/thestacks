@@ -132,7 +132,12 @@ defmodule Stacks.Books.CandidateScorer do
   # Marker tokens for derivative/companion editions. Token-level match
   # against the normalised candidate TITLE only (not subtitle/subjects —
   # a legitimate work may carry "Study Aids"-ish subject metadata).
-  @derivative_tokens MapSet.new(~w(study guide summary analysis workbook sparknotes))
+  #
+  # Plain list, not a MapSet: baking a MapSet into a module attribute
+  # inlines the struct literal at compile time, which dialyzer rejects
+  # as an opaqueness violation (call_without_opaque on
+  # MapSet.disjoint?/2). Membership over a 6-element list is fine.
+  @derivative_tokens ~w(study guide summary analysis workbook sparknotes)
 
   @stopwords ~w(the a an of to and in on for)
 
@@ -331,8 +336,10 @@ defmodule Stacks.Books.CandidateScorer do
   # guide the marker appears in the signal title and the penalty is
   # skipped.
   defp derivative_penalty(signal_title_tokens, candidate_title_tokens, weight) do
-    candidate_derivative? = not MapSet.disjoint?(candidate_title_tokens, @derivative_tokens)
-    signal_derivative? = not MapSet.disjoint?(signal_title_tokens, @derivative_tokens)
+    candidate_derivative? =
+      Enum.any?(@derivative_tokens, &MapSet.member?(candidate_title_tokens, &1))
+
+    signal_derivative? = Enum.any?(@derivative_tokens, &MapSet.member?(signal_title_tokens, &1))
 
     if candidate_derivative? and not signal_derivative?, do: -weight, else: 0.0
   end
