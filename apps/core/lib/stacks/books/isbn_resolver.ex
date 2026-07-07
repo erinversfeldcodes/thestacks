@@ -7,6 +7,7 @@ defmodule Stacks.Books.ISBNResolver do
 
   require Logger
 
+  alias Stacks.Books.CandidateScorer
   alias Stacks.Books.HttpClientBehaviour
   alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCache
@@ -229,6 +230,13 @@ defmodule Stacks.Books.ISBNResolver do
     surname = author_surname(author)
     raw_keywords = normalize_raw_text(raw_text)
 
+    # The ORIGINAL extracted signals, threaded down to candidate scoring.
+    # Scoring must see the full VLM title/author/raw_text — NOT the
+    # broadened query variant that produced the HTTP request — or the
+    # disambiguating tokens (e.g. subtitle keywords absorbed into the
+    # VLM title) are lost by the time we rank upstream docs.
+    signals = %{title: title, author: author, raw_text: raw_text}
+
     # Build candidate queries from most to least specific.
     # When raw_text is available, insert enriched queries early — BEFORE broad
     # base candidates — so that keywords like "FDR" disambiguate cut-off or
@@ -275,7 +283,7 @@ defmodule Stacks.Books.ISBNResolver do
       |> Enum.reject(fn {t, _} -> is_nil(t) or String.trim(t) == "" end)
 
     Enum.find_value(candidates, {:error, :not_found}, fn candidate ->
-      try_candidate(candidate, excluded_isbns, excluded_descriptors)
+      try_candidate(candidate, signals, excluded_isbns, excluded_descriptors)
     end)
   end
 
@@ -304,15 +312,23 @@ defmodule Stacks.Books.ISBNResolver do
   # of the same Orson Scott Card title): ISBN exclusion alone walks
   # from one edition to the next; (title, author) exclusion treats all
   # editions as the same book and skips past them.
-  defp try_candidate({t, a}, excluded_isbns, excluded_descriptors) do
+  #
+  # Known trade-off: the OL-vs-GB race keeps first-upstream-wins
+  # semantics BETWEEN the two providers; candidate scoring (see
+  # `pick_best_candidate/3`) applies WITHIN each provider's result list.
+  # A better-scoring doc in the slower provider's response can lose to
+  # the faster provider's best doc.
+  defp try_candidate({t, a}, signals, excluded_isbns, excluded_descriptors) do
     ol =
       Task.async(fn ->
-        wrap_3tuple(open_library_title_search(t, a, excluded_isbns, excluded_descriptors))
+        wrap_3tuple(
+          open_library_title_search(t, a, signals, excluded_isbns, excluded_descriptors)
+        )
       end)
 
     gb =
       Task.async(fn ->
-        wrap_3tuple(google_books_search(t, a, excluded_isbns, excluded_descriptors))
+        wrap_3tuple(google_books_search(t, a, signals, excluded_isbns, excluded_descriptors))
       end)
 
     case await_first_success([ol, gb], {:error, :not_found}) do
@@ -440,6 +456,13 @@ defmodule Stacks.Books.ISBNResolver do
 
   defp normalize_raw_text(text) do
     text
+    # Strip apostrophes FIRST (both ASCII and typographic) so possessives
+    # collapse into a single token: "TRAMP'S" → "TRAMPS". Without this,
+    # the apostrophe creates a word boundary and the acronym join below
+    # sees an orphan single letter next to the FOLLOWING word —
+    # "TRAMP'S CRYSTAL" → "S C" glued → "SCRYSTAL" — poisoning every
+    # enriched query variant (observed in production).
+    |> String.replace(~r/['’]/u, "")
     |> String.upcase()
     # Join space-separated single-letter sequences like "F D R" → "FDR".
     # The greedy pattern matches the full run in one pass.
@@ -459,20 +482,20 @@ defmodule Stacks.Books.ISBNResolver do
   # Returns {isbn, metadata} with partial metadata from the search result,
   # so store_book can skip the secondary ISBN lookup (which often fails for
   # obscure editions). Prefers ISBN-13 over ISBN-10.
-  defp open_library_title_search(title, author, excluded_isbns, excluded_descriptors) do
+  defp open_library_title_search(title, author, signals, excluded_isbns, excluded_descriptors) do
     case :fuse.ask(@open_library_fuse, :sync) do
       :blown ->
         {:error, :circuit_open}
 
       :ok ->
-        do_open_library_title_search(title, author, excluded_isbns, excluded_descriptors)
+        do_open_library_title_search(title, author, signals, excluded_isbns, excluded_descriptors)
     end
   end
 
-  defp do_open_library_title_search(title, author, excluded_isbns, excluded_descriptors) do
+  defp do_open_library_title_search(title, author, signals, excluded_isbns, excluded_descriptors) do
     base = [
       {"title", title},
-      {"fields", "key,title,isbn,author_name,subject,first_publish_year"},
+      {"fields", "key,title,subtitle,isbn,author_name,subject,first_publish_year"},
       {"limit", "5"}
     ]
 
@@ -481,16 +504,19 @@ defmodule Stacks.Books.ISBNResolver do
 
     case make_request(url) do
       {:ok, %{"docs" => docs}} when is_list(docs) ->
-        # Iterate docs and skip any whose ISBN or (title, author) matches
-        # an upstream exclusion. The first non-excluded doc with an ISBN
-        # wins. Without this, build_ol_metadata returns the first ISBN
-        # doc unconditionally and `try_candidate` ends up calling the
-        # SAME OL URL across all candidate query variants — the
-        # exclusion at the try_candidate level only ever sees the same
-        # top doc and never iterates past it.
-        Enum.find_value(docs, {:error, :not_found}, fn doc ->
-          build_ol_metadata(doc, excluded_isbns, excluded_descriptors)
-        end)
+        # Build candidates for ALL docs, skipping any whose ISBN or
+        # (title, author) matches an upstream exclusion (exclusion at
+        # the per-doc level is load-bearing: `try_candidate` retries the
+        # SAME OL URL across query variants, so excluding only at that
+        # level would see the same top doc forever). The surviving
+        # candidates are scored against the ORIGINAL VLM signals and the
+        # best one wins — taking the first doc instead picks the wrong
+        # book when OL's ranking favours an exact-prefix match over the
+        # one whose subtitle matches the extracted title.
+        docs
+        |> Enum.map(&build_ol_metadata(&1, excluded_isbns, excluded_descriptors))
+        |> Enum.reject(&is_nil/1)
+        |> pick_best_candidate(:open_library, signals)
 
       {:error, _} ->
         Stacks.CircuitBreakers.melt(@open_library_fuse)
@@ -513,6 +539,7 @@ defmodule Stacks.Books.ISBNResolver do
 
       metadata = %{
         title: doc["title"],
+        subtitle: doc["subtitle"],
         author: if(author_str != "", do: author_str, else: nil),
         subjects: doc |> Map.get("subject", []) |> Enum.take(5),
         publication_year: doc["first_publish_year"],
@@ -525,14 +552,17 @@ defmodule Stacks.Books.ISBNResolver do
     end
   end
 
-  defp google_books_search(title, author, excluded_isbns, excluded_descriptors) do
+  defp google_books_search(title, author, signals, excluded_isbns, excluded_descriptors) do
     case :fuse.ask(@google_books_fuse, :sync) do
-      :blown -> {:error, :circuit_open}
-      :ok -> do_google_books_search(title, author, excluded_isbns, excluded_descriptors)
+      :blown ->
+        {:error, :circuit_open}
+
+      :ok ->
+        do_google_books_search(title, author, signals, excluded_isbns, excluded_descriptors)
     end
   end
 
-  defp do_google_books_search(title, author, excluded_isbns, excluded_descriptors) do
+  defp do_google_books_search(title, author, signals, excluded_isbns, excluded_descriptors) do
     query =
       if author && author != "" do
         "intitle:#{URI.encode(title)}+inauthor:#{URI.encode(author)}"
@@ -548,9 +578,11 @@ defmodule Stacks.Books.ISBNResolver do
 
     case make_request(url) do
       {:ok, %{"items" => items}} when is_list(items) ->
-        Enum.find_value(items, {:error, :not_found}, fn item ->
-          parse_google_books_search_item(item, excluded_isbns, excluded_descriptors)
-        end)
+        # Same score-everything-pick-best approach as the OL path.
+        items
+        |> Enum.map(&parse_google_books_search_item(&1, excluded_isbns, excluded_descriptors))
+        |> Enum.reject(&is_nil/1)
+        |> pick_best_candidate(:google_books, signals)
 
       {:error, _} ->
         Stacks.CircuitBreakers.melt(@google_books_fuse)
@@ -577,6 +609,7 @@ defmodule Stacks.Books.ISBNResolver do
 
       metadata = %{
         title: info["title"],
+        subtitle: info["subtitle"],
         author: authors,
         description: info["description"],
         cover_image_url: get_in(info, ["imageLinks", "thumbnail"]),
@@ -626,6 +659,94 @@ defmodule Stacks.Books.ISBNResolver do
   defp log_resolver_accept(source, isbn, metadata) do
     Logger.info(
       "ISBNResolver.#{source}: ACCEPT isbn=#{isbn} title=#{inspect(metadata.title)} author=#{inspect(metadata.author)}"
+    )
+  end
+
+  # Plausibility floor for scored title-search picks. Max-wins alone has
+  # no notion of "all the candidates are garbage": a corrupted query can
+  # fuzzy-match pure noise (observed in production: VLM title "The
+  # Tramp's Crystal City" resolved to "The Crystal Ball a Mystery Story
+  # for Girls" at score 1.5) and the resolver would still commit to it.
+  #
+  # Floor arithmetic: a bare title-token coincidence on a short title
+  # scores 3.0–3.5 (the overlap coefficient is generous to short
+  # candidate titles — the Crystal City fixtures pin Card/Tarantino/
+  # Etchemendy at 3.5), while garbage fuzzy matches land around 1.5.
+  # 2.5 splits the two populations. The floor is WAIVED when the
+  # candidate has author corroboration (author component scored > 0):
+  # a scored author match at any total is strong positive evidence.
+  @min_plausible_score 2.5
+
+  # Pick the highest-scoring candidate from one provider's result list.
+  #
+  # Every candidate — including a lone one — is scored against the
+  # original VLM signals by `CandidateScorer.score/2` and checked
+  # against the plausibility floor. Single candidates used to skip
+  # scoring entirely, but that let a single garbage GB fuzzy-match win
+  # unchallenged. `Enum.sort_by/3` is stable, so on a score tie the
+  # provider's own ranking decides — exactly the old first-doc-wins
+  # behaviour.
+  #
+  # A below-floor best candidate is treated as no-match ({:error,
+  # :not_found} — the same shape as "no docs matched"), so
+  # `try_candidate` returns nil and `Enum.find_value` falls through to
+  # the next (broader) query variant, ultimately {:error, :not_found}.
+  defp pick_best_candidate([], _source, _signals), do: {:error, :not_found}
+
+  defp pick_best_candidate([{:ok, isbn, meta} = only], source, signals) do
+    score = CandidateScorer.score(meta, signals)
+
+    if plausible?(score, meta, signals) do
+      only
+    else
+      log_floored_decision(source, 1, {score, isbn, meta})
+      {:error, :not_found}
+    end
+  end
+
+  defp pick_best_candidate(candidates, source, signals) do
+    [{best_score, isbn, meta} = best | rest] =
+      candidates
+      |> Enum.map(fn {:ok, isbn, meta} -> {CandidateScorer.score(meta, signals), isbn, meta} end)
+      |> Enum.sort_by(&elem(&1, 0), :desc)
+
+    log_scored_decision(source, length(candidates), best, List.first(rest))
+
+    if plausible?(best_score, meta, signals) do
+      {:ok, isbn, meta}
+    else
+      log_floored_decision(source, length(candidates), best)
+      {:error, :not_found}
+    end
+  end
+
+  defp plausible?(score, meta, signals) do
+    score >= @min_plausible_score or CandidateScorer.author_match?(meta, signals)
+  end
+
+  defp log_floored_decision(source, count, {score, isbn, meta}) do
+    Logger.info(
+      "ISBNResolver.#{source}: floored best of #{count} candidate(s); best=#{isbn} " <>
+        "title=#{inspect(meta.title)} score=#{Float.round(score, 2)} < " <>
+        "floor=#{@min_plausible_score}, no author corroboration — treating as no match"
+    )
+  end
+
+  # Production debuggability for wrong-book picks: records which
+  # candidate won, by how much, and over what runner-up.
+  defp log_scored_decision(source, count, {best_score, best_isbn, best_meta}, runner_up) do
+    runner_up_str =
+      case runner_up do
+        {score, isbn, meta} ->
+          " runner_up=#{isbn} title=#{inspect(meta.title)} score=#{Float.round(score, 2)}"
+
+        nil ->
+          ""
+      end
+
+    Logger.info(
+      "ISBNResolver.#{source}: scored #{count} candidates; best=#{best_isbn} " <>
+        "title=#{inspect(best_meta.title)} score=#{Float.round(best_score, 2)};#{runner_up_str}"
     )
   end
 

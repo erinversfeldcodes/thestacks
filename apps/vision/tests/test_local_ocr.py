@@ -7,6 +7,7 @@ Tests cover:
 - No barcode in image → returns None
 - Corrupt/invalid image bytes → returns None (silent failure)
 - Invalid ISBN check digit → returns None
+- Mirrored / rotated barcode images → returns ISBN (multi-orientation sweep)
 """
 
 from __future__ import annotations
@@ -89,6 +90,63 @@ class TestLocalISBNScanRejectsNonISBN:
         image_bytes = _generate_blank_image_bytes()
         result = local_isbn_scan(image_bytes)
         assert result is None
+
+
+def _transpose_image_bytes(image_bytes: bytes, method: Image.Transpose) -> bytes:
+    """Apply a PIL transpose to encoded image bytes and re-encode as PNG."""
+    img = Image.open(io.BytesIO(image_bytes))
+    transposed = img.transpose(method)
+    buf = io.BytesIO()
+    transposed.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
+
+
+class TestLocalISBNScanOrientations:
+    """Tests for the multi-orientation sweep (mirror, rotations)."""
+
+    ISBN13 = "9780156001311"
+
+    def test_original_orientation_still_decodes(self) -> None:
+        """Regression: unmodified barcode image decodes on the first pass."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        assert local_isbn_scan(image_bytes) == self.ISBN13
+
+    def test_mirrored_barcode_decodes(self) -> None:
+        """Horizontally mirrored barcode (screenshot-of-screenshot) decodes."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        mirrored = _transpose_image_bytes(image_bytes, Image.Transpose.FLIP_LEFT_RIGHT)
+        assert local_isbn_scan(mirrored) == self.ISBN13
+
+    def test_rotated_90_barcode_decodes(self) -> None:
+        """90-degree rotated barcode decodes."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        rotated = _transpose_image_bytes(image_bytes, Image.Transpose.ROTATE_90)
+        assert local_isbn_scan(rotated) == self.ISBN13
+
+    def test_rotated_180_barcode_decodes(self) -> None:
+        """180-degree rotated barcode decodes."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        rotated = _transpose_image_bytes(image_bytes, Image.Transpose.ROTATE_180)
+        assert local_isbn_scan(rotated) == self.ISBN13
+
+    def test_rotated_270_barcode_decodes(self) -> None:
+        """270-degree rotated barcode decodes."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        rotated = _transpose_image_bytes(image_bytes, Image.Transpose.ROTATE_270)
+        assert local_isbn_scan(rotated) == self.ISBN13
+
+    def test_mirrored_then_rotated_barcode_decodes(self) -> None:
+        """Mirror + 90-degree rotation decodes."""
+        image_bytes = _generate_ean13_barcode_bytes(self.ISBN13)
+        mirrored = _transpose_image_bytes(image_bytes, Image.Transpose.FLIP_LEFT_RIGHT)
+        combined = _transpose_image_bytes(mirrored, Image.Transpose.ROTATE_90)
+        assert local_isbn_scan(combined) == self.ISBN13
+
+    def test_non_barcode_image_returns_none_across_variants(self) -> None:
+        """Plain image yields None — no false positives from the 6-variant sweep."""
+        image_bytes = _generate_blank_image_bytes()
+        assert local_isbn_scan(image_bytes) is None
 
 
 class TestLocalISBNScanSilentFailure:

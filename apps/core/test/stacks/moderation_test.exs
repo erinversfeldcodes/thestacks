@@ -18,6 +18,7 @@ defmodule Stacks.ModerationTest do
 
   import Stacks.Factory
 
+  alias Stacks.Books.MockHttpClient
   alias Stacks.Moderation
 
   # The pipeline now receives base64-encoded image data. Any non-empty string
@@ -465,6 +466,54 @@ defmodule Stacks.ModerationTest do
       after
         Application.put_env(:core, :vision_client, original)
       end
+    end
+  end
+
+  describe "run_pipeline/1 — null-ish author normalisation" do
+    # Production bug: the VLM emitted the literal STRING "null" as the
+    # author, which went out on the wire as `inauthor:null` (Google
+    # Books) and `author=null` (Open Library) and was treated as real
+    # author evidence by candidate scoring. Moderation must normalise
+    # null-ish author strings to nil before calling
+    # ISBNResolver.search_by_title/4 — nil authors are dropped from the
+    # query params entirely.
+    test "candidate with author=\"null\" reaches search_by_title with author=nil" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.NullAuthorClient)
+
+        # Capture every URL the resolver requests. The test config
+        # already wires :isbn_http_client to MockHttpClient; with no
+        # registered responses every lookup misses, so the pipeline
+        # ends in :isbn_not_found — we only care about the URLs.
+        MockHttpClient.capture_requests()
+
+        context = %{image_b64: @test_image_b64}
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+
+        urls = collect_request_urls()
+        assert urls != [], "expected the title-search to issue HTTP requests"
+
+        # author="null" must be dropped: no author/inauthor param at all.
+        refute Enum.any?(urls, &String.contains?(&1, "inauthor"))
+        refute Enum.any?(urls, &String.contains?(&1, "null"))
+
+        # And the raw_text normalisation must not corrupt keywords
+        # ("TRAMP'S" → "tramps", never "scrystal").
+        refute Enum.any?(urls, &String.contains?(&1, "scrystal"))
+        assert Enum.any?(urls, &String.contains?(&1, "tramps"))
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+  end
+
+  defp collect_request_urls(acc \\ []) do
+    receive do
+      {MockHttpClient, :request, url} -> collect_request_urls([url | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 
@@ -923,6 +972,36 @@ defmodule Stacks.ModerationTest do
              "author" => nil,
              "potential_isbns" => ["9780743273565"],
              "raw_text" => nil,
+             "confidence" => 0.9
+           }
+         ],
+         "model_used" => "mock"
+       }}
+    end
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule NullAuthorClient do
+    @moduledoc """
+    Reproduces the production VLM payload that surfaced the null-author
+    and scrystal bugs: author is the literal string "null" and the
+    raw_text contains a possessive apostrophe.
+    """
+    @behaviour Stacks.AI.ClientBehaviour
+
+    @impl true
+    def call_vision("analyze", _payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
+         "books" => [
+           %{
+             "title" => "The Tramp's Crystal City",
+             "author" => "null",
+             "potential_isbns" => [],
+             "raw_text" => "THE TRAMP'S CRYSTAL CITY",
              "confidence" => 0.9
            }
          ],
