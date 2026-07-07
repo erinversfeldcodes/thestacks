@@ -628,6 +628,46 @@ defmodule Stacks.Books.ISBNResolverTest do
       assert meta.subtitle =~ "FDR's"
       assert meta.source == :google_books
     end
+
+    test "a derivative 'Study Guide' edition loses to the real work (Klara case)" do
+      # Production failure: GB returns a study-guide companion whose
+      # title absorbs the author tokens AND whose author field GB
+      # mislabels as the real author — without the derivative-title
+      # penalty it outscores the real work (5.5 vs 5.25) and displaces
+      # it. Pinned offline in priv/eval/corpus.exs (klara_study_guide).
+      real =
+        google_item(
+          title: "Klara and the Sun",
+          author: "Kazuo Ishiguro",
+          categories: ["Fiction"],
+          identifiers: [%{"type" => "ISBN_13", "identifier" => "9780571364879"}]
+        )
+
+      derivative =
+        google_item(
+          title: "Study Guide: Klara and the Sun by Kazuo Ishiguro",
+          author: "Kazuo Ishiguro",
+          categories: ["Study Aids"],
+          identifiers: [%{"type" => "ISBN_13", "identifier" => "9798767950103"}]
+        )
+
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+
+      # Derivative FIRST — GB's own ranking put it on top in production.
+      MockHttpClient.put_response(
+        "googleapis.com",
+        {:ok, %{"items" => [derivative, real]}}
+      )
+
+      assert {:ok, "9780571364879", meta} =
+               ISBNResolver.search_by_title(
+                 "Klara and the Sun",
+                 "Kazuo Ishiguro",
+                 "KLARA AND THE SUN KAZUO ISHIGURO"
+               )
+
+      assert meta.title == "Klara and the Sun"
+    end
   end
 
   # ---------------------------------------------------------------------------
