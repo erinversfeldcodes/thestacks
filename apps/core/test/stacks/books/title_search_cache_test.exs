@@ -78,4 +78,69 @@ defmodule Stacks.Books.TitleSearchCacheTest do
       assert :miss = TitleSearchCache.get("B", "b", nil)
     end
   end
+
+  describe "invalidate_by_isbn/1" do
+    test "removes every entry whose positive result matches the ISBN, keeps the rest" do
+      :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "9781429964500", %{}})
+      :ok = TitleSearchCache.put("Crystal City", "Card", "text hint", {:ok, "9781429964500", %{}})
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
+
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+
+      assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
+      assert :miss = TitleSearchCache.get("Crystal City", "Card", "text hint")
+      # Unrelated warm entry survives — invalidation is targeted, not a flush.
+      assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+
+    test "normalises hyphens/whitespace on both the argument and the stored ISBN" do
+      # Stored with hyphens, invalidated bare.
+      :ok = TitleSearchCache.put("A", "a", nil, {:ok, "978-1-4299-6450-0", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+      assert :miss = TitleSearchCache.get("A", "a", nil)
+
+      # Stored bare, invalidated with hyphens and spaces.
+      :ok = TitleSearchCache.put("B", "b", nil, {:ok, "9781429964500", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn(" 978-1-4299-6450-0 ")
+      assert :miss = TitleSearchCache.get("B", "b", nil)
+    end
+
+    test "does not remove negative entries or entries for other ISBNs" do
+      :ok = TitleSearchCache.put("Fake", "Fake", nil, {:error, :not_found})
+      :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
+      assert {:ok, {:error, :not_found}} = TitleSearchCache.get("Fake", "Fake", nil)
+    end
+
+    test "blank or non-binary ISBNs are a no-op" do
+      :ok = TitleSearchCache.put("A", "a", nil, {:ok, "9780000000001", %{}})
+      assert :ok = TitleSearchCache.invalidate_by_isbn("")
+      assert :ok = TitleSearchCache.invalidate_by_isbn("  - ")
+      assert :ok = TitleSearchCache.invalidate_by_isbn(nil)
+      assert {:ok, {:ok, "9780000000001", _}} = TitleSearchCache.get("A", "a", nil)
+    end
+
+    test "emits [:stacks, :books, :title_search_cache, :invalidated] telemetry with count" do
+      ref = make_ref()
+      test_pid = self()
+
+      :telemetry.attach(
+        "invalidated-test-#{inspect(ref)}",
+        [:stacks, :books, :title_search_cache, :invalidated],
+        fn _event, measurements, metadata, _config ->
+          send(test_pid, {:invalidated, ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("invalidated-test-#{inspect(ref)}") end)
+
+      :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "9781429964500", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn("978-1-4299-6450-0")
+
+      assert_receive {:invalidated, ^ref, %{count: 1}, metadata}
+      assert metadata.isbn == "9781429964500"
+      assert metadata.l1_count == 1
+      assert metadata.l2_count == 0
+    end
+  end
 end

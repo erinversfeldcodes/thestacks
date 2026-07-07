@@ -117,8 +117,9 @@ defmodule Stacks.Books.ISBNResolverTest do
   end
 
   # Drain the URLs captured via `MockHttpClient.capture_requests/0`.
-  # All resolver Tasks have completed by the time search_by_title
-  # returns, so the messages are already in the mailbox.
+  # Title-search requests are sequential (OL first, GB only on an OL
+  # miss), so all requests have completed — and their capture messages
+  # are already in the mailbox — by the time search_by_title returns.
   defp collect_request_urls(acc \\ []) do
     receive do
       {MockHttpClient, :request, url} -> collect_request_urls([url | acc])
@@ -412,6 +413,50 @@ defmodule Stacks.Books.ISBNResolverTest do
       MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [item]}})
 
       assert {:error, :not_found} = ISBNResolver.search_by_title("Gatsby")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # search_by_title — sequential OL-first, GB fallback-only
+  # ---------------------------------------------------------------------------
+
+  # Regression for the :google_books_fuse burst blow-out: title-search
+  # used to RACE OL + GB per query variant, so every variant hit GB even
+  # when OL answered. GB 503s stochastically under burst (~10%/request),
+  # and up to 12 variants per upload amplified that into enough melts to
+  # blow the fuse. GB must now only be consulted when OL misses.
+  describe "search_by_title — sequential OL-first, GB fallback-only" do
+    test "Google Books is never consulted when Open Library hits" do
+      MockHttpClient.capture_requests()
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [google_item()]}})
+
+      assert {:ok, _, meta} = ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+      assert meta.source == :open_library
+
+      urls = collect_request_urls()
+      assert Enum.any?(urls, &String.contains?(&1, "openlibrary.org"))
+      refute Enum.any?(urls, &String.contains?(&1, "googleapis.com"))
+    end
+
+    test "Google Books is consulted after Open Library misses, in OL→GB order" do
+      MockHttpClient.capture_requests()
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [google_item()]}})
+
+      assert {:ok, _, meta} = ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+      assert meta.source == :google_books
+
+      # The GB hit resolves the FIRST query variant, so exactly two
+      # requests went out — OL first, then GB.
+      assert [first, second] = collect_request_urls()
+      assert first =~ "openlibrary.org"
+      assert second =~ "googleapis.com"
     end
   end
 

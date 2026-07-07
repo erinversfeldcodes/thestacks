@@ -48,7 +48,16 @@ defmodule Stacks.Books.ISBNResolver do
     Application.get_env(:core, :google_books_api_key)
   end
 
-  defp google_books_url(params) do
+  @doc false
+  # Public (but undocumented) because `Stacks.CircuitBreakers.probe_google_books/0`
+  # must build its probe URL EXACTLY the way production requests do. Keyless
+  # GB requests always fail (Google's anonymous pool returns 429 with
+  # `quota_limit_value: "0"`), so a probe without the key can never succeed
+  # and the blown fuse would never recover via probing. When no key is
+  # configured we omit `&key=` — the probe then matches whatever production
+  # does without a key.
+  @spec google_books_url(String.t()) :: String.t()
+  def google_books_url(params) do
     base = "#{@google_books_url}?#{params}"
 
     case google_books_api_key() do
@@ -146,7 +155,9 @@ defmodule Stacks.Books.ISBNResolver do
 
   @doc """
   Searches for a book by title and optional author, returning the first match
-  with an ISBN. Uses Google Books search API.
+  with an ISBN. Consults Open Library first and falls back to Google Books
+  only when Open Library misses for a given query variant (see
+  `try_candidate/4` for the rationale).
 
   Tries progressively broader queries to handle cut-off titles and partial
   author names:
@@ -287,17 +298,25 @@ defmodule Stacks.Books.ISBNResolver do
     end)
   end
 
-  # Race OL + GB per candidate query. The `resolve/1` path already does
-  # this for direct-ISBN lookups; title-based candidates benefit even
-  # more because `search_by_title/3` can try up to 12 candidate variants,
-  # so sequential OL-then-GB inside each one compounds to 24+ HTTP
-  # round-trips on a miss. Racing halves per-candidate cost and, for
-  # mixed_text uploads (which may resolve several books), meaningfully
-  # reduces total pipeline time.
+  # Sequential OL-first per candidate query, Google Books ONLY when OL
+  # misses that variant. This used to race OL + GB (`await_first_success`)
+  # per variant, but Google Books is a fallback, not a peer:
   #
-  # The existing `await_first_success/2` helper matches `{:ok, _}` —
-  # OL/GB title searches return a 3-tuple `{:ok, isbn, metadata}`, so
-  # wrap+unwrap around the race rather than duplicate the helper.
+  #   * OL answers the overwhelming majority of title-search variants, so
+  #     racing GB on every variant added no quality gain.
+  #   * GB's backend 503s stochastically under burst (~10% per request,
+  #     empirically measured). `search_by_title/4` tries up to 12 variants
+  #     per upload, so racing multiplied burst volume ~10× — enough
+  #     self-inflicted flakes to melt :google_books_fuse past its
+  #     5-in-60s threshold during a single mixed_text upload.
+  #
+  # Latency trade-off: GB now only adds latency on OL-miss variants
+  # (sequential worst case OL_time + GB_time per variant, vs
+  # max(OL, GB) racing) — acceptable because misses are the minority
+  # case and the fuse staying closed is worth far more than the
+  # occasional extra round-trip. The direct-ISBN `resolve/1` path keeps
+  # its OL+GB race (`race_resolve/1`): it is a single query, not 12,
+  # so it does not amplify burst volume the same way.
   #
   # When `excluded_isbns` or `excluded_descriptors` is non-empty, an
   # OL/GB hit whose ISBN matches an entry, OR whose (title, author)
@@ -313,26 +332,23 @@ defmodule Stacks.Books.ISBNResolver do
   # from one edition to the next; (title, author) exclusion treats all
   # editions as the same book and skips past them.
   #
-  # Known trade-off: the OL-vs-GB race keeps first-upstream-wins
-  # semantics BETWEEN the two providers; candidate scoring (see
-  # `pick_best_candidate/3`) applies WITHIN each provider's result list.
-  # A better-scoring doc in the slower provider's response can lose to
-  # the faster provider's best doc.
+  # Provider-preference note: OL-first means an OL hit always wins over
+  # a potentially better-scoring GB doc for the same variant; candidate
+  # scoring (see `pick_best_candidate/3`) applies WITHIN each provider's
+  # result list. Under the old race this cross-provider pick was merely
+  # non-deterministic (faster provider won); now it is deterministic.
   defp try_candidate({t, a}, signals, excluded_isbns, excluded_descriptors) do
-    ol =
-      Task.async(fn ->
-        wrap_3tuple(
-          open_library_title_search(t, a, signals, excluded_isbns, excluded_descriptors)
-        )
-      end)
+    result =
+      case open_library_title_search(t, a, signals, excluded_isbns, excluded_descriptors) do
+        {:ok, _isbn, _metadata} = ok ->
+          ok
 
-    gb =
-      Task.async(fn ->
-        wrap_3tuple(google_books_search(t, a, signals, excluded_isbns, excluded_descriptors))
-      end)
+        _ol_miss_or_error ->
+          google_books_search(t, a, signals, excluded_isbns, excluded_descriptors)
+      end
 
-    case await_first_success([ol, gb], {:error, :not_found}) do
-      {:ok, {isbn, metadata}} ->
+    case result do
+      {:ok, isbn, metadata} ->
         cond do
           excluded_isbn?(isbn, excluded_isbns) -> nil
           excluded_descriptor?(metadata, excluded_descriptors) -> nil
@@ -343,9 +359,6 @@ defmodule Stacks.Books.ISBNResolver do
         nil
     end
   end
-
-  defp wrap_3tuple({:ok, isbn, metadata}), do: {:ok, {isbn, metadata}}
-  defp wrap_3tuple(other), do: other
 
   # Hyphen/space-insensitive ISBN membership check. The upstream stores
   # rejected ISBNs as `book.primary_edition.isbn` (usually a clean

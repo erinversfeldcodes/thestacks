@@ -194,6 +194,25 @@ else
     CORE_APP="stacks-core-pr-${SANITISED}"
     MODAL_APP="thestacks-vision-${SANITISED}"
     echo "==> Deploy stack for branch: ${BRANCH}"
+
+    # ── Upstream resolver preflight (preview only) ────────────────────────
+    # A preview stack exists to run the deployed E2E suite, and the upload
+    # tests are meaningless when Open Library is down (EnrichBookJob can
+    # never replace the placeholder title). Check the upstreams NOW —
+    # before the ~30-min Neon-branch + Fly + Modal cycle — instead of
+    # discovering it in a 6-minute E2E poll timeout at the very end.
+    # Google Books issues (incl. quota exhaustion) are WARN-only inside
+    # the preflight script; only an Open Library outage aborts. Prod
+    # deploys skip this: shipping code must not be blocked by OL weather.
+    if [[ "${STACKS_SKIP_RESOLVER_PREFLIGHT:-0}" != "1" ]]; then
+        echo ""
+        echo "==> Preflight: external resolver health (OL required, GB advisory)..."
+        if ! bash "${REPO_ROOT}/scripts/preflight-resolver-health.sh"; then
+            echo "FAIL deploy: Open Library is unreachable — the E2E vision suite cannot pass; aborting before burning a deploy cycle." >&2
+            echo "    Override for manual inspection deploys: STACKS_SKIP_RESOLVER_PREFLIGHT=1" >&2
+            exit 1
+        fi
+    fi
 fi
 VISION_SERVICE_URL=""
 NEON_BRANCH_NAME=""
