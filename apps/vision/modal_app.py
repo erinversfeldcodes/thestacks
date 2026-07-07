@@ -315,8 +315,8 @@ _fastapi_image = (
     # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
     .apt_install("libzbar0")
     .pip_install(
-        "fastapi==0.135.1",
-        "starlette==0.52.1",
+        "fastapi==0.139.0",
+        "starlette==1.3.1",
         "uvicorn[standard]==0.41.0",
         "httpx==0.28.1",
         "pydantic==2.10.4",
