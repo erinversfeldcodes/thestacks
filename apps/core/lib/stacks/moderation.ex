@@ -319,9 +319,9 @@ defmodule Stacks.Moderation do
   end
 
   defp resolve_candidate(candidate, idx, context) do
-    title = candidate["title"]
-    author = candidate["author"]
-    raw_text = candidate["raw_text"]
+    title = normalise_nullish_text(candidate["title"])
+    author = normalise_author(candidate["author"])
+    raw_text = normalise_nullish_text(candidate["raw_text"])
     excluded_isbns = Map.get(context, :excluded_isbns, [])
     excluded_descriptors = Map.get(context, :excluded_books, [])
 
@@ -334,6 +334,31 @@ defmodule Stacks.Moderation do
       error -> error
     end
   end
+
+  # The VLM sometimes emits a placeholder STRING instead of omitting a
+  # field: `author: "null"` was observed in production, which went out
+  # as a literal `inauthor:null` Google Books query term and was treated
+  # as a real author name by candidate scoring. Normalise null-ish
+  # author strings to nil at the single point where VLM candidates are
+  # read (`resolve_candidate/3`) — `ISBNResolver.search_by_title/4`
+  # already drops author params for nil, and `CandidateScorer`'s author
+  # component treats a missing author as no-evidence-no-penalty.
+  @nullish_author_values ["null", "none", "n/a", "unknown", ""]
+
+  defp normalise_author(value) when is_binary(value) do
+    if String.downcase(String.trim(value)) in @nullish_author_values, do: nil, else: value
+  end
+
+  defp normalise_author(_), do: nil
+
+  # Title and raw_text get the conservative rule: only the literal
+  # "null" placeholder is dropped. A real book could be titled
+  # "Unknown" or "None", but no book is titled exactly "null".
+  defp normalise_nullish_text(value) when is_binary(value) do
+    if String.downcase(String.trim(value)) == "null", do: nil, else: value
+  end
+
+  defp normalise_nullish_text(_), do: nil
 
   defp title_fallback(nil, _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
