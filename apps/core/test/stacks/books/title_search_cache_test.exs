@@ -105,6 +105,27 @@ defmodule Stacks.Books.TitleSearchCacheTest do
       assert :miss = TitleSearchCache.get("B", "b", nil)
     end
 
+    test "invalidating by ISBN-13 removes an entry stored in ISBN-10 form" do
+      # The live production gap: OL docs often carry only the ISBN-10, so
+      # the memo stores "0312864833", but rejection passes the edition's
+      # ISBN-13 "9780312864835". Both sides canonicalise to the 13 form.
+      :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "0312864833", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn("9780312864835")
+      assert :miss = TitleSearchCache.get("Heartfire", "Card", nil)
+    end
+
+    test "invalidating by ISBN-10 removes an entry stored in ISBN-13 form" do
+      :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "9780312864835", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn("0312864833")
+      assert :miss = TitleSearchCache.get("Heartfire", "Card", nil)
+    end
+
+    test "cross-form invalidation handles an ISBN-10 with X check digit" do
+      :ok = TitleSearchCache.put("Obasan", "Kogawa", nil, {:ok, "080442957X", %{}})
+      :ok = TitleSearchCache.invalidate_by_isbn("9780804429573")
+      assert :miss = TitleSearchCache.get("Obasan", "Kogawa", nil)
+    end
+
     test "does not remove negative entries or entries for other ISBNs" do
       :ok = TitleSearchCache.put("Fake", "Fake", nil, {:error, :not_found})
       :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")

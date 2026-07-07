@@ -44,6 +44,7 @@ defmodule Stacks.Books.TitleSearchCache do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Books
   alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCacheEntry
 
@@ -143,11 +144,16 @@ defmodule Stacks.Books.TitleSearchCache do
   upload of the same image (retry rounds carry `excluded_isbns` and
   bypass the cache; round one does not).
 
-  Matching is exact ISBN equality after normalisation — hyphens and
-  whitespace stripped, upcased (ISBN-10 check digit `x`) — on BOTH the
-  argument and the stored ISBN. No ISBN-10 ↔ ISBN-13 conversion happens
-  here; cross-edition invalidation is the caller's job (pass every
-  edition ISBN of the rejected book).
+  Matching is canonical-ISBN-13 equality (`Stacks.Books.canonical_isbn13/1`)
+  on BOTH the argument and the stored ISBN: hyphens/whitespace stripped,
+  upcased, and any valid ISBN-10 converted to its ISBN-13 form. The
+  conversion matters in production — title searches memoise whatever
+  ISBN form the OL/GB doc yielded (OL docs often only carry ISBN-10),
+  while rejections pass `book_editions.isbn`, which is always ISBN-13.
+  Bare string equality made the invalidation a no-op for those rows.
+  Cross-EDITION invalidation (different works/printings, genuinely
+  different ISBNs) remains the caller's job — pass every edition ISBN
+  of the rejected book.
 
   Tier mechanics:
 
@@ -156,25 +162,30 @@ defmodule Stacks.Books.TitleSearchCache do
       cache survives. Per-node only; other Fly machines' L1 entries
       converge when they expire (≤24 h), and cannot be repopulated from
       L2 because the authoritative row is deleted below.
-    * **L2 (Postgres)** — a single `DELETE` on `outcome = 'found'` rows
-      whose `isbn` column matches after in-SQL normalisation
-      (`regexp_replace` + `upper`). Sequential scan is fine at this
-      table's scale (bounded by distinct title-search inputs per 24 h).
+    * **L2 (Postgres)** — fetch-then-delete: read `(id, isbn)` for all
+      `outcome = 'found'` rows, canonicalise in Elixir, delete the
+      matching ids. Replicating ISBN-10 → 13 conversion in SQL isn't
+      worth it at this table's scale (bounded by distinct title-search
+      inputs per 24 h); two round-trips on a user-initiated rejection
+      are fine. Deliberately NOT transactional — a row inserted between
+      the read and the delete would carry the just-rejected ISBN from a
+      concurrent in-flight pipeline and is acceptable best-effort loss,
+      same as invalidation racing that pipeline in any interleaving.
 
   Emits `[:stacks, :books, :title_search_cache, :invalidated]` with
   measurements `%{count: n}` (total entries removed across both tiers)
-  and metadata `%{isbn: normalised_isbn, l1_count: _, l2_count: _}`.
+  and metadata `%{isbn: canonical_isbn, l1_count: _, l2_count: _}`.
   """
   @spec invalidate_by_isbn(String.t()) :: :ok
   def invalidate_by_isbn(isbn) when is_binary(isbn) do
-    case normalise_isbn(isbn) do
+    case Books.canonical_isbn13(isbn) do
       "" ->
         :ok
 
-      normalised ->
-        l1_count = ets_delete_by_isbn(normalised)
-        l2_count = db_delete_by_isbn(normalised)
-        emit_invalidated(normalised, l1_count, l2_count)
+      canonical ->
+        l1_count = ets_delete_by_isbn(canonical)
+        l2_count = db_delete_by_isbn(canonical)
+        emit_invalidated(canonical, l1_count, l2_count)
         :ok
     end
   end
@@ -247,15 +258,17 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   # Scan-and-delete L1 entries whose positive result matches the
-  # (already normalised) ISBN. Full table scan is acceptable: the table
-  # is bounded by distinct title-search inputs within the TTL window,
-  # and invalidation only runs on user-initiated rejections.
-  defp ets_delete_by_isbn(normalised_isbn) do
+  # (already canonicalised) ISBN. The stored ISBN is canonicalised too —
+  # ISBN-10 memos must match ISBN-13 invalidations. Full table scan is
+  # acceptable: the table is bounded by distinct title-search inputs
+  # within the TTL window, and invalidation only runs on user-initiated
+  # rejections.
+  defp ets_delete_by_isbn(canonical_isbn) do
     @table
     |> :ets.tab2list()
     |> Enum.count(fn
       {key, {:ok, stored_isbn, _metadata}, _expires_at} ->
-        if normalise_isbn(stored_isbn) == normalised_isbn do
+        if Books.canonical_isbn13(stored_isbn) == canonical_isbn do
           :ets.delete(@table, key)
           true
         else
@@ -367,32 +380,40 @@ defmodule Stacks.Books.TitleSearchCache do
       :ok
   end
 
-  # Delete L2 rows whose stored ISBN matches after in-SQL normalisation
-  # (strip hyphens/whitespace, upcase). `outcome = 'found'` rows are the
-  # only ones carrying an ISBN; negative rows store "".
-  defp db_delete_by_isbn(normalised_isbn) do
+  # Delete L2 rows whose stored ISBN canonicalises to the (already
+  # canonicalised) target: fetch (id, isbn) for `outcome = 'found'` rows
+  # (the only ones carrying an ISBN; negative rows store ""), run
+  # `Books.canonical_isbn13/1` in Elixir rather than replicating the
+  # ISBN-10 → 13 conversion in SQL, then delete by id list. Best-effort,
+  # non-transactional — see `invalidate_by_isbn/1` doc for the rationale.
+  defp db_delete_by_isbn(canonical_isbn) do
     if persistent_enabled?() do
-      {count, _} =
-        Repo.delete_all(
-          from(e in TitleSearchCacheEntry,
-            where: e.outcome == "found",
-            where:
-              fragment(
-                "upper(regexp_replace(?, '[\\s-]', '', 'g')) = ?",
-                e.isbn,
-                ^normalised_isbn
-              )
-          )
+      matching_ids =
+        from(e in TitleSearchCacheEntry,
+          where: e.outcome == "found",
+          select: {e.id, e.isbn}
         )
+        |> Repo.all()
+        |> Enum.filter(fn {_id, isbn} -> Books.canonical_isbn13(isbn) == canonical_isbn end)
+        |> Enum.map(fn {id, _isbn} -> id end)
 
-      count
+      case matching_ids do
+        [] ->
+          0
+
+        ids ->
+          {count, _} =
+            Repo.delete_all(from(e in TitleSearchCacheEntry, where: e.id in ^ids))
+
+          count
+      end
     else
       0
     end
   rescue
     error ->
       Logger.warning(
-        "TitleSearchCache L2 delete_by_isbn failed for #{normalised_isbn}: #{inspect(error)}"
+        "TitleSearchCache L2 delete_by_isbn failed for #{canonical_isbn}: #{inspect(error)}"
       )
 
       0
@@ -425,15 +446,6 @@ defmodule Stacks.Books.TitleSearchCache do
     str
     |> String.trim()
     |> String.downcase()
-  end
-
-  # ISBN normalisation for invalidation matching: strip hyphens and
-  # whitespace, upcase (ISBN-10 check digit `x`). Mirrors the in-SQL
-  # normalisation in `db_delete_by_isbn/1`.
-  defp normalise_isbn(isbn) when is_binary(isbn) do
-    isbn
-    |> String.replace(~r/[\s-]/, "")
-    |> String.upcase()
   end
 
   # ---------------------------------------------------------------------------
