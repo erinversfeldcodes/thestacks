@@ -147,7 +147,10 @@ run_ci_and_get_section() {
 
     local tmpfile
     tmpfile="$(mktemp)"
-    "${runner[@]}" just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
+    # ${runner[@]+...} guards the empty-array case: macOS bash 3.2 treats
+    # expanding an empty array under `set -u` as an unbound variable and
+    # aborts, silently skipping the entire CI run before a push.
+    ${runner[@]+"${runner[@]}"} just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
     local ci_output
     ci_output="$(cat "$tmpfile")"
     rm -f "$tmpfile"
