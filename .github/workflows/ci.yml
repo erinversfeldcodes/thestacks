@@ -126,7 +126,7 @@ jobs:
       python: ${{ steps.v.outputs.python }}
       postgres: ${{ steps.v.outputs.postgres }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Read .versions
         id: v
         run: |
@@ -163,8 +163,8 @@ jobs:
       lockfiles: ${{ steps.filter.outputs.lockfiles }}
       source: ${{ steps.filter.outputs.source }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
         id: filter
         with:
           filters: |
@@ -235,25 +235,25 @@ jobs:
     env:
       MIX_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             deps
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: priv/plts
           key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: dialyzer-${{ runner.os }}-
       - run: mix deps.get
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       # Elixir-side proto artifacts only — lint doesn't need the Elm decoders.
@@ -292,12 +292,12 @@ jobs:
       STACKS_APP_DB_PASSWORD: ci-stacks-app-password
       STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             deps
@@ -305,10 +305,10 @@ jobs:
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
       - run: mix deps.get
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Generate proto artifacts
@@ -329,18 +329,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.elm
           key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
           restore-keys: elm-${{ runner.os }}-
       - working-directory: frontend
         run: npm install --save-dev elm elm-format elm-test
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - run: scripts/lint-elm.sh
@@ -352,14 +352,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          # Explicit toolchain is required when the action is pinned to a
+          # commit SHA — dtolnay/rust-toolchain normally infers the toolchain
+          # from the ref name (@stable), which a SHA pin no longer carries.
+          toolchain: stable
           # llvm-tools is required by cargo-llvm-cov for the 80% coverage
           # gate in scripts/test-rust.sh. Locally it's installed by
           # setup.sh via `rustup component add llvm-tools-preview`.
           components: rustfmt, clippy, llvm-tools
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -377,7 +381,7 @@ jobs:
       # --check` follows `pub mod generated;` from src/proto/mod.rs and
       # errors if the file isn't there ("failed to resolve mod
       # `generated`"), so the generator has to run before lint.
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Generate Rust proto artifacts
@@ -391,8 +395,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
@@ -408,7 +412,7 @@ jobs:
       # apps/vision/app/proto/gen/ is gitignored; lint and tests both
       # `from app.proto.gen.vision import ...`, which fails to resolve
       # without first running the generator. Same shape as test-rust.
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Generate Python proto artifacts
@@ -422,8 +426,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - run: scripts/lint-proto.sh
@@ -439,7 +443,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install actionlint
         # Use the upstream-published install script. Pins to a specific
         # version + the install dir so the binary lands at a predictable
@@ -478,12 +482,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             deps
@@ -495,11 +499,11 @@ jobs:
           MIX_ENV: dev
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
         run: mix deps.get
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Generate proto artifacts
@@ -530,10 +534,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -543,14 +547,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: hadolint/hadolint-action@v3.1.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: deploy/Dockerfile.core
-      - uses: hadolint/hadolint-action@v3.1.0
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: deploy/Dockerfile.vision
-      - uses: hadolint/hadolint-action@v3.1.0
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: deploy/Dockerfile.scraper
 
@@ -562,7 +566,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - run: semgrep scan --config auto --error
 
   checkov:
@@ -571,8 +575,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bridgecrewio/checkov-action@a7683e7b72a04503521247973281ec8142e1ac1f # v12.3112.0
         with:
           directory: deploy/
 
@@ -582,8 +586,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.35.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -599,7 +603,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
       - name: Install squawk
@@ -613,12 +617,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
       - name: Install Elixir deps
@@ -631,10 +635,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-      - uses: trufflesecurity/trufflehog@main
+      - uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           path: '.'
           base: main
@@ -647,10 +651,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install grype and scan
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          # Two-step install instead of curl | sh: download the installer from
+          # a pinned tag to a file, then execute it with an explicit grype
+          # version. No mutable remote script is piped straight into a shell.
+          curl -sSfL -o /tmp/grype-install.sh \
+            https://raw.githubusercontent.com/anchore/grype/v0.115.0/install.sh
+          sh /tmp/grype-install.sh -b /usr/local/bin v0.115.0
           grype db update
           grype dir:. --fail-on high --only-fixed
 
@@ -660,8 +669,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Generate proto artifacts for Docker builds
@@ -728,16 +737,16 @@ jobs:
       # allows scripts/check-schema-diff.sh to pass on destructive diffs.
       DB_BREAKING_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'db-breaking') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       # Pinned: 2.47.0 is the version verified locally against all Phase 2
@@ -768,7 +777,7 @@ jobs:
           scripts/lint-migrations.sh ${changed}
 
       # ── 3. Schema diff — BEFORE (origin/main) vs AFTER (HEAD + migrate) ───
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
@@ -859,7 +868,7 @@ jobs:
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           lfs: true
           # fetch-depth: 0 gives deploy-stack.sh enough git history to diff
@@ -867,21 +876,28 @@ jobs:
           # whether to run the per-preview seed step. Default depth=1 would
           # leave origin/main unreachable.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
       - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+      - name: Alias fly -> flyctl
+        # fly.io's install.sh provided both `fly` and `flyctl`; setup-flyctl
+        # ships only `flyctl`, but deploy scripts invoke `fly`.
         run: |
-          curl -L https://fly.io/install.sh | sh
-          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-      - uses: bufbuild/buf-setup-action@v1.47.2
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
       - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
@@ -896,7 +912,7 @@ jobs:
           python3 scripts/gen_python_proto.py --language rust
           python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -931,6 +947,9 @@ jobs:
           echo "Pinned ${HOST} -> ${IPV4}"
           getent hosts "${HOST}"
       - name: Warm Fly machines and Neon database
+        # The only piped curl below feeds the login JSON response to python3
+        # for token extraction — nothing fetched is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
           # `_` is the bash convention for an intentionally unused loop variable.
@@ -997,6 +1016,10 @@ jobs:
         #   * either auth login failing → seed/auth path broken (real issue)
         #   * owner has zero placements anywhere → seed contract broken
         # Both fail loudly so someone is forced to fix the test surface.
+        #
+        # curl output is piped to python3 purely to parse login/API JSON
+        # responses — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           U1="$(curl -sf "${CORE_URL}/api/auth/login" \
             -H "Content-Type: application/json" \

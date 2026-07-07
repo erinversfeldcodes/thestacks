@@ -12,6 +12,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Surface .venv-tools/ and pip --user tools outside the dev shell, and make
+# sure `dbt` is dbt-core (not the Homebrew dbt Cloud CLI) before `dbt docs
+# generate` below.
+# shellcheck source=scripts/lib/python-tools.sh
+source "$REPO_ROOT/scripts/lib/python-tools.sh"
+ensure_python_tools_path
+require_dbt_core
+
 if ! command -v check-model-has-description &>/dev/null; then
     echo "ERROR: dbt-checkpoint not installed. Run: pip install 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'" >&2
     exit 1

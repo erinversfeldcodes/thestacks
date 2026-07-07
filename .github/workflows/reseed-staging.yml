@@ -38,7 +38,7 @@ jobs:
     env:
       MIX_ENV: prod
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Read .versions
         id: v
         run: |
@@ -46,11 +46,11 @@ jobs:
             echo "otp=$(grep '^otp=' .versions | cut -d= -f2)"
             echo "elixir=$(grep '^elixir=' .versions | cut -d= -f2)"
           } >> "$GITHUB_OUTPUT"
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ steps.v.outputs.otp }}
           elixir-version: ${{ steps.v.outputs.elixir }}
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
 
@@ -59,6 +59,9 @@ jobs:
         env:
           NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
           NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
+        # curl output is piped to python3 purely to parse the Neon API JSON
+        # response — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           set -euo pipefail
           # Find the `staging` branch ID. Filter on name rather than `default`

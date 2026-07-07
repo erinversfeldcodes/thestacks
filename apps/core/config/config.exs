@@ -116,6 +116,22 @@ config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 
+# ── Time-zone database + hackney neutralisation ─────────────────────────────
+# time_zone_info is the canonical tz database: it bundles IANA data in the
+# package (no runtime download), so it works in the Docker prod image with no
+# network access or persistent volume. tzdata stays in the lockfile only
+# because timex hard-depends on it (timex ← elixir_feed_parser is also a hard
+# chain); its autoupdater — the sole hackney call site in the dependency
+# graph — is disabled so the hackney 4.x override in mix.exs is never
+# exercised through tzdata's 1.x-era API expectations.
+config :elixir, :time_zone_database, TimeZoneInfo.TimeZoneDatabase
+config :time_zone_info, update: :disabled
+config :tzdata, :autoupdate, :disabled
+
+# ex_aws would otherwise default to its hackney adapter at runtime (R2
+# storage). Req is already a direct dependency and swoosh uses it too.
+config :ex_aws, http_client: ExAws.Request.Req
+
 config :core, :ai_budget,
   daily_limit_cents: 500,
   monthly_limit_cents: 5_000

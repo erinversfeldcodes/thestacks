@@ -111,7 +111,7 @@ jobs:
       MODAL_APP_NAME: thestacks-vision
       # (FORCE_BREACH is declared per-step on the gate — see below.)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           lfs: true
@@ -127,27 +127,34 @@ jobs:
             echo "python=${PYTHON_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ steps.versions.outputs.otp }}
           elixir-version: ${{ steps.versions.outputs.elixir }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ steps.versions.outputs.node }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ steps.versions.outputs.python }}
 
-      - uses: bufbuild/buf-setup-action@v1.47.2
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
         with:
           github_token: ${{ github.token }}
 
       - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+      - name: Alias fly -> flyctl
+        # fly.io's install.sh provided both `fly` and `flyctl`; setup-flyctl
+        # ships only `flyctl`, but deploy scripts invoke `fly`.
         run: |
-          curl -L https://fly.io/install.sh | sh
-          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Modal
         run: pip install modal
@@ -274,6 +281,9 @@ jobs:
           DATABASE_URL: ${{ env.DATABASE_URL }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        # curl output is piped to python3 purely to parse the Neon API JSON
+        # response — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           set -euo pipefail
           # Fast-fail before any work if the Neon secrets aren't staged in
@@ -485,7 +495,7 @@ jobs:
 
       - name: upload-artifact — gate-observations.json (deploy + post-rollback)
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gate-observations
           path: |
