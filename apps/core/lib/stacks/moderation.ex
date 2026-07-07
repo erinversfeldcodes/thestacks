@@ -192,8 +192,9 @@ defmodule Stacks.Moderation do
   # VLM could return the exact ISBN of a book the user already said "no"
   # to (e.g. a screenshot whose barcode the model misread on round 1
   # then read the same way on round 2) and we'd resolve it again. The
-  # comparison is hyphen/space-insensitive — see `Stacks.Books.ISBNResolver`
-  # `excluded_isbn?/2` for the normalised match.
+  # comparison is hyphen/space- AND ISBN-10/13-form-insensitive (both
+  # sides canonicalised via `Books.canonical_isbn13/1`) — see
+  # `Stacks.Books.ISBNResolver` `excluded_isbn?/2` for the same match.
   #
   # Candidates without a `potential_isbns` field (or with an empty list)
   # fall through to the title-search path where exclusions are applied
@@ -214,8 +215,9 @@ defmodule Stacks.Moderation do
     normalised != "" and Enum.any?(excluded_isbns, &(normalise_isbn(&1) == normalised))
   end
 
-  defp normalise_isbn(value) when is_binary(value),
-    do: value |> String.replace(~r/[\s\-]/, "") |> String.upcase()
+  # Canonical ISBN-13 on both sides: a VLM candidate carrying the
+  # ISBN-10 form of a rejected book's ISBN-13 must still be dropped.
+  defp normalise_isbn(value) when is_binary(value), do: Books.canonical_isbn13(value)
 
   defp normalise_isbn(_), do: ""
 

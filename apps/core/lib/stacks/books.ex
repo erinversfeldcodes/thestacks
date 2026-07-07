@@ -1101,6 +1101,61 @@ defmodule Stacks.Books do
     check != 10 and check == Enum.at(digits, 9)
   end
 
+  @doc """
+  Canonical ISBN-13 comparison form of `isbn`.
+
+  Strips hyphens/whitespace and upcases, then converts a checksum-valid
+  ISBN-10 (including an `X` check digit) to its ISBN-13 equivalent:
+  `"978"` + the first nine digits + a recomputed EAN-13 (mod-10) check
+  digit over those twelve. The ISBN-10 check digit is discarded — it
+  does not carry into the 13 form. Anything else (13-digit strings,
+  checksum-invalid 10s, garbage, `""`) is returned in the stripped and
+  upcased form otherwise unchanged; non-binary input (incl. `nil`)
+  returns `nil`.
+
+  Two ISBN strings identify the same edition iff their canonical forms
+  are equal, regardless of 10/13 form or hyphenation. Use this on BOTH
+  sides of any ISBN comparison (cache invalidation, rejection-retry
+  exclusions): OL/GB search docs often carry only the ISBN-10 form
+  while `book_editions.isbn` always stores ISBN-13, so bare
+  hyphen-stripped equality silently misses cross-form matches.
+  """
+  @spec canonical_isbn13(term()) :: String.t() | nil
+  def canonical_isbn13(isbn) when is_binary(isbn) do
+    normalised =
+      isbn
+      |> String.replace(~r/[\s-]/, "")
+      |> String.upcase()
+
+    if valid_isbn10?(normalised) do
+      to_isbn13(normalised)
+    else
+      normalised
+    end
+  end
+
+  def canonical_isbn13(_isbn), do: nil
+
+  # Shape + checksum gate for canonical_isbn13/1. Unlike isbn10_valid?/1
+  # (which only sees all-digit strings — valid_isbn_checksum?/1's regex
+  # filters `X` out before it), this accepts the `X` (= 10) check digit.
+  defp valid_isbn10?(isbn) do
+    isbn =~ ~r/^\d{9}[\dX]$/ and isbn10_check_digit_ok?(isbn)
+  end
+
+  defp isbn10_check_digit_ok?(<<first_nine::binary-size(9), check>>) do
+    sum =
+      first_nine
+      |> String.graphemes()
+      |> Enum.map(&String.to_integer/1)
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
+
+    expected = rem(11 - rem(sum, 11), 11)
+    actual = if check == ?X, do: 10, else: check - ?0
+    expected == actual
+  end
+
   # Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use
   # the canonical form. ISBN-13s (and anything else) are returned unchanged.
   defp to_isbn13(<<a, b, c, d, e, f, g, h, i, _check>>) do

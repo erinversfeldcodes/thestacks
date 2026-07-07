@@ -445,6 +445,26 @@ defmodule Stacks.ModerationTest do
       end
     end
 
+    test "exclusion is ISBN-10/13-form-insensitive: excluded 10 drops a candidate carrying the 13" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        # SingleIsbnCandidateClient yields "9780743273565" (ISBN-13);
+        # "0743273567" is the same edition's ISBN-10. Canonicalisation
+        # on both sides must still drop the candidate.
+        Application.put_env(:core, :vision_client, __MODULE__.SingleIsbnCandidateClient)
+
+        context = %{
+          image_b64: @test_image_b64,
+          excluded_isbns: ["0743273567"]
+        }
+
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(context)
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
     test "non-excluded VLM ISBN candidate is still resolved when excluded_isbns is set" do
       original = Application.get_env(:core, :vision_client)
 

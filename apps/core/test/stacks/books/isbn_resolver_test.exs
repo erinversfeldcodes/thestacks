@@ -872,6 +872,40 @@ defmodule Stacks.Books.ISBNResolverTest do
                )
     end
 
+    test "exclusion match is ISBN-10/13-form-insensitive" do
+      # A rejected book's edition ISBN is always stored as ISBN-13, but
+      # OL docs often only carry the ISBN-10 form. The excluded 13 must
+      # still knock out a doc yielding its 10 (canonical-13 both sides).
+      excluded_isbn13 = "9780312864835"
+      doc_isbn10 = "0312864833"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: [doc_isbn10])]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, :not_found} =
+               ISBNResolver.search_by_title("Heartfire", "Card", nil,
+                 excluded_isbns: [excluded_isbn13]
+               )
+    end
+
+    test "exclusion by ISBN-10 also excludes the ISBN-13 form" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc(isbn: ["9780312864835"])]}}
+      )
+
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      assert {:error, :not_found} =
+               ISBNResolver.search_by_title("Heartfire", "Card", nil,
+                 excluded_isbns: ["0312864833"]
+               )
+    end
+
     test "returns {:error, :not_found} when all candidate variants resolve to excluded ISBNs" do
       excluded = "9780743273565"
 

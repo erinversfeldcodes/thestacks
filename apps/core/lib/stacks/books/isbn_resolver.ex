@@ -360,10 +360,12 @@ defmodule Stacks.Books.ISBNResolver do
     end
   end
 
-  # Hyphen/space-insensitive ISBN membership check. The upstream stores
-  # rejected ISBNs as `book.primary_edition.isbn` (usually a clean
-  # 13-digit string), but the OL/GB search-result ISBNs sometimes
-  # arrive with formatting hyphens. Normalise both sides before compare.
+  # Form-insensitive ISBN membership check. The upstream stores rejected
+  # ISBNs as `book.primary_edition.isbn` (always a clean ISBN-13, see
+  # `Books.normalize_edition_isbn/1`), but OL/GB search-result ISBNs can
+  # arrive with formatting hyphens AND in ISBN-10 form (OL docs often
+  # only carry the 10). Canonicalise both sides to ISBN-13 before
+  # compare — a rejected 13 must also exclude a doc yielding its 10.
   defp excluded_isbn?(_isbn, []), do: false
 
   defp excluded_isbn?(isbn, excluded_isbns) do
@@ -374,7 +376,7 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp normalise_isbn_for_compare(value) when is_binary(value),
-    do: value |> String.replace(~r/[\s\-]/, "") |> String.upcase()
+    do: Stacks.Books.canonical_isbn13(value)
 
   defp normalise_isbn_for_compare(_), do: ""
 

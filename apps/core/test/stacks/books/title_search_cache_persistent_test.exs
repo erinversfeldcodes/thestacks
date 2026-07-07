@@ -155,6 +155,25 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
       assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
 
+    test "invalidating by ISBN-13 deletes an L2 row stored in ISBN-10 form (and vice versa)" do
+      # L2 replays the live production no-op: the memoised OL doc yielded
+      # ISBN-10, the rejection passed the edition's ISBN-13. Matching is
+      # canonical-13 on both sides (fetch-then-delete-by-id, since the
+      # 10 -> 13 conversion runs in Elixir, not SQL).
+      :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "0312864833", %{}})
+      TitleSearchCache.await_pending_writes()
+
+      :ok = TitleSearchCache.invalidate_by_isbn("9780312864835")
+      assert Repo.all(TitleSearchCacheEntry) == []
+
+      # Vice versa: stored as 13, invalidated by the 10 form.
+      :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "9780312864835", %{}})
+      TitleSearchCache.await_pending_writes()
+
+      :ok = TitleSearchCache.invalidate_by_isbn("0312864833")
+      assert Repo.all(TitleSearchCacheEntry) == []
+    end
+
     test "does not delete negative (not_found) rows" do
       :ok = TitleSearchCache.put("Fake", "Fake", nil, {:error, :not_found})
       TitleSearchCache.await_pending_writes()

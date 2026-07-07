@@ -668,6 +668,49 @@ defmodule Stacks.BooksTest do
     end
   end
 
+  describe "canonical_isbn13/1" do
+    # The seam behind cache invalidation and rejection-retry exclusion
+    # matching: OL docs often carry only the ISBN-10 form while the DB
+    # stores ISBN-13, so both sides of any comparison canonicalise here.
+
+    test "converts a valid ISBN-10 to its ISBN-13 form" do
+      # The live production case: title-search memoised the OL doc's
+      # ISBN-10 while rejection invalidated by the edition's ISBN-13.
+      assert Books.canonical_isbn13("0312864833") == "9780312864835"
+    end
+
+    test "converts a valid ISBN-10 with an X check digit" do
+      assert Books.canonical_isbn13("080442957X") == "9780804429573"
+      # Lowercase x is upcased before the shape check.
+      assert Books.canonical_isbn13("080442957x") == "9780804429573"
+    end
+
+    test "strips hyphens and whitespace before converting" do
+      assert Books.canonical_isbn13("0-312-86483-3") == "9780312864835"
+      assert Books.canonical_isbn13(" 0 312 86483 3 ") == "9780312864835"
+    end
+
+    test "passes ISBN-13s through (normalised only)" do
+      assert Books.canonical_isbn13("9780312864835") == "9780312864835"
+      assert Books.canonical_isbn13("978-0-312-86483-5") == "9780312864835"
+    end
+
+    test "leaves a checksum-invalid 10-digit string unconverted" do
+      assert Books.canonical_isbn13("0312864834") == "0312864834"
+    end
+
+    test "returns garbage in stripped/upcased form, otherwise unchanged" do
+      assert Books.canonical_isbn13("garbage!") == "GARBAGE!"
+      assert Books.canonical_isbn13("") == ""
+      assert Books.canonical_isbn13("  - ") == ""
+    end
+
+    test "returns nil for non-binary input" do
+      assert Books.canonical_isbn13(nil) == nil
+      assert Books.canonical_isbn13(123) == nil
+    end
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
