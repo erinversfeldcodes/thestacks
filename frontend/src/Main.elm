@@ -1,4 +1,10 @@
-port module Main exposing (main)
+port module Main exposing
+    ( Auth
+    , decodeFlags
+    , main
+    , shouldShowOnboarding
+    , viewNav
+    )
 
 import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
@@ -671,6 +677,12 @@ update msg model =
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
                             , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
                             )
+
+                        Login.RegistrationSucceeded _ ->
+                            -- Registration only sends a confirmation email; no JWT is
+                            -- issued and no navigation happens. The Login page has already
+                            -- switched itself to the pending state via its own model.
+                            ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
@@ -1535,7 +1547,7 @@ view model =
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
-            , viewNav model
+            , viewNav model.route model.auth model.userMenu
             , main_
                 [ id "main-content"
                 , class
@@ -1665,8 +1677,8 @@ pageTitle route =
             "Not Found — The Stacks"
 
 
-viewNav : Model -> Html Msg
-viewNav model =
+viewNav : Route -> Maybe Auth -> UserMenu.Model -> Html Msg
+viewNav route maybeAuth userMenu =
     header [ class "app-header" ]
         [ div [ class "app-header__brand app-nav__dropdown" ]
             [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
@@ -1679,33 +1691,33 @@ viewNav model =
             ]
         , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
-                (case model.auth of
+                (case maybeAuth of
                     Nothing ->
-                        [ navItem model.route Catalogue "Catalogue"
-                        , navItem model.route MarketplaceBrowse "Marketplace"
-                        , navItem model.route Login "Sign In"
+                        [ navItem route Catalogue "Catalogue"
+                        , navItem route MarketplaceBrowse "Marketplace"
+                        , navItem route Login "Sign In"
                         ]
 
                     Just auth ->
-                        [ navItem model.route Library "Library"
-                        , navItem model.route AntiLibrary "Antilibrary"
-                        , navItem model.route WishList "Wish List"
-                        , navItem model.route ReadingPile "Reading Pile"
-                        , navItem model.route LookingForHome "Looking for a Home"
-                        , navDropdown model.route
+                        [ navItem route Library "Library"
+                        , navItem route AntiLibrary "Antilibrary"
+                        , navItem route WishList "Wish List"
+                        , navItem route ReadingPile "Reading Pile"
+                        , navItem route LookingForHome "Looking for a Home"
+                        , navDropdown route
                             Catalogue
                             "Catalogue"
                             [ ( Search, "Search" )
                             , ( Upload, "Add Book" )
                             ]
-                        , navDropdown model.route
+                        , navDropdown route
                             MarketplaceBrowse
                             "Marketplace"
                             [ ( MarketplaceCreate, "Create Listing" )
                             , ( MarketplaceMyListings, "My Listings" )
                             ]
                         , if auth.user.role == "owner" then
-                            navDropdown model.route
+                            navDropdown route
                                 Route.AdminMetrics
                                 "Admin"
                                 [ ( Route.AdminSourceApproval, "Sources" )
@@ -1716,7 +1728,7 @@ viewNav model =
                             text ""
                         , li
                             [ class
-                                (if isSettingsRoute model.route then
+                                (if isSettingsRoute route then
                                     "app-nav__item app-nav__item--active app-nav__dropdown"
 
                                  else
@@ -1724,7 +1736,7 @@ viewNav model =
                                 )
                             ]
                             [ Html.map UserMenuMsg
-                                (UserMenu.view auth.user model.userMenu)
+                                (UserMenu.view auth.user userMenu)
                             ]
                         ]
                 )
@@ -1900,21 +1912,29 @@ viewOverlay model =
             text ""
 
 
+{-| The onboarding overlay is shown for an authenticated user who has not yet
+completed onboarding and has no placements on any bookshelf.
+-}
+shouldShowOnboarding : Maybe Auth -> Bool -> Bool -> Bool
+shouldShowOnboarding maybeAuth onboardingCompleted hasAnyPlacements =
+    case maybeAuth of
+        Just _ ->
+            not onboardingCompleted && not hasAnyPlacements
+
+        Nothing ->
+            False
+
+
 {-| Show onboarding overlay for authenticated users with no placements
 who haven't completed onboarding yet.
 -}
 viewOnboarding : Model -> Html Msg
 viewOnboarding model =
-    case model.auth of
-        Just _ ->
-            if not model.onboardingCompleted && not model.hasAnyPlacements then
-                Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+    if shouldShowOnboarding model.auth model.onboardingCompleted model.hasAnyPlacements then
+        Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
 
-            else
-                text ""
-
-        Nothing ->
-            text ""
+    else
+        text ""
 
 
 viewHome : Html Msg

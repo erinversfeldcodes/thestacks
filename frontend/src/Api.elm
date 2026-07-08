@@ -14,6 +14,7 @@ module Api exposing
     , PollResponse
     , PollStatus(..)
     , QualityTrends
+    , RegisterError(..)
     , SourceHealth
     , UploadInit
     , acceptInvitation
@@ -137,6 +138,19 @@ authResponseDecoder =
     Decode.map fromProtoAuthResponse ProtoAuth.decodeAuthResponse
 
 
+{-| Decoder for the registration response.
+
+The backend returns `{"message": "confirmation_email_sent"}` on HTTP 201 — it
+does NOT return an auth token. We deliberately require the `"message"` key so a
+missing/unexpected body fails loudly (Err BadBody) rather than silently
+succeeding the way the lenient proto AuthResponse decoder would.
+
+-}
+registrationResponseDecoder : Decoder ()
+registrationResponseDecoder =
+    Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
+
+
 {-| The identification status of an uploaded image.
 Fails loudly on unknown values rather than silently falling through.
 -}
@@ -223,9 +237,30 @@ streamEventDecoder =
         )
 
 
+{-| A registration failure.
+
+A 422 carries per-field validation errors (keyed by field name — `email`,
+`password`, `display_name`) so the UI can explain the _actual_ problem rather
+than guessing. Every other failure (network, timeout, unexpected status, or a
+422 whose body we could not parse) is a `RegisterRequestFailed`.
+
+-}
+type RegisterError
+    = RegisterValidationFailed (List ( String, List String ))
+    | RegisterRequestFailed Http.Error
+
+
+{-| Decode the backend's `{"errors": {field: [msg, ...]}}` 422 body. See
+`format_errors/1` in the Elixir `StacksWeb.ChangesetHelpers`.
+-}
+registerErrorsDecoder : Decoder (List ( String, List String ))
+registerErrorsDecoder =
+    Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))
+
+
 register :
     { email : String, password : String, displayName : String }
-    -> (Result Http.Error AuthResponse -> msg)
+    -> (Result RegisterError () -> msg)
     -> Cmd msg
 register body toMsg =
     Http.post
@@ -238,8 +273,48 @@ register body toMsg =
                     , displayName = body.displayName
                     }
                 )
-        , expect = Http.expectJson toMsg authResponseDecoder
+        , expect = expectRegister toMsg
         }
+
+
+{-| `Http.expectJson` discards the response body on a non-2xx status, which
+would throw away the structured `{"errors": ...}` payload a 422 carries. This
+custom expect keeps those field errors so the caller can surface the real
+reason a registration was rejected.
+-}
+expectRegister : (Result RegisterError () -> msg) -> Http.Expect msg
+expectRegister toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (RegisterRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (RegisterRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (RegisterRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    if metadata.statusCode == 422 then
+                        case Decode.decodeString registerErrorsDecoder bodyText of
+                            Ok errors ->
+                                Err (RegisterValidationFailed errors)
+
+                            Err _ ->
+                                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+                    else
+                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ bodyText ->
+                    case Decode.decodeString registrationResponseDecoder bodyText of
+                        Ok value ->
+                            Ok value
+
+                        Err err ->
+                            Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
 login :

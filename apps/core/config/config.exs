@@ -65,7 +65,11 @@ config :core, Oban,
        # Sweeps expired rows from cache.isbn_resolver_cache and
        # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
        # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
-       {"30 3 * * *", Stacks.Workers.CacheSweepJob}
+       {"30 3 * * *", Stacks.Workers.CacheSweepJob},
+       # Reaps expired rows from op.guardian_tokens (Issue #124, A2). Access
+       # tokens that expire without an explicit logout leave dead rows behind;
+       # this purges them via an indexed range delete on `exp`. Midnight UTC.
+       {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
@@ -79,7 +83,24 @@ config :phoenix, :json_library, Jason
 
 config :core, Stacks.Accounts.Guardian,
   issuer: "stacks",
+  # Access tokens live 8h by default (Issue #124, A2). This bounds every user
+  # session so the guardian_tokens reaper (GuardianTokenSweepJob) has expired
+  # rows to purge — without a ttl a token never expires and the store grows
+  # unbounded. Admin tokens override this with an explicit {30, :minute} ttl in
+  # AdminAuthController.verify_mfa/2.
+  ttl: {8, :hours},
   secret_key: "change_me_in_production_via_runtime_exs_at_least_32_chars_long"
+
+# Guardian.DB — server-side JWT tracking so logout / revoke actually invalidates
+# a token (Issue #124, A2). Each issued token is stored in op.guardian_tokens on
+# encode_and_sign, checked on every verify, and deleted on revoke. Only "access"
+# tokens (regular user sessions) are tracked; "admin_session" tokens have their
+# own boot_id + admin_sessions revocation and are passed through.
+config :guardian, Guardian.DB,
+  repo: Core.Repo,
+  prefix: "op",
+  schema_name: "guardian_tokens",
+  token_types: ["access"]
 
 config :core, :vision_client, Stacks.AI.Client
 config :core, :isbn_http_client, Stacks.Books.HttpClient

@@ -54,4 +54,43 @@ defmodule Stacks.Accounts.Guardian do
       {:ok, claims}
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Server-side token revocation via Guardian.DB (Issue #124, A2)
+  #
+  # These hooks make `Guardian.revoke/1` and logout actually invalidate a token:
+  # the token is persisted on sign, presence-checked on every verify, and deleted
+  # on revoke. `token_types: ["access"]` in config means only regular user
+  # sessions are tracked; admin_session tokens return `:ignore` and pass through
+  # (they are revoked out-of-band via boot_id + the admin_sessions table).
+  # ---------------------------------------------------------------------------
+
+  @impl true
+  def after_encode_and_sign(resource, claims, token, _opts) do
+    with {:ok, _} <- Guardian.DB.after_encode_and_sign(resource, claims["typ"], claims, token) do
+      {:ok, token}
+    end
+  end
+
+  @impl true
+  def on_verify(claims, token, _opts) do
+    with {:ok, _} <- Guardian.DB.on_verify(claims, token) do
+      {:ok, claims}
+    end
+  end
+
+  @impl true
+  def on_refresh({old_token, old_claims}, {new_token, new_claims}, _opts) do
+    with {:ok, _, _} <-
+           Guardian.DB.on_refresh({old_token, old_claims}, {new_token, new_claims}) do
+      {:ok, {old_token, old_claims}, {new_token, new_claims}}
+    end
+  end
+
+  @impl true
+  def on_revoke(claims, token, _opts) do
+    with {:ok, _} <- Guardian.DB.on_revoke(claims, token) do
+      {:ok, claims}
+    end
+  end
 end
