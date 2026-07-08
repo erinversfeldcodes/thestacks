@@ -72,6 +72,45 @@ defmodule Stacks.AccountsTest do
     end
   end
 
+  # Punch #5 (Issue #124): the user.registered event is emitted INSIDE the
+  # registration Ecto.Multi. If the transaction rolls back, no event row must be
+  # written to event_log — an event that describes a registration that never
+  # happened would corrupt every downstream projection.
+  describe "register/1 negative event emission (rollback)" do
+    test "does not emit user.registered when the email is a duplicate" do
+      insert(:user, email: "dupe_event@example.com")
+      before_count = event_count("user.registered")
+
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{
+                 "email" => "dupe_event@example.com",
+                 "password" => "password123"
+               })
+
+      assert event_count("user.registered") == before_count
+    end
+
+    test "does not emit user.registered when the changeset is invalid" do
+      before_count = event_count("user.registered")
+
+      # Invalid email format — the :user insert step fails, rolling back the Multi
+      # before :emit_event ever runs.
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{"email" => "not-an-email", "password" => "password123"})
+
+      assert event_count("user.registered") == before_count
+    end
+
+    test "does not emit user.registered when the password is too short" do
+      before_count = event_count("user.registered")
+
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{"email" => "shortpw_event@example.com", "password" => "x"})
+
+      assert event_count("user.registered") == before_count
+    end
+  end
+
   describe "authenticate/2" do
     test "returns user on valid credentials" do
       insert(:user, email: "auth@example.com", password_hash: Argon2.hash_pwd_salt("mypassword"))

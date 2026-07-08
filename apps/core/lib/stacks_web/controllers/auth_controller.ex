@@ -5,6 +5,8 @@ defmodule StacksWeb.AuthController do
 
   use CoreWeb, :controller
 
+  require Logger
+
   import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
 
   alias Stacks.Accounts
@@ -86,7 +88,18 @@ defmodule StacksWeb.AuthController do
   @doc "DELETE /api/auth/logout — revoke the current JWT."
   def logout(conn, _params) do
     token = Guardian.Plug.current_token(conn)
-    Guardian.revoke(token)
+
+    # Revoke server-side (deletes the guardian_tokens row). We still return 204
+    # even if revocation fails — the client should consider itself logged out —
+    # but a failure means the token stays valid until its ttl expires, so it must
+    # be logged for investigation rather than silently discarded.
+    case Guardian.revoke(token) do
+      {:ok, _claims} ->
+        :ok
+
+      error ->
+        Logger.warning("Guardian.revoke failed on logout: #{inspect(error)}")
+    end
 
     send_resp(conn, 204, "")
   end

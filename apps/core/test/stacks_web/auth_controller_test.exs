@@ -3,8 +3,28 @@ defmodule StacksWeb.AuthControllerTest do
 
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+
+  # Reads the most recent audit.audit_log row for a given action via raw SQL so
+  # the assertion does not depend on the (proto-generated) Ecto schema shape.
+  # user_id is returned as a UUID string; ip_address is returned as stored.
+  defp latest_audit_row(action) do
+    {:ok, %{rows: [row], columns: cols}} =
+      Repo.query(
+        """
+        SELECT action, resource_type, user_id::text, ip_address
+          FROM audit.audit_log
+         WHERE action = $1
+         ORDER BY occurred_at DESC
+         LIMIT 1
+        """,
+        [action]
+      )
+
+    Enum.zip(cols, row) |> Enum.into(%{})
+  end
 
   describe "POST /api/auth/register" do
     test "creates user and returns confirmation_email_sent", %{conn: conn} do
@@ -99,6 +119,112 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"error" => "email_unconfirmed"} = json_response(conn, 403)
     end
+
+    # Punch #1 (Issue #124): missing-field and pool-exhaustion contracts.
+    test "returns 422 with a descriptive error when fields are missing", %{conn: conn} do
+      conn = post(conn, "/api/auth/login", %{})
+
+      assert %{"error" => "email and password are required"} = json_response(conn, 422)
+    end
+
+    test "returns 422 when only email is supplied", %{conn: conn} do
+      conn = post(conn, "/api/auth/login", %{email: "half@example.com"})
+
+      assert %{"error" => "email and password are required"} = json_response(conn, 422)
+    end
+
+    test "returns 503 service_busy + Retry-After: 5 when the ArgonPool is exhausted (Issue #166)",
+         %{conn: conn} do
+      insert(:user,
+        email: "busy@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      # Force the Argon2 pool to report busy quickly instead of the 10s prod
+      # default, then saturate every worker so the login verify cannot check
+      # out a slot. The login controller must map :argon2_busy -> 503.
+      #
+      # Both the timeout override and the pool-holder release live in on_exit so
+      # a mid-test assertion failure below can't leak the global
+      # :argon2_checkout_timeout_ms override or leave the ArgonPool saturated for
+      # subsequent tests.
+      original_timeout = Application.get_env(:core, :argon2_checkout_timeout_ms)
+      Application.put_env(:core, :argon2_checkout_timeout_ms, 25)
+
+      on_exit(fn ->
+        if original_timeout do
+          Application.put_env(:core, :argon2_checkout_timeout_ms, original_timeout)
+        else
+          Application.delete_env(:core, :argon2_checkout_timeout_ms)
+        end
+      end)
+
+      pool_size = Application.get_env(:core, :argon2_pool_size, 2)
+      parent = self()
+
+      holders =
+        for _ <- 1..pool_size do
+          Task.async(fn ->
+            NimblePool.checkout!(
+              Stacks.Accounts.ArgonPool,
+              :checkout,
+              fn _from, nil ->
+                send(parent, :holding)
+
+                receive do
+                  :release -> {nil, nil}
+                end
+              end,
+              5_000
+            )
+          end)
+        end
+
+      # Release every holder from on_exit (best-effort: the pids may already have
+      # finished). on_exit runs in a separate process so Task.await/1 isn't
+      # available here — the send is enough for each holder to return and free
+      # its pool slot.
+      on_exit(fn ->
+        for t <- holders, do: send(t.pid, :release)
+      end)
+
+      for _ <- 1..pool_size, do: assert_receive(:holding, 2_000)
+
+      busy_conn =
+        post(conn, "/api/auth/login", %{email: "busy@example.com", password: "secret123"})
+
+      assert %{"error" => "service_busy"} = json_response(busy_conn, 503)
+      assert get_resp_header(busy_conn, "retry-after") == ["5"]
+    end
+
+    # Punch #6 (Issue #124): a successful login must write a user.login audit
+    # entry with the acting user, resource_type "user", and a HASHED ip.
+    test "writes a user.login audit entry with a hashed IP on success", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "audit@example.com",
+          password_hash: Argon2.hash_pwd_salt("secret123"),
+          email_confirmed: true
+        )
+
+      client_ip = "203.0.113.7"
+      expected_hash = :crypto.hash(:sha256, client_ip) |> Base.encode16(case: :lower)
+
+      conn
+      |> put_req_header("x-forwarded-for", client_ip)
+      |> post("/api/auth/login", %{email: "audit@example.com", password: "secret123"})
+      |> json_response(200)
+
+      row = latest_audit_row("user.login")
+
+      assert row["action"] == "user.login"
+      assert row["resource_type"] == "user"
+      assert row["user_id"] == user.id
+      # IP must be stored hashed, never in the clear.
+      assert row["ip_address"] == expected_hash
+      refute row["ip_address"] == client_ip
+    end
   end
 
   describe "POST /api/auth/login per-account lockout (Issue #161)" do
@@ -189,6 +315,54 @@ defmodule StacksWeb.AuthControllerTest do
     test "returns 401 without token", %{conn: conn} do
       conn = delete(conn, "/api/auth/logout")
       assert json_response(conn, 401)
+    end
+  end
+
+  describe "JWT lifecycle on GET /api/auth/me (Issue #124)" do
+    # Punch #2: an expired JWT (driven through the real Guardian TTL/exp, not a
+    # hand-built AuthErrorHandler unit) must be rejected with 401.
+    test "an expired JWT is rejected with 401", %{conn: conn} do
+      user = insert(:user, email: "expired@example.com", email_confirmed: true)
+      {:ok, expired_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{expired_token}")
+        |> get("/api/auth/me")
+
+      assert json_response(conn, 401)
+    end
+
+    # Punch #4: after logout the SAME JWT must be rejected (401). This can only
+    # pass once server-side revocation (A2) is in place — before A2, revoke is a
+    # no-op and the token stays valid (200).
+    test "the same JWT is rejected with 401 after logout", %{conn: conn} do
+      user = insert(:user, email: "revoke@example.com", email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      # Sanity: the token works before logout.
+      pre_logout =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(pre_logout, 200)
+
+      # Log out — this must revoke the token server-side.
+      logout_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> delete("/api/auth/logout")
+
+      assert response(logout_conn, 204)
+
+      # The same token must now be rejected.
+      post_logout =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(post_logout, 401)
     end
   end
 
