@@ -103,7 +103,7 @@ else
 fi
 
 # ── Case 2: latency-breach fixture → FAIL, upload p95 SLI breached ───────────
-test_case "latency_breach_fails" "upload p95 > 3000ms → gate exits non-zero"
+test_case "latency_breach_fails" "upload p95 > 30000ms → gate exits non-zero"
 probe_fixture="$(mktemp)"
 write_probe_fixture "$probe_fixture" "1.0" "resolved"
 METRICS_FIXTURE="$METRICS_FIX/prom_sample_breached_latency.txt" \
