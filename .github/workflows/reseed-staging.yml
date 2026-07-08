@@ -42,9 +42,13 @@ jobs:
       - name: Read .versions
         id: v
         run: |
+          # .versions uses UPPERCASE shell-var format (OTP_VERSION=28) —
+          # source it like scripts/ci.sh does. The previous lowercase grep
+          # matched nothing, feeding setup-beam empty inputs.
+          source .versions
           {
-            echo "otp=$(grep '^otp=' .versions | cut -d= -f2)"
-            echo "elixir=$(grep '^elixir=' .versions | cut -d= -f2)"
+            echo "otp=${OTP_VERSION}"
+            echo "elixir=${ELIXIR_VERSION}"
           } >> "$GITHUB_OUTPUT"
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:

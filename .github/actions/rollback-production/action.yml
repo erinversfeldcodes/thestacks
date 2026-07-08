@@ -6,9 +6,11 @@ description: >
   Neon DB (LSN reset, optional) → Modal vision (optional). Both DB and vision
   rollback are optional by design: an empty pre-migrate-lsn skips the DB leg
   (image-only rollback), and an empty modal-prev-commit skips the vision leg
-  (bootstrap path on a brand-new prod stack). On rollback success, an audit
-  row is written via Stacks.Audit.log_rollback/1 and the corresponding
-  telemetry event fires.
+  (bootstrap path on a brand-new prod stack). On rollback success, a
+  BEST-EFFORT audit row is written via Stacks.Audit.log_rollback/1 (and the
+  corresponding telemetry event fires); the durable rollback record is the
+  rollback-record.json workflow artifact — see the log-audit step comment
+  and README for why the DB row cannot be guaranteed.
 inputs:
   core-app:
     description: "Fly app name for the core service."
@@ -201,8 +203,21 @@ runs:
         exit "${PIPESTATUS[0]}"
 
     - id: log-audit
-      name: Write audit row + emit telemetry
+      name: Write audit row + emit telemetry (best-effort)
       if: steps.run-rollback.outcome == 'success'
+      # BEST-EFFORT BY DESIGN (Issue #170 F). When the rollback rewound the
+      # DB to the pre-migrate LSN, the schema is back at N-1 while this
+      # checkout's code is at N — the INSERT can reference audit_log columns
+      # that do not exist yet (observed: `column "success" of relation
+      # "audit_log" does not exist`, run 28924423704). No ordering fixes it:
+      # a row written before the LSN restore is erased by the restore. The
+      # DB row is operator colour only; the DURABLE rollback record is the
+      # rollback-record.json artifact uploaded by deploy-production.yml.
+      # Two layers of protection so this step can never fail a completed
+      # rollback: try/rescue inside the Elixir (graceful warning + exit 0)
+      # and continue-on-error as belt-and-braces for failures outside the
+      # rescue (compile/boot/connection errors).
+      continue-on-error: true
       shell: bash
       env:
         MIX_ENV: prod
@@ -226,14 +241,27 @@ runs:
             v -> v
           end
 
-          {:ok, _entry} =
-            Stacks.Audit.log_rollback(%{
-              failed_sha: nilify.(System.get_env("FAILED_SHA")),
-              target_image: nilify.(System.get_env("TARGET_IMAGE")),
-              modal_prev_commit: nilify.(System.get_env("MODAL_PREV_COMMIT")),
-              reason: nilify.(System.get_env("REASON")),
-              triggered_by: nilify.(System.get_env("TRIGGERED_BY"))
-            })
+          attrs = %{
+            failed_sha: nilify.(System.get_env("FAILED_SHA")),
+            target_image: nilify.(System.get_env("TARGET_IMAGE")),
+            modal_prev_commit: nilify.(System.get_env("MODAL_PREV_COMMIT")),
+            reason: nilify.(System.get_env("REASON")),
+            triggered_by: nilify.(System.get_env("TRIGGERED_BY"))
+          }
+
+          try do
+            {:ok, _entry} = Stacks.Audit.log_rollback(attrs)
+            IO.puts("audit: rollback audit row written")
+          rescue
+            e ->
+              IO.warn(
+                "audit: best-effort rollback audit write failed — expected when " <>
+                  "the rollback rewound migrations (schema is pre-migration; this " <>
+                  "checkout inserts columns that do not exist there). The durable " <>
+                  "record is the rollback-record.json workflow artifact. " <>
+                  Exception.format(:error, e, __STACKTRACE__)
+              )
+          end
         '
 
     - id: emit-outputs

@@ -194,11 +194,15 @@ fi
 # is set. Skipped when running a targeted subset (e.g. ci.sh elixir rust).
 if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     _branch="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
-    _san="$(echo "$_branch" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-    _san="${_san%-}"
-    _core_app="stacks-core-pr-${_san}"
+    # Shared derivation (Issue #170 C): honours the optional PREVIEW_SUFFIX
+    # env var (set by CI, unset locally) so this block and the deploy/cleanup
+    # scripts always agree on the preview resource names.
+    # shellcheck source=scripts/lib/preview-names.sh
+    source "$REPO_ROOT/scripts/lib/preview-names.sh"
+    derive_preview_names "$_branch"
+    _core_app="${PREVIEW_CORE_APP}"
     _core_url="https://${_core_app}.fly.dev"
-    _neon_branch="preview/${_san}"
+    _neon_branch="${PREVIEW_NEON_BRANCH}"
 
     # ── Deploy + warmup ───────────────────────────────────────────────────────
     echo -e "\n${CYAN}${BOLD}=== deploy: stack + warmup ===${RESET}"
