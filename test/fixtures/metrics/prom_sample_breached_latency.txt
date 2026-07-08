@@ -1,10 +1,11 @@
-# Prometheus sample - upload route p95 latency BREACHED (> 3000ms threshold).
+# Prometheus sample - upload route p95 latency BREACHED (> 30000ms threshold).
 # Derived from prom_sample_healthy.txt; only the `route_group="upload"`
-# histogram buckets are edited to push the upload p95 above the 3000 ms
-# interim threshold (target: 2000 ms once the experimental framework in
-# ADR 015 exists). The fixture p95 lands in the 2000–5000 ms bucket, so
-# the fixture breaches both the current (3000) and target (2000)
-# thresholds — it does not need updating when the threshold tightens.
+# histogram buckets are edited to push the upload p95 above the 30000 ms
+# interim threshold (stream-hold-time ceiling; see the threshold comment
+# in scripts/check-slo-gate.sh). The fixture p95 lands in the
+# 30000–60000 ms bucket, so it breaches the interim (30000) threshold and
+# will keep breaching the eventual 2000–3000 ms request-latency threshold
+# — it does not need updating when the threshold tightens.
 # All other series are unchanged so every other SLI computes a real
 # value and the gate's breach decision is anchored on a single signal.
 
@@ -53,9 +54,11 @@ stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 30
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 40
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 50
-stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 95
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 60
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="30000"} 90
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="60000"} 98
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
-stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 280000
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 1620000
 stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
 
 stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="50"} 495
