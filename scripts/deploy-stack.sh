@@ -29,6 +29,13 @@
 #                             set without needing a per-preview seed step.
 #                             See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
+#   PREVIEW_SUFFIX          — optional uniqueness component appended to every
+#                             per-preview resource name (Fly apps, Modal app,
+#                             Neon branch). Set by CI ("ci" + last 6 digits of
+#                             the workflow run id) so concurrent local + CI
+#                             previews of the same branch never share
+#                             resources. Unset locally → historical bare
+#                             names. See scripts/lib/preview-names.sh.
 #   R2_ACCOUNT_ID           — Cloudflare R2 account ID (object storage)
 #   R2_ACCESS_KEY_ID        — R2 access key
 #   R2_SECRET_ACCESS_KEY    — R2 secret key
@@ -169,8 +176,14 @@ if [[ -z "$BRANCH" ]]; then
     BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
 fi
 
-SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-SANITISED="${SANITISED%-}"
+# Shared derivation (Issue #170 C): honours the optional PREVIEW_SUFFIX env
+# var so CI runs get run-unique names that can't collide with local `just ci`
+# previews of the same branch. Behaviour is byte-identical to the old inline
+# derivation when PREVIEW_SUFFIX is unset.
+# shellcheck source=scripts/lib/preview-names.sh
+source "${REPO_ROOT}/scripts/lib/preview-names.sh"
+derive_preview_names "$BRANCH"
+SANITISED="${PREVIEW_COMPONENT}"
 
 if [[ "$PROD_MODE" -eq 1 ]]; then
     CORE_APP="${CORE_APP:-thestacks-core}"
@@ -191,8 +204,8 @@ else
         echo "SKIP: NEON_STAGING_PROJECT_ID not set — skipping preview deploy."
         exit 0
     fi
-    CORE_APP="stacks-core-pr-${SANITISED}"
-    MODAL_APP="thestacks-vision-${SANITISED}"
+    CORE_APP="${PREVIEW_CORE_APP}"
+    MODAL_APP="${PREVIEW_MODAL_APP}"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -255,11 +268,11 @@ print(match[0] if match else '')
         | python3 -c "
 import json,sys
 branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == 'preview/${SANITISED}']
+match = [b['id'] for b in branches if b['name'] == '${PREVIEW_NEON_BRANCH}']
 print(match[0] if match else '')
 " 2>/dev/null || true)"
     if [[ -n "$stale_id" ]]; then
-        echo "    Deleting stale branch preview/${SANITISED}..."
+        echo "    Deleting stale branch ${PREVIEW_NEON_BRANCH}..."
         curl -sL -X DELETE \
             -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
             "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches/${stale_id}" > /dev/null
@@ -268,18 +281,18 @@ print(match[0] if match else '')
     neon_response="$(curl -sL -X POST \
         -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"branch\": {\"name\": \"preview/${SANITISED}\", \"parent_id\": \"${NEON_PARENT_BRANCH_ID}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
+        -d "{\"branch\": {\"name\": \"${PREVIEW_NEON_BRANCH}\", \"parent_id\": \"${NEON_PARENT_BRANCH_ID}\"}, \"endpoints\": [{\"type\": \"read_write\"}]}" \
         "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches?include_passwords=true")"
 
     NEON_CONNECTION_URI="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['connection_uris'][0]['connection_uri'])" 2>/dev/null || true)"
     neon_branch_name="$(echo "$neon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['branch']['name'])" 2>/dev/null || true)"
 
-    if [[ "$neon_branch_name" != "preview/${SANITISED}" ]]; then
+    if [[ "$neon_branch_name" != "${PREVIEW_NEON_BRANCH}" ]]; then
         echo "FAIL deploy: Neon branch creation failed" >&2
         echo "$neon_response" | head -5 >&2
         exit 1
     fi
-    NEON_BRANCH_NAME="preview/${SANITISED}"
+    NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
     echo "    Neon branch created: ${NEON_BRANCH_NAME}"
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
         echo "    Connection URI obtained."
@@ -402,7 +415,7 @@ fi
 if [[ "$PROD_MODE" -eq 1 ]]; then
     SCRAPER_APP="${SCRAPER_APP:-thestacks-scraper}"
 else
-    SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
+    SCRAPER_APP="${PREVIEW_SCRAPER_APP}"
 fi
 SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
 
@@ -445,7 +458,7 @@ fi
 if [[ "$PROD_MODE" -eq 1 ]]; then
     SEARXNG_APP="${SEARXNG_APP:-thestacks-searxng}"
 else
-    SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
+    SEARXNG_APP="${PREVIEW_SEARXNG_APP}"
 fi
 SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.internal:8080"
 
