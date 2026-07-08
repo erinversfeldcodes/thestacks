@@ -6,6 +6,13 @@ templater = jinja
 # Exclude dbt-managed directories
 exclude_rules = RF05
 
+[sqlfluff:indentation]
+# Jinja block tags ({% if %}, {% endif %}, etc.) sit at column 0 regardless of
+# surrounding SQL indentation. This matches dbt templater behaviour, where block
+# tags are rendered away before linting. Without this, jinja and dbt templaters
+# produce opposite LT02 errors on the same file.
+template_blocks_indent = false
+
 [sqlfluff:layout:type:comma]
 # Trailing commas (consistent with our style: comma at end of line)
 line_position = trailing

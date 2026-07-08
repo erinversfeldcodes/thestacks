@@ -7,6 +7,24 @@ config :core, Core.Repo,
   database: "stacks_test#{System.get_env("MIX_TEST_PARTITION")}",
   parameters: [search_path: "public,op"],
   pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: System.schedulers_online() * 2,
+  # Prevent parallel preload tasks from being dropped during peak sandbox
+  # contention (28 concurrent cases, each preloading multiple associations).
+  queue_target: 5_000,
+  queue_interval: 10_000
+
+# Core.ObanRepo shares Core.Repo's database in test — the prod
+# separation is purely for connection-pool isolation, not schema
+# isolation. Same database name, same sandbox pool adapter so tests
+# that enqueue Oban jobs can still assert against them via
+# `Oban.drain_queue` etc. without a cross-repo transaction dance.
+config :core, Core.ObanRepo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  database: "stacks_test#{System.get_env("MIX_TEST_PARTITION")}",
+  parameters: [search_path: "public,op"],
+  pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
 config :core, CoreWeb.Endpoint,
@@ -15,12 +33,41 @@ config :core, CoreWeb.Endpoint,
     "test-only-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-to-accept-it",
   server: false
 
-config :core, Oban, testing: :manual
+# Tests use Core.Repo for Oban (overriding config.exs's Core.ObanRepo).
+# Production keeps the dedicated Core.ObanRepo for pool isolation, but
+# in tests both repos point at the same DB (see test.exs above), and
+# the multi-repo sandbox ownership dance gets complicated to reason
+# about — cross-process event handlers trigger telemetry that enqueues
+# Oban jobs, which can happen outside the test's sandbox owner PIDs
+# and leak jobs into later tests. Pointing Oban back at Core.Repo in
+# test keeps every insert inside the one owner's transaction.
+config :core, Oban, testing: :manual, repo: Core.Repo
+
+# Strip Core.ObanRepo from the ecto_repos list in test env so
+# `mix ecto.create/migrate` don't iterate over a second (redundant)
+# repo. Production keeps both listed in config.exs so the ObanRepo
+# is started and has its own pool; tests skip it entirely because
+# Oban itself is configured back to Core.Repo above.
+config :core, ecto_repos: [Core.Repo]
+
 config :core, :env, :test
 
 config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
+# Disable ISBN cache in test — ETS is global, tests register different
+# mock responses for the same ISBN, so caching would cross-contaminate.
+config :core, :isbn_resolver_cache_enabled, false
+# Same reasoning for the title-search cache — tests reuse titles like
+# "The Great Gatsby" across scenarios with different expected ISBNs.
+config :core, :title_search_cache_enabled, false
+# Disable the Postgres L2 layer in tests. The existing cache unit tests
+# assume an empty state after `invalidate_all/0`; keeping the DB layer
+# enabled would bleed cached entries across tests (the sandbox rolls
+# back changes per-test but the initial state after invalidate_all would
+# still vary). DB-layer behaviour is exercised by its own integration
+# tests that opt-in to persistent mode.
+config :core, :persistent_cache_enabled, false
 config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
 config :core, :scraper_hmac_secret, "test-scraper-hmac-secret"

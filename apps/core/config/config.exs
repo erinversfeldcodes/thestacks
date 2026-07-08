@@ -19,15 +19,30 @@ import Config
 # ──────────────────────────────────────────────────────────────────────────────
 
 config :core,
-  ecto_repos: [Core.Repo],
+  # Core.ObanRepo is a dedicated pool for Oban, pointed at the same
+  # database as Core.Repo. See apps/core/lib/core/oban_repo.ex for
+  # the rationale. Listed in ecto_repos so migrations apply to it
+  # too — though in practice both repos target the same DB so either
+  # one running migrations is sufficient. Keeping both for clarity.
+  ecto_repos: [Core.Repo, Core.ObanRepo],
   generators: [binary_id: true, timestamp_type: :utc_datetime_usec]
 
 config :core, Core.Repo,
   migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at],
   types: Core.PostgrexTypes
 
+config :core, Core.ObanRepo,
+  migration_timestamps: [type: :utc_datetime_usec, inserted_at: :created_at],
+  types: Core.PostgrexTypes,
+  # Share migrations with Core.Repo — both repos point at the same
+  # database, so we run migrations once (via Core.Repo's priv/repo/
+  # migrations path) and Core.ObanRepo simply opens connections to the
+  # already-migrated schema. Without this override Ecto looks for
+  # `priv/oban_repo/migrations/` and fails.
+  priv: "priv/repo"
+
 config :core, Oban,
-  repo: Core.Repo,
+  repo: Core.ObanRepo,
   plugins: [
     Oban.Plugins.Pruner,
     {Oban.Plugins.Cron,
@@ -38,10 +53,22 @@ config :core, Oban,
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
-       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}}
+       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}},
+       # Nightly author-source discovery in batch mode. Replaces the
+       # per-book enqueue that was exhausting Brave Search's free-tier
+       # quota (2000/month ≈ 67/day) within the first few hours of
+       # traffic. The batch mode calls `Authors.authors_without_sources/0`
+       # and walks it, respecting `BraveClient.@daily_budget` — once
+       # budget is spent the remaining authors are picked up on the
+       # next night. 08:00 UTC picks a low-traffic window.
+       {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
+       # Sweeps expired rows from cache.isbn_resolver_cache and
+       # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
+       # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
+       {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
   ],
-  queues: [default: 10, events: 20, vision: 5, scraper: 5, notifications: 3, dbt_refresh: 1]
+  queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
   url: [host: "localhost"],
@@ -89,8 +116,47 @@ config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 
+# ── Time-zone database + hackney neutralisation ─────────────────────────────
+# time_zone_info is the canonical tz database: it bundles IANA data in the
+# package (no runtime download), so it works in the Docker prod image with no
+# network access or persistent volume. tzdata stays in the lockfile only
+# because timex hard-depends on it (timex ← elixir_feed_parser is also a hard
+# chain); its autoupdater — the sole hackney call site in the dependency
+# graph — is disabled so the hackney 4.x override in mix.exs is never
+# exercised through tzdata's 1.x-era API expectations.
+config :elixir, :time_zone_database, TimeZoneInfo.TimeZoneDatabase
+config :time_zone_info, update: :disabled
+config :tzdata, :autoupdate, :disabled
+
+# ex_aws would otherwise default to its hackney adapter at runtime (R2
+# storage). Req is already a direct dependency and swoosh uses it too.
+config :ex_aws, http_client: ExAws.Request.Req
+
 config :core, :ai_budget,
   daily_limit_cents: 500,
   monthly_limit_cents: 5_000
+
+# ── Enrichment confidence threshold (Issue #167) ────────────────────────────
+# Vision-extracted candidates with a per-book `confidence` below this value
+# are skipped before ISBN resolution / external lookups / EnrichBookJob
+# enqueue. Candidates with no `confidence` field (historical, pre-prompt-v2
+# payloads) are processed normally.
+config :core, :enrichment_confidence_threshold, 0.5
+
+# ── Per-account login lockout (Issue #161) ──────────────────────────────────
+# Defends against credential-stuffing by locking the account after N failed
+# logins within a rolling window, regardless of source IP. Lockout duration
+# doubles on each subsequent lock within 24 hours up to a cap.
+#
+#   :login_lockout_threshold              — failed attempts before lock (default 10)
+#   :login_lockout_window_seconds         — rolling window for the counter (default 600 / 10 min)
+#   :login_lockout_duration_seconds       — initial lock length (default 900 / 15 min)
+#   :login_lockout_max_duration_seconds   — cap after exponential backoff (default 7200 / 2 hr)
+#   :login_lockout_backoff_window_seconds — window inside which repeat locks compound (default 86_400 / 24 hr)
+config :core, :login_lockout_threshold, 10
+config :core, :login_lockout_window_seconds, 600
+config :core, :login_lockout_duration_seconds, 900
+config :core, :login_lockout_max_duration_seconds, 7_200
+config :core, :login_lockout_backoff_window_seconds, 86_400
 
 import_config "#{config_env()}.exs"

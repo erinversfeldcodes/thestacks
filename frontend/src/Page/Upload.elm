@@ -19,7 +19,7 @@ import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, authorName, bookCoverImageUrl)
+import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -59,6 +59,11 @@ type alias Model =
     , pendingBookIds : List String
     , collectedBooks : List Book
 
+    -- Multi-book partial-failure tracking: book IDs whose fetch failed.
+    -- Used to render a "Could not identify" placeholder per failed book
+    -- in the identified list, alongside the successfully fetched books.
+    , failedBookIds : List String
+
     -- Verification step state machine
     , step : UploadStep
     , selectedShelf : String
@@ -75,6 +80,12 @@ type alias Model =
     -- True once a terminal SSE event (resolved/rejected) has been received.
     -- Used to suppress spurious StreamError after the server closes the connection.
     , sseTerminalReceived : Bool
+
+    -- Cumulative list of book IDs the user has rejected via "No, try again"
+    -- for the current image upload. Reset on Reset or a successful Confirm.
+    -- The server uses this list to exclude already-rejected books from the
+    -- vision pipeline's next pass.
+    , rejectedBookIds : List String
     }
 
 
@@ -89,6 +100,8 @@ type Msg
     | DragOver
     | DragLeave
     | FilepickerRequested
+    | UploadInitialised File String (Result Http.Error Api.UploadInit)
+    | R2PutCompleted String String (Result Http.Error ())
     | UploadAccepted (Result Http.Error String)
     | StatusReceived (Result Http.Error PollResponse)
     | StreamEvent String
@@ -104,6 +117,7 @@ type Msg
     | Reset
     | ConfirmIdentification
     | RejectIdentification
+    | RejectIdentificationCompleted (Result Http.Error ())
     | ShelfSelected String
     | ConfirmPlacement
     | PlacementCompleted (Result Http.Error Placement)
@@ -123,6 +137,7 @@ init =
     , duplicateMoveState = NotAsked
     , pendingBookIds = []
     , collectedBooks = []
+    , failedBookIds = []
     , step = Uploading
     , selectedShelf = "wishlist"
     , placementState = NotAsked
@@ -131,6 +146,7 @@ init =
     , mergeIsbn = ""
     , mergeFormatLabel = ""
     , sseTerminalReceived = False
+    , rejectedBookIds = []
     }
 
 
@@ -147,15 +163,41 @@ update msg model maybeToken =
                     )
 
                 Just token ->
+                    -- Three-step presigned-URL flow:
+                    --   1. Init: ask backend for an image_id + presigned R2 PUT URL.
+                    --   2. PUT the file bytes directly to R2 (bypasses Phoenix).
+                    --   3. Commit: tell backend the PUT landed; backend enqueues
+                    --      the vision pipeline and we open the SSE stream.
                     ( { model
                         | file = Just file
                         , uploadState = Loading
                         , isDragging = False
                         , step = Uploading
                       }
-                    , Api.uploadImage file token UploadAccepted
+                    , Api.initUpload
+                        (File.mime file)
+                        token
+                        (UploadInitialised file token)
                     , NoOut
                     )
+
+        UploadInitialised _ _ (Err _) ->
+            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+
+        UploadInitialised file token (Ok init_) ->
+            ( model
+            , Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)
+            , NoOut
+            )
+
+        R2PutCompleted _ _ (Err _) ->
+            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+
+        R2PutCompleted imageId token (Ok ()) ->
+            ( model
+            , Api.commitUpload imageId token UploadAccepted
+            , NoOut
+            )
 
         DragOver ->
             ( { model | isDragging = True }, Cmd.none, NoOut )
@@ -217,7 +259,7 @@ update msg model maybeToken =
                                             else
                                                 GotIdentifiedBook singleId
                                     in
-                                    ( { model | pendingBookIds = [], collectedBooks = [], sseTerminalReceived = True }
+                                    ( { model | pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }
                                     , Api.getBook singleId (Just token) callback
                                     , NoOut
                                     )
@@ -227,6 +269,7 @@ update msg model maybeToken =
                                     ( { model
                                         | pendingBookIds = multiIds
                                         , collectedBooks = []
+                                        , failedBookIds = []
                                         , sseTerminalReceived = True
                                       }
                                     , Cmd.batch
@@ -243,10 +286,10 @@ update msg model maybeToken =
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                                 _ ->
-                                    ( { model | result = IdentificationFailed, sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
@@ -323,29 +366,35 @@ update msg model maybeToken =
                         )
 
                 Err _ ->
-                    -- One book fetch failed — remove from pending; show what we have
-                    -- if everything else is done, otherwise keep waiting.
+                    -- One book fetch failed — remove from pending and remember
+                    -- the failed ID so the multi-book identified view can render
+                    -- a "Could not identify" placeholder for it. Show what we
+                    -- have if everything else is done, otherwise keep waiting.
                     let
                         remaining =
                             List.filter (\bid -> bid /= bookId) model.pendingBookIds
+
+                        newFailed =
+                            model.failedBookIds ++ [ bookId ]
                     in
                     if List.isEmpty remaining then
                         case model.collectedBooks of
                             [] ->
-                                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                                ( { model | result = IdentificationFailed, failedBookIds = newFailed }, Cmd.none, NoOut )
 
                             books ->
                                 ( { model
                                     | result = Identified books
                                     , collectedBooks = []
                                     , pendingBookIds = []
+                                    , failedBookIds = newFailed
                                   }
                                 , Cmd.none
                                 , NoOut
                                 )
 
                     else
-                        ( { model | pendingBookIds = remaining }, Cmd.none, NoOut )
+                        ( { model | pendingBookIds = remaining, failedBookIds = newFailed }, Cmd.none, NoOut )
 
         GotDuplicateBook result ->
             case result of
@@ -478,7 +527,48 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         RejectIdentification ->
-            ( init, Cmd.none, NoOut )
+            case ( model.step, model.uploadState, maybeToken ) of
+                ( Verifying book, Success imageId, Just token ) ->
+                    let
+                        newRejected =
+                            model.rejectedBookIds ++ [ book.id ]
+                    in
+                    ( { model
+                        | rejectedBookIds = newRejected
+                        , step = Uploading
+                        , result = NoResult
+                        , pendingBookIds = []
+                        , collectedBooks = []
+                        , failedBookIds = []
+                        , placementState = NotAsked
+                        , sseTerminalReceived = False
+                      }
+                    , Api.rejectIdentification
+                        { imageId = imageId
+                        , rejectedBookIds = newRejected
+                        , token = token
+                        }
+                        RejectIdentificationCompleted
+                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                    )
+
+                _ ->
+                    -- No image / no token / not in Verifying step — fall back to
+                    -- the legacy full reset so we never wedge in a half-state.
+                    ( init, Cmd.none, NoOut )
+
+        RejectIdentificationCompleted result ->
+            case result of
+                Ok () ->
+                    -- The HTTP 202 only acknowledges the request. The SSE stream
+                    -- is the real signal source for the re-run vision pipeline.
+                    ( model, Cmd.none, NoOut )
+
+                Err _ ->
+                    -- The server didn't accept the rejection. Surface the
+                    -- failure on the same screen the user would see on a
+                    -- pipeline failure rather than wedging in the spinner.
+                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
 
         ShelfSelected shelf ->
             ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
@@ -500,6 +590,7 @@ update msg model maybeToken =
                     ( { model
                         | step = Complete book model.selectedShelf
                         , placementState = Success placementStub
+                        , rejectedBookIds = []
                       }
                     , Cmd.none
                     , NoOut
@@ -560,7 +651,7 @@ view model maybeToken =
                                     viewUploadArea model
 
                                 Identified books ->
-                                    viewIdentified books
+                                    viewIdentified books model.failedBookIds
 
                                 IdentificationFailed ->
                                     viewIdentificationFailed
@@ -665,20 +756,25 @@ viewDropPrompt =
         ]
 
 
-viewIdentified : List Book -> Html Msg
-viewIdentified books =
-    div [ class "upload-result upload-result--identified", attribute "role" "status", testId "upload-identified" ]
-        ([ h2 []
-            [ text
-                (if List.length books == 1 then
-                    "Book Identified!"
+viewIdentified : List Book -> List String -> Html Msg
+viewIdentified books failedBookIds =
+    let
+        totalCount =
+            List.length books + List.length failedBookIds
 
-                 else
-                    "Books Identified!"
-                )
-            ]
+        heading =
+            if totalCount == 1 then
+                "Book Identified!"
+
+            else
+                "Books Identified!"
+    in
+    div [ class "upload-result upload-result--identified", attribute "role" "status", testId "upload-identified" ]
+        ([ h2 [] [ text heading ]
          , ul [ class "upload-result__book-list" ]
-            (List.map viewIdentifiedBook books)
+            (List.map viewIdentifiedBook books
+                ++ List.map viewUnidentifiedPlaceholder failedBookIds
+            )
          ]
             ++ [ button [ class "btn btn--ghost", onClick Reset ] [ text "Try Another" ] ]
         )
@@ -694,6 +790,23 @@ viewIdentifiedBook book =
             , class "btn btn--primary"
             ]
             [ text "View Book" ]
+        ]
+
+
+{-| Render a placeholder list item for a book whose fetch failed during a
+multi-book upload. The user still sees the resolved books and can act on
+them; this row makes the partial failure visible without blocking the
+overall result.
+-}
+viewUnidentifiedPlaceholder : String -> Html Msg
+viewUnidentifiedPlaceholder _ =
+    li
+        [ class "upload-result__book-item upload-result__book-item--unidentified"
+        , testId "upload-unidentified-placeholder"
+        ]
+        [ p [ class "upload-result__book-title" ] [ text "Could not identify" ]
+        , p [ class "upload-result__book-author" ]
+            [ text "We couldn't load this book. You can still place the others." ]
         ]
 
 
@@ -756,12 +869,51 @@ viewManualEntry model =
         ]
 
 
+{-| Path to the in-app age-verification settings page. Used as the
+`age_verify_url` for age-gate notices that surface during the upload
+flow when a resolved book carries `visibility_tier = "age_gated"`.
+-}
+ageVerifyUrl : String
+ageVerifyUrl =
+    Route.toPath Route.SettingsAgeVerification
+
+
+{-| Render an in-flow age-gate notice when the resolved book is
+age-gated. Per US-1.1.4 the upload flow proceeds normally for the
+identification step, but the user is informed that age verification
+is required to view the book detail and is given a primary CTA that
+links to the age-verification settings page.
+-}
+viewAgeGateNoticeIfNeeded : Book -> Html Msg
+viewAgeGateNoticeIfNeeded book =
+    case book.visibilityTier of
+        AgeGated ->
+            div
+                [ class "upload-verify__age-gate-notice"
+                , testId "upload-age-gate-notice"
+                , attribute "role" "status"
+                ]
+                [ p [ class "upload-verify__age-gate-message" ]
+                    [ text "This book has been marked as age-gated based on its subject matter. Age verification is required to view its details." ]
+                , a
+                    [ href ageVerifyUrl
+                    , class "btn btn--primary"
+                    , testId "upload-age-gate-cta"
+                    ]
+                    [ text "Verify Age" ]
+                ]
+
+        _ ->
+            text ""
+
+
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
 viewVerifying : Book -> Html Msg
 viewVerifying book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
+        , viewAgeGateNoticeIfNeeded book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
                 [ case bookCoverImageUrl book of

@@ -52,6 +52,14 @@ defmodule Stacks.UploadPipelineTest do
     book = insert(:book, title: "The Great Gatsby")
     insert(:book_edition, book: book, isbn: "9780743273565")
 
+    # Reset OL/GB fuses defensively — other tests in the suite (and other
+    # suites running before this one in CI's full `mix test`) can leave the
+    # circuit breakers blown, which makes ISBNResolver short-circuit to
+    # :circuit_open before reaching the MockHttpClient that these tests set
+    # up. The fuses are global ETS state; only :ok return values matter.
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+
     {:ok, user: user, token: token, book: book}
   end
 
@@ -160,10 +168,12 @@ defmodule Stacks.UploadPipelineTest do
       Application.put_env(:core, :rate_limiting_enabled, true)
 
       try do
-        # The :upload bucket allows 10 requests per 60 seconds per user.
-        # Fire 11 requests to trigger the limiter.
+        # The :upload bucket allows 120 requests per 60 seconds per user.
+        # Fire 121 requests to trigger the limiter. Bumped from 10→120
+        # when Oban :vision queue concurrency scaled up to match
+        # realistic bookshelf-populating traffic.
         results =
-          Enum.map(1..11, fn _ ->
+          Enum.map(1..121, fn _ ->
             build_conn()
             |> auth_conn(token)
             |> post("/api/upload", %{})
@@ -507,6 +517,71 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   # ============================================================================
+  # Suite 2 — multi-book endpoint (US-1.1.7)
+  # ============================================================================
+
+  describe "Suite 2 — POST /api/upload (multi-book partial failure, US-1.1.7)" do
+    @tag stories: ["US-1.1.7"], suite: :api
+    test "multi-book partial resolution surfaces only the resolved book(s) via SSE stream", %{
+      conn: conn,
+      token: token,
+      user: user,
+      book: book
+    } do
+      # The multi-book "endpoint" is the same `/api/upload` route — a single
+      # image can yield multiple book candidates from vision. Partial failure
+      # (1 of 2 ISBNs resolves) is observed via the SSE stream which exposes
+      # the resolved book_ids only. There is no separate 207-Multi-Status
+      # response shape today (see test-audit-plan.md punch list #1) — the
+      # SSE payload IS the partial-success response.
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      # MultiBookPartialClient returns 2 ISBNs but only 9780743273565 is
+      # pre-inserted in setup; 9780000000099 will not resolve.
+      with_client(__MODULE__.MultiBookPartialClient, fn ->
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => @image_b64
+        })
+      end)
+
+      # The SSE stream is the multi-book HTTP partial-success surface.
+      stream_conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      assert stream_conn.status == 200
+
+      body = stream_conn.resp_body
+      # The resolved book is reflected in the SSE payload
+      assert String.contains?(body, "resolved")
+      assert String.contains?(body, book.id)
+      # The unresolved ISBN is NOT in the payload (it's silently dropped
+      # by Moderation.do_resolve_and_store_all/2). This documents the
+      # current behaviour: partial failures don't surface the failed
+      # ISBN — see punch-list flag for code gap.
+      refute String.contains?(body, "9780000000099")
+    end
+
+    @tag stories: ["US-1.1.7"], suite: :api
+    test "multi-book endpoint returns 401 when unauthenticated", %{conn: conn} do
+      # Defence-in-depth: don't rely on inheritance from the `/api/upload`
+      # 401 test. Multi-book identification flows through the same
+      # `/api/upload` route, but exercise it explicitly with a multipart
+      # body to guarantee the auth pipe halts before the multi-book code
+      # path runs.
+      tmp_path = create_temp_image()
+
+      upload = %Plug.Upload{
+        path: tmp_path,
+        filename: "two_books.jpg",
+        content_type: "image/jpeg"
+      }
+
+      conn = post(conn, "/api/upload", %{"image" => upload})
+      assert conn.status == 401
+    end
+  end
+
+  # ============================================================================
   # Suite 3: Database Assertion Tests
   # ============================================================================
 
@@ -846,6 +921,47 @@ defmodule Stacks.UploadPipelineTest do
       assert length(isbns) >= 2
       # All ISBNs should be distinct
       assert isbns == Enum.uniq(isbns)
+    end
+
+    @tag stories: ["US-1.1.7"], suite: :db
+    test "partial multi-book resolution leaves no orphan rows for the failed ISBN", %{user: user} do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+      failed_isbn = "9780000000099"
+
+      # Snapshot the books/editions tables before the run so we can prove no
+      # orphan rows were left for the failed ISBN.
+      books_before = Repo.aggregate(Book, :count)
+      editions_before = Repo.aggregate(BookEdition, :count)
+
+      with_client(__MODULE__.MultiBookPartialClient, fn ->
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => @image_b64
+        })
+      end)
+
+      # Resolved book_ids contains exactly one entry — the pre-existing
+      # "Great Gatsby" book — and the failed ISBN added zero new rows.
+      {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
+
+      updated =
+        from(i in "uploaded_images",
+          where: i.id == ^image_id_bin,
+          select: %{status: i.status, book_ids: i.book_ids}
+        )
+        |> Repo.one(prefix: "op")
+
+      assert updated.status == "resolved"
+      assert length(updated.book_ids) == 1
+
+      # No new Book rows were created (the resolved candidate hit
+      # find_existing/1, the failed candidate failed validation).
+      assert Repo.aggregate(Book, :count) == books_before
+      assert Repo.aggregate(BookEdition, :count) == editions_before
+
+      # No orphan edition exists for the failed ISBN.
+      refute Repo.get_by(BookEdition, isbn: failed_isbn)
     end
 
     @tag stories: ["US-1.1.7"], suite: :db
@@ -1497,13 +1613,13 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "NotABookClient returns not_book classification" do
-      result = __MODULE__.NotABookClient.call_vision("is_book", %{})
+      result = __MODULE__.NotABookClient.call_vision("analyze", %{})
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
     test "AmbiguousClient returns ambiguous classification" do
-      result = __MODULE__.AmbiguousClient.call_vision("is_book", %{})
+      result = __MODULE__.AmbiguousClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
                result
@@ -1511,7 +1627,7 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.1"], suite: :external
     test "ErrorClient returns service_unavailable" do
-      result = __MODULE__.ErrorClient.call_vision("is_book", %{})
+      result = __MODULE__.ErrorClient.call_vision("analyze", %{})
       assert {:error, :service_unavailable} = result
     end
   end
@@ -1519,14 +1635,14 @@ defmodule Stacks.UploadPipelineTest do
   describe "Suite 6 — MockClient extraction responses" do
     @tag stories: ["US-1.1.1"], suite: :external
     test "default MockClient returns book extraction with ISBN" do
-      {:ok, resp} = MockClient.call_vision("extract_isbn", %{})
+      {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert [book | _] = resp["books"]
       assert [_ | _] = book["potential_isbns"]
     end
 
     @tag stories: ["US-1.1.2"], suite: :external
     test "NoIsbnClient returns empty books array" do
-      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("extract_isbn", %{})
+      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("analyze", %{})
       assert resp["books"] == []
     end
   end
@@ -1534,7 +1650,7 @@ defmodule Stacks.UploadPipelineTest do
   describe "Suite 6 — circuit breaker" do
     @tag stories: ["US-1.1.1"], suite: :external
     test "CircuitOpenClient returns :circuit_open error" do
-      result = __MODULE__.CircuitOpenClient.call_vision("is_book", %{})
+      result = __MODULE__.CircuitOpenClient.call_vision("analyze", %{})
       assert {:error, :circuit_open} = result
     end
   end
@@ -1596,6 +1712,42 @@ defmodule Stacks.UploadPipelineTest do
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
 
       assert {:error, :not_found} = ISBNResolver.resolve("9780000000000")
+    end
+
+    @tag stories: ["US-1.1.6"], suite: :external
+    test "ISBNResolver returns gracefully when both upstreams reply 503 (service_unavailable)" do
+      # Both upstreams are unavailable (e.g. network outage / 503). The
+      # resolver must not crash — it returns a structured error and lets
+      # the caller decide how to surface it. The fuse melts on each error
+      # but the call still returns within the request timeout.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:error, :service_unavailable})
+      MockHttpClient.put_response("googleapis.com", {:error, :service_unavailable})
+
+      assert {:error, _reason} = ISBNResolver.resolve("9780451524935")
+    end
+
+    @tag stories: ["US-1.1.6"], suite: :external
+    test "merge_format endpoint surfaces 503 ISBN-service outage as 422 isbn_not_found", %{
+      conn: conn,
+      token: token,
+      book: book
+    } do
+      # End-to-end graceful degradation: when the duplicate-check / merge
+      # path calls ISBNResolver.resolve and both upstreams are down, the
+      # controller does NOT 5xx — it returns a clean 422 isbn_not_found
+      # body so the client can show the user a "try again later" message.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:error, :service_unavailable})
+      MockHttpClient.put_response("googleapis.com", {:error, :service_unavailable})
+
+      conn =
+        conn
+        |> auth_conn(token)
+        |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780451524935"})
+
+      # Controller stays graceful: the 503 from ISBN service is mapped to
+      # a structured 422 (isbn_not_found) rather than bubbling up as a 500.
+      assert resp = json_response(conn, 422)
+      assert resp["error"] == "isbn_not_found"
     end
   end
 
@@ -1914,6 +2066,16 @@ defmodule Stacks.UploadPipelineTest do
 
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
+
+    @tag stories: ["US-1.1.8"], suite: :api
+    test "returns 401 when unauthenticated", %{conn: conn, book: book} do
+      # Defence-in-depth per-route auth assertion. Don't rely on inherited
+      # coverage from sibling /api/books/* routes — the merge endpoint
+      # writes book editions (a sensitive mutation) so its own auth halt
+      # must be exercised.
+      conn = post(conn, "/api/books/#{book.id}/merge-format", %{"isbn" => "9780451524935"})
+      assert conn.status == 401
+    end
   end
 
   # ============================================================================
@@ -2182,19 +2344,22 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Inline mock modules
+  # Inline mock modules. Each returns the consolidated /analyze shape
+  # (classification + books in one response), matching what the production
+  # Moderation pipeline now calls post-consolidation.
   # ---------------------------------------------------------------------------
 
   defmodule NotABookClient do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
            "confidence" => 0.95,
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -2205,17 +2370,15 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
+           "books" => [],
            "model_used" => "mock"
          }}
-
-    def call_vision("extract_isbn", _payload),
-      do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
@@ -2224,7 +2387,7 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload), do: {:error, :service_unavailable}
+    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
     def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
   end
 
@@ -2232,28 +2395,16 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    # AMBIGUOUS classifications are treated as not-a-book by Moderation
+    # (only BOOK short-circuits into extract). Books field should be
+    # empty since extract is never reached for AMBIGUOUS.
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
            "confidence" => 0.5,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
-           "books" => [
-             %{
-               "title" => "Ambiguous Book",
-               "author" => nil,
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.5
-             }
-           ],
+           "books" => [],
            "model_used" => "mock"
          }}
 
@@ -2271,19 +2422,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Things I Don't Want to Know OR The Cost of Living",
@@ -2303,19 +2447,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Romance Novel",
@@ -2335,19 +2472,12 @@ defmodule Stacks.UploadPipelineTest do
     @moduledoc false
     @behaviour Stacks.AI.ClientBehaviour
     @impl true
-    def call_vision("is_book", _payload),
+    def call_vision("analyze", _payload),
       do:
         {:ok,
          %{
            "classification" => "CLASSIFICATION_RESULT_BOOK",
            "confidence" => 0.9,
-           "model_used" => "mock"
-         }}
-
-    def call_vision("extract_isbn", _payload),
-      do:
-        {:ok,
-         %{
            "books" => [
              %{
                "title" => "Book One",
@@ -2360,6 +2490,43 @@ defmodule Stacks.UploadPipelineTest do
                "title" => "Book Two",
                "author" => "Author B",
                "potential_isbns" => ["9780306406157"],
+               "raw_text" => nil,
+               "confidence" => 0.8
+             }
+           ],
+           "model_used" => "mock"
+         }}
+
+    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  end
+
+  defmodule MultiBookPartialClient do
+    @moduledoc """
+    Returns 2 candidates: one with a pre-inserted ISBN (resolves), one with
+    a fabricated ISBN (will not resolve via Books.find_existing or
+    ISBNResolver.resolve in the test environment). Used to exercise the
+    partial-failure branch of `Moderation.do_resolve_and_store_all/2`.
+    """
+    @behaviour Stacks.AI.ClientBehaviour
+    @impl true
+    def call_vision("analyze", _payload),
+      do:
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "books" => [
+             %{
+               "title" => "Book One (resolves)",
+               "author" => "Author A",
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             },
+             %{
+               "title" => "Book Two (fails)",
+               "author" => "Author B",
+               "potential_isbns" => ["9780000000099"],
                "raw_text" => nil,
                "confidence" => 0.8
              }

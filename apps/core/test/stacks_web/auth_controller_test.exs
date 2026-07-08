@@ -101,6 +101,58 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
+  describe "POST /api/auth/login per-account lockout (Issue #161)" do
+    setup do
+      # Tight threshold for fast tests.
+      threshold = Application.get_env(:core, :login_lockout_threshold)
+      window = Application.get_env(:core, :login_lockout_window_seconds)
+      duration = Application.get_env(:core, :login_lockout_duration_seconds)
+
+      Application.put_env(:core, :login_lockout_threshold, 3)
+      Application.put_env(:core, :login_lockout_window_seconds, 60)
+      Application.put_env(:core, :login_lockout_duration_seconds, 120)
+
+      on_exit(fn ->
+        Application.put_env(:core, :login_lockout_threshold, threshold)
+        Application.put_env(:core, :login_lockout_window_seconds, window)
+        Application.put_env(:core, :login_lockout_duration_seconds, duration)
+      end)
+
+      :ok
+    end
+
+    test "returns 423 with account_locked + retry_after_seconds after threshold failures",
+         %{conn: conn} do
+      insert(:user,
+        email: "lockme@example.com",
+        password_hash: Argon2.hash_pwd_salt("right-pass"),
+        email_confirmed: true
+      )
+
+      # Burn through the threshold with wrong passwords.
+      for _ <- 1..3 do
+        post(conn, "/api/auth/login", %{email: "lockme@example.com", password: "wrong"})
+      end
+
+      # The next attempt — even with the correct password — must be 423.
+      locked_conn =
+        post(conn, "/api/auth/login", %{email: "lockme@example.com", password: "right-pass"})
+
+      body = json_response(locked_conn, 423)
+      assert body["error"] == "account_locked"
+      assert is_integer(body["retry_after_seconds"])
+      assert body["retry_after_seconds"] > 0
+    end
+
+    test "unknown email returns generic invalid_credentials (no enumeration)",
+         %{conn: conn} do
+      response_conn =
+        post(conn, "/api/auth/login", %{email: "no-such-user@example.com", password: "anything"})
+
+      assert json_response(response_conn, 401) == %{"error" => "invalid_credentials"}
+    end
+  end
+
   describe "GET /api/auth/me" do
     test "returns current user when authenticated", %{conn: conn} do
       user = insert(:user, email: "me@example.com")
@@ -193,12 +245,28 @@ defmodule StacksWeb.AuthControllerTest do
     # This describe block re-enables it and uses a dedicated IP range
     # (10.99.x.x) to avoid cross-test contamination. ETS is cleared after
     # each test so counts don't bleed across tests in this block.
+    #
+    # The :auth bucket's production default is 60/60s — sized for
+    # NAT-shared IPs hitting login traffic. Pin a tight 5/60s value
+    # here so the boundary tests below can fire with a small loop
+    # rather than 60+ HTTP requests. See rate_limiter.ex moduledoc
+    # for the prod sizing rationale and rate_limiter_test.exs for the
+    # same per-test override pattern.
     setup do
       original = Application.get_env(:core, :rate_limiting_enabled)
       Application.put_env(:core, :rate_limiting_enabled, true)
 
+      original_auth = Application.get_env(:core, :rate_limit_auth)
+      Application.put_env(:core, :rate_limit_auth, 5)
+
       on_exit(fn ->
         Application.put_env(:core, :rate_limiting_enabled, original)
+
+        if original_auth do
+          Application.put_env(:core, :rate_limit_auth, original_auth)
+        else
+          Application.delete_env(:core, :rate_limit_auth)
+        end
 
         if :ets.whereis(:rate_limiter) != :undefined do
           :ets.delete_all_objects(:rate_limiter)

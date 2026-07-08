@@ -1,3 +1,10 @@
 -r ../../requirements/dev.txt
-atheris==2.3.0; sys_platform == "linux"
+# atheris (the libFuzzer integration used by tests/fuzz_image_input.py)
+# lives in requirements-fuzz.txt, NOT here. atheris 2.3.0 — the latest on
+# PyPI as of writing — references a CPython opcode (PRECALL) that was
+# removed in 3.12, so its C++ extension fails to compile under our 3.12
+# pin. The fuzz target guards `import atheris` with try/except and
+# operates as a seed-corpus regression test without it; CI doesn't need
+# it. `just fuzz-vision -- -atheris_runs=N` (which actually invokes the
+# fuzzer) installs it from requirements-fuzz.txt at that point.
 python-barcode==0.16.1

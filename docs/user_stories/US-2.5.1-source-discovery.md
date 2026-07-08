@@ -179,7 +179,7 @@ N/A — no handlers currently subscribe to `source.approved` or `enrichment.sour
 - **Endpoint**: `GET https://api.search.brave.com/res/v1/web/search?q=...&count=...`
 - **Client module**: `Stacks.Discovery.BraveClient`
 - **Auth**: `X-Subscription-Token` header with API key from `Application.get_env(:core, :brave_search_api_key)`
-- **Circuit breaker**: Daily budget of 67 queries (2000/month free tier). Uses `:persistent_term` + `:counters` for atomic tracking. Returns `{:error, :daily_budget_exhausted}` when exceeded.
+- **Circuit breaker**: `:brave_fuse` (managed by `Stacks.CircuitBreakers`). Also enforces a daily budget of 67 queries (2000/month free tier) via `:persistent_term` + `:counters`, returning `{:error, :daily_budget_exhausted}` when exceeded.
 - **Fallback**: Falls back to SearXNG
 - **Mock in test**: Configurable via `Application.get_env(:core, :brave_client)`
 
@@ -188,7 +188,7 @@ N/A — no handlers currently subscribe to `source.approved` or `enrichment.sour
 - **Endpoint**: `GET {searxng_url}/search?q=...&format=json&pageno=1&number_of_results=...`
 - **Client module**: `Stacks.Discovery.SearxngClient`
 - **Auth**: None (self-hosted, unlimited)
-- **Circuit breaker**: None
+- **Circuit breaker**: `:searxng_fuse` (managed by `Stacks.CircuitBreakers`)
 - **Fallback**: If also fails, job returns error
 - **Mock in test**: Configurable via `Application.get_env(:core, :searxng_client)`
 
@@ -270,7 +270,7 @@ N/A
 - **Brave Search API call counts and latencies**: per-query duration, daily budget usage (67/day from `:persistent_term` + `:counters`), budget exhaustion events
 - **SearXNG call counts and latencies**: fallback query counts when Brave budget is exhausted
 - **Together AI call counts and latencies**: `complete/2` calls for source scoring — per-call duration and success/failure
-- **Circuit breaker state**: Brave daily budget acts as a soft breaker; Together AI fuse for scoring failures
+- **Circuit breaker state**: `:brave_fuse` and `:searxng_fuse` open/closed transitions; Brave daily budget exhaustion events; Together AI fuse for scoring failures
 - **Duplicate detection rate**: percentage of search results filtered out by `Discovery.get_source_by_url/1` (already-known URLs)
 - **dbt refresh job duration**: time to rebuild `int_source_approval_rate` and `int_source_health` models
 

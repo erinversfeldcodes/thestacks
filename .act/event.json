@@ -1,0 +1,13 @@
+{
+  "pull_request": {
+    "base": {
+      "ref": "main"
+    },
+    "head": {
+      "ref": "chore/enable-pipelines"
+    }
+  },
+  "repository": {
+    "default_branch": "main"
+  }
+}

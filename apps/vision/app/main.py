@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import io
 import logging
 import time
 import uuid
@@ -10,9 +11,12 @@ from contextlib import asynccontextmanager
 import httpx
 import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from PIL import Image
 
 from app.config import settings
 from app.proto.gen.vision import (
+    AnalyzeRequest,
+    AnalyzeResponse,
     AssociateCallback,
     AssociateRequest,
     AssociateResponse,
@@ -38,11 +42,49 @@ logger = structlog.get_logger()
 _MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 _DOWNLOAD_TIMEOUT = 10.0  # seconds
 
+# Target max side for images sent to the VLM. Qwen2.5-VL uses dynamic
+# resolution tokenisation — token count scales with pixel count, and
+# inference time scales roughly linearly with tokens. A phone photo
+# (4032x3024) produces ~3000+ visual tokens; 672x672 produces ~144. For
+# book-cover classification + ISBN/title extraction, 672 is plenty
+# (text remains legible) and cuts Modal inference from ~2.5s to ~1s on
+# A10G. Applied AFTER the local OCR pre-pass, which needs full
+# resolution to decode barcodes reliably.
+_VLM_MAX_SIDE = 672
+_VLM_JPEG_QUALITY = 85
+
 # In-memory idempotency set: edition_id → job_id.
 # Cleared on restart; acceptable for async best-effort semantics.
 _associate_jobs: dict[str, str] = {}
 
 _ASSOCIATE_CALLBACK_PATH = "/api/internal/vision/associate"
+
+
+def _resize_for_vlm(image_b64: str) -> str:
+    """Downsize a base64-encoded image to max side `_VLM_MAX_SIDE` before
+    sending to the VLM. Preserves aspect ratio, re-encodes as JPEG to
+    guarantee a known format for the model. If the image is already
+    smaller than the target, re-encode anyway to normalise format —
+    the model accepts JPEG most reliably and the re-encode is ~5ms.
+
+    On any Pillow error (truncated bytes, format we can't decode), fall
+    back to returning the original base64 — resize is a perf optim, not
+    a correctness requirement, and we'd rather send full-res to Modal
+    than fail the upload.
+    """
+    try:
+        raw = base64.b64decode(image_b64, validate=True)
+        opened = Image.open(io.BytesIO(raw))
+        opened.load()
+        img: Image.Image = opened if opened.mode in ("RGB", "L") else opened.convert("RGB")
+        img.thumbnail((_VLM_MAX_SIDE, _VLM_MAX_SIDE), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=_VLM_JPEG_QUALITY, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as exc:
+        logger.warning("vlm resize failed; sending original", error=str(exc))
+        return image_b64
+
 
 # Proto ClassificationResult enum string values (wire format for ClassifyResponse.classification).
 _CLF_BOOK = "CLASSIFICATION_RESULT_BOOK"
@@ -329,6 +371,183 @@ async def associate(
 
     logger.bind(job_id=job_id, edition_id=edition_id).info("associate: job queued")
     return AssociateResponse(job_id=job_id)
+
+
+async def _load_image_b64(
+    image: str | None,
+    image_url: str | None,
+) -> str:
+    """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
+    into a single base64-encoded string. Raises HTTPException(422) for invalid
+    input — identical validation semantics to the /classify endpoint's inline
+    logic, factored out so /analyze can reuse it without duplication.
+    """
+    if image_url is not None:
+        image_bytes = await _download_image(image_url)
+        return base64.b64encode(image_bytes).decode()
+    if image is None:
+        raise HTTPException(
+            status_code=422, detail="Either 'image' or 'image_url' must be provided"
+        )
+    try:
+        decoded = base64.b64decode(image, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+    if len(decoded) > settings.max_image_size_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+        )
+    return image
+
+
+def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
+    """Normalise the ML model's classify payload into a (proto-enum, confidence)
+    pair. Identical to /classify's inline parsing."""
+    raw_ml = str(parsed.get("classification", "ambiguous"))
+    classification = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
+    raw_confidence = parsed.get("confidence", 0.0)
+    confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    return classification, confidence
+
+
+def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
+    """Normalise the ML model's extract payload into a list of ExtractedBook.
+    Identical to /extract's inline parsing."""
+    books: list[ExtractedBook] = []
+    raw_books = parsed.get("books")
+    if not isinstance(raw_books, list):
+        return books
+    for item in raw_books:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        author = item.get("author")
+        isbns = item.get("potential_isbns")
+        raw_text = item.get("raw_text")
+        conf = item.get("confidence")
+        books.append(
+            ExtractedBook(
+                title=title if isinstance(title, str) else None,
+                author=author if isinstance(author, str) else None,
+                potential_isbns=isbns if isinstance(isbns, list) else [],
+                raw_text=raw_text if isinstance(raw_text, str) else None,
+                confidence=float(conf) if isinstance(conf, int | float) else None,
+            )
+        )
+    return books
+
+
+@app.post(
+    "/analyze",
+    response_model=AnalyzeResponse,
+    status_code=200,
+    dependencies=[Depends(verify_hmac)],
+)
+async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
+    """Two-call classification + extraction in the FastAPI layer.
+
+    Flow:
+      1. Local OCR pre-pass — a clean barcode decode implies BOOK without
+         needing the vision model. ISBN barcodes have a checksum, so false
+         positives on non-books are effectively zero.
+      2. Classify (one `client.classify` call, focused prompt). On
+         confident NOT_BOOK or AMBIGUOUS we short-circuit and return with
+         empty books — `extract` is never invoked. This is the load-bearing
+         contract for the bunny-screenshot regression case and also halves
+         the Modal cost on non-book inputs.
+      3. Extract (one `client.extract` call, focused prompt) — only on
+         confirmed BOOK classifications. The per-book `confidence` field
+         from the extract prompt feeds Issue #167's enrichment-skip gate
+         downstream.
+
+    Previously this endpoint issued a single consolidated `client.analyze`
+    call. That collapsed prompt leaked classify reasoning into extract
+    reasoning and over-populated `books` on non-book inputs (e.g.
+    screenshot_bunny.jpg landed BOOK with empty books rather than
+    NOT_BOOK; rotated covers picked up confident wrong identifications).
+    The two-call flow restores the strict classification gate from
+    git ref dfef1333.
+    """
+    log = logger.bind(endpoint="/analyze")
+
+    image_b64 = await _load_image_b64(body.image, body.image_url)
+    if body.image_url is not None:
+        log = log.bind(image_url=body.image_url)
+
+    decoded_bytes = base64.b64decode(image_b64, validate=True)
+
+    if settings.local_ocr_enabled:
+        isbn = local_isbn_scan(decoded_bytes)
+        if isbn is not None:
+            log.info("local OCR pre-pass hit", isbn=isbn)
+            return AnalyzeResponse(
+                classification=_CLF_BOOK,
+                confidence=1.0,
+                books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
+                model_used="local_ocr",
+            )
+
+    client: VisionClient = request.app.state.vision_client
+
+    # Resize for VLM ONCE — the same downsized b64 is reused for the
+    # classify and (if needed) extract calls. OCR needs full resolution
+    # to decode barcodes; the VLM does not and inference scales with
+    # pixel count, so 672px-max cuts Modal time materially.
+    vlm_b64 = _resize_for_vlm(image_b64)
+
+    # STEP 1 — Classify (strict gate, no pressure to populate `books`).
+    log.info("calling vision model for classify")
+    classify_parsed = await client.classify(vlm_b64)
+    classification, confidence = _parse_classification(classify_parsed)
+
+    # Short-circuit on anything that isn't a confident BOOK. The earlier
+    # `_ANALYZE_PROMPT` consolidation tried to preserve partial-signal
+    # extraction on AMBIGUOUS; in practice that surfaced confident wrong
+    # identifications because the model reused cover-art cues without a
+    # strict gate. AMBIGUOUS now joins NOT_BOOK in returning empty books.
+    if classification != _CLF_BOOK:
+        log.info(
+            "analyze short-circuited at classify",
+            classification=classification,
+            confidence=confidence,
+        )
+        return AnalyzeResponse(
+            classification=classification,
+            confidence=confidence,
+            books=[],
+            model_used=settings.model_name,
+        )
+
+    # STEP 2 — Extract (only on confirmed BOOK).
+    # `excluded_books` carries the cumulative list of "Title by Author"
+    # identifications the user has already rejected for this image via the
+    # frontend's "No, try again" loop. The VisionModel.extract method
+    # appends a constraint clause to the extract prompt when the list is
+    # non-empty; an empty list leaves the prompt at its baseline.
+    log.info(
+        "calling vision model for extract",
+        excluded_books_count=len(body.excluded_books),
+    )
+    extract_parsed = await client.extract(
+        [vlm_b64],
+        excluded_books=list(body.excluded_books),
+    )
+    books = _parse_extracted_books(extract_parsed)
+    log.info(
+        "analyze complete",
+        classification=classification,
+        confidence=confidence,
+        book_count=len(books),
+    )
+
+    return AnalyzeResponse(
+        classification=classification,
+        confidence=confidence,
+        books=books,
+        model_used=settings.model_name,
+    )
 
 
 @app.post(

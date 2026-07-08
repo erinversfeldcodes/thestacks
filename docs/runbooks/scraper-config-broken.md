@@ -2,7 +2,9 @@
 
 **Severity:** P3 (enrichment quality degradation — no user-visible errors)
 **Owner:** Platform operator
-**Last reviewed:** 2026-03-19
+**Last reviewed:** 2026-06-10
+
+**See also:** `docs/agents/rust-agent.md` (scraper architecture), `docs/decisions/011-broadway-for-price-enrichment.md` (price pipeline).
 
 ---
 
@@ -51,14 +53,16 @@ HAVING MAX(ps.scraped_at) < NOW() - INTERVAL '48 hours'
 ORDER BY last_scraped ASC NULLS FIRST;
 ```
 
-### Step 2: Check Oban price_scrape jobs for the affected store
+### Step 2: Check Oban scraper jobs for the affected store
+
+The `TriggerPriceScrapeJob` worker runs on the `:scraper` Oban queue (see `apps/core/lib/stacks/workers/trigger_price_scrape_job.ex`).
 
 ```sql
--- Recent price scrape jobs for a specific store
+-- Recent price scrape jobs
 SELECT id, args, state, attempt, errors, completed_at
 FROM oban_jobs
-WHERE queue = 'price_scrape'
-  AND args->>'store_id' = '<store_uuid>'
+WHERE queue = 'scraper'
+  AND worker = 'Stacks.Workers.TriggerPriceScrapeJob'
 ORDER BY inserted_at DESC LIMIT 20;
 ```
 
@@ -67,15 +71,19 @@ Look at:
 - `state`: `discarded` → network failure or scraper crash
 - `errors`: HTTP error codes, parsing failures
 
+Also check the `:scraper_fuse` circuit breaker — if the scraper has been failing repeatedly the fuse blows for 15 minutes and core stops calling it. See `Stacks.CircuitBreakers` (`apps/core/lib/stacks/circuit_breakers.ex`).
+
 ### Step 3: Check the Rust scraper logs
 
 ```bash
 fly logs -a thestacks-scraper | grep -i "<store_name>\|price\|selector" | tail -100
 ```
 
+The scraper runs in region `jnb` (see `deploy/fly.scraper.toml`).
+
 Or if the Rust scraper is called via HTTP from the Elixir core:
 ```bash
-fly logs -a thestacks-core | grep -i "scraper\|price_scrape" | tail -50
+fly logs -a thestacks-core | grep -i "scraper\|TriggerPriceScrapeJob" | tail -50
 ```
 
 Common error signatures:
@@ -84,23 +92,41 @@ Common error signatures:
 - `"HTTP 429 Too Many Requests"` — rate limit hit
 - `"Failed to parse price: 'R-1.00'"` — currency or format change
 
-### Step 4: Manually test the scraper config
+### Step 4: Exercise the scraper directly via HTTP
 
-The scraper is TOML-driven. The config for each store is in `scrapers/<country_code>/<store_name>.toml`.
+The scraper is TOML-driven. Configs live at `apps/scraper/scrapers/<country_code>/<store_name>.toml` (currently `za/exclusive_books.toml` and `za/takealot.toml`).
+
+The binary is an axum HTTP server with no CLI subcommands — to test a config, exercise `POST /scrape` with an HMAC-signed `X-Internal-Token` (see `apps/scraper/src/auth.rs`, signed over `METHOD + path` using `SCRAPER_HMAC_SECRET`).
 
 ```bash
-# Test a scraper config manually (from project root)
+# Run the scraper locally with the project's scrapers/ directory as cwd
 cd apps/scraper
-cargo run -- test-config --config ../../scrapers/za/exclusive_books.toml --isbn 9780008442323
+SCRAPER_HMAC_SECRET=local-dev cargo run
 
-# Expected output: a price in ZAR and a URL
-# Actual output: "0 prices found" or an error → config is broken
+# In another shell, generate a token and hit /scrape
+TOKEN=$(echo -n "POST/scrape" | openssl dgst -sha256 -hmac "local-dev" -hex | awk '{print $2}')
+curl -sX POST http://localhost:8080/scrape \
+  -H "x-internal-token: $TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"isbn":"9780008442323","store":"za/exclusive_books"}'
+
+# Expected: JSON with price_cents, currency, url
+# 404 → store key not loaded; 500 with selector miss → config is broken
 ```
 
-If this is a Fly.io production issue, test from the scraper machine:
+If this is a Fly.io production issue, hit the scraper from the core machine over the private 6PN network:
 ```bash
-fly ssh console -a thestacks-scraper
-./scraper test-config --config /app/scrapers/za/exclusive_books.toml --isbn 9780008442323
+fly ssh console -a thestacks-core
+# from the core shell:
+curl http://thestacks-scraper.internal:8080/health
+```
+
+To force a config reload after editing TOML without redeploying:
+```bash
+# Sign POST /config/reload, then call it (HMAC auth required)
+curl -sX POST http://thestacks-scraper.internal:8080/config/reload \
+  -H "x-internal-token: $TOKEN"
+# Response: {"loaded": N}
 ```
 
 ### Step 5: Inspect the bookshop's HTML manually
@@ -115,9 +141,12 @@ curl -s "https://www.exclusivebooks.co.za/product/9780008442323" | \
 
 Compare the HTML structure against the selectors in the TOML config:
 ```toml
-# scrapers/za/exclusive_books.toml
-[price]
-selector = ".product-price .price"  # This may have changed
+# apps/scraper/scrapers/za/exclusive_books.toml
+[selectors]
+price = ".product-price, .price"   # comma-separated CSS selectors; may need updating
+title = ".product-name, .product-title"
+in_stock = ".availability, .stock-status"
+currency = "ZAR"
 ```
 
 ---
@@ -132,27 +161,33 @@ This is the most common cause. The scraper config needs a selector update.
 
 2. Update the TOML config:
    ```toml
-   # scrapers/za/exclusive_books.toml
-   [price]
-   selector = ".new-price-class .amount"  # Updated selector
+   # apps/scraper/scrapers/za/exclusive_books.toml
+   [selectors]
+   price = ".new-price-class .amount, .product-price"   # comma-separated fallbacks
    ```
 
-3. Test locally:
+3. Test locally by running the scraper and hitting `POST /scrape` as in Diagnosis Step 4.
+
+4. Either hot-reload configs in production (no redeploy):
    ```bash
-   cargo run -- test-config --config scrapers/za/exclusive_books.toml --isbn 9780008442323
+   # signed POST /config/reload — see Step 4
+   curl -sX POST http://thestacks-scraper.internal:8080/config/reload \
+     -H "x-internal-token: $TOKEN"
    ```
 
-4. Commit and deploy:
+   Or commit and redeploy:
    ```bash
    fly deploy -c deploy/fly.scraper.toml
    ```
 
-5. Trigger a manual scrape for the affected store to verify the fix:
+5. Trigger a fresh scrape by enqueuing the worker:
    ```bash
    fly ssh console -a thestacks-core
    ```
    ```elixir
-   iex> Stacks.Enrichment.PricePipeline.trigger_store_refresh(store_id)
+   iex> %{"isbn" => "9780008442323", "book_id" => book_id}
+   ...> |> Stacks.Workers.TriggerPriceScrapeJob.new()
+   ...> |> Oban.insert()
    ```
 
 ### If the bookshop is blocking the scraper (HTTP 403)
@@ -164,9 +199,9 @@ The bookshop may have detected automated requests. Options:
    curl https://www.exclusivebooks.co.za/robots.txt
    ```
 
-2. **Add a polite delay:** Increase the `request_delay_ms` in the TOML config.
+2. **Add a polite delay:** Lower `requests_per_minute` in the `[rate_limit]` block of the TOML config.
 
-3. **Review the User-Agent string:** Some sites block default scraper user agents. The TOML config supports a custom `user_agent` field.
+3. **Review the User-Agent string:** Some sites block default scraper user agents. The default UA is set in `apps/scraper/src/scraper.rs` (`Engine`); identify as The Stacks scraper with a contact URL per `docs/agents/rust-agent.md`.
 
 4. **Consider the legal implications:** Check `docs/technical-architecture.md` section 20 (Legal & Compliance). If the bookshop's terms of service prohibit scraping, the store may need to be disabled.
 
@@ -174,22 +209,21 @@ The bookshop may have detected automated requests. Options:
 
 ### If the bookshop is rate-limiting (HTTP 429)
 
-Increase `request_delay_ms` in the TOML config and reduce the scraping frequency:
+Lower `requests_per_minute` in the `[rate_limit]` block and lengthen `retry_after_seconds`:
 ```toml
-[scraper]
-request_delay_ms = 5000  # 5 seconds between requests (was 1000)
-max_requests_per_hour = 20  # Reduce from default
+[rate_limit]
+requests_per_minute = 3       # was 10
+retry_after_seconds = 120     # was 60
+respect_robots_txt = true
 ```
 
 ### If the price format changed (currency, decimal separator)
 
-Update the TOML config's price parsing rules:
+Price parsing lives in `apps/scraper/src/price.rs`; the per-store TOML only sets the currency code. If the bookshop changes its display format (e.g. "R 299,00" instead of "R299.00") and the existing parser can't cope, the fix is in Rust, not in the TOML. Open an issue and ping rust-agent.
+
 ```toml
-[price]
+[selectors]
 currency = "ZAR"
-decimal_separator = "."
-thousands_separator = ","
-strip_prefix = "R"  # "R 299.00" → 299.00
 ```
 
 ---
@@ -221,8 +255,10 @@ There is no automated backfill. Missing price snapshots during the outage period
 - If this is the second time the same store's config broke: consider marking the store as "fragile" in the TOML metadata and increasing monitoring frequency.
 - Commit the updated TOML config with a comment explaining what changed and when:
   ```toml
-  # Updated 2026-03-19: Exclusive Books redesigned their product page.
-  # Old selector: .product-price .price
-  # New selector: .purchase-block .display-price
+  # Updated 2026-06-10: Exclusive Books redesigned their product page.
+  # Old: price = ".product-price, .price"
+  # New: price = ".purchase-block .display-price, .product-price"
+  [selectors]
+  price = ".purchase-block .display-price, .product-price"
   ```
 - If the bookshop added scraping restrictions: file a partnership enquiry and document the outcome.

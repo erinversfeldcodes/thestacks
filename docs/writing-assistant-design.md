@@ -1,5 +1,16 @@
 # Writing Assistant — Design Document
 
+> **Status:** Design / forward-looking. No code exists yet. Tracked by
+> US-12.2.1 (`docs/user_stories/US-12.2.1-writing-assistant.md`) and US-12.2.2
+> (`docs/user_stories/US-12.2.2-writing-assistant-data.md`). Builds on the blog
+> stories US-12.1.1–US-12.1.3 (`Stacks.Blog` context, `op.blog_posts`). The
+> Together AI client already exists at `Stacks.AI.TogetherClient`; the
+> `apps/writing_assistant/` Modal sidecar, all `op.embeddings` /
+> `op.blog_assistant_sessions` / `op.prompt_templates` / `op.retrieval_log` /
+> `op.turn_feedback` / `op.book_content_chunks` schemas, and the
+> `Stacks.AI.WritingAssistantClient` module described below are aspirational —
+> see §13 for the issue breakdown.
+
 > A Socratic writing companion integrated into the blog editor. Helps users
 > refine arguments, surface contradictions, and deepen their thinking — drawing
 > on their reading history, shelf intent, and past writing. Encourages critical

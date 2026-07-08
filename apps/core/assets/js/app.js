@@ -5,6 +5,162 @@ import { Elm } from "../elm/src/Main.elm";
 // Import CSS so esbuild bundles it
 import "../css/main.css";
 
+// ---------------------------------------------------------------------------
+// Transparent client-side image compression before /api/upload
+//
+// Why: phone-camera uploads are typically 2–5 MB at 4000×3000. For book-
+// cover recognition (barcode scan or VLM classification) 1024px max side
+// at JPEG quality 0.85 is indistinguishable to the pipeline and ~20×
+// smaller. Cuts upload transit time from seconds to ~100 ms on typical
+// home upload bandwidth. Canvas re-encoding also strips EXIF (GPS, camera
+// metadata) as a side effect — no dedicated library needed, and uploads
+// no longer leak location.
+//
+// How: monkey-patch XMLHttpRequest. Elm's Http module uses XHR under the
+// hood; by intercepting at the transport layer we avoid touching any
+// Elm code. On any compression error we forward the original bytes so
+// the upload always succeeds. The patch is installed BEFORE Elm.init so
+// the very first upload is covered.
+//
+// Patched request path (send):
+//   1. If this is a POST to /api/upload with a FormData body carrying
+//      an image File → run compressImage → rebuild FormData with the
+//      compressed File → call origSend.
+//   2. Any non-matching request → forward unchanged.
+// ---------------------------------------------------------------------------
+(function () {
+  var MAX_SIDE = 1024;
+  var JPEG_QUALITY = 0.85;
+
+  function compressImage(file) {
+    return new Promise(function (resolve, reject) {
+      if (!/^image\//.test(file.type)) {
+        resolve(file);
+        return;
+      }
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var scale = Math.min(
+            1,
+            MAX_SIDE / Math.max(img.width, img.height)
+          );
+          if (scale >= 1) {
+            // Already within target size — skip re-encode to preserve
+            // original bytes (user might have carefully compressed).
+            URL.revokeObjectURL(url);
+            resolve(file);
+            return;
+          }
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(
+            function (blob) {
+              URL.revokeObjectURL(url);
+              if (!blob) {
+                resolve(file);
+                return;
+              }
+              var name = file.name
+                ? file.name.replace(/\.[^.]+$/, "") + ".jpg"
+                : "upload.jpg";
+              resolve(new File([blob], name, { type: "image/jpeg" }));
+            },
+            "image/jpeg",
+            JPEG_QUALITY
+          );
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("image decode failed"));
+      };
+      img.src = url;
+    });
+  }
+
+  var origOpen = XMLHttpRequest.prototype.open;
+  var origSend = XMLHttpRequest.prototype.send;
+
+  // Match either the legacy `POST /api/upload` flow (multipart body) or
+  // the new presigned flow's `PUT https://*.r2.cloudflarestorage.com/...`
+  // step, where the body is a raw File.
+  function classifyUpload(method, url) {
+    if (typeof method !== "string" || typeof url !== "string") return null;
+    var m = method.toUpperCase();
+    if (m === "POST" && /\/api\/upload(\?|$)/.test(url)) return "legacy_post";
+    if (m === "PUT" && /\br2\.cloudflarestorage\.com\b/.test(url))
+      return "presigned_put";
+    return null;
+  }
+
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this._stacksUploadKind = classifyUpload(method, url);
+    return origOpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function (body) {
+    var kind = this._stacksUploadKind;
+
+    // Legacy path: multipart body with an "image" field.
+    if (
+      kind === "legacy_post" &&
+      body &&
+      typeof FormData !== "undefined" &&
+      body instanceof FormData
+    ) {
+      var file = body.get("image");
+      if (file && file instanceof File && /^image\//.test(file.type)) {
+        var xhr = this;
+        var originalArgs = arguments;
+        compressImage(file)
+          .then(function (compressed) {
+            var newBody = new FormData();
+            newBody.set("image", compressed);
+            body.forEach(function (value, key) {
+              if (key !== "image") newBody.append(key, value);
+            });
+            origSend.call(xhr, newBody);
+          })
+          .catch(function () {
+            origSend.apply(xhr, originalArgs);
+          });
+        return;
+      }
+    }
+
+    // Presigned path: raw File body PUT directly to R2. Compress the
+    // File first, then hand it off so R2 receives the smaller payload.
+    // On any error, fall back to the original File to keep the upload
+    // working — compression is a perf optimization, not a correctness
+    // requirement.
+    if (kind === "presigned_put" && body instanceof File) {
+      var xhr2 = this;
+      var originalArgs2 = arguments;
+      if (!/^image\//.test(body.type)) {
+        return origSend.apply(this, arguments);
+      }
+      compressImage(body)
+        .then(function (compressed) {
+          origSend.call(xhr2, compressed);
+        })
+        .catch(function () {
+          origSend.apply(xhr2, originalArgs2);
+        });
+      return;
+    }
+
+    return origSend.apply(this, arguments);
+  };
+})();
+
 // Read stored auth from localStorage (passed as flags to Elm)
 var storedAuth = null;
 try {

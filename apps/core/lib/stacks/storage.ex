@@ -39,6 +39,30 @@ defmodule Stacks.Storage do
   end
 
   @doc """
+  Generate a presigned PUT URL the client can upload an image to
+  directly. Used by the init/commit upload flow to keep the Phoenix
+  handler pool out of the R2 upload path.
+
+  `content_type` hint is propagated to the PUT signature so R2 records
+  the object with the correct MIME type.
+  """
+  @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def presigned_put_url(storage_key, ttl_seconds \\ @default_ttl, opts \\ []) do
+    backend().presigned_put_url(storage_key, ttl_seconds, opts)
+  end
+
+  @doc """
+  Check whether an object exists at the given storage key. Used by the
+  upload commit step to confirm the client's direct PUT to R2 succeeded
+  before enqueueing identification work.
+  """
+  @spec head_image(String.t()) :: {:ok, non_neg_integer()} | {:error, :not_found | term()}
+  def head_image(storage_key) do
+    backend().head(storage_key)
+  end
+
+  @doc """
   Delete an image from object storage.
 
   Returns `:ok` on success.

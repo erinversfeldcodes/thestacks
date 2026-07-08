@@ -1,0 +1,56 @@
+# Prometheus sample - vision_fuse OPEN (state=0). Otherwise healthy.
+# The SLO gate threshold is "fuse open count == 0"; this breaches it.
+# Derived from prom_sample_healthy.txt with a single edit to the vision_fuse
+# gauge (1 -> 0).
+
+# -- BEAM memory --
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+core_prom_ex_beam_memory_processes_total_bytes 33554432
+core_prom_ex_beam_memory_ets_total_bytes 10485760
+core_prom_ex_beam_memory_code_total_bytes 52428800
+core_prom_ex_beam_memory_binary_total_bytes 16777216
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+core_prom_ex_beam_memory_allocated_bytes 125829120
+
+# -- Fuse state gauge - vision_fuse IS OPEN --
+stacks_fuse_state_state{fuse_name="vision_fuse"} 0
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# -- Phoenix / router_dispatch (healthy) --
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 4
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 85
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 42000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+# -- Upload terminal counter --
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# -- Phoenix HTTP --
+core_prom_ex_phoenix_http_requests_total{status="200"} 2580
+
+# -- Oban + Ecto (healthy) --
+core_prom_ex_oban_job_processing_duration_milliseconds_count{queue="default",state="success"} 420
+core_prom_ex_oban_job_exception_duration_milliseconds_count{queue="default",state="failure"} 5
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 6200
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3000

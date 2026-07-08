@@ -174,6 +174,35 @@ suite =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
                     model.result |> Expect.equal IdentificationFailed
+            , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
+              -- Regression guard: pending IDs and collected books must be cleared on
+              -- rejection so that a retry starts from a clean slate rather than
+              -- inheriting stale state from the previous attempt.
+              test "isbn_not_found rejection clears pendingBookIds and collectedBooks" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelInFlight =
+                            { base
+                                | uploadState = Success "img-1"
+                                , pendingBookIds = [ "book-1", "book-2" ]
+                                , collectedBooks = [ dummyBook ]
+                            }
+
+                        rawJson =
+                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"isbn_not_found\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+
+                        ( model, _, _ ) =
+                            Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal IdentificationFailed
+                        , \m -> m.pendingBookIds |> Expect.equal []
+                        , \m -> m.collectedBooks |> Expect.equal []
+                        ]
+                        model
             ]
         , describe "StreamError"
             [ -- US-1.1.1 | Suite 10: Elm (#160 SSE)

@@ -70,36 +70,84 @@ defmodule Stacks.Events.SubscriberWorker do
     handlers = Registry.handlers_for(event.event_type)
 
     Enum.each(handlers, fn handler ->
-      try do
-        case handler.handle_event(event) do
-          :ok ->
-            :ok
+      invoke_handler_with_telemetry(handler, event)
+    end)
+  end
 
-          {:error, reason} ->
-            Logger.error(
-              "SubscriberWorker: handler #{inspect(handler)} returned error " <>
-                "for event #{event.event_type}: #{inspect(reason)}"
-            )
+  # Wrap each handler call in a stopwatch + telemetry emission so
+  # operators can identify slow or broken handlers by event_type.
+  # Distinct events:
+  #   - `:dispatch.duration` (distribution): wall-clock ms spent in
+  #     `handler.handle_event/1`. Tagged by handler module + event_type.
+  #     Answers "which handlers are holding Oban worker slots longest?"
+  #   - `:handler_invoked.count.total` (counter): every invocation,
+  #     regardless of outcome. Answers "which handlers fire most
+  #     often?" — divides execution time fairly across traffic shape.
+  #   - `:handler_error.count.total` (counter): retains the existing
+  #     error-rate signal, just renamed to fit the PromEx
+  #     `[...].count.total` convention so the exported metric ends in
+  #     `_total` cleanly.
+  defp invoke_handler_with_telemetry(handler, event) do
+    start = System.monotonic_time()
+    tags = %{handler: inspect(handler), event_type: event.event_type}
 
-            :telemetry.execute(
-              [:stacks, :events, :handler_error],
-              %{count: 1},
-              %{handler: inspect(handler), event_type: event.event_type}
-            )
-        end
-      rescue
-        exception ->
+    # Event path matches the `event_name:` key on the PromEx
+    # Counter — NOT the full metric path. Telemetry.Metrics appends
+    # `:count, :total` to form the Prometheus name; callers emit on
+    # the shorter event path.
+    :telemetry.execute(
+      [:stacks, :events, :handler_invoked],
+      %{count: 1},
+      tags
+    )
+
+    try do
+      case handler.handle_event(event) do
+        :ok ->
+          emit_dispatch_duration(start, tags)
+          :ok
+
+        {:error, reason} ->
+          emit_dispatch_duration(start, tags)
+
           Logger.error(
-            "SubscriberWorker: handler #{inspect(handler)} raised for event " <>
-              "#{event.event_type}: #{Exception.format(:error, exception, __STACKTRACE__)}"
+            "SubscriberWorker: handler #{inspect(handler)} returned error " <>
+              "for event #{event.event_type}: #{inspect(reason)}"
           )
 
           :telemetry.execute(
             [:stacks, :events, :handler_error],
             %{count: 1},
-            %{handler: inspect(handler), event_type: event.event_type}
+            tags
           )
       end
-    end)
+    rescue
+      exception ->
+        emit_dispatch_duration(start, tags)
+
+        Logger.error(
+          "SubscriberWorker: handler #{inspect(handler)} raised for event " <>
+            "#{event.event_type}: #{Exception.format(:error, exception, __STACKTRACE__)}"
+        )
+
+        :telemetry.execute(
+          [:stacks, :events, :handler_error],
+          %{count: 1},
+          tags
+        )
+    end
+  end
+
+  defp emit_dispatch_duration(start, tags) do
+    duration = System.monotonic_time() - start
+
+    # `event_name:` on the PromEx distribution is
+    # `[:stacks, :events, :dispatch]`; the unit suffix
+    # `:duration, :milliseconds` is part of the METRIC name only.
+    :telemetry.execute(
+      [:stacks, :events, :dispatch],
+      %{duration: duration},
+      tags
+    )
   end
 end

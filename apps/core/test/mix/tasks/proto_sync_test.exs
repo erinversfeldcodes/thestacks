@@ -552,6 +552,20 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :published_at, :utc_datetime_usec"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
+      # Every generated index uses CONCURRENTLY so squawk stays clean in CI.
+      assert output =~ "concurrently: true"
+      # DESC columns render as Ecto's `desc: :col` keyword form, not raw SQL.
+      assert output =~ "desc: :occurred_at"
+      # CONCURRENTLY requires running outside a transaction.
+      assert output =~ "@disable_ddl_transaction true"
+      # Ecto holds its migration lock on its own connection, but in the
+      # non-disabled path that lock lives long enough during a
+      # CONCURRENTLY build that Neon's TCP idle-keepalive drops the
+      # socket (observed: 300s hang + `ssl send: closed`). Disable the
+      # lock for CONCURRENTLY-bearing migrations.
+      assert output =~ "@disable_migration_lock true"
+      # The raw-SQL index escape hatch is gone — use Ecto's `create index`.
+      refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"
       assert output =~ "def down"
       assert output =~ ~s|drop table(:event_log, prefix: "op")|
@@ -698,9 +712,26 @@ defmodule Mix.Tasks.Proto.SyncTest do
           ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
           assert File.exists?(ecto_path), "Expected #{ecto_path} to exist"
 
-          dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
-          assert File.exists?(dbt_path), "Expected #{dbt_path} to exist"
+          # Tables with `skip_dbt: true` are infra plumbing (e.g. cache.*)
+          # and do not have a dbt staging model.
+          if Map.get(table, :skip_dbt, false) do
+            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
+
+            refute File.exists?(dbt_path),
+                   "Expected #{dbt_path} NOT to exist (skip_dbt: true)"
+          else
+            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
+            assert File.exists?(dbt_path), "Expected #{dbt_path} to exist"
+          end
         end)
+
+        # The cache tables are the only current `skip_dbt: true` users.
+        # Sanity-check the manifest shape hasn't drifted.
+        cache_entries =
+          Enum.filter(manifest.tables, &Map.get(&1, :skip_dbt, false))
+
+        assert Enum.any?(cache_entries, &(&1.table_name == "isbn_resolver_cache"))
+        assert Enum.any?(cache_entries, &(&1.table_name == "title_search_cache"))
       after
         File.cd!(original_cwd)
 
@@ -725,9 +756,15 @@ defmodule Mix.Tasks.Proto.SyncTest do
         |> File.ls!()
         |> Enum.filter(fn file ->
           # Remove untracked ADD COLUMN drift migrations generated today.
-          # Keep CREATE TABLE migrations and any committed/tracked migrations.
+          # Match ONLY the proto.sync ADD COLUMN naming pattern
+          # (`add_<fields>_to_<table>`) so hand-written migrations with
+          # other shapes (e.g. `move_cache_tables_to_cache_schema`) are
+          # preserved. Previously this matched everything-not-_create_,
+          # which silently deleted unstaged move/alter migrations
+          # authored by the developer in the same day.
           String.starts_with?(file, today) and
-            not String.contains?(file, "_create_") and
+            String.contains?(file, "_add_") and
+            String.contains?(file, "_to_") and
             file in untracked_migrations
         end)
         |> Enum.each(fn file ->
@@ -1332,13 +1369,19 @@ defmodule Mix.Tasks.Proto.SyncTest do
               Path.join(core_root, table.ecto_path)
             )
 
-          dbt_result =
-            DriftChecker.check(
-              DbtGenerator.generate(table, fields),
-              Path.join(dbt_root, table.dbt_path)
-            )
+          # `skip_dbt: true` tables intentionally have no staging model —
+          # don't drift-check a file that by design doesn't exist.
+          if Map.get(table, :skip_dbt, false) do
+            [ecto_result]
+          else
+            dbt_result =
+              DriftChecker.check(
+                DbtGenerator.generate(table, fields),
+                Path.join(dbt_root, table.dbt_path)
+              )
 
-          [ecto_result, dbt_result]
+            [ecto_result, dbt_result]
+          end
         end)
 
       drifted = Enum.filter(results, &match?({:drift, _, _}, &1))

@@ -12,17 +12,17 @@ defmodule Stacks.UploadTelemetryTest.NoIsbnClient do
   @moduledoc false
   @behaviour Stacks.AI.ClientBehaviour
   @impl true
-  def call_vision("is_book", _payload),
+  # Consolidated /analyze shape — BOOK classification but empty books
+  # list triggers :isbn_not_found in Moderation.analyze/2.
+  def call_vision("analyze", _payload),
     do:
       {:ok,
        %{
          "classification" => "CLASSIFICATION_RESULT_BOOK",
          "confidence" => 0.9,
+         "books" => [],
          "model_used" => "mock"
        }}
-
-  def call_vision("extract_isbn", _payload),
-    do: {:ok, %{"books" => [], "model_used" => "mock"}}
 
   def call_vision(_endpoint, _payload), do: {:ok, %{}}
 end
@@ -171,7 +171,9 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "emits [:stacks, :events, :handler_error] when handler raises", %{user: user} do
+    test "emits [:stacks, :events, :handler_error] when handler raises", %{
+      user: user
+    } do
       attach_telemetry([:stacks, :events, :handler_error])
 
       Application.put_env(:core, :test_handler_overrides, %{

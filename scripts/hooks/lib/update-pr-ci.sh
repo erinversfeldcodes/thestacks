@@ -128,9 +128,29 @@ EOF
 run_ci_and_get_section() {
     local repo_root="$1"
 
+    # Git hooks run in a fresh bash subshell that doesn't trigger direnv
+    # (direnv hooks fire on interactive shell init), so the project's nix
+    # devShell — which exposes the .venv-tools/ wrappers and LLVM env vars
+    # via shellHook — isn't loaded. Wrap the `just ci` invocation in
+    # `nix develop --command` so the hook sees the same environment as an
+    # interactive shell.
+    #
+    # Marker check uses STACKS_DEV_SHELL (set by our shellHook) rather than
+    # the generic IN_NIX_SHELL — IN_NIX_SHELL is also set when entering
+    # *any* nix shell (including a stale one with broken state), so it
+    # produces false negatives that skip the wrap when we genuinely need it.
+    # Skip the wrap if `nix` isn't installed (e.g. CI runners with --no-verify).
+    local runner=()
+    if [[ -z "${STACKS_DEV_SHELL:-}" ]] && command -v nix &>/dev/null; then
+        runner=(nix develop --command)
+    fi
+
     local tmpfile
     tmpfile="$(mktemp)"
-    just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
+    # ${runner[@]+...} guards the empty-array case: macOS bash 3.2 treats
+    # expanding an empty array under `set -u` as an unbound variable and
+    # aborts, silently skipping the entire CI run before a push.
+    ${runner[@]+"${runner[@]}"} just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
     local ci_output
     ci_output="$(cat "$tmpfile")"
     rm -f "$tmpfile"

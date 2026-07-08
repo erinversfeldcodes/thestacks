@@ -10,5 +10,10 @@ select
     resource_id,
     ip_address,
     metadata,
-    occurred_at
+    occurred_at,
+    endpoint,
+    latency_ms,
+    success,
+    row_count,
+    operator_session_id
 from {{ source('audit', 'audit_log') }}

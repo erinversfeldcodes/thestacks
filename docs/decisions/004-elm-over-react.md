@@ -55,7 +55,7 @@ This state machine demands robust UI state management. The primary risk in the f
 - `Page/` — page-level modules (Upload, Bookshelf, Search, Settings, etc.)
 - `Components/` — reusable components (Spine, ISBNInput, FilterPanel, etc.)
 - `Types/` — shared types (Book, Placement, User, RemoteData)
-- `Navigation/` — routing (ShelfRouter)
+- `Navigation/` — routing (`Route`, `SwipeNavigation`)
 - `Animation/` — transitions (SlideTransition, RoomTransition)
 - `Api.elm` — HTTP client module
 

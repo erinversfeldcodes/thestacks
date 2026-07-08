@@ -47,14 +47,14 @@ All significant state changes emit events via `Stacks.Events.emit/1`, which:
 |-------|------------|---------|
 | `default` | 10 | General-purpose fallback |
 | `events` | 20 | Event fan-out to registered subscribers |
-| `vision` | 5 | GPU calls to Modal — expensive, rate-limited |
+| `vision` | 60 | GPU calls to Modal — expensive, rate-limited |
 | `scraper` | 5 | Per-bookshop price fetches |
 | `notifications` | 3 | Email delivery |
 | `dbt_refresh` | 1 | Sequential dbt runs |
 
 > **Note:** The original ADR planned dedicated queues for `review_scrape`, `author_scrape`, `source_discovery`, and `geographic_discovery`. These were never created — those workers run on the `default` queue instead, which provides sufficient concurrency for Phase 1 volumes.
 
-**Event subscriber registration:** Subscribers register centrally via `Stacks.Events.Registry`. See ADR 006 for the rationale behind centralised registration over decentralised.
+**Event subscriber registration:** Subscribers register centrally via `Stacks.Events.Registry` — a compile-time module attribute mapping event types to handler modules implementing `Stacks.Events.Handler`. No GenServer or runtime state is involved.
 
 **Retry strategy:** Built-in Oban exponential backoff with configurable max attempts per queue. Failed jobs transition to `discarded` state after max retries and remain inspectable in `oban_jobs`.
 
@@ -75,7 +75,7 @@ All significant state changes emit events via `Stacks.Events.emit/1`, which:
 **Negative:**
 - PostgreSQL is doing double duty as operational store and event bus. Under very high event volume (multi-million events/day), this could create write contention. Mitigation: partition `event_log` by month at 5M rows (see `docs/capacity-model.md`).
 - No built-in topic fan-out like Kafka's consumer groups. Subscribers are Elixir modules registered at startup — adding a new subscriber requires a code deploy.
-- Job payload size is bounded by PostgreSQL JSONB limits (~1GB technically, but large payloads are an anti-pattern). Image bytes are stored in job args for vision jobs; this is acceptable at 2 concurrent vision jobs.
+- Job payload size is bounded by PostgreSQL JSONB limits (~1GB technically, but large payloads are an anti-pattern). Image bytes are stored in job args for vision jobs; this is acceptable at the current vision queue concurrency.
 - Event replay cannot selectively exclude side effects — if a subscriber sends an email, replaying the event will re-send the email. Replay should be done in a development environment or with side-effect guards.
 
 **Not a constraint:**

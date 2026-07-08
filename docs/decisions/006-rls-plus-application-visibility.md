@@ -48,7 +48,7 @@ This is the primary gate. Called before any content is returned to a user. It re
 - Block status (if either party has blocked the other)
 - Marketplace listing exception (active listings ignore profile ceiling)
 
-The function returns `:visible | :hidden | :not_found` — the `:not_found` variant is used when a blocked user looks up a blocker's profile (returns 404, not 403, to avoid confirming the user exists).
+The function returns `:visible | :hidden` (see `Stacks.Visibility.resolve_visibility/2` in `apps/core/lib/stacks/visibility.ex`). Callers that need to distinguish "blocked" from "absent" (for example, to return 404 instead of 403 when a blocked user looks up a blocker's profile) layer that decision on top of the visibility result.
 
 **Database layer: Row-Level Security**
 
@@ -60,7 +60,7 @@ RLS policies are designed in Phase 1A alongside the migrations and enforced afte
 | `blog_posts` | `stacks_app` role can only write rows where `user_id = current_user_id`. Read access filtered by visibility column |
 | `offer_threads` / `offer_messages` | Scoped to `(placement_id, buyer_id)` — only the buyer and the listing owner can read |
 
-RLS policies will be documented in `docs/rls-design.md` (file to be created when policies are activated in Phase 1B).
+RLS policies are documented in `docs/rls-design.md` and enabled by migration `apps/core/priv/repo/migrations/20260319000008_enable_rls_policies.exs`.
 
 **Database roles:**
 - `stacks_app` — CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`. This is the role the Phoenix app uses.
@@ -89,8 +89,10 @@ RLS policies will be documented in `docs/rls-design.md` (file to be created when
 - The marketplace listing exception (active listings punch through profile ceiling) must be encoded consistently in both the application layer and RLS — a divergence here could cause a listing to be visible in the DB but rejected by the application, or vice versa.
 
 **Testing requirement:**
-- `resolve_visibility/2` must be property-tested with a generated suite of (requester, owner, resource, block status, group membership) combinations. See `docs/technical-architecture.md` section 16.
+- `resolve_visibility/2` must be property-tested with a generated suite of (requester, owner, resource, block status, group membership) combinations. See the Testing Strategy section of `docs/technical-architecture.md`.
 - RLS policies must be tested with database-level role switching in integration tests.
 
 **Known gap at time of writing:**
 - RLS policies are designed in Phase 1A but not yet activated. Activation is gated on Phase 1B.3 (visibility contexts) passing tests. During Phase 1A and 1B, only `resolve_visibility/2` is enforced.
+
+**Update (2026-03-19):** RLS policies were activated by migration `20260319000008_enable_rls_policies.exs`, alongside Issue #047 (`issues/complete/047-visibility-infrastructure.md`). Both layers are now in force.

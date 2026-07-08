@@ -46,27 +46,27 @@ The dashboard fetches from 4 API endpoints in parallel, each section using Remot
 ## 3. API Calls
 
 ### `GET /api/metrics`
-- **Auth**: Required (owner role)
-- **Pipeline**: `:api` -> `:authenticated` -> `:require_owner`
+- **Auth**: Required (MFA-verified admin session)
+- **Pipeline**: `:api` -> `:admin` -> `:rate_limit_admin` (the `:admin` pipeline runs `AdminAuthPipeline` + `RequireMFA` + `AuditAdminCall`)
 - **Controller**: `StacksWeb.MetricsController.index/2`
 - **Response (success)**: `{ data: MetricsDashboard }` — includes `coverPercentage`, `pricePercentage`, `reviewPercentage`, `costs` (list of `{ name, category, amountZar }`), `gdprImagesPending` — HTTP 200
 - **Response (error)**: HTTP 401/403
 
 ### `GET /api/metrics/quality-trends`
-- **Auth**: Required (owner role)
-- **Pipeline**: `:api` -> `:authenticated` -> `:require_owner`
+- **Auth**: Required (MFA-verified admin session)
+- **Pipeline**: `:api` -> `:admin` -> `:rate_limit_admin` (the `:admin` pipeline runs `AdminAuthPipeline` + `RequireMFA` + `AuditAdminCall`)
 - **Controller**: `StacksWeb.MetricsController.quality_trends/2`
 - **Response (success)**: `{ data: QualityTrends }` — includes `coverTrend`, `priceTrend`, `reviewTrend` (each "up"/"down"/"stable") — HTTP 200
 
 ### `GET /api/metrics/source-health`
-- **Auth**: Required (owner role)
-- **Pipeline**: `:api` -> `:authenticated` -> `:require_owner`
+- **Auth**: Required (MFA-verified admin session)
+- **Pipeline**: `:api` -> `:admin` -> `:rate_limit_admin` (the `:admin` pipeline runs `AdminAuthPipeline` + `RequireMFA` + `AuditAdminCall`)
 - **Controller**: `StacksWeb.MetricsController.source_health/2`
 - **Response (success)**: `{ data: [SourceHealth] }` — each has `name`, `sourceType`, `status` ("healthy"/"degraded"/"broken"), `consecutiveFailures`, `lastSuccess`, `lastFailure` — HTTP 200
 
 ### `GET /api/metrics/enrichment-gaps`
-- **Auth**: Required (owner role)
-- **Pipeline**: `:api` -> `:authenticated` -> `:require_owner`
+- **Auth**: Required (MFA-verified admin session)
+- **Pipeline**: `:api` -> `:admin` -> `:rate_limit_admin` (the `:admin` pipeline runs `AdminAuthPipeline` + `RequireMFA` + `AuditAdminCall`)
 - **Controller**: `StacksWeb.MetricsController.enrichment_gaps/2`
 - **Response (success)**: `{ data: EnrichmentGaps }` — includes `booksWithoutPrices`, `booksWithoutCovers`, `booksWithoutReviews` (integers) — HTTP 200
 
@@ -80,10 +80,10 @@ The dashboard fetches from 4 API endpoints in parallel, each section using Remot
 
 ## 4. Auth & Middleware Guards
 
-- **Plugs fired**: `SecurityHeaders` -> `AuthPipeline` -> `RequireRole(role: "owner")`
+- **Plugs fired**: `SecurityHeaders` -> `AdminAuthPipeline` -> `RequireMFA` -> `AuditAdminCall` -> `RateLimiter(bucket: :admin)`
 - **Visibility checks**: N/A — admin-only
 - **Age gate**: N/A
-- **Ownership checks**: Role-based via `RequireRole` plug
+- **Ownership checks**: Role-based via the `:admin` pipeline (admin session + MFA required)
 
 ---
 
@@ -198,7 +198,7 @@ N/A — metrics are computed on each request. No caching layer for dashboard dat
 ### Route
 - **Route variant**: `Route.AdminMetrics`
 - **URL**: `/admin/metrics`
-- **Public or authenticated**: Authenticated, owner role required
+- **Public or authenticated**: Authenticated, MFA-verified admin session required
 
 ### Init
 - **`initPage` branch**: Fires 4 parallel API calls via `Cmd.batch`

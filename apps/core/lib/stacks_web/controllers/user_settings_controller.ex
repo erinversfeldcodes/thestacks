@@ -45,6 +45,12 @@ defmodule StacksWeb.UserSettingsController do
       {:error, :invalid_password} ->
         conn |> put_status(422) |> json(%{error: "invalid_current_password"})
 
+      {:error, :argon2_busy} ->
+        conn
+        |> put_status(503)
+        |> put_resp_header("retry-after", "5")
+        |> json(%{error: "service_busy"})
+
       {:error, changeset} ->
         conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
     end
@@ -73,6 +79,12 @@ defmodule StacksWeb.UserSettingsController do
 
       {:error, :invalid_password} ->
         conn |> put_status(422) |> json(%{error: "invalid_current_password"})
+
+      {:error, :argon2_busy} ->
+        conn
+        |> put_status(503)
+        |> put_resp_header("retry-after", "5")
+        |> json(%{error: "service_busy"})
 
       {:error, changeset} ->
         conn |> put_status(422) |> json(%{errors: format_errors(changeset)})

@@ -4,7 +4,7 @@
 
 > **As a** user (self-hoster), **I want to** add or modify bookshop scrapers via TOML config files **so that** I can track prices from stores relevant to my country or region.
 
-The user creates or edits a TOML configuration file in the designated scrapers directory. Each file defines a store: name, base URL, search URL pattern, CSS selectors for price extraction, and currency. The Rust scraping microservice reads these configs and begins scraping on the next scheduled run. After adding a new store config, the store appears in the "Where to Buy" section on book detail overlays once prices have been fetched. The Metrics Dashboard shows the new source in its "Configured Sources" count.
+The user creates or edits a TOML configuration file in the designated scrapers directory (`apps/scraper/scrapers/<country>/<store>.toml`). Each file defines a store using `[source]` (name, type, country, url, currency), `[search]` (method, path, query_param, query_template), `[selectors]` (CSS selectors for price/title/in_stock/currency), and `[rate_limit]` (requests_per_minute, retry_after_seconds, respect_robots_txt) blocks. The Rust scraping microservice reads these configs (hot-reloadable via `POST /config/reload`) and begins scraping on the next scheduled run. After adding a new store config, the store appears in the "Where to Buy" section on book detail overlays once prices have been fetched. The Metrics Dashboard shows the new source in its "Configured Sources" count.
 
 ---
 
@@ -99,8 +99,8 @@ The user creates or edits a TOML configuration file in the designated scrapers d
 ## 8. External Service Calls
 
 ### Rust scraper service
-- **Service**: Rust scraper microservice
-- **Endpoint**: `POST /scrape`
+- **Service**: Rust scraper microservice (`apps/scraper/`)
+- **Endpoints**: `GET /health`, `POST /scrape`, `POST /config/reload` (hot-reload TOML configs without restart)
 - **Client module**: `Stacks.Enrichment.ScraperClient`
 - **Auth**: HMAC (`X-Internal-Token`)
 - **Circuit breaker**: `:scraper_fuse`

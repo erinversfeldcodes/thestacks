@@ -1,0 +1,73 @@
+# Prometheus sample - otherwise healthy shape, but the Oban `default` queue
+# has only 2 completed jobs (1 success + 1 failure). Rate is 50% which would
+# trip the 5% threshold - but the sample size is below the min-samples guard
+# (OBAN_MIN_SAMPLES = 10), so the SLI must report `breached: false` with
+# `samples: 2` and a `note` field. Reviewer P1 #4.
+
+# -- BEAM memory (healthy) --
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+core_prom_ex_beam_memory_processes_total_bytes 33554432
+core_prom_ex_beam_memory_ets_total_bytes 10485760
+core_prom_ex_beam_memory_code_total_bytes 52428800
+core_prom_ex_beam_memory_binary_total_bytes 16777216
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+core_prom_ex_beam_memory_allocated_bytes 125829120
+
+# -- Router_dispatch (healthy) --
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 4
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 85
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 42000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+# -- Upload terminal counter (healthy) --
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# -- Fuse state gauge (all healthy) --
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# -- Phoenix HTTP --
+core_prom_ex_phoenix_http_requests_total{status="200"} 2580
+
+# -- Oban default queue - ONLY 2 samples, 50% failure rate --
+# This would nominally breach (rate > 0.05) but samples < min_samples guard.
+# PromEx emits Oban outcomes as two separate distribution families, each
+# with its own `_count` field - use those as the per-queue sample counts.
+core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker"} 1
+core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker"} 1
+
+# -- Ecto (healthy) --
+# Mirrors prom_sample_healthy.txt's bucket granularity — the SLI's p95
+# algorithm interpolates within the tightest populated bucket, so
+# skipping intermediate buckets forces p95 to land near the upper edge
+# of whatever bucket is populated (~47 ms here when only `le=50` is
+# present), which spuriously breached the 20 ms threshold in earlier
+# revisions of this fixture.
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 2950
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 2998
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="250"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="1000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="5000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 6200
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3000

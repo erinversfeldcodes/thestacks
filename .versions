@@ -1,0 +1,16 @@
+# Canonical runtime version pins for The Stacks.
+#
+# This file is the single source of truth.
+# Consumers:
+#   - .github/workflows/ci.yml  (via the `versions` job — reads this file)
+#   - scripts/ci.sh             (sources this file directly)
+#
+# Files that CANNOT read this file automatically (update manually when bumping):
+#   - flake.nix          — Nix package names (erlang_28, nodejs_22, python312, postgresql_16)
+#   - deploy/Dockerfile.* — exact patch-level base image tags (hexpm/elixir:1.18.4-erlang-28.4-…)
+
+OTP_VERSION=28
+ELIXIR_VERSION=1.18
+NODE_VERSION=22
+PYTHON_VERSION=3.12
+POSTGRES_VERSION=16

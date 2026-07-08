@@ -32,12 +32,13 @@ elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
     fi
 fi
 
-# Elm proto decoder drift check — ensures generated Elm modules match proto specs.
-if [[ -x "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
-    bash "$REPO_ROOT/scripts/gen-elm-proto.sh" --check
+# Proto codegen drift checks — only run locally where generated files are present.
+# Generated files are gitignored so they don't exist in CI (skip silently there).
+if [[ "${CI:-}" != "true" ]]; then
+    if [[ -x "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
+        bash "$REPO_ROOT/scripts/gen-elm-proto.sh" --check
+    fi
+    bash "$REPO_ROOT/scripts/gen-python-proto.sh" --check
+    bash "$REPO_ROOT/scripts/gen-rust-proto.sh" --check
+    bash "$REPO_ROOT/scripts/gen-elixir-proto.sh" --check
 fi
-
-# Proto codegen drift check — each script checks only its own language targets (--language flag).
-bash "$REPO_ROOT/scripts/gen-python-proto.sh" --check
-bash "$REPO_ROOT/scripts/gen-rust-proto.sh" --check
-bash "$REPO_ROOT/scripts/gen-elixir-proto.sh" --check

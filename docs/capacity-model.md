@@ -84,6 +84,17 @@ Latency is measured via Phoenix Telemetry events (`[:phoenix, :endpoint, :stop]`
 - P50/P95/P99 per endpoint over rolling 1h / 24h windows
 - Alert badges when thresholds are exceeded
 
+The post-deploy SLO gate (`scripts/check-slo-gate.sh`, per ADR-015) enforces a hard subset of these targets against a 10-minute window after every production deploy:
+
+| SLI | Threshold |
+|-----|-----------|
+| `upload_p95_ms` | ≤ 3000 (interim; target 2000) |
+| `auth_p95_ms` | ≤ 500 |
+| `catalogue_p95_ms` | ≤ 500 |
+| `real_5xx_rate` | ≤ 0.005 |
+
+A breach triggers automatic rollback. The endpoint-level targets in the tables above are the development goals; the gate values are the deploy-blocking floor.
+
 ---
 
 ## 3. Cost Model (per-user projection)
@@ -94,11 +105,11 @@ All costs in South African Rand (ZAR). Exchange rates as of 2026-03.
 
 | Service | Unit cost assumption | Basis |
 |---------|---------------------|-------|
-| Modal (vision, A10G) | R0.50–R2.50 per identification | ~$0.03–$0.14/min GPU time at 30–60s per call |
+| Modal (vision, A10G) | R0.50–R2.50 per identification | ~$0.03–$0.14/min GPU time at 30–60s per call. Stack: HF Transformers + Qwen2.5-VL-7B-Instruct (bf16) on A10G, single inference per container, `max_containers=10` (see `apps/vision/modal_app.py`; rationale in ADR-001 / ADR-015) |
 | Together AI (summarisation) | ~R0.10 per review summary | Per-token pricing at ~R0.002/1K tokens, ~50K tokens/summary |
 | Brave Search API | R0.054/query (free tier: 2K queries/month; paid: $3/1K ≈ R0.054/query) | Brave pricing page |
-| Fly.io (core app, 2× shared-cpu-1x 256MB) | R150–R250/month flat | Fly.io pricing |
-| Neon PostgreSQL | R0 (free tier up to 10GB + 1 compute); R200–R800+/month at scale | Neon pricing |
+| Fly.io (core app, shared-cpu-1x, 2 cpus, 512MB; plus scraper/log-shipper/searxng) | R150–R250/month flat | Fly.io pricing; sizing per `deploy/fly.*.toml` |
+| Neon PostgreSQL | R0 (free tier up to 10GB + 1 compute); R200–R800+/month at scale | Neon pricing. Staging branch + per-PR preview branches use copy-on-write off the production base, so preview compute is the dominant marginal cost, not preview storage |
 | Resend (email) | R0 (free tier: 3K emails/month) | Resend pricing |
 
 ### Uploads per user per month (assumption)
@@ -213,12 +224,12 @@ These are concrete, observable thresholds that should trigger an infrastructure 
 | Active users | — | **500 users** | Evaluate Neon scaling tier; plan read replicas for read-heavy `GET /bookshelves` |
 | `price_snapshots` row count | 0 | **5M rows** | Implement monthly partitioning |
 | `event_log` row count | 0 | **5M rows** | Implement monthly partitioning |
-| Fly.io machine memory | 256MB | **> 80% sustained** | Upgrade to 512MB or add a second machine |
+| Fly.io machine memory | 512MB (core), 256MB (scraper/log-shipper), 512MB (searxng) | **> 80% sustained** | Upgrade tier or add a second machine. Sizing lives in `deploy/fly.{core,scraper,searxng,log-shipper}.toml` |
 | `GET /api/search/platform` P95 | N/A | **> 1,000ms** | Evaluate dedicated search service (e.g., Typesense, meilisearch) |
 | Modal spend | < R5/day | **> R50/day sustained** | Renegotiate budget limits; evaluate whether modal selection is still optimal |
 | Active users | — | **1,000 users** | Evaluate DuckDB for `wh` schema analytical queries |
 | Active users | — | **5,000 users** | Evaluate Snowflake / ClickHouse for time-series data (`price_snapshots` history) |
-| Oban queue depth | < 100 jobs | **> 1,000 jobs sustained** | See `docs/runbooks/oban-queue-backlog.md` |
+| Oban queue depth | < 100 jobs | **> 1,000 jobs sustained** | See `docs/runbooks/oban-queue-backlog.md`. Configured concurrency in `apps/core/config/config.exs`: `default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1`. Oban is the event bus (ADR-002) |
 
 ### Capacity review cadence
 
@@ -236,3 +247,4 @@ These are concrete, observable thresholds that should trigger an infrastructure 
 | Version | Date | Summary |
 |---------|------|---------|
 | 1.0 | 2026-03-19 | Initial capacity model — projections only, no real data |
+| 1.1 | 2026-05-24 | Align with current code: Fly sizing (core 512MB/2cpu), Oban queue concurrency, vision stack (HF Transformers + Qwen2.5-VL-7B + A10G, `max_containers=10`), Neon CoW preview model, ADR-015 SLO gate thresholds. Cross-refs to ADR-001/-002/-015. |

@@ -22,25 +22,21 @@ Coordinate and execute the 12-layer test strategy across all 4 execution environ
 
 ## Execution Environments (4)
 
-Controlled by `TEST_TARGET` environment variable:
+Controlled by `TEST_TARGET` (and `BASE_URL` for deployed targeting) — see `docs/agents/standards/testing.md` and `docs/technical-architecture.md` Section 16:
 
 | Environment | TEST_TARGET | External Services | Database |
 |-------------|-------------|-------------------|----------|
-| Fully local (offline) | `local` | Mocked (Mox, WireMock) | Local Postgres |
-| Local -> deployed dev | `dev` | Real (Modal, Open Library, etc.) | Dev Neon PostgreSQL |
-| CI pipeline | `ci` | Mocked | CI Postgres (GitHub Actions service) |
-| CI -> deployed preview | `preview` | Real | Preview Neon PostgreSQL |
+| Fully local (offline) | `local` (default) | Mocked | Local Postgres |
+| Local -> deployed | `deployed` + `BASE_URL=…` | Real (Modal, Open Library, etc.) | Dev Neon PostgreSQL |
+| CI pipeline | `local` (default) | Mocked | CI Postgres (GitHub Actions service) |
+| CI -> deployed preview | `deployed` + `BASE_URL=…` | Real | Preview Neon PostgreSQL |
 
 ### Wiring Pattern
 ```elixir
-# In config/test.exs or runtime.exs
-case System.get_env("TEST_TARGET", "local") do
-  "local" -> config :stacks, :vision_client, Stacks.Vision.MockClient
-  "dev"   -> config :stacks, :vision_client, Stacks.Vision.HTTPClient
-  "ci"    -> config :stacks, :vision_client, Stacks.Vision.MockClient
-  "preview" -> config :stacks, :vision_client, Stacks.Vision.HTTPClient
-end
+# apps/core/config/test.exs — defaults to the mock client.
+config :core, :vision_client, Stacks.AI.MockClient
 ```
+Deployed runs (`TEST_TARGET=deployed` + `BASE_URL=…`) are driven by `scripts/test-deployed.sh`; Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` and bumps per-step timeout to 90 s.
 
 ## Test-to-Story Mapping
 
@@ -84,14 +80,13 @@ Reference: `docs/implementation-mapping.md` maps each story to its technical com
 
 ## Pre-approved Commands
 ```bash
-# Elixir
-mix test
-mix test --cover
-mix test test/acceptance/
+# Elixir (mix coveralls MUST be run from apps/core/; minimum_coverage: 80 is set in apps/core/mix.exs)
+cd apps/core && mix test
+cd apps/core && mix coveralls
+cd apps/core && mix test test/acceptance/
 
-# Elm
-cd frontend && elm-test
-cd frontend && npx elm-program-test
+# Elm (elm-program-test runs inside the elm-test runner — no standalone CLI)
+cd frontend && npx elm-test
 
 # Rust
 cd apps/scraper && cargo test
@@ -101,8 +96,8 @@ cd apps/scraper && cargo fuzz run [target]
 cd apps/vision && python3 -m pytest
 cd apps/vision && python3 -m atheris [target]
 
-# E2E
-npx playwright test
+# E2E (config: e2e/playwright.config.ts, specs: e2e/tests/*.spec.ts)
+cd e2e && npx playwright test
 
 # Load
 k6 run test/load/[scenario].js
@@ -110,9 +105,19 @@ k6 run test/load/[scenario].js
 # dbt
 cd dbt && dbt test
 
-# Environment control
-TEST_TARGET=local mix test
-TEST_TARGET=dev mix test
+# Just wrappers (preferred)
+just test            # all local suites
+just test-elixir     # scripts/test-elixir.sh — mix coveralls from apps/core/
+just test-elm        # scripts/test-elm.sh
+just test-rust       # scripts/test-rust.sh
+just test-python     # scripts/test-python.sh
+just test-dbt        # scripts/test-dbt.sh
+just test-e2e        # Playwright against local just dev
+just test-e2e-ci     # scripts/test-e2e.sh — Playwright with service lifecycle
+just test-deployed   # scripts/test-deployed.sh (requires TEST_TARGET=deployed)
+
+# Deployed targeting
+TEST_TARGET=deployed BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
 ```
 
 ---
@@ -120,7 +125,15 @@ TEST_TARGET=dev mix test
 ## Orchestrator Integration
 
 DO NOT: Write plan files, commit messages, or proceed to next phase.
-DO: Write tests, test configs, chaos scenarios, load scripts, and return a completion report. Call `mcp__project-tools__update_progress(number, note)` to append progress notes — do not edit the issue file directly.
+DO: Write tests, test configs, chaos scenarios, load scripts, and return a completion report.
+
+**MCP tools (prefer over file edits):**
+- `mcp__project-tools__get_issue(number)` — read issue scope/DoD
+- `mcp__project-tools__update_progress(number, note)` — append progress notes; do not edit the issue file directly
+- `mcp__project-tools__run_test_suite(domain)` — domain ∈ `{elixir, elm, rust, python}`; returns structured pass/fail + summary
+- `mcp__project-tools__run_e2e_gate(issue_number)` — deploys preview branch, runs Playwright + DAST against it
+
+**Hook reminder:** The `Stop` Claude Code hook (`.claude/settings.json`) runs the full lint suite (format + credo + sobelow + ruff + buf + elm-format + cargo fmt) for every changed file at end-of-response. A passing test run is not enough — the hook must also exit cleanly.
 
 ### Test-First Protocol
 

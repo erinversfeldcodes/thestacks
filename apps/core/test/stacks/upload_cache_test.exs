@@ -9,9 +9,14 @@ defmodule Stacks.UploadCacheTest do
   # async: false because BudgetTracker is a global GenServer.
   use Core.DataCase, async: false
 
+  import Stacks.Factory
+
+  alias Stacks.Accounts.Guardian
   alias Stacks.AI.BudgetTracker
+  alias Stacks.Books
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
+  alias StacksWeb.Plugs.AgeGate
 
   setup do
     BookDetailCache.invalidate_all()
@@ -143,6 +148,139 @@ defmodule Stacks.UploadCacheTest do
 
       # All cleared
       Enum.each(ids, fn id -> assert {:miss, ^id} = BookDetailCache.get(id) end)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SECURITY — cache poisoning prevention (US-1.1.1)
+  # ---------------------------------------------------------------------------
+
+  describe "BookDetailCache poisoning prevention on upload failure" do
+    @tag stories: ["US-1.1.1"], suite: :cache, security: true
+    test "store_upload failure does not insert any entry into the cache" do
+      # Snapshot the cache before — it's clean per the outer setup.
+      assert :ets.info(:book_detail_cache, :size) == 0
+
+      user = insert(:user)
+
+      # Simulate an upload failure: File.read fails because the file does
+      # not exist. store_upload returns {:error, _} without ever creating
+      # an UploadedImage row, a Book row, or a BookEdition.
+      bogus_path = "/tmp/nonexistent_#{System.unique_integer([:positive])}.jpg"
+      upload = %Plug.Upload{path: bogus_path, filename: "x.jpg", content_type: "image/jpeg"}
+
+      assert {:error, _reason} = Books.store_upload(user.id, upload)
+
+      # No cache entry was inserted as a side-effect of the failed upload.
+      # This protects against the upload path inadvertently writing
+      # placeholder/empty data into BookDetailCache, which would surface
+      # later as a stale 404 or empty book detail to other users.
+      assert :ets.info(:book_detail_cache, :size) == 0
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :cache, security: true
+    test "storage backend failure does not insert any entry into the cache" do
+      # Same property under a different mid-flow failure: the storage
+      # backend rejects the upload. Books.store_upload short-circuits on
+      # the {:error, :unavailable} from the backend before any DB or
+      # cache write would happen.
+      defmodule __MODULE__.FailingStorage do
+        @behaviour Stacks.Storage.StorageBehaviour
+        @impl true
+        def put(_key, _data, _opts), do: {:error, :unavailable}
+        @impl true
+        def presigned_url(_key, _ttl \\ 900), do: {:error, :unavailable}
+        @impl true
+        def delete(_key), do: :ok
+      end
+
+      original = Application.get_env(:core, :storage)
+      Application.put_env(:core, :storage, __MODULE__.FailingStorage)
+      on_exit(fn -> Application.put_env(:core, :storage, original) end)
+
+      assert :ets.info(:book_detail_cache, :size) == 0
+
+      user = insert(:user)
+
+      tmp_path =
+        Path.join(System.tmp_dir!(), "poison_test_#{System.unique_integer([:positive])}.jpg")
+
+      File.write!(tmp_path, "fake jpeg")
+      on_exit(fn -> File.rm(tmp_path) end)
+
+      upload = %Plug.Upload{path: tmp_path, filename: "x.jpg", content_type: "image/jpeg"}
+
+      assert {:error, :unavailable} = Books.store_upload(user.id, upload)
+
+      assert :ets.info(:book_detail_cache, :size) == 0
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SECURITY — age-gated cache segregation (US-1.1.4)
+  # ---------------------------------------------------------------------------
+
+  describe "BookDetailCache age-gated segregation" do
+    @tag stories: ["US-1.1.4"], suite: :cache, security: true
+    test "age-gated book cached after age-verified fetch is still gated for non-verified viewer" do
+      # The BookDetailCache key is the book_id alone — there is no
+      # per-user or per-age-verification segregation in the cache itself.
+      # This is intentional: age-gating is enforced per-request by the
+      # AgeGate plug AFTER the cache lookup, so even when an age-verified
+      # user populates the cache, a subsequent request from a
+      # non-verified user must still be blocked.
+      #
+      # We test the controller-equivalent property: the cached entry
+      # carries the book's `visibility_tier` field, which AgeGate checks
+      # on every request. Cache hit alone does not bypass the gate.
+      {:ok, gated_book} =
+        Books.create(%{
+          "title" => "Gated Title",
+          "isbn" => "9780316769488",
+          "visibility_tier" => "age_gated"
+        })
+
+      # Simulate an age-verified user populating the cache.
+      BookDetailCache.put(gated_book.id, gated_book)
+
+      # The cached value retains the visibility_tier flag, so AgeGate.enforce
+      # can reject non-verified viewers without consulting the DB. If the
+      # cache stripped this field, segregation would silently break.
+      assert {:ok, cached} = BookDetailCache.get(gated_book.id)
+      assert cached.visibility_tier == "age_gated"
+    end
+
+    @tag stories: ["US-1.1.4"], suite: :cache, security: true
+    test "AgeGate.enforce halts a non-verified viewer regardless of cache state" do
+      # End-to-end-equivalent assertion: even when the cache is
+      # pre-populated (as if an age-verified user just fetched the book),
+      # a non-verified viewer's request runs through AgeGate.enforce on
+      # every call. Cache key isolation is therefore NOT required as long
+      # as enforcement is per-request — this test pins that property in
+      # place so a future "skip AgeGate on cache hit" optimisation can't
+      # silently leak gated content.
+      {:ok, gated_book} =
+        Books.create(%{
+          "title" => "Age Gated Cached",
+          "isbn" => "9780140449136",
+          "visibility_tier" => "age_gated"
+        })
+
+      # Pre-populate the cache (e.g. an age-verified user just fetched it).
+      BookDetailCache.put(gated_book.id, gated_book)
+      assert {:ok, cached} = BookDetailCache.get(gated_book.id)
+
+      # A non-verified viewer hits the gate. The plug halts the conn and
+      # writes a 403 — independent of whether the data came from cache or DB.
+      non_verified = insert(:user, age_verified: false)
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Guardian.Plug.put_current_resource(non_verified)
+        |> AgeGate.enforce(cached)
+
+      assert conn.halted
+      assert conn.status == 403
     end
   end
 

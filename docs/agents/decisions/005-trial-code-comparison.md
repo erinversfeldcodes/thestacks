@@ -2,6 +2,7 @@
 **Issue**: #024 (Agent Teams Evaluation)
 **Date**: 2026-03-13
 **Branches compared**: `trial/005-current-orchestrator`, `trial/005-agent-teams`, `trial/005-hybrid`
+**Status**: historical — see `agent-teams-evaluation.md` for the final decision
 
 ---
 

@@ -9,15 +9,28 @@ const isProduction = process.argv.includes("--production");
 // Copy static assets (textures, etc.) to priv/static so they are served
 // at their original URL paths (e.g. /textures/bookshelf-wide-panoramic.png).
 function copyStaticAssets() {
-  const staticSrc = path.resolve(__dirname, "static");
   const staticDest = path.resolve(__dirname, "..", "priv", "static");
-
-  if (!fs.existsSync(staticSrc)) return;
-
-  // Use cp -r via child_process to avoid semgrep path-traversal false positives
-  // on path.join(dir, entry.name) patterns from readdirSync.
   const { execSync } = require("child_process");
-  execSync(`cp -r "${staticSrc}/." "${staticDest}/"`, { stdio: "inherit" });
+
+  // Ensure destination exists.
+  fs.mkdirSync(staticDest, { recursive: true });
+
+  // Copy the static/ directory contents (textures etc.) if present.
+  const staticSrc = path.resolve(__dirname, "static");
+  if (fs.existsSync(staticSrc)) {
+    // Use cp -rL via child_process to avoid semgrep path-traversal false positives
+    // on path.join(dir, entry.name) patterns from readdirSync.
+    // -L dereferences symlinks (static/textures is a symlink to frontend/public/textures).
+    // macOS cp -r follows symlinks by default, but Linux preserves them — -L is portable.
+    execSync(`cp -rL "${staticSrc}/." "${staticDest}/"`, { stdio: "inherit" });
+  }
+
+  // Copy the SPA entrypoint index.html to priv/static so PageController
+  // can serve it for / and all client-side routes.
+  const indexSrc = path.resolve(__dirname, "index.html");
+  if (fs.existsSync(indexSrc)) {
+    fs.copyFileSync(indexSrc, path.join(staticDest, "index.html"));
+  }
 }
 
 async function build() {

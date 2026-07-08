@@ -12,12 +12,13 @@
 - Registration confirmation email not received
 - Password reset email not received
 - WishList availability notification not received
-- Marketplace notification (sale, offer, shipping) not received
+- Marketplace notification (sale, new offer) not received
+- Group invitation email not received
 
 **Operator sees:**
-- Oban `notifications` queue: `EmailDeliveryJob` jobs in `retrying` or `discarded` state
-- Logs: `[error] Resend/Postmark API returned HTTP 4xx/5xx on email send`
-- Resend/Postmark dashboard: delivery failures, bounce rate spike, or API error rate increase
+- Oban `notifications` queue: `Stacks.Workers.EmailDeliveryJob` jobs in `retrying` or `discarded` state
+- Logs: `[error]` from `Stacks.Email.Mailer` / Swoosh on a failed `Mailer.deliver/1` (HTTP 4xx/5xx from Resend)
+- Resend dashboard: delivery failures, bounce rate spike, or API error rate increase
 
 ---
 
@@ -27,12 +28,13 @@
 
 | Email type | Impact if broken |
 |-----------|-----------------|
-| Registration confirmation | If email confirmation is required, new users cannot complete registration |
+| Registration confirmation | Email confirmation is always required (Issue #084); new users cannot complete registration |
 | Password reset | Users who forget their password cannot recover access |
 | WishList availability notification | Users miss notification when a wanted book becomes available |
-| Marketplace sale notification | Sellers not notified of purchase — may not ship |
-| GDPR export/delete confirmation | Users do not receive confirmation of GDPR actions |
-| Partner approval notification | Partners not notified of approval status |
+| Marketplace sale notification | Sellers/buyers not notified of a completed transaction |
+| New offer notification | Sellers not notified when a buyer makes an offer on a listing |
+| Group invitation | Invitees do not receive the invitation link |
+| GDPR export ready / opt-out confirmation | Users do not receive confirmation of GDPR actions |
 
 **Still working:**
 - All platform features that don't require email confirmation
@@ -43,12 +45,11 @@
 
 ## Diagnosis
 
-### Step 1: Check Resend/Postmark status
+### Step 1: Check Resend status
 
 **Resend:** [https://resend-status.com](https://resend-status.com)
-**Postmark:** [https://status.postmarkapp.com](https://status.postmarkapp.com)
 
-Check for active incidents or degraded delivery.
+Check for active incidents or degraded delivery. (The production mailer is wired to `Swoosh.Adapters.Resend` in `config/runtime.exs`, gated on `EMAIL_PROVIDER=resend`. There is no Postmark fallback currently configured.)
 
 ### Step 2: Check Oban notification queue
 
@@ -72,45 +73,54 @@ ORDER BY attempted_at DESC LIMIT 20;
 ### Step 3: Check Phoenix logs for API errors
 
 ```bash
-fly logs -a thestacks-core | grep -i "email\|resend\|postmark" | tail -50
+fly logs -a thestacks-core | grep -iE "email|resend|swoosh|Mailer" | tail -50
 ```
 
 Common errors:
 - `HTTP 401 Unauthorized` — API key invalid or expired
 - `HTTP 422 Unprocessable Entity` — Email address invalid (bounce) or domain not configured
-- `HTTP 429 Too Many Requests` — Rate limit hit (unlikely at Phase 1 scale)
+- `HTTP 429 Too Many Requests` — Rate limit hit (Resend free tier caps apply; `Stacks.Email` also enforces an internal 10/user/hr and 100/hr global cap)
 - `HTTP 503 Service Unavailable` — Provider outage
 
-### Step 4: Verify API key is valid
+### Step 4: Verify provider is configured and API key is valid
 
 ```bash
-fly secrets list -a thestacks-core | grep EMAIL
+fly secrets list -a thestacks-core | grep -E "EMAIL_PROVIDER|RESEND_API_KEY"
 ```
 
-Test the API key:
+Both `EMAIL_PROVIDER=resend` and `RESEND_API_KEY` must be set — `config/runtime.exs` only wires the Resend adapter when `EMAIL_PROVIDER == "resend"`. Without it, the mailer falls back to `Swoosh.Adapters.Local` (configured in `apps/core/config/config.exs`) and emails are silently captured in a local mailbox, never sent.
+
+Send a test email by enqueueing a real job (there is no `Stacks.Email.ping/0`):
 ```bash
 fly ssh console -a thestacks-core
 ```
 ```elixir
-iex> Stacks.Email.ping()
-# Should return :ok
-# If {:error, :unauthorized}: API key is invalid
+# Enqueue a registration confirmation to a known test user
+iex> user = Stacks.Accounts.get_user_by_email("ops-test@thestacks.app")
+iex> Stacks.Email.send_registration_confirmation(user)
+# Then watch the notifications queue for the job to complete:
+iex> import Ecto.Query
+iex> Core.Repo.all(
+...>   from j in Oban.Job,
+...>   where: j.worker == "Stacks.Workers.EmailDeliveryJob",
+...>   order_by: [desc: j.inserted_at], limit: 5
+...> )
 ```
 
 ### Step 5: Check domain authentication (SPF/DKIM)
 
 A common cause of delivery failures is domain authentication misconfiguration. If SPF/DKIM/DMARC records are missing or incorrect, major providers (Gmail, Outlook) may silently reject or junk emails.
 
-Check in the Resend/Postmark dashboard:
+Check in the Resend dashboard:
 - Domain verification status for `thestacks.app`
-- SPF record: should include `include:sendgrid.net` (or the provider's SPF record)
+- SPF record: should include `include:amazonses.com` (Resend's underlying SPF host)
 - DKIM record: public key must be present in DNS as a TXT record
 
 ```bash
 # Check SPF record
 dig TXT thestacks.app | grep "v=spf"
 
-# Check DKIM (Resend uses specific selector, e.g., "resend._domainkey")
+# Check DKIM (Resend uses the "resend._domainkey" selector by default)
 dig TXT resend._domainkey.thestacks.app
 ```
 
@@ -120,31 +130,27 @@ dig TXT resend._domainkey.thestacks.app
 
 ### If the email provider is reporting an incident
 
-1. Do nothing to the application. Oban will retry email jobs automatically.
-2. Check when the retry window closes — by default, Oban retries with exponential backoff up to the configured max attempts. If the provider outage is long, some jobs may be discarded before recovery.
-3. If critical emails (password reset) are discarded: manually re-trigger after recovery.
+1. Do nothing to the application. Oban will retry email jobs automatically (`EmailDeliveryJob` is configured with `max_attempts: 3`).
+2. Check when the retry window closes — Oban retries with exponential backoff. After 3 attempts a job is `discarded` and will not retry on its own; if the outage is long, expect some jobs to land in `discarded` before the provider recovers.
+3. If critical emails (registration confirmation, password reset) are discarded: re-trigger after recovery (see "Re-queuing discarded email jobs" below).
 
 ### If the API key has expired
 
 ```bash
-# Generate a new API key in Resend/Postmark dashboard
-# Then update the Fly.io secret
-fly secrets set EMAIL_API_KEY="re_newkey_..." -a thestacks-core
+# Generate a new API key in the Resend dashboard, then update the Fly.io secret
+fly secrets set RESEND_API_KEY="re_newkey_..." -a thestacks-core
 ```
 
-After updating, the app restarts. Test immediately:
-```elixir
-iex> Stacks.Email.ping()
-```
+After updating, the app restarts. Test immediately by enqueueing a real send (see Step 4 above) and confirming the resulting Oban job reaches `completed`.
 
 ### If domain authentication has lapsed (SPF/DKIM issue)
 
 1. In the DNS provider for `thestacks.app`, verify:
-   - SPF: `v=spf1 include:<provider-spf-domain> ~all`
-   - DKIM: TXT record at `<selector>._domainkey.thestacks.app` with the public key from the email provider
+   - SPF: `v=spf1 include:amazonses.com ~all` (Resend sends via SES under the hood)
+   - DKIM: TXT record at `resend._domainkey.thestacks.app` with the public key from the Resend dashboard
    - DMARC: `v=DMARC1; p=quarantine; rua=mailto:dmarc@thestacks.app`
 
-2. Re-verify the domain in the Resend/Postmark dashboard after updating DNS records.
+2. Re-verify the domain in the Resend dashboard after updating DNS records.
 
 3. DNS propagation takes up to 48 hours. During this period, some emails may still fail delivery.
 
@@ -156,6 +162,7 @@ If Oban has discarded email jobs during the outage (exceeded max retries), they 
 -- Find discarded email jobs
 SELECT id FROM oban_jobs
 WHERE queue = 'notifications'
+  AND worker = 'Stacks.Workers.EmailDeliveryJob'
   AND state = 'discarded'
   AND inserted_at > NOW() - INTERVAL '24 hours';
 ```
@@ -168,9 +175,10 @@ fly ssh console -a thestacks-core
 iex> Oban.retry_job(job_id)
 
 # Or retry all discarded email jobs (use with caution — may send duplicate emails)
+iex> import Ecto.Query
 iex> Oban.Job
-     |> where([j], j.state == "discarded" and j.queue == "notifications")
-     |> Repo.all()
+     |> where([j], j.state == "discarded" and j.worker == "Stacks.Workers.EmailDeliveryJob")
+     |> Core.Repo.all()
      |> Enum.each(fn job -> Oban.retry_job(job.id) end)
 ```
 
@@ -200,8 +208,8 @@ Register a new test account (if in a staging environment) and verify the confirm
 
 ## Post-Incident
 
-- If the API key expires: add the expiry date to a calendar reminder 30 days in advance.
+- If the API key expires: add the expiry date to a calendar reminder 30 days in advance. See `docs/runbooks/secrets-rotation.md` (covers `RESEND_API_KEY` rotation).
 - If domain authentication lapsed: set a 6-month calendar reminder to re-verify domain DNS records.
-- Consider adding email delivery success rate as a metric on the metrics dashboard (via Resend/Postmark webhooks for delivery status).
-- Email confirmation is always required — email delivery failure blocks new signups. Document the impact on new user onboarding in the SLA.
-- Consider a secondary email provider as fallback (e.g., primary: Resend, fallback: AWS SES) for registration confirmation and password reset — these are the most critical email types.
+- Consider adding email delivery success rate as a metric on the metrics dashboard (via Resend webhooks for delivery status).
+- Email confirmation is always required (Issue #084 removed the `REQUIRE_EMAIL_CONFIRMATION` flag) — email delivery failure blocks new signups. Document the impact on new user onboarding in the SLA.
+- Consider a secondary email provider as fallback (e.g., primary: Resend, fallback: AWS SES) for registration confirmation and password reset — these are the most critical email types. This is not currently configured.

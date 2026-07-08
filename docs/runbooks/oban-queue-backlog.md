@@ -84,15 +84,19 @@ fly ssh console -a thestacks-core
 ```
 ```elixir
 # Check all circuit breaker states
-iex> [:modal_vision, :together_ai, :brave_search, :open_library, :google_books]
-     |> Enum.map(fn name -> {name, Fuse.ask(name)} end)
+iex> [:vision_fuse, :together_ai_fuse, :brave_fuse, :open_library_fuse, :google_books_fuse, :scraper_fuse, :searxng_fuse, :r2_fuse]
+     |> Enum.map(fn name -> {name, :fuse.ask(name, :sync)} end)
 
 # :ok = circuit closed (requests flowing)
 # :blown = circuit open (requests blocked after repeated failures)
 ```
 
-A blown circuit for `brave_search` explains a backed-up `source_discovery` queue.
-A blown circuit for `:open_library` would explain failed ISBN resolution jobs.
+See `docs/runbooks/circuit-breakers.md` for the full fuse registry.
+
+A blown `:brave_fuse` explains failed `Stacks.Workers.DiscoverAuthorSourcesJob` runs on the `default` queue.
+A blown `:open_library_fuse` or `:google_books_fuse` would explain failed ISBN resolution in `Stacks.Workers.IdentifyBookJob` (`vision` queue) and `Stacks.Workers.EnrichBookJob` (`default` queue).
+A blown `:vision_fuse` backs up the `vision` queue — see `docs/runbooks/modal-outage.md`.
+A blown `:scraper_fuse` backs up the `scraper` queue (`Stacks.Workers.TriggerPriceScrapeJob`).
 
 ### Step 5: Check if the backlog is growing or stable
 
@@ -185,12 +189,20 @@ ORDER BY count(*) DESC;
 If one worker dominates: identify the enqueue logic and check for a scheduling loop. The fix requires a code change.
 
 **Emergency: pause a specific queue**
+
+The configured queues are `default` (10), `events` (20), `vision` (60), `scraper` (5),
+`notifications` (3), and `dbt_refresh` (1) — see `apps/core/config/config.exs`.
+
 ```elixir
 # This pauses job processing for the queue (jobs accumulate but don't run)
-iex> Oban.pause_queue(queue: :price_scrape)
+iex> Oban.pause_queue(queue: :scraper)
 
 # After fixing the issue, resume:
-iex> Oban.resume_queue(queue: :price_scrape)
+iex> Oban.resume_queue(queue: :scraper)
+
+# To cancel or retry an individual job by id:
+iex> Oban.cancel_job(job_id)
+iex> Oban.retry_job(job_id)
 ```
 
 ---
@@ -224,5 +236,14 @@ WHERE scraped_at > NOW() - INTERVAL '24 hours';
 
 - If a specific worker is repeatedly discarding jobs, file an issue for the underlying cause.
 - If circuit breakers are tripping frequently for an external service: consider whether that service is reliable enough to remain in the pipeline, or if a fallback/alternative should be implemented.
-- Review Oban concurrency settings if a queue is consistently falling behind — the `concurrency` setting for that queue may need to be increased.
+- Review Oban concurrency settings if a queue is consistently falling behind — the `concurrency` setting for that queue may need to be increased in `apps/core/config/config.exs`.
 - Consider enabling `Oban.Web` for a visual queue monitoring UI.
+
+---
+
+## See also
+
+- [ADR-002: Oban as Event Bus Instead of Kafka or RabbitMQ](../decisions/002-oban-over-kafka.md) — rationale for Oban being the only message bus.
+- [Runbook: Modal vision outage](modal-outage.md) — when the `vision` queue specifically is backing up.
+- [Runbook: Circuit breakers](circuit-breakers.md) — full fuse registry and probe-based recovery semantics.
+- `apps/core/lib/stacks/workers/` — all worker modules. The Oban repo is `Core.ObanRepo` (shares the database with `Core.Repo`); see `apps/core/lib/core/oban_repo.ex`.

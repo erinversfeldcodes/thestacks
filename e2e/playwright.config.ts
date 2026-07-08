@@ -48,7 +48,14 @@ export default defineConfig({
     {
       name: "upload",
       timeout: 300_000,
-      retries: 0,
+      // Two retries to absorb transient external-service flakiness (Google Books
+      // / Open Library rate limits, Modal cold-starts, R2 hiccups). Worst case
+      // a hung test still terminates on the 300 s per-attempt timeout, so the
+      // serial project cannot run longer than 3 × 300 s × test_count even when
+      // every retry exhausts. Do NOT use retries to mask consistent failures —
+      // a test that needs all three attempts to pass is a flaky test that
+      // needs fixing.
+      retries: 2,
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup", "chromium", "upload-mock"],
       testMatch: /upload\.spec\.ts$/,

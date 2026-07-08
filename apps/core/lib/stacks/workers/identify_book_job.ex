@@ -24,17 +24,20 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   @impl true
   def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key}
+        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key} = args
       }) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
     case Storage.get_image_url(storage_key) do
       {:ok, image_url} ->
-        context = %{
-          image_url: image_url,
-          user_id: user_id,
-          image_id: image_id
-        }
+        context =
+          %{
+            image_url: image_url,
+            user_id: user_id,
+            image_id: image_id
+          }
+          |> put_excluded_books(args)
+          |> put_excluded_isbns(args)
 
         run_pipeline(context, image_id)
 
@@ -50,29 +53,63 @@ defmodule Stacks.Workers.IdentifyBookJob do
   # ── Legacy path: image_b64 (backwards compat for in-flight jobs) ──────────
 
   def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64}
+        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64} = args
       }) do
     Logger.info(
       "IdentifyBookJob: processing image #{image_id} for user #{user_id} (legacy b64 path)"
     )
 
-    context = %{
-      image_b64: image_b64,
-      user_id: user_id,
-      image_id: image_id
-    }
+    context =
+      %{
+        image_b64: image_b64,
+        user_id: user_id,
+        image_id: image_id
+      }
+      |> put_excluded_books(args)
+      |> put_excluded_isbns(args)
 
     run_pipeline(context, image_id)
   end
 
+  # Carries the cumulative rejected-books list from the args map into the
+  # moderation context. Missing or non-list values are normalised to an
+  # empty list so downstream callers can `Map.get(context, :excluded_books, [])`
+  # without worrying about shape.
+  defp put_excluded_books(context, args) do
+    case Map.get(args, "excluded_books") do
+      list when is_list(list) -> Map.put(context, :excluded_books, list)
+      _ -> context
+    end
+  end
+
+  # Carries the cumulative rejected-ISBNs list from the args map into the
+  # moderation context. The resolver layer consumes this to skip OL/GB
+  # search hits whose ISBN matches a previously-rejected book, preventing
+  # a slightly-different VLM title variant from collapsing back to the
+  # same wrong ISBN on every retry. Distinct from `excluded_books` (which
+  # is VLM-bound for the extract prompt) — this list is Elixir-side only.
+  defp put_excluded_isbns(context, args) do
+    case Map.get(args, "excluded_isbns") do
+      list when is_list(list) -> Map.put(context, :excluded_isbns, list)
+      _ -> context
+    end
+  end
+
   defp run_pipeline(context, image_id) do
+    Stacks.Telemetry.phase(:identify_book, %{upload_id: image_id}, fn ->
+      do_run_pipeline(context, image_id)
+    end)
+  end
+
+  defp do_run_pipeline(context, image_id) do
     case Moderation.run_pipeline(context) do
-      {:ok, books} when is_list(books) ->
+      {:ok, %{resolved: books, rejected: rejected}} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
         isbns = Enum.map_join(books, ", ", &primary_isbn/1)
 
         Logger.info("IdentifyBookJob: identified #{length(books)} book(s): #{isbns}")
         mark_resolved(image_id, book_ids)
+        emit_partial_rejections(image_id, rejected)
         :ok
 
       {:error, :not_a_book} ->
@@ -98,11 +135,38 @@ defmodule Stacks.Workers.IdentifyBookJob do
       {:error, exception}
   end
 
+  # Emits one `image.rejected` event per failed candidate from a
+  # multi-book partial-resolve. The aggregate_id stays the same `image_id`
+  # so the events tie back to the upload — observability tools can group
+  # by aggregate to reconstruct the per-image outcome (1+ resolved + N
+  # rejected). The image's row stays `resolved` because at least one
+  # candidate succeeded; that's the all-or-nothing rejection contract at
+  # the upload level.
+  defp emit_partial_rejections(_image_id, []), do: :ok
+
+  defp emit_partial_rejections(image_id, rejected) when is_list(rejected) do
+    Enum.each(rejected, fn {candidate_id, reason} ->
+      Events.emit_safe(%{
+        event_type: "image.rejected",
+        aggregate_type: "image",
+        aggregate_id: image_id,
+        payload: %{
+          isbn: to_string(candidate_id),
+          reason: to_string(reason)
+        }
+      })
+    end)
+  end
+
   defp primary_isbn(%{editions: [edition | _]}), do: edition.isbn
   defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
-    query = from(i in UploadedImage, where: i.id == ^image_id)
+    # Scope the update to rows still in `pending` so Oban retries that re-enter
+    # this path after a successful run do not re-touch the row and double-emit
+    # the [:stacks, :upload, :terminal] telemetry event. Only a real
+    # pending -> resolved transition fires the counter.
+    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
       Repo.update_all(
@@ -117,6 +181,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: resolved image #{image_id} → #{length(book_ids)} book(s)")
+
+      :telemetry.execute(
+        [:stacks, :upload, :terminal],
+        %{count: 1},
+        %{outcome: :resolved}
+      )
 
       Phoenix.PubSub.broadcast(
         Core.PubSub,
@@ -139,7 +209,11 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   defp mark_rejected(image_id, reason) do
-    query = from(i in UploadedImage, where: i.id == ^image_id)
+    # Scope to rows still in `pending` so an Oban retry that re-enters this
+    # path after a successful rejection cannot re-emit
+    # [:stacks, :upload, :terminal]. Only real pending -> rejected transitions
+    # fire the counter.
+    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
       Repo.update_all(
@@ -153,6 +227,12 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
     if count > 0 do
       Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
+
+      :telemetry.execute(
+        [:stacks, :upload, :terminal],
+        %{count: 1},
+        %{outcome: :rejected}
+      )
 
       Phoenix.PubSub.broadcast(
         Core.PubSub,

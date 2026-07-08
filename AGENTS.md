@@ -20,6 +20,7 @@ Agents are plain .md files. Invoke the Orchestrator as:
 |---|---|---|
 | orchestrator | docs/agents/orchestrator-agent.md | System conductor — plans, delegates, reviews |
 | researcher | docs/agents/orchestrator/researcher-agent.md | Research subagent — codebase + doc analysis |
+| reviewer (generic) | docs/agents/orchestrator/reviewer-agent.md | Review subagent — DoD + standards verdict |
 | elixir-agent | docs/agents/elixir-agent.md | Phoenix, Oban, EDA, contexts, partner API |
 | elm-agent | docs/agents/elm-agent.md | Elm SPA, shelves, spines, cork board, partner dashboard |
 | python-agent | docs/agents/python-agent.md | FastAPI vision service (Modal), content moderation |
@@ -92,6 +93,7 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - Testing: docs/agents/standards/testing.md
 - Security: docs/agents/standards/security.md
 - Protobuf: docs/agents/standards/protobuf.md
+- Migrations: docs/agents/standards/migrations.md
 
 ## Canonical References
 - Architecture: docs/technical-architecture.md

@@ -52,11 +52,13 @@ defmodule Stacks.BooksTest do
       assert %{isbn: ["has an invalid checksum"]} = errors_on(changeset)
     end
 
-    test "accepts isbn-10 with valid checksum" do
+    test "accepts isbn-10 with valid checksum and normalises to isbn-13" do
       attrs = %{"isbn" => "0306406152", "title" => "Valid ISBN-10"}
       assert {:ok, book} = Books.create(attrs)
       assert [edition] = book.editions
-      assert edition.isbn == "0306406152"
+      # ISBN-10 "0306406152" normalises to ISBN-13 on storage so that
+      # find_existing/1 (which searches by ISBN-13) can round-trip correctly.
+      assert edition.isbn == "9780306406157"
     end
   end
 
@@ -663,6 +665,49 @@ defmodule Stacks.BooksTest do
       assert {:ok, _book} = Books.create_from_isbn("9780451524935")
 
       assert event_count("book.created") == before_count + 1
+    end
+  end
+
+  describe "canonical_isbn13/1" do
+    # The seam behind cache invalidation and rejection-retry exclusion
+    # matching: OL docs often carry only the ISBN-10 form while the DB
+    # stores ISBN-13, so both sides of any comparison canonicalise here.
+
+    test "converts a valid ISBN-10 to its ISBN-13 form" do
+      # The live production case: title-search memoised the OL doc's
+      # ISBN-10 while rejection invalidated by the edition's ISBN-13.
+      assert Books.canonical_isbn13("0312864833") == "9780312864835"
+    end
+
+    test "converts a valid ISBN-10 with an X check digit" do
+      assert Books.canonical_isbn13("080442957X") == "9780804429573"
+      # Lowercase x is upcased before the shape check.
+      assert Books.canonical_isbn13("080442957x") == "9780804429573"
+    end
+
+    test "strips hyphens and whitespace before converting" do
+      assert Books.canonical_isbn13("0-312-86483-3") == "9780312864835"
+      assert Books.canonical_isbn13(" 0 312 86483 3 ") == "9780312864835"
+    end
+
+    test "passes ISBN-13s through (normalised only)" do
+      assert Books.canonical_isbn13("9780312864835") == "9780312864835"
+      assert Books.canonical_isbn13("978-0-312-86483-5") == "9780312864835"
+    end
+
+    test "leaves a checksum-invalid 10-digit string unconverted" do
+      assert Books.canonical_isbn13("0312864834") == "0312864834"
+    end
+
+    test "returns garbage in stripped/upcased form, otherwise unchanged" do
+      assert Books.canonical_isbn13("garbage!") == "GARBAGE!"
+      assert Books.canonical_isbn13("") == ""
+      assert Books.canonical_isbn13("  - ") == ""
+    end
+
+    test "returns nil for non-binary input" do
+      assert Books.canonical_isbn13(nil) == nil
+      assert Books.canonical_isbn13(123) == nil
     end
   end
 

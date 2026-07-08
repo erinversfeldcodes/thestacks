@@ -748,6 +748,9 @@ userSuite =
                         , passwordResetSentAt = ""
                         , createdAt = ""
                         , updatedAt = ""
+                        , failedLoginCount = 0
+                        , failedLoginFirstAt = ""
+                        , lockedUntil = ""
                         }
 
                     result =
@@ -1274,6 +1277,9 @@ responseSuite =
                             , passwordResetSentAt = ""
                             , createdAt = ""
                             , updatedAt = ""
+                            , failedLoginCount = 0
+                            , failedLoginFirstAt = ""
+                            , lockedUntil = ""
                             }
                         }
 

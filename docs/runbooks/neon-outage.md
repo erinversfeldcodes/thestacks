@@ -2,7 +2,13 @@
 
 **Severity:** P0 (total platform outage — no cached read path)
 **Owner:** Platform operator
-**Last reviewed:** 2026-03-19
+**Last reviewed:** 2026-06-10
+
+The production database lives in the `thestacks` Neon project on a single
+`production` branch. The `thestacks-staging` project (with its `staging`
+branch and per-PR `preview/<pr>` copy-on-write clones) is structurally
+isolated — a staging-side incident does not touch prod, and vice versa.
+See `docs/deployment/NEON_BRANCH_TOPOLOGY.md` for the full topology.
 
 ---
 
@@ -73,9 +79,14 @@ iex> Stacks.Repo.query("SELECT 1")
 If IEx is not available (app crash loop), test from outside:
 
 ```bash
-# Get the DATABASE_URL (contains credentials — handle with care)
+# Get the DATABASE_URL (contains credentials — handle with care).
+# Note: prod's DATABASE_URL is composed at deploy time from the
+# STACKS_PROD_DB_{ROLE,PASSWORD,HOST,NAME} GH secrets (see
+# .github/workflows/deploy-production.yml) and pushed to the Fly app
+# as a single DATABASE_URL secret. `fly secrets list` shows only the
+# digest — pull the full value from the Neon console or recompose
+# from the GH secrets if you need to psql from outside the app.
 fly secrets list -a thestacks-core | grep DATABASE
-# Use psql with the connection string from Neon console
 psql "$DATABASE_URL"
 ```
 
@@ -85,8 +96,8 @@ psql "$DATABASE_URL"
 fly ssh console -a thestacks-core
 ```
 ```elixir
-# Check pool status
-iex> DBConnection.Poolboy.status(Stacks.Repo)
+# Check pool status (Ecto v3 default pool is DBConnection.ConnectionPool)
+iex> Ecto.Adapters.SQL.query(Stacks.Repo, "SELECT 1", [])
 # Or check via Telemetry metrics: db.pool.checked_out vs db.pool.size
 ```
 
@@ -130,18 +141,28 @@ After updating secrets, the app restarts automatically.
 
 **Check 2: Neon branch/compute health**
 
-In the Neon console, verify:
-- The production branch (`main`) is active
+In the Neon console (project `thestacks`), verify:
+- The `production` branch is active and marked as default
 - The compute endpoint is running (not in a suspended/stopped state)
-- No recent branch deletions or resets that might affect the production branch
+- No recent branch deletions, resets, or default-branch swaps. A
+  stray `pre-rollback-*` branch left over from `migration-recovery.md`
+  is expected and harmless — it's a snapshot, not the live branch.
+
+From the CLI:
+
+```bash
+neonctl branches list --project-id "$NEON_PROJECT_ID" \
+  --api-key "$NEON_API_KEY"
+```
 
 **Check 3: Connection limit**
 
 Neon's free tier limits concurrent connections. If the platform is hitting the connection limit:
 
 ```bash
-# In Neon console: check active connections
-SELECT count(*) FROM pg_stat_activity WHERE datname = 'stacks_production';
+# In Neon console SQL editor (against the production branch):
+SELECT count(*) FROM pg_stat_activity
+ WHERE datname = current_database();
 ```
 
 If at the limit, consider reducing Ecto pool size temporarily or upgrading the Neon plan.
@@ -155,6 +176,42 @@ If at the limit, consider reducing Ecto pool size temporarily or upgrading the N
 - Ecto's `DBConnection` pool attempts reconnection automatically.
 - Oban resumes processing queued jobs.
 - No manual intervention required.
+
+**If the pool stays wedged after Neon recovers**, the connection
+pool's reconnect backoff may have grown long. Bounce the Fly machines
+to force a fresh pool:
+
+```bash
+fly machine restart -a thestacks-core
+```
+
+The release boots fresh, `Stacks.Release.migrate/0` runs only on a
+deploy path (not on a machine restart), and the pool re-establishes
+connections to Neon immediately.
+
+**Point-in-time restore (PITR) — only if data corruption is suspected.**
+Neon supports LSN-based restore on any branch. **Do not use this for a
+plain outage** — the cost is data loss for writes since the LSN. Use
+only when the outage involved data corruption (e.g. a runaway script,
+a partial migration not handled by `migration-recovery.md`):
+
+```bash
+# 1. Identify the target LSN from before the corruption window.
+#    Neon console → Branches → production → History → pick LSN.
+# 2. Reset the production branch to that LSN. Neon's API requires
+#    preserve_under_name so the pre-restore state survives as a
+#    sibling branch (matches the pre-rollback-* pattern in
+#    migration-recovery.md).
+curl -X POST \
+  -H "Authorization: Bearer $NEON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source_lsn":"<LSN>","preserve_under_name":"pre-restore-<UTC>"}' \
+  "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/<production-branch-id>/restore"
+# 3. fly machine restart -a thestacks-core to pick up fresh connections.
+```
+
+See `scripts/rollback-production.sh` lines 153–179 for the canonical
+restore call shape used by the auto-rollback path.
 
 **Verify recovery:**
 ```bash
@@ -187,4 +244,18 @@ Oban has a built-in "rescue" mechanism that transitions orphaned `executing` job
 - **Document the outage:** Duration, impact (total unavailability), root cause.
 - **Consider read replicas:** At 500+ users, a Neon read replica for `GET` endpoints would allow read-only access during a primary outage. See `docs/capacity-model.md` trigger points.
 - **Consider a status page:** If outages are becoming frequent, a platform status page (e.g., via Statuspage.io or a simple static page) improves user trust.
-- **Review connection string expiry:** Neon connection strings may have expiry dates depending on the plan. Set a calendar reminder to rotate before expiry.
+- **Review connection string expiry:** Neon connection strings may have expiry dates depending on the plan. Set a calendar reminder to rotate before expiry. See `docs/runbooks/secrets-rotation.md` for the `STACKS_PROD_DB_*` rotation flow.
+
+---
+
+## Related
+
+- `docs/deployment/NEON_BRANCH_TOPOLOGY.md` — two-project layout
+  (`thestacks` prod vs `thestacks-staging`) and the CoW preview lineage.
+- `docs/runbooks/manual-rollback.md` — image-only rollback path; does
+  not touch the Neon branch.
+- `docs/runbooks/migration-recovery.md` — partial-migration recovery
+  via LSN reset and the `pre-rollback-*` safety branch.
+- `docs/runbooks/secrets-rotation.md` — rotating the `STACKS_PROD_DB_*`
+  components that compose the prod `DATABASE_URL`.
+- `scripts/rollback-production.sh` — canonical Neon restore HTTP call.

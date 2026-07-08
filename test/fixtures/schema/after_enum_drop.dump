@@ -1,0 +1,18 @@
+-- Fixture: `structure.sql` AFTER dropping `looking_for_home` from the
+-- `op.bookshelf_name` enum. Diff vs before_enum_drop.dump must be flagged
+-- by check-schema-diff.sh — the set of enum values has shrunk.
+
+CREATE TYPE op.bookshelf_name AS ENUM (
+    'antilibrary',
+    'library',
+    'wishlist',
+    'reading_pile'
+);
+
+CREATE TABLE op.bookshelves (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    name op.bookshelf_name NOT NULL,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);

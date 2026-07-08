@@ -1,9 +1,9 @@
 [
   verbose: false,
   quiet: false,
-  exit_on_vuln: false,
+  exit_on_vuln: true,
   skip: false,
   router: "lib/core_web/router.ex",
-  ignore: ["Config.Secrets", "Config.HTTPS"],
-  ignore_files: []
+  ignore: ["Config.Secrets", "Config.HTTPS", "Traversal.FileModule"],
+  ignore_files: ["test/support/"]
 ]

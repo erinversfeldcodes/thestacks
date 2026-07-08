@@ -17,9 +17,12 @@ defmodule Stacks.Books.MockHttpClient do
 
   @behaviour Stacks.Books.HttpClientBehaviour
 
+  @capture_key {__MODULE__, :capture_pid}
+
   @impl true
   def get(url) do
-    responses = Process.get(__MODULE__, [])
+    notify_capture(url)
+    responses = lookup_responses()
 
     case Enum.find(responses, fn {pattern, _} -> String.contains?(url, pattern) end) do
       {_, response} -> response
@@ -33,8 +36,73 @@ defmodule Stacks.Books.MockHttpClient do
     Process.put(__MODULE__, [{pattern, response} | responses])
   end
 
+  @doc """
+  Capture every requested URL by sending `{Stacks.Books.MockHttpClient,
+  :request, url}` to the calling (test) process. Uses the same
+  `$callers`-walking process-dictionary mechanism as `put_response/2`,
+  so requests made from Tasks spawned by the code under test are
+  captured too. Lets tests assert on the exact query the resolver
+  built (e.g. that a corrupted keyword or `inauthor:null` never goes
+  out on the wire).
+  """
+  def capture_requests do
+    Process.put(@capture_key, self())
+  end
+
   @doc "Clear all registered responses for the current process."
   def clear do
     Process.delete(__MODULE__)
+  end
+
+  # Walk the `$callers` chain so responses registered in the test process
+  # are visible to Tasks spawned from it (e.g. ISBNResolver.race_resolve/1
+  # spawns two parallel Task.async'd lookups). Elixir automatically puts
+  # the caller hierarchy in `$callers` when a Task is started, so we can
+  # check each ancestor's dictionary. Local dict wins; fall through to
+  # ancestors only on miss.
+  defp lookup_responses do
+    case Process.get(__MODULE__, :undefined) do
+      :undefined -> find_in_callers(Process.get(:"$callers", []))
+      responses -> responses
+    end
+  end
+
+  defp find_in_callers([]), do: []
+
+  defp find_in_callers([pid | rest]) do
+    case safe_dict_get(pid) do
+      nil -> find_in_callers(rest)
+      responses -> responses
+    end
+  end
+
+  defp safe_dict_get(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} -> Keyword.get(dict, __MODULE__)
+      nil -> nil
+    end
+  end
+
+  defp notify_capture(url) do
+    case find_capture_pid([self() | Process.get(:"$callers", [])]) do
+      nil -> :ok
+      pid -> send(pid, {__MODULE__, :request, url})
+    end
+  end
+
+  defp find_capture_pid([]), do: nil
+
+  defp find_capture_pid([pid | rest]) do
+    case safe_capture_get(pid) do
+      nil -> find_capture_pid(rest)
+      capture_pid -> capture_pid
+    end
+  end
+
+  defp safe_capture_get(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} -> dict |> List.keyfind(@capture_key, 0, {nil, nil}) |> elem(1)
+      nil -> nil
+    end
   end
 end
