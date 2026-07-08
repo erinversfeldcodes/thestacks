@@ -29,10 +29,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Shared derivation (honours optional PREVIEW_SUFFIX — see the lib header).
 BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
-SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-SANITISED="${SANITISED%-}"
-CORE_APP="stacks-core-pr-${SANITISED}"
+# shellcheck source=scripts/lib/preview-names.sh
+source "${REPO_ROOT}/scripts/lib/preview-names.sh"
+derive_preview_names "$BRANCH"
+CORE_APP="${PREVIEW_CORE_APP}"
 CORE_URL="https://${CORE_APP}.fly.dev"
 
 # ── Deploy ────────────────────────────────────────────────────────────────────

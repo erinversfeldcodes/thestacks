@@ -868,6 +868,22 @@ jobs:
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
+      - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
+        # "ci" + the LAST 6 digits of the run id. Run ids are ~11 digits and
+        # monotonically increasing across all of GitHub, so the last 6 only
+        # repeat for runs ~10^6 apart — never concurrently. Truncated (rather
+        # than the full id) because Fly's 30-char app-name cap leaves only 12
+        # chars for the "<branch>-<suffix>" component after the longest
+        # prefix (stacks-scraper-pr- / stacks-searxng-pr-, 18 chars); an
+        # 8-char suffix keeps 3 chars of branch for legibility. Local `just
+        # ci` runs never set PREVIEW_SUFFIX and keep the bare branch-derived
+        # names — this suffix is what stops a local cleanup deleting CI's
+        # Neon branch mid-run (and vice versa). Consumed by
+        # scripts/lib/preview-names.sh via deploy-stack.sh /
+        # cleanup-preview.sh and the Pin-Fly-hostname step below.
+        run: |
+          echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}" >> "$GITHUB_ENV"
+          echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}"
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           lfs: true
@@ -930,12 +946,14 @@ jobs:
         # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
         # directly so every resolver (curl, Playwright, Node) returns IPv4.
         run: |
-          BRANCH="${GITHUB_HEAD_REF:-preview}"
-          SAN="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-          SAN="${SAN%-}"
-          CORE_URL="https://stacks-core-pr-${SAN}.fly.dev"
-          HOST="stacks-core-pr-${SAN}.fly.dev"
-          NEON_BRANCH="preview/${SAN}"
+          # Same shared derivation as deploy-stack.sh / cleanup-preview.sh —
+          # picks up PREVIEW_SUFFIX from GITHUB_ENV so the names match the
+          # ones the deploy step just created.
+          source scripts/lib/preview-names.sh
+          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
+          CORE_URL="https://${PREVIEW_CORE_APP}.fly.dev"
+          HOST="${PREVIEW_CORE_APP}.fly.dev"
+          NEON_BRANCH="${PREVIEW_NEON_BRANCH}"
           echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
           echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
           IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"

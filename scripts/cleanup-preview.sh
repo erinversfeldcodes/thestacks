@@ -4,6 +4,21 @@
 # Deletes the two Fly apps and the Neon DB branch created by deploy-preview.sh.
 # Safe to run multiple times; missing resources are silently skipped.
 #
+# Teardown ORDER matters (Issue #170 D): Fly machines are stopped BEFORE the
+# Neon preview branch is deleted. The core app's pooled Postgrex connections
+# otherwise keep pointing at the deleted Neon endpoint until autostop kicks
+# in, spraying `Postgrex ... The requested endpoint could not be found`
+# errors into the core logs — harmless, but noisy enough to mask real DB
+# errors. Stopping the machines first drains the pool before the endpoint
+# disappears.
+#
+# Manual verification (2026-07-08 procedure, re-run after any reorder):
+#   1. Deploy a preview (scripts/deploy-preview.sh).
+#   2. In a second terminal: `fly logs --app stacks-core-pr-<branch>`.
+#   3. Run this script and watch the log tail through the Neon deletion —
+#      zero Postgrex "endpoint could not be found" errors after the machine
+#      stop completes.
+#
 # Required env vars:
 #   FLY_API_TOKEN   — Fly.io API token
 #
@@ -15,6 +30,10 @@
 #   MODAL_TOKEN_ID          — Modal API token ID (required to delete Modal app)
 #   MODAL_TOKEN_SECRET      — Modal API token secret
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
+#   PREVIEW_SUFFIX          — optional uniqueness component; MUST match the
+#                             value the deploy ran with so the same suffixed
+#                             names are derived (Issue #170 C). CI sets it;
+#                             local runs leave it unset.
 #
 # Usage:
 #   scripts/cleanup-preview.sh
@@ -40,14 +59,18 @@ if [[ -z "$BRANCH" ]]; then
     BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
 fi
 
-# Sanitise branch name the same way deploy-preview.sh does
-SANITISED="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
-SANITISED="${SANITISED%-}"
+# Derive names exactly as deploy-stack.sh does (shared lib honours the
+# optional PREVIEW_SUFFIX env var) so cleanup only ever touches the
+# resources its own deploy created.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/preview-names.sh
+source "${REPO_ROOT}/scripts/lib/preview-names.sh"
+derive_preview_names "$BRANCH"
 
-CORE_APP="stacks-core-pr-${SANITISED}"
-SCRAPER_APP="stacks-scraper-pr-${SANITISED}"
-SEARXNG_APP="stacks-searxng-pr-${SANITISED}"
-MODAL_APP="thestacks-vision-${SANITISED}"
+CORE_APP="${PREVIEW_CORE_APP}"
+SCRAPER_APP="${PREVIEW_SCRAPER_APP}"
+SEARXNG_APP="${PREVIEW_SEARXNG_APP}"
+MODAL_APP="${PREVIEW_MODAL_APP}"
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
@@ -68,6 +91,26 @@ if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     # idle machines (no running-machine cost). The app DNS record stays live.
     # The next ci.sh run re-deploys to the same app via `fly apps create || true`.
     echo "    Keeping ${CORE_APP} (auto_stop_machines handles idle cost, preserves DNS)."
+
+    # Stop the core machines NOW rather than waiting for autostop (Issue
+    # #170 D). This runs before the Neon-branch deletion below, so the
+    # Ecto pool's connections are gone before their endpoint is — no
+    # post-teardown Postgrex "endpoint could not be found" noise in the
+    # logs. Same `fly machines list --json` idiom as deploy-stack.sh.
+    echo "    Stopping ${CORE_APP} machines (drain DB pool before Neon branch deletion)..."
+    fly machines list --app "${CORE_APP}" --json 2>/dev/null \
+        | python3 -c "
+import json,sys
+for m in json.load(sys.stdin):
+    print(m['id'])
+" 2>/dev/null \
+        | while read -r mid; do
+            [[ -z "$mid" ]] && continue
+            fly machine stop "$mid" --app "${CORE_APP}" 2>/dev/null \
+                && echo "    Stopped machine ${mid}." \
+                || echo "    Machine ${mid} already stopped (or stop failed — non-fatal)."
+        done
+
     fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
     fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
 else
@@ -87,7 +130,7 @@ fi
 # ── Neon branch ───────────────────────────────────────────────────────────────
 if [[ -n "${NEON_STAGING_API_KEY:-}" ]] && [[ -n "${NEON_STAGING_PROJECT_ID:-}" ]]; then
     # Use the name passed from deploy-preview.sh, or derive it from the branch.
-    [[ -z "$NEON_BRANCH_NAME" ]] && NEON_BRANCH_NAME="preview/${SANITISED}"
+    [[ -z "$NEON_BRANCH_NAME" ]] && NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
     echo "    Looking up Neon branch '${NEON_BRANCH_NAME}'..."
     branch_id="$(curl -sL \
         -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
