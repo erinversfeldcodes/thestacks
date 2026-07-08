@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { registerViaApi, uniqueEmail } from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -109,5 +110,43 @@ test.describe("Login Page Aesthetic", () => {
     const tablist = page.locator('[role="tablist"]');
     await expect(tablist).toBeVisible();
     await expect(page.locator('[role="tab"]')).toHaveCount(2);
+  });
+});
+
+test.describe("Unconfirmed-email login", () => {
+  test("a freshly-registered (unconfirmed) user is told to confirm their email (403)", async ({
+    page,
+    request,
+  }) => {
+    // A brand-new registration is unconfirmed by definition — no seed needed.
+    const email = uniqueEmail("e2e-unconfirmed");
+    const password = "a-strong-password";
+    const reg = await registerViaApi(request, {
+      email,
+      password,
+      displayName: "Unconfirmed Reader",
+    });
+    expect(reg.ok()).toBeTruthy();
+
+    await page.goto("/login");
+    await page.fill('input[id="email"]', email);
+    await page.fill('input[id="password"]', password);
+    await page.getByTestId("login-submit").click();
+
+    // The 403 confirm-your-email path must surface its specific copy — NOT the
+    // generic invalid-credentials message.
+    const error = page.getByTestId("login-error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText(
+      "confirm your email address before signing in"
+    );
+    await expect(error).not.toContainText("The door remains shut");
+
+    // Login is refused — the user stays on the login page with no session.
+    await expect(page).toHaveURL(/\/login/);
+    const stored = await page.evaluate(() =>
+      localStorage.getItem("stacks-auth")
+    );
+    expect(stored).toBeFalsy();
   });
 });

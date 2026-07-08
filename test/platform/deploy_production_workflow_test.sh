@@ -545,6 +545,60 @@ fi
 
 DEPLOY_STACK_IDX="$(step_idx_by_run_substr "deploy-stack.sh")"
 
+# ── Case M3b: Test-helper flag (Issue #124) is preview-only, never prod ─────
+# GET /api/test/confirmation-token is gated by the server env
+# STACKS_E2E_TEST_HELPERS; when "1" it returns an account-activation token,
+# so it must NEVER be enabled in production. The preview branch of
+# deploy-stack.sh sets it to "1" (the E2E confirm-email + onboarding specs
+# need it live on the preview app); the --production branch forces it empty
+# so it can never reach the prod app. Enforced statically here so a future
+# edit that leaks the flag into prod fails CI.
+test_case "e2e_test_helpers_preview_only" "deploy-stack.sh enables STACKS_E2E_TEST_HELPERS only for previews, never production"
+
+if [[ -f "$DEPLOY_STACK_SCRIPT" ]]; then
+    # Anchors that uniquely identify each branch of the prod/preview
+    # conditional: NEON_STAGING_API_KEY="" lives only in the --production
+    # branch; CORE_APP="${PREVIEW_CORE_APP}" only in the preview branch.
+    PROD_ANCHOR=$(grep -n 'NEON_STAGING_API_KEY=""' "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    PREVIEW_ANCHOR=$(grep -n "CORE_APP=\"\${PREVIEW_CORE_APP}\"" "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    HELPERS_ENABLE_LINE=$(grep -n 'STACKS_E2E_TEST_HELPERS="1"' "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+    HELPERS_EMPTY_LINE=$(grep -n 'STACKS_E2E_TEST_HELPERS=""' "$DEPLOY_STACK_SCRIPT" | head -1 | cut -d: -f1)
+
+    # 1. The "1" enablement exists and sits inside the preview branch.
+    if [[ -n "$HELPERS_ENABLE_LINE" && -n "$PREVIEW_ANCHOR" && "$HELPERS_ENABLE_LINE" -gt "$PREVIEW_ANCHOR" ]]; then
+        _record_pass "STACKS_E2E_TEST_HELPERS=\"1\" (#$HELPERS_ENABLE_LINE) lives in the preview branch (after #$PREVIEW_ANCHOR)"
+    else
+        _record_fail "STACKS_E2E_TEST_HELPERS=\"1\" must be set in the preview branch (enable=#$HELPERS_ENABLE_LINE preview_anchor=#$PREVIEW_ANCHOR)"
+    fi
+
+    # 2. The prod branch forces the flag empty, BEFORE the preview branch
+    #    begins — proving production cannot inherit the "1" value.
+    if [[ -n "$HELPERS_EMPTY_LINE" && -n "$PROD_ANCHOR" && -n "$PREVIEW_ANCHOR" \
+          && "$HELPERS_EMPTY_LINE" -gt "$PROD_ANCHOR" && "$HELPERS_EMPTY_LINE" -lt "$PREVIEW_ANCHOR" ]]; then
+        _record_pass "prod branch forces STACKS_E2E_TEST_HELPERS=\"\" (#$HELPERS_EMPTY_LINE, between prod anchor #$PROD_ANCHOR and preview anchor #$PREVIEW_ANCHOR)"
+    else
+        _record_fail "prod branch must force STACKS_E2E_TEST_HELPERS=\"\" before the preview branch (empty=#$HELPERS_EMPTY_LINE prod_anchor=#$PROD_ANCHOR preview_anchor=#$PREVIEW_ANCHOR)"
+    fi
+
+    # 3. The core secrets-set gates the flag behind ${VAR:+...}, so an empty
+    #    value in prod mode is omitted entirely (no empty secret is staged).
+    if grep -q "\${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS=" "$DEPLOY_STACK_SCRIPT"; then
+        _record_pass "secrets block gates the flag behind \${STACKS_E2E_TEST_HELPERS:+...} (empty → omitted)"
+    else
+        _record_fail "secrets block must pass the flag via \${STACKS_E2E_TEST_HELPERS:+...} so an empty prod value is omitted"
+    fi
+
+    # 4. Defense-in-depth: prod mode explicitly unsets any lingering Fly
+    #    secret so a hand-set value can't survive across deploys.
+    if grep -q 'fly secrets unset STACKS_E2E_TEST_HELPERS' "$DEPLOY_STACK_SCRIPT"; then
+        _record_pass "prod path unsets any lingering STACKS_E2E_TEST_HELPERS Fly secret"
+    else
+        _record_fail "prod path should 'fly secrets unset STACKS_E2E_TEST_HELPERS' as defense-in-depth"
+    fi
+else
+    _record_fail "scripts/deploy-stack.sh not found — cannot verify test-helper gating"
+fi
+
 # ── Case M4: Rollback step uses composite action (not inline bash) ──────────
 test_case "rollback_uses_composite_action" "rollback step uses ./.github/actions/rollback-production"
 

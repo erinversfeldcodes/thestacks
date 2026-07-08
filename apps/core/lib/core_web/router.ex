@@ -327,6 +327,18 @@ defmodule CoreWeb.Router do
     post "/smoke/circuit_breakers", InternalController, :smoke_circuit_breakers
   end
 
+  # Test-only helper endpoints (Issue #124). Unauthenticated by design — the
+  # E2E suite calls these before it has a session. The E2ETestHelper plug is
+  # the sole gate: it returns 404 for every request unless the server flag
+  # STACKS_E2E_TEST_HELPERS=1 is set, which production never sets. This is why
+  # the guard lives in the router pipeline (fails closed) rather than in the
+  # controller. The endpoint leaks an account-activation token, so a real 404
+  # (not the SPA catch-all's index.html) is returned when the flag is off.
+  scope "/api/test", StacksWeb do
+    pipe_through [:api, StacksWeb.Plugs.E2ETestHelper]
+    get "/confirmation-token", TestHelperController, :confirmation_token
+  end
+
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
   scope "/", CoreWeb do
     pipe_through :spa

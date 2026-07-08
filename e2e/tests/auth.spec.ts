@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { signInViaForm, suiteAuthFile } from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -75,5 +76,88 @@ test.describe("Authentication", () => {
     // Should show the upload area, not the auth-required prompt
     await expect(page.getByTestId('upload-auth-required')).not.toBeVisible();
     await expect(page.getByTestId('upload-drop-zone')).toBeVisible();
+  });
+});
+
+test.describe("Owner-only admin navigation", () => {
+  test("the platform owner sees the Admin dropdown (Metrics/Sources/Scrapers)", async ({
+    page,
+  }) => {
+    await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
+
+    // navDropdown renders the "Admin" primary as a dropdown toggle link that
+    // points at the metrics page; the Sources/Scrapers sub-links live in a
+    // sibling <ul class="app-nav__dropdown-menu"> that CSS keeps display:none
+    // until the dropdown is hovered (or focus-within). Target the toggle by
+    // its accessible role/name, then hover to reveal the sub-links.
+    const adminToggle = page.getByRole("link", { name: "Admin", exact: true });
+    await expect(adminToggle).toBeVisible();
+    await expect(adminToggle).toHaveAttribute("href", "/admin/metrics");
+
+    // Hovering the toggle reveals the dropdown menu (:hover -> display:block).
+    await adminToggle.hover();
+
+    const sources = page.locator('a[href="/admin/sources"]');
+    const scrapers = page.locator('a[href="/admin/scrapers"]');
+    await expect(sources).toBeVisible();
+    await expect(sources).toHaveText("Sources");
+    await expect(scrapers).toBeVisible();
+    await expect(scrapers).toHaveText("Scrapers");
+  });
+});
+
+test.describe("Non-owner admin navigation", () => {
+  // The "auth" suite user is a plain role=user account.
+  test.use({ storageState: suiteAuthFile("auth") });
+
+  test("a non-owner user does not see the Admin dropdown", async ({ page }) => {
+    await page.goto("/library");
+
+    // Authenticated nav is present …
+    await expect(page.getByTestId("user-menu")).toBeVisible();
+    // … but there is no Admin entry point of any kind.
+    await expect(page.locator('a[href="/admin/metrics"]')).toHaveCount(0);
+    await expect(page.locator('a[href="/admin/sources"]')).toHaveCount(0);
+    await expect(page.locator('a[href="/admin/scrapers"]')).toHaveCount(0);
+  });
+});
+
+test.describe("Logout", () => {
+  test("signing out ends the session, reverts the nav, and kills the token server-side", async ({
+    page,
+  }) => {
+    await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
+
+    // Capture the live token so we can prove it is revoked after logout.
+    const token = await page.evaluate(
+      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
+    );
+    expect(token).toBeTruthy();
+
+    // Open the display-name menu and sign out.
+    await page.getByTestId("user-menu").click();
+    await page.getByRole("button", { name: "Sign Out" }).click();
+
+    await page.waitForURL("**/login");
+
+    // Nav reverts to the unauthenticated state.
+    await expect(page.locator('a[href="/login"]')).toBeVisible();
+    await expect(page.getByTestId("user-menu")).toHaveCount(0);
+
+    // Local session cleared.
+    const stored = await page.evaluate(() =>
+      localStorage.getItem("stacks-auth")
+    );
+    expect(stored).toBeFalsy();
+
+    // A protected page bounces back to the login form.
+    await page.goto("/upload");
+    await expect(page.locator('input[id="email"]')).toBeVisible();
+
+    // A2 revocation: the pre-logout token is dead server-side (guardian_db).
+    const resp = await page.request.get("/api/placements/mine", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(resp.status()).toBe(401);
   });
 });
