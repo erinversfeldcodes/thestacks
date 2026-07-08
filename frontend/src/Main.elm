@@ -1,6 +1,8 @@
 port module Main exposing
     ( Auth
+    , LoginEffect(..)
     , decodeFlags
+    , loginEffects
     , main
     , shouldShowOnboarding
     , viewNav
@@ -542,6 +544,59 @@ encodeAuth auth =
         ]
 
 
+{-| The side-effects a completed form login must fire.
+
+A stored-auth reload runs the placements + onboarding check in `init`; a fresh
+login must run the _same_ effects, otherwise `hasAnyPlacements` never leaves its
+optimistic init value (`True`) and the onboarding overlay can never appear for a
+brand-new, placement-free user. Exposed so tests can assert the fetch happens.
+
+-}
+type LoginEffect
+    = PersistAuth
+    | NavigateHome
+    | FetchPlacements
+    | InitOnboarding
+
+
+{-| Effects performed when a login completes (form login, both the immediate and
+post-transition paths). Mirrors what `init` does for a stored auth.
+-}
+loginEffects : List LoginEffect
+loginEffects =
+    [ PersistAuth
+    , NavigateHome
+    , FetchPlacements
+    , InitOnboarding
+    ]
+
+
+{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+-}
+loginEffectCmd : Nav.Key -> Auth -> LoginEffect -> Cmd Msg
+loginEffectCmd key auth effect =
+    case effect of
+        PersistAuth ->
+            saveAuth (encodeAuth auth)
+
+        NavigateHome ->
+            Nav.pushUrl key (Route.toPath AntiLibrary)
+
+        FetchPlacements ->
+            Api.getMyPlacements auth.token GotPlacementCheck
+
+        InitOnboarding ->
+            Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
+
+
+{-| All commands a completed login must fire, given the base command already
+produced by the login sub-update.
+-}
+loginCompletionCmd : Nav.Key -> Auth -> Cmd Msg -> Cmd Msg
+loginCompletionCmd key auth baseCmd =
+    Cmd.batch (baseCmd :: List.map (loginEffectCmd key auth) loginEffects)
+
+
 
 -- UPDATE
 
@@ -675,7 +730,7 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , loginCompletionCmd model.key auth baseCmd
                             )
 
                         Login.RegistrationSucceeded _ ->
@@ -708,7 +763,7 @@ update msg model =
                                         { id = ar.userId
                                         , email = ar.email
                                         , displayName = ar.displayName
-                                        , role = "user"
+                                        , role = ar.role
                                         , countryCode = Nothing
                                         , city = Nothing
                                         }
@@ -716,7 +771,7 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , loginCompletionCmd model.key auth baseCmd
                             )
 
                         _ ->

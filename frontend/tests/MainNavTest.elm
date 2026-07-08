@@ -133,6 +133,23 @@ suite =
                     Main.decodeFlags (Encode.object [])
                         |> Expect.equal Nothing
             ]
+        , describe "loginEffects (fresh login mirrors init)"
+            [ test "fetches placements so onboarding can trigger for a placement-free user" <|
+                \() ->
+                    List.member Main.FetchPlacements Main.loginEffects
+                        |> Expect.equal True
+            , test "initialises the onboarding overlay after login" <|
+                \() ->
+                    List.member Main.InitOnboarding Main.loginEffects
+                        |> Expect.equal True
+            , test "still persists the auth and navigates home" <|
+                \() ->
+                    Main.loginEffects
+                        |> Expect.all
+                            [ \effects -> Expect.equal True (List.member Main.PersistAuth effects)
+                            , \effects -> Expect.equal True (List.member Main.NavigateHome effects)
+                            ]
+            ]
         , describe "shouldShowOnboarding"
             [ test "shows when authed, not completed, and no placements" <|
                 \() ->

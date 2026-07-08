@@ -192,6 +192,13 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # branch. Suppress branch creation by clearing NEON_STAGING_API_KEY
     # locally so the preview-branch block below is a no-op.
     NEON_STAGING_API_KEY=""
+    # Test-only helper endpoints (e.g. GET /api/test/confirmation-token,
+    # Issue #124) must NEVER be enabled in production — they leak an
+    # account-activation token. Force the gate env empty here so no stale
+    # shell/.env export can promote it onto the prod app; the prod-only
+    # "Purge test-helper flag" block below also unsets any lingering Fly
+    # secret as defense-in-depth.
+    STACKS_E2E_TEST_HELPERS=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -206,6 +213,13 @@ else
     fi
     CORE_APP="${PREVIEW_CORE_APP}"
     MODAL_APP="${PREVIEW_MODAL_APP}"
+    # Enable the E2E test-helper endpoints (Issue #124) on PREVIEW apps only.
+    # GET /api/test/confirmation-token returns 404 unless this server env
+    # == "1"; the confirm-email + onboarding E2E specs need it live on the
+    # preview app. This is set ONLY in the preview branch of this
+    # conditional — the --production branch above forces it empty so it can
+    # never reach the prod app.
+    STACKS_E2E_TEST_HELPERS="1"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -591,8 +605,25 @@ fly secrets set \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
     ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
+    ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
+
+# ── Purge test-helper flag (prod only, Issue #124) ───────────────────────────
+# Belt-and-suspenders: production and preview use disjoint Fly app names
+# (thestacks-core vs preview-*), so this script never stages the flag onto
+# the prod app in the first place — the ${STACKS_E2E_TEST_HELPERS:+...}
+# expansion above sees an empty value in prod mode. Still, explicitly unset
+# the secret on prod so any value set by hand (or a future code path) can't
+# linger and silently expose GET /api/test/confirmation-token in production.
+# --stage keeps it batched with the deploy above; || true tolerates the
+# common case where the secret was never present.
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    echo ""
+    echo "==> Ensuring test-helper flag is unset on ${CORE_APP} (prod safety)..."
+    fly secrets unset STACKS_E2E_TEST_HELPERS --app "${CORE_APP}" --stage 2>/dev/null \
+        || echo "    (STACKS_E2E_TEST_HELPERS not present — nothing to unset)"
+fi
 
 # ── DATABASE_URL assertion (prod only, P2 #9) ────────────────────────────────
 # On a brand-new prod app no DATABASE_URL is configured yet, and

@@ -335,7 +335,10 @@ login body toMsg =
         }
 
 
-{-| POST /api/auth/logout — invalidate the current session.
+{-| DELETE /api/auth/logout — invalidate the current session server-side
+(revokes the token via guardian\_db, Issue #124 A2). The method MUST be DELETE
+to match the router; a POST silently 404s the SPA catch-all, leaving the token
+valid until its TTL — caught by the logout E2E (auth.spec.ts).
 -}
 logout :
     String
@@ -343,7 +346,7 @@ logout :
     -> Cmd msg
 logout token toMsg =
     Http.request
-        { method = "POST"
+        { method = "DELETE"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody

@@ -63,6 +63,42 @@ scripts:
   (windowed Prometheus deltas + synthetic probes); exit 0 iff every SLI
   passes.
 
+## Real email on a preview (opt-in)
+
+By default a PR preview stack does **not** send real email. Swoosh runs the
+local adapter (`Swoosh.Adapters.Local`, configured in
+`apps/core/config/config.exs`), which captures messages in-process instead of
+delivering them. This keeps ordinary CI runs deterministic and free of any
+external dependency — the E2E suite exercises email flows through a
+deterministic DB-token path, not a real inbox.
+
+To validate **real Resend delivery** on a preview before merge — proving the
+production email path actually sends — opt the PR in with a label:
+
+1. Add the **`preview-real-email`** label to the PR.
+2. Re-run the CI workflow (or push a commit). Applying a label does not by
+   itself re-trigger CI: the `pull_request` trigger only fires on
+   `opened`/`synchronize`/`reopened`, so the label must be present the next
+   time the `deploy-preview` job runs.
+
+When the label is present, the `deploy-preview` job in `.github/workflows/ci.yml`
+exports the `RESEND_API_KEY` **repository/organization secret** into
+`deploy-stack.sh`, which stages it together with `EMAIL_PROVIDER=resend` as Fly
+secrets on the preview core app. `config/runtime.exs` then swaps the mailer to
+`Swoosh.Adapters.Resend` and the preview sends live email.
+
+Requirements and guarantees:
+
+- The **`RESEND_API_KEY` secret must exist** in the repository/organization
+  secret store. It is never hardcoded in any script, workflow, or config — CI
+  reads it from `${{ secrets.RESEND_API_KEY }}` only when the label is set,
+  otherwise the value resolves to an empty string.
+- **Default is OFF.** Without the label the exported value is empty,
+  `deploy-stack.sh`'s `${RESEND_API_KEY:+...}` expansion is a no-op, and the
+  preview keeps the local (non-sending) adapter.
+- Production is unaffected: `deploy-production.yml` always sets
+  `RESEND_API_KEY`, so prod always sends via Resend regardless of any label.
+
 ## Cross-references
 
 - `docs/runbooks/manual-rollback.md` — image-only rollback procedure
