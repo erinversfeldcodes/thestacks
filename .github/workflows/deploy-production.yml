@@ -248,8 +248,19 @@ jobs:
         # composed URL is written to $GITHUB_ENV for subsequent steps and
         # masked in logs via ::add-mask::. Fails loudly with a named
         # variable when any component is missing.
+        #
+        # STACKS_PROBER_EMAIL/PASSWORD ride along in the same fast-fail loop
+        # (Issue #170 E): the warmup + probes authenticate as the prober
+        # user, and a missing prober secret previously only surfaced as an
+        # HTTP 401 AFTER the whole stack had deployed — which rolled the
+        # deploy back (run 28924423704). Both secrets exist in the repo
+        # now; this check guards against future rot before anything
+        # deploys. (Wording note: this comment deliberately avoids the
+        # standalone step-marker word matched by
+        # test/platform/deploy_production_workflow_test.sh's ordering
+        # check, which keys on its first occurrence in the job body.)
         run: |
-          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME STACKS_PROBER_EMAIL STACKS_PROBER_PASSWORD; do
             if [[ -z "${!v}" ]]; then
               echo "::error::$v is required but not set"
               exit 1
@@ -439,6 +450,51 @@ jobs:
           # equivalent); github.repository is `<owner>/<name>`.
           origin-remote: ${{ github.server_url }}/${{ github.repository }}.git
 
+      - name: Write rollback-record.json — durable rollback record (Issue #170 F)
+        # The rollback action's DB audit row is BEST-EFFORT only: a rollback
+        # that includes a Neon LSN restore rewinds the schema, so the audit
+        # INSERT can crash (missing columns), and a row written before the
+        # restore would be erased by it. The rollback record cannot durably
+        # live in the database being rolled back — this artifact file is the
+        # durable record. Runs whenever the rollback step ran, success or
+        # failure, and lands in the same `gate-observations` artifact below.
+        if: ${{ always() && steps.rollback.outcome != 'skipped' }}
+        env:
+          ROLLBACK_STEP_OUTCOME: ${{ steps.rollback.outcome }}
+          FAILED_SHA: ${{ github.sha }}
+          TARGET_IMAGE: ${{ env.CORE_PREV_IMAGE }}
+          ROLLBACK_MODAL_PREV_COMMIT: ${{ env.MODAL_PREV_COMMIT }}
+          # Keep in lockstep with the rollback step's `rollback-reason` /
+          # `triggered-by` inputs above.
+          REASON: ${{ inputs.manual_rollback && format('Manual rollback by @{0}', github.actor) || 'SLO gate breached or prior step failed — see gate-observations.json' }}
+          TRIGGERED_BY: ${{ inputs.manual_rollback && 'manual' || 'step-failure' }}
+          CORE_ROLLED_BACK: ${{ steps.rollback.outputs.core-rolled-back }}
+          DB_ROLLED_BACK: ${{ steps.rollback.outputs.db-rolled-back }}
+          MODAL_ROLLED_BACK: ${{ steps.rollback.outputs.modal-rolled-back }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+
+          record = {
+              "failed_sha": os.environ.get("FAILED_SHA", ""),
+              "target_image": os.environ.get("TARGET_IMAGE", ""),
+              "modal_prev_commit": os.environ.get("ROLLBACK_MODAL_PREV_COMMIT", ""),
+              "reason": os.environ.get("REASON", ""),
+              "triggered_by": os.environ.get("TRIGGERED_BY", ""),
+              "rollback_step_outcome": os.environ.get("ROLLBACK_STEP_OUTCOME", ""),
+              "core_rolled_back": os.environ.get("CORE_ROLLED_BACK", ""),
+              "db_rolled_back": os.environ.get("DB_ROLLED_BACK", ""),
+              "modal_rolled_back": os.environ.get("MODAL_ROLLED_BACK", ""),
+              "workflow_run_url": os.environ.get("RUN_URL", ""),
+              "recorded_at": datetime.datetime.now(datetime.timezone.utc)
+                  .isoformat(timespec="seconds"),
+          }
+          with open("rollback-record.json", "w") as f:
+              json.dump(record, f, indent=2)
+          print(json.dumps(record, indent=2))
+          PY
+
       # ── Verify the rolled-back system is actually healthy ───────────────
       # If the rollback reported success but the rolled-back image is itself
       # unhealthy (e.g. data state has drifted such that N-1's invariants
@@ -494,6 +550,9 @@ jobs:
       # that set. Nothing to do here on success.
 
       - name: upload-artifact — gate-observations.json (deploy + post-rollback)
+        # rollback-record.json (written above when a rollback ran) is the
+        # DURABLE rollback record — the in-DB audit row is best-effort only
+        # (see .github/actions/rollback-production/README.md).
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -501,6 +560,7 @@ jobs:
           path: |
             gate-observations.json
             gate-observations-post-rollback.json
+            rollback-record.json
           if-no-files-found: warn
 
       - name: summary — post gate observations to the workflow summary

@@ -20,6 +20,11 @@ Three rollback legs, **executed in this order**:
    `$MODAL_PREV_COMMIT`, runs `modal deploy apps/vision/modal_app.py`
    to revert the Modal app to the previous revision.
 
+After the three legs, a **best-effort** audit row is written via
+`Stacks.Audit.log_rollback/1` — see
+[Audit row is best-effort](#audit-row-is-best-effort-artifact-is-the-durable-record)
+for why it cannot be guaranteed and where the durable record lives.
+
 ### Ordering invariant
 
 Core image first, then DB, then vision. This is forced by what each
@@ -95,10 +100,38 @@ flows produce empty inputs that exit cleanly rather than failing:
 Neither case is a failure — both are documented partial-rollback
 paths.
 
+## Audit row is best-effort; artifact is the durable record
+
+The `log-audit` step is **best-effort by design** (Issue #170 F,
+verified on run 28924423704):
+
+- When the rollback included a **Neon LSN restore**, the DB schema is
+  rewound to N-1 while this checkout's code is at N. The audit INSERT
+  can then reference `audit_log` columns that don't exist in the
+  rewound schema (observed: `column "success" of relation "audit_log"
+  does not exist`) — a guaranteed crash whenever the rolled-back
+  deploy included migrations touching `audit_log`.
+- **No ordering fixes this.** Writing the row *before* the LSN
+  restore doesn't help either: the restore erases it. A rollback
+  record cannot durably live in the database being rolled back.
+
+So the step wraps the insert in `try/rescue` (warning + exit 0 on
+failure) and carries `continue-on-error: true` as belt-and-braces —
+a completed rollback is never failed by its own bookkeeping. The row,
+when it lands, is convenience colour for operators querying
+`audit_log`.
+
+The **durable rollback record** is `rollback-record.json`, written by
+`deploy-production.yml` whenever the rollback step ran (success or
+failure) and uploaded inside the `gate-observations` workflow
+artifact. It carries `failed_sha`, `target_image`,
+`modal_prev_commit`, `reason`, `triggered_by`, the per-leg outputs
+(`core/db/modal_rolled_back`), the step outcome, the run URL, and a
+timestamp.
+
 ## Failure modes
 
-The action exits non-zero (and `log-audit` does **not** run, leaving
-audit-row absence as a signal that the rollback didn't complete) on:
+The action exits non-zero on:
 
 | Cause | Detection | Output |
 |---|---|---|
@@ -109,9 +142,10 @@ audit-row absence as a signal that the rollback didn't complete) on:
 | `validate-inputs` fails (e.g. `pre-migrate-lsn` set without Neon vars) | bash `exit 1` | all three outputs `error` |
 
 `emit-outputs` always runs (`if: always()`) so the workflow can read
-the per-leg status even on failure. The audit row is the source of
-truth for "did rollback complete?" — its **absence** indicates the
-action exited before reaching `log-audit`.
+the per-leg status even on failure. The source of truth for "did
+rollback complete?" is the `rollback-record.json` workflow artifact
+plus the per-leg outputs — **not** the DB audit row, which is
+best-effort only (see the section above).
 
 ## How to invoke from `workflow_dispatch`
 
