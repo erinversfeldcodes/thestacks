@@ -5,15 +5,19 @@ on:
   push:
     branches: [main]
 
-permissions:
-  security-events: write
-  id-token: write
-  contents: read
-  actions: read
+# scorecard-action's publish verification rejects workflow-global write
+# permissions — writes must be scoped to the job (read-all globally).
+# https://github.com/ossf/scorecard-action#workflow-restrictions
+permissions: read-all
 
 jobs:
   scorecard:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
