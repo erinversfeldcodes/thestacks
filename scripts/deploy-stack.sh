@@ -793,9 +793,14 @@ echo "==> Running migrations on ${CORE_APP}..."
 machine_id="$(fly_machine_started_id "${CORE_APP}")"
 
 if [[ -n "${machine_id}" ]]; then
-    fly machine exec "${machine_id}" \
+    # deploy_with_retry: machine execs right after a rolling deploy are the
+    # flakiest calls here — observed transient "failed_precondition: exec
+    # request failed: EOF" (run 28928687981) aborting an otherwise-healthy
+    # deploy. One 5s retry absorbs the settle window. Issue #170 G.
+    deploy_with_retry "in-container migrate" \
+        fly machine exec "${machine_id}" \
         "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.migrate()'\"" \
-        --app "${CORE_APP}" --timeout 60 2>&1 \
+        --app "${CORE_APP}" --timeout 60 \
         || { echo "FAIL deploy: migrations failed"; exit 1; }
     echo "PASS deploy: migrations applied"
 
@@ -811,16 +816,18 @@ if [[ -n "${machine_id}" ]]; then
     if [[ "$PROD_MODE" -eq 1 ]]; then
         echo ""
         echo "==> Seeding ${CORE_APP} (prod owner + prober)..."
-        fly machine exec "${machine_id}" \
+        deploy_with_retry "prod owner seed" \
+            fly machine exec "${machine_id}" \
             "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prod()'\"" \
-            --app "${CORE_APP}" --timeout 60 2>&1 \
+            --app "${CORE_APP}" --timeout 60 \
             || { echo "FAIL deploy: prod seed failed"; exit 1; }
         echo "PASS deploy: prod owner seed applied"
 
         if [[ -n "${STACKS_PROBER_EMAIL:-}" && -n "${STACKS_PROBER_PASSWORD:-}" ]]; then
-            fly machine exec "${machine_id}" \
+            deploy_with_retry "prober seed" \
+                fly machine exec "${machine_id}" \
                 "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.seed_prober()'\"" \
-                --app "${CORE_APP}" --timeout 60 2>&1 \
+                --app "${CORE_APP}" --timeout 60 \
                 || { echo "FAIL deploy: prober seed failed"; exit 1; }
             echo "PASS deploy: prober seed applied"
         fi
