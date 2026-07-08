@@ -9,9 +9,11 @@
 # migrations that predate this gate.
 #
 # Usage:
-#   scripts/security-squawk.sh               # diff against origin/main
-#   scripts/security-squawk.sh origin/HEAD   # diff against specific base
-#   E2E_SQUAWK_ALL=1 scripts/security-squawk.sh  # lint every migration
+#   scripts/security-squawk.sh                      # diff against origin/main
+#   scripts/security-squawk.sh origin/HEAD          # diff against specific base
+#   E2E_SQUAWK_ALL=1 scripts/security-squawk.sh     # lint every migration
+#   SQUAWK_TARGET_DIR=/path scripts/security-squawk.sh   # lint every .exs in
+#                                                   # a custom dir (test use)
 #
 # Exit codes:
 #   0 — no violations found (or no changed migrations to lint)
@@ -20,7 +22,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MIGRATIONS_DIR="$REPO_ROOT/apps/core/priv/repo/migrations"
+DEFAULT_MIGRATIONS_DIR="$REPO_ROOT/apps/core/priv/repo/migrations"
+# SQUAWK_TARGET_DIR: when set, overrides the default migrations directory AND
+# skips the git-diff filter — every .exs file in the target dir is linted.
+# Used by test harnesses to point the script at fixture directories.
+TARGET_DIR="${SQUAWK_TARGET_DIR:-$DEFAULT_MIGRATIONS_DIR}"
 
 if ! command -v squawk &>/dev/null; then
     echo "SKIP: squawk not installed (npm install -g squawk-cli)"
@@ -28,24 +34,35 @@ if ! command -v squawk &>/dev/null; then
 fi
 
 # ── Determine which migration files to lint ───────────────────────────────────
-if [[ "${E2E_SQUAWK_ALL:-}" == "1" ]]; then
+# Use `while read` instead of `mapfile` for bash 3.2 compatibility (macOS default).
+MIGRATION_FILES=()
+if [[ -n "${SQUAWK_TARGET_DIR:-}" ]]; then
+    # Test-mode override: lint every .exs file in the target dir, no diff.
+    while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(find "$TARGET_DIR" -name "*.exs" | sort)
+elif [[ "${E2E_SQUAWK_ALL:-}" == "1" ]]; then
     # Explicit opt-in to lint every migration
-    mapfile -t MIGRATION_FILES < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
+    while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(find "$TARGET_DIR" -name "*.exs" | sort)
 else
     BASE="${1:-origin/main}"
 
     # Find migrations added or modified relative to the base ref.
     # Falls back to all migrations if the base ref doesn't exist (new repo).
+    # `|| true` attaches to each command whose failure is non-fatal here:
+    #   - `git diff` empty output is valid (no changed files);
+    #   - `grep` returns exit 1 when no line matches, which is also valid.
+    # Without per-command `|| true`, `set -euo pipefail` would kill the
+    # script on the no-match case. The earlier version had `|| true` only
+    # at the end of the pipeline; under pipefail that did not shield an
+    # early grep failure.
     if git rev-parse --verify "$BASE" &>/dev/null; then
-        mapfile -t MIGRATION_FILES < <(
-            git diff --name-only --diff-filter=AM "$BASE"...HEAD 2>/dev/null \
-                | grep "apps/core/priv/repo/migrations/.*\.exs$" \
-                | while IFS= read -r f; do echo "$REPO_ROOT/$f"; done \
-                || true
+        while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(
+            { git diff --name-only --diff-filter=AM "$BASE"...HEAD 2>/dev/null || true; } \
+                | { grep "apps/core/priv/repo/migrations/.*\.exs$" || true; } \
+                | while IFS= read -r f; do echo "$REPO_ROOT/$f"; done
         )
     else
         echo "WARNING: base ref '$BASE' not found — linting all migrations." >&2
-        mapfile -t MIGRATION_FILES < <(find "$MIGRATIONS_DIR" -name "*.exs" | sort)
+        while IFS= read -r f; do MIGRATION_FILES+=("$f"); done < <(find "$TARGET_DIR" -name "*.exs" | sort)
     fi
 fi
 
@@ -67,24 +84,65 @@ echo ""
 VIOLATIONS=0
 
 for migration in "${MIGRATION_FILES[@]}"; do
-    # Extract content from execute("...") blocks — simplistic but covers the
-    # most dangerous patterns (ADD COLUMN, ADD CONSTRAINT, DROP INDEX, etc.)
-    sql_block="$(grep -oP '(?<=execute ")[^"]+' "$migration" 2>/dev/null || true)"
+    # Extract SQL from execute(...) blocks. Handles three forms:
+    #   execute("single line")
+    #   execute("""                execute(
+    #     multi                      "single line"
+    #     line                    )
+    #   """)
+    # Skips blocks containing Elixir string interpolation (#{...}) — the SQL
+    # isn't known until runtime, so squawk can't analyse it.
+    # Also skips anonymous PL/pgSQL (DO $$ ... END $$) — squawk doesn't check
+    # those for migration hazards.
+    sql_block="$(python3 -c '
+import re, sys
+src = open(sys.argv[1]).read()
+blocks = []
+# triple-quoted
+blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL)]
+# single-quoted single-line
+blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src)]
+for b in blocks:
+    if "#{" in b:         # Elixir interpolation — not analysable
+        continue
+    if re.search(r"DO\s*\$\$", b, re.IGNORECASE):  # anonymous procedure
+        continue
+    stmt = b.strip()
+    if not stmt.endswith(";"):
+        stmt += ";"
+    print(stmt)
+' "$migration" 2>/dev/null || true)"
 
+    # No raw SQL to lint — skip (Ecto schema DSL migrations are not squawkable).
     if [[ -z "$sql_block" ]]; then
-        # No raw SQL — squawk the whole file and let it figure it out.
-        # squawk can also parse Ecto-style strings in some versions.
-        if ! squawk --assume-in-transaction "$migration" 2>/dev/null; then
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-    else
-        tmpfile="$(mktemp --suffix=.sql)"
-        echo "$sql_block" > "$tmpfile"
-        if ! squawk --assume-in-transaction "$tmpfile"; then
-            VIOLATIONS=$((VIOLATIONS + 1))
-        fi
-        rm -f "$tmpfile"
+        echo "  (no raw SQL in $migration — skipping)"
+        continue
     fi
+
+    # GNU mktemp supports --suffix, BSD (macOS) does not. Create then rename.
+    tmpfile="$(mktemp)"
+    mv "$tmpfile" "$tmpfile.sql"
+    tmpfile="$tmpfile.sql"
+    echo "$sql_block" > "$tmpfile"
+    # Destructive rules enabled by default in squawk 2.x — we rely on the
+    # defaults for:
+    #   * ban-drop-column          (DROP COLUMN)
+    #   * renaming-column          (RENAME COLUMN)
+    #   * renaming-table           (RENAME TO)
+    #   * adding-required-field    (ADD COLUMN ... NOT NULL, no default)
+    #
+    # --exclude rules that don't apply to our fragment-based extraction:
+    # * require-timeout-settings — we extract individual statements; the real
+    #   migration already runs inside Ecto's migration transaction.
+    # * adding-field-with-default — false positive on PG 11+ (Neon is PG 15
+    #   where non-volatile DEFAULTs are metadata-only, no table rewrite).
+    if ! squawk \
+            --assume-in-transaction \
+            --exclude=require-timeout-settings,adding-field-with-default \
+            "$tmpfile"; then
+        VIOLATIONS=$((VIOLATIONS + 1))
+    fi
+    rm -f "$tmpfile"
 done
 
 if [[ $VIOLATIONS -gt 0 ]]; then

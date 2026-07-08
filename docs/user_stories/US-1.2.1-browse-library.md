@@ -1,26 +1,26 @@
-# US-1.2.1 — Browse the Library Shelf
+# US-1.2.1 — Browse the Library Bookshelf
 
 ## 1. User Story
 
-> **As a** user, **I want to** browse my Library shelf **so that** I can see all the books I've read, displayed as an earned collection.
+> **As a** user, **I want to** browse my Library bookshelf **so that** I can see all the books I've read, displayed as an earned collection.
 
-**What the user wants to accomplish:** View their read books on a shelf that feels like a personal, well-worn library.
+**What the user wants to accomplish:** View their read books on a bookshelf that feels like a personal, well-worn library.
 
 **How they accomplish it:**
 1. The user clicks "Library" in the top navigation.
-2. The page transitions in (horizontal slide if coming from an adjacent shelf, or a fade through darkness if coming from the Reading Pile or Third Spaces).
-3. The Library shelf loads with all read books displayed as spines on floor-to-ceiling shelving.
+2. The page transitions in (horizontal slide if coming from an adjacent bookshelf, or a fade through darkness if coming from the Reading Pile or Third Spaces).
+3. The Library bookshelf loads with all read books displayed as spines on floor-to-ceiling shelving.
 
 **What they see on the page:**
 - **Wallpaper:** Deep green damask wallpaper with a subtle repeating pattern.
 - **Shelving:** Dark walnut panelling -- rich, aged wood grain. Floor-to-ceiling bookshelves spanning the full width of the page.
 - **Lighting:** Warm lamplight -- a golden glow cast from the upper-left, as if from a desk lamp just out of frame. Soft shadows beneath each shelf.
-- **Shelf label:** "Library" in an elegant serif typeface, centred at the top, styled as if embossed into a brass plate mounted on the wood.
+- **Bookshelf label:** "Library" in an elegant serif typeface, centred at the top, styled as if embossed into a brass plate mounted on the wood.
 - **Books:** Spines rendered vertically. Well-read and well-loved wear states dominate -- rounded corners, muted colours, creased spines. Books with user writing show bookmarks/tabs poking out the top.
 - The overall feeling is of a room you've earned -- every spine a testament to time spent reading.
 
 **Acceptance Criteria:**
-- Library shelf loads with all read books displayed as spines.
+- Library bookshelf loads with all read books displayed as spines.
 - Bookcase renders with at least 4 shelf rows (empty rows padded).
 - Books grouped into rows by accumulated spine width (max 990px per row).
 - Spine view and list view are toggleable.
@@ -33,23 +33,23 @@
 ### Happy Path
 1. User navigates to `/library` (clicks "Library" nav item).
 2. `Main.elm` matches the `Library` route and calls `Page.Bookshelf.init libraryConfig maybeToken userId`.
-3. Model initialises with `books = Loading`; an API request fires to `GET /api/bookshelves/library`.
+3. Model initialises with `shelves = Loading`; an API request fires to `GET /api/bookshelves/library`.
 4. While loading, an empty bookcase with 4 shelf rows renders immediately (loading skeleton).
-5. On `BooksLoaded (Ok placements)`, model updates to `books = Success placements`.
-6. Placements are grouped into rows via `groupIntoRows 990`, each row rendered as a `shelf-row` with clickable spines.
-7. User clicks a spine -> `BookClicked book` fires -> `OutMsg NavigateTo (BookDetail book.id)` -> book detail overlay opens.
+5. On `ShelvesLoaded (Ok shelves)`, model updates to `shelves = Success shelves`.
+6. Each shelf's placements are grouped into rows via `groupIntoRows 990`, each row rendered as a `shelf-row` with clickable spines.
+7. User clicks a spine -> `BookClicked book` fires -> `OutMsg NavigateTo (BookDetail book.id)` -> book detail overlay opens (see ADR-005).
 
 ### Sad Paths
-- **API error**: `BooksLoaded (Err err)` -> model sets `books = Failure err` -> error message: "Could not load your library. Please try again."
-- **403 Forbidden (age-gated)**: `BooksLoaded (Err (Http.BadStatus 403))` -> `showAgeGate = True` -> age gate UI renders with Verify/Dismiss buttons.
+- **API error**: `ShelvesLoaded (Err err)` -> model sets `shelves = Failure err` -> error message: "Could not load your library. Please try again."
+- **403 Forbidden (age-gated)**: `ShelvesLoaded (Err (Http.BadStatus 403))` -> `showAgeGate = True` -> age gate UI renders with Verify/Dismiss buttons.
 - **No token**: No API call fires; empty bookcase renders in Loading state.
 
 ### Elm State Machine
-- **Page module**: `Page.Bookshelf` (shared module, configured via `libraryConfig`)
-- **Model fields involved**: `books : RemoteData Http.Error (List Placement)`, `showAgeGate : Bool`, `config : Config`, `userId : String`, `visibility : String`, `rssLink : RSSLink.Model`, `viewMode : ShelfViewMode`, `sortState : BookList.SortState`
-- **Msg flow**: `init` fires `Api.getBookshelf "library" token BooksLoaded` -> `BooksLoaded (Ok placements)` -> `Success placements` -> view renders
-- **RemoteData states**: `NotAsked` (no token) -> `Loading` (API in flight) -> `Success placements` / `Failure err`
-- **OutMsg pattern**: `NavigateTo (BookDetail bookId)` propagates to Main for overlay display; `NoOut` for all other messages.
+- **Page module**: `Page.Bookshelf` (unified module, replaces the deprecated `Page.Bookshelf.Library`/`.AntiLibrary`/`.WishList`; config-driven via `libraryConfig`)
+- **Model fields involved**: `shelves : RemoteData Http.Error (List Shelf)`, `showAgeGate : Bool`, `config : Config`, `userId : String`, `visibility : String`, `rssLink : RSSLink.Model`, `viewMode : ShelfViewMode`, `sortState : BookList.SortState`, `token : Maybe String`
+- **Msg flow**: `init` fires `Api.getBookshelf "library" token ShelvesLoaded` -> `ShelvesLoaded (Ok shelves)` -> `Success shelves` -> view renders
+- **RemoteData states**: `NotAsked` (no token) -> `Loading` (API in flight) -> `Success shelves` / `Failure err`
+- **OutMsg pattern**: `NavigateTo (BookDetail bookId)` propagates to Main for overlay display (per ADR-005); `NoOut` for all other messages.
 
 ---
 
@@ -60,7 +60,7 @@
 - **Pipeline**: `:api` -> `:authenticated` -> `:view_as`
 - **Controller**: `StacksWeb.BookshelfController.show/2`
 - **Request body**: N/A (GET request)
-- **Response (success)**: `{ bookshelf: "library", count: N, placements: [{ id, position, placed_at, formats, personal_rating, notes, book: { id, title, description, visibility_tier, author: { id, name, bio }, editions: [...], edition_count, primary_edition: {...} } }] }` -- HTTP 200
+- **Response (success)**: `{ bookshelf: "library", count: N, shelves: [{ id, position, placements: [{ id, position, placed_at, formats, personal_rating, notes, book: { id, title, description, visibility_tier, author: { id, name, bio }, editions: [...], edition_count, primary_edition: {...} } }] }] }` -- HTTP 200 (post Issue #151 physical shelf entity)
 - **Response (error)**: `{ error: "invalid bookshelf name" }` -- HTTP 404 (if name not in valid set)
 - **FallbackController handling**: 404 for invalid bookshelf name; 403 if age-gated; visibility filtering applied to each placement.
 
@@ -103,13 +103,13 @@ N/A -- browse is a read-only operation.
 
 ## 7. Background Jobs (Oban)
 
-N/A -- no background jobs are triggered by browsing a shelf.
+N/A -- no background jobs are triggered by browsing a bookshelf.
 
 ---
 
 ## 8. External Service Calls
 
-N/A -- no external services are called during shelf browsing.
+N/A -- no external services are called during bookshelf browsing.
 
 ---
 
@@ -127,7 +127,7 @@ N/A -- bookshelf listing is not cached (BookDetailCache is only used for individ
 
 ## 11. dbt Model Dependencies
 
-- **Model**: `stg_bookshelf_placements`, `stg_bookshelves`
+- **Model**: `stg_bookshelf_placements`, `stg_bookshelves`, `stg_shelves`
 - **Trigger**: `placement.created` and `placement.moved` events trigger `DbtRefreshHandler`
 - **Materialisation**: view (staging models)
 - **Consumer**: Not directly consumed by this endpoint, but placement data feeds into `mart_community_read_count` and other aggregates.
@@ -142,9 +142,9 @@ N/A -- bookshelf listing is not cached (BookDetailCache is only used for individ
 - **Public or authenticated**: Authenticated (`:authenticated` pipeline)
 
 ### Init
-- **`initPage` branch**: `Library` route -> `Page.Bookshelf.init libraryConfig maybeToken userId`
-- **API calls on init**: `Api.getBookshelf "library" token BooksLoaded`
-- **Initial model state**: `{ books = Loading, showAgeGate = False, config = libraryConfig, userId = userId, visibility = "platform", rssLink = RSSLink.init, viewMode = SpineView, sortState = { column = Title, direction = Asc } }`
+- **`initPage` branch**: `Library` route -> `initBookshelf Bookshelf.libraryConfig maybeAuth` -> `Page.Bookshelf.init libraryConfig maybeToken userId`
+- **API calls on init**: `Api.getBookshelf "library" token ShelvesLoaded`
+- **Initial model state**: `{ shelves = Loading, showAgeGate = False, config = libraryConfig, userId = userId, visibility = "platform", rssLink = RSSLink.init, viewMode = SpineView, sortState = { column = Title, direction = Asc }, token = maybeToken }`
 
 ### Config (Library-specific)
 ```elm
@@ -159,23 +159,24 @@ libraryConfig =
 ```
 
 ### Update cycle
-- **Msg `BooksLoaded (Ok placements)`**: `books` -> `Success placements`; no Cmd; `NoOut`
-- **Msg `BooksLoaded (Err (Http.BadStatus 403))`**: `books` -> `Failure`; `showAgeGate` -> `True`; `NoOut`
-- **Msg `BookClicked book`**: no model change; `NavigateTo (BookDetail book.id)`
+- **Msg `ShelvesLoaded (Ok shelves)`**: `shelves` -> `Success shelves`; no Cmd; `NoOut`
+- **Msg `ShelvesLoaded (Err (Http.BadStatus 403))`**: `shelves` -> `Failure`; `showAgeGate` -> `True`; `NoOut`
+- **Msg `BookClicked book`**: no model change; `NavigateTo (BookDetail book.id)` (opens overlay per ADR-005)
 - **Msg `ViewModeChanged mode`**: `viewMode` -> `mode` (switches between `SpineView` and `ListView`)
 - **Msg `SortColumnClicked column`**: toggles `sortState.direction` if same column, otherwise sets `Asc` on new column
 - **Msg `VerifyAge`**: `NavigateTo SettingsAgeVerification`
 - **Msg `DismissAgeGate`**: `showAgeGate` -> `False`
+- **Msg `AddShelf` / `ShelfAdded`**: shelf-management actions for the physical shelf entity (Issue #151) -- adds a new physical shelf row to the bookshelf via `Api.addShelf`.
 
 ### View
 - **Key elements**:
   - `Loading`/`NotAsked`: empty bookcase with 4 shelf rows (via `minShelfRows 4 []`)
-  - `Success placements` (non-empty): `viewBookcase (minShelfRows 4 shelfViews)` where `shelfViews` are rows of clickable spines grouped by `groupIntoRows 990`
+  - `Success shelves` (non-empty): `viewBookshelfFromShelves` -> `viewShelf` per physical shelf, with placements grouped into rows by `groupIntoRows 990`
   - `Success []` (empty): `viewEmptyShelfMessage` with Library-specific message
   - `Failure _`: error paragraph with "Could not load your library. Please try again."
   - `showAgeGate = True`: `Components.AgeGate.ageGate` renders with Verify/Dismiss actions
   - `ListView`: `BookList.view` renders sortable table with Title, Author, Pages, Date Added, Formats columns
-- **ARIA attributes**: `aria-live="polite"` on content area; `role="list"` on `shelf-row__books`; `role="listitem"` on each spine button; `aria-label` on shelf label
+- **ARIA attributes**: `aria-live="polite"` on content area; `role="list"` on `shelf-row__books`; `role="listitem"` on each spine button; `aria-label` on bookshelf label
 - **CSS classes**: `page page--shelf shelf-library`, `wallpaper wallpaper--damask`, `lighting`, `shelf-room`, `shelf-room__header`, `shelf-label`, `bookcase`, `bookcase__side`, `bookcase__inner`, `shelf-row`, `shelf-row__back`, `shelf-row__books`, `shelf-row__plank`, `shelf-row__lip`, `book-button`, `book`, `book__face`, `book__spine`, `book__top`, `book__cover`, `view-mode-toggle`
 
 ---
@@ -217,3 +218,11 @@ libraryConfig =
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | Placements query with JOINs and preloads | Two queries per load: bookshelf lookup (indexed, fast) + placements with book/author/edition preloads. Cost scales with number of placements. |
 | Neon DB (storage) | GiB stored | N/A (read-only) | No writes during browse. Storage cost is amortised across all operations. |
 | R2 presigned URLs | N/A | N/A | Cover image URLs are pre-stored in `edition.cover_image_url`; no runtime R2 operations during browse. |
+
+---
+
+## 16. Cross-References
+
+- **Sibling stories**: [US-1.2.2 Browse Antilibrary](US-1.2.2-browse-antilibrary.md), [US-1.2.3 Browse Wish List](US-1.2.3-browse-wishlist.md), [US-1.2.4 Browse Reading Pile](US-1.2.4-browse-reading-pile.md), [US-1.2.5 Bookshelf Transitions](US-1.2.5-shelf-transitions.md) -- all use the unified `Page.Bookshelf` module with different `Config` values (except Reading Pile which has a unique layout).
+- **ADR-005**: [Book Detail as Overlay, Not a Routed Page](../decisions/005-book-detail-overlay-not-route.md) -- clicking a spine opens an overlay over the bookshelf rather than navigating to `/books/:id`.
+- **Issue #151** (complete): [Physical Shelf Entity](../../issues/complete/151-physical-shelf-entity.md) -- introduced the `Shelf` entity between `Bookshelf` (named collection) and `Placement` (book-on-shelf record); the API now returns `shelves: [{id, position, placements: [...]}]` rather than a flat placement list.

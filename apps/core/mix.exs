@@ -41,7 +41,7 @@ defmodule Core.MixProject do
 
   defp deps do
     [
-      {:phoenix, "~> 1.7.18"},
+      {:phoenix, "~> 1.7.22"},
       {:phoenix_ecto, "~> 4.6"},
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
@@ -51,7 +51,7 @@ defmodule Core.MixProject do
       {:fuse, "~> 2.5"},
       {:cloak_ecto, "~> 1.3"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.7"},
+      {:plug_cowboy, "~> 2.8"},
       {:cors_plug, "~> 3.0"},
       {:prom_ex, "~> 1.9"},
       {:telemetry_metrics, "~> 1.0"},
@@ -73,8 +73,20 @@ defmodule Core.MixProject do
       {:ex_machina, "~> 2.8", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:timex, "~> 3.7"},
+      # Canonical Elixir time-zone database (bundled IANA data, no runtime
+      # fetch). tzdata remains in the lockfile as timex's hard dependency but
+      # is inert: its autoupdater is disabled in config.exs.
+      {:time_zone_info, "~> 0.7"},
+      # Override tzdata's `hackney ~> 1.17` pin. hackney 1.x carries four
+      # security advisories (GHSA-gp9c-pm5m-5cxr and friends), all patched in
+      # 4.0.1+. Nothing calls hackney at runtime: swoosh uses Req, ex_aws is
+      # configured with ExAws.Request.Req, and tzdata's autoupdate (its only
+      # hackney call site) is disabled.
+      {:hackney, "~> 4.0", override: true},
       {:nimble_csv, "~> 1.2"},
-      {:libcluster, "~> 3.3"}
+      {:nimble_pool, "~> 1.1"},
+      {:libcluster, "~> 3.3"},
+      {:nimble_totp, "~> 0.1"}
     ]
   end
 

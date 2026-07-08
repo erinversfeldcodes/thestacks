@@ -19,6 +19,9 @@ gracefully rather than accumulating failures.
 | `:open_library_fuse` | Open Library API | 5 failures / 60s | 5 min | Falls back to Google Books |
 | `:google_books_fuse` | Google Books API | 5 failures / 60s | 5 min | ISBN lookup fails gracefully |
 | `:scraper_fuse` | Rust scraper service | 3 failures / 60s | 15 min | All store scrapes skipped until reset |
+| `:brave_fuse` | Brave Search API | 5 failures / 60s | 5 min | Discovery falls back to SearXNG |
+| `:searxng_fuse` | SearXNG discovery | 5 failures / 60s | 5 min | Discovery search degrades |
+| `:r2_fuse` | Cloudflare R2 storage | 5 failures / 60s | 5 min | Image writes fail until reset |
 
 ---
 
@@ -47,7 +50,7 @@ fly ssh console -a thestacks-core
 
 ```elixir
 # Check all fuses at once
-for name <- [:vision_fuse, :together_ai_fuse, :open_library_fuse, :google_books_fuse, :scraper_fuse] do
+for name <- [:vision_fuse, :together_ai_fuse, :open_library_fuse, :google_books_fuse, :scraper_fuse, :brave_fuse, :searxng_fuse, :r2_fuse] do
   IO.puts("#{name}: #{inspect(:fuse.ask(name, :sync))}")
 end
 ```
@@ -59,6 +62,9 @@ together_ai_fuse: :ok
 open_library_fuse: :ok
 google_books_fuse: :ok
 scraper_fuse: :ok
+brave_fuse: :ok
+searxng_fuse: :ok
+r2_fuse: :ok
 ```
 
 Any `:blown` line identifies the affected service.
@@ -98,6 +104,9 @@ ORDER BY attempted_at DESC LIMIT 20;
 | `:open_library_fuse` | `curl https://openlibrary.org/api/books?bibkeys=ISBN:9780743273565&format=json` | OL status, rate limits |
 | `:google_books_fuse` | `curl "https://www.googleapis.com/books/v1/volumes?q=isbn:9780743273565"` | Google API key quota |
 | `:scraper_fuse` | See [scraper-config-broken.md](./scraper-config-broken.md) | Rust scraper health, HMAC config |
+| `:brave_fuse` | `curl -H "X-Subscription-Token: $KEY" "https://api.search.brave.com/res/v1/web/search?q=test&count=1"` | API key valid? Daily quota exhausted? |
+| `:searxng_fuse` | `curl "$SEARXNG_URL/"` | Container health, network reachability |
+| `:r2_fuse` | `curl -I "https://$R2_HOST/"` | DNS, TLS, network to Cloudflare; status <500 = healthy |
 
 ---
 

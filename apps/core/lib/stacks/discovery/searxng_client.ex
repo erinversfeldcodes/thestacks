@@ -5,11 +5,19 @@ defmodule Stacks.Discovery.SearxngClient do
   No rate limiting needed (self-hosted, unlimited).
   Uses Finch with the shared `Stacks.Finch` pool.
   Instance URL configured via `Application.get_env(:core, :searxng_url)`.
+
+  Protected by `:searxng_fuse` — managed by `Stacks.CircuitBreakers`.
+  When the fuse is blown (SearXNG is down or slow), requests
+  short-circuit to `{:error, :circuit_open}` without touching the
+  upstream. The probe loop confirms SearXNG is back and resets the
+  fuse automatically.
   """
 
   @behaviour Stacks.Discovery.SearxngClientBehaviour
 
   require Logger
+
+  @fuse_name :searxng_fuse
 
   @impl true
   @doc """
@@ -25,11 +33,16 @@ defmodule Stacks.Discovery.SearxngClient do
   def search(query, opts \\ []) do
     base_url = Application.get_env(:core, :searxng_url)
 
-    if is_nil(base_url) or base_url == "" do
-      Logger.warning("SearxngClient: SEARXNG_URL not configured")
-      {:error, :url_not_configured}
-    else
-      do_search(base_url, query, opts)
+    cond do
+      is_nil(base_url) or base_url == "" ->
+        Logger.warning("SearxngClient: SEARXNG_URL not configured")
+        {:error, :url_not_configured}
+
+      :fuse.ask(@fuse_name, :sync) == :blown ->
+        {:error, :circuit_open}
+
+      true ->
+        do_search(base_url, query, opts)
     end
   end
 
@@ -50,12 +63,20 @@ defmodule Stacks.Discovery.SearxngClient do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_results(body)
 
+      {:ok, %Finch.Response{status: status, body: body}} when status >= 500 ->
+        Logger.warning("SearxngClient: upstream 5xx #{status}: #{body}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
+        {:error, {:unexpected_status, status}}
+
       {:ok, %Finch.Response{status: status, body: body}} ->
+        # 4xx other than server errors — don't melt; likely a
+        # misconfigured query, not a service-health signal.
         Logger.warning("SearxngClient: unexpected status #{status}: #{body}")
         {:error, {:unexpected_status, status}}
 
       {:error, reason} ->
         Logger.warning("SearxngClient: request failed: #{inspect(reason)}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, reason}
     end
   end

@@ -49,10 +49,24 @@ run_check() {
 # Must appear before the extension-specific dispatch block.
 # ---------------------------------------------------------------------------
 if command -v gitleaks > /dev/null 2>&1; then
-  run_check \
-    "gitleaks detect --no-git --source ${FILE_PATH}" \
-    "Run: gitleaks detect --no-git --source ${FILE_PATH}" \
-    gitleaks detect --no-git --source "$FILE_PATH" --log-level error
+  # Skip .env files — they are gitignored by design and intentionally contain
+  # real secrets. The .gitleaks.toml path allowlist covers them in git-mode
+  # scans; --no-git --source on a bare file path bypasses that allowlist.
+  case "$BASENAME" in
+    .env|.env.local)
+      : # SKIP: gitignored env file
+      ;;
+    *)
+      _gitleaks_config=()
+      if [[ -f "${REPO_ROOT}/.gitleaks.toml" ]]; then
+        _gitleaks_config=(--config "${REPO_ROOT}/.gitleaks.toml")
+      fi
+      run_check \
+        "gitleaks detect --no-git --source ${FILE_PATH}" \
+        "Run: gitleaks detect --no-git --source ${FILE_PATH}" \
+        gitleaks detect --no-git --source "$FILE_PATH" --log-level error "${_gitleaks_config[@]}"
+      ;;
+  esac
 else
   : # SKIP: gitleaks not installed
 fi

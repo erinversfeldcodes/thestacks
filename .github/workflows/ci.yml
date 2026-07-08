@@ -1,0 +1,1079 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Cost gate. The pre-push hook runs `just ci` — which includes the local
+  # deploy-preview + E2E suite as part of scripts/ci.sh's deploy phase —
+  # and writes the results to <!-- ci-summary-* --> in the PR description.
+  # The PR also carries a <!-- deployed-e2e-summary-* --> block written
+  # by CI's post-pipeline step as an audit artefact of the runner-side
+  # deploy; we deliberately do NOT gate on it here, because (a) it
+  # always lags one CI cycle behind the current push and would
+  # ratchet stale red state into a permanent block, and (b) its
+  # content overlaps with ci-summary's "deploy: *" rows anyway.
+  # We don't want to burn CI minutes re-running checks that already failed
+  # locally — or running CI at all on a PR that was pushed with
+  # --no-verify, which leaves ci-summary blank. So before any other job
+  # runs, scan the description: if ci-summary is missing, contains a
+  # "skipped" sentinel, or has any ❌, set proceed=false and let the rest
+  # of the workflow short-circuit.
+  #
+  # Trust model: this is a cost-saving optimization, not a security gate.
+  # PR descriptions are editable by anyone with write access — branch
+  # protection rules are the actual gate that enforces "CI must pass
+  # before merge". Someone faking a green report can skip the cost-saver
+  # but cannot bypass branch protection.
+  #
+  # Only runs on pull_request events. Pushes to main bypass the gate
+  # entirely (the workflow's `on: push: branches: [main]` trigger fires
+  # only after merge, when CI must always run).
+  gate-pre-push-report:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check pre-push report on PR description
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Pass the repo explicitly so `gh pr view` doesn't fall back
+          # to detecting it via local git. This job has no checkout
+          # (saves ~5s per CI run — we only need the PR body, not the
+          # repo contents) so without -R, gh shells out to git and dies
+          # on "fatal: not a git repository".
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          body="$(gh pr view "$PR_NUMBER" --json body --jq '.body')"
+
+          # Extract content strictly between (and excluding) the sentinel
+          # comments. Empty string if either sentinel is missing.
+          extract_block() {
+              local start="$1" end="$2"
+              awk -v s="$start" -v e="$end" '
+                  $0 ~ s { f=1; next }
+                  $0 ~ e { f=0 }
+                  f
+              ' <<< "$body"
+          }
+
+          # Pass condition: ci-summary exists, contains at least one ✅,
+          # and contains zero ❌. This catches three failure modes —
+          # block missing entirely (--no-verify), block is a "skipped"
+          # sentinel (no checks ran, e.g. FLY_API_TOKEN unset locally),
+          # or block has a real failure.
+          block_is_green() {
+              local label="$1" block="$2"
+              if [[ -z "$block" ]]; then
+                  echo "Gate: ${label} block missing or empty in PR description"
+                  return 1
+              fi
+              if grep -q '❌' <<< "$block"; then
+                  echo "Gate: ${label} block has at least one ❌"
+                  return 1
+              fi
+              if ! grep -q '✅' <<< "$block"; then
+                  echo "Gate: ${label} block has no ✅ rows (likely a 'skipped' sentinel)"
+                  return 1
+              fi
+              return 0
+          }
+
+          ci_block="$(extract_block '<!-- ci-summary-start -->' '<!-- ci-summary-end -->')"
+
+          proceed=true
+          block_is_green "ci-summary" "$ci_block" || proceed=false
+
+          if [[ "$proceed" == "true" ]]; then
+              echo "Gate: pre-push report is fully green; CI will proceed."
+          else
+              echo "Gate: pre-push report not all green; CI will skip remaining jobs."
+              echo "Push without skipping the local hook (don't pass --no-verify) and"
+              echo "ensure ci-summary lands green to trigger a CI run."
+          fi
+          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
+  # Reads .versions and exposes the values as job outputs so every other job
+  # has a single authoritative reference. Service container images (which are
+  # resolved before steps run) can also reference needs.versions.outputs.*
+  versions:
+    needs: gate-pre-push-report
+    # Run when the gate ran and approved (PR with green report) OR when
+    # the gate was skipped entirely (push to main, no PR context).
+    if: |
+      always() &&
+      (needs.gate-pre-push-report.result == 'skipped' ||
+       (needs.gate-pre-push-report.result == 'success' &&
+        needs.gate-pre-push-report.outputs.proceed == 'true'))
+    runs-on: ubuntu-latest
+    outputs:
+      otp: ${{ steps.v.outputs.otp }}
+      elixir: ${{ steps.v.outputs.elixir }}
+      node: ${{ steps.v.outputs.node }}
+      python: ${{ steps.v.outputs.python }}
+      postgres: ${{ steps.v.outputs.postgres }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Read .versions
+        id: v
+        run: |
+          source .versions
+          {
+            echo "otp=${OTP_VERSION}"
+            echo "elixir=${ELIXIR_VERSION}"
+            echo "node=${NODE_VERSION}"
+            echo "python=${PYTHON_VERSION}"
+            echo "postgres=${POSTGRES_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+  changes:
+    needs: gate-pre-push-report
+    if: |
+      always() &&
+      (needs.gate-pre-push-report.result == 'skipped' ||
+       (needs.gate-pre-push-report.result == 'success' &&
+        needs.gate-pre-push-report.outputs.proceed == 'true'))
+    runs-on: ubuntu-latest
+    outputs:
+      elixir: ${{ steps.filter.outputs.elixir }}
+      elm: ${{ steps.filter.outputs.elm }}
+      rust: ${{ steps.filter.outputs.rust }}
+      python: ${{ steps.filter.outputs.python }}
+      proto: ${{ steps.filter.outputs.proto }}
+      dbt: ${{ steps.filter.outputs.dbt }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+      licenses: ${{ steps.filter.outputs.licenses }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      docker: ${{ steps.filter.outputs.docker }}
+      iac: ${{ steps.filter.outputs.iac }}
+      lockfiles: ${{ steps.filter.outputs.lockfiles }}
+      source: ${{ steps.filter.outputs.source }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+        id: filter
+        with:
+          filters: |
+            elixir:
+              - 'apps/core/**'
+              - 'mix.exs'
+              - 'mix.lock'
+            elm:
+              - 'frontend/**'
+            rust:
+              - 'apps/scraper/**'
+            python:
+              - 'apps/vision/**'
+            proto:
+              - 'proto/**'
+            dbt:
+              - 'dbt/**'
+            e2e:
+              - 'frontend/**'
+              - 'apps/core/**'
+              - 'apps/vision/**'
+              - 'e2e/**'
+            migrations:
+              - 'apps/core/priv/repo/migrations/**'
+            licenses:
+              - 'mix.lock'
+              - 'frontend/package-lock.json'
+              - 'e2e/package-lock.json'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+            docker:
+              - '**/Dockerfile*'
+              - '.dockerignore'
+            iac:
+              - '**/Dockerfile*'
+              - 'deploy/**'
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - 'nix/**'
+              - 'flake.nix'
+              - 'flake.lock'
+            lockfiles:
+              - 'mix.lock'
+              - 'frontend/package-lock.json'
+              - 'e2e/package-lock.json'
+              - 'apps/scraper/Cargo.lock'
+              - 'apps/vision/requirements*.txt'
+              - 'scripts/mcp/requirements.txt'
+              - 'flake.lock'
+            source:
+              - 'apps/**'
+              - 'frontend/**'
+              - 'scripts/**'
+              - 'proto/**'
+              - 'dbt/**'
+
+  # Split from test-elixir: lint runs CPU-only (no postgres service, no frontend
+  # build needed), so it parallelises cleanly with test-elixir and gets its own
+  # timeout budget. dialyzer's PLT generation can take ~4 min on a cold cache
+  # whenever mix.lock changes — running it inside test-elixir was eating the
+  # 15-min budget before the test suite could finish.
+  lint-elixir:
+    needs: [changes, versions]
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: priv/plts
+          key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-
+      - run: mix deps.get
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      # Elixir-side proto artifacts only — lint doesn't need the Elm decoders.
+      # Without these the generated Ecto schemas + ProtoJSON modules don't
+      # exist, and dialyzer/credo would error on the undefined references.
+      - name: Generate Elixir proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+      - run: scripts/lint-elixir.sh
+
+  test-elixir:
+    needs: [changes, versions]
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+      # Trigger the CreateDbRoles migration to actually create stacks_app /
+      # stacks_dbt / stacks_readonly — mirrors production behaviour so the
+      # role grants, revokes, and rollback are exercised in CI.
+      STACKS_APP_DB_PASSWORD: ci-stacks-app-password
+      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - run: mix deps.get
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+          scripts/gen-elm-proto.sh
+      - name: Build frontend into priv/static
+        working-directory: apps/core/assets
+        run: |
+          npm install
+          npm run deploy
+      - run: scripts/test-elixir.sh
+
+  test-elm:
+    needs: [changes, versions]
+    if: needs.changes.outputs.elm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.elm
+          key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
+          restore-keys: elm-${{ runner.os }}-
+      - working-directory: frontend
+        run: npm install --save-dev elm elm-format elm-test
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - run: scripts/lint-elm.sh
+      - run: scripts/test-elm.sh
+
+  test-rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          # Explicit toolchain is required when the action is pinned to a
+          # commit SHA — dtolnay/rust-toolchain normally infers the toolchain
+          # from the ref name (@stable), which a SHA pin no longer carries.
+          toolchain: stable
+          # llvm-tools is required by cargo-llvm-cov for the 80% coverage
+          # gate in scripts/test-rust.sh. Locally it's installed by
+          # setup.sh via `rustup component add llvm-tools-preview`.
+          components: rustfmt, clippy, llvm-tools
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/scraper/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - run: cargo install cargo-audit --locked
+      # cargo-llvm-cov drives the 80% coverage threshold check at the
+      # end of test-rust.sh. Locally installed by setup.sh; install
+      # here so CI runs the same gate. --locked pins to Cargo.lock.
+      - run: cargo install cargo-llvm-cov --locked
+      # The Rust proto code (apps/scraper/src/proto/generated/) is
+      # gitignored and built from proto/ at deploy time. `cargo fmt
+      # --check` follows `pub mod generated;` from src/proto/mod.rs and
+      # errors if the file isn't there ("failed to resolve mod
+      # `generated`"), so the generator has to run before lint.
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate Rust proto artifacts
+        run: scripts/gen-rust-proto.sh
+      - run: scripts/lint-rust.sh
+      - run: scripts/test-rust.sh
+
+  test-python:
+    needs: [changes, versions]
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+          cache: pip
+      # libzbar is the C library behind pyzbar (used by the vision
+      # sidecar's local OCR pre-pass). pyzbar dlopens libzbar.so.0 via
+      # ctypes — without the system package, every barcode test in
+      # test_local_ocr.py silently returns None (local_isbn_scan's
+      # safety contract on ImportError). Locally provided by nix's
+      # `zbar` package; on Ubuntu CI runners it's `libzbar0`.
+      - run: sudo apt-get update && sudo apt-get install -y libzbar0
+      - working-directory: apps/vision
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      # apps/vision/app/proto/gen/ is gitignored; lint and tests both
+      # `from app.proto.gen.vision import ...`, which fails to resolve
+      # without first running the generator. Same shape as test-rust.
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate Python proto artifacts
+        run: python3 scripts/gen_python_proto.py --language python
+      - run: scripts/lint-python.sh
+      - run: scripts/test-python.sh
+
+  lint-proto:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - run: scripts/lint-proto.sh
+
+  lint-actions:
+    # Issue #137 Phase 5: actionlint backfill across .github/workflows/*.yml +
+    # .github/actions/**/action.yml. Pinned to v1.7.4 (latest stable as of
+    # 2026-04). Bumping the pin is a one-line edit but should be paired with
+    # a fresh local re-run of `actionlint` in case the new version surfaces
+    # findings the previous one missed.
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install actionlint
+        # Use the upstream-published install script. Pins to a specific
+        # version + the install dir so the binary lands at a predictable
+        # path on $GITHUB_PATH. The script verifies the SHA256 checksum
+        # against the release manifest.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.4/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run actionlint
+        # No-arg invocation auto-discovers .github/workflows/*.yml. Composite
+        # actions under .github/actions/**/action.yml are validated via the
+        # workflows that consume them (actionlint follows `uses:` references).
+        # Any non-zero exit fails the job — the inline shellcheck warnings
+        # we previously triaged are now fixed at source rather than
+        # suppressed, so this command should produce no output.
+        run: actionlint
+
+  test-dbt:
+    needs: [changes, versions]
+    if: needs.changes.outputs.dbt == 'true' || needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - name: Install Elixir deps
+        env:
+          MIX_ENV: dev
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
+        run: mix deps.get
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+          cache: pip
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+      - name: Install dbt-postgres, sqlfluff, and dbt-checkpoint
+        run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'
+      - name: Seed and test dbt staging layer
+        env:
+          MIX_ENV: dev
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/stacks_dev
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          DBT_HOST: localhost
+          DBT_PORT: "5432"
+          DBT_USER: postgres
+          DBT_PASSWORD: postgres
+          DBT_DBNAME: stacks_dev
+          SQLFLUFF_TEMPLATER: dbt
+        run: |
+          scripts/lint-sql.sh
+          scripts/test-dbt.sh
+          scripts/lint-dbt.sh
+
+  gitleaks:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  hadolint:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.core
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.vision
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.scraper
+
+  semgrep:
+    needs: changes
+    if: needs.changes.outputs.source == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - run: semgrep scan --config auto --error
+
+  checkov:
+    needs: changes
+    if: needs.changes.outputs.iac == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bridgecrewio/checkov-action@a7683e7b72a04503521247973281ec8142e1ac1f # v12.3112.0
+        with:
+          directory: deploy/
+
+  trivy:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.lockfiles == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+
+  # E2E tests run in the deploy-preview job against the deployed stack
+  # (line ~552: "Run E2E against deployed stack"). No standalone E2E job —
+  # the tests need the full stack (Phoenix + vision on Modal + Neon DB).
+
+  security-squawk:
+    needs: changes
+    if: needs.changes.outputs.migrations == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Install squawk
+        run: npm install -g squawk-cli
+      - name: Lint changed migrations
+        run: scripts/security-squawk.sh origin/main
+
+  check-licenses:
+    needs: [changes, versions]
+    if: needs.changes.outputs.licenses == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - name: Install Elixir deps
+        run: mix deps.get
+      - name: Check licences
+        run: scripts/check-licenses.sh
+
+  trufflehog:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
+        with:
+          path: '.'
+          base: main
+          head: HEAD
+          extra_args: '--only-verified'
+
+  syft-grype:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.lockfiles == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install grype and scan
+        run: |
+          # Two-step install instead of curl | sh: download the installer from
+          # a pinned tag to a file, then execute it with an explicit grype
+          # version. No mutable remote script is piped straight into a shell.
+          curl -sSfL -o /tmp/grype-install.sh \
+            https://raw.githubusercontent.com/anchore/grype/v0.115.0/install.sh
+          sh /tmp/grype-install.sh -b /usr/local/bin v0.115.0
+          grype db update
+          grype dir:. --fail-on high --only-fixed
+
+  dockle:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Generate proto artifacts for Docker builds
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
+      - name: Build images for CIS benchmark
+        run: |
+          docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
+          docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
+          docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
+      - name: Scan images with dockle
+        env:
+          DOCKLE_IGNORES: DKL-DI-0006,CIS-DI-0010,DKL-DI-0005
+          DOCKLE_ACCEPT_KEYS: PHX_SERVER,ERL_INETRC,--chown,savedAptMark,GNUPGHOME,GPG_KEY
+        run: |
+          DOCKLE_VERSION=$(curl -s "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          curl -sL -o dockle.deb "https://github.com/goodwithtech/dockle/releases/download/v${DOCKLE_VERSION}/dockle_${DOCKLE_VERSION}_Linux-64bit.deb"
+          sudo dpkg -i dockle.deb && rm dockle.deb
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-core
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-vision
+          dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
+
+  migration-safety:
+    # Expand–contract enforcement. Runs only on pull_request events that
+    # touch Ecto migrations. Three gates in sequence:
+    #   1. squawk on the extracted SQL (ban-drop-column, renaming-column,
+    #      renaming-table, adding-required-field).
+    #   2. scripts/lint-migrations.sh — requires `@breaking_ok "<reason>"`
+    #      on destructive Ecto DSL ops (remove, rename, modify null: false).
+    #   3. scripts/check-schema-diff.sh — compares structure.sql BEFORE
+    #      (origin/main) and AFTER (this branch + migrations applied). A
+    #      destructive column/table/enum diff requires the `db-breaking` PR label.
+    needs: [changes, versions]
+    if: needs.changes.outputs.migrations == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # config/dev.exs hardcodes `database: "stacks_dev"` and runtime.exs
+        # only reads DATABASE_URL in :prod, so the Postgres container name
+        # MUST match `stacks_dev` for `mix ecto.migrate` (MIX_ENV=dev) to
+        # connect. Do not change this without also changing dev.exs.
+        image: postgres:${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: dev
+      # runtime.exs raises unconditionally in non-test envs without these.
+      # Sourced from the same secrets deploy-preview uses — identical values
+      # mean the gate exercises the real config path without special casing.
+      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+      # Derived from the PR labels. `true` iff `db-breaking` is applied, which
+      # allows scripts/check-schema-diff.sh to pass on destructive diffs.
+      DB_BREAKING_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'db-breaking') }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      # Pinned: 2.47.0 is the version verified locally against all Phase 2
+      # fixtures. Bump only after re-running test/platform/run_all.sh.
+      - name: Install squawk
+        run: npm install -g squawk-cli@2.47.0
+
+      # ── 1. Squawk — destructive SQL patterns ──────────────────────────────
+      - name: squawk — destructive migration rules
+        run: scripts/security-squawk.sh origin/main
+
+      # ── 2. @breaking_ok annotation on Ecto DSL destructive ops ────────────
+      - name: lint-migrations — require @breaking_ok on destructive Ecto ops
+        run: |
+          changed="$(git diff --name-only --diff-filter=AM origin/main...HEAD \
+              | grep '^apps/core/priv/repo/migrations/.*\.exs$' || true)"
+          if [[ -z "${changed}" ]]; then
+            echo "No migration files changed — skipping lint-migrations."
+            exit 0
+          fi
+          echo "Linting:"
+          # Intentionally unquoted so each path is its own argv entry. Both
+          # `printf` and `lint-migrations.sh` rely on the shell expanding
+          # ${changed} into multiple words.
+          # shellcheck disable=SC2086
+          printf '  %s\n' ${changed}
+          # shellcheck disable=SC2086
+          scripts/lint-migrations.sh ${changed}
+
+      # ── 3. Schema diff — BEFORE (origin/main) vs AFTER (HEAD + migrate) ───
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+
+      # `mix deps.get` must run BEFORE proto gen: gen-ecto-proto.sh shells
+      # into `mix run` to bootstrap proto.sync, which requires deps on disk.
+      # Proto artifacts are gitignored (apps/core/lib/stacks/gen/); without
+      # them `mix compile` fails during ecto.migrate below.
+      - name: Install mix deps (HEAD)
+        run: mix deps.get
+      - name: Generate proto artifacts (HEAD)
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+
+      - name: Dump BEFORE and AFTER structure
+        # Swap the migrations/ dir between origin/main's state and HEAD's,
+        # running `mix ecto.migrate` + `mix ecto.dump` against each. Uses
+        # HEAD's compiled app and deps for both — migrations must be
+        # self-contained SQL-level DSL, per docs/agents/standards/migrations.md.
+        # If a migration imports an app module, this gate may silently
+        # produce the wrong diff (main's migration runs against HEAD's app
+        # shape). `lint-migrations.sh` / reviewer audit catches this class
+        # at the source; this gate does not detect it mechanically.
+        #
+        # `rm -rf` before each `git checkout <ref> -- dir` guarantees the
+        # working tree matches the ref exactly — handles additions, deletions,
+        # and squashing uniformly.
+        run: |
+          mkdir -p /tmp/schema
+          MIG_DIR=apps/core/priv/repo/migrations
+
+          # BEFORE: migrations dir as it is on origin/main
+          rm -rf "${MIG_DIR}"
+          git checkout origin/main -- "${MIG_DIR}"
+          mix ecto.drop || true
+          mix ecto.create
+          mix ecto.migrate
+          mix ecto.dump --dump-path /tmp/schema/before.sql
+
+          # AFTER: migrations dir as it is on HEAD
+          rm -rf "${MIG_DIR}"
+          git checkout HEAD -- "${MIG_DIR}"
+          mix ecto.drop || true
+          mix ecto.create
+          mix ecto.migrate
+          mix ecto.dump --dump-path /tmp/schema/after.sql
+
+      - name: check-schema-diff — destructive changes require db-breaking label
+        run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
+
+  deploy-preview:
+    # TODO: restore full dependency list after deploy-preview is stable:
+    # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
+    needs: [versions, changes]
+    if: |
+      github.event_name == 'pull_request' && (
+        needs.changes.outputs.source == 'true' ||
+        needs.changes.outputs.docker == 'true' ||
+        needs.changes.outputs.iac == 'true' ||
+        needs.changes.outputs.lockfiles == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
+      NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+      VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
+      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+      SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+      SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      # Trigger CreateDbRoles migration against Neon preview branch — exercises
+      # role creation, grants, and revokes the same way prod will.
+      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+      GITHUB_HEAD_REF: ${{ github.head_ref }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          lfs: true
+          # fetch-depth: 0 gives deploy-stack.sh enough git history to diff
+          # apps/core/priv/repo/seeds.exs against origin/main when deciding
+          # whether to run the per-preview seed step. Default depth=1 would
+          # leave origin/main unreachable.
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ needs.versions.outputs.node }}
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+      - name: Alias fly -> flyctl
+        # fly.io's install.sh provided both `fly` and `flyctl`; setup-flyctl
+        # ships only `flyctl`, but deploy scripts invoke `fly`.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+      - name: Install Elixir deps (for mix proto.sync inside deploy-stack.sh)
+        run: mix deps.get
+      - name: Install frontend deps (for node build.js inside deploy-stack.sh)
+        working-directory: apps/core/assets
+        run: npm install
+      - name: Install Modal (for vision deploy inside deploy-stack.sh)
+        run: pip install modal
+      - name: Generate proto artifacts for Docker builds
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
+          scripts/gen-elm-proto.sh
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+      - name: Install E2E deps and Playwright browsers
+        working-directory: e2e
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+      - name: Deploy preview stack + warm vision pipeline
+        run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit "${PIPESTATUS[0]}"
+      - name: Pin Fly hostname to IPv4 in /etc/hosts
+        # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
+        # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
+        # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
+        # directly so every resolver (curl, Playwright, Node) returns IPv4.
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-preview}"
+          SAN="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
+          SAN="${SAN%-}"
+          CORE_URL="https://stacks-core-pr-${SAN}.fly.dev"
+          HOST="stacks-core-pr-${SAN}.fly.dev"
+          NEON_BRANCH="preview/${SAN}"
+          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
+          echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
+          IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
+          if [[ -z "${IPV4}" ]]; then
+            echo "FAIL: no A record for ${HOST}"
+            exit 1
+          fi
+          echo "${IPV4} ${HOST}" | sudo tee -a /etc/hosts
+          echo "Pinned ${HOST} -> ${IPV4}"
+          getent hosts "${HOST}"
+      - name: Warm Fly machines and Neon database
+        # The only piped curl below feeds the login JSON response to python3
+        # for token extraction — nothing fetched is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+        run: |
+          # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
+          # `_` is the bash convention for an intentionally unused loop variable.
+          for _ in {1..20}; do
+            curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
+          done
+          for _ in {1..10}; do
+            curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
+          done
+          for _ in {1..5}; do
+            curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+              -H "Content-Type: application/json" \
+              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+              >/dev/null 2>&1 &
+          done
+          for _ in {1..3}; do
+            DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+              -H "Content-Type: application/json" \
+              -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
+              2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+            if [[ -n "${DB_TOKEN}" ]]; then
+              curl -sf --max-time 30 "${CORE_URL}/api/catalogue?per_page=20" \
+                -H "Authorization: Bearer ${DB_TOKEN}" >/dev/null 2>&1 || true
+            fi
+          done
+          wait
+          sleep 2
+      # Pre-flight check: verify Open Library can resolve the ISBNs the upload
+      # suite depends on. If OL is down or rate-limiting when this deploy
+      # starts, the upload suite will fail with an unhelpful "title never
+      # enriched" timeout 6+ minutes later. Failing fast here saves CI time
+      # and gives the operator an actionable error.
+      - name: Preflight — external resolver health
+        run: bash scripts/preflight-resolver-health.sh
+      - name: Run E2E against deployed stack
+        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+      - name: Smoke — circuit breakers
+        if: always()
+        run: |
+          if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
+            bash scripts/smoke-circuit-breakers.sh "${CORE_URL}" || true
+          else
+            echo "SKIP: SCRAPER_HMAC_SECRET not set"
+          fi
+      - name: Security live — OWASP ZAP baseline
+        if: always()
+        run: |
+          zap_out="$(docker run --rm \
+            --mount type=tmpfs,destination=/zap/wrk \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "${CORE_URL}" 2>&1)" || true
+          echo "${zap_out}"
+          if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
+            echo "PASS: ZAP baseline"
+          else
+            echo "WARN: ZAP baseline found new failures (advisory)"
+          fi
+      - name: Security live — IDOR cross-user check
+        if: always()
+        # Hard-fails on missing preconditions. Skipping a security check
+        # because the seed data didn't cooperate masks regressions: if a
+        # future code change accidentally allowed cross-user DELETE, this
+        # step would still report green. So:
+        #   * either auth login failing → seed/auth path broken (real issue)
+        #   * owner has zero placements anywhere → seed contract broken
+        # Both fail loudly so someone is forced to fix the test surface.
+        #
+        # curl output is piped to python3 purely to parse login/API JSON
+        # responses — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+        run: |
+          U1="$(curl -sf "${CORE_URL}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+          U2="$(curl -sf "${CORE_URL}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+          if [[ -z "${U1}" ]] || [[ -z "${U2}" ]]; then
+            echo "FAIL: IDOR — could not authenticate both seed users (auth seed broken or login regressed)"
+            exit 1
+          fi
+          # Try each of the 5 named bookshelves until we find a placement.
+          # Distribution of seeded placements across bookshelves isn't
+          # contractual — only "owner has at least one placement" is — so
+          # we don't hard-code which bookshelf to look in.
+          PLACEMENT=""
+          USED_BOOKSHELF=""
+          for bookshelf in library antilibrary wishlist reading-pile looking-for-home; do
+            candidate="$(curl -sf "${CORE_URL}/api/bookshelves/${bookshelf}" \
+              -H "Authorization: Bearer ${U1}" 2>/dev/null \
+              | python3 -c \
+                "import json,sys; d=json.load(sys.stdin); s=d.get('shelves',[]); p=[pl for sh in s for pl in sh.get('placements',[])]; print(p[0]['id'] if p else '')" \
+              2>/dev/null || true)"
+            if [[ -n "${candidate}" ]]; then
+              PLACEMENT="${candidate}"
+              USED_BOOKSHELF="${bookshelf}"
+              break
+            fi
+          done
+          if [[ -z "${PLACEMENT}" ]]; then
+            echo "FAIL: IDOR — owner has no placements across any of the 5 bookshelves; staging seed contract is to populate at least one"
+            exit 1
+          fi
+          echo "Using placement ${PLACEMENT} from bookshelf '${USED_BOOKSHELF}'"
+          IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
+            -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
+            -H "Authorization: Bearer ${U2}")"
+          if [[ "${IDOR_CODE}" == "200" ]]; then
+            echo "FAIL: IDOR — user2 deleted user1's placement (HTTP 200)"
+            exit 1
+          else
+            echo "PASS: IDOR cross-user DELETE blocked (HTTP ${IDOR_CODE})"
+          fi
+      - name: Cleanup preview stack
+        if: always()
+        run: |
+          bash scripts/cleanup-preview.sh \
+            --branch "${GITHUB_HEAD_REF:-preview}" \
+            --neon-branch-name "${NEON_BRANCH:-}" || true
+      - name: Post deployed E2E results to PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/hooks/lib/post-deployed-e2e-to-pr.sh

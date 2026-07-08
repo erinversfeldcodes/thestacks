@@ -1,8 +1,8 @@
-# US-1.2.2 — Browse the AntiLibrary Shelf
+# US-1.2.2 — Browse the AntiLibrary Bookshelf
 
 ## 1. User Story
 
-> **As a** user, **I want to** browse my AntiLibrary shelf **so that** I can see all the books I own but haven't yet read, displayed as a collection of anticipation.
+> **As a** user, **I want to** browse my AntiLibrary bookshelf **so that** I can see all the books I own but haven't yet read, displayed as a collection of anticipation.
 
 **What the user wants to accomplish:** View their unread-but-owned books in an environment that evokes the promise of future reading.
 
@@ -14,13 +14,13 @@
 - **Wallpaper:** Cream wallpaper with botanical prints -- delicate ferns, pressed flowers, and leaf illustrations in muted greens and browns.
 - **Shelving:** Lighter oak shelving -- honey-toned, clean grain, less imposing than the Library's walnut.
 - **Lighting:** Afternoon sunlight -- a warm, diffuse glow suggesting a sun-filled room. Soft highlights on the top edges of book spines.
-- **Shelf label:** "Antilibrary" in the same serif typeface and brass plate style as other shelves.
+- **Bookshelf label:** "Antilibrary" in the same serif typeface and brass plate style as other bookshelves.
 - **Books:** Spines have a softened wear state -- slight softening of edges but still relatively fresh. The promise of reading, not yet begun.
 
 Note: The codebase uses `wearLevel = Pristine` for AntiLibrary (not `Softened`), matching the "not yet read" concept rather than the "softened" description in the user story.
 
 **Acceptance Criteria:**
-- AntiLibrary shelf loads with all unread-but-owned books displayed as spines.
+- AntiLibrary bookshelf loads with all unread-but-owned books displayed as spines.
 - Bookcase renders with at least 4 shelf rows.
 - Books grouped into rows by accumulated spine width (max 990px per row).
 - Spine view and list view are toggleable.
@@ -33,9 +33,9 @@ Note: The codebase uses `wearLevel = Pristine` for AntiLibrary (not `Softened`),
 ### Happy Path
 1. User navigates to `/antilibrary`.
 2. `Main.elm` matches `AntiLibrary` route -> `Page.Bookshelf.init antiLibraryConfig maybeToken userId`.
-3. Model initialises with `books = Loading`; API request fires to `GET /api/bookshelves/antilibrary`.
+3. Model initialises with `shelves = Loading`; API request fires to `GET /api/bookshelves/antilibrary`.
 4. Empty bookcase with 4 shelf rows renders immediately during loading.
-5. On success, placements grouped into rows via `groupIntoRows 990` and rendered as clickable spines.
+5. On success, each returned shelf renders its `placements` as clickable spines (the unified module renders one row per shelf).
 6. User clicks a spine -> `BookClicked book` -> overlay opens.
 
 ### Sad Paths
@@ -45,7 +45,7 @@ Note: The codebase uses `wearLevel = Pristine` for AntiLibrary (not `Softened`),
 
 ### Elm State Machine
 - **Page module**: `Page.Bookshelf` (shared module, configured via `antiLibraryConfig`)
-- **Model fields involved**: Same as US-1.2.1 -- `books`, `showAgeGate`, `config`, `userId`, `visibility`, `rssLink`, `viewMode`, `sortState`
+- **Model fields involved**: Same as US-1.2.1 -- `shelves`, `showAgeGate`, `config`, `userId`, `visibility`, `rssLink`, `viewMode`, `sortState`, `token`
 - **Msg flow**: Identical to US-1.2.1 but with `apiName = "antilibrary"`
 - **RemoteData states**: `NotAsked` -> `Loading` -> `Success` / `Failure`
 - **OutMsg pattern**: `NavigateTo (BookDetail bookId)` or `NoOut`
@@ -59,7 +59,7 @@ Note: The codebase uses `wearLevel = Pristine` for AntiLibrary (not `Softened`),
 - **Pipeline**: `:api` -> `:authenticated` -> `:view_as`
 - **Controller**: `StacksWeb.BookshelfController.show/2`
 - **Request body**: N/A
-- **Response (success)**: `{ bookshelf: "antilibrary", count: N, placements: [...] }` -- HTTP 200
+- **Response (success)**: `{ bookshelf: "antilibrary", count: N, shelves: [{id, position, placements: [...]}, ...] }` -- HTTP 200
 - **Response (error)**: `{ error: "invalid bookshelf name" }` -- HTTP 404
 - **FallbackController handling**: Same as US-1.2.1
 
@@ -142,7 +142,7 @@ N/A -- bookshelf listings are not cached.
 
 ### Init
 - **`initPage` branch**: `AntiLibrary` route -> `Page.Bookshelf.init antiLibraryConfig maybeToken userId`
-- **API calls on init**: `Api.getBookshelf "antilibrary" token BooksLoaded`
+- **API calls on init**: `Api.getBookshelf "antilibrary" token ShelvesLoaded`
 - **Initial model state**: Same structure as Library, with `config = antiLibraryConfig`
 
 ### Config (AntiLibrary-specific)
@@ -197,8 +197,8 @@ Identical to US-1.2.1. All `Msg` variants behave the same way regardless of conf
 
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
-| `page.load_time{route="/antilibrary"}` | Elm Performance API | Histogram (ms) | Time from navigation to `BooksLoaded (Ok _)` rendering complete | p50 < 400ms, p95 < 1200ms |
-| `shelf.render_time{shelf="antilibrary"}` | Elm Performance API | Histogram (ms) | Time to run `groupIntoRows 990` and render all shelf rows | p95 < 100ms for 200 books |
+| `page.load_time{route="/antilibrary"}` | Elm Performance API | Histogram (ms) | Time from navigation to `ShelvesLoaded (Ok _)` rendering complete | p50 < 400ms, p95 < 1200ms |
+| `shelf.render_time{shelf="antilibrary"}` | Elm Performance API | Histogram (ms) | Time to render all shelf rows from the nested shelves response | p95 < 100ms for 200 books |
 | `shelf.book_count{shelf="antilibrary"}` | API response | Gauge | `count` field in API response | Informational (capacity planning) |
 | `user.books_clicked_per_session{shelf="antilibrary"}` | Elm event tracking | Counter per session | Increment on each `BookClicked` msg | Informational (engagement) |
 | `user.view_mode_toggles_per_session` | Elm event tracking | Counter per session | Increment on each `ViewModeChanged` msg | Informational (feature usage) |

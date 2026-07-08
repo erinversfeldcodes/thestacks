@@ -3,10 +3,35 @@ defmodule StacksWeb.Plugs.RateLimiter do
   ETS-backed sliding window rate limiter Plug.
 
   - Global endpoints: 1000 requests / 60 seconds per IP
-  - Auth endpoints (`:auth` bucket): 5 requests / 60 seconds per IP
-  - Upload endpoints (`:upload` bucket): 10 requests / 60 seconds per authenticated user
+  - Auth endpoints (`:auth` bucket): 60 requests / 60 seconds per IP
+  - Upload endpoints (`:upload` bucket): 120 requests / 60 seconds per authenticated user
   - Social endpoints (`:social` bucket): 20 requests / 60 seconds per authenticated user
-  - Password change (`:password_change` bucket): 3 requests / 60 seconds per IP
+  - Password change (`:password_change` bucket): 20 requests / 60 seconds per IP
+
+  ## Sizing rationale (auth + password_change)
+
+  Per-IP rate-limiting alone is a weak credential-stuffing defence —
+  attackers rotate IPs trivially, and the only IPs the limit actually
+  hurts are corporate / mobile NATs sharing one address across many
+  legitimate users. The values here are sized to slow naive scripted
+  attempts without locking out NAT-shared real users:
+
+  - `:auth` 60/60s — 1 req/sec average with burst headroom. A real
+    user can mistype, retry, refresh a tab, open a new device, etc.
+    A scripted attacker still has to slow down materially.
+  - `:password_change` 20/60s — easily covers retries on a typo;
+    well below useful throughput for credential stuffing the
+    /api/settings/password endpoint.
+
+  The proper credential-stuffing defence (per-account lockout after N
+  failed attempts + CAPTCHA / proof-of-work after threshold) is
+  tracked separately. Without it, treat these IP caps as the floor of
+  abuse prevention, not the ceiling.
+
+  Both `:auth` and `:password_change` honour env-var overrides at
+  Server.init/1 time — RATE_LIMIT_AUTH and RATE_LIMIT_PASSWORD_CHANGE.
+  Use those for per-environment tuning (e.g. tighter on prod, looser
+  on isolated test/staging if needed).
 
   The ETS table is managed by `StacksWeb.Plugs.RateLimiter.Server` which
   must be started in the supervision tree before this plug runs.
@@ -26,11 +51,20 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @table :rate_limiter
   @window_ms 60_000
   @global_limit 1_000
-  @auth_limit 5
-  @upload_limit 10
-  @password_change_limit 3
+  @auth_limit 60
+  # Uploads per user per minute. 10 was too tight — real users populating
+  # a shelf routinely hit it, and our gate probe (24/min sustained)
+  # couldn't run without 429s. 120 is set by the Oban :vision queue
+  # ceiling (concurrency=60, ~3s/job ≈ ~100 jobs/min in steady state);
+  # above 120 one user can flood the queue and starve others. 120 is
+  # comfortable for ~2 concurrent heavy users, graceful backpressure
+  # beyond. Real users won't approach this.
+  @upload_limit 120
+  @password_change_limit 20
   @social_limit 20
   @public_limit 30
+  # Admin endpoints — tighter than auth; break-glass access is not high-throughput.
+  @admin_limit 30
 
   def init(opts), do: opts
 
@@ -69,9 +103,13 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:auth), do: Application.get_env(:core, :rate_limit_auth, @auth_limit)
   defp get_limit(:upload), do: @upload_limit
-  defp get_limit(:password_change), do: @password_change_limit
+
+  defp get_limit(:password_change),
+    do: Application.get_env(:core, :rate_limit_password_change, @password_change_limit)
+
   defp get_limit(:social), do: @social_limit
   defp get_limit(:public), do: @public_limit
+  defp get_limit(:admin), do: Application.get_env(:core, :rate_limit_admin, @admin_limit)
   defp get_limit(_), do: @global_limit
 
   # Upload and social buckets key on user ID so the limit is per-user, not per-IP.
@@ -141,11 +179,15 @@ defmodule StacksWeb.Plugs.RateLimiter do
       :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
 
       # runtime.exs runs before Fly.io secrets are injected into the process
-      # environment, so Application.get_env(:core, :rate_limit_auth) is not set
-      # by the time the plug reads it. Apply the override here, where secrets
+      # environment, so Application.get_env(:core, :rate_limit_*) is not set
+      # by the time the plug reads it. Apply overrides here, where secrets
       # are guaranteed to be present.
       if limit = System.get_env("RATE_LIMIT_AUTH") do
         Application.put_env(:core, :rate_limit_auth, String.to_integer(limit))
+      end
+
+      if limit = System.get_env("RATE_LIMIT_PASSWORD_CHANGE") do
+        Application.put_env(:core, :rate_limit_password_change, String.to_integer(limit))
       end
 
       schedule_cleanup()

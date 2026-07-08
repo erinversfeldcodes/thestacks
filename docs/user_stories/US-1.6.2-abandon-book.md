@@ -7,7 +7,7 @@
 **What the user wants to accomplish:** Gracefully abandon a book without judgement -- it returns to the unread shelf.
 
 **How they accomplish it:**
-1. On the book detail overlay (while the book is in the Reading Pile), the user selects "Antilibrary" from the Move to Shelf dropdown.
+1. On the book detail overlay (see ADR-005), while the book is in the Reading Pile, the user selects "Antilibrary" from the Move to Shelf dropdown.
 2. The system records the transition, including that it was an abandonment (moved backwards in the journey).
 
 **What they see on the page:**

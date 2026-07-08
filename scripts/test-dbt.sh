@@ -8,11 +8,15 @@ if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# Ensure pip-installed tools (dbt, sqlfluff) are on PATH.
-# Python --user installs land in ~/Library/Python/*/bin on macOS.
-for pybin in "$HOME"/Library/Python/*/bin; do
-    [[ -d "$pybin" ]] && export PATH="$pybin:$PATH"
-done
+# dbt lives in .venv-tools/, exposed by flake.nix shellHook inside the dev
+# shell. Outside it, python-tools.sh surfaces .venv-tools/bin and the active
+# interpreter's pip --user bin, and require_dbt_core guards against `dbt`
+# resolving to the Homebrew dbt Cloud CLI (same binary name, wrong product).
+# shellcheck source=scripts/lib/python-tools.sh
+source "$REPO_ROOT/scripts/lib/python-tools.sh"
+ensure_python_tools_path
+require_dbt_core
+
 # shellcheck source=scripts/lib/postgres.sh
 source "$REPO_ROOT/scripts/lib/postgres.sh"
 

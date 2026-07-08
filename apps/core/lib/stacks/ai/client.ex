@@ -24,6 +24,20 @@ defmodule Stacks.AI.Client do
 
   Protected by `:vision_fuse` — managed by `Stacks.CircuitBreakers`.
   When blown, `call_vision/2` returns `{:error, :circuit_open}`.
+
+  ## Cost Tracking
+
+  Every Finch request to the vision service charges a fixed per-call cost to
+  `BudgetTracker` under the `:modal` provider key. The cost is incurred whether
+  the response is success, non-200, or transport error — Modal bills for GPU
+  time regardless of whether we end up using the result.
+
+  The per-call amount defaults to 1 cent and is configurable via
+  `config :core, :modal_cost_per_call_cents`. This is a coarse approximation;
+  precise per-call billing arrives via `RefreshCostsJob` reading the Modal
+  usage API. The BudgetTracker counter exists to enforce the daily/monthly
+  budget cap in real time and to surface a non-zero number on the cost
+  dashboard between RefreshCostsJob runs.
   """
 
   alias Stacks.AI.BudgetTracker
@@ -34,6 +48,7 @@ defmodule Stacks.AI.Client do
   @behaviour ClientBehaviour
 
   @fuse_name :vision_fuse
+  @default_modal_cost_per_call_cents 1
 
   @impl true
   def call_vision(endpoint, payload) do
@@ -104,6 +119,11 @@ defmodule Stacks.AI.Client do
 
   defp endpoint_path("is_book"), do: "classify"
   defp endpoint_path("extract_isbn"), do: "extract"
+  # Single-request classify + extract — the vision service composes both
+  # steps and short-circuits on non-books internally. Prefer this over
+  # calling "is_book" and "extract_isbn" separately; see
+  # Stacks.Moderation.run_pipeline/1.
+  defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("associate"), do: "associate"
 
   defp endpoint_path(other) do
@@ -137,7 +157,13 @@ defmodule Stacks.AI.Client do
     )
 
     # 210s gives the Modal service headroom beyond its own 300s inference timeout.
-    case Finch.request(req, Stacks.Finch, receive_timeout: 210_000) do
+    result = Finch.request(req, Stacks.Finch, receive_timeout: 210_000)
+
+    # Record the per-call cost regardless of outcome. Rejection ≠ free —
+    # Modal bills for GPU time whether or not we use the result.
+    record_vision_call_cost()
+
+    case result do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
 
@@ -173,6 +199,13 @@ defmodule Stacks.AI.Client do
         Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, reason}
     end
+  end
+
+  defp record_vision_call_cost do
+    cost_cents =
+      Application.get_env(:core, :modal_cost_per_call_cents, @default_modal_cost_per_call_cents)
+
+    BudgetTracker.record_cost(:modal, cost_cents)
   end
 
   defp configured_client do

@@ -15,10 +15,12 @@ module Api exposing
     , PollStatus(..)
     , QualityTrends
     , SourceHealth
+    , UploadInit
     , acceptInvitation
     , activateListing
     , addShelf
     , approveSource
+    , commitUpload
     , completeOnboardingStep
     , confirmAssociation
     , createBlogPost
@@ -47,6 +49,7 @@ module Api exposing
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
+    , initUpload
     , inviteToGroup
     , leaveGroup
     , login
@@ -56,7 +59,9 @@ module Api exposing
     , moveBook
     , placeBook
     , publishBlogPost
+    , putFileToR2
     , register
+    , rejectIdentification
     , rejectSource
     , removeBook
     , saveConsent
@@ -71,7 +76,6 @@ module Api exposing
     , updateProfile
     , updateProfileVisibility
     , updateShelfVisibility
-    , uploadImage
     )
 
 import File exposing (File)
@@ -85,7 +89,6 @@ import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
 import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
-import Stacks.Common.V1.Upload as ProtoUpload
 import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
@@ -275,20 +278,112 @@ logout token toMsg =
         }
 
 
-{-| POST /api/upload — returns the image\_id from the 202 accepted response.
+{-| Init-step response from `POST /api/upload/init`.
 -}
-uploadImage :
-    File
+type alias UploadInit =
+    { imageId : String
+    , uploadUrl : String
+    , expiresIn : Int
+    }
+
+
+decodeUploadInit : Decoder UploadInit
+decodeUploadInit =
+    Decode.map3 UploadInit
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "upload_url" Decode.string)
+        (Decode.field "expires_in" Decode.int)
+
+
+{-| `POST /api/upload/init` — allocates an image\_id server-side and
+returns a presigned R2 PUT URL the client can upload to directly. The
+Phoenix handler only touches the DB + SigV4 signing, not the bytes.
+-}
+initUpload :
+    String
     -> String
-    -> (Result Http.Error String -> msg)
+    -> (Result Http.Error UploadInit -> msg)
     -> Cmd msg
-uploadImage file token toMsg =
+initUpload contentType token toMsg =
     Http.request
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload"
-        , body = Http.multipartBody [ Http.filePart "image" file ]
-        , expect = Http.expectJson toMsg (Decode.map .imageId ProtoUpload.decodeUploadAccepted)
+        , url = baseUrl ++ "/api/upload/init"
+        , body =
+            Http.jsonBody
+                (Encode.object [ ( "content_type", Encode.string contentType ) ])
+        , expect = Http.expectJson toMsg decodeUploadInit
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT the file bytes to the presigned R2 URL. Sends the raw File body;
+Elm's Http uses XHR under the hood, so the JS-side compression
+monkey-patch in `apps/core/assets/js/app.js` intercepts this
+automatically. No auth header — the presigned URL signature IS the
+authorisation.
+-}
+putFileToR2 :
+    String
+    -> File
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+putFileToR2 url file toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = []
+        , url = url
+        , body = Http.fileBody file
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| `POST /api/upload/:id/commit` — signals to the backend that the
+client's direct PUT to R2 succeeded. Backend HEADs R2, flips the row
+from awaiting\_upload → pending, and enqueues identification work.
+Returns the image\_id on success.
+-}
+commitUpload :
+    String
+    -> String
+    -> (Result Http.Error String -> msg)
+    -> Cmd msg
+commitUpload imageId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/upload/:image\_id/reject-identification — tell the server the
+current identification was wrong; the server will delete any placement
+created from it and re-run the vision pipeline excluding the listed books.
+Returns 202 on accept; the SSE stream emits new events as the new
+IdentifyBookJob runs.
+-}
+rejectIdentification :
+    { imageId : String, rejectedBookIds : List String, token : String }
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+rejectIdentification { imageId, rejectedBookIds, token } toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/reject-identification"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
+                )
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }

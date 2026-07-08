@@ -2,6 +2,7 @@
 **Branch**: `trial/005-agent-teams`
 **Date**: 2026-03-13
 **Evaluator**: Orchestrator (Claude Code lead agent)
+**Status**: historical — see `agent-teams-evaluation.md` for the final decision
 
 ---
 

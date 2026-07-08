@@ -99,6 +99,10 @@ models:
         description: Google books id.
       - name: book_id
         description: Book id.
+        tests:
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -298,6 +302,11 @@ models:
               where: "status = 'resolved'"
       - name: book_id
         description: Book id.
+        tests:
+          - relationships:
+              to: ref('stg_books')
+              field: id
+              where: "status = 'resolved'"
       - name: book_edition_id
         description: Book edition id.
       - name: user_id
@@ -334,6 +343,16 @@ models:
         description: Metadata.
       - name: occurred_at
         description: Occurred at.
+      - name: endpoint
+        description: Endpoint.
+      - name: latency_ms
+        description: Latency ms.
+      - name: success
+        description: Success.
+      - name: row_count
+        description: Row count.
+      - name: operator_session_id
+        description: Operator session id.
 
   - name: stg_event_log
     description: >

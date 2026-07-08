@@ -79,14 +79,52 @@ function fakePlacement(bookId: string = FAKE_BOOK_ID) {
 // Route helpers — mock API endpoints
 // ---------------------------------------------------------------------------
 
-/** Mock POST /api/upload to accept and return an image ID. */
+// Same-origin path the init mock returns as the presigned PUT target.
+// Same-origin so CSP `connect-src 'self'` doesn't block the request, and
+// outside the `r2.cloudflarestorage.com` pattern the JS shim looks for so
+// the canvas-compression path is skipped (we want the raw mock file to
+// reach Playwright's route handler unchanged).
+const MOCK_R2_PUT_PATH = `/__mock_r2_put__/${FAKE_IMAGE_ID}`;
+
+/**
+ * Mock the 3-step presigned-URL upload flow:
+ *   POST /api/upload/init        → returns image_id + same-origin mock PUT URL
+ *   PUT  <mock-PUT-url>          → 200 OK
+ *   POST /api/upload/:id/commit  → 200 OK
+ *
+ * After commit, Page.Upload opens an SSE EventSource against
+ * /api/upload/:id/stream — that's mocked separately by `injectEventSourceMock`
+ * so each test can choose resolved / rejected / not-a-book / error / pending.
+ */
 async function mockUploadAccept(page: Page) {
-  await page.route("**/api/upload", (route) => {
+  await page.route("**/api/upload/init", (route) => {
     if (route.request().method() === "POST") {
       route.fulfill({
-        status: 202,
+        status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ status: "accepted", image_id: FAKE_IMAGE_ID }),
+        body: JSON.stringify({
+          image_id: FAKE_IMAGE_ID,
+          upload_url: MOCK_R2_PUT_PATH,
+          expires_in: 3600,
+        }),
+      });
+    } else {
+      route.continue();
+    }
+  });
+  await page.route(`**${MOCK_R2_PUT_PATH}`, (route) => {
+    if (route.request().method() === "PUT") {
+      route.fulfill({ status: 200, body: "" });
+    } else {
+      route.continue();
+    }
+  });
+  await page.route("**/api/upload/*/commit", (route) => {
+    if (route.request().method() === "POST") {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ image_id: FAKE_IMAGE_ID }),
       });
     } else {
       route.continue();
@@ -94,9 +132,13 @@ async function mockUploadAccept(page: Page) {
   });
 }
 
-/** Mock POST /api/upload to return a 500 error. */
+/**
+ * Fail the upload at the init step. The page renders the generic
+ * "Upload failed. Please try again." error UI — keeping the failure on
+ * the very first step is the simplest path for the sad-path retry test.
+ */
 async function mockUploadFailure(page: Page) {
-  await page.route("**/api/upload", (route) => {
+  await page.route("**/api/upload/init", (route) => {
     if (route.request().method() === "POST") {
       route.fulfill({
         status: 500,
@@ -600,7 +642,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
 
     // Click retry — should reset to initial state
     // First, switch the mock to success for the retry
-    await page.unroute("**/api/upload");
+    await page.unroute("**/api/upload/init");
     await mockUploadAccept(page);
     await mockPollResolved(page);
     await mockGetBook(page);

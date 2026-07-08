@@ -12,6 +12,9 @@ Security is not a feature — it's a property of the system. Every agent must co
 - Guardian JWT (HS256), 64-char secret generated with `mix guardian.gen.secret`
 - 24h access tokens, 7d refresh tokens (stored in DB, revocable)
 - Argon2 password hashing (argon2_elixir)
+- Argon2 operations serialised through `Stacks.Accounts.ArgonPool` (NimblePool) so concurrent hashes/verifies cannot OOM the instance (Issue #166)
+- Per-account login lockout in `AuthController.login` after N failed attempts (`failed_login_count` / `locked_until` on `op.users`); per-IP rate limit remains as defence-in-depth (Issue #161)
+- TOTP MFA enforced on owner-only routes via `StacksWeb.Plugs.RequireMFA` (admin, source admin, metrics); secrets stored encrypted in `Stacks.MFA.UserMFA`
 - First user becomes owner. No public registration in single-user phase.
 
 ### Partner Auth
@@ -22,9 +25,9 @@ Security is not a feature — it's a property of the system. Every agent must co
 - Rotation invalidates old key immediately
 
 ### Service-to-Service
-- Core ↔ scraper: Fly.io private networking (`.internal` DNS) — no public endpoint for scraper
-- Core ↔ vision service: HMAC-signed requests over public Modal HTTPS (`VISION_HMAC_SECRET` shared secret)
-- HMAC-signed requests as defence in depth
+- Core ↔ scraper: Fly.io private networking (`.internal` DNS) — no public endpoint for scraper. HMAC verification in `apps/scraper/src/auth.rs`.
+- Core ↔ vision service: HMAC-signed requests over public Modal HTTPS (`VISION_HMAC_SECRET` shared secret). Signing in `apps/core/lib/stacks/ai/client.ex`, verification in `apps/vision/app/services/hmac_auth.py`.
+- Signature scheme: `<unix_ts>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` — timestamp clamped to prevent replay.
 
 ---
 
@@ -39,22 +42,22 @@ Security is not a feature — it's a property of the system. Every agent must co
 | External Personal | Reddit usernames in reviews | Pseudonymised in analytics | Source retention policy |
 
 ### Right to Export
-`Stacks.GDPR.export/1` returns all user data as structured JSON. Served as a downloadable file.
+`Stacks.GDPR.Export` returns all user data as structured JSON. Served as a downloadable file via `POST /api/gdpr/export`.
 
 ### Right to Erasure
-`Stacks.GDPR.delete_user/1` via Ecto.Multi:
+`Stacks.GDPR.Deletion` via `DELETE /api/gdpr/account`:
 1. Delete all op schema rows for the user
 2. Anonymise wh schema records (hash user_id, remove PII)
 3. Scrub PII from event_log payloads (targeted, not delete)
 4. Record the deletion itself in audit_log
 
 ### Consent
-- Per-use consent with timestamps
+- Per-use consent with timestamps (`Stacks.GDPR.Consent`, `POST /api/gdpr/consent`)
 - `consent_analytics`, `consent_analytics_at` on users table
 - Features gated on consent status via `StacksWeb.Plugs.ConsentCheck`
 
 ### Image Retention
-- Original uploads deleted after 30 days (Oban scheduled job)
+- Original uploads deleted after 30 days (Oban scheduled job in `Stacks.GDPR.ImageRetention`)
 - Only thumbnails retained permanently
 - Tracked in `uploaded_images.expires_at`
 
@@ -140,10 +143,22 @@ Elm does NOT require `unsafe-eval`. Never add it.
 ## Database Security
 
 - Separate roles: `stacks_app` (CRUD on op, SELECT on wh, INSERT on audit), `stacks_dbt` (SELECT on op, CRUD on wh), `stacks_readonly`
-- `audit_log`: INSERT-only grant for app role. No UPDATE/DELETE.
+- Row-level security policies (defence in depth) plus application-layer `Stacks.Visibility` enforcement — see [ADR-006](../../decisions/006-rls-plus-application-visibility.md)
+- `audit_log` (`op.audit_log`, written via `Stacks.Audit`): INSERT-only grant for app role. No UPDATE/DELETE.
 - `event_log`: append-only in normal operation. GDPR erasure via targeted payload scrubbing.
 - Column-level encryption via Cloak for personal notes, audit metadata.
 - No raw SQL from user input. Ecto parameterised queries only.
+
+---
+
+## Secrets Management
+
+- Production secrets: Fly.io secrets (`fly secrets set ...`) per app (`core`, `vision`, `scraper`).
+- Modal vision service: Modal secret `thestacks-vision` (read via `VISION_*` prefixed env vars).
+- Local development: `.env` (gitignored) populated from `.env.example` (committed). `set -a && source .env && set +a` to export.
+- Required core secrets: `SECRET_KEY_BASE`, `VISION_HMAC_SECRET`, `CLOAK_KEY`, `DATABASE_URL`.
+- Required vision secrets: `VISION_HMAC_SECRET`, `VISION_TOGETHER_API_KEY`.
+- Never commit secrets. Gitleaks and TruffleHog run in CI on every PR.
 
 ---
 
@@ -151,20 +166,19 @@ Elm does NOT require `unsafe-eval`. Never add it.
 
 | Tool | What | When |
 |------|------|------|
-| Sobelow | Elixir SAST | Every PR |
-| Semgrep | Multi-language SAST + custom AI safety rules | Every PR |
-| CodeQL | Deep SAST | Weekly |
+| Sobelow | Elixir SAST | Every PR (Stop hook + CI) |
+| Semgrep | Multi-language SAST | Every PR |
+| CodeQL | Deep SAST (`.github/workflows/codeql.yml`) | Weekly (Mon 04:00 UTC) |
 | mix deps.audit | Elixir dependency vulnerabilities | Every PR |
 | cargo audit | Rust dependency vulnerabilities | Every PR |
-| npm audit | Node/Elm tooling vulnerabilities | Every PR |
-| Trivy | Container image scanning | Every build |
 | Gitleaks | Secret detection | Every PR |
-| Checkov | IaC scanning (Dockerfiles, Fly config) | Every PR |
+| TruffleHog | Secret detection (verified) | Every PR |
 | Hadolint | Dockerfile linting | Every PR |
-| OWASP ZAP | DAST | Weekly |
-| Nuclei | DAST (template-based) | Weekly |
-| cargo-fuzz | Rust fuzzing (TOML parsing, HTML extraction) | Nightly |
-| Atheris | Python fuzzing (image input) | Nightly |
+| Checkov | IaC scanning (Dockerfiles, Fly config) | Every PR |
+| Trivy | Container image vulnerability scanning | Every build |
+| Dockle | Container image best-practices linting | Every build |
+| Syft + Grype | SBOM + vulnerability scan (fails on high, fixed only) | Every PR |
+| OWASP ZAP baseline | DAST against deployed preview | Per deploy (advisory) |
 
 ---
 
@@ -175,3 +189,12 @@ If a security issue is found:
 2. Notify the platform owner
 3. If in production: deploy a fix or disable the affected feature via feature flag
 4. Post-mortem: what happened, why, how to prevent recurrence
+
+---
+
+## See Also
+
+- [`docs/agents/security-agent.md`](../security-agent.md) — security specialist agent
+- [ADR-006: RLS plus application-layer visibility](../../decisions/006-rls-plus-application-visibility.md)
+- Issue #161 — per-account login lockout
+- Issue #166 — Argon2 NimblePool concurrency safety

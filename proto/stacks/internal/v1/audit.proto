@@ -30,4 +30,22 @@ message AuditEntry {
 
   // When the action occurred (UTC).
   google.protobuf.Timestamp occurred_at = 7 [json_name = "occurred_at"];
+
+  // Admin-call shape — Phase 1 (break-glass prod data access).
+  // All nullable: existing call sites that omit these opts store NULL.
+
+  // API endpoint invoked by the admin call (e.g. "/api/admin/users/by_email").
+  string endpoint = 8 [json_name = "endpoint"];
+
+  // Round-trip latency of the admin call in milliseconds.
+  int32 latency_ms = 9 [json_name = "latency_ms"];
+
+  // Whether the admin call succeeded (false = error or empty result).
+  bool success = 10 [json_name = "success"];
+
+  // Number of rows returned or affected by the admin call.
+  int32 row_count = 11 [json_name = "row_count"];
+
+  // UUID of the admin session that issued this call.
+  string operator_session_id = 12 [json_name = "operator_session_id"];
 }

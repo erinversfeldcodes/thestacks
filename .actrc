@@ -1,0 +1,5 @@
+-P ubuntu-latest=stacks-act-runner
+--pull=false
+--env GITHUB_TOKEN
+--env-file .act/.env
+-e .act/event.json

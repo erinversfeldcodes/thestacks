@@ -33,9 +33,26 @@ defmodule CoreWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
-  # Prometheus metrics — no auth, restricted to internal network in production
-  # (Fly private networking). PromEx renders metrics at /internal/metrics.
+  # Prometheus metrics — auth-gated by StacksWeb.Plugs.MetricsAuth: requires
+  # an Authorization: Bearer <METRICS_SCRAPE_TOKEN> header. The plug halts
+  # with 401 for unauthorised callers before PromEx.Plug ever sees the
+  # request. No IP allowlist — fly-proxy re-originates public traffic over
+  # 6PN so conn.remote_ip is not a trust signal.
+  plug StacksWeb.Plugs.MetricsAuth
   plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
+
+  # Synthetic dependency probe for SLO gate cold-start coverage. Handled at
+  # the endpoint level (before the router) so it (a) never appears in
+  # `core_prom_ex_phoenix_http_requests_total` and therefore can't skew
+  # `real_5xx_rate`, (b) never triggers route-group tagging, and (c) short-
+  # circuits dependency-heavy Plug pipelines that the real `/api/*` routes
+  # run. Bearer auth is provided by the MetricsAuth plug above.
+  plug StacksWeb.Plugs.DepsCheck
+
+  # Tag every request with a :route_group before the router dispatches so
+  # phoenix.router_dispatch.stop metadata carries the group. Feeds the SLO
+  # gate in Issue #136.
+  plug StacksWeb.Plugs.RouteGroup
 
   plug CoreWeb.Router
 end

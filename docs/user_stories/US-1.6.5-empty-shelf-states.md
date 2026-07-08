@@ -1,13 +1,13 @@
-# US-1.6.5 — Empty Shelf States
+# US-1.6.5 — Empty Bookshelf States
 
 ## 1. User Story
 
-> **As a** user, **I want to** see an inviting empty state when a shelf has no books **so that** I feel encouraged to add books rather than confused by a blank screen.
+> **As a** user, **I want to** see an inviting empty state when a bookshelf has no books **so that** I feel encouraged to add books rather than confused by a blank screen.
 
-**What the user wants to accomplish:** Understand that an empty shelf is normal (especially when they're just starting out) and know how to add their first book.
+**What the user wants to accomplish:** Understand that an empty bookshelf is normal (especially when they're just starting out) and know how to add their first book.
 
 **How they accomplish it:**
-This is automatic -- no user action. The system renders an empty state when a shelf has zero active placements.
+This is automatic -- no user action. The system renders an empty state when a bookshelf has zero active placements.
 
 **What they see on the page:**
 - **Library (empty):** "Your library is waiting. Move a book here when you've finished reading it."
@@ -17,7 +17,7 @@ This is automatic -- no user action. The system renders an empty state when a sh
 - **Looking for Home (empty):** "Nothing here yet -- these are books looking for a new home."
 
 **Acceptance Criteria:**
-- Each shelf has a unique, contextual empty state message.
+- Each bookshelf has a unique, contextual empty state message.
 - Empty bookshelves (Library, AntiLibrary, WishList) render inside a bookcase with empty shelf rows.
 - Reading Pile empty state shows the armchair scene with message text.
 - Looking for Home empty state uses the `Components.EmptyBookshelf` component.
@@ -27,7 +27,7 @@ This is automatic -- no user action. The system renders an empty state when a sh
 ## 2. UI Interaction Flow
 
 ### Happy Path
-1. User navigates to a shelf with no active placements.
+1. User navigates to a bookshelf with no active placements.
 2. API returns `{ bookshelf: "...", count: 0, placements: [] }`.
 3. `BooksLoaded (Ok [])` -> `books = Success []` -> `List.isEmpty placements == True`.
 4. Empty state view renders.
@@ -118,7 +118,7 @@ Empty states render on the same routes as their non-empty counterparts:
 ### Init
 Same as respective browse stories. The API call fires and returns an empty placements list.
 
-### Empty state rendering per shelf
+### Empty state rendering per bookshelf
 
 #### Library, AntiLibrary, WishList (`Page.Bookshelf`)
 When `books = Success placements` and `List.isEmpty placements`:
@@ -134,8 +134,8 @@ viewEmptyBookshelf model =
 - 3 additional empty shelf rows are appended via `minShelfRows 4` to fill the bookcase.
 
 Empty messages per config:
-| Shelf | `config.emptyMessage` |
-|-------|-----------------------|
+| Bookshelf | `config.emptyMessage` |
+|-----------|-----------------------|
 | Library | "Your library is waiting. Move a book here when you've finished reading it." |
 | AntiLibrary | "Books you own but haven't read yet. Upload a photo to start building your collection." |
 | WishList | "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN." |
@@ -163,7 +163,7 @@ emptyBookshelf
 No update cycle specific to empty states. The empty state is purely a view concern.
 
 ### View
-- **Key elements (shelf bookshelves)**:
+- **Key elements (bookcase-rendered bookshelves)**:
   - `div.bookshelf` > `viewBookcase` > `div.bookcase` with side panels
   - `div.shelf-row.shelf-row--empty` containing the message
   - `p.shelf-row__empty-text` with the empty message text
@@ -175,7 +175,7 @@ No update cycle specific to empty states. The empty state is purely a view conce
   - `Components.EmptyBookshelf` component output
 - **ARIA attributes**: No explicit ARIA on empty states. The `aria-live="polite"` region on the content area ensures screen readers announce the empty message.
 - **CSS classes**:
-  - Shelf bookshelves: `bookshelf`, `bookcase`, `bookcase__side`, `bookcase__inner`, `shelf-row shelf-row--empty`, `shelf-row__back`, `shelf-row__books shelf-row__books--message`, `shelf-row__empty-text`, `shelf-row__plank`, `shelf-row__lip`
+  - Bookcase-rendered bookshelves: `bookshelf`, `bookcase`, `bookcase__side`, `bookcase__inner`, `shelf-row shelf-row--empty`, `shelf-row__back`, `shelf-row__books shelf-row__books--message`, `shelf-row__empty-text`, `shelf-row__plank`, `shelf-row__lip`
   - Reading Pile: `reading-pile__empty-msg`
   - Looking for Home: Component-specific classes from `Components.EmptyBookshelf`
 
@@ -197,11 +197,11 @@ No update cycle specific to empty states. The empty state is purely a view conce
 
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
-| `page.load_time{route, state="empty"}` | Elm Performance API | Histogram (ms) | Time from navigation to empty state rendering complete | p50 < 200ms, p95 < 500ms (faster than populated shelf -- no spine rendering) |
-| `empty_shelf.render_time{shelf}` | Elm Performance API | Histogram (ms) | Time to render empty bookcase with 4 shelf rows + empty message | p95 < 30ms (minimal DOM) |
-| `empty_shelf.view_rate{shelf}` | Elm event tracking | Gauge (%) | Percentage of shelf loads that result in empty state (`Success []`) | Informational (content health) |
-| `empty_shelf.time_to_first_book{shelf}` | Server-side (event_log) | Histogram (days) | Time from first empty shelf view to first `placement.created` on that shelf | Informational (onboarding funnel) |
-| `empty_shelf.bounce_rate{shelf}` | Elm event tracking | Gauge (%) | Percentage of empty shelf views where user navigates away without taking action | Informational (UX effectiveness of empty state messaging) |
+| `page.load_time{route, state="empty"}` | Elm Performance API | Histogram (ms) | Time from navigation to empty state rendering complete | p50 < 200ms, p95 < 500ms (faster than populated bookshelf -- no spine rendering) |
+| `empty_bookshelf.render_time{bookshelf}` | Elm Performance API | Histogram (ms) | Time to render empty bookcase with 4 shelf rows + empty message | p95 < 30ms (minimal DOM) |
+| `empty_bookshelf.view_rate{bookshelf}` | Elm event tracking | Gauge (%) | Percentage of bookshelf loads that result in empty state (`Success []`) | Informational (content health) |
+| `empty_bookshelf.time_to_first_book{bookshelf}` | Server-side (event_log) | Histogram (days) | Time from first empty bookshelf view to first `placement.created` on that bookshelf | Informational (onboarding funnel) |
+| `empty_bookshelf.bounce_rate{bookshelf}` | Elm event tracking | Gauge (%) | Percentage of empty bookshelf views where user navigates away without taking action | Informational (UX effectiveness of empty state messaging) |
 
 ---
 
@@ -209,7 +209,7 @@ No update cycle specific to empty states. The empty state is purely a view conce
 
 | Cost Service | Unit | Volume Driver | Notes |
 |-------------|------|--------------|-------|
-| Fly.io compute (core) | CPU-ms per request | Number of empty shelf loads | Cheapest shelf load path: when bookshelf row is nil, controller returns immediately without querying placements. When bookshelf exists but has no placements, one additional query returns empty results. |
+| Fly.io compute (core) | CPU-ms per request | Number of empty bookshelf loads | Cheapest bookshelf load path: when bookshelf row is nil, controller returns immediately without querying placements. When bookshelf exists but has no placements, one additional query returns empty results. |
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | Bookshelf lookup (1 query) + optional empty placements query | New user (no bookshelf row): 1 query, immediate nil return. Existing user (bookshelf exists, no placements): 2 queries, both fast. |
 | Neon DB (storage) | N/A | N/A | No data to store or retrieve beyond the bookshelf metadata lookup. |
-| R2 presigned URLs | N/A | N/A | No cover images to display on empty shelves. |
+| R2 presigned URLs | N/A | N/A | No cover images to display on empty bookshelves. |

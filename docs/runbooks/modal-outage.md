@@ -2,7 +2,9 @@
 
 **Severity:** P2 (partial feature degradation — manual ISBN entry remains functional)
 **Owner:** Platform operator
-**Last reviewed:** 2026-03-19
+**Last reviewed:** 2026-06-10
+
+The production Modal app is `thestacks-vision` (per `apps/vision/modal_app.py`, default `MODAL_APP_NAME`). Per-PR preview deploys use `thestacks-vision-<sanitised-branch>` (per `scripts/deploy-stack.sh` — branch lowercased, `/_` → `-`, truncated to 30 chars). Substitute the right app name in the commands below when triaging a preview rather than production.
 
 ---
 
@@ -19,6 +21,7 @@
 - Circuit breaker `:vision_fuse` may be blown — check `:fuse.ask(:vision_fuse, :sync)`
 - Phoenix logs: `[error] Vision service unreachable: connection refused / timeout`
 - Metrics dashboard: identification success rate dropping toward 0%
+- If Modal has disabled the workspace for non-payment or quota: vision HTTP calls return `404` with body `modal-http: workspace ac-* is disabled` — see [`budget-exhaustion.md`](budget-exhaustion.md), but recovery is the same as for an outage (this runbook)
 
 ---
 
@@ -46,6 +49,15 @@ Visit [https://modal.statuspage.io](https://modal.statuspage.io) or the Modal da
 Look for:
 - Incidents or degraded performance on GPU inference
 - Container cold start delays (Modal sometimes reports these separately)
+
+Then list our own apps and tail logs from the affected one:
+```bash
+modal app list
+modal app logs thestacks-vision         # prod
+# or: modal app logs thestacks-vision-<sanitised-branch>  for a preview
+```
+
+Look for repeated cold-start failures, OOM on the A10G, or the workspace-disabled banner. Recall the inference stack: HuggingFace Transformers + `Qwen/Qwen2.5-VL-7B-Instruct` in bfloat16 on A10G (single inference per container, scales horizontally via `max_containers=10`). Image-build failures show up here before they show up as 5xx on `/analyze`.
 
 ### Step 2: Check Oban vision queue
 
@@ -87,7 +99,7 @@ iex> :fuse.reset(:vision_fuse)
 
 ```bash
 fly secrets list -a thestacks-core | grep VISION
-fly secrets list -a thestacks-vision  # Modal app, if accessible
+modal secret list | grep thestacks-vision   # Modal app secret (named `thestacks-vision`)
 ```
 
 Both `VISION_HMAC_SECRET` values must match. Mismatched secrets cause 401 errors (not timeouts) — if logs show 401, this is an auth issue, not an outage.
@@ -128,6 +140,10 @@ curl -s https://<modal-endpoint-url>/health
    modal deploy apps/vision/modal_app.py
    ```
    This triggers a fresh container build. If Modal's infrastructure is degraded, this may not help, but it's worth trying if the outage appears to be related to a specific deployment.
+3. If a preview deploy's Modal app is wedged and blocking E2E, stop it explicitly rather than waiting for the workspace-cleanup script:
+   ```bash
+   modal app stop thestacks-vision-<sanitised-branch>
+   ```
 
 ### If the VISION_HMAC_SECRET has drifted
 
@@ -138,8 +154,10 @@ NEW_SECRET=$(openssl rand -hex 32)
 # Update Fly.io core app
 fly secrets set VISION_HMAC_SECRET="$NEW_SECRET" -a thestacks-core
 
-# Update Modal (via Modal dashboard or CLI)
-modal secret create vision-secrets VISION_HMAC_SECRET="$NEW_SECRET"
+# Update the Modal secret (named `thestacks-vision`, per apps/vision/modal_app.py).
+# --force overwrites the existing secret rather than erroring on conflict;
+# the same syntax is what scripts/deploy-stack.sh uses.
+modal secret create thestacks-vision VISION_HMAC_SECRET="$NEW_SECRET" --force
 ```
 
 After updating, deploy both services to pick up the new secret.
@@ -177,3 +195,13 @@ Upload a clear book photo via the frontend. Expect 15–30 second response (cold
 - Note the outage duration and any user-facing impact in the platform changelog.
 - If this is the second Modal outage in a month: evaluate the keep-warm trade-off (cost vs. cold-start improvement) — currently ruled out as anti-pattern (ADR 001), but evidence of frequent outages may change the calculus.
 - If HMAC drift caused the issue: document how the drift occurred and add a monitoring check for HMAC secret synchronisation.
+
+---
+
+## See also
+
+- [`docs/decisions/001-modal-over-together-ai.md`](../decisions/001-modal-over-together-ai.md) — why Modal owns vision inference (and why keep-warm is an anti-pattern)
+- [`docs/decisions/015-vision-service-architecture.md`](../decisions/015-vision-service-architecture.md) — current vision service architecture (HF Transformers + Qwen2.5-VL-7B-Instruct on A10G)
+- [`docs/runbooks/budget-exhaustion.md`](budget-exhaustion.md) — when the workspace is disabled by spend cap rather than a Modal-side outage
+- [`docs/runbooks/vision-hallucination.md`](vision-hallucination.md) — when the model is up but returning garbage (not an outage)
+- [`docs/runbooks/vision-service-rollback.md`](vision-service-rollback.md) — when a recent vision deploy regressed and you need to roll back the Modal app

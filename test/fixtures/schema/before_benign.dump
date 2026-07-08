@@ -1,0 +1,11 @@
+-- Fixture: `structure.sql` BEFORE an additive migration.
+-- Paired with after_benign.dump — the diff is purely additive.
+
+CREATE TABLE op.books (
+    id uuid NOT NULL,
+    isbn text NOT NULL,
+    title text NOT NULL,
+    author_id uuid,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);

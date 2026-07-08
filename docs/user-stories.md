@@ -63,15 +63,15 @@ Phase 1 user stories have been moved to individual documentation files in `docs/
 - Order confirmation with tracking information.
 
 **Post-sale lifecycle:**
-1. When payment is confirmed, the book is removed from the seller's "Looking for a Home" shelf. The listing is marked as "Sold" and no longer appears in marketplace search results.
-2. The buyer receives a confirmation email (if notifications are enabled) and a prompt within the platform: "You've purchased [Title] by [Author]. Would you like to add it to one of your shelves?"
+1. When payment is confirmed, the book is removed from the seller's "Looking for a Home" bookshelf. The listing is marked as "Sold" and no longer appears in marketplace search results.
+2. The buyer receives a confirmation email (if notifications are enabled) and a prompt within the platform: "You've purchased [Title] by [Author]. Would you like to add it to one of your bookshelves?"
 3. If the book was already on the buyer's WishList, the system detects this and offers: "This book is on your WishList. Move it to your Library or AntiLibrary?" The WishList placement is updated rather than duplicated.
-4. If the book is not in the buyer's collection, they are prompted with a shelf picker (defaulting to AntiLibrary). Adding it is optional — the buyer may choose to dismiss the prompt.
-5. The seller's placement history records the sale event: "Sold via marketplace on [date]" alongside the standard shelf transition history.
+4. If the book is not in the buyer's collection, they are prompted with a bookshelf picker (defaulting to AntiLibrary). Adding it is optional — the buyer may choose to dismiss the prompt.
+5. The seller's placement history records the sale event: "Sold via marketplace on [date]" alongside the standard bookshelf transition history.
 
 **What the buyer sees after purchase:**
 - A warm confirmation card: "It's on its way! [Title] has found a new home." with estimated delivery date.
-- Below the confirmation: "Add to your shelves?" with a shelf picker. If the book is on their WishList: "This was on your WishList! Move it to…" with Library and AntiLibrary as prominent options.
+- Below the confirmation: "Add to your bookshelves?" with a bookshelf picker. If the book is on their WishList: "This was on your WishList! Move it to…" with Library and AntiLibrary as prominent options.
 - Dismissing the prompt is fine — the book can be added later via the standard upload or ISBN entry flow.
 
 **Refund, dispute, and non-delivery flows:** TBD — to be specified in a future phase when the marketplace is closer to implementation. The current stories define the happy path only.
@@ -148,7 +148,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 
 **As a** bookshop owner, **I want to** push my current inventory to The Stacks **so that** users can see which books I have in stock and at what price.
 
-**What the partner wants to accomplish:** Surface their available books alongside the user's shelves and search results, so that when a user is looking at a book, they can see "Available at [Shop Name] for R149".
+**What the partner wants to accomplish:** Surface their available books alongside the user's bookshelves and search results, so that when a user is looking at a book, they can see "Available at [Shop Name] for R149".
 
 **How they accomplish it:**
 1. The partner sends a JSON payload to `POST /api/partner/inventory` containing a list of books, each identified by ISBN, with price, currency, condition (new/used), and quantity.
@@ -159,7 +159,7 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 
 **What the user sees:**
 - On any book detail view, a "Available nearby" section on the cork-board sidebar shows partner shops that stock this book: shop name, price, condition, and a link to the shop's location or website.
-- Availability is indicated with a small green dot on the book spine when browsing shelves (subtle, not intrusive).
+- Availability is indicated with a small green dot on the book spine when browsing bookshelves (subtle, not intrusive).
 
 ---
 
@@ -354,11 +354,11 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 **How they accomplish it:**
 1. On any book's detail overlay, if partner inventory data exists for that ISBN, an "Available Locally" section appears below the book metadata.
 2. Each available partner is shown as a card: partner name, price (if provided), condition, and a "Visit" link to the partner's profile or website.
-3. Partners are sorted by proximity if the reader has set a location preference (US-4.x), otherwise alphabetically.
+3. Partners are sorted by proximity if the reader has set a location preference (US-17.2.2), otherwise alphabetically.
 4. If no partners carry the book, the section doesn't appear (no empty state — the absence is silent).
 
 **What they see on the page:**
-- A subtle divider with "Available at" in the same serif font as shelf labels.
+- A subtle divider with "Available at" in the same serif font as bookshelf labels.
 - Partner cards styled as small index cards: partner logo (or placeholder initial), name, price in local currency, book condition as a discrete badge (New, Like New, Good, Acceptable).
 - On the bookshelf view: books with local availability show a small green dot on the spine's bottom edge — unobtrusive but discoverable.
 
@@ -443,22 +443,22 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 **How they accomplish it:**
 1. The user navigates to a group page (from their Groups list in their profile).
 2. The group page shows a reverse-chronological feed of visible content from group members.
-3. Feed items include: blog posts published with visibility set to this group (or broader), and shelf activity (books added, moved, or completed) from members whose shelves are visible to the group.
+3. Feed items include: blog posts published with visibility set to this group (or broader), and bookshelf activity (books added, moved, or completed) from members whose bookshelves are visible to the group.
 
 **What they see on the page:**
 - The group page header shows: group name, type badge (close friends / broadcast / subscription), member count (for close friends groups), and an "Invite" button (for the owner).
 - Below the header, a content feed styled as a stack of parchment cards:
   - **Blog posts** show: author display name, post title, first two lines, date, and a "Read" link that opens the full post.
-  - **Shelf activity** shows: "[Name] added [Title] to their Reading Pile" or "[Name] moved [Title] to Library" — displayed as small, compact cards with the book spine thumbnail.
+  - **Bookshelf activity** shows: "[Name] added [Title] to their Reading Pile" or "[Name] moved [Title] to Library" — displayed as small, compact cards with the book spine thumbnail.
 - For **broadcast** groups: only the owner's content appears (members are recipients, not contributors).
 - For **close friends** groups: all members' content appears, creating a shared conversation.
 - For **subscription** groups: the owner's content appears; members can see the feed but do not contribute to it.
-- Content respects all visibility rules: a post set to "Only me" never appears, even in a close friends feed. A shelf set to "Only me" is excluded. The visibility ceiling (US-10.1.1) always applies.
+- Content respects all visibility rules: a post set to "Only me" never appears, even in a close friends feed. A bookshelf set to "Only me" is excluded. The visibility ceiling (US-10.1.1) always applies.
 - The feed does not use algorithmic ranking — it is strictly chronological. No infinite scroll; pagination at 20 items with a "Load more" link.
 
 **Acceptance criteria:**
 - [ ] Group pages display a reverse-chronological feed of member content
-- [ ] Blog posts and shelf activity are included in the feed
+- [ ] Blog posts and bookshelf activity are included in the feed
 - [ ] Content visibility rules are enforced per-item
 - [ ] Broadcast groups show only the owner's content
 - [ ] Close friends groups show all members' content

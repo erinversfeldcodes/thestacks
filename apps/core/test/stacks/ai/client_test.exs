@@ -8,8 +8,10 @@ end
 
 defmodule Stacks.AI.ClientTest do
   # async: false — tests mutate the global :vision_client application env key
+  # and the global BudgetTracker GenServer.
   use ExUnit.Case, async: false
 
+  alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client
 
   # Token format: "<integer_timestamp>.<64_hex_chars>"
@@ -188,6 +190,57 @@ defmodule Stacks.AI.ClientTest do
       [ts_str, _] = String.split(stale_token, ".", parts: 2)
       staleness = System.os_time(:second) - String.to_integer(ts_str)
       assert staleness > 60
+    end
+  end
+
+  describe "make_vision_request/2 — BudgetTracker cost recording" do
+    # The real client path is exercised here (not the mock dispatch) because
+    # the cost-recording call site is inside `make_vision_request/2`. We
+    # point the client at an unreachable port so Finch returns a transport
+    # `{:error, _}` quickly without leaving the test host.
+    setup do
+      original_url = Application.get_env(:core, :vision_service_url)
+      original_client = Application.get_env(:core, :vision_client)
+      original_state = :sys.get_state(BudgetTracker)
+
+      # Port 1 has no listener on any sane host; Finch returns a transport
+      # error in milliseconds. Avoids a 210s wait on a real timeout path.
+      Application.put_env(:core, :vision_service_url, "http://127.0.0.1:1")
+      # Ensure dispatch lands in the real client, not the mock.
+      Application.put_env(:core, :vision_client, Stacks.AI.Client)
+      # Reset any fuse melt from a previous test so :fuse.ask returns :ok.
+      :fuse.reset(:vision_fuse)
+
+      :sys.replace_state(BudgetTracker, fn state ->
+        %{state | daily_total_cents: 0, monthly_total_cents: 0, providers: %{}}
+      end)
+
+      on_exit(fn ->
+        Application.put_env(:core, :vision_service_url, original_url)
+        Application.put_env(:core, :vision_client, original_client)
+        :sys.replace_state(BudgetTracker, fn _ -> original_state end)
+        :fuse.reset(:vision_fuse)
+      end)
+
+      :ok
+    end
+
+    test "records modal cost in BudgetTracker even when the request errors" do
+      # Sanity: starting from a clean zero state.
+      assert BudgetTracker.current_state().daily_total_cents == 0
+
+      # Drive a real Finch round-trip via call_vision/2. Port 1 will refuse,
+      # so we land in the {:error, reason} branch of make_vision_request/2.
+      result = Client.call_vision("analyze", %{image: "test"})
+      assert {:error, _reason} = result
+
+      # current_state/0 is a synchronous call — it serializes after the
+      # cost-recording cast, ensuring the GenServer has processed it.
+      state = BudgetTracker.current_state()
+      cost_per_call = Application.get_env(:core, :modal_cost_per_call_cents, 1)
+      assert state.daily_total_cents == cost_per_call
+      assert state.monthly_total_cents == cost_per_call
+      assert state.providers["modal"] == cost_per_call
     end
   end
 end

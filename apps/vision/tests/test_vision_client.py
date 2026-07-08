@@ -16,7 +16,7 @@ async def client() -> AsyncGenerator[VisionClient, None]:
     await c.close()
 
 
-def _make_modal_mock(return_value: dict) -> MagicMock:
+def _make_modal_mock(return_value: dict[str, object]) -> MagicMock:
     """Build a mock modal.Cls handle whose method.remote.aio() returns return_value."""
     aio_mock = AsyncMock(return_value=return_value)
     method_mock = MagicMock()
@@ -34,7 +34,9 @@ async def test_extract_returns_dict(client: VisionClient) -> None:
     with patch.object(client, "_modal_cls", cls_mock):
         result = await client.extract([_VALID_IMAGE])
     assert "books" in result
-    assert result["books"][0]["title"] == "Test Book"
+    books = result["books"]
+    assert isinstance(books, list)
+    assert books[0]["title"] == "Test Book"
 
 
 async def test_classify_returns_dict(client: VisionClient) -> None:
@@ -112,3 +114,21 @@ async def test_classify_remote_error_returns_502(client: VisionClient) -> None:
     ):
         await client.classify(_VALID_IMAGE)
     assert exc_info.value.status_code == 502
+
+
+async def test_classify_non_dict_returns_safe_default(client: VisionClient) -> None:
+    """Defensive fallback: non-dict Modal classify result → ambiguous default."""
+    cls_mock = _make_modal_mock({})
+    cls_mock.return_value.classify.remote.aio = AsyncMock(return_value="oops")
+    with patch.object(client, "_modal_cls", cls_mock):
+        result = await client.classify(_VALID_IMAGE)
+    assert result == {"classification": "ambiguous", "confidence": 0.0}
+
+
+async def test_extract_non_dict_returns_safe_default(client: VisionClient) -> None:
+    """Defensive fallback: non-dict Modal extract result → empty books."""
+    cls_mock = _make_modal_mock({})
+    cls_mock.return_value.extract.remote.aio = AsyncMock(return_value="oops")
+    with patch.object(client, "_modal_cls", cls_mock):
+        result = await client.extract([_VALID_IMAGE])
+    assert result == {"books": []}

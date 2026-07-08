@@ -12,6 +12,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Surface .venv-tools/ and pip --user tools outside the dev shell, and make
+# sure `dbt` is dbt-core (not the Homebrew dbt Cloud CLI) before `dbt docs
+# generate` below.
+# shellcheck source=scripts/lib/python-tools.sh
+source "$REPO_ROOT/scripts/lib/python-tools.sh"
+ensure_python_tools_path
+require_dbt_core
+
 if ! command -v check-model-has-description &>/dev/null; then
     echo "ERROR: dbt-checkpoint not installed. Run: pip install 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'" >&2
     exit 1
@@ -23,11 +31,10 @@ if [[ ! -f dbt/target/manifest.json ]]; then
 fi
 
 # Column-level checks (check-model-has-all-columns, check-source-has-all-columns)
-# require catalog.json. Generate it if missing.
-if [[ ! -f dbt/target/catalog.json ]]; then
-    echo "Generating dbt catalog for column-level checks..."
-    (cd dbt && dbt docs generate --quiet)
-fi
+# require catalog.json. Always regenerate so it reflects the current DB schema
+# rather than a potentially stale artifact from a prior run.
+echo "Generating dbt catalog for column-level checks..."
+(cd dbt && dbt docs generate --quiet)
 
 FAILED=()
 WARNED=()

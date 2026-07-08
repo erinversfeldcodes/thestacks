@@ -17,7 +17,8 @@ select
 from {{ ref('int_book_detail_view') }}
 
 {% if is_incremental() %}
-    where updated_at > (
+where
+    updated_at > (
         select max(prev.last_refreshed_at)
         from {{ this }} as prev
     )

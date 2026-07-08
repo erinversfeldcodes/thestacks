@@ -65,7 +65,13 @@ defmodule Stacks.Books do
     :user_id
   ]
 
-  @valid_image_statuses ~w(pending resolved rejected)
+  # Image lifecycle:
+  #   awaiting_upload → client has been issued a presigned PUT URL but
+  #     hasn't yet committed. The bytes may or may not be in R2.
+  #   pending         → bytes verified in R2, IdentifyBookJob enqueued.
+  #   resolved        → pipeline identified one or more books.
+  #   rejected        → pipeline rejected (not-a-book, isbn-not-found, etc).
+  @valid_image_statuses ~w(awaiting_upload pending resolved rejected)
 
   @doc """
   Returns a book edition by ID, or nil if not found.
@@ -224,7 +230,8 @@ defmodule Stacks.Books do
   Delegates to the internal ISBNResolver. Use this instead of calling
   ISBNResolver directly from other contexts.
   """
-  @spec resolve_isbn(String.t()) :: {:ok, map()} | {:error, :not_found}
+  @spec resolve_isbn(String.t()) ::
+          {:ok, map()} | {:error, ISBNResolver.error_reason()}
   def resolve_isbn(isbn) do
     ISBNResolver.resolve(isbn)
   end
@@ -263,18 +270,145 @@ defmodule Stacks.Books do
     end
   end
 
-  defp insert_uploaded_image(image_id, storage_key, user_id) do
+  @doc """
+  Store raw image bytes for an upload initiated via `init_upload/2`.
+
+  Called by `UploadController.upload_data/2` when the browser PUTs file bytes
+  to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
+  """
+  @spec store_upload_bytes(binary(), binary()) :: :ok | {:error, term()}
+  def store_upload_bytes(image_id, bytes) when is_binary(bytes) do
+    case Stacks.Storage.upload_image(image_id, bytes) do
+      {:ok, _key} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp insert_uploaded_image(image_id, storage_key, user_id, status \\ "pending") do
     now = DateTime.utc_now()
 
     %UploadedImage{id: image_id}
     |> uploaded_image_changeset(%{
       storage_path: storage_key,
-      status: "pending",
+      status: status,
       uploaded_at: now,
       expires_at: DateTime.add(now, 30, :day),
       user_id: user_id
     })
     |> Repo.insert()
+  end
+
+  @doc """
+  Init step of the presigned-URL upload flow. Allocates an `image_id`,
+  reserves the R2 storage key, inserts an `UploadedImage` row with
+  status `"awaiting_upload"`, and returns a short-lived presigned PUT
+  URL the client uploads to directly.
+
+  Bytes never touch the Phoenix handler — the client PUTs straight to
+  R2, then calls `commit_upload/2` to signal completion. Frees the
+  HTTP pool during the slow upload transit and removes R2 latency
+  from the API response.
+
+  Returns `{:ok, %{image_id: ..., upload_url: ..., expires_in: ...}}`
+  or `{:error, reason}` if the row insert or presigning fails.
+
+  `opts` may include:
+    * `:content_type` — MIME type hint baked into the presigned URL.
+      The client MUST send the matching `Content-Type` header on its
+      PUT or R2 rejects with a signature mismatch.
+    * `:ttl_seconds` — presigned URL lifetime. Default 900s (15 min).
+  """
+  @spec init_upload(binary(), keyword()) ::
+          {:ok, %{image_id: binary(), upload_url: String.t(), expires_in: pos_integer()}}
+          | {:error, term()}
+  def init_upload(user_id, opts \\ []) do
+    image_id = Ecto.UUID.generate()
+    storage_key = "uploads/#{image_id}"
+    ttl_seconds = Keyword.get(opts, :ttl_seconds, 900)
+
+    # Use a Phoenix-served upload URL rather than an R2 presigned URL.
+    # Direct browser→R2 PUT requires the R2 bucket to allow the request
+    # origin in its CORS policy. Preview deployments use *.fly.dev origins
+    # which may not be in the bucket allowlist, causing silent CORS failures.
+    # Proxying through Phoenix is same-origin from the browser's perspective,
+    # so no CORS preflight is needed. Phoenix then stores to the configured
+    # backend (R2 in production, Local in dev/preview).
+    upload_url = "/api/upload/#{image_id}/data"
+
+    with {:ok, _image} <-
+           insert_uploaded_image(image_id, storage_key, user_id, "awaiting_upload") do
+      {:ok, %{image_id: image_id, upload_url: upload_url, expires_in: ttl_seconds}}
+    end
+  end
+
+  @doc """
+  Commit step of the presigned-URL upload flow. Verifies the client's
+  direct PUT to R2 actually landed, flips the `UploadedImage` row from
+  `"awaiting_upload"` to `"pending"`, and enqueues `IdentifyBookJob`.
+
+  The HEAD check prevents a client from calling commit without actually
+  uploading — we won't enqueue vision work against a missing object.
+
+  Returns `{:ok, %{image_id: ..., job_id: ...}}` on success, or:
+    * `{:error, :not_found}` — no such upload row, or the client's
+      user_id doesn't own it.
+    * `{:error, :not_yet_uploaded}` — row exists and is owned, but R2
+      HEAD returned 404. Either the client is racing the commit before
+      their PUT completed, or the upload failed silently.
+    * `{:error, :already_committed}` — row status is already `"pending"`
+      or a terminal state. Idempotent — repeat commits are safe but
+      don't re-enqueue.
+  """
+  @spec commit_upload(binary(), binary()) ::
+          {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
+  def commit_upload(user_id, image_id) when is_binary(user_id) and is_binary(image_id) do
+    with {:ok, image} <- fetch_owned_awaiting_upload(user_id, image_id),
+         :ok <- verify_object_exists(image.storage_path),
+         {:ok, updated} <- flip_awaiting_to_pending(image),
+         {:ok, job} <- upload_and_identify(user_id, updated.id, updated.storage_path) do
+      Events.emit_safe(%{
+        event_type: "image.submitted",
+        aggregate_type: "image",
+        aggregate_id: updated.id,
+        payload: %{storage_path: updated.storage_path}
+      })
+
+      {:ok, %{image_id: updated.id, job_id: job.id}}
+    end
+  end
+
+  # Translate the storage backend's :not_found into :not_yet_uploaded so
+  # the controller can distinguish "no such row" from "row exists but
+  # the client PUT hasn't landed yet" — the latter is a race condition
+  # clients can retry, the former is a hard 404.
+  defp verify_object_exists(storage_path) do
+    case Stacks.Storage.head_image(storage_path) do
+      {:ok, _size} -> :ok
+      {:error, :not_found} -> {:error, :not_yet_uploaded}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_owned_awaiting_upload(user_id, image_id) do
+    case Repo.get(UploadedImage, image_id) do
+      nil ->
+        {:error, :not_found}
+
+      %UploadedImage{user_id: owner} when owner != user_id ->
+        {:error, :not_found}
+
+      %UploadedImage{status: "awaiting_upload"} = image ->
+        {:ok, image}
+
+      %UploadedImage{} ->
+        {:error, :already_committed}
+    end
+  end
+
+  defp flip_awaiting_to_pending(%UploadedImage{} = image) do
+    image
+    |> uploaded_image_changeset(%{status: "pending"})
+    |> Repo.update()
   end
 
   @doc """
@@ -801,18 +935,37 @@ defmodule Stacks.Books do
 
   defp maybe_create_author(changeset, _attrs), do: changeset
 
-  defp find_or_create_author(nil), do: {:ok, nil}
-  defp find_or_create_author(""), do: {:ok, nil}
+  @doc """
+  Looks up an author row by exact `name`, inserting a new row if none
+  exists. Returns `{:ok, nil}` for nil or empty input — used during
+  enrichment, where Open Library / Google Books may legitimately not
+  carry an author. Returns `{:error, changeset}` only on insert failure
+  (e.g. row constraint).
 
-  defp find_or_create_author(name) when is_binary(name) do
-    case Repo.get_by(Author, name: name) do
-      nil ->
-        %Author{}
-        |> author_changeset(%{name: name})
-        |> Repo.insert()
+  Exposed (rather than kept private) so `Stacks.Workers.EnrichBookJob`
+  can link the resolver's author string to a real `op.authors` row when
+  filling in a placeholder book's `author_id`.
+  """
+  @spec find_or_create_author(String.t() | nil) ::
+          {:ok, Author.t() | nil} | {:error, Ecto.Changeset.t()}
+  def find_or_create_author(nil), do: {:ok, nil}
+  def find_or_create_author(""), do: {:ok, nil}
 
-      author ->
-        {:ok, author}
+  def find_or_create_author(name) when is_binary(name) do
+    case String.trim(name) do
+      "" ->
+        {:ok, nil}
+
+      trimmed ->
+        case Repo.get_by(Author, name: trimmed) do
+          nil ->
+            %Author{}
+            |> author_changeset(%{name: trimmed})
+            |> Repo.insert()
+
+          author ->
+            {:ok, author}
+        end
     end
   end
 
@@ -860,7 +1013,23 @@ defmodule Stacks.Books do
     |> validate_required(@edition_required_fields)
     |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
     |> validate_isbn_checksum()
+    |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
+  end
+
+  # Normalise any ISBN-10 input to ISBN-13 before storage so that
+  # find_existing/1 (which always searches by ISBN-13) can round-trip
+  # correctly. Without this, a title-search returning an ISBN-10 would be
+  # stored as-is, find_existing would miss it, and re-inserts would hit the
+  # unique constraint instead of deduplicating cleanly.
+  # Only runs when the changeset is still valid (format + checksum already passed).
+  defp normalize_edition_isbn(%{valid?: false} = changeset), do: changeset
+
+  defp normalize_edition_isbn(changeset) do
+    case get_change(changeset, :isbn) do
+      nil -> changeset
+      isbn -> put_change(changeset, :isbn, to_isbn13(isbn))
+    end
   end
 
   @doc false
@@ -881,7 +1050,21 @@ defmodule Stacks.Books do
     end)
   end
 
-  defp valid_isbn_checksum?(isbn) do
+  @doc """
+  True iff `isbn` is a well-formed ISBN-10 or ISBN-13 with a valid
+  check digit. Strings that don't match the shape are accepted (returns
+  `true`) so validation callsites can defer shape-checking to separate
+  validators; for explicit checksum gating, pre-filter with the shape
+  regex before calling.
+
+  Publicly exposed so callers (e.g. `Stacks.Moderation`) can trust a
+  scanner-decoded ISBN without a round-trip to Open Library: barcode
+  scanners won't decode a checksum-invalid EAN-13, and the 1-in-10 odds
+  of a random 13-digit string passing the checksum make false positives
+  vanishingly rare.
+  """
+  @spec valid_isbn_checksum?(String.t()) :: boolean()
+  def valid_isbn_checksum?(isbn) do
     if isbn =~ ~r/^\d{10}$|^\d{13}$/ do
       digits = Enum.map(String.graphemes(isbn), &String.to_integer/1)
 
@@ -916,6 +1099,61 @@ defmodule Stacks.Books do
 
     check = rem(11 - rem(sum, 11), 11)
     check != 10 and check == Enum.at(digits, 9)
+  end
+
+  @doc """
+  Canonical ISBN-13 comparison form of `isbn`.
+
+  Strips hyphens/whitespace and upcases, then converts a checksum-valid
+  ISBN-10 (including an `X` check digit) to its ISBN-13 equivalent:
+  `"978"` + the first nine digits + a recomputed EAN-13 (mod-10) check
+  digit over those twelve. The ISBN-10 check digit is discarded — it
+  does not carry into the 13 form. Anything else (13-digit strings,
+  checksum-invalid 10s, garbage, `""`) is returned in the stripped and
+  upcased form otherwise unchanged; non-binary input (incl. `nil`)
+  returns `nil`.
+
+  Two ISBN strings identify the same edition iff their canonical forms
+  are equal, regardless of 10/13 form or hyphenation. Use this on BOTH
+  sides of any ISBN comparison (cache invalidation, rejection-retry
+  exclusions): OL/GB search docs often carry only the ISBN-10 form
+  while `book_editions.isbn` always stores ISBN-13, so bare
+  hyphen-stripped equality silently misses cross-form matches.
+  """
+  @spec canonical_isbn13(term()) :: String.t() | nil
+  def canonical_isbn13(isbn) when is_binary(isbn) do
+    normalised =
+      isbn
+      |> String.replace(~r/[\s-]/, "")
+      |> String.upcase()
+
+    if valid_isbn10?(normalised) do
+      to_isbn13(normalised)
+    else
+      normalised
+    end
+  end
+
+  def canonical_isbn13(_isbn), do: nil
+
+  # Shape + checksum gate for canonical_isbn13/1. Unlike isbn10_valid?/1
+  # (which only sees all-digit strings — valid_isbn_checksum?/1's regex
+  # filters `X` out before it), this accepts the `X` (= 10) check digit.
+  defp valid_isbn10?(isbn) do
+    isbn =~ ~r/^\d{9}[\dX]$/ and isbn10_check_digit_ok?(isbn)
+  end
+
+  defp isbn10_check_digit_ok?(<<first_nine::binary-size(9), check>>) do
+    sum =
+      first_nine
+      |> String.graphemes()
+      |> Enum.map(&String.to_integer/1)
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
+
+    expected = rem(11 - rem(sum, 11), 11)
+    actual = if check == ?X, do: 10, else: check - ?0
+    expected == actual
   end
 
   # Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use

@@ -1,7 +1,10 @@
 # The Stacks — Platform Reviewer Agent
 
 ## Role
-You review infrastructure, CI/CD, Docker, Nix, and deployment configuration changes produced by the platform-agent. You never write code. You return a structured verdict and a mandatory research section surfacing alternatives for human consideration.
+You review infrastructure, CI/CD, Docker, Nix, and deployment configuration changes produced by the platform-agent. You never write code and never edit issue, plan, or state files — use `mcp__project-tools__get_issue(number)` to load issue context, and return your verdict to the orchestrator as a structured report. You return a structured verdict and a mandatory research section surfacing alternatives for human consideration.
+
+## Scope
+Reviews changes under `.github/workflows/`, `.github/actions/`, `deploy/` (Dockerfiles and `fly.*.toml`), `nix/`, `scripts/` (ci, deploy, security, probe, rollback), `flake.nix`, `Justfile`, and the deploy-related sections of `apps/vision/modal_app.py` (Modal app + secrets wiring). Sibling reviewers handle other stacks — see `docs/agents/reviewers/` (elixir, elm, python, rust, database, protobuf, contract, ux). The implementation spec for this stack lives in `docs/agents/platform-agent.md`; the parent conductor is `docs/agents/orchestrator-agent.md` and the generic review protocol is `docs/agents/orchestrator/reviewer-agent.md`.
 
 ---
 
@@ -29,22 +32,28 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
   - `COPY` specific files, not entire context (`COPY . .` is a smell)
   - Hadolint-clean: no DL warnings
   - `.dockerignore` excludes `_build`, `deps`, `.git`, `node_modules`, `.env`, test fixtures
-- **Fly.io config**:
+- **Fly.io config** (`deploy/fly.core.toml`, `deploy/fly.scraper.toml`, `deploy/fly.searxng.toml`, `deploy/fly.log-shipper.toml`):
   - Health checks configured with appropriate `interval`, `timeout`, and `grace_period`
-  - Private networking (`internal_port`, `auto_rollback`) for scraper (vision service is on Modal, not Fly)
+  - Internal-only services (scraper, searxng, log-shipper) must have **no `[[services]]` block** — `.internal` DNS over Fly's private WireGuard is the only ingress. Vision is on Modal, not Fly.
   - Secrets via `fly secrets set`, never in TOML files
-  - Region set to IAD (`iad` is correct; `yyz`, `jnb` are wrong)
-  - Resource sizing appropriate: core 256MB, vision 512MB, scraper 256MB
+  - `primary_region` set correctly: core/searxng/log-shipper in `iad`; scraper currently runs in `jnb` by design — flag changes to either without justification
+  - Resource sizing appropriate: core 256MB, scraper 256MB (vision sizing is set on the Modal `VisionModel` GPU class, not Fly)
   - `force_https = true` for public-facing core service
-- **GitHub Actions CI**:
+  - `auto_stop_machines = true` (boolean, not string) for cost control on idle apps
+- **GitHub Actions CI** (`.github/workflows/`: `ci.yml`, `codeql.yml`, `scorecard.yml`, `deploy-production.yml`, `tag-main.yml`, `cleanup-pre-rollback-branches.yml`, `reseed-staging.yml`):
   - `dorny/paths-filter` for monorepo path scoping — only run what changed
   - Dependency caching: Mix lock file hash, Cargo.lock hash, pip requirements hash, Elm `elm.json` hash
-  - Security scanning in every PR: sobelow, cargo audit, pip audit, ruff, buf lint
-  - Deploy job only on `main` branch, gated behind all test jobs passing
+  - Security scanning wired into `ci.yml`: gitleaks, semgrep, hadolint (per Dockerfile), checkov, trivy, syft + grype, plus an OWASP ZAP baseline against preview; sobelow / cargo audit / pip audit / buf lint live inside the per-language jobs
+  - Deploy job (`deploy-production.yml`) only on `main`, gated behind all test jobs passing; rollback flow uses the composite action at `.github/actions/rollback-production/` (Issue #137) and the SLO gate at `.github/actions/check-slo-gate/`
+  - Release-to-main pipeline (Issue #136): `tag-main.yml` tags on merge; pre-rollback Neon branches reaped by `cleanup-pre-rollback-branches.yml`; staging refresh via `reseed-staging.yml`
   - No secrets in workflow YAML — use `${{ secrets.* }}` exclusively
   - Job timeouts set — runaway jobs should not block the queue indefinitely
+- **Modal (vision)** (`apps/vision/modal_app.py`, deploy-related sections):
+  - GPU class, ASGI app, and image are defined declaratively; no secrets inline — `VISION_HMAC_SECRET` comes from a Modal secret (`modal secret create thestacks-vision ...`)
+  - Deploy command documented (`modal deploy apps/vision/modal_app.py`) and either runs in CI or has an explicit out-of-band ownership note
+  - Public HTTPS endpoint URL surfaced to core via `VISION_SERVICE_URL` Fly secret
 - **Nix/Flox**:
-  - `flake.nix` pins all tool versions
+  - `flake.nix` (and `nix/flake.nix`) pins all tool versions
   - `devShells.default` provides the complete dev environment from the CLAUDE.md stack table
   - `nix develop` should work offline after first fetch
 - **justfile**:
@@ -73,13 +82,14 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 
 ### 5. Security (mechanical — specialist self-checks)
 Load and verify against `./docs/agents/standards/security.md`.
-- **Private networking**: Rust scraper must not be publicly reachable on Fly — verify `internal_port` only, no public `services` block. Vision service is on Modal with HMAC auth on a public HTTPS endpoint — verify `VISION_HMAC_SECRET` is set as both a Fly secret (core) and a Modal secret (vision).
-- **Secrets management**: All secrets in Fly via `fly secrets set`. No secrets in TOML, Dockerfiles, workflow files, or `.env.example`.
-- **Container scanning**: Trivy or equivalent configured in CI to scan final images for CVEs.
-- **IaC scanning**: Checkov or Hadolint scanning Dockerfiles and Fly TOML for misconfigurations.
-- **Secret detection**: Gitleaks or `git-secrets` configured to block accidental secret commits.
-- **Non-root containers**: All runtime containers run as non-root. Verify `USER` directive in every Dockerfile.
+- **Private networking**: Rust scraper, searxng, and log-shipper must not be publicly reachable on Fly — verify no `[[services]]` block, callers reach them via `.internal` DNS. Vision is on Modal with HMAC auth on a public HTTPS endpoint — verify `VISION_HMAC_SECRET` is set as both a Fly secret (core) and a Modal secret (vision), and `VISION_SERVICE_URL` is a Fly secret on core.
+- **Secrets management**: All secrets via `fly secrets set` (Fly) or `modal secret create` (Modal), or environment-injected from GitHub Actions secrets. No secrets in TOML, Dockerfiles, workflow files, or `.env.example`.
+- **Container scanning**: Trivy + Syft/Grype configured in `ci.yml` to scan images and the working tree for CVEs.
+- **IaC scanning**: Checkov + Hadolint scanning Dockerfiles and `deploy/` for misconfigurations (both wired in `ci.yml` and `scripts/security.sh`).
+- **Secret detection**: Gitleaks (with `.gitleaks.toml`) configured to block accidental secret commits.
+- **Non-root containers**: All runtime containers run as non-root. Verify `USER` directive in every Dockerfile (e.g. `USER stacks` in `Dockerfile.core`).
 - **TLS**: `force_https = true` on the core public service. Internal Fly networking uses Fly's private WireGuard — verify services communicate over `.internal` addresses.
+- **Migration safety**: Any Postgres migration touching a large table or adding/dropping an index must use `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` and disable the migration transaction (`@disable_ddl_transaction true`). Coordinate with the database-reviewer when in doubt — see `./docs/agents/standards/migrations.md`.
 - **`.env.example`**: Must not contain real credentials even as examples. Reviewers have been burned by this before.
 
 ### 6. Alternative Approaches Research (judgment — reviewer only)
@@ -98,6 +108,7 @@ This section is mandatory. The human will decide what to act on.
 Load and check against:
 - `./docs/agents/standards/code-quality.md` — consistency, no over-engineering
 - `./docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
+- `./docs/agents/standards/testing.md` — CI must execute the 12-layer test strategy across the four `TEST_TARGET` environments; new platform changes must not silently drop a layer
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

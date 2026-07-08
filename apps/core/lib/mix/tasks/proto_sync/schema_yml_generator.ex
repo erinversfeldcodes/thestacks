@@ -263,6 +263,13 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
       "              field: id"
   end
 
+  defp render_test({:relationships, ref_model, where}) when is_binary(where) do
+    "          - relationships:\n" <>
+      "              to: ref('#{ref_model}')\n" <>
+      "              field: id\n" <>
+      "              where: \"#{where}\""
+  end
+
   defp render_test({:accepted_values, values}) do
     values_str = Enum.map_join(values, ", ", fn v -> "'#{v}'" end)
 

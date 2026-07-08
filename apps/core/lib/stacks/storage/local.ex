@@ -34,6 +34,28 @@ defmodule Stacks.Storage.Local do
   end
 
   @impl true
+  @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []) do
+    # Local backend has no real presigned semantics — browser can't PUT
+    # to a `file://` URL. Returning a fake URL is enough for tests that
+    # exercise the init/commit shape without actually uploading.
+    {:ok, "file://#{full_path(key)}"}
+  end
+
+  @impl true
+  @spec head(String.t()) :: {:ok, non_neg_integer()} | {:error, :not_found | term()}
+  def head(key) do
+    path = full_path(key)
+
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} -> {:ok, size}
+      {:error, :enoent} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key) do
     path = full_path(key)

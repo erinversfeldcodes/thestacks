@@ -6,6 +6,15 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.SecurityHeaders
   end
 
+  # Browser pipeline for the Elm SPA's HTML response. Only sets security
+  # headers — the SPA route below is the catch-all that serves index.html
+  # for client-side routing, so every page load runs through here and
+  # picks up CSP, X-Frame-Options, HSTS, etc. Without this pipeline the
+  # SPA's HTML response carries no security headers at all.
+  pipeline :spa do
+    plug StacksWeb.Plugs.SecurityHeaders
+  end
+
   pipeline :authenticated do
     plug StacksWeb.Plugs.AuthPipeline
   end
@@ -52,6 +61,16 @@ defmodule CoreWeb.Router do
 
   pipeline :require_owner do
     plug StacksWeb.Plugs.RequireRole, role: "owner"
+  end
+
+  pipeline :admin do
+    plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireMFA
+    plug StacksWeb.Plugs.AuditAdminCall
+  end
+
+  pipeline :rate_limit_admin do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :admin
   end
 
   pipeline :partner_auth do
@@ -113,6 +132,28 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated, :rate_limit_upload]
     post "/upload", UploadController, :create
     post "/upload/identify", UploadController, :identify
+    # Presigned-URL upload flow — init issues the signed PUT, commit
+    # verifies the client's direct-to-R2 upload + enqueues the job.
+    post "/upload/init", UploadController, :init
+    post "/upload/:image_id/commit", UploadController, :commit
+    # Rejection-retry — user clicks "No, try again" on an identified
+    # book. Backend stays stateless w.r.t. the rejection list: the
+    # frontend supplies the cumulative list of rejected book IDs and
+    # we enqueue a fresh IdentifyBookJob with the list forwarded to
+    # the vision model as exclusions.
+    post "/upload/:image_id/reject-identification",
+         UploadController,
+         :reject_identification
+  end
+
+  # Upload data PUT — no user auth. The image_id UUID (128-bit random) is the
+  # effective auth token: anyone who can guess it can PUT data, but commit_upload
+  # verifies ownership before enqueuing vision work. Proxying through Phoenix
+  # (same origin as the SPA) avoids R2 CORS preflight failures when the browser
+  # origin (*.fly.dev, localhost) is not in the R2 bucket's CORS allowlist.
+  scope "/api", StacksWeb do
+    pipe_through :api
+    put "/upload/:image_id/data", UploadController, :upload_data
   end
 
   scope "/api", StacksWeb do
@@ -214,21 +255,25 @@ defmodule CoreWeb.Router do
     delete "/users/:id/block", SocialController, :unblock
   end
 
-  # Metrics dashboard — owner role required
+  # Metrics dashboard — MFA-verified admin session required
   scope "/api", StacksWeb do
-    pipe_through [:api, :authenticated, :require_owner]
+    pipe_through [:api, :admin, :rate_limit_admin]
     get "/metrics", MetricsController, :index
     get "/metrics/quality-trends", MetricsController, :quality_trends
     get "/metrics/source-health", MetricsController, :source_health
     get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
+  end
 
-    get "/admin/sources", SourceAdminController, :index
-    put "/admin/sources/:id/approve", SourceAdminController, :approve
-    put "/admin/sources/:id/reject", SourceAdminController, :reject
+  # Source and partner admin — MFA-verified admin session required
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :rate_limit_admin]
+    get "/sources", SourceAdminController, :index
+    put "/sources/:id/approve", SourceAdminController, :approve
+    put "/sources/:id/reject", SourceAdminController, :reject
 
-    get "/admin/partners", PartnerController, :index
-    put "/admin/partners/:id/approve", PartnerController, :approve
-    put "/admin/partners/:id/reject", PartnerController, :reject
+    get "/partners", PartnerController, :index
+    put "/partners/:id/approve", PartnerController, :approve
+    put "/partners/:id/reject", PartnerController, :reject
   end
 
   # Partner API — authenticated via API key, no user auth
@@ -244,6 +289,37 @@ defmodule CoreWeb.Router do
     delete "/events/:id", PartnerEventController, :delete
   end
 
+  # Admin auth — public (no admin token needed)
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :rate_limit_auth]
+    post "/auth/login", AdminAuthController, :login
+    post "/auth/verify_mfa", AdminAuthController, :verify_mfa
+  end
+
+  # Admin auth — requires valid admin session with MFA verified
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin]
+    delete "/auth/logout", AdminAuthController, :logout
+  end
+
+  # MFA enrollment — requires regular owner auth (no MFA yet)
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :authenticated, :require_owner, :rate_limit_auth]
+    post "/auth/mfa/setup", AdminAuthController, :mfa_setup
+    post "/auth/mfa/confirm", AdminAuthController, :mfa_confirm
+  end
+
+  # Admin data endpoints — requires valid admin session with MFA verified + audit logging
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :rate_limit_admin]
+    get "/users/by_email", AdminController, :by_email
+    get "/users/by_id", AdminController, :by_id
+    get "/audit_log", AdminController, :audit_log
+    get "/platform_stats", AdminController, :platform_stats
+    get "/gdpr_export", AdminController, :gdpr_export
+    post "/gdpr_erase", AdminController, :gdpr_erase
+  end
+
   # Internal service-to-service callbacks — HMAC authenticated, no user auth
   scope "/api/internal", StacksWeb do
     pipe_through :api
@@ -253,6 +329,7 @@ defmodule CoreWeb.Router do
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
   scope "/", CoreWeb do
+    pipe_through :spa
     get "/*path", PageController, :index
   end
 end

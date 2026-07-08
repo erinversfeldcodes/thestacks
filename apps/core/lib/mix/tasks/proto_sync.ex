@@ -24,6 +24,8 @@ defmodule Mix.Tasks.Proto.Sync do
 
   use Mix.Task
 
+  @requirements []
+
   alias Mix.Tasks.ProtoSync.DbtGenerator
   alias Mix.Tasks.ProtoSync.Descriptor
   alias Mix.Tasks.ProtoSync.DriftChecker
@@ -56,8 +58,14 @@ defmodule Mix.Tasks.Proto.Sync do
     migrations_dir = Path.join(core_root, "priv/repo/migrations")
     schema_yml_path = Path.join(dbt_root, "schema.yml")
 
+    # Tables with `skip_dbt: true` opt out of dbt staging model + schema.yml
+    # generation entirely. Used for infra plumbing tables (e.g. cache.*) that
+    # live outside the analytics schemas and should never appear in dbt.
+    # Unlike `dbt_grant: false`, which only suppresses the GRANT SELECT block
+    # in the migration, `skip_dbt` also skips the .sql staging file and
+    # the schema.yml entry. Both flags are set together for cache tables.
     generated_blocks =
-      Map.new(manifest.tables, fn table ->
+      Enum.reduce(manifest.tables, %{}, fn table, blocks ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
         ecto_content = EctoGenerator.generate(table, fields)
@@ -66,17 +74,21 @@ defmodule Mix.Tasks.Proto.Sync do
         File.write!(ecto_path, ecto_content)
         Mix.shell().info("Generated #{ecto_path}")
 
-        dbt_content = DbtGenerator.generate(table, fields)
-        dbt_path = Path.join(dbt_root, table.dbt_path)
-        File.mkdir_p!(Path.dirname(dbt_path))
-        File.write!(dbt_path, dbt_content)
-        Mix.shell().info("Generated #{dbt_path}")
-
         generate_migration(table, fields, migrations_dir)
 
-        model_name = "stg_#{table.table_name}"
-        block = SchemaYmlGenerator.generate(table, fields, descriptor)
-        {model_name, block}
+        if Map.get(table, :skip_dbt, false) do
+          blocks
+        else
+          dbt_content = DbtGenerator.generate(table, fields)
+          dbt_path = Path.join(dbt_root, table.dbt_path)
+          File.mkdir_p!(Path.dirname(dbt_path))
+          File.write!(dbt_path, dbt_content)
+          Mix.shell().info("Generated #{dbt_path}")
+
+          model_name = "stg_#{table.table_name}"
+          block = SchemaYmlGenerator.generate(table, fields, descriptor)
+          Map.put(blocks, model_name, block)
+        end
       end)
 
     if File.exists?(schema_yml_path) do
@@ -228,19 +240,27 @@ defmodule Mix.Tasks.Proto.Sync do
             Path.join(core_root, table.ecto_path)
           )
 
-        dbt_result =
-          DriftChecker.check(
-            DbtGenerator.generate(table, fields),
-            Path.join(dbt_root, table.dbt_path)
-          )
-
         migration_result = check_migration_drift(table, fields, migrations_dir)
 
-        model_name = "stg_#{table.table_name}"
-        block = SchemaYmlGenerator.generate(table, fields, descriptor)
-        blocks_acc = Map.put(blocks_acc, model_name, block)
+        # `skip_dbt: true` opts out of both the dbt staging model and the
+        # schema.yml block. Drift check must match: otherwise a missing
+        # .sql file would be flagged as drift for every infra-plumbing
+        # table.
+        if Map.get(table, :skip_dbt, false) do
+          {[ecto_result | migration_result], blocks_acc}
+        else
+          dbt_result =
+            DriftChecker.check(
+              DbtGenerator.generate(table, fields),
+              Path.join(dbt_root, table.dbt_path)
+            )
 
-        {[ecto_result, dbt_result | migration_result], blocks_acc}
+          model_name = "stg_#{table.table_name}"
+          block = SchemaYmlGenerator.generate(table, fields, descriptor)
+          blocks_acc = Map.put(blocks_acc, model_name, block)
+
+          {[ecto_result, dbt_result | migration_result], blocks_acc}
+        end
       end)
 
     results = List.flatten(results)

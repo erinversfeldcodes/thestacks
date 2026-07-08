@@ -1,0 +1,170 @@
+# Prometheus exposition-format sample - "breached real_5xx_rate" shape.
+#
+# Copy of prom_sample_healthy.txt with 5xx responses added to two
+# high-traffic routes. All other invariants (latency, upload success,
+# fuse, Oban, BEAM memory) remain healthy — this fixture isolates the
+# real_5xx_rate SLI.
+#
+# Breach arithmetic: 2600 healthy 200s + 60 5xx = 60/2660 ≈ 2.26%, well
+# over the 0.5% threshold and well above the 50 HTTP_MIN_SAMPLES floor.
+
+# -- BEAM memory (per-category, sum = total) --
+# HELP core_prom_ex_beam_memory_persistent_term_total_bytes Memory allocated to :persistent_term.
+# TYPE core_prom_ex_beam_memory_persistent_term_total_bytes gauge
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+# HELP core_prom_ex_beam_memory_processes_total_bytes Memory allocated to Erlang processes.
+# TYPE core_prom_ex_beam_memory_processes_total_bytes gauge
+core_prom_ex_beam_memory_processes_total_bytes 33554432
+# HELP core_prom_ex_beam_memory_ets_total_bytes Memory allocated for ETS tables.
+# TYPE core_prom_ex_beam_memory_ets_total_bytes gauge
+core_prom_ex_beam_memory_ets_total_bytes 10485760
+# HELP core_prom_ex_beam_memory_code_total_bytes Memory allocated for Erlang code.
+# TYPE core_prom_ex_beam_memory_code_total_bytes gauge
+core_prom_ex_beam_memory_code_total_bytes 52428800
+# HELP core_prom_ex_beam_memory_binary_total_bytes Memory allocated for binaries.
+# TYPE core_prom_ex_beam_memory_binary_total_bytes gauge
+core_prom_ex_beam_memory_binary_total_bytes 16777216
+# HELP core_prom_ex_beam_memory_atom_total_bytes Memory allocated for atoms.
+# TYPE core_prom_ex_beam_memory_atom_total_bytes gauge
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+# HELP core_prom_ex_beam_memory_allocated_bytes Total amount of memory currently allocated.
+# TYPE core_prom_ex_beam_memory_allocated_bytes gauge
+core_prom_ex_beam_memory_allocated_bytes 125829120
+
+# -- BEAM stats (informational) --
+# HELP core_prom_ex_beam_stats_process_count A count of running Erlang processes.
+# TYPE core_prom_ex_beam_stats_process_count gauge
+core_prom_ex_beam_stats_process_count 300
+# HELP core_prom_ex_beam_stats_run_queue_count Number of ready processes/ports.
+# TYPE core_prom_ex_beam_stats_run_queue_count gauge
+core_prom_ex_beam_stats_run_queue_count{type="normal"} 0
+core_prom_ex_beam_stats_run_queue_count{type="dirty"} 0
+
+# -- Custom stacks_* metrics (from Core.PromEx.Plugins.Stacks) --
+# HELP stacks_fuse_state_state Circuit breaker state (1 = healthy, 0 = blown).
+# TYPE stacks_fuse_state_state gauge
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+# HELP stacks_router_dispatch_stop_duration_milliseconds Phoenix route-dispatch latency tagged by route group.
+# TYPE stacks_router_dispatch_stop_duration_milliseconds histogram
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="250"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="1000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="2000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="5000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="100"} 1180
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="250"} 1420
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="1000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="2000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="5000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 4
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="100"} 30
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="250"} 60
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 85
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 95
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 42000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="50"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="100"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="250"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="1000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="2000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="5000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="health"} 8500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="health"} 500
+
+# HELP stacks_upload_terminal_count_total Upload pipeline terminal outcomes.
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# -- Phoenix HTTP request metrics (core_prom_ex_phoenix_*) --
+# HELP core_prom_ex_phoenix_http_requests_total The number of requests serviced.
+# TYPE core_prom_ex_phoenix_http_requests_total counter
+core_prom_ex_phoenix_http_requests_total{action="show",controller="CoreWeb.HealthController",host="thestacks-core.fly.dev",method="GET",path="/api/health",status="200"} 500
+core_prom_ex_phoenix_http_requests_total{action="index",controller="CoreWeb.BookshelfController",host="thestacks-core.fly.dev",method="GET",path="/api/bookshelves/:name",status="200"} 1500
+core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.SessionController",host="thestacks-core.fly.dev",method="POST",path="/api/login",status="200"} 500
+core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.UploadController",host="thestacks-core.fly.dev",method="POST",path="/api/upload",status="200"} 95
+core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.UploadController",host="thestacks-core.fly.dev",method="POST",path="/api/upload",status="422"} 5
+core_prom_ex_phoenix_http_requests_total{action="index",controller="CoreWeb.BookshelfController",host="thestacks-core.fly.dev",method="GET",path="/api/bookshelves/:name",status="500"} 40
+core_prom_ex_phoenix_http_requests_total{action="create",controller="CoreWeb.SessionController",host="thestacks-core.fly.dev",method="POST",path="/api/login",status="503"} 20
+
+# -- Ecto query metrics (core_prom_ex_ecto_repo_query_*) --
+# HELP core_prom_ex_ecto_repo_query_queue_time_milliseconds The time spent waiting to check out a database connection.
+# TYPE core_prom_ex_ecto_repo_query_queue_time_milliseconds histogram
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 2950
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 2998
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="250"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="1000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="5000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10000"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 6200
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3000
+
+# -- Oban job distributions (core_prom_ex_oban_job_*) --
+# `processing_duration` fires on [:oban, :job, :stop] (success). `exception_duration`
+# fires on [:oban, :job, :exception] (failure). The _count field on each gives the
+# per-queue count for that outcome.
+#
+# HELP core_prom_ex_oban_job_processing_duration_milliseconds Time to process an Oban job.
+# TYPE core_prom_ex_oban_job_processing_duration_milliseconds histogram
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="10"} 100
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="100"} 380
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="500"} 415
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="1000"} 420
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="5000"} 420
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="20000"} 420
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker",le="+Inf"} 420
+core_prom_ex_oban_job_processing_duration_milliseconds_sum{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker"} 31500
+core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker"} 420
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="10"} 5
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="100"} 35
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="500"} 70
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="1000"} 90
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="5000"} 95
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="20000"} 95
+core_prom_ex_oban_job_processing_duration_milliseconds_bucket{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker",le="+Inf"} 95
+core_prom_ex_oban_job_processing_duration_milliseconds_sum{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker"} 38000
+core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker"} 95
+
+# HELP core_prom_ex_oban_job_exception_duration_milliseconds Time spent on jobs that raised.
+# TYPE core_prom_ex_oban_job_exception_duration_milliseconds histogram
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="10"} 0
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="100"} 3
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="500"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="1000"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="5000"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="20000"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker",le="+Inf"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_sum{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker"} 400
+core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker"} 5
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="10"} 0
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="100"} 1
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="500"} 2
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="1000"} 2
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="5000"} 2
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="20000"} 2
+core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="+Inf"} 2
+core_prom_ex_oban_job_exception_duration_milliseconds_sum{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker"} 150
+core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker"} 2

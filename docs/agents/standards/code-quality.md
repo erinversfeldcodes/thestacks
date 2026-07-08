@@ -55,8 +55,14 @@ end
 
 ### Formatting & Linting
 - `mix format` — mandatory, no exceptions
-- `mix credo --strict` — all checks must pass
+- `mix credo --strict` — all checks must pass (warnings are failures; exits 16 on warnings)
 - `mix sobelow` — no high-severity findings
+- `mix dialyzer` — type checking; warnings configured in `apps/core/.dialyzer_ignore.exs`
+- `mix proto.sync --check` — fails the build if generated Ecto schemas, migrations, or dbt staging models drift from `proto/`
+
+### Testing
+- `mix test` from `apps/core/` (umbrella app, not root)
+- `mix coveralls` for coverage; `minimum_coverage: 80` configured in `apps/core/mix.exs`
 
 ---
 
@@ -71,13 +77,17 @@ Never use raw `Maybe` for API state. Always use `RemoteData` (NotAsked | Loading
 ### No Ports Unless Absolutely Necessary
 Ports break Elm's type safety guarantee. Use elm/file for uploads (typed port API). Everything else should be pure Elm.
 
-### Formatting
+### Formatting & Linting
 - `elm-format` — mandatory, no exceptions. It's opinionated and that's the point.
+- `elm-review` — runs against `src/` and `tests/` (config in `frontend/elm-review/`)
+
+### Testing
+- `elm-test` for unit + integration tests under `frontend/tests/`
 
 ### Naming
-- Pages: `Page.Shelf.Library`, `Page.Partner.Dashboard`
-- Components: `Components.Spine`, `Components.CorkBoard`
-- API types: `Api.Generated.*` for Protobuf-generated decoders
+- Pages: `Page.Bookshelf`, `Page.Bookshelf.ReadingPile`, `Page.Settings.AgeVerification`
+- Components: `Components.Spine`, `Components.ISBNInput`
+- Generated types: `proto/gen/elm/` (sourced via `source-directories` in `frontend/elm.json`)
 
 ---
 
@@ -105,12 +115,30 @@ Ports break Elm's type safety guarantee. Use elm/file for uploads (typed port AP
 Every function signature must have type annotations. Pydantic v2 models for all API schemas.
 
 ### Formatting & Linting
-- `ruff` for both linting and formatting (replaces black + flake8 + isort)
-- `mypy` or `pyright` for type checking
+- `ruff check` for linting AND `ruff format` for formatting — both are enforced in CI (replaces black + flake8 + isort)
+- `mypy` (strict mode) for type checking — configured in `apps/vision/pyproject.toml`
 
 ### Testing
-- `pytest` with fixtures
+- `pytest` with fixtures (asyncio mode auto; configured in `apps/vision/pyproject.toml`)
 - `Atheris` for fuzzing (image input parsing)
+
+---
+
+## Protobuf Conventions
+
+### Schema as Contract
+`.proto` files in `proto/` are the single source of truth for structured data. Generated code for Elixir (Ecto schemas + ProtoJSON), Elm (decoders/encoders), Python (Pydantic v2), Rust (serde), and dbt staging models is regenerated from these files — never hand-edited.
+
+### Formatting & Linting
+- `buf lint` — enforces STANDARD + COMMENTS rule sets (configured in `proto/buf.yaml`)
+- `buf breaking` — guards FILE-level breaking changes; exemptions tracked in `proto/buf.yaml`
+- Field numbers are forever. Never reuse a number. Additive changes only.
+- Enum zero value suffix: `_UNSPECIFIED`
+
+### Codegen
+- `mix proto.sync` regenerates Ecto schemas, dbt staging models, migrations, ProtoJSON.Gen, schema.yml
+- `scripts/gen-elm-proto.sh`, `scripts/gen-python-proto.sh`, `scripts/gen-rust-proto.sh` regenerate the other languages
+- `buf generate` is NOT the active codegen path; plugins in `proto/buf.gen.yaml` are commented out intentionally
 
 ---
 
@@ -118,7 +146,7 @@ Every function signature must have type annotations. Pydantic v2 models for all 
 
 ### Naming
 - All lowercase, snake_case
-- Tables: plural nouns (`books`, `partners`, `shelf_placements`)
+- Tables: plural nouns (`books`, `partners`, `bookshelf_placements`)
 - Columns: singular (`book_id`, `price_cents`, `created_at`)
 - Enums: `ENUM('value_one', 'value_two')` — snake_case values
 
@@ -158,3 +186,10 @@ Every function signature must have type annotations. Pydantic v2 models for all 
 - One logical change per commit
 - Conventional commit messages: `feat(scope): summary`
 - Never commit secrets, `.env` files, or generated code (except Elm decoders)
+
+### Automated Enforcement
+Claude Code hooks in `.claude/settings.json` enforce these standards automatically:
+- **PostToolUse** (per file write/edit) — runs the appropriate formatter/linter check for the edited file (`mix format`, `elm-format`, `cargo fmt`, `ruff`, `buf lint`, plus a `gitleaks` scan on every write).
+- **Stop** (end of every response) — runs the full lint suite for all changed files: format + `credo` + `sobelow` (Elixir), `elm-format` + `elm-review` (Elm), `cargo fmt` + `cargo clippy` (Rust), `ruff check` + `ruff format` (Python), `buf lint` (proto), and `mix proto.sync --check` for drift.
+
+If a hook fails, the error and the `Run: ...` fix command are surfaced inline. The session cannot proceed past a Stop hook failure.

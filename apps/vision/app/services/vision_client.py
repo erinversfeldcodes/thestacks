@@ -18,17 +18,35 @@ class VisionClient:
     The target Modal app name is read from MODAL_APP_NAME (injected by modal_app.py
     as a Secret.from_dict at deploy time). This allows ephemeral preview deployments
     to call their own GPU class rather than the production one.
+
+    Exposes one method per Modal-side `VisionModel` method: ``classify``
+    and ``extract``. The HTTP ``/analyze`` endpoint orchestrates
+    ``classify`` + ``extract`` at the FastAPI layer (with a short-circuit
+    on confident ``not_book``) — there is no single-call ``analyze`` any
+    more; the prior consolidation regressed classification accuracy.
     """
 
     def __init__(self) -> None:
         app_name = os.environ.get("MODAL_APP_NAME", _DEFAULT_APP_NAME)
         self._modal_cls = modal.Cls.from_name(app_name, "VisionModel")
 
-    async def extract(self, images: list[str]) -> dict[str, object]:
+    async def extract(
+        self,
+        images: list[str],
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Run the extract Modal method.
+
+        ``excluded_books`` forwards the rejection-retry list ("Title by Author"
+        strings the user has already rejected on a prior identification of
+        this image) through to ``VisionModel.extract``, which appends a
+        constraint clause to the extract prompt. ``None`` or an empty list
+        leaves the baseline prompt unchanged.
+        """
         try:
             model = self._modal_cls()
             result = await asyncio.wait_for(
-                model.extract.remote.aio(images),
+                model.extract.remote.aio(images, excluded_books or []),
                 timeout=float(settings.request_timeout_seconds),
             )
         except TimeoutError as exc:

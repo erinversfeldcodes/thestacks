@@ -31,6 +31,18 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
+      # `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so opt
+      # out of Ecto's default migration-wide transaction.
+      @disable_ddl_transaction true
+
+      # Ecto holds its advisory migration lock on a separate idle connection
+      # for the full CONCURRENTLY build. Neon's managed Postgres drops idle
+      # TCP sockets on its own keepalive window, surfacing as a 300s hang +
+      # `ssl send: closed` on fresh envs (observed 2026-04-22 bootstrapping
+      # the staging project). Disabling the lock prevents that; deploys are
+      # already serialised by the release pipeline.
+      @disable_migration_lock true
+
       def up do
         create table(:#{table.table_name}, prefix: "#{table.schema_prefix}", primary_key: false) do
           add :id, :binary_id, primary_key: true
@@ -210,7 +222,10 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       |> Enum.filter(fn {_, override} -> Map.has_key?(override, :references_table) end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
-        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\")"
+        # Foreign-key indexes are always non-unique, named implicitly by Ecto.
+        # `concurrently: true` keeps the lint-clean invariant uniform across
+        # every index this generator emits.
+        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\", concurrently: true)"
       end)
 
     explicit_lines =
@@ -227,31 +242,32 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     end
   end
 
+  # Every generated index uses `concurrently: true`. Squawk enforces this in
+  # CI; more importantly, CONCURRENTLY lets Postgres build the index without
+  # blocking writes, which is the safe default for any future additions to
+  # already-populated tables.
   defp format_index_line(idx, table) do
+    cols = format_index_columns(idx.columns)
+    prefix = table.schema_prefix
+    base = "(:#{table.table_name}, #{cols}, prefix: \"#{prefix}\""
+    tail = ", name: \"#{idx.name}\", concurrently: true)"
+
     if Map.get(idx, :unique, false) do
-      cols = format_index_columns(idx.columns)
-
-      "    create unique_index(:#{table.table_name}, #{cols}, prefix: \"#{table.schema_prefix}\")"
+      "    create unique_index" <> base <> tail
     else
-      col_sql = format_index_sql(table, idx)
-      "\n    execute(#{inspect(col_sql)})"
+      "    create index" <> base <> tail
     end
-  end
-
-  defp format_index_sql(table, idx) do
-    cols =
-      Enum.map_join(idx.columns, ", ", fn
-        {:desc, col} -> "#{col} DESC"
-        col when is_atom(col) -> "#{col}"
-      end)
-
-    "CREATE INDEX #{idx.name} ON #{table.schema_prefix}.#{table.table_name} (#{cols})"
   end
 
   defp format_index_columns(columns) do
     cols =
       Enum.map_join(columns, ", ", fn
-        {:desc, col} -> ":#{col}"
+        # Ecto's `create index` supports mixed asc/desc columns via keyword
+        # syntax: `[:a, :b, desc: :c]` for `a, b, c DESC`. Keyword members
+        # must come after positional atoms, which is how the manifest
+        # declares them in practice (descending columns are conventionally
+        # last, e.g. `{:desc, :occurred_at}`).
+        {:desc, col} -> "desc: :#{col}"
         col when is_atom(col) -> ":#{col}"
       end)
 

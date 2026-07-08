@@ -7,26 +7,33 @@ Develop and maintain the Python/FastAPI vision service: image-to-text extraction
 - **Framework:** FastAPI (ASGI app deployed via Modal `@modal.asgi_app()`)
 - **Language:** Python 3.12+
 - **Linting:** ruff (linting + formatting)
-- **Type checking:** Type hints everywhere, validated by mypy or pyright
+- **Type checking:** Type hints everywhere, validated by mypy (strict mode)
 - **Models:** Pydantic v2 for request/response schemas
 - **Vision model:** Qwen2.5-VL-7B-Instruct on Modal (A10G GPU)
+- **Inference backend:** HuggingFace Transformers + accelerate, weights loaded in bfloat16 (no vLLM — matches the dfef1333 baseline; `classify` and `extract` are sync `@modal.method` calls serialised by Modal)
+- **Local pre-pass:** pyzbar (libzbar0) for barcode decoding before invoking the GPU
 - **Testing:** pytest, Atheris (fuzzing)
 
 ## Owned Domains
 
-### Endpoints (in `apps/vision/app/`)
-- `POST /extract` — Accepts 1-3 images, returns extracted text (title, author, ISBN barcode, publisher)
-- `POST /classify` — Accepts an image, returns classification: is_book (bool), subjects (list), confidence
-- `GET /health` — Health check (returns model availability status)
+### Endpoints (in `apps/vision/app/main.py`)
+- `GET /health` — Health check (no HMAC required)
+- `POST /classify` — Single image; returns `is_book` verdict, confidence, and subjects
+- `POST /extract` — Single image; returns extracted text (title, author, ISBN barcode, publisher)
+- `POST /analyze` — Orchestrates `classify` → (on positive) `extract` in one call; short-circuits on confident `not_book` / `ambiguous`
+- `POST /associate` — 202 Accepted; queues association work
+- All non-health endpoints require HMAC via `Depends(verify_hmac)`
 
 ### Modules
-- `app/main.py` — FastAPI app, routes, middleware
-- `app/models/extraction.py` — Pydantic models for extraction request/response
-- `app/models/classification.py` — Pydantic models for classification
+- `app/main.py` — FastAPI app, routes, middleware, and inline Pydantic v2 request/response models (no separate `app/models/` package)
 - `app/services/vision_client.py` — Modal client (calls `VisionModel` class on Modal)
 - `app/services/hmac_auth.py` — HMAC token validation (shared secret with Elixir core)
+- `app/services/local_ocr.py` — Local pyzbar barcode pre-pass (avoids a GPU round-trip when a barcode is visible)
+- `app/services/image_download.py` — Fetches uploaded images for processing
+- `app/services/url_validator.py` — SSRF-safe URL validation
 - `app/config.py` — Environment-based config (model name, budget limits)
-- `apps/vision/modal_app.py` — Modal app definition (`VisionModel` GPU class + `vision_api` ASGI function)
+- `app/proto/gen/` — Generated proto types (do not hand-edit)
+- `apps/vision/modal_app.py` — Modal app definition (`VisionModel` A10G GPU class loading Qwen2.5-VL-7B-Instruct in bfloat16 via HF Transformers + `vision_api` ASGI function)
 
 ### Content Moderation Role
 The vision service handles steps 1 and 2 of the 4-step moderation pipeline:
@@ -48,8 +55,12 @@ The vision service returns raw extracted dicts. It does NOT validate ISBNs or ma
 ## Context Loading Requirements
 ```
 ./docs/agents/standards/code-quality.md
+./docs/agents/standards/testing.md
 ./docs/agents/standards/security.md
+./docs/agents/reviewers/python-reviewer.md
 ./docs/technical-architecture.md (sections 5, 10)
+./docs/decisions/001-modal-over-together-ai.md
+./docs/decisions/015-vision-service-architecture.md
 ```
 
 ## Integration Handoffs

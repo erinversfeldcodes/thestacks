@@ -1,9 +1,27 @@
 """
 Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
 
+Inference stack:
+  * Backend  — HuggingFace Transformers + accelerate (no vLLM).
+  * Model    — Qwen/Qwen2.5-VL-7B-Instruct loaded in bfloat16.
+  * GPU      — A10G. 7B bf16 weights fit with comfortable headroom; the
+                A10G is materially cheaper than H100 and matches the
+                empirically-clean baseline (commit dfef1333).
+  * Concurrency — single inference per container at a time. ``classify``
+                  and ``extract`` are sync ``@modal.method`` calls; Modal
+                  serialises them on the underlying CUDA context. Bursts
+                  scale out horizontally via ``max_containers=10`` rather
+                  than vertically via ``@modal.concurrent``.
+  * Flow     — two GPU calls per upload (``classify`` then, on a positive
+                classification, ``extract``). The FastAPI ``/analyze``
+                endpoint in ``app/main.py`` orchestrates the two calls and
+                short-circuits on confident ``not_book`` / ``ambiguous``.
+
 This file defines two Modal functions:
 
-  1. VisionModel  — GPU class (A10G) for running Qwen2.5-VL inference.
+  1. VisionModel  — GPU class (A10G) running Qwen2.5-VL-7B-Instruct in
+                    bfloat16. Exposes ``classify`` and ``extract`` Modal
+                    methods. Single-image inference only.
   2. vision_api   — CPU function hosting the FastAPI app via @modal.asgi_app().
                     HTTPS endpoint: https://erinversfeldcodes--{MODAL_APP_NAME}-vision-api.modal.run
 
@@ -70,33 +88,106 @@ _CLASSIFY_PROMPT = (
     "  - Artwork, geometric shapes, patterns, logos, or abstract designs without book text.\n"
     "  - A screenshot of text that does not name a specific title or author.\n"
     "  - An image resembling a book cover in composition (rectangle, colours, shapes) but\n"
-    "    with no readable title, author name, or ISBN — this is NOT a book.\n\n"
+    "    with no readable title, author name, or ISBN — this is NOT a book.\n"
+    "  - A still from a TV show, film, news segment, advertisement, video game, or other "
+    "video/screen content where a book is NOT the dominant subject (even if a book happens "
+    "to be visible in the frame, e.g. on a desk, shelf, or held by a presenter, but the "
+    "primary subject of the image is the show / channel / brand / scene around it).\n\n"
     'Answer "ambiguous" only when the image might show book content but you genuinely\n'
     "cannot tell — e.g. a blurred or cropped image where something rectangular is\n"
-    "partially visible but no text is legible.\n\n"
+    "partially visible but no text is legible; OR a screenshot where a book is present "
+    "and partially legible but you cannot determine whether it is the primary subject "
+    "vs. an incidental prop in a larger scene.\n\n"
     "Respond with ONLY valid JSON — no explanation, no code fences:\n"
     '{"classification": "book", "confidence": 0.95,'
     ' "reasoning": "one sentence explaining your decision"}'
 )
 
 _EXTRACT_PROMPT = (
-    "Extract all books visible or mentioned in this image. For each book, return its title, "
-    "author name, and any ISBN numbers visible. If the image is a screenshot of text "
-    "(social media post, article, reading list), extract all books mentioned in the text. "
-    "For physical book covers, use both the visible text and the cover artwork — illustration "
-    "style, subject matter, period, and imagery — as complementary signals to identify the "
-    "correct title and author accurately.\n\n"
-    "Respond with ONLY valid JSON — no explanation, no code fences:\n"
-    '{"books": [{"title": "...", "author": "...", "potential_isbns": [], "raw_text": "..."}]}\n'
+    "You are a book identification assistant with expertise in OCR and cover recognition.\n\n"
+    "Extract all books visible or mentioned in this image. For EACH book:\n"
+    "- Read all visible text, including text that is mirrored, rotated, partially cropped, "
+    "or at an angle. If text appears reversed, mentally un-flip it before transcribing.\n"
+    "- Use ALL available signals together: visible text (title, author, subtitle, publisher), "
+    "cover artwork (illustration style, colour palette, period, subject matter, typography), "
+    "and any partial words or fragments — do NOT discard partial text.\n"
+    "- When the title appears cropped at the top or bottom of the cover, include any "
+    "visible prefix or suffix words even if only partially legible. Prefer the longest "
+    'plausible full title (e.g. "Train to Crystal City" not "Crystal City"; '
+    '"The Book Thief" not "Book Thief") over the shortest fragment.\n'
+    "- If the image is a screenshot of text (social media, article, reading list), extract "
+    "all book titles and authors mentioned in the text content.\n"
+    "- ONLY identify ACTUAL BOOKS. If the image is a still from a TV show, film, news "
+    "segment, advertisement, video game, or any video/screen content — even if a book "
+    "happens to be visible in the frame — return books:[] unless the book is the "
+    "dominant subject AND its title is clearly legible. Do NOT identify a TV show or "
+    "media-brand as a book, even when the OL/GB catalogue may contain a tie-in book with "
+    "the same name. Authors should be people, not production companies "
+    '(e.g. "Discovery Communications", "Warner Bros.", "Productions, Inc.") '
+    "— if the only plausible author is an organisation/brand, return books:[].\n\n"
+    "Reasoning approach:\n"
+    "1. Transcribe all readable text verbatim (including fragments), noting any orientation "
+    "issues.\n"
+    "2. Apply any necessary corrections (mirror, rotation) to produce clean text.\n"
+    "3. Cross-reference corrected text + cover art to identify the specific edition.\n"
+    "4. If uncertain between multiple books, pick the most likely and reflect that in "
+    "confidence.\n\n"
+    "Respond with ONLY valid JSON — no explanation, no markdown, no code fences:\n"
+    '{"books": [{'
+    '  "title": "Full title as it appears on the cover",'
+    '  "author": "Author full name or null if not visible",'
+    '  "confidence": 0.95,'
+    '  "raw_text": "Verbatim text fragments as seen, before any correction",'
+    '  "corrected_text": "Text after un-mirroring/rotating/inferring partial words",'
+    '  "identification_signals": ["cover text", "subtitle", "cover art", "partial OCR"],'
+    '  "potential_isbns": []'
+    "}]}\n"
     'If no books can be identified: {"books": []}'
 )
+
+
+def _build_extract_prompt(excluded_books: list[str] | None) -> str:
+    """Return the extract prompt, augmented with a rejection-retry constraint
+    when ``excluded_books`` is non-empty.
+
+    The frontend's "No, try again" flow re-uploads (logically) the same image
+    with the cumulative list of previously-identified books the user has
+    rejected. We append an explicit constraint instructing the model to NOT
+    return any of those titles, so it picks a different plausible candidate
+    or returns books:[] if none exists. When the list is empty, the baseline
+    prompt is returned unchanged.
+    """
+    if not excluded_books:
+        return _EXTRACT_PROMPT
+    bullets = "\n".join(f"  - {entry}" for entry in excluded_books)
+    constraint = (
+        "\n\nCONSTRAINT: This image has previously been identified as the "
+        "following book(s), and the user has rejected those identifications "
+        "as incorrect. Do NOT return any of these as a match. Pick a "
+        "different book that fits the image, or return books:[] if no "
+        "other plausible match exists.\n"
+        "Rejected (do NOT return):\n"
+        f"{bullets}\n"
+    )
+    return _EXTRACT_PROMPT + constraint
 
 
 @app.cls(
     gpu="A10G",
     image=image,
-    # 300s allows for cold-start (~30s) + queue wait (up to 120s when concurrent
-    # jobs are serialised on a single A10G) + inference (~60s for long inputs).
+    # A10G economics: 7B bf16 fits comfortably (~15 GB weights of the
+    # 24 GB VRAM); single-inference-per-container under HF Transformers
+    # (no continuous batching here — that was vLLM). Cold start ~60 s
+    # to load the 7B weights from the local image cache.
+    #
+    # Cap autoscaled containers at 10. Without @modal.concurrent we run
+    # one inference per container at a time, so this also caps in-flight
+    # GPU work at 10. Re-evaluate `max_containers` if monthly bill runs
+    # hotter than expected or if upload queue depth saturates the cap.
+    max_containers=10,
+    # 300s allows for cold-start (~60s) + queue wait (up to 120s when
+    # concurrent jobs are serialised on a single A10G) + inference (~60s
+    # for long inputs).
     timeout=300,
     # Keep the container alive for 20 minutes after the last request.
     # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
@@ -107,6 +198,17 @@ _EXTRACT_PROMPT = (
 class VisionModel:
     @modal.enter()
     def load(self) -> None:
+        """Load the Qwen2.5-VL processor + model via HF Transformers.
+
+        ``Qwen2_5_VLForConditionalGeneration.from_pretrained`` loads the
+        bfloat16 weights from the local HuggingFace cache (baked into the
+        image at build time by ``_download_model``) onto the A10G via
+        ``device_map="auto"``. ``AutoProcessor`` loads the matching
+        image+text preprocessor. Sync — no async engine, no event-loop
+        bootstrap. Inference goes through ``model.generate`` (see
+        ``_infer``); concurrency is bounded by ``max_containers`` rather
+        than continuous batching.
+        """
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
@@ -122,10 +224,15 @@ class VisionModel:
         return self._infer(image_b64, _CLASSIFY_PROMPT)
 
     @modal.method()
-    def extract(self, images_b64: list[str]) -> dict[str, Any]:
+    def extract(
+        self,
+        images_b64: list[str],
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not images_b64:
             return {"books": []}
-        return self._infer(images_b64[0], _EXTRACT_PROMPT)
+        prompt = _build_extract_prompt(excluded_books)
+        return self._infer(images_b64[0], prompt)
 
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import torch
@@ -208,8 +315,8 @@ _fastapi_image = (
     # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
     .apt_install("libzbar0")
     .pip_install(
-        "fastapi==0.135.1",
-        "starlette==0.52.1",
+        "fastapi==0.139.0",
+        "starlette==1.3.1",
         "uvicorn[standard]==0.41.0",
         "httpx==0.28.1",
         "pydantic==2.10.4",

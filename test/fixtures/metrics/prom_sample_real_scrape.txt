@@ -1,0 +1,304 @@
+# HELP core_prom_ex_beam_system_schedulers_online_info The number of scheduler threads that are online.
+# TYPE core_prom_ex_beam_system_schedulers_online_info gauge
+core_prom_ex_beam_system_schedulers_online_info 14
+# HELP core_prom_ex_beam_system_schedulers_info The number of scheduler threads in use by the BEAM.
+# TYPE core_prom_ex_beam_system_schedulers_info gauge
+core_prom_ex_beam_system_schedulers_info 14
+# HELP core_prom_ex_beam_system_dirty_io_schedulers_info The total number of dirty I/O schedulers used to execute I/O bound native functions.
+# TYPE core_prom_ex_beam_system_dirty_io_schedulers_info gauge
+core_prom_ex_beam_system_dirty_io_schedulers_info 10
+# HELP core_prom_ex_beam_system_dirty_cpu_schedulers_online_info The total number of dirty CPU schedulers that are online.
+# TYPE core_prom_ex_beam_system_dirty_cpu_schedulers_online_info gauge
+core_prom_ex_beam_system_dirty_cpu_schedulers_online_info 14
+# HELP core_prom_ex_beam_system_dirty_cpu_schedulers_info The total number of dirty CPU scheduler threads used by the BEAM.
+# TYPE core_prom_ex_beam_system_dirty_cpu_schedulers_info gauge
+core_prom_ex_beam_system_dirty_cpu_schedulers_info 14
+# HELP core_prom_ex_beam_system_word_size_bytes_info The size of Erlang term words in bytes.
+# TYPE core_prom_ex_beam_system_word_size_bytes_info gauge
+core_prom_ex_beam_system_word_size_bytes_info 8
+# HELP core_prom_ex_beam_system_time_correction_support_info Whether the BEAM instance has time correction support.
+# TYPE core_prom_ex_beam_system_time_correction_support_info gauge
+core_prom_ex_beam_system_time_correction_support_info 1
+# HELP core_prom_ex_beam_system_thread_support_info Whether the BEAM instance has been compiled with threading support.
+# TYPE core_prom_ex_beam_system_thread_support_info gauge
+core_prom_ex_beam_system_thread_support_info 1
+# HELP core_prom_ex_beam_system_jit_support_info Whether the BEAM instance is running with the JIT compiler.
+# TYPE core_prom_ex_beam_system_jit_support_info gauge
+core_prom_ex_beam_system_jit_support_info 1
+# HELP core_prom_ex_beam_system_smp_support_info Whether the BEAM instance has been compiled with SMP support.
+# TYPE core_prom_ex_beam_system_smp_support_info gauge
+core_prom_ex_beam_system_smp_support_info 1
+# HELP core_prom_ex_beam_system_version_info The OTP release major version.
+# TYPE core_prom_ex_beam_system_version_info gauge
+core_prom_ex_beam_system_version_info 27
+# HELP core_prom_ex_beam_system_atom_limit_info The maximum number of atoms allowed.
+# TYPE core_prom_ex_beam_system_atom_limit_info gauge
+core_prom_ex_beam_system_atom_limit_info 1048576
+# HELP core_prom_ex_beam_system_thread_pool_size_info The number of async threads in the async threads pool used for async driver calls.
+# TYPE core_prom_ex_beam_system_thread_pool_size_info gauge
+core_prom_ex_beam_system_thread_pool_size_info 1
+# HELP core_prom_ex_beam_system_process_limit_info The maximum number of processes that can simultaneously exist on the BEAM instance.
+# TYPE core_prom_ex_beam_system_process_limit_info gauge
+core_prom_ex_beam_system_process_limit_info 1048576
+# HELP core_prom_ex_beam_system_port_limit_info The maximum number of ports that can simultaneously exist on the BEAM instance.
+# TYPE core_prom_ex_beam_system_port_limit_info gauge
+core_prom_ex_beam_system_port_limit_info 65536
+# HELP core_prom_ex_beam_system_ets_limit_info The maximum number of ETS tables allowed (this is partially obsolete given that the number of ETS tables is limited by available memory).
+# TYPE core_prom_ex_beam_system_ets_limit_info gauge
+core_prom_ex_beam_system_ets_limit_info 8192
+# HELP core_prom_ex_beam_system_logical_processors_online_info The total number of logical processors online on the host machine.
+# TYPE core_prom_ex_beam_system_logical_processors_online_info gauge
+core_prom_ex_beam_system_logical_processors_online_info 14
+# HELP core_prom_ex_beam_system_logical_processors_available_info The total number of logical processors available to the BEAM.
+# TYPE core_prom_ex_beam_system_logical_processors_available_info gauge
+core_prom_ex_beam_system_logical_processors_available_info 14
+# HELP core_prom_ex_beam_system_logical_processors_info The total number of logical processors on the host machine.
+# TYPE core_prom_ex_beam_system_logical_processors_info gauge
+core_prom_ex_beam_system_logical_processors_info 14
+# HELP core_prom_ex_application_git_author_info The application's author of the last Git commit at the time of deployment.
+# TYPE core_prom_ex_application_git_author_info gauge
+core_prom_ex_application_git_author_info{author="Git author not available"} 1
+# HELP core_prom_ex_application_git_sha_info The application's Git SHA at the time of deployment.
+# TYPE core_prom_ex_application_git_sha_info gauge
+core_prom_ex_application_git_sha_info{sha="Git SHA not available"} 1
+# HELP core_prom_ex_application_dependency_info Information regarding the application's dependencies.
+# TYPE core_prom_ex_application_dependency_info gauge
+core_prom_ex_application_dependency_info{modules="101",name="kernel",version="10.2.7.4"} 1
+core_prom_ex_application_dependency_info{modules="33",name="ex_aws",version="2.6.1"} 1
+core_prom_ex_application_dependency_info{modules="1",name="cors_plug",version="3.0.3"} 1
+core_prom_ex_application_dependency_info{modules="88",name="phoenix",version="1.7.21"} 1
+core_prom_ex_application_dependency_info{modules="30",name="ecto_sql",version="3.13.5"} 1
+core_prom_ex_application_dependency_info{modules="28",name="jason",version="1.4.4"} 1
+core_prom_ex_application_dependency_info{modules="9",name="elixir_feed_parser",version="2.1.0"} 1
+core_prom_ex_application_dependency_info{modules="3",name="argon2_elixir",version="4.1.3"} 1
+core_prom_ex_application_dependency_info{modules="13",name="fuse",version="2.5.0"} 1
+core_prom_ex_application_dependency_info{modules="9",name="stream_data",version="1.2.0"} 1
+core_prom_ex_application_dependency_info{modules="60",name="swoosh",version="1.23.1"} 1
+core_prom_ex_application_dependency_info{modules="52",name="excoveralls",version="0.18.5"} 1
+core_prom_ex_application_dependency_info{modules="21",name="broadway",version="1.2.1"} 1
+core_prom_ex_application_dependency_info{modules="93",name="stdlib",version="6.2.2.3"} 1
+core_prom_ex_application_dependency_info{modules="4",name="telemetry_poller",version="1.3.0"} 1
+core_prom_ex_application_dependency_info{modules="40",name="prom_ex",version="1.11.0"} 1
+core_prom_ex_application_dependency_info{modules="69",name="oban",version="2.20.3"} 1
+core_prom_ex_application_dependency_info{modules="5",name="plug_cowboy",version="2.8.0"} 1
+core_prom_ex_application_dependency_info{modules="24",name="req",version="0.5.17"} 1
+core_prom_ex_application_dependency_info{modules="13",name="libcluster",version="3.5.0"} 1
+core_prom_ex_application_dependency_info{modules="92",name="postgrex",version="0.22.0"} 1
+core_prom_ex_application_dependency_info{modules="22",name="cloak_ecto",version="1.3.0"} 1
+core_prom_ex_application_dependency_info{modules="72",name="timex",version="3.7.13"} 1
+core_prom_ex_application_dependency_info{modules="4",name="nimble_csv",version="1.3.0"} 1
+core_prom_ex_application_dependency_info{modules="30",name="guardian",version="2.4.0"} 1
+core_prom_ex_application_dependency_info{modules="10",name="ex_aws_s3",version="2.5.9"} 1
+core_prom_ex_application_dependency_info{modules="15",name="finch",version="0.21.0"} 1
+core_prom_ex_application_dependency_info{modules="6",name="ex_machina",version="2.8.0"} 1
+core_prom_ex_application_dependency_info{modules="7",name="telemetry_metrics",version="1.1.0"} 1
+core_prom_ex_application_dependency_info{modules="14",name="phoenix_ecto",version="4.7.0"} 1
+core_prom_ex_application_dependency_info{modules="273",name="elixir",version="1.18.4"} 1
+# HELP core_prom_ex_application_primary_info Information regarding the primary application.
+# TYPE core_prom_ex_application_primary_info gauge
+core_prom_ex_application_primary_info{modules="261",name="core",version="0.1.0"} 1
+# HELP core_prom_ex_prom_ex_status_info Information regarding the PromEx library. Primarily used as a source of truth for Prometheus default labels.
+# TYPE core_prom_ex_prom_ex_status_info gauge
+core_prom_ex_prom_ex_status_info 1
+# HELP core_prom_ex_beam_stats_ets_count A count of how many ETS tables currently exist.
+# TYPE core_prom_ex_beam_stats_ets_count gauge
+core_prom_ex_beam_stats_ets_count 150
+# HELP core_prom_ex_beam_stats_atom_count A count of how many atoms are currently allocated.
+# TYPE core_prom_ex_beam_stats_atom_count gauge
+core_prom_ex_beam_stats_atom_count 33000
+# HELP core_prom_ex_beam_stats_process_count A count of how many Erlang processes are currently running.
+# TYPE core_prom_ex_beam_stats_process_count gauge
+core_prom_ex_beam_stats_process_count 300
+# HELP core_prom_ex_beam_stats_port_count A count of how many ports are currently active.
+# TYPE core_prom_ex_beam_stats_port_count gauge
+core_prom_ex_beam_stats_port_count 30
+# HELP core_prom_ex_beam_stats_uptime_milliseconds_count The total number of wall clock milliseconds that have passed since the system started.
+# TYPE core_prom_ex_beam_stats_uptime_milliseconds_count gauge
+core_prom_ex_beam_stats_uptime_milliseconds_count 600000
+# HELP core_prom_ex_beam_stats_port_io_byte_count The total number of bytes sent and received through ports since the system started.
+# TYPE core_prom_ex_beam_stats_port_io_byte_count gauge
+core_prom_ex_beam_stats_port_io_byte_count{type="output"} 3493
+core_prom_ex_beam_stats_port_io_byte_count{type="input"} 37111
+# HELP core_prom_ex_beam_stats_gc_reclaimed_bytes The total number of bytes reclaimed since the system started.
+# TYPE core_prom_ex_beam_stats_gc_reclaimed_bytes gauge
+core_prom_ex_beam_stats_gc_reclaimed_bytes 100000000
+# HELP core_prom_ex_beam_stats_gc_count The total number of garbage collections since the system started.
+# TYPE core_prom_ex_beam_stats_gc_count gauge
+core_prom_ex_beam_stats_gc_count 2500
+# HELP core_prom_ex_beam_stats_reduction_count The total number of reductions since the system started.
+# TYPE core_prom_ex_beam_stats_reduction_count gauge
+core_prom_ex_beam_stats_reduction_count 5000000
+# HELP core_prom_ex_beam_stats_context_switch_count The total number of context switches since the system started.
+# TYPE core_prom_ex_beam_stats_context_switch_count gauge
+core_prom_ex_beam_stats_context_switch_count 30000
+# HELP core_prom_ex_beam_stats_run_queue_count The number of processes and ports that are ready to run and are in the run queue.
+# TYPE core_prom_ex_beam_stats_run_queue_count gauge
+core_prom_ex_beam_stats_run_queue_count{type="normal"} 1
+core_prom_ex_beam_stats_run_queue_count{type="dirty"} 0
+# HELP core_prom_ex_beam_stats_active_task_count The number of processes and ports that are ready to run, or are currently running.
+# TYPE core_prom_ex_beam_stats_active_task_count gauge
+core_prom_ex_beam_stats_active_task_count{type="normal"} 2
+core_prom_ex_beam_stats_active_task_count{type="dirty"} 0
+# HELP core_prom_ex_beam_memory_persistent_term_total_bytes The total amount of memory currently allocated to Erlang :persistent_term.
+# TYPE core_prom_ex_beam_memory_persistent_term_total_bytes gauge
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+# HELP core_prom_ex_beam_memory_processes_total_bytes The total amount of memory currently allocated to Erlang processes.
+# TYPE core_prom_ex_beam_memory_processes_total_bytes gauge
+core_prom_ex_beam_memory_processes_total_bytes 33554432
+# HELP core_prom_ex_beam_memory_ets_total_bytes The total amount of memory currently allocated for ETS tables.
+# TYPE core_prom_ex_beam_memory_ets_total_bytes gauge
+core_prom_ex_beam_memory_ets_total_bytes 10485760
+# HELP core_prom_ex_beam_memory_code_total_bytes The total amount of memory currently allocated for Erlang code.
+# TYPE core_prom_ex_beam_memory_code_total_bytes gauge
+core_prom_ex_beam_memory_code_total_bytes 52428800
+# HELP core_prom_ex_beam_memory_binary_total_bytes The total amount of memory currently allocated for binaries.
+# TYPE core_prom_ex_beam_memory_binary_total_bytes gauge
+core_prom_ex_beam_memory_binary_total_bytes 16777216
+# HELP core_prom_ex_beam_memory_atom_total_bytes The total amount of memory currently allocated for atoms.
+# TYPE core_prom_ex_beam_memory_atom_total_bytes gauge
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+# HELP core_prom_ex_beam_memory_allocated_bytes The total amount of memory currently allocated.
+# TYPE core_prom_ex_beam_memory_allocated_bytes gauge
+core_prom_ex_beam_memory_allocated_bytes 125829120
+# HELP core_prom_ex_application_uptime_milliseconds_count The total number of wall clock milliseconds that have passed since the application started.
+# TYPE core_prom_ex_application_uptime_milliseconds_count gauge
+core_prom_ex_application_uptime_milliseconds_count 600000
+# HELP stacks_fuse_state_state Circuit breaker state (1 = healthy, 0 = blown).
+# TYPE stacks_fuse_state_state gauge
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+# HELP stacks_router_dispatch_stop_duration_milliseconds Phoenix route-dispatch latency tagged by route group.
+# TYPE stacks_router_dispatch_stop_duration_milliseconds histogram
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="100"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="250"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 1
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 1.2e3
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="100"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="250"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="1000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="2000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="5000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 250.0
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="50"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="100"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="250"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="500"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="1000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="2000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="5000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="+Inf"} 1
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="health"} 42.0
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="health"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="100"} 0
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="250"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="1000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="2000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="5000"} 1
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 1
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 150.0
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 1
+# HELP stacks_upload_terminal_count_total Upload pipeline terminal outcomes (resolved/rejected/timeout).
+# TYPE stacks_upload_terminal_count_total counter
+stacks_upload_terminal_count_total{outcome="rejected"} 1
+stacks_upload_terminal_count_total{outcome="resolved"} 2
+# HELP core_prom_ex_ecto_repo_query_results_returned The number of result rows returned from a query.
+# TYPE core_prom_ex_ecto_repo_query_results_returned histogram
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="5"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="10"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="50"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="100"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="500"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="1000"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="+Inf"} 2
+core_prom_ex_ecto_repo_query_results_returned_sum{command="select",repo="Core.Repo",source="source_unavailable"} 2
+core_prom_ex_ecto_repo_query_results_returned_count{command="select",repo="Core.Repo",source="source_unavailable"} 2
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="5"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="10"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="50"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="100"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="500"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="1000"} 1
+core_prom_ex_ecto_repo_query_results_returned_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="+Inf"} 1
+core_prom_ex_ecto_repo_query_results_returned_sum{command="select",repo="Core.Repo",source="oban_jobs"} 0
+core_prom_ex_ecto_repo_query_results_returned_count{command="select",repo="Core.Repo",source="oban_jobs"} 1
+# HELP core_prom_ex_ecto_repo_query_total_time_milliseconds The sum of the other time measurements.
+# TYPE core_prom_ex_ecto_repo_query_total_time_milliseconds histogram
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="10"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="50"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="250"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="2500"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="10000"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="30000"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="+Inf"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_sum{command="select",repo="Core.Repo",source="oban_jobs"} 1.443917
+core_prom_ex_ecto_repo_query_total_time_milliseconds_count{command="select",repo="Core.Repo",source="oban_jobs"} 1
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="10"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="50"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="250"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="2500"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="10000"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="30000"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="+Inf"} 2
+core_prom_ex_ecto_repo_query_total_time_milliseconds_sum{command="select",repo="Core.Repo",source="source_unavailable"} 2.597208
+core_prom_ex_ecto_repo_query_total_time_milliseconds_count{command="select",repo="Core.Repo",source="source_unavailable"} 2
+# HELP core_prom_ex_ecto_repo_query_execution_time_milliseconds The time spent executing the query.
+# TYPE core_prom_ex_ecto_repo_query_execution_time_milliseconds histogram
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="10"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="50"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="250"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="2500"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="10000"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="30000"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="oban_jobs",le="+Inf"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_sum{command="select",repo="Core.Repo",source="oban_jobs"} 0.7194999999999999
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_count{command="select",repo="Core.Repo",source="oban_jobs"} 1
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="10"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="50"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="250"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="2500"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="10000"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="30000"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_bucket{command="select",repo="Core.Repo",source="source_unavailable",le="+Inf"} 2
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_sum{command="select",repo="Core.Repo",source="source_unavailable"} 0.25975
+core_prom_ex_ecto_repo_query_execution_time_milliseconds_count{command="select",repo="Core.Repo",source="source_unavailable"} 2
+# HELP core_prom_ex_ecto_repo_query_decode_time_milliseconds The time spent decoding the data received from the database.
+# TYPE core_prom_ex_ecto_repo_query_decode_time_milliseconds histogram
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="5"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="50"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="100"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="500"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="2500"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_sum{repo="Core.Repo"} 0.426875
+core_prom_ex_ecto_repo_query_decode_time_milliseconds_count{repo="Core.Repo"} 3
+# HELP core_prom_ex_ecto_repo_query_queue_time_milliseconds The time spent waiting to check out a database connection.
+# TYPE core_prom_ex_ecto_repo_query_queue_time_milliseconds histogram
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="250"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="1000"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="5000"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10000"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 2.635
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3
+# HELP core_prom_ex_phoenix_endpoint_port_info The configured port of the Endpoint module.
+# TYPE core_prom_ex_phoenix_endpoint_port_info gauge
+core_prom_ex_phoenix_endpoint_port_info{endpoint="CoreWeb.Endpoint",port="4002"} 1
+# HELP core_prom_ex_phoenix_endpoint_url_info The configured URL of the Endpoint module.
+# TYPE core_prom_ex_phoenix_endpoint_url_info gauge
+core_prom_ex_phoenix_endpoint_url_info{endpoint="CoreWeb.Endpoint",url="http://localhost:4002"} 1
+

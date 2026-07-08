@@ -1,0 +1,89 @@
+# Prometheus sample - upload route p95 latency BREACHED (> 3000ms threshold).
+# Derived from prom_sample_healthy.txt; only the `route_group="upload"`
+# histogram buckets are edited to push the upload p95 above the 3000 ms
+# interim threshold (target: 2000 ms once the experimental framework in
+# ADR 015 exists). The fixture p95 lands in the 2000–5000 ms bucket, so
+# the fixture breaches both the current (3000) and target (2000)
+# thresholds — it does not need updating when the threshold tightens.
+# All other series are unchanged so every other SLI computes a real
+# value and the gate's breach decision is anchored on a single signal.
+
+# -- BEAM memory (per-category, sum = total) --
+core_prom_ex_beam_memory_persistent_term_total_bytes 524288
+core_prom_ex_beam_memory_processes_total_bytes 33554432
+core_prom_ex_beam_memory_ets_total_bytes 10485760
+core_prom_ex_beam_memory_code_total_bytes 52428800
+core_prom_ex_beam_memory_binary_total_bytes 16777216
+core_prom_ex_beam_memory_atom_total_bytes 2097152
+core_prom_ex_beam_memory_allocated_bytes 125829120
+
+# -- Custom stacks_* metrics --
+stacks_fuse_state_state{fuse_name="vision_fuse"} 1
+stacks_fuse_state_state{fuse_name="together_ai_fuse"} 1
+stacks_fuse_state_state{fuse_name="open_library_fuse"} 1
+stacks_fuse_state_state{fuse_name="google_books_fuse"} 1
+stacks_fuse_state_state{fuse_name="scraper_fuse"} 1
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="50"} 200
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="100"} 480
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="250"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="1000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="2000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="5000"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="auth",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="auth"} 28500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="auth"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="50"} 620
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="100"} 1180
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="250"} 1420
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="500"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="1000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="2000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="5000"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="catalogue",le="+Inf"} 1500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="catalogue"} 92000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="catalogue"} 1500
+
+# Upload p95 pushed way past 2000ms: only 50/100 samples under 2000ms, so p95
+# falls in (2000, 5000] bucket (the gate should interpolate to > 2000ms).
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="50"} 2
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="100"} 10
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="250"} 20
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="500"} 30
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="1000"} 40
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="2000"} 50
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="5000"} 95
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="upload",le="+Inf"} 100
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="upload"} 280000
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="upload"} 100
+
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="50"} 495
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="100"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="250"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="500"} 500
+stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="health",le="+Inf"} 500
+stacks_router_dispatch_stop_duration_milliseconds_sum{route_group="health"} 8500
+stacks_router_dispatch_stop_duration_milliseconds_count{route_group="health"} 500
+
+stacks_upload_terminal_count_total{outcome="resolved"} 95
+stacks_upload_terminal_count_total{outcome="rejected"} 3
+stacks_upload_terminal_count_total{outcome="timeout"} 2
+
+# -- Phoenix HTTP request metrics --
+core_prom_ex_phoenix_http_requests_total{action="show",controller="CoreWeb.HealthController",host="thestacks-core.fly.dev",method="GET",path="/api/health",status="200"} 500
+core_prom_ex_phoenix_http_requests_total{action="index",controller="CoreWeb.BookshelfController",host="thestacks-core.fly.dev",method="GET",path="/api/bookshelves/:name",status="200"} 1500
+
+# -- Ecto query metrics --
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="10"} 2950
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="50"} 2998
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="250"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket{repo="Core.Repo",le="+Inf"} 3000
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum{repo="Core.Repo"} 6200
+core_prom_ex_ecto_repo_query_queue_time_milliseconds_count{repo="Core.Repo"} 3000
+
+# -- Oban (healthy) --
+core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.DefaultWorker",queue="default",state="success",worker="Core.DefaultWorker"} 420
+core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.DefaultWorker",queue="default",state="failure",worker="Core.DefaultWorker"} 5
+core_prom_ex_oban_job_processing_duration_milliseconds_count{name="Core.UploadWorker",queue="uploads",state="success",worker="Core.UploadWorker"} 95
+core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker"} 2

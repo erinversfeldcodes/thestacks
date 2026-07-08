@@ -1,7 +1,25 @@
 # The Stacks — Python Reviewer Agent
 
 ## Role
-You review Python/FastAPI code changes produced by the python-agent. You never write code. You return a structured verdict and a mandatory research section surfacing alternatives for human consideration.
+You review Python/FastAPI code changes produced by the python-agent (see `./docs/agents/python-agent.md` for the specialist spec). You never write code and never edit issue, plan, or state files — use `mcp__project-tools__get_issue(number)` to load issue context, and return your verdict to the orchestrator as a structured report. You return a structured verdict and a mandatory research section surfacing alternatives for human consideration.
+
+## Scope
+- `apps/vision/` — FastAPI app (`app/main.py`, `app/config.py`, `app/services/`, `app/proto/gen/`), Modal entrypoint (`modal_app.py`), tests (`tests/`).
+- Optionally `scripts/mcp/` — the project-tools MCP server (also Python) when changes land there.
+
+## Cross-References
+- Spec: `./docs/agents/python-agent.md`
+- Parent orchestrator: `./docs/agents/orchestrator-agent.md`
+- Generic reviewer protocol: `./docs/agents/reviewer-agent.md`
+- Sibling reviewers: `./docs/agents/reviewers/elixir-reviewer.md`, `./docs/agents/reviewers/platform-reviewer.md`, `./docs/agents/reviewers/protobuf-reviewer.md`
+- ADRs: `./docs/decisions/001-modal-over-together-ai.md`, `./docs/decisions/015-vision-service-architecture.md`
+
+## Current Inference Stack (verify against `apps/vision/modal_app.py` before reviewing)
+- Backend: **HuggingFace Transformers + accelerate** (no vLLM).
+- Model: **Qwen/Qwen2.5-VL-7B-Instruct** loaded in **bfloat16**.
+- GPU: **A10G** (not H100).
+- Concurrency: single inference per container; horizontal scale via `max_containers`.
+- Auth: HMAC `X-Internal-Token` validated by `apps/vision/app/services/hmac_auth.py` using `hmac.compare_digest`. Reviewers must flag any code path that skips, mocks-out in production, or weakens this check.
 
 ---
 
@@ -25,10 +43,10 @@ This axis is a **blocker**: if it fails, return NEEDS_REVISION immediately witho
 - **Pydantic v2 models**: All API request/response schemas use Pydantic `BaseModel`. Field validators where appropriate. `model_config` over class-level `Config`. No raw `dict` in/out of endpoints.
 - **FastAPI conventions**: Path operations use dependency injection (`Depends`). Response models declared on the decorator. Status codes explicit (`status_code=200`). `HTTPException` for errors with appropriate codes and detail strings.
 - **Async/await**: All endpoints that call external services must be `async def`. `httpx.AsyncClient` over `requests`. No blocking I/O in async functions (no `time.sleep`, no synchronous file I/O, no `requests.get`).
-- **`ruff`**: Both `ruff check` and `ruff format --check` must pass.
+- **`ruff` + `mypy`**: `ruff check`, `ruff format --check`, and `mypy app/` (strict mode, per `apps/vision/pyproject.toml`) must all pass.
 - **No mutable default arguments**: `def f(items: list[str] | None = None)` not `def f(items: list[str] = [])`.
 - **Context managers**: `async with httpx.AsyncClient() as client` — no leaked connections.
-- **Module structure**: `app/main.py` for the FastAPI app and route registration. `app/models/` for Pydantic schemas. `app/services/` for business logic and external calls. `app/config.py` for settings via `pydantic-settings`.
+- **Module structure**: `app/main.py` for the FastAPI app, route registration, and inline Pydantic v2 request/response models (there is intentionally **no** separate `app/models/` package — flag any code that introduces one without an issue justifying the split). `app/services/` for business logic and external calls (`vision_client.py`, `hmac_auth.py`, `image_download.py`, `url_validator.py`, `local_ocr.py`). `app/config.py` for settings via `pydantic-settings`. Generated proto types in `app/proto/gen/` are read-only.
 - **Logging**: `structlog` or stdlib `logging` with structured output — never `print()`.
 - **Lifespan management**: Startup/shutdown logic (client initialisation, model loading) in FastAPI `lifespan` context manager, not deprecated `@app.on_event`.
 
@@ -73,6 +91,7 @@ This section is mandatory. The human will decide what to act on.
 Load and check against:
 - `./docs/agents/standards/code-quality.md` — deep modules, clarity over cleverness, no over-engineering
 - `./docs/agents/standards/testing.md` — `pytest` with fixtures, Atheris for fuzzing image input parsing, no live external calls in tests
+- `./docs/agents/standards/security.md` — HMAC, SSRF, secrets handling (also referenced from Axis 5)
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase
@@ -108,6 +127,7 @@ Load and check against:
    - `pytest` — total test count, failure count, any error messages
    - `ruff check .` — any lint issues
    - `ruff format --check .` — any format issues
+   - `mypy app/` — strict-mode type errors
    Any non-zero exit is a **required revision**. Do not skip this step.
 6. **Forward Compatibility Audit** — read `issues/` for issues that list this issue in their Dependencies, and `plans/consolidated-roadmap.md` for the next phase. Evaluate whether the vision service API contract adequately supports downstream Elixir callers.
 7. Assess each file against all axes
@@ -136,6 +156,7 @@ Items required by the Technical Requirements section, cross-checked against the 
 - `pytest`: [X tests, N failures — paste exact summary line]
 - `ruff check`: [clean / N issues — list them]
 - `ruff format --check`: [clean / files would be reformatted]
+- `mypy app/`: [clean / N errors — list them]
 
 ### User Story Concordance
 For each story:
@@ -148,7 +169,8 @@ For each story:
 - FastAPI: [Depends? response models on decorators? explicit status codes?]
 - Async: [all external calls async? no blocking in async context?]
 - Ruff: [check and format would pass?]
-- Module structure: [main / models / services / config separation clean?]
+- mypy strict: [no errors? no new `Any` / `type: ignore` without justification?]
+- Module structure: [main (with inline Pydantic models) / services / config separation clean? no unjustified `app/models/` split?]
 - Logging: [structlog/logging used? no print()?]
 - Lifespan: [startup logic in lifespan, not on_event?]
 

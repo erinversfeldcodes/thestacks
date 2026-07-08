@@ -125,21 +125,21 @@ The use of `{:cancel, ...}` (rather than `{:error, ...}`) is deliberate: ISBN-no
 - **Client module**: `Stacks.AI.Client` via `call_vision("extract_isbn", payload)`
 - **Response**: Returns candidates, but their `potential_isbns` either don't resolve or are empty
 
-### Open Library API
-- **Service**: Open Library
+### Open Library + Google Books (parallel race)
+- **Service**: Open Library and Google Books
 - **Client module**: `Stacks.Books.ISBNResolver.resolve/1`
-- **Result**: `{:error, :not_found}` -- ISBN not in Open Library catalogue
-
-### Google Books API
-- **Service**: Google Books
-- **Client module**: `Stacks.Books.ISBNResolver.resolve/1` (fallback from Open Library)
-- **Result**: `{:error, :not_found}` -- ISBN not in Google Books catalogue
+- **Strategy**: OL and GB are queried in parallel via `Task.async`. The first `{:ok, _}` wins; the loser is `Task.shutdown`ed. A hard `@race_timeout_ms` of 8s caps the race to protect the upload hot path from a stuck upstream. Each provider is also fronted by a Fuse circuit breaker (`:open_library_fuse`, `:google_books_fuse`); a blown fuse returns `{:error, :circuit_open}` without an HTTP call.
+- **Result**: Both providers return `{:error, :not_found}` (or the race times out), so `resolve/1` returns `{:error, :not_found}`.
 
 ### ISBNResolver Title Search (fallback)
-- **Service**: Google Books Search API
+- **Service**: Open Library and Google Books search APIs (raced per candidate query)
 - **Client module**: `Stacks.Books.ISBNResolver.search_by_title/3`
-- **Query strategy**: Progressively broader queries (full title + author, trimmed title + author, full title + surname, raw text enrichment)
-- **Result**: `{:error, :not_found}` -- no matching book found
+- **Query strategy**: Progressively broader queries (full title + author, trimmed title + author, full title + surname, raw text enrichment, subtitle-stripped variants)
+- **Result**: `{:error, :not_found}` -- no matching book found across any candidate variant
+
+### Resolver cache (ISBNResolverCache)
+- **Module**: `Stacks.Books.ISBNResolverCache` (ETS L1 + Postgres L2)
+- **Behaviour on rejection**: A `{:error, :not_found}` from the OL/GB race is memoised for **1 h** (negative TTL); a successful resolution would be memoised for **24 h** (positive TTL). Transient resolver errors (`:circuit_open`, `:timeout`, `:transport_error`, `:unexpected_status`, `:malformed_response`) are deliberately **NOT** cached — the fuse and Oban retries are the signal to retry later, not to memoise. This prevents a transient upstream blip from poisoning lookups for the negative TTL.
 
 ---
 
@@ -353,3 +353,13 @@ Note: ISBN rejection does NOT trigger fuse melts. The vision sidecar responded s
 - **Total per rejection: ~R0.50-R2.50 (~$0.03-$0.14 USD)**
 
 Note: ISBN rejections are expensive relative to their outcome — the user gets no book added but the full vision pipeline cost is incurred. The manual ISBN entry fallback (US-1.1.5) avoids this cost entirely.
+
+---
+
+## 16. Cross-References
+
+- **CLAUDE.md** — "ISBN Hard Gate": *"No book enters the system without a verified ISBN from Open Library or Google Books. This is non-negotiable."* This user story is the user-facing realisation of that core convention.
+- **ADR-006** — `docs/decisions/006-ambiguous-classification-as-rejection.md`. Both ambiguous classification and ISBN-not-found terminate the pipeline with `{:cancel, reason}` rather than `{:error, ...}` so Oban does not retry. ISBN-not-found is treated as a permanent failure for the same reason: the same image against the same upstream catalogues will produce the same result.
+- **US-1.1.1** — happy-path upload flow (`docs/user_stories/US-1.1.1-upload-photo.md`).
+- **US-1.1.3** — non-book rejection (`docs/user_stories/US-1.1.3-non-book-rejection.md`) — sibling sad path, same `mark_rejected` mechanics with a different reason.
+- **US-1.1.5** — manual ISBN entry (`docs/user_stories/US-1.1.5-manual-isbn-entry.md`) — primary recovery path from this rejection.

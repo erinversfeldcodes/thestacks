@@ -26,6 +26,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load version pins (OTP, Elixir, Node, Python, Postgres).
+# Same file consumed by .github/workflows/ci.yml via the `versions` job.
+if [[ -f "$REPO_ROOT/.versions" ]]; then
+    # shellcheck source=../.versions
+    source "$REPO_ROOT/.versions"
+fi
+
 # Load local .env for dev secrets (FLY_API_TOKEN, NEON_*, etc.) when outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
@@ -279,9 +286,18 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
 
         if command -v docker &>/dev/null; then
             echo "==> OWASP ZAP baseline scan..."
+            # Pinned to 2.16.1 — the upstream `:stable` tag drifted to a
+            # state where the Automation Framework writes its summary file
+            # to a path zap-baseline.py doesn't expect (`/home/zap/zap_out.json`)
+            # and `--autooff` mode times out downloading add-ons before the
+            # scan starts. 2.16.1 is the last known-good version where
+            # baseline.py + AF + add-on bundle line up. Bumping the pin is
+            # a one-line edit; pair with a fresh local re-run to confirm
+            # the new tag still produces the `FAIL-NEW: 0` line the grep
+            # below depends on.
             zap_out="$(docker run --rm \
                 --mount type=tmpfs,destination=/zap/wrk \
-                ghcr.io/zaproxy/zaproxy:stable \
+                ghcr.io/zaproxy/zaproxy:2.16.1 \
                 zap-baseline.py -t "${_core_url}" 2>&1)" || true
             echo "${zap_out}"
             if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
@@ -352,7 +368,7 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             _placement="$(curl -sf "${_core_url}/api/bookshelves/library" \
                 -H "Authorization: Bearer ${_u1}" 2>/dev/null \
                 | python3 -c \
-                    "import json,sys; d=json.load(sys.stdin); p=d.get('placements',[]); print(p[0]['id'] if p else '')" \
+                    "import json,sys; d=json.load(sys.stdin); s=d.get('shelves',[]); p=[pl for sh in s for pl in sh.get('placements',[])]; print(p[0]['id'] if p else '')" \
                 2>/dev/null || true)"
             if [[ -n "${_placement}" ]]; then
                 _idor_code="$(curl -o /dev/null -s -w "%{http_code}" \

@@ -55,9 +55,9 @@ The following quality dimensions apply to all data products. Each SLA section sp
 - Some stores do not expose structured price data (JavaScript-rendered pages). These stores may have lower completeness.
 
 **dbt models:**
-- `stg_prices` — staging (1:1 with `price_snapshots`, light cleaning)
-- `int_price_history` — price over time per edition per store
-- `mart_price_alerts` — books below user-configured threshold
+- `stg_price_snapshots` — staging (1:1 with `op.price_snapshots`, proto-generated)
+- `int_price_trends` — price over time per edition per store
+- `mart_book_prices` — current and historical prices surfaced to users
 
 ### 2.2 Review Data
 
@@ -76,8 +76,9 @@ The following quality dimensions apply to all data products. Each SLA section sp
 **LLM faithfulness definition:** A review summary is "faithful" if every URL cited in the summary was present in the raw scraped data provided to the LLM. A summary with a fabricated URL is a faithfulness failure. This is tracked in `mart_llm_faithfulness` (see `docs/technical-architecture.md` section 29).
 
 **dbt models:**
-- `stg_reviews_goodreads`, `stg_reviews_reddit`, `stg_reviews_storygraph`
-- `int_reviews_unified` — all review sources in a common schema
+- `stg_review_snapshots` — staging (1:1 with `op.review_snapshots`, unified across GoodReads / Reddit / StoryGraph via `source` column)
+- `int_review_sentiment` — aggregated sentiment per work across sources
+- `mart_book_reviews` — review summaries surfaced to users
 - `mart_llm_faithfulness` — per-summary faithfulness tracking
 
 ### 2.3 Author Intelligence
@@ -92,8 +93,8 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | Completeness — RSS | > 20% of authors with websites have a detected RSS feed | Informational |
 
 **dbt models:**
-- `stg_authors` (from `op.authors`)
-- `mart_author_activity` — upcoming events and recent releases per author
+- `stg_authors` (from `op.authors`, proto-generated)
+- `int_author_activity` — upcoming events and recent releases per author
 
 ### 2.4 Events
 
@@ -106,8 +107,9 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | Completeness | > 60% of verified bookstores have at least one event in the next 90 days | Informational — not all bookstores run events |
 
 **dbt models:**
-- `stg_bookstore_events`, `stg_third_space_events`
-- `mart_author_activity` — events matched to authors in user's collection
+- `stg_bookstore_events`, `stg_third_space_events` (proto-generated from `op.bookstore_events`, `op.third_space_events`)
+- `int_event_matches` — events matched to authors and books in user's collection
+- `int_author_activity` — events rolled up per author
 
 ### 2.5 LLM Outputs (Blog Post Associations)
 
@@ -120,7 +122,9 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | Completeness | > 90% of published blog posts with > 200 words have at least one association generated | Alert if < 70% |
 
 **dbt models:**
-- `mart_blog_activity` — post engagement, association quality
+- `stg_post_book_associations` (proto-generated from `op.post_book_associations`)
+- `int_blog_engagement` — post views, comments, association quality
+- `mart_blog_activity` — post engagement surfaced to author dashboards
 
 ### 2.6 Scraper Configs (TOML)
 
@@ -130,13 +134,13 @@ The following quality dimensions apply to all data products. Each SLA section sp
 |-----------|-----------|----------------|
 | Validity | All TOML files parse without errors | Rust scraper returns non-zero exit on invalid TOML → CI fails |
 | Liveness | Each active scraper config produces at least one price snapshot per 7 days | Alert if a config produces 0 results for 7 consecutive days |
-| HTML structure | CSS selectors still resolve on the target page | HTML change detection via `int_source_health` (Issue #068) |
+| HTML structure | CSS selectors still resolve on the target page | HTML change detection via `int_source_health` (delivered by Issue #068) |
 
 ---
 
 ## 3. Source Health Monitoring
 
-Source health monitoring tracks whether each external data source is healthy. This is specified here for implementation by Issue #068.
+Source health monitoring tracks whether each external data source is healthy. This was implemented by Issue #068 — staging in `stg_source_health_checks`, rollup in `int_source_health`.
 
 ### Source health record structure
 
@@ -233,26 +237,32 @@ Alert if 7-day faithfulness rate drops below 95%.
 
 ## 5. dbt Model Scope Reference
 
-The following dbt models support the data quality framework. All are scoped in the work planned for Issue #052.
+The following dbt models support the data quality framework. The intermediate and mart layers were delivered by Issue #052; source health and quality-trend marts by Issue #068. Staging models are proto-generated (`mix proto.sync`) per ADR-009 / ADR-010 — see `dbt/models/staging/` for the full list of 30+ staging views.
 
-| dbt model | Layer | Purpose | Status |
-|-----------|-------|---------|--------|
-| `stg_price_snapshots` | staging | Clean price data | Scoped in #052 |
-| `stg_review_snapshots` | staging | Clean review data | Scoped in #052 |
-| `stg_books` | staging | Clean book/work data | Scoped in #052 |
-| `stg_authors` | staging | Clean author data | Scoped in #052 |
-| `stg_event_log` | staging | Clean event log | Scoped in #052 |
-| `int_price_history` | intermediate | Price over time per edition per store | Scoped in #052 |
-| `int_reviews_unified` | intermediate | All review sources in common schema | Scoped in #052 |
-| `int_source_health` | intermediate | Per-source health tracking (Issue #068) | Pending #068 |
-| `int_book_enriched` | intermediate | Book + all metadata joined | Scoped in #052 |
-| `mart_price_alerts` | mart | Books below price threshold | Scoped in #052 |
-| `mart_author_activity` | mart | Recent events and releases per author | Scoped in #052 |
-| `mart_community_read_count` | mart | Aggregate read count per work | Scoped in #052 |
-| `mart_platform_searchable` | mart | Cross-user search index | Scoped in #052 |
-| `mart_data_quality_trend` | mart | Quality metric trends over time | Pending #068 |
-| `mart_enrichment_gaps` | mart | Books missing enrichment | Pending #068 |
-| `mart_llm_faithfulness` | mart | Per-summary faithfulness tracking | Pending #068 |
+| dbt model | Layer | Purpose |
+|-----------|-------|---------|
+| `stg_price_snapshots` | staging | Clean price data (proto-generated) |
+| `stg_review_snapshots` | staging | Clean review data (proto-generated) |
+| `stg_books` / `stg_book_editions` | staging | Work and edition data (proto-generated) |
+| `stg_authors` | staging | Author data (proto-generated) |
+| `stg_event_log` | staging | Event log (proto-generated) |
+| `stg_source_health_checks` | staging | Per-source health probe results (proto-generated) |
+| `int_price_trends` | intermediate | Price over time per edition per store |
+| `int_review_sentiment` | intermediate | Aggregated review sentiment across sources |
+| `int_source_health` | intermediate | Per-source health tracking |
+| `int_book_detail_view` | intermediate | Book + all metadata joined |
+| `int_author_activity` | intermediate | Recent events and releases per author |
+| `int_event_matches` | intermediate | Events matched to authors/books in user collections |
+| `mart_book_prices` | mart | Current and historical prices surfaced to users |
+| `mart_book_reviews` | mart | Review summaries surfaced to users |
+| `mart_community_read_count` | mart | Aggregate read count per work |
+| `mart_platform_searchable` | mart | Cross-user search index |
+| `mart_data_freshness` | mart | Freshness panel data per source/shelf |
+| `mart_data_quality_trend` | mart | Quality metric trends over time |
+| `mart_enrichment_gaps` | mart | Books missing enrichment |
+| `mart_llm_faithfulness` | mart | Per-summary faithfulness tracking |
+| `mart_cost_tracking` | mart | LLM / infra cost rollups |
+| `mart_system_health` | mart | Job stats and platform health rollup |
 
 **Note on Tier 3/4 data exclusion:** dbt models must never include Tier 3 (sensitive) or Tier 4 (external personal) data. The `wh` schema is available to `stacks_dbt` and `stacks_readonly` roles — any PII that reaches these models would be accessible to analytics queries. The staging models enforce this with column-level exclusions. The following columns are explicitly excluded from all warehouse models:
 - `users.password_hash`

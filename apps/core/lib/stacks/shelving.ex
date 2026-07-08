@@ -18,6 +18,7 @@ defmodule Stacks.Shelving do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Audit
+  alias Stacks.Books.Book
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
 
@@ -174,6 +175,7 @@ defmodule Stacks.Shelving do
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
     default_shelf = get_or_create_default_shelf(bookshelf.id)
+    visibility_tier = lookup_book_visibility_tier(book_id)
 
     Multi.new()
     |> Multi.insert(
@@ -189,7 +191,11 @@ defmodule Stacks.Shelving do
         event_type: "placement.created",
         aggregate_type: "placement",
         aggregate_id: p.id,
-        payload: %{book_id: book_id, bookshelf: bookshelf_name}
+        payload: %{
+          book_id: book_id,
+          bookshelf: bookshelf_name,
+          visibility_tier: visibility_tier
+        }
       })
 
       {:ok, p}
@@ -809,6 +815,18 @@ defmodule Stacks.Shelving do
 
       shelf ->
         shelf
+    end
+  end
+
+  # Looks up the book's visibility_tier so downstream event consumers (e.g. the
+  # GDPR/age-gate filter on the public timeline) can decide whether to surface
+  # this placement without a follow-up book lookup. Returns nil if the book
+  # cannot be loaded — the placement insert that follows will fail the FK check
+  # in that case, so a nil here is harmless.
+  defp lookup_book_visibility_tier(book_id) do
+    case Repo.get(Book, book_id) do
+      %Book{visibility_tier: tier} -> tier
+      _ -> nil
     end
   end
 

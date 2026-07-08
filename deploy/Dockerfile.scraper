@@ -1,8 +1,11 @@
 # Chef stage — installs cargo-chef and musl toolchain once, reused by planner + builder
 FROM rust:1.88 AS chef
 
+# --locked pins cargo-chef's transitive deps (e.g. cargo-platform) to the
+# versions it was published with. Without this, cargo-platform 0.3.3 gets
+# pulled in and demands rustc 1.91, which mismatches the 1.88 base image.
 # hadolint ignore=DL3008
-RUN cargo install cargo-chef && \
+RUN cargo install cargo-chef --locked && \
     rustup target add x86_64-unknown-linux-musl && \
     apt-get update && apt-get install -y --no-install-recommends musl-tools && rm -rf /var/lib/apt/lists/*
 

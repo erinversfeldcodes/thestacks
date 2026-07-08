@@ -16,18 +16,22 @@ Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fl
 ## Owned Domains
 
 ### Fly.io Configuration (in `deploy/`)
-- `fly.core.toml` — Phoenix app (2x shared-cpu-1x, 512MB, auto-stop)
-- `fly.scraper.toml` — Rust microservice (1x shared-cpu-1x, 256MB, auto-stop)
-- Internal networking: core and scraper communicate via Fly private network (`.internal` DNS)
+- `fly.core.toml` — Phoenix app (auto-stop machines, IAD region)
+- `fly.scraper.toml` — Rust microservice (internal-only, no `[[services]]` block)
+- `fly.searxng.toml` — SearXNG metasearch (internal-only)
+- `fly.log-shipper.toml` — Vector log shipper (internal-only)
+- Internal networking: core, scraper, searxng, log-shipper communicate via Fly private network (`.internal` DNS)
 
 ### Modal (vision service)
 - `apps/vision/modal_app.py` — Modal app: `VisionModel` GPU class (A10G) + `vision_api` ASGI function
 - Deploy: `modal deploy apps/vision/modal_app.py`
 - Secret: `modal secret create thestacks-vision VISION_HMAC_SECRET=<secret>`
 
-### Dockerfiles (in `deploy/` or per-app)
-- `apps/core/Dockerfile` — Elixir release build (multi-stage: build -> release)
-- `apps/scraper/Dockerfile` — Rust musl build (static binary)
+### Dockerfiles (in `deploy/`)
+- `deploy/Dockerfile.core` — Elixir release build (multi-stage: build -> release)
+- `deploy/Dockerfile.scraper` — Rust musl build (static binary)
+- `deploy/Dockerfile.vision` — Vision sidecar (used for local/Fly fallback; Modal is primary)
+- `deploy/log-shipper/Dockerfile`, `deploy/searxng/Dockerfile` — supporting services
 
 ### GitHub Actions (in `.github/workflows/`)
 - `ci.yml` — Main CI pipeline with dorny/paths-filter change detection
@@ -37,17 +41,34 @@ Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fl
   - Python: ruff, mypy, pytest
   - Protobuf: buf lint, buf breaking
   - dbt: dbt test (against test DB)
-- `security.yml` — Security scanning (Semgrep, CodeQL, Trivy, Gitleaks, Checkov, Hadolint)
-- `deploy-preview.yml` — Deploy preview environment from PR
-- `deploy-production.yml` — Deploy to production on main merge
-- `scheduled.yml` — Nightly chaos tests, weekly load/security/visual regression
+- `codeql.yml` — CodeQL security analysis
+- `scorecard.yml` — OSSF Scorecard
+- `deploy-production.yml` — Deploy to production on main merge (uses composite rollback action)
+- `tag-main.yml` — Tag releases on main
+- `cleanup-pre-rollback-branches.yml` — Reap pre-rollback Neon branches
+- `reseed-staging.yml` — Reseed staging environment
 
-### Nix/Flox (in `nix/`)
-- `flake.nix` — Dev shell with Elixir, Elm, Rust, Python, PostgreSQL, dbt, buf, just
+### Composite Actions (in `.github/actions/`)
+- `rollback-production/` — Encapsulates production rollback flow (see Issue #137)
+- `check-slo-gate/` — Wraps `scripts/check-slo-gate.sh` for post-deploy SLO checks
+
+### Canonical Scripts (in `scripts/`)
+- `ci.sh` — local re-run of the CI matrix
+- `deploy-stack.sh` — deploy all Fly apps in dependency order
+- `deploy-preview.sh` — deploy a PR preview (Neon branch + Fly preview apps)
+- `cleanup-preview.sh` — tear down a preview environment
+- `check-slo-gate.sh` — post-deploy SLO probe gate
+- `rollback-production.sh` — rollback production release (called by composite action)
+- `probe-production.sh`, `preflight-resolver-health.sh`, `warmup-vision.sh` — deploy-time probes
+- `security.sh` — canonical security scan suite (Sobelow, Semgrep, Trivy, Gitleaks, Checkov, Hadolint)
+
+### Nix/Flox
+- `flake.nix` (project root) — primary dev shell with Elixir, Elm, Rust, Python, PostgreSQL, dbt, buf, just
+- `nix/flake.nix` — supplementary nix module
 - Single `nix develop` or `flox activate` gives contributors an identical environment
 
 ### Task Runner
-- `justfile` at project root — common commands for dev, test, build, deploy per service
+- `Justfile` at project root — common commands for dev, test, build, deploy per service
 
 ## Key Patterns
 
@@ -68,12 +89,20 @@ dorny/paths-filter triggers only relevant test suites:
 Fly.io secrets for production. `.env` files (gitignored) for local. Never commit secrets.
 
 ### Rolling deploys
-Fly.io handles rolling deploys. Health checks gate rollout. Rollback via `flyctl releases rollback`.
+Fly.io handles rolling deploys. Health checks gate rollout. SLO probe gate runs post-deploy via `scripts/check-slo-gate.sh`. Rollback via the composite action at `.github/actions/rollback-production/` (Issue #137) or `scripts/rollback-production.sh`. Pre-rollback Neon branches are reaped by `cleanup-pre-rollback-branches.yml`.
+
+### Release-to-main workflow (Issue #136)
+Trunk-based: merges to `main` trigger `deploy-production.yml`. `tag-main.yml` tags each successful deploy. Rollback restores both the Fly release and the Neon DB branch.
 
 ## Context Loading Requirements
 ```
 ./docs/agents/standards/code-quality.md
+./docs/agents/standards/security.md
+./docs/agents/standards/testing.md
+./docs/agents/reviewers/platform-reviewer.md
 ./docs/technical-architecture.md (sections 17, 19)
+./docs/decisions/001-modal-over-together-ai.md
+./docs/decisions/002-oban-over-kafka.md
 ```
 
 ## Integration Handoffs

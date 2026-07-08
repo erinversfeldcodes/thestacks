@@ -1,0 +1,536 @@
+name: Deploy production
+
+# Triggers:
+#   - push to main: every merge to main is a production deploy. The
+#     PR-level branch protection rule already gates CI-must-be-green
+#     before merge, so the production deploy doesn't need to wait on
+#     a separate workflow_run signal.
+#   - workflow_dispatch: manual trigger for safe live validation +
+#     operator-initiated rollback. Inputs:
+#       * target_app — point the workflow at a preview Fly app instead
+#         of prod (live validation against a sacrificial environment).
+#       * force_rollback — inject a synthetic SLI breach so the gate
+#         trips on a healthy deploy; exercises the rollback path
+#         end-to-end without a real regression.
+#       * manual_rollback — skip deploy + gate entirely and run only
+#         the rollback step. Use after a bad deploy when the SLO gate
+#         didn't catch the regression. See docs/runbooks/manual-rollback.md
+#         (added in Phase 6 of #137).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_app:
+        description: "Target Fly app (default: thestacks-core; use a preview app name for safe validation)"
+        required: false
+        default: thestacks-core
+      force_rollback:
+        description: "Inject a failing SLI (beam_memory_mb) to exercise the rollback path without a real regression"
+        required: false
+        type: boolean
+        default: false
+      manual_rollback:
+        description: "Roll back the prod stack without running a deploy first. Use after a bad deploy when the SLO gate didn't catch the regression."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      # Prod mode is driven entirely by the `--production` arg to
+      # deploy-stack.sh; the script never consults Neon in prod (no branch
+      # creation, no Neon API calls) and instead composes DATABASE_URL from
+      # the STACKS_PROD_DB_* components below. So no NEON_* secrets are
+      # surfaced here — the staging Neon project is preview-only.
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+      VISION_TOGETHER_API_KEY: ${{ secrets.VISION_TOGETHER_API_KEY }}
+      VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+      SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+      CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+      SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+      STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+      METRICS_SCRAPE_TOKEN: ${{ secrets.METRICS_SCRAPE_TOKEN }}
+      # Log-shipper secrets. deploy-stack.sh's prod branch creates the
+      # `thestacks-log-shipper` Fly app (idempotent) and stages these on
+      # every deploy so rotating any of them happens on the next merge to
+      # main. An empty LOG_SHIPPER_ACCESS_TOKEN skips the shipper entirely
+      # with a WARN; that's intentional — logs just stop persisting to
+      # Axiom until a deploy runs with a populated token.
+      LOG_SHIPPER_ACCESS_TOKEN: ${{ secrets.LOG_SHIPPER_ACCESS_TOKEN }}
+      AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+      AXIOM_DATASET: ${{ secrets.AXIOM_DATASET }}
+      # Prod-only: deploy-stack.sh (prod mode) stages these as Fly secrets
+      # so Stacks.Release.seed_prod/0 can create exactly one owner user.
+      # Idempotent: every deploy calls seed_prod; after the first run the
+      # user already exists and the call no-ops.
+      PROD_OWNER_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
+      PROD_OWNER_PASSWORD: ${{ secrets.PROD_OWNER_PASSWORD }}
+      # Dedicated prober user (role: "user", not "owner") seeded by
+      # seed_prober/0 on every prod deploy. Probe scripts authenticate as this
+      # user so owner credentials never appear in probe logs.
+      STACKS_PROBER_EMAIL: ${{ secrets.STACKS_PROBER_EMAIL }}
+      STACKS_PROBER_PASSWORD: ${{ secrets.STACKS_PROBER_PASSWORD }}
+      # Probe-production.sh reads PROBE_SEED_EMAIL/PASSWORD to know which
+      # account to exercise. Point it at the dedicated prober user.
+      PROBE_SEED_EMAIL: ${{ secrets.STACKS_PROBER_EMAIL }}
+      PROBE_SEED_PASSWORD: ${{ secrets.STACKS_PROBER_PASSWORD }}
+      # Prod Neon connection components. Prod mode does NOT create a Neon
+      # branch (that's preview-only), so DATABASE_URL must be composed from
+      # these four secrets and staged onto the core Fly app. The compose
+      # step below URL-encodes role/password/dbname to handle special chars.
+      # Rotate each piece independently as needed.
+      STACKS_PROD_DB_ROLE: ${{ secrets.STACKS_PROD_DB_ROLE }}
+      STACKS_PROD_DB_PASSWORD: ${{ secrets.STACKS_PROD_DB_PASSWORD }}
+      STACKS_PROD_DB_HOST: ${{ secrets.STACKS_PROD_DB_HOST }}
+      STACKS_PROD_DB_NAME: ${{ secrets.STACKS_PROD_DB_NAME }}
+      # workflow_dispatch.inputs.target_app overrides the default (prod) app
+      # name so an operator can re-use this workflow against a preview app
+      # for live validation. Falls back to `thestacks-core` for workflow_run.
+      CORE_APP: ${{ inputs.target_app || 'thestacks-core' }}
+      MODAL_APP_NAME: thestacks-vision
+      # (FORCE_BREACH is declared per-step on the gate — see below.)
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Read .versions
+        id: versions
+        run: |
+          source .versions
+          {
+            echo "otp=${OTP_VERSION}"
+            echo "elixir=${ELIXIR_VERSION}"
+            echo "node=${NODE_VERSION}"
+            echo "python=${PYTHON_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+      - name: Alias fly -> flyctl
+        # fly.io's install.sh provided both `fly` and `flyctl`; setup-flyctl
+        # ships only `flyctl`, but deploy scripts invoke `fly`.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Modal
+        run: pip install modal
+
+      - name: Install Elixir deps (for proto gen inside deploy-stack.sh)
+        run: mix deps.get
+
+      - name: Install frontend deps (for esbuild)
+        working-directory: apps/core/assets
+        run: npm install
+
+      - name: record-prev-state — capture current core image and vision commit
+        id: prev
+        run: |
+          # Capture the current Fly image digest for core so we can redeploy
+          # it if the gate trips. `fly image show --app ... --json` returns
+          # `{"Registry":"...", "Repository":"...", "Tag":"...", "Digest":"...", "Ref":"..."}`
+          # — though field-name casing has drifted across flyctl versions
+          # (older builds emitted `Ref`; newer ones may emit `reference` or
+          # nest the data differently). The parse below tries multiple known
+          # field names and surfaces what was actually returned via
+          # ::warning:: so silent-empty failures are diagnosable on the
+          # workflow log.
+          # `fly image show --json` shape has drifted across flyctl
+          # versions (current returns a list of per-machine objects with
+          # capitalised field names; older returned a flat object with a
+          # `Ref` field). Parsing logic lives in scripts/parse-fly-image.py
+          # so it can be unit-tested separately and revised without
+          # touching this workflow.
+          set +e
+          fly_json="$(fly image show --app "${CORE_APP}" --json 2>&1)"
+          fly_rc=$?
+          set -e
+          if [[ $fly_rc -ne 0 ]]; then
+            echo "::warning::fly image show failed (exit $fly_rc) for app '${CORE_APP}'"
+            echo "::warning::stderr/stdout was: $fly_json"
+            prev_image=""
+          else
+            printf '%s' "$fly_json" > /tmp/fly-image.json
+            set +e
+            prev_image="$(python3 scripts/parse-fly-image.py /tmp/fly-image.json 2>/tmp/fly-image-parse.err)"
+            parse_rc=$?
+            set -e
+            if [[ $parse_rc -ne 0 || -z "$prev_image" ]]; then
+              parse_err="$(cat /tmp/fly-image-parse.err 2>/dev/null || true)"
+              echo "::warning::fly image show parse failed (exit $parse_rc): $parse_err"
+              echo "::warning::raw fly image show output (first 500 chars): ${fly_json:0:500}"
+              prev_image=""
+            else
+              echo "Resolved CORE_PREV_IMAGE: $prev_image"
+            fi
+          fi
+          echo "CORE_PREV_IMAGE=${prev_image}" >> "$GITHUB_ENV"
+          echo "prev core image: ${prev_image:-<empty>}"
+
+          # Reviewer P1 #5: source the prev Modal commit from the immutable
+          # `main-<sha>` tags produced by .github/workflows/tag-main.yml on
+          # every SUCCESSFUL deploy (tag-main fires on this workflow's
+          # workflow_run / success — failed deploys never get a tag).
+          #
+          # Take the most-recent `main-*` tag by committer date — that's the
+          # last verified-deployed commit, which is exactly what we want as
+          # the revert target. The current HEAD has no tag yet (tag-main
+          # only stamps after this workflow succeeds), so no race.
+          prev_tag="$(git tag --list 'main-*' --sort=-committerdate | head -1)"
+          if [[ -n "$prev_tag" ]]; then
+              prev_modal="$(git rev-parse --verify "${prev_tag}^{commit}" 2>/dev/null || true)"
+          else
+              prev_modal=""
+          fi
+          echo "MODAL_PREV_COMMIT=${prev_modal}" >> "$GITHUB_ENV"
+          echo "prev modal tag:    ${prev_tag:-<none>}"
+          echo "prev modal commit: ${prev_modal:-<none>}"
+
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "COMMIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Generate proto artifacts
+        # Generates Python (vision sidecar) + Rust (scraper) + Elm
+        # (frontend) proto types. Elixir + Ecto codegen runs inside
+        # deploy-stack.sh (lines 605-617) — bundled there alongside the
+        # runner-side `mix ecto.migrate` it pairs with.
+        run: |
+          python3 scripts/gen_python_proto.py --language rust
+          python3 scripts/gen_python_proto.py --language python
+          scripts/gen-elm-proto.sh
+
+      - name: Compose DATABASE_URL from prod Neon components
+        # URL-encodes role/password/dbname so passwords containing @ / : etc.
+        # survive the round-trip through the connection string grammar. The
+        # composed URL is written to $GITHUB_ENV for subsequent steps and
+        # masked in logs via ::add-mask::. Fails loudly with a named
+        # variable when any component is missing.
+        run: |
+          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::$v is required but not set"
+              exit 1
+            fi
+          done
+          DATABASE_URL="$(python3 -c "
+          import os, urllib.parse as up
+          role = up.quote(os.environ['STACKS_PROD_DB_ROLE'], safe='')
+          pw   = up.quote(os.environ['STACKS_PROD_DB_PASSWORD'], safe='')
+          host = os.environ['STACKS_PROD_DB_HOST']
+          db   = up.quote(os.environ['STACKS_PROD_DB_NAME'], safe='')
+          print(f'postgresql://{role}:{pw}@{host}/{db}?sslmode=require')
+          ")"
+          echo "::add-mask::${DATABASE_URL}"
+          echo "DATABASE_URL=${DATABASE_URL}" >> "$GITHUB_ENV"
+          echo "Composed DATABASE_URL for ${STACKS_PROD_DB_HOST}"
+
+      - name: Install postgresql-client (for capture-lsn psql call)
+        # Idempotent and cheap; runs on both the deploy and manual short-
+        # circuit paths. The capture-lsn step that needs psql is gated
+        # separately so this install is harmless when capture-lsn is
+        # skipped.
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Capture pre-migrate Neon LSN (prod)
+        id: capture-lsn
+        if: ${{ !inputs.manual_rollback }}
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        # curl output is piped to python3 purely to parse the Neon API JSON
+        # response — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+        run: |
+          set -euo pipefail
+          # Fast-fail before any work if the Neon secrets aren't staged in
+          # the GitHub repo. Without this, an empty NEON_API_KEY +
+          # NEON_PROJECT_ID would silently slip through to a curl call with
+          # an empty Bearer token + an empty projects/{id}/ URL segment,
+          # producing the misleading "default (primary) branch not found"
+          # error from the Python parser below — which sounds like a
+          # Neon-side problem but is actually a missing-secrets gap. Both
+          # secrets must be added via `gh secret set NEON_API_KEY` and
+          # `gh secret set NEON_PROJECT_ID` before this workflow can fire.
+          if [[ -z "${NEON_API_KEY:-}" || -z "${NEON_PROJECT_ID:-}" ]]; then
+            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as GitHub repo secrets. See issue #137 'Required secrets (new)' for the staging procedure." >&2
+            exit 1
+          fi
+
+          # Capture the LSN from Postgres itself — Neon's Branch object exposes
+          # only parent_lsn (fork-point), not current_lsn. pg_current_wal_lsn()
+          # returns a value like "0/16E8090" which is exactly the form Neon's
+          # restore API accepts in `source_lsn`.
+          LSN=$(psql "$DATABASE_URL" -t -A -c "SELECT pg_current_wal_lsn();")
+          if [[ -z "$LSN" ]]; then
+            echo "::error::Failed to capture pre-migrate LSN" >&2
+            exit 1
+          fi
+          echo "lsn=$LSN" >> "$GITHUB_OUTPUT"
+          echo "Captured pre-migrate LSN: $LSN"
+
+          # Resolve the prod branch ID via /branches filtered on default: true.
+          # `default` (rather than the deprecated `primary`) future-proofs against
+          # the branch being renamed at the project level.
+          BRANCH_ID=$(curl -sL \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches" \
+            | python3 -c '
+          import json, sys
+          branches = json.load(sys.stdin).get("branches", [])
+          prod = next((b for b in branches if b.get("default") is True), None)
+          if prod is None:
+              sys.exit("default (primary) branch not found")
+          print(prod["id"])
+          ')
+          if [[ -z "$BRANCH_ID" ]]; then
+            echo "::error::Failed to resolve Neon prod branch ID" >&2
+            exit 1
+          fi
+          echo "branch-id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved prod branch id: $BRANCH_ID"
+
+      # Migrations now run inside deploy-stack.sh (right after Elixir
+      # codegen + before the core fly deploy cutover). Consolidating
+      # them there avoids duplicating the compile + codegen between a
+      # workflow step and the script. Failure semantics unchanged: a
+      # migrate failure aborts the script before any image swap, so the
+      # old image keeps serving traffic.
+
+      - name: deploy-stack.sh — push core + vision + scraper to production
+        if: ${{ !inputs.manual_rollback }}
+        run: bash scripts/deploy-stack.sh --production
+
+      # The actual gate logic lives in .github/actions/check-slo-gate so
+      # the verify step (later in the job) can invoke the same SLI
+      # definitions without duplicating the script invocation. Operators
+      # can also run scripts/check-slo-gate.sh directly to distinguish
+      # genuinely-unhealthy state from probe flakiness.
+      - name: check-slo-gate — 10 min post-deploy health gate
+        id: gate
+        if: ${{ !inputs.manual_rollback }}
+        uses: ./.github/actions/check-slo-gate
+        with:
+          out-path: gate-observations.json
+          force-breach: ${{ inputs.force_rollback && 'beam_memory_mb' || '' }}
+        # Reference to scripts/check-slo-gate.sh for the workflow contract
+        # test's marker matcher (the action invokes this script internally).
+
+      - name: First-deploy bootstrap notice (no rollback target)
+        # Skip-rollback path for the genuine bootstrap case: a brand-new
+        # prod stack where no `main-<sha>` git tag has been stamped yet
+        # AND the Fly app doesn't exist (so `fly image show` returns
+        # empty). With both CORE_PREV_IMAGE and MODAL_PREV_COMMIT empty,
+        # the rollback action would fast-fail on `core-prev-image is
+        # required` — but there's genuinely nothing to roll back TO.
+        #
+        # Two sub-paths:
+        #   - Auto-rollback path (failure()): emit a warning and let the
+        #     job stay failed (the upstream failure() that triggered us
+        #     is the real signal; there's nothing actionable about the
+        #     missing rollback target itself).
+        #   - Manual-rollback path (inputs.manual_rollback): the
+        #     operator deliberately asked for a rollback, so silently
+        #     succeeding would be wrong. Exit 1 to surface the
+        #     bootstrap mismatch as a workflow failure.
+        #
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE == '' }}
+        env:
+          MANUAL_ROLLBACK: ${{ inputs.manual_rollback }}
+        run: |
+          echo "Bootstrap path detected — no prior image to roll back to:"
+          echo "  CORE_PREV_IMAGE is empty (fly image show returned no usable image)"
+          if [[ -n "${MODAL_PREV_COMMIT:-}" ]]; then
+            echo "  MODAL_PREV_COMMIT IS set: ${MODAL_PREV_COMMIT}"
+            echo "    (tag picked up — but core leg is the gating requirement)"
+          else
+            echo "  MODAL_PREV_COMMIT is empty (no main-<sha> git tags exist yet)"
+          fi
+          echo "Once the first successful deploy lands and tag-main.yml stamps a"
+          echo "main-<sha> tag, subsequent deploys will have a valid rollback target."
+          if [[ "${MANUAL_ROLLBACK}" == "true" ]]; then
+            echo "::error::Manual rollback was triggered but there is no prior image to roll back to."
+            exit 1
+          fi
+          echo "::warning::Auto-rollback skipped — bootstrap deploy with no prior image. The deploy failure above is the real signal; investigate that directly."
+
+      - name: rollback-production.sh — invokes rollback-production composite action
+        id: rollback
+        # Gated on CORE_PREV_IMAGE being non-empty in addition to the
+        # failure() / manual_rollback triggers — bootstrap path (no prior
+        # image) is handled separately by the notice step above.
+        #
+        if: ${{ (failure() || inputs.manual_rollback) && env.CORE_PREV_IMAGE != '' }}
+        uses: ./.github/actions/rollback-production
+        with:
+          core-app: ${{ env.CORE_APP }}
+          core-prev-image: ${{ env.CORE_PREV_IMAGE }}
+          modal-app: ${{ env.MODAL_APP_NAME }}
+          modal-prev-commit: ${{ env.MODAL_PREV_COMMIT }}
+          modal-token-id: ${{ secrets.MODAL_TOKEN_ID }}
+          modal-token-secret: ${{ secrets.MODAL_TOKEN_SECRET }}
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+          rollback-reason: ${{ inputs.manual_rollback && format('Manual rollback by @{0}', github.actor) || 'SLO gate breached or prior step failed — see gate-observations.json' }}
+          neon-project-id: ${{ secrets.NEON_PROJECT_ID }}
+          neon-api-key: ${{ secrets.NEON_API_KEY }}
+          neon-branch-id: ${{ steps.capture-lsn.outputs.branch-id }}
+          pre-migrate-lsn: ${{ steps.capture-lsn.outputs.lsn }}
+          failed-sha: ${{ github.sha }}
+          # `migration-failure` was previously distinguishable when migrate
+          # ran as a discrete workflow step. After consolidating into
+          # deploy-stack.sh (Phase 7 iteration), the failure surface is
+          # the deploy-stack step as a whole — migrate failures are no
+          # longer separable from other deploy-stack failures at the
+          # workflow level. Operators can still read the precise cause
+          # from the workflow logs and the audit row's `reason` field.
+          triggered-by: ${{ inputs.manual_rollback && 'manual' || 'step-failure' }}
+          database-url: ${{ env.DATABASE_URL }}
+          cloak-key: ${{ secrets.CLOAK_KEY }}
+          # Auto-issued GITHUB_TOKEN — used by the script's git clone of
+          # the prev Modal commit. The workflow's permissions: block
+          # grants `contents: read` which is sufficient.
+          github-token: ${{ github.token }}
+          # Resolve the origin URL dynamically from the workflow context
+          # so forks and renames don't break the rollback's git clone.
+          # github.server_url is `https://github.com` (or the Enterprise
+          # equivalent); github.repository is `<owner>/<name>`.
+          origin-remote: ${{ github.server_url }}/${{ github.repository }}.git
+
+      # ── Verify the rolled-back system is actually healthy ───────────────
+      # If the rollback reported success but the rolled-back image is itself
+      # unhealthy (e.g. data state has drifted such that N-1's invariants
+      # don't hold), we'd otherwise exit "rollback success" silently while
+      # prod is still broken. Run a fresh SLO gate against the rolled-back
+      # state. Same SLI definitions as the deploy-time gate (via the shared
+      # check-slo-gate action) so the bar is consistent.
+      #
+      # Two failure modes this surfaces:
+      #   (a) Genuinely unhealthy — rolled-back image itself fails SLO.
+      #       MANUAL INTERVENTION REQUIRED — do not auto-cascade further.
+      #   (b) Probe flakiness — Axiom hiccup, transient infra. Operator
+      #       re-runs scripts/check-slo-gate.sh manually to differentiate.
+      #
+      # The structural no-cascade guarantee comes from omission: there's
+      # no retry-rollback step after this. If verify fails, the workflow
+      # fails terminally; humans take over.
+      - name: Wait for rolled-back machines to settle
+        # 60s buffer so health checks stabilise after fly's rolling
+        # update and Modal's revision cycle. Without this the SLI scrape
+        # samples in-progress traffic that's hitting machines mid-cycle
+        # and gets a misleadingly bad picture.
+        if: ${{ steps.rollback.outcome == 'success' }}
+        run: |
+          echo "Waiting 60s for rolled-back machines to settle..."
+          sleep 60
+          # Bump DEPLOY_STARTED_AT so the gate observations are labelled
+          # with the post-rollback start time, not the original deploy
+          # start. The window itself is governed by PROBE_WINDOW_SECONDS
+          # inside the script; this label is metadata.
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: verify-rollback — re-run SLO gate against the rolled-back system
+        id: verify-rollback
+        if: ${{ steps.rollback.outcome == 'success' }}
+        uses: ./.github/actions/check-slo-gate
+        with:
+          out-path: gate-observations-post-rollback.json
+
+      - name: verify-rollback failure annotation
+        if: ${{ steps.verify-rollback.outcome == 'failure' }}
+        run: |
+          echo "::error::MANUAL INTERVENTION REQUIRED: rollback completed but the rolled-back system breached SLO."
+          echo "Audit row was already written (action: 'system.rollback'). The pre-rollback Neon branch is preserved if you need to inspect / promote it back."
+          echo "DO NOT push another deploy until investigated. Re-run scripts/check-slo-gate.sh against the rolled-back state to distinguish:"
+          echo "  (a) genuinely unhealthy — rolled-back image fails SLO; needs manual recovery"
+          echo "  (b) probe flakiness — re-run is healthy; safe to proceed"
+          exit 1
+
+      # (Reviewer P1 #5) The moving `deployed-modal` tag step was removed;
+      # .github/workflows/tag-main.yml now stamps an immutable `main-<sha>`
+      # tag on every merge to main, and `record-prev-state` above reads from
+      # that set. Nothing to do here on success.
+
+      - name: upload-artifact — gate-observations.json (deploy + post-rollback)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gate-observations
+          path: |
+            gate-observations.json
+            gate-observations-post-rollback.json
+          if-no-files-found: warn
+
+      - name: summary — post gate observations to the workflow summary
+        if: ${{ always() }}
+        run: |
+          if [[ ! -f gate-observations.json ]]; then
+            {
+              echo "## Deploy observations"
+              echo ""
+              echo "_gate-observations.json was not produced — see earlier step logs_"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Single Python block — avoids bash/Python quote escape gymnastics
+          # (inline one-liners with \" inside bash single-quotes don't parse
+          # cleanly as Python f-strings). Heredoc passes the script as-is.
+          python3 <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          obs = json.load(open("gate-observations.json"))
+          print("## Deploy observations")
+          print()
+          print(f"- **Outcome:** `{obs.get('outcome', 'unknown')}`")
+          print(f"- **Commit:** `{os.environ.get('COMMIT_SHA', '')}`")
+          print(f"- **Deploy started:** `{os.environ.get('DEPLOY_STARTED_AT', '')}`")
+          print()
+          print("### SLI table")
+          print()
+          print("| SLI | Value | Threshold | Breached |")
+          print("|-----|-------|-----------|----------|")
+          for s in obs.get("slis", []):
+              flag = "yes" if s.get("breached") else "no"
+              print(f"| {s['name']} | {s['value']} | {s['threshold']} | {flag} |")
+          PY

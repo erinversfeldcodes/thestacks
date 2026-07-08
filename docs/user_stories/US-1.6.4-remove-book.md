@@ -7,7 +7,7 @@
 **What the user wants to accomplish:** Get rid of a book that was added by mistake, or that they no longer want to track. This is different from moving between shelves -- this is removal.
 
 **How they accomplish it:**
-1. On the book detail overlay, the user clicks "Remove from collection" (in a less prominent position -- danger zone).
+1. On the book detail overlay (see ADR-005), the user clicks "Remove from collection" (in a less prominent position -- danger zone).
 2. A confirmation modal appears: "Are you sure you want to remove \"[Title]\" from your collection? This cannot be undone."
 3. The user confirms.
 4. The book's shelf placement is soft-deleted (`removed_at` set). The book record itself remains in the database.

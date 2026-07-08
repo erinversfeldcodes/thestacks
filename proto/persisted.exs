@@ -78,6 +78,75 @@
     },
 
     # -------------------------------------------------------------------------
+    # Book lookup caches (L2 — persistent backing for the ETS L1 caches in
+    # Stacks.Books.ISBNResolverCache and Stacks.Books.TitleSearchCache).
+    # Survive Fly machine stops and deploys; shared across all nodes.
+    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/infra/v1/book_cache.proto",
+      proto_message: "IsbnResolverCacheEntry",
+      table_name: "isbn_resolver_cache",
+      schema_prefix: "cache",
+      ecto_module: Stacks.Books.IsbnResolverCacheEntry,
+      ecto_path: "lib/stacks/gen/books/isbn_resolver_cache_entry.ex",
+      dbt_path: "stg_isbn_resolver_cache.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      # Infra plumbing: NOT exposed to dbt. `dbt_grant: false` suppresses the
+      # GRANT SELECT block in any generated migration; `skip_dbt: true` also
+      # skips the staging .sql model and its schema.yml block.
+      dbt_grant: false,
+      skip_dbt: true,
+      indexes: [
+        %{
+          name: "isbn_resolver_cache_isbn_index",
+          columns: [:isbn],
+          unique: true
+        },
+        %{
+          name: "isbn_resolver_cache_expires_at_index",
+          columns: [:expires_at]
+        }
+      ],
+      field_overrides: %{
+        isbn: %{null: false},
+        outcome: %{null: false},
+        metadata: %{ecto_type: :map},
+        expires_at: %{null: false}
+      }
+    },
+    %{
+      proto_file: "stacks/infra/v1/book_cache.proto",
+      proto_message: "TitleSearchCacheEntry",
+      table_name: "title_search_cache",
+      schema_prefix: "cache",
+      ecto_module: Stacks.Books.TitleSearchCacheEntry,
+      ecto_path: "lib/stacks/gen/books/title_search_cache_entry.ex",
+      dbt_path: "stg_title_search_cache.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: false,
+      skip_dbt: true,
+      indexes: [
+        %{
+          name: "title_search_cache_key_index",
+          columns: [:cache_key],
+          unique: true
+        },
+        %{
+          name: "title_search_cache_expires_at_index",
+          columns: [:expires_at]
+        }
+      ],
+      field_overrides: %{
+        cache_key: %{null: false},
+        outcome: %{null: false},
+        metadata: %{ecto_type: :map},
+        expires_at: %{null: false}
+      }
+    },
+
+    # -------------------------------------------------------------------------
     # Partners
     # -------------------------------------------------------------------------
     %{
@@ -168,7 +237,12 @@
         password_hash: %{dbt_exclude: true},
         password_reset_token: %{dbt_exclude: true},
         password_reset_sent_at: %{dbt_exclude: true},
-        email_confirmation_token: %{dbt_exclude: true}
+        email_confirmation_token: %{dbt_exclude: true},
+        # Per-account login lockout counters (Issue #161) — security telemetry,
+        # exclude from dbt analytics to avoid leaking attack patterns downstream.
+        failed_login_count: %{default: 0, null: false, dbt_exclude: true},
+        failed_login_first_at: %{dbt_exclude: true},
+        locked_until: %{dbt_exclude: true}
       }
     },
 
@@ -260,7 +334,10 @@
         :updated_at
       ],
       field_overrides: %{
-        book_id: %{belongs_to: Stacks.Books.Book},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          dbt_tests: [{:relationships, "stg_books"}]
+        },
         is_primary: %{default: false}
       }
     },
@@ -292,7 +369,10 @@
           default: [],
           dbt_tests: [{:not_null, "status = 'resolved'"}]
         },
-        book_id: %{belongs_to: Stacks.Books.Book},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          dbt_tests: [{:relationships, "stg_books", "status = 'resolved'"}]
+        },
         book_edition_id: %{belongs_to: Stacks.Books.BookEdition},
         user_id: %{ecto_type: :binary_id, belongs_to: Stacks.Accounts.User}
       }
@@ -928,7 +1008,12 @@
         :password_hash,
         :email_confirmation_token,
         :password_reset_token,
-        :password_reset_sent_at
+        :password_reset_sent_at,
+        # Per-account lockout counters (Issue #161) — internal security state,
+        # never exposed in user JSON responses.
+        :failed_login_count,
+        :failed_login_first_at,
+        :locked_until
       ],
       field_overrides: %{}
     },

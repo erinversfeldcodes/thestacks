@@ -1,0 +1,129 @@
+name: Reseed staging Neon branch
+
+# Keeps the `staging` branch in the `thestacks-staging` Neon project in
+# sync with main's seeds.exs + migrations. Every preview/<pr> branch is a
+# Neon copy-on-write clone of `staging`, so a fresh staging means previews
+# inherit fresh fixtures with zero per-preview cost. Without this workflow,
+# staging drifts every time seeds.exs is updated and previews silently
+# inherit stale fixtures (which is exactly what caused the IDOR smoke
+# test to fail with "owner has no placements").
+#
+# Triggers:
+#   - push to main when seeds.exs or any migration file changes — the
+#     paths-filter is the same set deploy-stack.sh's preview-seed
+#     diff-check looks at.
+#   - workflow_dispatch — operator-initiated reseed. Use after a manual
+#     edit to the staging branch, or to verify the workflow itself works.
+#
+# Idempotency: seeds.exs uses `on_conflict: :nothing` / `:replace_all` so
+# re-running adds only missing rows. Existing preview branches are NOT
+# affected — they're already-forked CoW clones, so updates to staging
+# don't propagate to them. The next preview deploy after reseed picks up
+# the fresh fixtures via a new fork.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/core/priv/repo/seeds.exs'
+      - 'apps/core/priv/repo/migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reseed-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MIX_ENV: prod
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Read .versions
+        id: v
+        run: |
+          {
+            echo "otp=$(grep '^otp=' .versions | cut -d= -f2)"
+            echo "elixir=$(grep '^elixir=' .versions | cut -d= -f2)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ steps.v.outputs.otp }}
+          elixir-version: ${{ steps.v.outputs.elixir }}
+      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Resolve staging branch DATABASE_URL
+        id: neon
+        env:
+          NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
+          NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
+        # curl output is piped to python3 purely to parse the Neon API JSON
+        # response — nothing fetched from the network is executed as code.
+        # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+        run: |
+          set -euo pipefail
+          # Find the `staging` branch ID. Filter on name rather than `default`
+          # because `staging` is the project's default branch but explicit
+          # name-matching surfaces a clearer error if someone renames it.
+          BRANCH_ID="$(curl -sfL \
+            -H "Authorization: Bearer $NEON_STAGING_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_STAGING_PROJECT_ID/branches" \
+            | python3 -c "
+          import json, sys
+          branches = json.load(sys.stdin).get('branches', [])
+          match = [b['id'] for b in branches if b.get('name') == 'staging']
+          print(match[0] if match else '')
+          ")"
+          if [[ -z "$BRANCH_ID" ]]; then
+            echo "::error::staging branch not found in project $NEON_STAGING_PROJECT_ID"
+            exit 1
+          fi
+          echo "branch-id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
+          # Get the connection URI for the staging branch. The Neon API
+          # `connection_uri` endpoint is the supported way to retrieve a
+          # ready-to-use URI for any existing branch.
+          URI="$(curl -sfL \
+            -H "Authorization: Bearer $NEON_STAGING_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_STAGING_PROJECT_ID/connection_uri?branch_id=$BRANCH_ID&database_name=neondb&role_name=neondb_owner&pooled=true" \
+            | python3 -c "import json, sys; print(json.load(sys.stdin).get('uri', ''))")"
+          if [[ -z "$URI" ]]; then
+            echo "::error::could not resolve connection URI for staging branch"
+            exit 1
+          fi
+          # Mask the URI in logs (it contains credentials).
+          echo "::add-mask::$URI"
+          echo "uri=$URI" >> "$GITHUB_OUTPUT"
+
+      - name: Install Elixir deps
+        working-directory: apps/core
+        run: mix deps.get --only prod
+
+      - name: Generate Ecto schemas from proto
+        run: bash scripts/gen-ecto-proto.sh
+
+      - name: Apply migrations to staging
+        working-directory: apps/core
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.uri }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+        run: mix ecto.migrate
+
+      - name: Run seeds against staging
+        working-directory: apps/core
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.uri }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          ALLOW_SEEDS: "true"
+        # `mix run priv/repo/seeds.exs` directly (rather than going through
+        # Stacks.Release.seed/0) because we're running from a checked-out
+        # source tree, not a release. The seeds.exs file is the single
+        # source of truth for the fixture set.
+        run: mix run priv/repo/seeds.exs
+
+      - name: Summary
+        run: |
+          echo "Staging branch ${{ steps.neon.outputs.branch-id }} reseeded."
+          echo "Future preview/<pr> branches forked from this staging will"
+          echo "inherit the latest fixtures via Neon copy-on-write."

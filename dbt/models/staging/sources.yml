@@ -259,6 +259,12 @@ sources:
             description: Token for password reset flow.
           - name: password_reset_sent_at
             description: Timestamp when password reset email was sent.
+          - name: failed_login_count
+            description: Failed-login counter for per-account lockout (Issue #161).
+          - name: failed_login_first_at
+            description: Timestamp of the first failure in the current rolling window (Issue #161).
+          - name: locked_until
+            description: When non-null and in the future, the account is locked (Issue #161).
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
@@ -855,3 +861,13 @@ sources:
             description: Client IP address at time of action.
           - name: occurred_at
             description: Timestamp when the action occurred (used for freshness).
+          - name: endpoint
+            description: API endpoint path that generated the audit event.
+          - name: latency_ms
+            description: Request latency in milliseconds.
+          - name: success
+            description: Whether the request completed successfully.
+          - name: row_count
+            description: Number of rows returned or affected.
+          - name: operator_session_id
+            description: Admin session ID for break-glass access events.

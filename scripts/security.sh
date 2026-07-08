@@ -35,8 +35,13 @@ hadolint deploy/Dockerfile.scraper
 checkov --directory deploy/
 
 # Vulnerability scanning (filesystem)
+# .venv-tools/ (dev CLIs: checkov, dbt, sqlfluff) and scripts/mcp/.venv (MCP server)
+# are excluded for the same reason as apps/vision/.venv: transitive deps of dev tools
+# are not application attack surface and generate false-positive CVE noise.
 trivy fs . --severity CRITICAL,HIGH --exit-code 1 \
     --skip-dirs apps/vision/.venv \
+    --skip-dirs .venv-tools \
+    --skip-dirs scripts/mcp/.venv \
     --skip-files apps/core/erl_crash.dump
 
 # TruffleHog — deep entropy-based secret scanning
@@ -51,11 +56,21 @@ fi
 
 # Syft + Grype — SBOM generation and CVE scanning
 if command -v syft &>/dev/null && command -v grype &>/dev/null; then
+    # Exclude rebar.lock files inside our hex deps: each Erlang package
+    # publishes its own rebar.lock pinning the versions IT was built against,
+    # which syft reads as if those versions were installed in our project.
+    # Mix's top-level mix.lock is authoritative — the actual installed
+    # versions are in deps/<pkg>/ebin/<pkg>.app. Without this exclude, syft
+    # surfaces phantom older cowlib (and similar) versions and grype fails
+    # the gate on advisories that don't apply to anything we ship.
     syft . -o cyclonedx-json \
         --exclude ./apps/scraper/target \
         --exclude ./apps/vision/.venv \
+        --exclude ./.venv-tools \
+        --exclude ./scripts/mcp/.venv \
         --exclude ./_build \
         --exclude ./.claude/worktrees \
+        --exclude './deps/*/rebar.lock' \
         2>/dev/null > /tmp/stacks-sbom.json
     grype sbom:/tmp/stacks-sbom.json --fail-on high
     rm -f /tmp/stacks-sbom.json
@@ -66,18 +81,62 @@ fi
 # dbt-checkpoint quality gates moved to scripts/lint-dbt.sh (runs in dbt CI group).
 # See: just lint-dbt
 
-# Dockle — CIS Docker Benchmark for each Dockerfile
+# Dockle — CIS Docker Benchmark for each Dockerfile.
+#
+# Each image is built with BuildKit enabled (required by Dockerfile.core's
+# `RUN --mount=type=cache` directives), saved to a tarball, then scanned by
+# dockle. Build/save failures are surfaced as script failures — the previous
+# `&& \` chain swallowed them because `set -e` is suspended for non-final
+# commands in `&&` lists (per bash(1)).
+_dockle_image() {
+    local name="$1"
+    local dockerfile="$2"
+    local tar="/tmp/${name}.tar"
+
+    if ! DOCKER_BUILDKIT=1 docker build -q -t "$name" -f "$dockerfile" .; then
+        echo "FAIL dockle: docker build failed for $dockerfile" >&2
+        return 1
+    fi
+    if ! docker save "$name" -o "$tar"; then
+        echo "FAIL dockle: docker save failed for $name" >&2
+        docker rmi "$name" 2>/dev/null || true
+        return 1
+    fi
+    local rc=0
+    dockle --exit-code 1 --exit-level WARN --input "$tar" || rc=$?
+    rm -f "$tar"
+    docker rmi "$name" 2>/dev/null || true
+    return "$rc"
+}
+
 if command -v dockle &>/dev/null; then
     if command -v docker &>/dev/null; then
-        echo "Running dockle CIS benchmark..."
-        docker build -q -t stacks-dockle-core -f deploy/Dockerfile.core . && \
-            docker save stacks-dockle-core -o /tmp/stacks-dockle-core.tar && \
-            dockle --exit-code 1 --exit-level WARN --input /tmp/stacks-dockle-core.tar
-        docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper . && \
-            docker save stacks-dockle-scraper -o /tmp/stacks-dockle-scraper.tar && \
-            dockle --exit-code 1 --exit-level WARN --input /tmp/stacks-dockle-scraper.tar
-        docker rmi stacks-dockle-core stacks-dockle-scraper 2>/dev/null || true
-        rm -f /tmp/stacks-dockle-core.tar /tmp/stacks-dockle-scraper.tar
+        # Dockerfile.core uses `RUN --mount=type=cache` (BuildKit-only).
+        # The legacy builder rejects it; `DOCKER_BUILDKIT=1 docker build`
+        # also fails if the buildx CLI plugin isn't installed (colima's
+        # default ships without it). Probe before attempting the build
+        # so the SKIP path is taken cleanly rather than failing mid-run.
+        # Install via `brew install docker-buildx && mkdir -p \
+        #   ~/.docker/cli-plugins && ln -s \
+        #   "$(brew --prefix)/opt/docker-buildx/bin/docker-buildx" \
+        #   ~/.docker/cli-plugins/docker-buildx`.
+        if docker buildx version &>/dev/null; then
+            echo "Running dockle CIS benchmark..."
+            _dockle_image stacks-dockle-core deploy/Dockerfile.core
+            # The scraper image cross-compiles Rust to x86_64-linux-musl.
+            # On non-Linux/x86_64 hosts (typically darwin/arm64 dev
+            # laptops) the cargo-chef stage hits a ring@0.17.x
+            # `musl-gcc -m64` mismatch before dockle ever runs. Skip
+            # the local scan on those hosts; CI runs on Linux/x86_64
+            # and exercises this gate properly.
+            if [[ "$(uname -s)/$(uname -m)" == "Linux/x86_64" ]]; then
+                _dockle_image stacks-dockle-scraper deploy/Dockerfile.scraper
+            else
+                echo "SKIP: dockle scraper image — host $(uname -s)/$(uname -m) cannot cross-build to x86_64-linux-musl reliably (ring@0.17 musl-gcc -m64 mismatch). CI gates this on Linux/x86_64."
+            fi
+        else
+            echo "SKIP: dockle — docker buildx plugin not installed. Dockerfile.core requires BuildKit (RUN --mount=type=cache). Install via 'brew install docker-buildx' on macOS or rely on CI to gate this."
+        fi
     else
         echo "SKIP: docker not available — cannot run dockle (dockle requires a built image)"
     fi

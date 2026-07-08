@@ -14,6 +14,9 @@ defmodule Stacks.CircuitBreakers do
   | `:open_library_fuse`| Open Library REST API  | 5 in 60 s       | 5 min    |
   | `:google_books_fuse`| Google Books API       | 5 in 60 s       | 5 min    |
   | `:scraper_fuse`     | Rust scraper service   | 3 in 60 s       | 15 min   |
+  | `:brave_fuse`       | Brave Search API       | 5 in 60 s       | 5 min    |
+  | `:searxng_fuse`     | SearXNG discovery      | 5 in 60 s       | 5 min    |
+  | `:r2_fuse`          | Cloudflare R2 storage  | 5 in 60 s       | 5 min    |
 
   Per-store fuses are deferred to a follow-on issue.
 
@@ -54,6 +57,8 @@ defmodule Stacks.CircuitBreakers do
 
   require Logger
 
+  alias Stacks.Books.ISBNResolver
+
   # How often to probe a blown fuse.
   # {reset, Ms} in each fuse spec is the backstop maximum.
   @probe_interval_ms 15_000
@@ -68,7 +73,10 @@ defmodule Stacks.CircuitBreakers do
     together_ai_fuse: @standard_spec,
     open_library_fuse: @standard_spec,
     google_books_fuse: @standard_spec,
-    scraper_fuse: @scraper_spec
+    scraper_fuse: @scraper_spec,
+    brave_fuse: @standard_spec,
+    searxng_fuse: @standard_spec,
+    r2_fuse: @standard_spec
   ]
 
   # Probe functions keyed by fuse atom.
@@ -80,7 +88,10 @@ defmodule Stacks.CircuitBreakers do
     scraper_fuse: &__MODULE__.probe_scraper/0,
     together_ai_fuse: &__MODULE__.probe_together_ai/0,
     open_library_fuse: &__MODULE__.probe_open_library/0,
-    google_books_fuse: &__MODULE__.probe_google_books/0
+    google_books_fuse: &__MODULE__.probe_google_books/0,
+    brave_fuse: &__MODULE__.probe_brave/0,
+    searxng_fuse: &__MODULE__.probe_searxng/0,
+    r2_fuse: &__MODULE__.probe_r2/0
   }
 
   # ---------------------------------------------------------------------------
@@ -143,6 +154,11 @@ defmodule Stacks.CircuitBreakers do
   @doc false
   @spec probe_vision() :: :ok | {:error, term()}
   def probe_vision do
+    # Probe-auth audit: production calls (Stacks.AI.Client) are HMAC-signed,
+    # but the sidecar's GET /health route is deliberately unauthenticated
+    # (no `Depends(verify_hmac)` in apps/vision/app/main.py) — an
+    # unauthenticated probe against it genuinely succeeds when the service
+    # is up, so no credentials are needed here.
     base_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
     probe_http_get("#{base_url}/health")
   end
@@ -150,6 +166,11 @@ defmodule Stacks.CircuitBreakers do
   @doc false
   @spec probe_scraper() :: :ok | {:error, term()}
   def probe_scraper do
+    # Probe-auth audit: production calls (Stacks.Enrichment.ScraperClient)
+    # are token-authenticated, but the scraper's GET /health route is
+    # explicitly exempt ("/health — no auth required" in
+    # apps/scraper/src/main.rs) — an unauthenticated probe genuinely
+    # succeeds when the service is up.
     base_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
     probe_http_get("#{base_url}/health")
   end
@@ -157,6 +178,9 @@ defmodule Stacks.CircuitBreakers do
   @doc false
   @spec probe_together_ai() :: :ok | {:error, term()}
   def probe_together_ai do
+    # Probe-auth audit: matches production — Stacks.AI.TogetherClient sends
+    # the same `Bearer` token from :vision_together_api_key. /v1/models is
+    # the cheapest authenticated endpoint (no token spend).
     case Application.get_env(:core, :vision_together_api_key) do
       key when is_binary(key) and byte_size(key) > 0 ->
         req =
@@ -185,13 +209,146 @@ defmodule Stacks.CircuitBreakers do
   @doc false
   @spec probe_open_library() :: :ok | {:error, term()}
   def probe_open_library do
+    # Probe-auth audit: matches production — Open Library is keyless by
+    # design; ISBNResolver's OL requests carry no credentials either, so an
+    # unauthenticated probe exercises exactly the production request shape.
     probe_http_get("https://openlibrary.org/search.json?q=frankenstein&limit=1")
+  end
+
+  @doc false
+  @spec probe_brave() :: :ok | {:error, term()}
+  def probe_brave do
+    # Probes Brave Search with a lightweight `count=1` query.
+    #
+    # Probe-auth audit: matches production — the same X-Subscription-Token
+    # header production searches send. Requires the API key — without it
+    # the fuse can't be meaningfully probed (Brave 401s keyless requests),
+    # so we return `{:error, :api_key_not_configured}` and the circuit
+    # stays blown until a human rotates the key.
+    #
+    # One probe call spends ~1 query against the Brave daily budget
+    # (67/day on free tier). At the default 15 s probe interval while
+    # blown, that's <1% of budget per hour of outage — acceptable.
+    case Application.get_env(:core, :brave_search_api_key) do
+      key when is_binary(key) and byte_size(key) > 0 ->
+        req =
+          Finch.build(
+            :get,
+            "https://api.search.brave.com/res/v1/web/search?q=test&count=1",
+            [
+              {"Accept", "application/json"},
+              {"X-Subscription-Token", key}
+            ],
+            nil
+          )
+
+        case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
+          {:ok, %Finch.Response{status: 200}} -> :ok
+          {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        Logger.warning(
+          "CircuitBreakers: brave_search_api_key not configured — cannot probe :brave_fuse"
+        )
+
+        {:error, :api_key_not_configured}
+    end
+  end
+
+  @doc false
+  @spec probe_searxng() :: :ok | {:error, term()}
+  def probe_searxng do
+    case Application.get_env(:core, :searxng_url) do
+      url when is_binary(url) and byte_size(url) > 0 ->
+        # SearXNG exposes `/healthz` when `general.enable_http = true` in
+        # settings.yml; when disabled, the root path still returns 200.
+        # Use the root path to avoid a config coupling.
+        #
+        # Probe-auth audit: matches production — the self-hosted SearXNG
+        # instance is unauthenticated and Stacks.Discovery.SearxngClient
+        # sends no credentials either.
+        probe_http_get(String.trim_trailing(url, "/") <> "/")
+
+      _ ->
+        Logger.warning("CircuitBreakers: searxng_url not configured — cannot probe :searxng_fuse")
+
+        {:error, :url_not_configured}
+    end
+  end
+
+  @doc false
+  @spec probe_r2() :: :ok | {:error, term()}
+  def probe_r2 do
+    # R2's bucket endpoint returns 400 for unauthenticated GETs to the
+    # root but still proves network + DNS + TLS. We accept any sub-500
+    # status as "service up" — we're probing health, not
+    # functionality (functionality is covered by actual writes melting
+    # the fuse on failure).
+    #
+    # Probe-auth audit: production calls (Stacks.Storage via ExAws) are
+    # SigV4-signed; replicating SigV4 here isn't worth it because R2
+    # deterministically answers unauthenticated requests with a 4xx when
+    # it is up — unlike Google Books, an unauthenticated probe CAN
+    # succeed, so the sub-500 acceptance is a genuine health signal.
+    case r2_probe_host() do
+      host when is_binary(host) and byte_size(host) > 0 ->
+        do_probe_r2("https://" <> host <> "/")
+
+      _ ->
+        Logger.warning("CircuitBreakers: R2 endpoint not configured — cannot probe :r2_fuse")
+        {:error, :endpoint_not_configured}
+    end
+  end
+
+  # Prefer the explicit `:r2_endpoint_host` app env, fall back to the
+  # ExAws `:s3` config which runtime.exs sets to
+  # `<account>.r2.cloudflarestorage.com`. Returns nil if neither is set.
+  defp r2_probe_host do
+    case Application.get_env(:core, :r2_endpoint_host) do
+      host when is_binary(host) and byte_size(host) > 0 ->
+        host
+
+      _ ->
+        get_in(Application.get_env(:ex_aws, :s3) || [], [:host])
+    end
+  end
+
+  defp do_probe_r2(url) do
+    req = Finch.build(:get, url, [], nil)
+
+    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
+      {:ok, %Finch.Response{status: status}} when status < 500 -> :ok
+      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc false
   @spec probe_google_books() :: :ok | {:error, term()}
   def probe_google_books do
-    probe_http_get("https://www.googleapis.com/books/v1/volumes?q=frankenstein&maxResults=1")
+    probe_http_get(google_books_probe_url())
+  end
+
+  @doc false
+  # Extracted (and public) so the URL construction is unit-testable without
+  # a real HTTP call — see CircuitBreakersTest "probe URL construction".
+  #
+  # The probe MUST authenticate exactly like production requests do.
+  # Keyless Google Books requests always fail: Google's anonymous quota
+  # pool returns 429 with `quota_limit_value: "0"` (empirically verified),
+  # so an unauthenticated probe can never succeed and probe-based recovery
+  # for :google_books_fuse would be structurally impossible — once blown,
+  # the fuse stayed blown until the 5-min {:reset, _} backstop and then
+  # immediately re-blew under the next burst. We reuse
+  # `ISBNResolver.google_books_url/1`, the same builder production search/
+  # resolve requests go through, which appends `&key=` when
+  # `:google_books_api_key` is configured and omits it otherwise (a nil
+  # key means the probe matches whatever production does without a key).
+  @spec google_books_probe_url() :: String.t()
+  def google_books_probe_url do
+    ISBNResolver.google_books_url("q=frankenstein&maxResults=1")
   end
 
   # ---------------------------------------------------------------------------

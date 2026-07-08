@@ -31,20 +31,24 @@ cd "$CORE_DIR"
 mix deps.compile jason --no-deps-check 2>/dev/null || true
 
 # Provide dummy env vars so runtime.exs doesn't crash (we don't start the app).
+# Covers both dev and prod required vars — codegen doesn't use any of these.
 export CLOAK_KEY="${CLOAK_KEY:-$(openssl rand -base64 32)}"
 export SECRET_KEY_BASE="${SECRET_KEY_BASE:-$(openssl rand -base64 64)}"
 export DATABASE_URL="${DATABASE_URL:-ecto://localhost/stacks_dev}"
 export VISION_HMAC_SECRET="${VISION_HMAC_SECRET:-dummy_secret_for_codegen_only}"
-export MIX_ENV="${MIX_ENV:-dev}"
+export VISION_SERVICE_URL="${VISION_SERVICE_URL:-http://localhost:8000}"
+export GUARDIAN_SECRET_KEY="${GUARDIAN_SECRET_KEY:-dummy_guardian_key_for_codegen}"
 
 # Use mix run with --no-compile to skip app compilation but still have Mix available.
 # The --no-start flag prevents starting the app (we don't need the DB).
 # We eval a script that loads just the proto_sync modules.
 mix run --no-compile --no-start -e '
-  # Load proto_sync modules in dependency order
+  # Load proto_sync sub-modules then the main task module.
+  # Leaf dependencies (TypeMapper, Descriptor) first — other modules alias them.
   task_dir = "lib/mix/tasks/proto_sync"
-  for mod <- ~w(manifest.ex type_mapper.ex descriptor.ex ecto_generator.ex dbt_generator.ex migration_generator.ex schema_yml_generator.ex drift_checker.ex) do
-    Code.compile_file(Path.join(task_dir, mod))
+  for dep <- ~w(type_mapper.ex descriptor.ex manifest.ex), do: Code.compile_file(Path.join(task_dir, dep))
+  for file <- Path.wildcard(Path.join(task_dir, "*.ex")) |> Enum.sort() do
+    Code.compile_file(file)
   end
   Code.compile_file("lib/mix/tasks/proto_sync.ex")
 
