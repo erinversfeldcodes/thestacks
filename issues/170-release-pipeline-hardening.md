@@ -42,6 +42,17 @@ Every workflow triggered by a push to main completes green, and local `just ci` 
 **Fix:** in the cleanup path (`scripts/cleanup-preview.sh` / the ci.sh deploy-phase cleanup), stop/scale-to-zero the Fly app(s) BEFORE deleting the Neon branch: `fly scale count 0 --app <app> --yes` (or `fly apps destroy` where the app is per-run disposable under C).
 **Test:** run the cleanup against a live preview and tail core logs during teardown — zero Postgrex endpoint errors after the stop completes; Neon branch gone; Fly app stopped/destroyed.
 
+### E. Production deploy aborts: warmup prober secrets missing — NOT FIXED
+**Symptom:** first post-merge prod deploy (run 28924423704) failed at `FAIL warmup: could not authenticate as warmup user (HTTP 401)` after all services deployed healthy; rollback triggered.
+**Cause:** `deploy-production.yml` maps `PROBE_SEED_EMAIL/PASSWORD` from `secrets.STACKS_PROBER_EMAIL/STACKS_PROBER_PASSWORD`, which are not set in the repo (`gh secret list` confirms). The warmup then used its dev-mode defaults (`owner@thestacks.app` / `dev-password-123`) against prod → 401. `Stacks.Release.seed_prober/0` also `fetch_required_env!`s the same vars.
+**Fix:** create both secrets (`gh secret set STACKS_PROBER_EMAIL` / `STACKS_PROBER_PASSWORD`, strong generated password); additionally add them to the workflow's existing fast-fail secrets preflight so a missing prober secret aborts BEFORE deploying anything, not after.
+**Test:** re-run Deploy production; warmup authenticates (2xx), pipeline proceeds to SLO gate. Negative: with a secret unset, the preflight fails before `deploy-stack.sh` runs.
+
+### F. Rollback crashes on audit logging; prod audit_log schema behind — NOT FIXED
+**Symptom:** the rollback action's `mix run` audit step crashed: `MatchError ... column "success" of relation "audit_log" does not exist`, failing the rollback job after the image rollback itself had succeeded.
+**Cause (two-part):** (1) migration `20260504182149_add_endpoint_latency_ms_success_row_count_operator_session_id_to_audit_log.exs` exists in-repo but is evidently unapplied on prod — verify via `SELECT version FROM schema_migrations WHERE version='20260504182149'` and determine why the runner-side `mix ecto.migrate` didn't apply it (this was the first prod deploy since the audit-columns work merged; check whether the migrate step ran before the abort). (2) Robustness: `{:ok, _} = Stacks.Audit.log_rollback(...)` hard-matches — rollback observability must never fail the rollback. Make the audit write best-effort (rescue → log warning → exit 0).
+**Test:** unit test for the best-effort wrapper (audit insert raising → step exits 0, warning logged); prod `schema_migrations` check documented in the runbook; after E, a rollback rehearsal (induced failure on preview or workflow-dispatch) completes green end-to-end.
+
 ## Reviewer Context
 - `.versions` is the canonical version-pin file, consumed by `source` (uppercase shell vars) — never grep lowercase keys.
 - All workflow `uses:` references are SHA-pinned with trailing version comments (PR #204 hardening); keep that convention in any workflow edits here.
@@ -53,6 +64,8 @@ Every workflow triggered by a push to main completes green, and local `just ci` 
 - [ ] B: Scorecard workflow green including publish; SARIF visible in the Security tab.
 - [ ] C: CI deploy-preview uses run-id-suffixed Fly app + Neon branch names; concurrent local + CI runs verified non-interfering; cleanup removes only its own resources.
 - [ ] D: cleanup stops Fly app(s) before Neon branch deletion; teardown produces no Postgrex endpoint errors.
+- [ ] E: STACKS_PROBER_EMAIL/PASSWORD secrets set; prober secrets in the fast-fail preflight; prod warmup authenticates.
+- [ ] F: prod schema_migrations verified current (incl. 20260504182149); rollback audit write is best-effort with a unit test; rollback rehearsal green.
 - [ ] `actionlint` and `shellcheck` pass on all touched files.
 - [ ] Tests written and passing (C's name-derivation assertions; D's teardown log check documented as a manual verification step in the script header if not automatable).
 - [ ] Standards compliance verified (`just verify` passes).
@@ -65,3 +78,4 @@ platform-agent (workflows + deploy/cleanup scripts). No app-code changes expecte
 
 ## Progress Notes
 - 2026-07-08: A and B root-caused and patched in-tree during post-merge pipeline watch (actionlint-verified). C and D root-caused with production log evidence; unimplemented.
+- 2026-07-08 (later): first prod deploy failed → E (missing prober secrets → warmup 401 → rollback) and F (rollback audit crash on missing audit_log.success column; prod migrations suspect) root-caused from run 28924423704 logs and gh secret list. Deploy remains rolled back to the pre-merge image.
