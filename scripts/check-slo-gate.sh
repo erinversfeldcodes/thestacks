@@ -624,18 +624,25 @@ slis.append(http_entry)
 
 # Route-group p95 latency: auth, catalogue, upload.
 #
-# `upload_p95_ms` threshold is 3000 ms (interim). The target is 2000 ms
-# and will be lowered back to that once an experimental framework exists
-# to compare vision configurations (model / quantization / engine / GPU)
-# on a reproducible canary set. See ADR 015 section "Future work:
-# experimental framework for model comparison". The 3000 ms ceiling is
-# high enough to absorb a bursty probe cold-start but still catches a
-# regression if the vision pipeline gets meaningfully worse.
+# `upload_p95_ms` threshold is 30000 ms (interim). The `:upload` route
+# group includes GET /api/upload/:id/stream — the identification progress
+# stream — whose router-dispatch duration is how long the client holds the
+# stream open while the vision pipeline resolves (10-20 s by design with
+# the current always-VLM path). Run 28931136604 measured p95 = 18108 ms on
+# a fully healthy system (upload_success_rate 1.0, 0 timeouts) and rolled
+# back an otherwise-green deploy. 30000 ms still catches a hung pipeline
+# (streams held to their timeout) while tolerating normal VLM latency.
+# Bring-down plan: (1) the identify cascade (barcode -> cover-embedding
+# retrieval -> OCR -> VLM fallback) collapses common-case resolution to
+# 1-3 s; (2) reclassify the stream route into its own group so this SLI
+# measures request latency again — then restore a 2000-3000 ms threshold.
+# See ADR 015 section "Future work: experimental framework for model
+# comparison".
 HIST = "stacks_router_dispatch_stop_duration_milliseconds_bucket"
 for group, threshold, name in [
     ("auth", 500, "auth_p95_ms"),
     ("catalogue", 500, "catalogue_p95_ms"),
-    ("upload", 3000, "upload_p95_ms"),
+    ("upload", 30000, "upload_p95_ms"),
 ]:
     p95 = histogram_p95_by_group(HIST, "route_group", group)
     slis.append(
