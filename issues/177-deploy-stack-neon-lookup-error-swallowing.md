@@ -31,14 +31,15 @@ Distinguish API failure from genuine absence before concluding "not found":
 platform-agent (platform-reviewer).
 
 ## Definition of Done
-- [ ] deploy-stack.sh distinguishes "Neon API call failed" from "branch genuinely not found" with distinct messages
-- [ ] Transient API failures are surfaced (not swallowed) and, ideally, retried with a bounded backoff
-- [ ] "parent branch not found" is only reported when the API succeeded and the branch is truly absent
-- [ ] Platform test covers the three cases (API error / branch absent / branch present)
-- [ ] `just verify` passes
+- [x] deploy-stack.sh distinguishes "Neon API call failed" from "branch genuinely not found" with distinct messages
+- [x] Transient API failures are surfaced (not swallowed) and, ideally, retried with a bounded backoff
+- [x] "parent branch not found" is only reported when the API succeeded and the branch is truly absent
+- [x] Platform test covers the three cases (API error / branch absent / branch present)
+- [x] `just verify` passes
 
 ## Dependencies
 - None. Surfaced during Issue #175 (preview-E2E warmup guard); independent of it.
 
 ## Progress Notes
 - 2026-07-09: Filed from Issue #175 close-out (orchestrator + principal-engineer both flagged). Out of #175's locked scope (warmup guard), tracked here.
+- 2026-07-09: Implemented via orchestrator (platform-agent). Added `neon_branch_id_by_name()` (HTTP-status-aware, bounded retry: 3 attempts, transient=429/5xx/network only) and routed BOTH the parent- and stale-branch lookups through it; stale-lookup API failure → WARNING+continue (not abort). TDD (RED→GREEN); testing-coordinator sign-off + added a non-transient-4xx (401) test case (mutant-verified). Gates: `just verify` exit 0 (2259 elixir tests); platform suite 17/0; 2B-iii deploy-preview confirmed the refactored branch-creation happy-path live (parent lookup resolved `staging`, preview branch created). Built on branch `177-…` off `feat/124-e2e-auth`.
