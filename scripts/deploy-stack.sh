@@ -76,6 +76,70 @@ deploy_with_retry() {
     return 1
 }
 
+# Resolve a Neon branch id by name, distinguishing a genuine "branch absent"
+# from a transient/hard Neon API failure (Issue #177). The old inline
+# `curl … | python3 … 2>/dev/null || true` collapsed every failure — network
+# blip, 5xx/429, expired key, malformed body — into an empty id, which the
+# caller then misreported as "branch not found." This helper surfaces the real
+# error instead.
+#
+# Usage: neon_branch_id_by_name <project_id> <branch_name>
+#   stdout: the matching branch id, or EMPTY if the name is genuinely absent
+#   return 0: API succeeded (branch found OR genuinely absent)
+#   return 1: API failed (network error, 5xx/429 after bounded retries, or a
+#             non-transient 4xx) — a distinct "Neon API" message goes to stderr
+#             and NO id is printed. The caller decides how to react.
+#
+# Reads NEON_STAGING_API_KEY from the environment (same as the rest of the
+# script). Retries transient failures a bounded number of times with backoff;
+# `sleep` between attempts keeps this from hammering the API.
+neon_branch_id_by_name() {
+    local project_id="$1"
+    local branch_name="$2"
+    local max_attempts=3
+    local attempt=0
+    local response curl_rc http_code body
+    while (( attempt < max_attempts )); do
+        attempt=$(( attempt + 1 ))
+        response="$(curl -sS -w '\n%{http_code}' \
+            -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${project_id}/branches")"
+        curl_rc=$?
+        # HTTP status is the final line; the JSON body is everything above it.
+        http_code="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+
+        # Transient: transport error, rate limit (429), or any 5xx → retry.
+        if (( curl_rc != 0 )) || [[ "$http_code" == 429 || "$http_code" == 5?? ]]; then
+            if (( attempt < max_attempts )); then
+                sleep "$attempt"
+                continue
+            fi
+            echo "FAIL deploy: Neon API call failed (HTTP ${http_code:-none} / curl rc ${curl_rc}) after ${attempt} attempts querying branches for project ${project_id}" >&2
+            return 1
+        fi
+
+        # Non-transient API error (e.g. 401/403/404) — do not retry.
+        if [[ "$http_code" != 2?? ]]; then
+            echo "FAIL deploy: Neon API call failed (HTTP ${http_code} / curl rc ${curl_rc}) querying branches for project ${project_id}" >&2
+            return 1
+        fi
+
+        # Success: parse the body and print the matching id (empty if absent).
+        printf '%s' "$body" | python3 -c "
+import json, sys
+branches = json.load(sys.stdin).get('branches', [])
+match = [b['id'] for b in branches if b.get('name') == '${branch_name}']
+print(match[0] if match else '')
+"
+        return 0
+    done
+    # Unreachable in practice (the loop returns on every path), but keep a
+    # defensive non-zero so a logic slip can never masquerade as success.
+    echo "FAIL deploy: Neon API call exhausted retries querying branches for project ${project_id}" >&2
+    return 1
+}
+
 # `fly apps create` is idempotent but prints a confusing "App already exists"
 # error to stderr with exit code 1 on subsequent calls. Swallow both so the
 # script's own failure signals stay legible.
@@ -260,15 +324,11 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
     # See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
     NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
     echo "    Parent branch: ${NEON_PARENT_BRANCH}"
-    NEON_PARENT_BRANCH_ID="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == '${NEON_PARENT_BRANCH}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
+    # A helper non-zero (real Neon API failure) aborts via `|| exit 1` with the
+    # helper's distinct "Neon API" stderr; a helper 0 + empty id is a GENUINE
+    # absence and gets the "parent branch not found" message. The two are now
+    # never conflated (Issue #177).
+    NEON_PARENT_BRANCH_ID="$(neon_branch_id_by_name "${NEON_STAGING_PROJECT_ID}" "${NEON_PARENT_BRANCH}")" || exit 1
 
     if [[ -z "$NEON_PARENT_BRANCH_ID" ]]; then
         echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_STAGING_PROJECT_ID}" >&2
@@ -276,15 +336,14 @@ print(match[0] if match else '')
     fi
     echo "    Parent branch ID: ${NEON_PARENT_BRANCH_ID}"
 
-    stale_id="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == '${PREVIEW_NEON_BRANCH}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
+    # Stale sibling-branch lookup. Unlike the parent lookup, an API failure here
+    # is NOT fatal: worst case a stale preview branch lingers (the create step
+    # below would then fail loudly on its own). Surface the failure as a WARNING
+    # and continue rather than aborting the whole deploy — but never swallow it.
+    if ! stale_id="$(neon_branch_id_by_name "${NEON_STAGING_PROJECT_ID}" "${PREVIEW_NEON_BRANCH}")"; then
+        echo "    WARNING: stale-branch lookup for ${PREVIEW_NEON_BRANCH} failed (see Neon API error above); skipping stale cleanup and continuing." >&2
+        stale_id=""
+    fi
     if [[ -n "$stale_id" ]]; then
         echo "    Deleting stale branch ${PREVIEW_NEON_BRANCH}..."
         curl -sL -X DELETE \
