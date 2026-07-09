@@ -178,6 +178,28 @@ else
     _record_fail "expected exactly 1 curl call (no retry on 401), got $CALLS"
 fi
 
+# ── Case 3c: branch name containing a single quote → no injection breakage ────
+# A git ref / branch name with a single quote (e.g. preview/foo'bar) must not
+# break the success-parse step. If the name is interpolated into the python
+# source it produces a SyntaxError → empty stdout → the branch is silently
+# misclassified as absent. The name must be passed OUT-OF-BAND (argv), not
+# baked into the python literal.
+test_case "branch_name_with_quote" "200 body with a single-quoted branch name → resolves the id (no injection)"
+curl() {
+    bump
+    # Branch literally named  preview/foo'bar  (the ' is the danger char).
+    printf '%s\n%s' \
+        '{"branches":[{"id":"br-other","name":"main"},{"id":"br-quote-999","name":"preview/foo'\''bar"}]}' \
+        '200'
+    return 0
+}
+reset_calls
+: > "$ERRFILE"
+OUT="$(neon_branch_id_by_name "$PROJECT_ID" "preview/foo'bar" 2>"$ERRFILE")"
+RC=$?
+assert_exit_zero "$RC" "lookup of a single-quoted branch name returns 0"
+assert_contains "$OUT" "br-quote-999" "resolves the id for a name containing a single quote"
+
 # ── Case 4 (nice-to-have): transient network error THEN success ───────────────
 # First attempt: curl transport error (non-zero exit). Second: 200 with branch.
 # → retry recovers, prints the id, returns 0, curl called exactly twice.
