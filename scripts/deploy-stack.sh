@@ -126,12 +126,17 @@ neon_branch_id_by_name() {
         fi
 
         # Success: parse the body and print the matching id (empty if absent).
-        printf '%s' "$body" | python3 -c "
+        # Pass branch_name OUT-OF-BAND as argv[1] (single-quoted python source,
+        # no shell interpolation) so a name containing a single quote — e.g. a
+        # git ref like preview/foo'bar — can't break the python literal and get
+        # silently misclassified as "branch absent".
+        printf '%s' "$body" | python3 -c '
 import json, sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b.get('name') == '${branch_name}']
-print(match[0] if match else '')
-"
+target = sys.argv[1]
+branches = json.load(sys.stdin).get("branches", [])
+match = [b["id"] for b in branches if b.get("name") == target]
+print(match[0] if match else "")
+' "$branch_name"
         return 0
     done
     # Unreachable in practice (the loop returns on every path), but keep a
