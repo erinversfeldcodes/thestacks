@@ -94,6 +94,14 @@ Fly.io handles rolling deploys. Health checks gate rollout. SLO probe gate runs 
 ### Release-to-main workflow (Issue #136)
 Trunk-based: merges to `main` trigger `deploy-production.yml`. `tag-main.yml` tags each successful deploy. Rollback restores both the Fly release and the Neon DB branch.
 
+### Infrastructure teardown & destructive ops
+For any destructive or outward-facing infra operation — deleting Fly apps, Neon branches, or Modal apps; force-deploys; secret changes — follow **inventory → confirm → execute → verify**:
+
+1. **Inventory first.** List the exact resources that will be affected (names, regions, branch). Never act on a wildcard you haven't enumerated; if what you find contradicts the described intent, surface it instead of proceeding.
+2. **Confirm scope with the human** before executing anything irreversible.
+3. **Respect teardown ordering.** Stop/drain compute before deleting its data store — stop the Fly core machines to drain the DB pool *before* deleting the Neon branch (Issue #123; canonically `scripts/cleanup-preview.sh`). Deleting the branch out from under live connections leaves orphaned errors.
+4. **Verify after.** Prove the resources are actually gone / the system is healthy — re-list, health-check `/api/health`, or diff against billing. Don't infer success from an exit code alone.
+
 ## Context Loading Requirements
 ```
 ./docs/agents/standards/code-quality.md
