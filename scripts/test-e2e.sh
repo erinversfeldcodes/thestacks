@@ -80,6 +80,28 @@ port_open() {
     nc -z localhost "$1" 2>/dev/null
 }
 
+# warm_remote_preview
+# Guard against cold-start 502s on the deployed preview (Issue #175). The preview
+# core app runs with auto_stop_machines = true and can go cold between the deploy
+# warmup and Playwright's `setup` project (auth.setup.ts) making its first login —
+# yielding an HTTP 502 that fails the whole E2E gate.
+#
+# The gate is purely "is there a remote URL to warm?": when BASE_URL is set we
+# poll the preview's health endpoint until it returns 200 (reusing
+# wait_for_health, which fails fast with a clear message and non-zero exit after
+# the bound). When BASE_URL is unset there is nothing remote to warm — regardless
+# of E2E_SERVICES (including the "run against an already-running local stack"
+# mode, E2E_SERVICES=none with no BASE_URL) — so this is a strict no-op. This
+# matches the globalSetup guard, which is likewise BASE_URL-only.
+warm_remote_preview() {
+    # No remote target to warm (local run) → strict no-op.
+    if [[ -z "${BASE_URL:-}" ]]; then
+        return 0
+    fi
+    echo "==> Remote mode: warming ${BASE_URL}/api/health before setup..."
+    wait_for_health "${BASE_URL}/api/health" "Preview" 60
+}
+
 # ── Install E2E deps if needed ─────────────────────────────────────────────────
 if [[ ! -d "$REPO_ROOT/e2e/node_modules" ]]; then
     echo "==> Installing E2E dependencies..."
@@ -167,6 +189,11 @@ echo ""
 echo "==> Clearing stale auth storage state..."
 rm -rf "$REPO_ROOT/e2e/.auth/"
 mkdir -p "$REPO_ROOT/e2e/.auth"
+
+# ── Warm the remote preview before the setup project runs ────────────────────
+# No-op locally; in remote mode this blocks until the (possibly cold) preview
+# returns 200 so auth.setup.ts's first login doesn't hit a 502.
+warm_remote_preview
 
 # ── Run Playwright ────────────────────────────────────────────────────────────
 echo ""
