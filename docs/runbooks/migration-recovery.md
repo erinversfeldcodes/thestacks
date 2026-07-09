@@ -134,6 +134,42 @@ escalate.
 
 ---
 
+## Deploy note: `op.guardian_tokens` (Issue #124, server-side JWT revocation)
+
+Two operator-relevant behaviours ship with the `guardian_db` change (ADR 016).
+
+### Deploying force-invalidates every live session (expected)
+
+When the `20260708120000_create_guardian_tokens` migration + the #124 code first
+reach an environment, **every currently-valid session is force-invalidated.**
+Pre-existing access tokens were signed before the table existed, so they have no
+row in `op.guardian_tokens`; the first authenticated request each makes fails
+`Guardian.DB.on_verify` → 401 → the user must re-login. This is **expected, not a
+regression** — do not roll back on a spike of 401s / re-logins immediately after
+this deploy. New logins issue tracked tokens and behave normally.
+
+### Migration ↔ code rollback must be lockstep
+
+`op.guardian_tokens` is a case where the standard **"revert image before schema"**
+ordering (see the expand-contract invariant above) is **load-bearing, and the
+reverse is catastrophic**:
+
+- The #124 code does a `SELECT` on `op.guardian_tokens` on **every** authenticated
+  request (`on_verify`) and an INSERT on every login.
+- Rolling back the `guardian_tokens` migration (dropping the table) **without also
+  rolling back the #124 code** leaves the running image querying a table that no
+  longer exists → every verify and every login raises → **total auth outage**, not
+  a degraded subset.
+
+So: never down-migrate `guardian_tokens` while #124 code is still serving. Roll
+back the **core image first** (to a pre-#124 image that doesn't touch the table),
+**then** the schema — exactly the composite action's core-image → Neon-DB ordering.
+If in doubt, leave the table in place: an unused `guardian_tokens` table is inert
+for a pre-#124 image (expand-contract safe), whereas a missing table under #124
+code is a hard outage.
+
+---
+
 ## Cross-references
 
 ### `migration-safety` lint

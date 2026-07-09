@@ -245,8 +245,18 @@ thestacks/
 |-----------|-----------|-------|
 | JWT signing | Guardian (HS256) | 64-char `GUARDIAN_SECRET_KEY`, generated with `mix guardian.gen.secret` |
 | Session storage | Signed/encrypted cookies | `same_site: "Lax"`, `secure: true` in production |
-| Token lifetime | 24h access, 7d refresh | Refresh tokens stored in DB, revocable |
+| Token lifetime | 8h access, no refresh token | Refresh flow deferred to #173. Access token is stored in `op.guardian_tokens` and revocable server-side via `guardian_db` (Issue #124). |
 | Password hashing | Argon2 (`argon2_elixir`) | Memory-hard, resistant to GPU attacks |
+
+### Server-side token revocation (stateful auth)
+
+As of Issue #124 (A2), user access tokens are tracked server-side via `guardian_db` so that logout and `Guardian.revoke/1` actually invalidate a live token. Each issued access token is INSERTed into `op.guardian_tokens` on sign, presence-checked on every verify (`Stacks.Accounts.Guardian.on_verify/3` → `Guardian.DB.on_verify/2`), and deleted on revoke. A daily Oban cron (`Stacks.Workers.GuardianTokenSweepJob`, 00:00 UTC) purges expired rows. Only `"access"` tokens are tracked (`token_types: ["access"]`); admin `"admin_session"` tokens are excluded and revoked out-of-band via `boot_id` + the `admin_sessions` table.
+
+**Statefulness blast radius.** This trades stateless HS256 verification for a stateful, DB-backed check:
+
+- Every authenticated request now performs a `SELECT` on `op.guardian_tokens` (PK lookup on `jti`) as part of token verification. Auth is no longer purely CPU-bound signature checking.
+- Login now depends on a successful token INSERT — if the write to `op.guardian_tokens` fails, `encode_and_sign` fails and the user cannot log in.
+- A Neon (Postgres) outage now returns **401 for all authenticated traffic**, not just for endpoints that touch the DB directly. Previously a token was verifiable purely from its signature; now unreachable Postgres means no session can be verified.
 
 ### Plug Pipeline
 
