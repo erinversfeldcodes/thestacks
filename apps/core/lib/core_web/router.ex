@@ -73,6 +73,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :admin
   end
 
+  pipeline :rate_limit_e2e_helper do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :e2e_helper
+  end
+
   pipeline :partner_auth do
     plug StacksWeb.PartnerAuthPlug
   end
@@ -334,8 +338,13 @@ defmodule CoreWeb.Router do
   # the guard lives in the router pipeline (fails closed) rather than in the
   # controller. The endpoint leaks an account-activation token, so a real 404
   # (not the SPA catch-all's index.html) is returned when the flag is off.
+  #
+  # PE-gate hardening (Issue #124): on public preview apps the flag IS on, so
+  # (1) the controller scopes lookups to `@thestacks.test` accounts only — a
+  # real user's token can never resolve — and (2) the `:e2e_helper` rate-limit
+  # bucket (10/min per IP) bounds brute-force enumeration / token harvesting.
   scope "/api/test", StacksWeb do
-    pipe_through [:api, StacksWeb.Plugs.E2ETestHelper]
+    pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
   end
 

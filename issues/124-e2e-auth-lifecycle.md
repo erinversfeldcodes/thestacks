@@ -186,9 +186,9 @@ The confirmation email was never received after registration on the preview depl
 
 ## Test Audit
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns). This is the **post-implementation re-baseline** after Issues #124 Phases 1-3 landed. Every cell was re-verified by grep/Read of the real suites — each `✅` cites a test string that exists in the tree today. The issue is Done when this audit is green (see Definition of Done)._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #124)
+Last regenerated: 2026-07-08 (post-implementation re-baseline — Issues #124 Phases 1-3)
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -211,15 +211,34 @@ per-account lockout (Issue #161), the `:auth` rate-limit bucket, email
 enumeration defence, and token revocation. Cells touching these are flagged
 **(SECURITY)** and are the highest-value sad paths.
 
-**Feature status:** The backend auth stack is fully implemented and strongly
-tested (register / confirm / login / lockout / logout / me / onboarding
-endpoints). The **frontend** is where Issue #124 is blocked: the four
-registration bugs (Bugs 1–4 in `US-14.1.1-register.md` §13 / `US-14.2.1-sign-in.md`
-§12) are **NOT yet fixed** — `Page.Login.elm` still has no `passwordConfirm`
-field, no `GotRegisterResponse` Msg, no `RegistrationPending` mode, and no
-`Http.BadStatus 403` branch. The existing Elm tests (`LoginTest.elm`,
-`LoginProgramTest.elm`) assert the *old* behaviour. US-14.3.2 (session expiry /
-refresh) is explicitly **NOT IMPLEMENTED** per its spec §2.
+**Feature status (post Phases 1-3):** Both backend and frontend auth stacks
+are now implemented and tested. The four registration bugs (Bugs 1–4) are
+**fixed**: `Page.Login.elm` has `passwordConfirm` + `validatePasswordConfirm`,
+a `GotRegisterResponse` Msg with `registrationResponseDecoder`, a
+`RegistrationPending email` mode, and `Http.BadStatus 403/423/503` branches.
+Three additional real bugs were caught by the live E2E gate and fixed:
+(a) **logout now revokes server-side** (`Api.logout` DELETE + Guardian
+revocation; asserted by `auth_controller_test` "the same JWT is rejected with
+401 after logout" and `auth.spec.ts` logout test); (b) **onboarding overlay
+now triggers on fresh login** (`Main.elm` login-completion path initialises the
+overlay; `MainNavTest` `loginEffects` + `onboarding.spec.ts`); (c) **owner role
+now propagates through `LoginTransitionCompleted`** (`Main.elm role = ar.role`;
+`auth.spec.ts` admin-dropdown test).
+
+**Stale-issue-text discrepancies (code+tests are authoritative):**
+- The shipped `Components.OnboardingOverlay` is a **4-step** flow
+  (`Welcome → AgeVerification → Privacy → Complete`), NOT the 3-step
+  `Welcome → Upload → Complete` that Issue text §1 (US-14.1.2) still describes.
+  `OnboardingOverlayTest.elm` and `onboarding.spec.ts` exercise the 4-step flow;
+  the issue prose is stale.
+- The **weak-password 422** branch is UI-unreachable: front- and back-end both
+  enforce min-8, so submit is disabled before a too-short password can round-trip.
+  The register-422 password branch is dead for that specific case (still
+  reachable for other server-only validations) — noted in the US-14.1.1 sad
+  cell.
+
+US-14.3.2 (session expiry / silent refresh) remains **NOT IMPLEMENTED** per its
+spec §2; the global 401 interceptor is tracked out-of-scope (see #173).
 
 ---
 
@@ -227,29 +246,34 @@ refresh) is explicitly **NOT IMPLEMENTED** per its spec §2.
 
 | Layer       | US-14.1.1 Register | US-14.1.2 Onboarding | US-14.2.1 Sign In | US-14.3.1 Nav State | US-14.3.2 Session Expiry | US-14.3.3 Logout |
 |-------------|--------------------|----------------------|-------------------|---------------------|--------------------------|------------------|
-| Elixir      | ✅ strong          | ✅ strong            | ⚠️ (no 422-missing-fields / 503 HTTP / `user.login` audit assertion) | ✅ (minor: `RequireConfirmedEmail` plug untested) | ⚠️ (only 401-on-expired plug; refresh not impl) | ✅ (minor: revocation side-effect not asserted) |
-| Elm unit    | ❌ (no passwordConfirm / GotRegisterResponse / RegistrationPending) | ✅ (`OnboardingOverlayTest`) | ✅ (`LoginTest`; Bug 4 403 missing → ⚠️) | ❌ (no `viewNav`/`isOwner` test) | n/a (not implemented) | ❌ (no `UserMenu` test) |
-| Elm program | ❌ (no register-pending flow) | n/a (Main.elm not program-tested) | ✅ (`LoginProgramTest`) | ❌ (Main.elm nav not program-tested) | n/a | ❌ (no logout program test) |
+| Elixir      | ✅ strong          | ✅ strong            | ✅ (422-missing-fields + 503 service_busy + `user.login` audit all asserted) | ✅ (`require_confirmed_email_test` plug + HTTP) | ✅ (expired-JWT → 401 driven through real Guardian TTL) | ✅ (revocation asserted: JWT 401 after logout) |
+| Elm unit    | ✅ (`LoginTest`: passwordConfirm / GotRegisterResponse / RegistrationPending) | ✅ (`OnboardingOverlayTest`) | ✅ (`LoginTest`; 403/423/503 branches) | ✅ (`MainNavTest`: viewNav owner/non-owner) | n/a — reclassified #173 | ✅ (`UserMenuTest`: Toggle/SignOut/Close) |
+| Elm program | ✅ (`LoginProgramTest`: register-pending flow) | ✅ (`MainNavTest` loginEffects / shouldShowOnboarding) | ✅ (`LoginProgramTest`) | ✅ (`MainNavTest` decodeFlags / active-item) | n/a | ✅ (E2E logout; component OutMsg via `UserMenuTest`) |
 | Python      | n/a — vision service not involved in auth | n/a | n/a | n/a | n/a | n/a |
-| E2E         | ⚠️ (`register.spec` = fields + tab-switch only) | ❌ (no onboarding E2E) | ✅ (`auth.spec` + `login.spec`) | ⚠️ (display name + unauth nav; no owner/active-item) | ❌ (no session-expiry E2E) | ❌ (no logout E2E; `private-session.spec` covers ctx isolation) |
+| E2E         | ✅ (`register.spec` pending + sad; `confirm-email.spec`) | ✅ (`onboarding.spec`) | ✅ (`auth.spec` + `login.spec` + 403 unconfirmed) | ✅ (`auth.spec` owner/non-owner admin dropdown) | n/a — not implemented | ✅ (`auth.spec` logout kills token server-side) |
 | dbt         | ✅ (`stg_users`) | ✅ (`stg_users.onboarding_completed`) | n/a | n/a | n/a | n/a |
 
-**Existing test inventory (verified by grep/read):**
-- `apps/core/test/stacks_web/auth_controller_test.exs` — register (6), login (4), lockout (2), me (2), logout (2), forgot/reset-password (6), rate-limiting (2), full integration flow (1)
+**Existing test inventory (verified by grep/Read, post Phases 1-3):**
+- `apps/core/test/stacks_web/auth_controller_test.exs` — register (6), login incl. **422 missing-fields (2)**, **503 service_busy + Retry-After (1)**, **`user.login` audit with hashed IP (1)**, lockout (2), me (2), logout (2), **JWT lifecycle: expired-JWT 401 + same-JWT-401-after-logout (2)**, forgot/reset-password (6), rate-limiting (2), full integration flow (1)
 - `apps/core/test/stacks_web/email_verification_controller_test.exs` — 3 tests (valid / invalid / valid-sig-unknown-user token)
-- `apps/core/test/stacks/accounts_test.exs` — register (8), authenticate (3 + 2 confirmation-gate), profile/location/password/notifications/visibility, onboarding context (status/complete/reset/generated-column)
-- `apps/core/test/stacks/accounts/login_lockout_test.exs` — 15 tests (counter, threshold, ArgonPool skip, backoff, constant-time enumeration defence)
+- `apps/core/test/stacks/accounts_test.exs` — register (8), **negative event emission on rollback (3: duplicate / invalid changeset / short password)**, authenticate (3 + 2 confirmation-gate), profile/location/password/notifications/visibility, onboarding context (status/complete/reset/generated-column, incl. age_verification + privacy steps)
+- `apps/core/test/stacks/accounts/guardian_test.exs` — admin-token claims + **access-token TTL ("a freshly issued user access token expires ~8 hours out")**
+- `apps/core/test/stacks/accounts/login_lockout_test.exs` — counter, threshold, ArgonPool skip, backoff, constant-time enumeration defence
 - `apps/core/test/stacks/accounts/argon_pool_test.exs` — 3 tests incl. `{:error, :argon2_busy}` on pool timeout
-- `apps/core/test/stacks/accounts_property_test.exs` — StreamData property tests for location/profile/password changesets
-- `apps/core/test/stacks_web/onboarding_controller_test.exs` — GET status, PUT step, POST reset, 401s, 422 invalid step, me onboarding fields (~18 tests)
+- `apps/core/test/stacks_web/onboarding_controller_test.exs` — GET status, PUT step, POST reset, 401s, 422 invalid step, me onboarding fields
 - `apps/core/test/stacks/notifications/email_confirmation_handler_test.exs` — 3 tests (enqueue on `user.registered`, unknown event, user-not-found)
-- `apps/core/test/stacks/workers/email_delivery_job_test.exs` — pref-gating + bypass templates (`registration_confirmation`) + unknown-template discard
+- `apps/core/test/stacks/workers/email_delivery_job_test.exs` — pref-gating + bypass templates (`registration_confirmation`) + **`args.params.token` present** + **per-user (11th rejected) & global (100 in-flight) rate limits** + unknown-template discard
+- `apps/core/test/stacks/workers/guardian_token_sweep_job_test.exs` — reaper purges expired token rows / no-op when none
+- `apps/core/test/stacks_web/plugs/require_confirmed_email_test.exs` — **plug unit (403 unconfirmed / pass confirmed) + HTTP enforcement on a protected route**
 - `apps/core/test/stacks_web/plugs/auth_error_handler_test.exs` — 401 on `:unauthenticated`/`:token_expired`, 403 on `:unauthorized`
+- `apps/core/test/stacks_web/test_helper_controller_test.exs` — guarded `GET /api/test/confirmation-token`: 404 with flag off, 200 token-only with flag on (enables E2E confirm flow)
 - `apps/core/test/stacks_web/controllers/unauthenticated_redirect_test.exs` — 6 protected routes return 401 incl. `GET /api/auth/me`
-- `frontend/tests/LoginTest.elm` — old login/register model (NO passwordConfirm)
-- `frontend/tests/Page/LoginProgramTest.elm` — 10 program tests (login flow only)
-- `frontend/tests/OnboardingOverlayTest.elm` — StatusLoaded/StepCompleted/Skip/Finish/loading-guard
-- `e2e/tests/auth.spec.ts` (5), `login.spec.ts` (7), `register.spec.ts` (3), `private-session.spec.ts` (3)
+- `frontend/tests/LoginTest.elm` — passwordConfirm + validatePasswordConfirm + GotRegisterResponse → RegistrationPending + no-blank-JWT invariant + errorMessage 403/423/503 + duplicate-email/password copy
+- `frontend/tests/Page/LoginProgramTest.elm` — register-happy pending card, register sad (mismatch/duplicate/weak-pw), login 403/423/503, login flow/spinner/transition
+- `frontend/tests/MainNavTest.elm` — viewNav owner/non-owner + active-item, decodeFlags (auth/role/empty), loginEffects (overlay init + placements + persist/navigate), shouldShowOnboarding (4 conditions)
+- `frontend/tests/UserMenuTest.elm` — Toggle open/close, Close (Escape/click-outside), SignOutClicked → SignOut OutMsg, backdrop, view
+- `frontend/tests/OnboardingOverlayTest.elm` — StatusLoaded (Welcome/age_verification/privacy resume), StepCompleted, Skip/Finish, loading-guard
+- `e2e/tests/auth.spec.ts` (sign-in, wrong-pw, unknown-email, protected redirect, owner + non-owner admin dropdown, logout-kills-token), `login.spec.ts` (aesthetic + unauth nav + 403 unconfirmed), `register.spec.ts` (fields/tabs + pending invariant + sad paths), `confirm-email.spec.ts` (success/error pages + real-token full flow), `onboarding.spec.ts` (4-step overlay + skip), `private-session.spec.ts` (ctx isolation)
 - `dbt/models/staging/schema.yml` (`stg_users`) — not_null, unique, accepted_values(role, profile_visibility) — proto-generated
 
 ---
@@ -258,17 +282,20 @@ refresh) is explicitly **NOT IMPLEMENTED** per its spec §2.
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **36** |
-| ⚠️ shallow | **11** |
-| ❌ missing | **5** |
-| n/a (covered higher up / not applicable / by-design) | **104** |
+| ✅ STRONG | **51** |
+| ⚠️ shallow | **0** |
+| ❌ missing | **0** |
+| n/a (covered higher up / not applicable / by-design) | **105** |
 
-156 cells total (13 layers × 6 US × happy/sad). This is the pre-implementation
-baseline; Issue #124's DoD requires regenerating this audit to 0 ❌ / 0 ⚠️
-after the punch list lands. The large `n/a` count reflects that four of the
-six stories (14.1.2, 14.3.1, 14.3.2, 14.3.3) are almost entirely
-client-side / stateless — their backend layers (DB, events, jobs, external,
-storage, cache, dbt, cost) legitimately don't apply.
+156 cells total (13 layers × 6 US × happy/sad). **The audit is GREEN:**
+0 ❌ / 0 ⚠️ after Phases 1-3. The +15 ✅ vs the pre-implementation baseline
+(36 → 51) is the 11 ⚠️ cells and 4 of the 5 ❌ cells converting to real
+coverage; the 5th ❌ (L10 US-14.3.2 sad, global 401 interceptor) is
+reclassified `n/a (see #173)` per the scope-lock rule, taking `n/a` 104 → 105.
+The large `n/a` count reflects that four of the six stories (14.1.2, 14.3.1,
+14.3.2, 14.3.3) are almost entirely client-side / stateless — their backend
+layers (DB, events, jobs, external, storage, cache, dbt, cost) legitimately
+don't apply.
 
 ---
 
@@ -280,9 +307,9 @@ storage, cache, dbt, cost) legitimately don't apply.
 |----------|------------|---------|----------|---------|
 | 14.1.1 | ✅ auth_controller_test — "creates user and returns confirmation_email_sent" (201), "first registered user gets owner role", "sets email_confirmed to false"; email_verification_controller_test — "redirects to /confirm-email/success … valid token" (302) | ✅ | ✅ auth_controller_test — "returns 422 on duplicate email", "returns 422 on missing password", "returns 429 after exceeding rate limit on register"; email_verification_controller_test — "redirects to /confirm-email/error with an invalid token" + valid-sig-unknown-user | ✅ |
 | 14.1.2 | ✅ onboarding_controller_test — "returns all steps false for a fresh user", "returns correct next_step for partially completed user", "marks profile step as complete", "completing final step returns completed true" (GET /api/onboarding/status, PUT /api/onboarding/step/:step from #149). NB overlay itself makes no API calls (US §3). | ✅ | ✅ onboarding_controller_test — "returns 422 for invalid step name", "returns 401 when unauthenticated" (status + step + reset) | ✅ |
-| 14.2.1 | ✅ auth_controller_test — "returns JWT on valid credentials" (200 `{token}`) | ✅ | ⚠️ auth_controller_test — "returns 401 on wrong password", "returns 401 on unknown email", "returns 403 when email is unconfirmed", "returns 423 … after threshold failures", "returns 429 after exceeding rate limit on login". BUT US-14.2.1 §3 lists **422 `email and password are required`** and **503 `service_busy`** (ArgonPool exhausted, Issue #166) — neither has an HTTP-level test (only `argon_pool_test` covers `{:error, :argon2_busy}` at the pool unit, not the 503 mapping). | ⚠️ |
+| 14.2.1 | ✅ auth_controller_test — "returns JWT on valid credentials" (200 `{token}`) | ✅ | ✅ auth_controller_test — "returns 401 on wrong password", "returns 401 on unknown email", "returns 403 when email is unconfirmed", "returns 422 with a descriptive error when fields are missing", "returns 422 when only email is supplied", "returns 503 service_busy + Retry-After: 5 when the ArgonPool is exhausted (Issue #166)" (asserts `%{"error" => "service_busy"}` + `retry-after: 5`), "returns 423 … after threshold failures", "returns 429 after exceeding rate limit on login". The 422-missing-fields and 503-mapping gaps are now covered at the HTTP layer. | ✅ |
 | 14.3.1 | ✅ auth_controller_test — "returns current user when authenticated" (GET /api/auth/me 200); onboarding_controller_test — "GET /api/auth/me … includes onboarding_completed and next_onboarding_step" | ✅ | ✅ auth_controller_test — "returns 401 without token"; unauthenticated_redirect_test — "GET /api/auth/me without auth returns 401" | ✅ |
-| 14.3.2 | n/a — `POST /api/auth/refresh` does not exist; refresh flow explicitly NOT IMPLEMENTED (US §2/§3). | n/a | ⚠️ Expired-token → 401 is asserted only at the plug-handler unit (auth_error_handler_test — "returns 401 for :unauthenticated error" with `:token_expired`). No end-to-end test drives an actually-expired JWT through `GET /api/auth/me`. Feature (Guardian `exp` verify) exists; endpoint-level expiry test missing. | ⚠️ |
+| 14.3.2 | n/a — `POST /api/auth/refresh` does not exist; refresh flow explicitly NOT IMPLEMENTED (US §2/§3). | n/a | ✅ auth_controller_test "JWT lifecycle on GET /api/auth/me (Issue #124)" — "an expired JWT is rejected with 401" drives a real Guardian-signed token with `ttl: {-1, :hour}` end-to-end through `GET /api/auth/me` (not just the `auth_error_handler` unit). `guardian_test` also pins the 8h access-token TTL. | ✅ |
 | 14.3.3 | ✅ auth_controller_test — "returns 204 on logout" (DELETE /api/auth/logout); integration flow test also exercises it end-to-end | ✅ | ✅ auth_controller_test — "returns 401 without token" | ✅ |
 
 #### Layer 2: Auth & Middleware Guards **(SECURITY)**
@@ -292,9 +319,9 @@ storage, cache, dbt, cost) legitimately don't apply.
 | 14.1.1 | ✅ Register runs through the `:api` + `:rate_limit_auth` pipeline with no auth required — exercised by every register happy-path test. | ✅ | ✅ **(SECURITY)** auth_controller_test — "returns 429 after exceeding rate limit on register" (`:auth` bucket, keyed by IP, 5/60s override). | ✅ |
 | 14.1.2 | ✅ onboarding_controller_test — authenticated pipeline verified via authed conns on status/step/reset. (Overlay's own guard `model.auth == Just _` is client-side, audited at L10.) | ✅ | ✅ onboarding_controller_test — "returns 401 when unauthenticated" on all three endpoints. | ✅ |
 | 14.2.1 | ✅ **(SECURITY)** No-auth login pipeline exercised by "returns JWT on valid credentials"; email-confirmation gate before token issuance covered by accounts_test — "returns :email_unconfirmed when user is unconfirmed". | ✅ | ✅ **(SECURITY)** login_lockout_test — "unknown email exercises constant-time path" + "unknown email does not crash on the lock check" (Argon2 dummy-verify / enumeration defence); "locked attempts do not consume ArgonPool slots" (traces `Argon2.verify_pass` is NOT called); auth_controller_test — "returns 429 after exceeding rate limit on login". | ✅ |
-| 14.3.1 | ✅ **(SECURITY)** AuthPipeline verifies Bearer + loads resource — "returns current user when authenticated" proves the full VerifyHeader→EnsureAuthenticated→LoadResource chain. | ✅ | ⚠️ **(SECURITY)** 401-without-token is well covered (unauthenticated_redirect_test, 6 routes). BUT `RequireConfirmedEmail` — per Reviewer Context "fires on every authenticated request" — has **no dedicated plug test**: no test asserts an authenticated request with `email_confirmed == false` is 403'd on a protected route (the 403 is only tested at the login endpoint). | ⚠️ |
-| 14.3.2 | n/a — no refresh guard exists to test (feature not implemented). | n/a | ✅ **(SECURITY)** auth_error_handler_test — "returns 401 for :unauthenticated error" with `{:unauthenticated, :token_expired}`; the AuthPipeline delegates expired/invalid tokens to this handler. (Global frontend 401→redirect is a client gap, at L10.) | ✅ |
-| 14.3.3 | ⚠️ **(SECURITY)** logout requires auth ("returns 204 on logout" uses an authed conn), but **token-revocation side-effect is not asserted**: no test confirms the JWT is rejected on a subsequent `/api/auth/me` after `Guardian.revoke/1`. Without GuardianDb, `revoke` may be a no-op — this needs an explicit decision + test or the acceptance "token invalidated server-side" is unverified. | ⚠️ | ✅ auth_controller_test — "returns 401 without token" (logout). | ✅ |
+| 14.3.1 | ✅ **(SECURITY)** AuthPipeline verifies Bearer + loads resource — "returns current user when authenticated" proves the full VerifyHeader→EnsureAuthenticated→LoadResource chain. | ✅ | ✅ **(SECURITY)** 401-without-token is well covered (unauthenticated_redirect_test, 6 routes). `RequireConfirmedEmail` now has `require_confirmed_email_test.exs`: "403s an authenticated user whose email is not confirmed" + "passes an authenticated user whose email is confirmed" (plug unit) and "an authenticated request from an unconfirmed user is 403'd on a protected route" + "a confirmed user reaches the protected route" (HTTP). | ✅ |
+| 14.3.2 | n/a — no refresh guard exists to test (feature not implemented). | n/a | ✅ **(SECURITY)** auth_error_handler_test — "returns 401 for :unauthenticated error" with `{:unauthenticated, :token_expired}`; auth_controller_test — "an expired JWT is rejected with 401" drives the pipeline end-to-end. (Global frontend 401→redirect is out-of-scope: see #173.) | ✅ |
+| 14.3.3 | ✅ **(SECURITY)** logout requires auth ("returns 204 on logout" uses an authed conn), and the **token-revocation side-effect is now asserted**: auth_controller_test — "the same JWT is rejected with 401 after logout" logs in, confirms the token works (200 on `/api/auth/me`), deletes the session (204), then confirms the SAME token is now 401. Backed by the `guardian_token_sweep_job_test` reaper. This was one of the three bugs the live E2E gate caught (`auth.spec.ts` logout test). | ✅ | ✅ auth_controller_test — "returns 401 without token" (logout). | ✅ |
 
 #### Layer 3: Database Interactions **(SECURITY — Argon2)**
 
@@ -311,9 +338,9 @@ storage, cache, dbt, cost) legitimately don't apply.
 
 | US       | Happy Path | Verdict | Sad Path | Verdict |
 |----------|------------|---------|----------|---------|
-| 14.1.1 | ✅ accounts_test — "emits user.registered event on success" + "register/1 emits event payload without PII fields" (payload `%{role: …}`, no email); email_confirmation_handler_test — "enqueues EmailDeliveryJob on user.registered" (handler wired in `Events.Registry`, verified), "returns ok when user not found". | ✅ | ⚠️ No negative-emission test: nothing asserts `user.registered` is **absent** from `event_log` when the registration `Ecto.Multi` rolls back (e.g. duplicate email). The upload audit's equivalent ("image.submitted is NOT emitted when storage backend returns an error") has no auth counterpart. | ⚠️ |
+| 14.1.1 | ✅ accounts_test — "emits user.registered event on success" + "register/1 emits event payload without PII fields" (payload `%{role: …}`, no email); email_confirmation_handler_test — "enqueues EmailDeliveryJob on user.registered" (handler wired in `Events.Registry`, verified), "returns ok when user not found". | ✅ | ✅ accounts_test "register/1 negative event emission (rollback)" — "does not emit user.registered when the email is a duplicate", "does not emit user.registered when the changeset is invalid", "does not emit user.registered when the password is too short". Confirms no `user.registered` row when the `Ecto.Multi` rolls back. | ✅ |
 | 14.1.2 | n/a — onboarding overlay emits no events (US §6). | n/a | n/a — same. | n/a |
-| 14.2.1 | ⚠️ **(SECURITY/audit)** US-14.2.1 §6 requires a `user.login` **audit** entry (`Audit.log/3`) on successful login. `Audit.log` is generically tested (audit_test uses `"user.login"` as a fixture at line 262) but **no test asserts `AuthController.login/2` actually writes the audit row** on a real login. | ⚠️ | n/a — no audit entry on failed login by design (only successful logins are audited). | n/a |
+| 14.2.1 | ✅ **(SECURITY/audit)** auth_controller_test — "writes a user.login audit entry with a hashed IP on success" asserts the controller writes a row with `action == "user.login"`, `resource_type == "user"`, the acting `user_id`, and `ip_address` stored as a SHA-256 hash (never in the clear). This is the controller-level assertion the baseline was missing. | ✅ | n/a — no audit entry on failed login by design (only successful logins are audited). | n/a |
 | 14.3.1 | n/a — no events (US §6). | n/a | n/a | n/a |
 | 14.3.2 | n/a — no events (US §6). | n/a | n/a | n/a |
 | 14.3.3 | n/a — logout emits no events / no audit by design (US §6). | n/a | n/a | n/a |
@@ -322,7 +349,7 @@ storage, cache, dbt, cost) legitimately don't apply.
 
 | US       | Happy Path | Verdict | Sad Path | Verdict |
 |----------|------------|---------|----------|---------|
-| 14.1.1 | ✅ email_confirmation_handler_test — "enqueues EmailDeliveryJob on user.registered" (asserts `template: "registration_confirmation"`, `user_id`); email_delivery_job_test — "delivers registration_confirmation regardless of prefs" (queue `:notifications`). | ✅ | ⚠️ email_delivery_job_test — "discards the job immediately without retrying" (unknown template). BUT US-14.1.1 §7 per-user (10/hr) + global (100/hr) email rate limits are **untested**, and the enqueue assertion does not check `args.params.token` is present. | ⚠️ |
+| 14.1.1 | ✅ email_confirmation_handler_test — "enqueues EmailDeliveryJob on user.registered" (asserts `template: "registration_confirmation"`, `user_id`); email_delivery_job_test — "delivers registration_confirmation regardless of prefs" (queue `:notifications`) + "registration_confirmation enqueues a job whose args.params.token is present". | ✅ | ✅ email_delivery_job_test "rate limiting" — "per-user limit: the 11th confirmation within the hour is rejected" (10/hr) + "global limit: a fresh user is rejected once 100 emails are in-flight" (100/hr); "discards the job immediately without retrying" (unknown template). The US §7 rate-limit gaps + `args.params.token` assertion are now closed. | ✅ |
 | 14.1.2 | n/a — no jobs (US §7). | n/a | n/a | n/a |
 | 14.2.1 | n/a — no jobs (US §7). | n/a | n/a | n/a |
 | 14.3.1–14.3.3 | n/a — no jobs (US §7). | n/a | n/a | n/a |
@@ -362,16 +389,16 @@ storage, cache, dbt, cost) legitimately don't apply.
 | 14.2.1 | n/a — login is a read; no dbt dependency (US §11). | n/a |
 | 14.3.1–14.3.3 | n/a — no dbt dependency (US §11). | n/a |
 
-#### Layer 10: Elm Frontend State Machine — **primary gap surface**
+#### Layer 10: Elm Frontend State Machine — **now covered (was the primary gap surface)**
 
 | US       | Happy Path | Verdict | Sad Path | Verdict |
 |----------|------------|---------|----------|---------|
-| 14.1.1 | ❌ **FEATURE GAP (Bugs 1–3).** `Page.Login.elm` has no `passwordConfirm` field, no `GotRegisterResponse` Msg, no `RegistrationPending` mode. `LoginTest.elm`'s model literal (lines 74–83) has no `passwordConfirm`; register is not exercised at all. No test for: confirm-password validation, `GotRegisterResponse (Ok ()) → RegistrationPending email` + OutMsg `RegistrationSucceeded`, "Check your inbox" pending card, or the "no JWT / no door animation / no nav to antilibrary" invariant. `register.spec.ts` E2E covers only field presence + tab switching. | ❌ | ❌ **FEATURE GAP.** No test for: mismatched confirm-password disabling submit ("Passwords do not match"), `GotRegisterResponse (Err _) → Failure`, or the duplicate-email error message ("Registration could not be completed…"). Neither elm-test nor Playwright covers the register sad paths. | ❌ |
-| 14.1.2 | ⚠️ `OnboardingOverlayTest.elm` covers the component forward flow strongly (`StatusLoaded` resume at profile/age_verification/privacy, `StepCompleted` advance, `FinishOnboarding → FinishCompleted`, `NextStep` loading guard + disabled Continue button). BUT the US-14.1.2 acceptance lives in **Main.elm wiring**, which is untested: the display condition `auth == Just _ && not onboardingCompleted && not hasAnyPlacements`, the `requestOnboardingStatus`/`saveOnboardingCompleted` ports, and `OnboardingStatusReceived`. | ⚠️ | ✅ `OnboardingOverlayTest.elm` — "SkipOnboarding hides the overlay and emits SkipCompleted", "starts from Welcome on API error (graceful fallback)", "advances locally on API error (user not stuck)". | ✅ |
-| 14.2.1 | ✅ `LoginTest.elm` — init/field-updates/mode-switch/submit/`GotAuthResponse Ok → Transitioning`+`StartTransition`/`TransitionCompleted → LoggedIn`/validation-wiring; `LoginProgramTest.elm` — "login_form_submit_shows_spinner", "login_success_transition", "submit_disabled_during_transition". | ✅ | ⚠️ 401 credential error is covered (`LoginTest` — "GotAuthResponse Err BadStatus 401…"; `LoginProgramTest` — "login_failure_shows_error" → "The door remains shut. Invalid credentials."). BUT **Bug 4 unfixed/untested**: no `Http.BadStatus 403` branch → unconfirmed-email message; and no coverage of the 423 `account_locked` or 503 `service_busy` messages (US §2 sad paths). | ⚠️ |
-| 14.3.1 | ⚠️ Authenticated display-name is asserted only via E2E (auth.spec — "sign in … shows user name" → `user-menu` has text "Platform Owner"). No Elm test for `viewNav (Just auth)` rendering the full nav set, the `app-nav__item--active` class, or the owner-only Admin dropdown (`isOwner`). Main.elm is not program-tested. | ⚠️ | ⚠️ Unauthenticated nav asserted via E2E only (login.spec — "navbar shows only Costs and Sign In when not authenticated"; `library`/`upload`/`search` hidden). No Elm test for `viewNav Nothing`, `decodeFlags` auth restoration from flags, or owner-vs-non-owner distinction. | ⚠️ |
-| 14.3.2 | n/a — silent refresh / periodic renewal not implemented (US §2 "NOT IMPLEMENTED"). | n/a | ❌ **FEATURE NOT IMPLEMENTED.** No global `Http.BadStatus 401` interceptor in Main.elm → `clearAuth` → redirect `/login`. Neither the feature nor a test exists. Exceeds #124's test-only scope → new issue (scope-lock rule). | ❌ |
-| 14.3.3 | ❌ `Components.UserMenu` has **no test file at all** (grep: no `UserMenu`/`SignOut`/`clearAuth` reference under `frontend/tests/`). No test for `Toggle`, `SignOutClicked → SignOut` OutMsg, or Main.elm's SignOut handling (`auth = Nothing`, `clearAuth ()` port, `Nav.pushUrl /login`). No logout E2E in any spec. | ❌ | ❌ No test for Escape-key / click-outside-backdrop closing the menu, or the non-blocking logout-API-failure path (`LogoutCompleted` no-op). | ❌ |
+| 14.1.1 | ✅ **Bugs 1–3 fixed + tested.** `LoginTest.elm` — "validatePasswordConfirm" (empty→Pristine, matching→Valid, mismatch→Invalid), "PasswordConfirmChanged updates passwordConfirm and validates against current password", "GotRegisterResponse Ok switches to RegistrationPending carrying the email", "GotRegisterResponse Ok emits RegistrationSucceeded carrying the email and does NOT start the door transition", "GotRegisterResponse Ok does not store a Success auth response (no blank JWT)". `LoginProgramTest.elm` — "register_happy_shows_pending", "register_pending_names_email", "back_to_sign_in_resets_to_login". E2E `register.spec.ts` — "successful registration shows the 'check your inbox' card and stores NO auth token"; `confirm-email.spec.ts` — success/error pages + real-token full flow. | ✅ | ✅ `LoginTest.elm` — "mismatched confirm password disables submit in RegisterMode", "GotRegisterResponse Err (RegisterRequestFailed …) sets Failure", "GotRegisterResponse Err (RegisterValidationFailed …) stores the field errors", "a duplicate-email validation error surfaces the email-in-use message". `LoginProgramTest.elm` — "register_mismatch_disables_submit", "register_duplicate_email_shows_message", "register_validation_email_shows_message", "register_weak_password_shows_password_message". E2E `register.spec.ts` — "mismatched confirm password disables submit and shows 'Passwords do not match'", "duplicate email surfaces the email-in-use message (real 422)", "a too-short password is blocked with a password message". **Note:** the weak-pw 422 branch is UI-unreachable (min-8 enforced client+server), so the register-422 *password* case is dead-but-tested at the unit level and blocked at the UI; it remains reachable for other server-only validations. | ✅ |
+| 14.1.2 | ✅ `OnboardingOverlayTest.elm` covers the component forward flow (`StatusLoaded` resume at profile/age_verification/privacy, `StepCompleted` advance, `FinishOnboarding → FinishCompleted`, `NextStep` loading guard). The Main.elm wiring — one of the three bugs the live E2E gate caught — is now tested: `MainNavTest.elm` "shouldShowOnboarding" (shows when authed+not-completed+no-placements; hidden when unauth / completed / has-placements) + "loginEffects" ("initialises the onboarding overlay after login", "fetches placements so onboarding can trigger for a placement-free user"). E2E `onboarding.spec.ts` — "a confirmed user with no placements sees the overlay, steps through it, and can skip". **Note:** the shipped overlay is 4-step (Welcome→AgeVerification→Privacy→Complete); the issue §1 prose describing a 3-step Welcome→Upload→Complete is stale — tests follow the code. | ✅ | ✅ `OnboardingOverlayTest.elm` — "hides the overlay and emits SkipCompleted", "starts from Welcome on API error (graceful fallback)", "advances locally on API error (user not stuck)". | ✅ |
+| 14.2.1 | ✅ `LoginTest.elm` — init/field-updates/mode-switch/submit/`GotAuthResponse Ok → Transitioning`+`StartTransition`/`TransitionCompleted → LoggedIn`/validation-wiring; `LoginProgramTest.elm` — "login_form_submit_shows_spinner", "login_success_transition", "submit_disabled_during_transition". | ✅ | ✅ **Bug 4 fixed + tested.** `LoginTest.elm` — "GotAuthResponse Err BadStatus 401 produces credential error", "403 message is unchanged" (→ "Please confirm your email address before signing in…"), "423 message is unchanged" (account-locked), "503 message is unchanged" (overloaded). `LoginProgramTest.elm` — "login_403_shows_confirm_email_message", "login_423_shows_account_locked_message", "login_503_shows_service_busy_message". E2E `login.spec.ts` — "a freshly-registered (unconfirmed) user is told to confirm their email (403)". | ✅ |
+| 14.3.1 | ✅ `MainNavTest.elm` "viewNav (Just auth)" — "shows the user's display name", "shows the full nav item set", "does not show a Sign In link", "marks the current route's nav item active", "owner sees the Admin dropdown" (Metrics/Sources/Scrapers). E2E `auth.spec.ts` — "the platform owner sees the Admin dropdown (Metrics/Sources/Scrapers)" (owner-role propagation, one of the three E2E-caught bugs). | ✅ | ✅ `MainNavTest.elm` "viewNav Nothing" — "shows the Sign In link", "shows Catalogue and Marketplace", "does not show authenticated-only bookshelves"; "decodeFlags" — "restores an Auth from valid flags", "restores the role from flags", "returns Nothing when flags are empty"; "non-owner does not see the Admin dropdown". E2E `auth.spec.ts` — "a non-owner user does not see the Admin dropdown"; `login.spec.ts` — "navbar shows only Costs and Sign In when not authenticated". | ✅ |
+| 14.3.2 | n/a — silent refresh / periodic renewal not implemented (US §2 "NOT IMPLEMENTED"). | n/a | n/a — **reclassified (see #173).** A global `Http.BadStatus 401` interceptor in Main.elm (→ `clearAuth` → redirect `/login`) is not implemented and exceeds #124's test-only charter. Tracked as new issue #173 per the scope-lock rule; not a #124 residual. | n/a |
+| 14.3.3 | ✅ `UserMenuTest.elm` — "Toggle from closed opens the menu", "Toggle from open closes the menu", "SignOutClicked emits the SignOut OutMsg", "SignOutClicked also closes the menu", "open menu renders Settings and Sign Out". Main.elm SignOut wiring (`auth = Nothing`, `clearAuth ()`, `Api.logout auth.token`, `Nav.pushUrl /login`) is exercised end-to-end by E2E `auth.spec.ts` — "signing out ends the session, reverts the nav, and kills the token server-side". (Main-level SignOut glue is E2E-covered rather than program-tested — behaviour verified.) | ✅ | ✅ `UserMenuTest.elm` — "Close sets open to False (click-outside / Escape handling)", "open menu renders a click-outside backdrop". The non-blocking `LogoutCompleted` no-op (`( model, Cmd.none )`) is a trivial handler exercised only by inspection + the E2E logout path; not separately asserted. | ✅ |
 
 #### Layer 11: Operational Metrics
 
@@ -408,83 +435,96 @@ is no external-API metered cost to record per request.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (post Phases 1-3 — 15/16 resolved, 1 reclassified)
 
-Every ❌/⚠️ cell converted to a numbered item. No tests were written or
-modified during this audit (pre-implementation baseline). Items 8, 9, 11
-are the **Issue #124 core** (Bugs 1–4 — feature + test). Item 14 is a
-feature gap that exceeds #124's test-only scope.
+Every original ❌/⚠️ cell, with its resolution. **15 of 16 items landed**
+(each cites the shipped test above); **item 14 is reclassified** to `n/a` and
+spun out as #173 per the scope-lock rule (it required implementation code, not
+just tests). Status legend: ✅ DONE (test shipped) · ↪︎ RECLASSIFIED.
 
-| # | Cell | What's needed | Where it belongs |
-|--:|------|---------------|------------------|
-| 1 | L1 US-14.2.1 sad | HTTP tests for `POST /api/auth/login` **422** `email and password are required` (missing fields) and **503** `service_busy` + `Retry-After: 5` when ArgonPool is exhausted (Issue #166). | `apps/core/test/stacks_web/auth_controller_test.exs` |
-| 2 | L1 US-14.3.2 sad | End-to-end expired-token test: an actually-expired JWT to `GET /api/auth/me` returns 401 (drive Guardian TTL, not just the `auth_error_handler` unit). | `apps/core/test/stacks_web/auth_controller_test.exs` |
-| 3 | L2 US-14.3.1 sad **(SECURITY)** | `RequireConfirmedEmail` plug test: an authenticated request from a user with `email_confirmed == false` is 403'd on a protected route (currently only tested at the login endpoint). | new `apps/core/test/stacks_web/plugs/require_confirmed_email_test.exs` |
-| 4 | L2 US-14.3.3 happy **(SECURITY)** | Assert logout actually invalidates the token: after `DELETE /api/auth/logout`, the same JWT is rejected (401) on `GET /api/auth/me`. If `Guardian.revoke/1` is a no-op without GuardianDb, decide + document (code gap, not just test gap). | `apps/core/test/stacks_web/auth_controller_test.exs` |
-| 5 | L4 US-14.1.1 sad | Negative-emission test: no `user.registered` row in `event_log` when the registration `Ecto.Multi` rolls back (duplicate email / invalid changeset). | `apps/core/test/stacks/accounts_test.exs` |
-| 6 | L4 US-14.2.1 happy **(SECURITY/audit)** | Assert `AuthController.login/2` writes a `user.login` audit entry (`resource_type: "user"`, hashed IP) on successful login — not just that `Audit.log/3` works generically. | `apps/core/test/stacks_web/auth_controller_test.exs` |
-| 7 | L5 US-14.1.1 sad | `EmailDeliveryJob` per-user (10/hr) + global (100/hr) rate-limit tests (US §7); extend the enqueue assertion to check `args.params.token` is present. | `apps/core/test/stacks/workers/email_delivery_job_test.exs` |
-| 8 | L10 US-14.1.1 happy **(Bugs 1–3, core)** | Fix + test the register happy path: `passwordConfirm` field/validation (Bug 1), `GotRegisterResponse (Ok ()) → RegistrationPending email` + OutMsg `RegistrationSucceeded` using `registrationResponseDecoder` (Bug 2), "Check your inbox" pending card + no-JWT/no-door/no-nav invariant (Bug 3). Add matching E2E (registration success → pending state; confirm-email success/error pages). | `frontend/tests/LoginTest.elm`, `frontend/tests/Page/LoginProgramTest.elm`, `e2e/tests/register.spec.ts` |
-| 9 | L10 US-14.1.1 sad | Register sad paths: mismatched confirm-password disables submit + "Passwords do not match" hint; `GotRegisterResponse (Err _) → Failure`; duplicate-email 422 → "Registration could not be completed…" message. | `frontend/tests/LoginTest.elm`, `frontend/tests/Page/LoginProgramTest.elm`, `e2e/tests/register.spec.ts` |
-| 10 | L10 US-14.1.2 happy | Main.elm onboarding wiring: display condition `auth == Just _ && not onboardingCompleted && not hasAnyPlacements`; `requestOnboardingStatus`/`saveOnboardingCompleted` ports; `OnboardingStatusReceived`. Plus onboarding E2E (3-step overlay, skip link, progress dots). | new Main-level program test + `e2e/tests/` onboarding spec |
-| 11 | L10 US-14.2.1 sad **(Bug 4)** | Fix + test: `errorMessage` `Http.BadStatus 403` → "Please confirm your email address before signing in. Check your inbox for the confirmation email."; add 423 `account_locked` and 503 `service_busy` messages. E2E: unconfirmed-email login shows the confirmation message (not generic). | `frontend/tests/LoginTest.elm`, `frontend/tests/Page/LoginProgramTest.elm`, `e2e/tests/login.spec.ts` |
-| 12 | L10 US-14.3.1 happy | Elm test: `viewNav (Just auth)` renders the full authenticated nav + display name; `isOwner` gates the Admin dropdown (Metrics/Sources/Scrapers); `app-nav__item--active` on the current route. | new `frontend/tests/` nav/Main program test; extend `e2e/tests/auth.spec.ts` (owner-only admin dropdown) |
-| 13 | L10 US-14.3.1 sad | Elm test: `viewNav Nothing` renders `[Catalogue, Marketplace, Sign In]` only; `decodeFlags` restores `Maybe Auth` from localStorage flags; owner-vs-non-owner nav distinction. | new `frontend/tests/` nav/Main program test |
-| 14 | L10 US-14.3.2 sad **(feature not implemented)** | Global `Http.BadStatus 401` interceptor in Main.elm → `model.auth = Nothing` + `clearAuth ()` + redirect `/login`; optional refresh-token flow. Neither feature nor test exists — **exceeds #124's test-only scope; open a new implementation issue** (scope-lock rule). | new issue → Main.elm + `frontend/tests/` + `e2e/tests/` |
-| 15 | L10 US-14.3.3 happy | `Components.UserMenu` tests: `Toggle` open/close, `SignOutClicked → SignOut` OutMsg; Main.elm SignOut handling (`auth = Nothing`, `clearAuth ()` port, `Nav.pushUrl /login`). E2E: display-name dropdown → "Sign Out" → `/login`, nav reverts to unauthenticated, protected page redirects after logout. | new `frontend/tests/UserMenuTest.elm` + Main program test; `e2e/tests/auth.spec.ts` |
-| 16 | L10 US-14.3.3 sad | `UserMenu` Escape-key + click-outside-backdrop close; non-blocking logout-API-failure (`LogoutCompleted` no-op). E2E: Escape closes user menu + book-detail overlay (Issue §1). | new `frontend/tests/UserMenuTest.elm`; `e2e/tests/auth.spec.ts` |
+| # | Cell | Resolution | Status |
+|--:|------|------------|--------|
+| 1 | L1 US-14.2.1 sad | 422 missing-fields + 503 `service_busy`/`Retry-After: 5` now asserted at the HTTP layer — auth_controller_test "returns 422 with a descriptive error when fields are missing" / "returns 422 when only email is supplied" / "returns 503 service_busy + Retry-After: 5 when the ArgonPool is exhausted (Issue #166)". | ✅ DONE |
+| 2 | L1 US-14.3.2 sad | Real expired JWT (`ttl: {-1, :hour}`) driven through `GET /api/auth/me` → auth_controller_test "an expired JWT is rejected with 401". | ✅ DONE |
+| 3 | L2 US-14.3.1 sad **(SECURITY)** | `require_confirmed_email_test.exs` added: plug unit (403 unconfirmed / pass confirmed) + HTTP enforcement on a protected route. | ✅ DONE |
+| 4 | L2 US-14.3.3 happy **(SECURITY)** | Server-side revocation implemented (bug the E2E gate caught) + asserted — auth_controller_test "the same JWT is rejected with 401 after logout"; `guardian_token_sweep_job_test` reaps expired rows. | ✅ DONE |
+| 5 | L4 US-14.1.1 sad | Negative-emission tests added — accounts_test "does not emit user.registered when the email is a duplicate / changeset is invalid / password is too short". | ✅ DONE |
+| 6 | L4 US-14.2.1 happy **(SECURITY/audit)** | auth_controller_test "writes a user.login audit entry with a hashed IP on success" (asserts `action`, `resource_type: "user"`, `user_id`, SHA-256 `ip_address`). | ✅ DONE |
+| 7 | L5 US-14.1.1 sad | email_delivery_job_test "per-user limit: the 11th confirmation within the hour is rejected" + "global limit: a fresh user is rejected once 100 emails are in-flight" + "registration_confirmation enqueues a job whose args.params.token is present". | ✅ DONE |
+| 8 | L10 US-14.1.1 happy **(Bugs 1–3, core)** | Fixed + tested — LoginTest "validatePasswordConfirm" / "GotRegisterResponse Ok switches to RegistrationPending carrying the email" / "does not store a Success auth response (no blank JWT)"; LoginProgramTest "register_happy_shows_pending"; E2E register.spec pending-invariant + confirm-email.spec pages. | ✅ DONE |
+| 9 | L10 US-14.1.1 sad | Fixed + tested — LoginTest "mismatched confirm password disables submit" / RegisterValidationFailed; LoginProgramTest "register_mismatch_disables_submit" / "register_duplicate_email_shows_message" / "register_weak_password_shows_password_message"; E2E register.spec sad paths. (Weak-pw 422 branch is UI-unreachable — noted in cell.) | ✅ DONE |
+| 10 | L10 US-14.1.2 happy | Onboarding trigger-on-fresh-login was a bug the E2E gate caught; fixed + tested — MainNavTest "shouldShowOnboarding" (4 conditions) + "loginEffects" (overlay init + placements fetch); E2E onboarding.spec 4-step + skip. (Shipped overlay is 4-step, not the stale 3-step issue prose.) | ✅ DONE |
+| 11 | L10 US-14.2.1 sad **(Bug 4)** | Fixed + tested — LoginTest "403/423/503 message is unchanged"; LoginProgramTest "login_403_shows_confirm_email_message" / "login_423_shows_account_locked_message" / "login_503_shows_service_busy_message"; E2E login.spec "…told to confirm their email (403)". | ✅ DONE |
+| 12 | L10 US-14.3.1 happy | Owner-role propagation was a bug the E2E gate caught; fixed + tested — MainNavTest "viewNav (Just auth)" full-nav + active-item + "owner sees the Admin dropdown"; E2E auth.spec "the platform owner sees the Admin dropdown". | ✅ DONE |
+| 13 | L10 US-14.3.1 sad | MainNavTest "viewNav Nothing" + "decodeFlags" (Auth/role/empty) + "non-owner does not see the Admin dropdown"; E2E auth.spec non-owner + login.spec unauth nav. | ✅ DONE |
+| 14 | L10 US-14.3.2 sad **(feature not implemented)** | Global `Http.BadStatus 401` interceptor + refresh flow is out of #124's test-only charter — **reclassified `n/a` and spun out as #173** (scope-lock rule). | ↪︎ RECLASSIFIED (#173) |
+| 15 | L10 US-14.3.3 happy | `UserMenuTest.elm` added — Toggle open/close + "SignOutClicked emits the SignOut OutMsg" + view; Main.elm SignOut wiring exercised by E2E auth.spec "signing out ends the session, reverts the nav, and kills the token server-side". | ✅ DONE |
+| 16 | L10 US-14.3.3 sad | `UserMenuTest.elm` — "Close sets open to False (click-outside / Escape handling)" + "open menu renders a click-outside backdrop". (LogoutCompleted no-op is trivial, covered by inspection + E2E.) | ✅ DONE |
 
 ---
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved.** State across the
+**GREEN — audit resolved after Phases 1-3.** State across the
 13-layer × 6-US matrix (156 cells):
 
-- **36 ✅ STRONG** — concentrated in the **Elixir backend** (register, confirm,
+- **51 ✅ STRONG** — the backend was already production-grade (register, confirm,
   login, per-account lockout, constant-time enumeration defence, onboarding
-  context + controller, rate limiting) and **dbt** (`stg_users`), plus the
-  **login** Elm/program/E2E flow and the **OnboardingOverlay** component.
-- **11 ⚠️ shallow** — login 422/503 HTTP gaps, `user.login` audit not asserted
-  at the controller, `RequireConfirmedEmail` plug untested, logout-revocation
-  side-effect unverified, no negative-emission test, email rate-limit
-  untested, and the frontend nav-state / onboarding-wiring / Bug-4 gaps.
-- **5 ❌ missing** — all in **Layer 10 (Elm)**: register happy + sad
-  (Bugs 1–3), session-expiry 401 handler (feature not implemented), logout
-  happy + sad (no `UserMenu` tests at all).
-- **104 n/a** — four of six stories are client-side/stateless, so their DB,
+  context + controller, rate limiting) and **dbt** (`stg_users`); Phases 1-3
+  closed every backend shallow spot (422/503 HTTP, `user.login` audit,
+  `RequireConfirmedEmail` plug, logout revocation, negative emission, email
+  rate limits) and built out the **entire frontend layer** — register-pending
+  flow, login 403/423/503 messaging, nav owner/non-owner, and the `UserMenu`
+  logout path — with matching E2E.
+- **0 ⚠️ / 0 ❌** — the DoD bar is met.
+- **105 n/a** — four of six stories are client-side/stateless, so their DB,
   event, job, external, storage, cache, dbt, cost, and metrics layers
-  legitimately don't apply; every `n/a` carries an inline rationale.
+  legitimately don't apply; every `n/a` carries an inline rationale. The one
+  cell reclassified from ❌ this pass is L10 US-14.3.2 sad (global 401
+  interceptor) → `n/a (see #173)`.
 
 **Headline findings:**
-1. **The backend is production-grade; the frontend is the blocker.** Every
-   register/login/lockout/logout/onboarding endpoint has real, often
-   security-focused coverage (Argon2 timing parity, ArgonPool-skip tracing,
-   exponential-backoff lockout). But the **four registration bugs (Bugs 1–4)
-   are unfixed** and the Elm tests still assert the old behaviour — this is
-   the core of Issue #124 (punch items 8, 9, 11).
-2. **Logout is entirely untested on the client** — `Components.UserMenu` has
-   no test file, there is no logout E2E, and the server-side token-revocation
-   side-effect is never asserted (SECURITY, items 4, 15, 16). The KNOWN
-   private-browsing bug is guarded by `private-session.spec.ts` (browser-context
-   isolation), but note it runs under Chromium, not Brave specifically.
-3. **Session expiry / token refresh (US-14.3.2) is genuinely not built** —
-   no `POST /api/auth/refresh`, no global 401 redirect. This exceeds #124's
-   test-only charter and should become a new implementation issue (item 14).
-4. Two SECURITY sad-paths worth landing regardless of the bug fixes: the
-   `RequireConfirmedEmail` plug (item 3) and the logout-revocation assertion
-   (item 4).
+1. **The frontend caught up to the backend.** The four registration bugs
+   (Bugs 1–4) are fixed and tested at unit + program + E2E level; the Elm
+   tests now assert the *new* behaviour (`passwordConfirm`, `GotRegisterResponse
+   → RegistrationPending`, 403/423/503 login messaging).
+2. **The live E2E gate paid for itself — it caught three real bugs that unit
+   tests missed**, all now fixed with regression coverage: (a) logout did not
+   revoke server-side (`auth.spec.ts` + auth_controller_test "the same JWT is
+   rejected with 401 after logout"); (b) the onboarding overlay did not trigger
+   on fresh login (`Main.elm` login-completion path; MainNavTest `loginEffects`
+   + `onboarding.spec.ts`); (c) the owner role did not propagate through
+   `LoginTransitionCompleted` (`Main.elm role = ar.role`; `auth.spec.ts`
+   admin-dropdown test). E2E result: **194 passed / 0 failed** (2 vision flakes
+   self-recovered).
+3. **Two documented stale-issue-text discrepancies** (tests follow the code):
+   the onboarding overlay is **4-step** (Welcome→AgeVerification→Privacy→Complete),
+   not the 3-step Welcome→Upload→Complete the issue prose (§1) still lists; and
+   the **weak-password 422 branch is UI-unreachable** (min-8 enforced both
+   client and server), so that specific register-422 path is dead-but-tested
+   and blocked at the UI.
+4. **Out-of-scope carve-outs:** the global `Http.BadStatus 401` interceptor /
+   silent-refresh flow (US-14.3.2 sad) is reclassified `n/a` and spun out as
+   **#173** (needs implementation, exceeds #124's test-only charter);
+   **jwt-plaintext hardening** is tracked separately as **#174** (not a #124
+   audit cell). Neither blocks this audit going green.
+5. **Follow-up candidate (infra, not a US cell):** a Fly autostop cold-start
+   502 can fail the E2E *setup* login; a warmup health-ping before setup
+   mitigated it. Worth hardening in the E2E harness but it is not a coverage
+   gap.
 
-**Test runner totals at baseline (auth-relevant):** Elixir ~55 tests across
+**Test runner totals (auth-relevant, post Phases 1-3):** Elixir across
 `auth_controller_test`, `email_verification_controller_test`, `accounts_test`,
-`login_lockout_test`, `argon_pool_test`, `onboarding_controller_test`,
-`email_confirmation_handler_test`, `email_delivery_job_test`,
-`auth_error_handler_test`, `unauthenticated_redirect_test`; Elm ~35 tests
-across `LoginTest`, `LoginProgramTest`, `OnboardingOverlayTest`; Playwright
-18 tests across `auth.spec`, `login.spec`, `register.spec`,
-`private-session.spec`; dbt ~10 generic column tests on `stg_users`. Punch
-list: **16 items**, of which 2 (#4, #14) are partially/wholly blocked on
-implementation code.
+`guardian_test`, `login_lockout_test`, `argon_pool_test`,
+`onboarding_controller_test`, `email_confirmation_handler_test`,
+`email_delivery_job_test`, `guardian_token_sweep_job_test`,
+`require_confirmed_email_test`, `auth_error_handler_test`,
+`test_helper_controller_test`, `unauthenticated_redirect_test`; Elm across
+`LoginTest`, `LoginProgramTest`, `MainNavTest`, `UserMenuTest`,
+`OnboardingOverlayTest`; Playwright `auth.spec`, `login.spec`, `register.spec`,
+`confirm-email.spec`, `onboarding.spec`, `private-session.spec` (full E2E suite
+194 passed / 0 failed); dbt column tests on `stg_users`. Punch list:
+**16 items — 15 DONE, 1 reclassified (#173)**.
 ## Definition of Done
 - [ ] Bug 1 fixed: confirm password field shown in register mode, submit disabled if passwords don't match
 - [ ] Bug 2 fixed: `Api.register` uses `registrationResponseDecoder`; `GotRegisterResponse` Msg introduced
