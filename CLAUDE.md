@@ -104,6 +104,15 @@ See `AGENTS.md` for the full registry and domain routing table. See `docs/agents
 - **SQL/dbt:** Lowercase, snake_case. All tables UUID PKs + TIMESTAMPTZ. dbt models: staging -> intermediate -> marts.
 - **Protobuf:** `buf lint`. Field numbers are forever. Never reuse a number. Additive changes only.
 
+## Shell & Bash Conventions
+
+Bash commands run under the user's shell (**zsh**). To avoid the recurring "no matches found" failures:
+
+- **Quote globs and brace-expansions** passed to any command: `ls "plans/124-"*state*.json`, `git show "HEAD:issues/124-"*.md`, `grep -rn "pat" "apps/core"`. Unquoted `**`, `*foo*`, and `{a,b,c}` are expanded by zsh *before* the tool runs and abort the whole command when nothing matches.
+- **Prefer `find` / `ls dir/ | grep`** over bare recursive globs for discovery: `find apps/core -name "*book_detail_cache*"`, not `apps/core/**/*book_detail_cache*`.
+- **Run long commands in the background.** Deploys, `just verify`, full test suites, E2E, and dialyzer PLT builds should use `run_in_background: true` and be polled via their log — don't block a foreground call. Foreground `sleep` is blocked.
+- **Load `.env` before scripts/mix tasks that need runtime secrets** (`CLOAK_KEY`, `DATABASE_URL`, `FLY_API_TOKEN`): `set -a; source .env; set +a`. Many `scripts/*.sh` and `mix` tasks fail without it.
+
 ## Do Not
 
 - Skip ISBN verification for any book entering the system
