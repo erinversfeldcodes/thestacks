@@ -7,6 +7,9 @@ const isDeployed = !!process.env.BASE_URL;
 
 export default defineConfig({
   testDir: "./tests",
+  // Warm the deployed preview before any project runs (Issue #175). No-op when
+  // BASE_URL is unset, so local runs are untouched.
+  globalSetup: "./global-setup",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
