@@ -57,6 +57,9 @@ _Compact audit — one plug + tests; app/US layers mostly n/a. Baseline generate
 - [x] `just verify` passes
 - [x] **Test audit (embedded above) is GREEN** — applicable cells `✅`; 0 `❌`/`⚠️`. Regenerate as the final step.
 - [x] (scope expansion, 2026-07-10) `AuthController.get_ip/1` (audit-log provenance IP) also keys on `Fly-Client-IP`, never first XFF — with a spoof-resistance test (mutation-verified)
+- [x] **Live-stack validation (behaviour verified against real Fly topology):** the local tests set `fly-client-ip`/`x-forwarded-for` by hand, which is impossible on real Fly — so the production chain (Fly injects the trusted IP → limiter/audit key on it → rotating XFF can't bypass) is proven by two live-stack tests run **green against a real preview** (`stacks-core-pr-176-…fly.dev`):
+  - [x] `e2e/tests/rate-limit.spec.ts` (isolated `ratelimit` Playwright project, runs last) — realistic login flood → 429; rotating `X-Forwarded-For` → still 429. **PASSED live (28.8s).**
+  - [x] `apps/core/test/stacks_web/audit_ip_deployed_test.exs` (`@tag :deployed_only`) — one register through real Fly with a spoofed XFF → the recorded `audit.audit_log` provenance IP (`c870dc47…`) is NOT the spoofed `sha256("203.0.113.99")` (`4486f606…`). **PASSED live.**
 
 ## Dependencies
 - None. Independent; can land on this branch (feat/124-e2e-auth) or its own. Touches the `:e2e_helper` bucket added in #124 plus the pre-existing `:auth`/`:password_change` buckets.
