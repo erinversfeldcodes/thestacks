@@ -151,6 +151,35 @@ defmodule StacksWeb.AuthController do
     |> json(%{error: "token and password are required"})
   end
 
+  @doc """
+  POST /api/auth/refresh — rotate the current JWT for a fresh one.
+
+  Reachable only behind the `:authenticated` pipeline, so an expired, revoked,
+  or absent token is rejected with 401 before this action runs. On a valid
+  token we rotate: the old token is revoked server-side (its `guardian_tokens`
+  row is deleted, so it can never be used again) and a fresh token with the
+  standard 8h access TTL is minted. Response mirrors login's `%{token, user}`
+  shape so the SPA can swap tokens transparently during silent renewal.
+  """
+  def refresh(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+    old_token = Guardian.Plug.current_token(conn)
+
+    # Revoke the old token first so it stops working immediately (rotation),
+    # then mint a fresh one with the default 8h access TTL.
+    case Guardian.revoke(old_token) do
+      {:ok, _claims} ->
+        :ok
+
+      error ->
+        Logger.warning("Guardian.revoke failed during refresh: #{inspect(error)}")
+    end
+
+    {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+    json(conn, %{token: token, user: ProtoJSON.user(user)})
+  end
+
   @doc "GET /api/auth/me — return the current authenticated user."
   def me(conn, _params) do
     user = Guardian.Plug.current_resource(conn)

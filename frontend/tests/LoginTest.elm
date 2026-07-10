@@ -107,6 +107,7 @@ suite =
                             , passwordValidation = Pristine
                             , passwordConfirmValidation = Pristine
                             , displayNameValidation = Pristine
+                            , sessionExpired = False
                             }
 
                         ( model, _, _ ) =

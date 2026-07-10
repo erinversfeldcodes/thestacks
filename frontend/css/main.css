@@ -2375,6 +2375,24 @@ h4 {
     line-height: 1.5;
 }
 
+/* -- Session-expired notice (calm "lamplight" amber, distinct from the maroon
+      error above): the user did nothing wrong, so it reads as a warm notice,
+      not a warning. Dark brass text on an amber-tinted parchment panel keeps
+      >= 4.5:1 contrast on the login card. -- */
+
+.login-card__notice--session-expired {
+    color: #6b4310;
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: var(--size-sm);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background-color: rgba(184, 134, 11, 0.12);
+    border: 1px solid rgba(184, 134, 11, 0.35);
+    border-radius: 3px;
+    line-height: 1.5;
+}
+
 /* -- Submit button -- */
 
 .login-card__submit {

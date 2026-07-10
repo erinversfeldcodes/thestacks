@@ -52,6 +52,7 @@ module Api exposing
     , getUserPlacements
     , initUpload
     , inviteToGroup
+    , isUnauthorized
     , leaveGroup
     , login
     , logout
@@ -61,6 +62,7 @@ module Api exposing
     , placeBook
     , publishBlogPost
     , putFileToR2
+    , refresh
     , register
     , rejectIdentification
     , rejectSource
@@ -332,6 +334,43 @@ login body toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
+        }
+
+
+{-| True when an `Http.Error` is an authentication failure (HTTP 401) from an
+authenticated request — the signal the global session-expiry interceptor uses to
+distinguish an expired/revoked token from any other load failure. A 403 is NOT
+unauthorized here: it is used for the age-gate and stays local to the page.
+-}
+isUnauthorized : Http.Error -> Bool
+isUnauthorized err =
+    case err of
+        Http.BadStatus 401 ->
+            True
+
+        _ ->
+            False
+
+
+{-| POST /api/auth/refresh — exchange the current (still-valid) access token for
+a fresh one before it expires (Issue #173 proactive silent renewal). The 200
+body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
+here means the session is no longer renewable and the caller falls through to the
+session-expiry interceptor.
+-}
+refresh :
+    String
+    -> (Result Http.Error AuthResponse -> msg)
+    -> Cmd msg
+refresh token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/auth/refresh"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg authResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
         }
 
 

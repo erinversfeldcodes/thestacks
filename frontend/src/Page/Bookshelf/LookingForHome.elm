@@ -30,6 +30,7 @@ type alias Model =
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | SessionExpired
 
 
 type Msg
@@ -64,7 +65,11 @@ update msg model =
                     ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | books = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | books = Failure err }, Cmd.none, NoOut )
 
         VerifyAge ->
             ( model, Cmd.none, NavigateTo SettingsAgeVerification )

@@ -161,3 +161,44 @@ test.describe("Logout", () => {
     expect(resp.status()).toBe(401);
   });
 });
+
+test.describe("Session expiry", () => {
+  test("an expired/revoked token redirects to login with a session-expired notice on the next authed action", async ({
+    page,
+  }) => {
+    await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
+
+    // Simulate the access token having expired / been revoked server-side:
+    // keep the stored session SHAPE (so the SPA still boots "authenticated")
+    // but swap in a token the server will reject with 401 — exactly the state a
+    // real expiry produces. We do NOT fabricate a session from nothing.
+    await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      raw.token = `${raw.token}.expired`;
+      localStorage.setItem("stacks-auth", JSON.stringify(raw));
+    });
+
+    // Take an authed action with the now-invalid token: loading a bookshelf
+    // issues a Bearer request that comes back 401, which must route through the
+    // single global session-expiry interceptor.
+    await page.goto("/library");
+
+    // Redirected to the login form …
+    await page.waitForURL("**/login", { timeout: 15000 });
+    await expect(page.locator('input[id="email"]')).toBeVisible();
+
+    // … showing the DISTINCT session-expired notice (not invalid-credentials) …
+    const notice = page.getByTestId("session-expired-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("closed your session");
+
+    // … the invalid-credentials error is NOT what's shown here …
+    await expect(page.getByTestId("login-error")).toHaveCount(0);
+
+    // … and the local session has been cleared.
+    const stored = await page.evaluate(() =>
+      localStorage.getItem("stacks-auth")
+    );
+    expect(stored).toBeFalsy();
+  });
+});

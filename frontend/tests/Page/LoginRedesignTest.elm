@@ -175,6 +175,7 @@ formValidationTests =
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
+                        , sessionExpired = False
                         }
 
                     html =
@@ -208,6 +209,7 @@ formValidationTests =
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
+                        , sessionExpired = False
                         }
 
                     html =
