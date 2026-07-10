@@ -60,4 +60,28 @@ defmodule Core.PromExCustomMetricsTest do
     assert output =~ "stacks_fuse_state_state",
            "expected stacks_fuse_state_state in PromEx output, got:\n#{output}"
   end
+
+  # Issue #181: AuthController.refresh/2 emits
+  # [:stacks, :auth, :refresh, :revoke_failed] when it fails to revoke the old
+  # token during rotation. This test proves the metric is registered in the
+  # PromEx plugin AND that emitting the event is picked up by the registered
+  # counter — i.e. the emission in the controller branch (covered directly by
+  # the auth_controller_test) will be exported as a real, scrapeable series.
+  test "PromEx exports the auth refresh revoke-failure counter (Issue #181)" do
+    :telemetry.execute(
+      [:stacks, :auth, :refresh, :revoke_failed],
+      %{count: 1},
+      %{}
+    )
+
+    # Give PromEx's telemetry handler a moment to process the ETS writes.
+    Process.sleep(50)
+
+    output = PromEx.get_metrics(Core.PromEx)
+
+    refute output == :prom_ex_down, "Core.PromEx must be running for this test"
+
+    assert output =~ "stacks_auth_refresh_revoke_failed_count_total",
+           "expected stacks_auth_refresh_revoke_failed_count_total in PromEx output, got:\n#{output}"
+  end
 end

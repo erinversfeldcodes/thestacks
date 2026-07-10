@@ -6,6 +6,7 @@ defmodule StacksWeb.AuthControllerTest do
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias StacksWeb.AuthController
 
   # Reads the most recent audit.audit_log row for a given action via raw SQL so
   # the assertion does not depend on the (proto-generated) Ecto schema shape.
@@ -485,6 +486,51 @@ defmodule StacksWeb.AuthControllerTest do
       refresh_conn = post(conn, "/api/auth/refresh")
 
       assert json_response(refresh_conn, 401)
+    end
+
+    # Issue #181: when Guardian.revoke fails during refresh the action still
+    # mints a fresh token (degraded rotation — the old token stays valid until
+    # its TTL expires) but the degraded case must be counted/alertable via
+    # telemetry, in addition to the existing Logger.warning.
+    #
+    # Forcing a real revoke failure for a token that passed the :authenticated
+    # pipeline is not possible through the router (a valid token revokes
+    # cleanly). We instead call the action directly with a current_token that
+    # cannot be peeked: Guardian.revoke("not-a-real-token") returns
+    # {:error, :not_found}, driving the genuine revoke-failure branch with no
+    # production seam. The mint uses the resource, so the response is a normal
+    # 200 and behaviour is unchanged.
+    test "emits [:stacks, :auth, :refresh, :revoke_failed] telemetry when the old token cannot be revoked",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-revoke-fail@example.com", email_confirmed: true)
+
+      test_pid = self()
+      handler_id = "test-refresh-revoke-failed-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:stacks, :auth, :refresh, :revoke_failed],
+          fn event, measurements, metadata, _config ->
+            send(test_pid, {:telemetry, event, measurements, metadata})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      refresh_conn =
+        conn
+        |> Guardian.Plug.put_current_resource(user)
+        |> Guardian.Plug.put_current_token("not-a-real-token")
+        |> AuthController.refresh(%{})
+
+      # Behaviour is unchanged: a fresh token is still minted and returned 200.
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+      assert is_binary(new_token) and new_token != ""
+
+      # The degraded case is now counted/alertable.
+      assert_receive {:telemetry, [:stacks, :auth, :refresh, :revoke_failed], %{count: 1}, %{}}
     end
   end
 
