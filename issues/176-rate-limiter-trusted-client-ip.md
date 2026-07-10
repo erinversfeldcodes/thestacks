@@ -30,32 +30,32 @@ Rate-limit buckets are keyed on the **trusted** client IP that Fly injects, so t
 
 ## Test Audit
 
-_Compact audit — one plug + tests; app/US layers mostly n/a. Pre-implementation baseline generated 2026-07-09. Green when the limiter keys on the trusted IP and the spoof path is closed by test._
+_Compact audit — one plug + tests; app/US layers mostly n/a. Baseline generated 2026-07-09; regenerated GREEN 2026-07-10 after implementation._
 
 | Layer | Applies? | Happy | Sad **(SECURITY)** |
 |-------|----------|-------|--------------------|
-| 2 Auth guards / middleware | yes | ✅-target: buckets key on `Fly-Client-IP`; per-client isolation holds | ❌ forged `X-Forwarded-For` no longer resets the counter (same client → still limited) |
-| 8 Cache (RateLimiter ETS) | yes | ⚠️ existing bucket check/increment tests pass with the new key | ❌ spoof test: N requests with rotating XFF but same `Fly-Client-IP` → 429 |
+| 2 Auth guards / middleware | yes | ✅ buckets key on `Fly-Client-IP`; per-client isolation holds (unit + `:api`-pipeline integration test) | ✅ forged/rotating `X-Forwarded-For` no longer resets the counter — same client still limited (mutation-verified) |
+| 8 Cache (RateLimiter ETS) | yes | ✅ bucket check/increment works on the new key; fallback to `conn.remote_ip` covered | ✅ spoof test: N requests with rotating XFF + fixed `Fly-Client-IP` → 429, for both `:auth` and `:password_change` |
 | 1,3–7,9–13 | no | n/a — no app-data/US behavior change | n/a |
 
-### Punch list (baseline)
-| # | Cell | What's needed | Where |
-|---|------|---------------|-------|
-| 1 | L2 sad (SECURITY) | `get_ip/1` prefers `Fly-Client-IP`; never first XFF. | `rate_limiter.ex:162-167` |
-| 2 | L8 sad (SECURITY) | Test: rotating `X-Forwarded-For` with a fixed `Fly-Client-IP` still hits 429 at the limit (spoof no longer bypasses). | `rate_limiter_test.exs` |
-| 3 | L2 happy | Migrate existing per-IP rate-limit tests (`:auth`/`:password_change`) from `X-Forwarded-For` to `Fly-Client-IP`; assert isolation still works. | `auth_controller_test.exs`, `rate_limiter_test.exs` |
-| 4 | L8 happy | Local/test fallback to `conn.remote_ip` when `Fly-Client-IP` absent — unchanged behavior covered. | `rate_limiter_test.exs` |
+### Punch list (resolved)
+| # | Cell | What's needed | Where | Status |
+|---|------|---------------|-------|--------|
+| 1 | L2 sad (SECURITY) | `get_ip/1` prefers `Fly-Client-IP`; never first XFF. | `rate_limiter.ex:168-174` | ✅ |
+| 2 | L8 sad (SECURITY) | Spoof test: rotating XFF + fixed `Fly-Client-IP` → 429 (`:auth` + `:password_change`). | `rate_limiter_test.exs` | ✅ |
+| 3 | L2 happy | Migrate `:auth`/`:password_change` isolation tests to `Fly-Client-IP` + a two-IP `:api`-pipeline isolation test. | `auth_controller_test.exs`, `rate_limiter_test.exs` | ✅ |
+| 4 | L8 happy | Local/test fallback to `conn.remote_ip` when `Fly-Client-IP` absent. | `rate_limiter_test.exs` | ✅ |
 
 ### Verdict
-Baseline — limiter is spoofable via first-XFF. Green when keying is on the trusted `Fly-Client-IP`, a spoof test proves rotation no longer bypasses, and existing isolation tests pass on the new key.
+**GREEN.** `get_ip/1` keys on the trusted `Fly-Client-IP` (fallback `conn.remote_ip`), never first XFF; rotating-XFF spoof is closed for `:auth` and `:password_change` (mutation-verified — reverting to XFF flips the security tests RED); isolation proven at the unit and `:api`-pipeline layers. 52/0 in the two suites; `just verify` exit 0 (2264 elixir tests). Deploy-preview: app booted on the new limiter, 194 E2E passed through it (the 1 failure was an orthogonal vision test). elixir-reviewer APPROVED; PE GREEN.
 
 ## Definition of Done
-- [ ] `get_ip/1` keys on `Fly-Client-IP` (trusted), falling back to `conn.remote_ip`; never the client-supplied first `X-Forwarded-For` value
-- [ ] Spoof test: rotating `X-Forwarded-For` with a fixed `Fly-Client-IP` is rate-limited (429) at the bucket threshold
-- [ ] Existing `:auth`/`:password_change` per-IP isolation tests migrated to `Fly-Client-IP` and passing
-- [ ] Local/test fallback (`conn.remote_ip`) preserved
-- [ ] `just verify` passes
-- [ ] **Test audit (embedded above) is GREEN** — applicable cells `✅`; 0 `❌`/`⚠️`. Regenerate as the final step.
+- [x] `get_ip/1` keys on `Fly-Client-IP` (trusted), falling back to `conn.remote_ip`; never the client-supplied first `X-Forwarded-For` value
+- [x] Spoof test: rotating `X-Forwarded-For` with a fixed `Fly-Client-IP` is rate-limited (429) at the bucket threshold
+- [x] Existing `:auth`/`:password_change` per-IP isolation tests migrated to `Fly-Client-IP` and passing
+- [x] Local/test fallback (`conn.remote_ip`) preserved
+- [x] `just verify` passes
+- [x] **Test audit (embedded above) is GREEN** — applicable cells `✅`; 0 `❌`/`⚠️`. Regenerate as the final step.
 
 ## Dependencies
 - None. Independent; can land on this branch (feat/124-e2e-auth) or its own. Touches the `:e2e_helper` bucket added in #124 plus the pre-existing `:auth`/`:password_change` buckets.
@@ -65,3 +65,4 @@ security-agent.
 
 ## Progress Notes
 - 2026-07-09: Raised from the #124 PE-gate security review (LOW, pre-existing, project-wide). The `:e2e_helper` bucket is protected primarily by email-domain scoping, so this is defense-in-depth there — but it materially strengthens the real `:auth`/`:password_change` brute-force limits. To be worked on this branch per human direction.
+- 2026-07-10: Implemented via orchestrator (security-agent). `get_ip/1` now keys on the trusted `fly-client-ip` header (fallback `conn.remote_ip`), never first XFF. TDD (RED→GREEN); testing-coordinator mutation-verified + flagged `:password_change` keying MISSING and the auth_controller migration WEAK → both closed (added `:password_change` spoof unit test + two-`fly-client-ip` `:api`-pipeline integration test). Gates: `just verify` exit 0 (2264 elixir tests); 52/0 in the two suites; 2B-iii deploy succeeded (Fly recovered) — 194 E2E passed through the deployed limiter, 1 orthogonal vision-test failure. elixir-reviewer APPROVED; PE GREEN (no P0/P1). Built on branch `176-…` off `feat/124-e2e-auth`. Follow-ups flagged by all three reviewers: `AuthController.get_ip/1` (audit-log IP) has the identical XFF-trust weakness (P2, separate issue); orthogonal vision E2E flake (`upload.spec.ts:352`).
