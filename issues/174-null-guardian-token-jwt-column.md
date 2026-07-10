@@ -30,35 +30,34 @@ After this issue, a full dump of `op.guardian_tokens` contains no usable bearer 
 
 ## Test Audit
 
-_Baseline map for this security-hardening change (the applicable layers only; most are n/a). Pre-implementation baseline generated 2026-07-08 — the raw JWT is currently persisted. Regenerate as the fix lands; green when the column no longer holds a replayable token and all revocation/verify/sweep tests pass._
+_Baseline generated 2026-07-08; regenerated GREEN 2026-07-10 after implementation. Approach: a `BEFORE INSERT OR UPDATE` trigger forces `jwt = NULL` at the data layer (enforced on every write path — login, the future refresh #173, anything), + a one-time scrub of existing rows._
 
-| Layer | Happy | Verdict | Sad | Verdict |
-|-------|-------|---------|-----|---------|
+| Layer | Happy | Verdict | Sad **(SECURITY)** | Verdict |
+|-------|-------|---------|--------------------|---------|
 | 1 API | n/a — no endpoint change | n/a | n/a | n/a |
-| 2 Auth guards **(SECURITY)** | verify/revoke still work with no persisted jwt | ❌ | dumped `guardian_tokens` yields no replayable token | ❌ |
-| 3 DB / migration **(SECURITY)** | migration nulls/alters `jwt`; existing rows scrubbed | ❌ | column cannot store a raw bearer token | ❌ |
-| 4 Events | n/a | n/a | n/a | n/a |
-| 5 Oban (sweeper) | expired-token purge still works (by `exp`) | ❌ | n/a | n/a |
-| 6–13 | n/a — no external/cache/dbt/cost/UI surface | n/a | n/a | n/a |
+| 2 Auth guards **(SECURITY)** | verify/revoke still work with jwt NULL | ✅ regression guards + guardian_test/sweep (10/0) | dumped `guardian_tokens` yields no replayable token | ✅ jwt NULL on INSERT+UPDATE (mutation-verified: drop trigger → raw token persists) |
+| 3 DB / migration **(SECURITY)** | trigger nulls jwt; existing rows scrubbed; applies clean from scratch | ✅ fresh-DB gate (2269 tests) + reversible | column holds no raw bearer token — enforced by trigger, verified on live Neon | ✅ `:deployed_only` test: `jwt IS NULL` after live login |
+| 5 Oban (sweeper) | expired-token purge still works (by `exp`) | ✅ guardian_token_sweep_job_test (unregressed) | n/a | n/a |
+| 4,6–13 | n/a — no external/cache/dbt/cost/UI/event surface | n/a | n/a | n/a |
 
-### Punch list (baseline)
-| # | What's needed | Where |
-|---|---------------|-------|
-| 1 | Adapter/schema override so `jwt` is never persisted (NULL) | `apps/core/lib/stacks/accounts/guardian*.ex` (+ custom adapter) |
-| 2 | Migration altering `op.guardian_tokens.jwt` + scrub existing rows | `apps/core/priv/repo/migrations/` |
-| 3 | Test: after login, `op.guardian_tokens.jwt IS NULL` for the new row | `apps/core/test/stacks/accounts/guardian_db_test.exs` (new) |
-| 4 | Test: verify/revoke/sweep still pass with no persisted jwt (regression of #124 A2 behaviour) | reuse #124 auth_controller_test logout-revocation test |
+### Punch list (resolved)
+| # | What's needed | Where | Status |
+|---|---------------|-------|--------|
+| 1 | Never persist a raw jwt (NULL) | `20260710000000_null_guardian_token_jwt.exs` — `BEFORE INSERT OR UPDATE` trigger forcing `NEW.jwt := NULL` | ✅ |
+| 2 | Migration nulling jwt + scrub existing rows | same migration (`UPDATE … SET jwt = NULL WHERE jwt IS NOT NULL`) | ✅ |
+| 3 | Test: after login `jwt IS NULL` (INSERT + UPDATE) | `guardian_db_jwt_test.exs` + live `guardian_jwt_deployed_test.exs` | ✅ |
+| 4 | verify/revoke/sweep unregressed | `guardian_db_jwt_test.exs` guards + `guardian_test.exs` + `guardian_token_sweep_job_test.exs` | ✅ |
 
 ### Verdict
-Baseline — raw JWT persisted. Green when the column holds no replayable token and #124's revocation/verify/sweep tests remain green.
+**GREEN.** A DB trigger forces `op.guardian_tokens.jwt = NULL` on every INSERT/UPDATE (mutation-verified load-bearing) — a dump contains no replayable bearer token. Existing rows scrubbed. All four Guardian.DB hooks (verify/revoke/refresh/sweep) unregressed. Proven end-to-end: fresh-DB gate (2269 tests), and a `:deployed_only` test confirming `jwt IS NULL` on a real Neon preview after a live login; E2E 195/0. database-reviewer APPROVED; PE GREEN. (Non-scope P3 notes: an optional scrub-specific test; the decoded `claims` column — not a replay vector.)
 
 ## Definition of Done
-- [ ] `op.guardian_tokens.jwt` no longer stores a usable bearer token (NULL / removed / hashed)
-- [ ] Migration alters the column and scrubs existing rows
-- [ ] Login/verify/logout-revocation/expired-sweep all still pass (no #124 A2 regression)
-- [ ] Test asserts the persisted row has no replayable token
-- [ ] Tests pass with `TEST_TARGET=local`; `just verify` passes
-- [ ] **Test audit (embedded above) is GREEN** — every applicable cell `✅` or `n/a`; 0 `❌`, 0 `⚠️`. Regenerate as the final step.
+- [x] `op.guardian_tokens.jwt` no longer stores a usable bearer token (NULL, trigger-enforced)
+- [x] Migration alters the column behaviour and scrubs existing rows
+- [x] Login/verify/logout-revocation/expired-sweep all still pass (no #124 A2 regression)
+- [x] Test asserts the persisted row has no replayable token (INSERT + UPDATE + live Neon)
+- [x] Tests pass with `TEST_TARGET=local`; `just verify` passes
+- [x] **Test audit (embedded above) is GREEN** — every applicable cell `✅` or `n/a`; 0 `❌`, 0 `⚠️`. Regenerate as the final step.
 
 ## Dependencies
 - #124 A2 (guardian_db integration) — this hardens it. Same branch, after #124's phases, before the PR.
@@ -68,3 +67,4 @@ security-agent + database-agent.
 
 ## Progress Notes
 - 2026-07-08: Raised from #124 Phase 1 security review (P3, accepted-with-mitigation). #124 adds an 8h TTL + role isolation as interim bounds; this removes the surface. Do before opening the #124 PR.
+- 2026-07-10: Implemented via orchestrator (database-agent). Chose a `BEFORE INSERT OR UPDATE` DB trigger forcing `NEW.jwt := NULL` (data-layer, covers login + future refresh + any path) + a one-time scrub — over an app-side override (weaker, path-dependent). No app-code change; `guardian.ex` untouched. TDD (RED→GREEN); testing-coordinator PASS (direct-SQL mutant confirmed the trigger is load-bearing). Gates: `just verify` exit 0; fresh-DB gate (migrate-from-scratch + 2269 tests + dbt); full 2B-iii deploy — migration applied on Neon, `:deployed_only` test confirmed `jwt IS NULL` live, E2E 195/0. database-reviewer APPROVED; PE GREEN (no P0/P1). Built on branch `174-…` off `feat/124-e2e-auth`. Confirmed the trigger already covers #173's future refresh path (no extra work there). P3 follow-ups (not filed): optional scrub-specific test; the decoded `claims` column (not a replay vector).
