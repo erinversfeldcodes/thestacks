@@ -208,11 +208,13 @@ defmodule StacksWeb.AuthControllerTest do
           email_confirmed: true
         )
 
+      # Issue #176: the audit IP is taken from the trusted Fly-Client-IP header
+      # (Fly overwrites it at the edge), not the spoofable X-Forwarded-For.
       client_ip = "203.0.113.7"
       expected_hash = :crypto.hash(:sha256, client_ip) |> Base.encode16(case: :lower)
 
       conn
-      |> put_req_header("x-forwarded-for", client_ip)
+      |> put_req_header("fly-client-ip", client_ip)
       |> post("/api/auth/login", %{email: "audit@example.com", password: "secret123"})
       |> json_response(200)
 
@@ -224,6 +226,38 @@ defmodule StacksWeb.AuthControllerTest do
       # IP must be stored hashed, never in the clear.
       assert row["ip_address"] == expected_hash
       refute row["ip_address"] == client_ip
+    end
+
+    # Issue #176: X-Forwarded-For is client-supplied behind Fly and trivially
+    # spoofed. It must never be stamped into the audit provenance IP — when no
+    # trusted Fly-Client-IP header is present, fall back to conn.remote_ip.
+    test "audit IP does not trust X-Forwarded-For", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "audit-xff@example.com",
+          password_hash: Argon2.hash_pwd_salt("secret123"),
+          email_confirmed: true
+        )
+
+      spoofed_ip = "203.0.113.99"
+      # The test conn's remote_ip is the loopback default; that is the trusted
+      # fallback when no Fly-Client-IP header is set.
+      fallback_ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+      spoofed_hash = :crypto.hash(:sha256, spoofed_ip) |> Base.encode16(case: :lower)
+      fallback_hash = :crypto.hash(:sha256, fallback_ip) |> Base.encode16(case: :lower)
+
+      conn
+      |> put_req_header("x-forwarded-for", spoofed_ip)
+      |> post("/api/auth/login", %{email: "audit-xff@example.com", password: "secret123"})
+      |> json_response(200)
+
+      row = latest_audit_row("user.login")
+
+      assert row["user_id"] == user.id
+      # The spoofed X-Forwarded-For must NOT be the recorded provenance IP.
+      refute row["ip_address"] == spoofed_hash
+      # The trusted fallback (remote_ip) is what gets hashed and stored.
+      assert row["ip_address"] == fallback_hash
     end
   end
 
