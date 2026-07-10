@@ -160,6 +160,19 @@ defmodule Core.PromEx.Plugins.Stacks do
           reporter_options: [buckets: @route_duration_buckets]
         ),
 
+        # ── Auth refresh revoke-failure counter (Issue #181) ──────────
+        # Fires when AuthController.refresh/2 fails to revoke the old token
+        # during rotation. The action still mints a fresh token (degraded
+        # rotation: the old token stays valid until its TTL expires), so this
+        # counter makes the degraded case alertable alongside the Logger
+        # warning. Counter path ends in `:count, :total` so the exported name
+        # is `stacks_auth_refresh_revoke_failed_count_total`.
+        counter(
+          [:stacks, :auth, :refresh, :revoke_failed, :count, :total],
+          event_name: [:stacks, :auth, :refresh, :revoke_failed],
+          description: "Failures to revoke the old JWT during token refresh rotation."
+        ),
+
         # ── Fuse state gauge ──────────────────────────────────────────
         # `last_value` maps to Prometheus gauge type. Path ends in
         # `[:state, :state]` so the exported name is

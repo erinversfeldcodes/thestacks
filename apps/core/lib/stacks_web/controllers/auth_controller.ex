@@ -173,6 +173,10 @@ defmodule StacksWeb.AuthController do
 
       error ->
         Logger.warning("Guardian.revoke failed during refresh: #{inspect(error)}")
+
+        # Count the degraded case so it is alertable: the old token was NOT
+        # revoked and stays valid until its TTL expires, weakening rotation.
+        :telemetry.execute([:stacks, :auth, :refresh, :revoke_failed], %{count: 1}, %{})
     end
 
     {:ok, token, _claims} = Guardian.encode_and_sign(user)
