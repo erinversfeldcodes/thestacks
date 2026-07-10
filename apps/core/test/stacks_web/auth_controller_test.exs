@@ -452,7 +452,9 @@ defmodule StacksWeb.AuthControllerTest do
 
     test "returns 429 after exceeding rate limit on register", %{conn: conn} do
       # Use a dedicated IP so these requests don't interfere with other tests.
-      conn = put_req_header(conn, "x-forwarded-for", "10.99.1.1")
+      # Issue #176: the limiter keys on the trusted Fly-Client-IP header, not
+      # the spoofable X-Forwarded-For.
+      conn = put_req_header(conn, "fly-client-ip", "10.99.1.1")
 
       for n <- 1..5 do
         post(conn, "/api/auth/register", %{
@@ -472,7 +474,9 @@ defmodule StacksWeb.AuthControllerTest do
 
     test "returns 429 after exceeding rate limit on login", %{conn: conn} do
       # Use a dedicated IP so these requests don't interfere with other tests.
-      conn = put_req_header(conn, "x-forwarded-for", "10.99.1.2")
+      # Issue #176: the limiter keys on the trusted Fly-Client-IP header, not
+      # the spoofable X-Forwarded-For.
+      conn = put_req_header(conn, "fly-client-ip", "10.99.1.2")
 
       insert(:user,
         email: "ratelimited@example.com",
@@ -493,6 +497,44 @@ defmodule StacksWeb.AuthControllerTest do
         })
 
       assert response(rate_limited_conn, 429)
+    end
+
+    # Issue #176 integration proof: buckets must be keyed on the trusted
+    # Fly-Client-IP through the real :api → RateLimiter pipeline, NOT on the
+    # shared remote_ip. Two clients differ ONLY by Fly-Client-IP (same conn /
+    # remote_ip); exhausting client A must not spill onto client B. Against the
+    # old XFF impl this is RED — it ignores fly-client-ip, so A and B collapse
+    # into one remote_ip bucket and B would be blocked.
+    test "per-Fly-Client-IP isolation: exhausting one client does not block another",
+         %{conn: conn} do
+      client_a = put_req_header(conn, "fly-client-ip", "10.99.2.1")
+      client_b = put_req_header(conn, "fly-client-ip", "10.99.2.2")
+
+      # Exhaust client A's :auth bucket (pinned limit 5).
+      for n <- 1..5 do
+        post(client_a, "/api/auth/register", %{
+          email: "iso-a#{n}@example.com",
+          password: "password123"
+        })
+      end
+
+      overflow_a =
+        post(client_a, "/api/auth/register", %{
+          email: "iso-a6@example.com",
+          password: "password123"
+        })
+
+      assert response(overflow_a, 429)
+
+      # Client B shares the remote_ip but has a distinct Fly-Client-IP — it must
+      # still be allowed (registration succeeds with 201, not a 429).
+      allowed_b =
+        post(client_b, "/api/auth/register", %{
+          email: "iso-b1@example.com",
+          password: "password123"
+        })
+
+      assert json_response(allowed_b, 201)
     end
   end
 

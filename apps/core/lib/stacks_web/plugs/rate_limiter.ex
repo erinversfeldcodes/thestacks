@@ -159,10 +159,17 @@ defmodule StacksWeb.Plugs.RateLimiter do
     end
   end
 
+  # Key per-IP buckets on the *trusted* client IP. Fly sets and overwrites the
+  # `fly-client-ip` header at the edge with the real client address, so it
+  # cannot be spoofed by the client. `x-forwarded-for` is deliberately NOT
+  # consulted — behind Fly its first hop is client-supplied and trivially
+  # rotated, which would let an attacker reset every per-IP counter (Issue
+  # #176). When the header is absent or empty (local dev / ExUnit conns) we
+  # fall back to `conn.remote_ip`.
   defp get_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [ip | _] -> ip
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
+    case get_req_header(conn, "fly-client-ip") do
+      [ip | _] when ip != "" -> ip
+      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
 
