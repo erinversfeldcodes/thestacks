@@ -157,15 +157,17 @@ defmodule StacksWeb.AuthController do
     json(conn, %{user: ProtoJSON.user(user)})
   end
 
+  # Provenance IP for audit-log events. Key on the *trusted* client IP: Fly
+  # sets and overwrites the `fly-client-ip` header at the edge with the real
+  # client address, so it cannot be spoofed. `x-forwarded-for` is deliberately
+  # NOT consulted — behind Fly its leftmost hop is client-supplied and trivially
+  # forged, which would let an attacker poison the recorded provenance IP (Issue
+  # #176, mirroring the RateLimiter fix). When the header is absent or empty
+  # (local dev / ExUnit conns) we fall back to `conn.remote_ip`.
   defp get_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [forwarded | _] ->
-        # x-forwarded-for may be comma-separated when multiple proxies are in the chain.
-        # Take the leftmost IP (the original client) and strip any whitespace.
-        forwarded |> String.split(",") |> List.first() |> String.trim()
-
-      [] ->
-        conn.remote_ip |> :inet.ntoa() |> to_string()
+    case get_req_header(conn, "fly-client-ip") do
+      [ip | _] when ip != "" -> ip
+      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
 end
