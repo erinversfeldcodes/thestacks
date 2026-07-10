@@ -60,6 +60,26 @@ only if it reaches the state the way a real user does. Rules:
 - See `docs/agents/standards/testing.md` (the 12-layer strategy + `TEST_TARGET` matrix) and the
   `testing-coordinator` agent for cross-cutting coverage.
 
+## 5. Deployed Elixir tests (`@tag :deployed_only`) — hard-won gotchas
+Tag with `@moduletag :deployed_only` (excluded by `test_helper.exs`; run via `scripts/test-deployed.sh`
+/ `mix test --only deployed_only`), guard on `System.get_env("BASE_URL")` (skip when unset so a bare
+`--only deployed_only` run stays inert, not red). Then:
+- **Do NOT read the preview DB through `Core.Repo`.** `config/test.exs` hardcodes `Core.Repo` to
+  `localhost/stacks_test`, and there is no deployed override — so `DATABASE_URL=<preview>` does NOT
+  repoint it. A `Repo.query` will silently hit localhost (empty → "not found"). Open a **direct
+  `Postgrex.start_link`** from `System.get_env("DATABASE_URL")` in `setup` (parse the URL; Neon needs
+  `ssl: true`, `ssl_opts: [verify: :verify_none]`) and query through that connection.
+- **A row the live app committed over HTTP is on a different connection** — read it on a normal
+  (non-sandbox-transaction) connection so it's visible; the direct Postgrex conn above is that.
+- **Absorb cold-start 502s at the request level.** The preview may have auto-stopped; the first
+  `Req.post!` can 502. A real user retries — so add `retry: :transient, max_retries: 8, retry_delay:
+  <2s→10s backoff>`. (Same class as the Issue #175 warmup guard, one layer down.)
+- **UUID params:** comparing a text UUID against a `uuid` column via `$1::uuid` makes Postgrex try to
+  encode a 16-byte binary and fail. Compare the column cast to text instead: `WHERE id::text = $1`.
+- **Bucket/idempotency awareness:** rate-limit or lockout state on a shared preview is real and
+  window-based — order tests so a saturating test runs last/alone, and prefer unique emails/ids per
+  run to avoid cross-run collisions on a shared branch.
+
 ## Output
 The test file(s) at the right layer, plus a one-line note of *why this layer* and the RED-before /
 mutation evidence that it's non-vacuous. If a behaviour genuinely can't be validated at any layer,
