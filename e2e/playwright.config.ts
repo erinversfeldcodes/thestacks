@@ -35,7 +35,9 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
-      testIgnore: /upload.*\.spec\.ts/,
+      // Exclude the upload projects AND the rate-limit saturation test — the
+      // latter has its own dedicated `ratelimit` project that runs last/alone.
+      testIgnore: /(upload.*|rate-limit)\.spec\.ts/,
     },
     // Mock-based upload pipeline tests: parallelised (no GPU needed)
     {
@@ -63,6 +65,19 @@ export default defineConfig({
       dependencies: ["setup", "chromium", "upload-mock"],
       testMatch: /upload\.spec\.ts$/,
       fullyParallel: false,
+    },
+    // Rate-limit saturation test (Issue #176, B1): runs LAST and ALONE.
+    // It floods the real Fly stack's per-IP `:auth` bucket to trip a 429, which
+    // saturates the shared bucket for ~60s — so it depends on every other
+    // project and disables parallelism/retries. See rate-limit.spec.ts header
+    // for the full isolation rationale.
+    {
+      name: "ratelimit",
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["setup", "chromium", "upload-mock", "upload"],
+      testMatch: /rate-limit\.spec\.ts$/,
+      fullyParallel: false,
+      retries: 0,
     },
   ],
 });
