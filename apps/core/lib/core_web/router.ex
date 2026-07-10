@@ -169,6 +169,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated]
 
     delete "/auth/logout", AuthController, :logout
+    post "/auth/refresh", AuthController, :refresh
     get "/auth/me", AuthController, :me
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn

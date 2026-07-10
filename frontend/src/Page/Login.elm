@@ -7,6 +7,7 @@ module Page.Login exposing
     , SubmitError(..)
     , TransitionState(..)
     , errorMessage
+    , expiredInit
     , init
     , isSubmitDisabled
     , update
@@ -44,6 +45,11 @@ type alias Model =
     , passwordValidation : FieldValidation
     , passwordConfirmValidation : FieldValidation
     , displayNameValidation : FieldValidation
+
+    -- Set by the global session-expiry interceptor (Issue #173) when the user is
+    -- redirected here after their token expired/was revoked. Drives a notice
+    -- distinct from invalid-credentials, and is cleared once they interact.
+    , sessionExpired : Bool
     }
 
 
@@ -100,7 +106,16 @@ init =
     , passwordValidation = Pristine
     , passwordConfirmValidation = Pristine
     , displayNameValidation = Pristine
+    , sessionExpired = False
     }
+
+
+{-| Initial login state to show after a global session-expiry redirect: identical
+to `init` but with the session-expired notice raised. See `Main.sessionExpired`.
+-}
+expiredInit : Model
+expiredInit =
+    { init | sessionExpired = True }
 
 
 validateEmail : String -> FieldValidation
@@ -189,6 +204,7 @@ update msg model =
                 , passwordValidation = Pristine
                 , passwordConfirmValidation = Pristine
                 , displayNameValidation = Pristine
+                , sessionExpired = False
               }
             , Cmd.none
             , NoOut
@@ -214,7 +230,7 @@ update msg model =
                         RegistrationPending _ ->
                             Cmd.none
             in
-            ( { model | submitState = Loading }, cmd, NoOut )
+            ( { model | submitState = Loading, sessionExpired = False }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
             ( { model | submitState = Success authResponse, transitionState = Transitioning }
@@ -309,6 +325,7 @@ viewFormCard model =
                         "Present your credentials to enter"
                 )
             ]
+        , viewSessionExpiredNotice model
         , div
             [ class "login-card__tabs"
             , attribute "role" "tablist"
@@ -504,6 +521,34 @@ viewFieldHint validation =
 
         Pristine ->
             text ""
+
+
+{-| Notice shown when the user was redirected here by the global session-expiry
+interceptor (Issue #173). Deliberately distinct from the invalid-credentials
+error so an expired session reads differently from a wrong password. Suppressed
+once a submit failure is showing so the more-specific message wins.
+-}
+viewSessionExpiredNotice : Model -> Html Msg
+viewSessionExpiredNotice model =
+    let
+        submitFailed =
+            case model.submitState of
+                Failure _ ->
+                    True
+
+                _ ->
+                    False
+    in
+    if model.sessionExpired && model.mode == LoginMode && not submitFailed then
+        div
+            [ attribute "role" "status"
+            , class "login-card__notice login-card__notice--session-expired"
+            , testId "session-expired-notice"
+            ]
+            [ text "The library closed your session for safekeeping — sign in again to return." ]
+
+    else
+        text ""
 
 
 viewError : Model -> Html Msg

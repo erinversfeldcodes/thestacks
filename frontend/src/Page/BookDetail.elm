@@ -62,6 +62,7 @@ type OutMsg
     = NoOut
     | NavigateTo Route
     | RequestCloseOverlay
+    | SessionExpired
 
 
 type Msg
@@ -217,7 +218,11 @@ update msg model maybeToken =
                     ( { model | book = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | book = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | book = Failure err }, Cmd.none, NoOut )
 
         VerifyAge ->
             ( model, Cmd.none, NavigateTo Route.SettingsAgeVerification )
@@ -284,7 +289,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
 
         ConfirmPlace ->
             case ( model.book, maybeToken ) of
@@ -312,7 +321,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
             ( { model | removeModalOpen = True }, Cmd.none, NoOut )
@@ -340,7 +353,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | removeState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
         AvailabilityLoaded (Ok items) ->
             ( { model | availability = Success items }, Cmd.none, NoOut )

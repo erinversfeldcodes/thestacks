@@ -4,6 +4,7 @@ port module Main exposing
     , decodeFlags
     , loginEffects
     , main
+    , renewAuthToken
     , shouldShowOnboarding
     , viewNav
     )
@@ -53,6 +54,7 @@ import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
 import Page.Settings.Profile as Profile
 import Page.Upload as Upload
+import Process
 import Task
 import Types.Placement
 import Types.RemoteData
@@ -163,6 +165,10 @@ type alias Model =
     , onboarding : OnboardingOverlay.Model
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
+
+    -- Raised by `sessionExpired`; consumed when the Login page is (re)built so the
+    -- global session-expiry notice survives the redirect's `UrlChanged`.
+    , sessionExpiredNotice : Bool
     }
 
 
@@ -191,6 +197,7 @@ init flags url key =
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
+      , sessionExpiredNotice = False
       }
     , Cmd.batch
         [ cmd
@@ -199,6 +206,7 @@ init flags url key =
                 Cmd.batch
                     [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
                     , Api.getMyPlacements auth.token GotPlacementCheck
+                    , scheduleRenewal
                     ]
 
             Nothing ->
@@ -544,6 +552,59 @@ encodeAuth auth =
         ]
 
 
+{-| The single, central session-expiry path (Issue #173). Every authenticated
+page routes its `SessionExpired` OutMsg here, and a failed silent renewal falls
+through here too. Mirrors sign-out (Main.elm sign-out handler): clears
+`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — but
+also raises `sessionExpiredNotice` so the login page shows an "expired" message
+distinct from invalid-credentials. The notice survives the `Nav.pushUrl`-driven
+`UrlChanged` re-init via the flag (consumed when the Login page is built).
+-}
+sessionExpired : Model -> ( Model, Cmd Msg )
+sessionExpired model =
+    ( { model
+        | auth = Nothing
+        , sessionExpiredNotice = True
+        , userMenu = UserMenu.init
+        , bookDetailOverlay = Nothing
+      }
+    , Cmd.batch
+        [ clearAuth ()
+        , Nav.pushUrl model.key (Route.toPath Login)
+        ]
+    )
+
+
+{-| Adopt a freshly-refreshed access token, keeping the same authenticated user.
+A token refresh only rotates the credential — identity, role, and location are
+unchanged — so the refresh response's user fields are ignored in favour of the
+current ones. Pure and key-free, so the renewal-success path is unit-testable.
+-}
+renewAuthToken : Api.AuthResponse -> Auth -> Auth
+renewAuthToken authResponse auth =
+    { auth | token = authResponse.token }
+
+
+{-| How long to wait after receiving an access token before silently renewing it.
+The access token TTL is 8h (server-side, Issue #124); we refresh comfortably
+before that so an active session never hits a hard 401. A single fixed delay is
+used rather than decoding the JWT `exp` claim (the token is opaque to the SPA).
+-}
+renewalDelayMs : Float
+renewalDelayMs =
+    7 * 60 * 60 * 1000
+
+
+{-| Schedule one proactive silent-renewal tick. Fired on every token receipt
+(stored-auth `init`, fresh login, and after each successful renewal) so renewal
+keeps rolling for the life of the session without a busy loop.
+-}
+scheduleRenewal : Cmd Msg
+scheduleRenewal =
+    Process.sleep renewalDelayMs
+        |> Task.perform (\_ -> RenewToken)
+
+
 {-| The side-effects a completed form login must fire.
 
 A stored-auth reload runs the placements + onboarding check in `init`; a fresh
@@ -557,6 +618,7 @@ type LoginEffect
     | NavigateHome
     | FetchPlacements
     | InitOnboarding
+    | ScheduleRenewal
 
 
 {-| Effects performed when a login completes (form login, both the immediate and
@@ -568,6 +630,7 @@ loginEffects =
     , NavigateHome
     , FetchPlacements
     , InitOnboarding
+    , ScheduleRenewal
     ]
 
 
@@ -587,6 +650,9 @@ loginEffectCmd key auth effect =
 
         InitOnboarding ->
             Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
+
+        ScheduleRenewal ->
+            scheduleRenewal
 
 
 {-| All commands a completed login must fire, given the base command already
@@ -643,6 +709,8 @@ type Msg
     | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
+    | RenewToken
+    | TokenRefreshed (Result Http.Error Api.AuthResponse)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -673,8 +741,18 @@ update msg model =
                 transition =
                     Just (transitionClass model.route newRoute)
 
-                ( page, cmd ) =
+                ( initialisedPage, cmd ) =
                     initPage newRoute model.auth (Just model.route)
+
+                -- Consume a pending session-expiry notice: when the redirect lands
+                -- on /login, build the Login page in its expired-notice state so the
+                -- message survives this `UrlChanged` re-init.
+                page =
+                    if newRoute == Login && model.sessionExpiredNotice then
+                        PageLogin Login.expiredInit
+
+                    else
+                        initialisedPage
             in
             ( { model
                 | url = url
@@ -683,6 +761,8 @@ update msg model =
                 , previousRoute = Just model.route
                 , transition = transition
                 , userMenu = UserMenu.init
+                , sessionExpiredNotice =
+                    model.sessionExpiredNotice && newRoute /= Login
               }
             , cmd
             )
@@ -808,6 +888,9 @@ update msg model =
                         Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
 
+                        Bookshelf.SessionExpired ->
+                            sessionExpired model
+
                         Bookshelf.NavigateTo (BookDetail bookId) ->
                             let
                                 ( overlayModel, overlayCmd ) =
@@ -844,6 +927,9 @@ update msg model =
                     case outMsg of
                         ReadingPile.NoOut ->
                             ( baseModel, baseCmd )
+
+                        ReadingPile.SessionExpired ->
+                            sessionExpired model
 
                         ReadingPile.NavigateTo (BookDetail bookId) ->
                             let
@@ -882,6 +968,9 @@ update msg model =
                         LookingForHome.NoOut ->
                             ( baseModel, baseCmd )
 
+                        LookingForHome.SessionExpired ->
+                            sessionExpired model
+
                         LookingForHome.NavigateTo (Route.BookDetail bookId) ->
                             openOverlay baseModel bookId
 
@@ -916,6 +1005,9 @@ update msg model =
                         BookDetail.NoOut ->
                             ( baseModel, baseCmd )
 
+                        BookDetail.SessionExpired ->
+                            sessionExpired model
+
                         BookDetail.RequestCloseOverlay ->
                             ( baseModel, baseCmd )
 
@@ -949,6 +1041,9 @@ update msg model =
                     case outMsg of
                         Upload.NoOut ->
                             ( baseModel, baseCmd )
+
+                        Upload.SessionExpired ->
+                            sessionExpired model
 
                         Upload.NavigateTo route ->
                             ( baseModel
@@ -1136,6 +1231,9 @@ update msg model =
                         CreateListing.NoOut ->
                             ( baseModel, baseCmd )
 
+                        CreateListing.SessionExpired ->
+                            sessionExpired model
+
                         CreateListing.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -1301,6 +1399,9 @@ update msg model =
                             , Cmd.map GroupsMsg subCmd
                             )
 
+                        Groups.SessionExpired ->
+                            sessionExpired model
+
                         Groups.NavigateTo route ->
                             ( { model | page = PageGroups newSubModel }
                             , Cmd.batch
@@ -1324,6 +1425,9 @@ update msg model =
                             ( { model | page = PageGroupsDetail newSubModel }
                             , Cmd.map GroupsDetailMsg subCmd
                             )
+
+                        GroupsDetail.SessionExpired ->
+                            sessionExpired model
 
                         GroupsDetail.NavigateTo route ->
                             ( { model | page = PageGroupsDetail newSubModel }
@@ -1372,6 +1476,9 @@ update msg model =
                             ( { model | bookDetailOverlay = Just updatedOverlay }
                             , Cmd.map OverlayBookDetailMsg subCmd
                             )
+
+                        BookDetail.SessionExpired ->
+                            sessionExpired { model | bookDetailOverlay = Nothing }
 
                 Nothing ->
                     ( model, Cmd.none )
@@ -1480,6 +1587,37 @@ update msg model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+        RenewToken ->
+            -- Proactive silent renewal tick. Only meaningful while authenticated;
+            -- a signed-out session simply drops the tick.
+            case model.auth of
+                Just auth ->
+                    ( model, Api.refresh auth.token TokenRefreshed )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        TokenRefreshed (Ok authResponse) ->
+            -- Renewal succeeded: adopt the fresh token (keeping the same user),
+            -- persist it, and roll the next renewal. No navigation, no logout.
+            case model.auth of
+                Just auth ->
+                    let
+                        renewedAuth =
+                            renewAuthToken authResponse auth
+                    in
+                    ( { model | auth = Just renewedAuth }
+                    , Cmd.batch [ saveAuth (encodeAuth renewedAuth), scheduleRenewal ]
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        TokenRefreshed (Err _) ->
+            -- Renewal failed (token already expired/revoked, or the service is
+            -- down): fall through to the single global session-expiry path.
+            sessionExpired model
 
         SwipeReceived direction ->
             let

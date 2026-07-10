@@ -53,6 +53,7 @@ type Msg
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | SessionExpired
 
 
 init : String -> String -> String -> ( Model, Cmd Msg )
@@ -78,7 +79,11 @@ update msg model =
             ( { model | group = Success group }, Cmd.none, NoOut )
 
         GroupLoaded (Err err) ->
-            ( { model | group = Failure err }, Cmd.none, NoOut )
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | group = Failure err }, Cmd.none, NoOut )
 
         InviteInputChanged val ->
             ( { model | inviteInput = val, inviteState = InviteIdle }, Cmd.none, NoOut )
@@ -92,11 +97,15 @@ update msg model =
         InviteSent (Ok _) ->
             ( { model | inviteState = InviteSuccess, inviteInput = "" }, Cmd.none, NoOut )
 
-        InviteSent (Err _) ->
-            ( { model | inviteState = InviteFailed "Could not send invitation. Check the username or email." }
-            , Cmd.none
-            , NoOut
-            )
+        InviteSent (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | inviteState = InviteFailed "Could not send invitation. Check the username or email." }
+                , Cmd.none
+                , NoOut
+                )
 
         LeaveGroup ->
             ( model
@@ -107,8 +116,12 @@ update msg model =
         LeftGroup (Ok ()) ->
             ( model, Cmd.none, NavigateTo Groups )
 
-        LeftGroup (Err _) ->
-            ( model, Cmd.none, NoOut )
+        LeftGroup (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( model, Cmd.none, NoOut )
 
         TabChanged FeedTab ->
             case model.feed of
@@ -128,7 +141,11 @@ update msg model =
             ( { model | feed = Success resp }, Cmd.none, NoOut )
 
         FeedLoaded (Err e) ->
-            ( { model | feed = Failure e }, Cmd.none, NoOut )
+            if Api.isUnauthorized e then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | feed = Failure e }, Cmd.none, NoOut )
 
         LoadMoreFeed ->
             case model.feed of
@@ -164,8 +181,12 @@ update msg model =
                 _ ->
                     ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
 
-        MoreFeedLoaded (Err _) ->
-            ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
+        MoreFeedLoaded (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

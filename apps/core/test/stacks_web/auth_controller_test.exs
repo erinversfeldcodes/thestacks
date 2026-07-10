@@ -400,6 +400,94 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
+  describe "POST /api/auth/refresh" do
+    # Issue #173, Phase 1: proactive silent-renewal. Exchange a valid,
+    # non-revoked, non-expired JWT for a fresh one behind the :authenticated
+    # pipeline. The pipeline rejects expired/revoked/absent tokens with 401
+    # before the controller runs; a valid token is rotated (old token revoked,
+    # new token minted) and returned in login's %{token, user} shape.
+
+    test "returns 200 with a fresh, different, verifiable token and a user object",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-happy@example.com", email_confirmed: true)
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token, "user" => returned_user} = json_response(refresh_conn, 200)
+
+      # The new token must be a non-empty binary and DIFFERENT from the old one.
+      assert is_binary(new_token)
+      assert new_token != ""
+      assert new_token != old_token
+
+      # The user payload mirrors login's ProtoJSON.user shape.
+      assert returned_user["email"] == "refresh-happy@example.com"
+
+      # The freshly minted token must itself verify.
+      assert {:ok, _new_claims} = Guardian.decode_and_verify(new_token)
+    end
+
+    test "rotates the old token so it is no longer usable after a refresh",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-rotate@example.com", email_confirmed: true)
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+      assert new_token != old_token
+
+      # Rotation proof: the OLD token must no longer authenticate — a subsequent
+      # authed request with it is rejected 401 (its guardian_tokens row is gone).
+      stale_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> get("/api/auth/me")
+
+      assert json_response(stale_conn, 401)
+    end
+
+    test "returns 401 when the token has been revoked (logged out)", %{conn: conn} do
+      user = insert(:user, email: "refresh-revoked@example.com", email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      # Revoke server-side (deletes the guardian_tokens row), mirroring logout.
+      {:ok, _claims} = Guardian.revoke(token)
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> post("/api/auth/refresh")
+
+      assert json_response(refresh_conn, 401)
+    end
+
+    test "returns 401 when the token has already expired", %{conn: conn} do
+      user = insert(:user, email: "refresh-expired@example.com", email_confirmed: true)
+      {:ok, expired_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{expired_token}")
+        |> post("/api/auth/refresh")
+
+      assert json_response(refresh_conn, 401)
+    end
+
+    test "returns 401 when no Authorization header is present", %{conn: conn} do
+      refresh_conn = post(conn, "/api/auth/refresh")
+
+      assert json_response(refresh_conn, 401)
+    end
+  end
+
   describe "POST /api/auth/forgot-password" do
     test "returns 200 for a registered email", %{conn: conn} do
       insert(:user, email: "forgotme@example.com")

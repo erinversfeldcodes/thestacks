@@ -57,6 +57,7 @@ type Msg
 type OutMsg
     = NoOut
     | NavigateTo Route.Route
+    | SessionExpired
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -93,7 +94,11 @@ update msg model maybeToken =
                     ( { model | placements = Success placements }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | placements = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | placements = Failure err }, Cmd.none, NoOut )
 
         PlacementSelected placementId ->
             ( { model
@@ -153,7 +158,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | submitState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
         ActivateListing listingId ->
             case maybeToken of
@@ -175,7 +184,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | submitState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
 
 

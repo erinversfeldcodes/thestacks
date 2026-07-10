@@ -93,6 +93,7 @@ type OutMsg
     = NoOut
     | NavigateTo Route.Route
     | OpenStream String
+    | SessionExpired
 
 
 type Msg
@@ -181,8 +182,12 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-        UploadInitialised _ _ (Err _) ->
-            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+        UploadInitialised _ _ (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
 
         UploadInitialised file token (Ok init_) ->
             ( model
@@ -453,7 +458,11 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    ( { model | isbnLookupState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | isbnLookupState = Failure err }, Cmd.none, NoOut )
 
         EnterManualMode ->
             ( { model | result = ManualISBNEntry, isbnLookupState = NotAsked }, Cmd.none, NoOut )
@@ -513,7 +522,11 @@ update msg model maybeToken =
                             )
 
                 Err err ->
-                    ( { model | mergeFormatState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | mergeFormatState = Failure err }, Cmd.none, NoOut )
 
         Reset ->
             ( init, Cmd.none, NoOut )
@@ -597,7 +610,11 @@ update msg model maybeToken =
                     )
 
                 ( Err err, _ ) ->
-                    ( { model | placementState = Failure err }, Cmd.none, NoOut )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | placementState = Failure err }, Cmd.none, NoOut )
 
                 _ ->
                     ( model, Cmd.none, NoOut )
