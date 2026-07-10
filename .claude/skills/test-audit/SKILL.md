@@ -20,6 +20,7 @@ API calls · auth & middleware guards · database interactions · event flow & l
 3. **Distinguish "test missing, feature exists" from "feature not implemented"** — check `apps/core/lib` / `frontend/src` before deciding; the latter becomes a spin-out feature issue, not a test punch item.
 4. **Layers 11/12 are usually `n/a — covered by SLO gate`** (`scripts/check-slo-gate.sh`); telemetry *firing* tests count where they exist.
 5. Write the audit incrementally to a file/section as you verify — don't hold the whole thing in memory for one final write (it can be lost mid-run).
+6. **Every applicable cell names a validation path, not just a status.** A `✅`/`❌` is backed by *how* the behaviour is (or will be) proven — the right layer per the `write-validation-test` skill. Crucially: when browser/Playwright E2E is the wrong tool (backend-only behaviour, a security invariant, a harness/CI change), that cell is **not** `n/a` — it demands an acceptance or live-stack test that reaches the state the way a real user would. `n/a` means genuinely-not-applicable or covered-at-a-higher-level, never "hard to E2E". A behaviour with no validation path is a `❌` punch item.
 
 ## Output
 - Produce the framework summary, coverage tally, full per-layer tables, and a **numbered punch list** (every ❌/⚠️: id, cell, test needed, which suite/file).
@@ -32,3 +33,9 @@ API calls · auth & middleware guards · database interactions · event flow & l
 
 ## Scale
 - Many issues → fan out one agent per issue (they're independent), each writing its own `plans/<slug>-test-audit.md` or embedding directly. Spot-check citations afterward (grep a sample of cited test strings to confirm they exist).
+
+## Related skills
+- `create-issue` embeds a **baseline** audit at ticket-creation time — this skill is its step 4.
+- `write-validation-test` is how a `❌` cell becomes `✅`: it picks the right layer and keeps
+  live-stack tests honest (realistic user behaviour, no artificial pokes).
+- `verify-and-followup` turns residual `❌`/`⚠️` cells that exceed scope into tracked follow-up issues.
