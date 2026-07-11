@@ -100,6 +100,18 @@ config :core, Stacks.Accounts.Guardian,
 # converted to seconds at the check site; configurable so ops can tune it.
 config :core, :session_absolute_cap, {7, :day}
 
+# Refresh-token rotation grace window (Issue #180, Phase 1). #179's reuse gate
+# burns the whole family whenever a non-current jti is presented — which
+# over-fires on a benign rotation race (an in-flight request or a second tab
+# still carrying the JUST-rotated old token). This honours the IMMEDIATELY-
+# PREVIOUS token for this window after rotation WITHOUT burning; anything else
+# (older token, previous-past-grace, unknown) still burns, so #179's posture
+# holds outside the window. Security tradeoff: a stolen just-rotated token is
+# honoured for <= this window after the victim rotates — the standard, accepted
+# cost of refresh-token rotation grace. Expressed as `{n, unit}`, converted to
+# seconds at the check site (Stacks.Accounts); configurable so ops can tune it.
+config :core, :session_rotation_grace, {20, :second}
+
 # Guardian.DB — server-side JWT tracking so logout / revoke actually invalidates
 # a token (Issue #124, A2). Each issued token is stored in op.guardian_tokens on
 # encode_and_sign, checked on every verify, and deleted on revoke. Only "access"

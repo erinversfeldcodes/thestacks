@@ -751,9 +751,10 @@ defmodule StacksWeb.AuthControllerTest do
     # token replayed, benignly by a stale tab or maliciously by a thief). The
     # verify_claims gate — which runs on EVERY request, before guardian_db's
     # on_verify row-presence check — detects the non-current jti and revokes the
-    # WHOLE family, burning the live token too. Accepted false-positive: a benign
-    # multi-tab replay of the just-rotated token trips this and logs the user out
-    # everywhere; the grace window that fixes it is deferred to #180.
+    # WHOLE family, burning the live token too. #180 adds a 20s grace window for
+    # the IMMEDIATELY-PREVIOUS token only, so a genuine reuse is now a token
+    # OLDER than the immediate predecessor (2+ rotations back) or the previous
+    # token past grace — both still burn.
     defp login_token!(conn, email) do
       insert(:user,
         email: email,
@@ -767,18 +768,26 @@ defmodule StacksWeb.AuthControllerTest do
       {token, claims}
     end
 
-    test "replaying a rotated (non-current) token 401s AND revokes the whole family",
+    test "replaying an older (2-rotations-back) token 401s AND revokes the whole family",
          %{conn: conn} do
       {token_a, claims_a} = login_token!(conn, "reuse-detect@example.com")
       family_id = claims_a["family_id"]
 
-      # Rotate once → token B; token A is now the superseded (non-current) token.
-      refresh_conn =
+      # Rotate twice: A → B → C. Token B is now the immediate predecessor (inside
+      # the #180 grace window); token A is TWO rotations back — past the grace
+      # window's single-predecessor scope, so replaying it is genuine reuse.
+      refresh_b =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
 
-      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+      assert %{"token" => token_b} = json_response(refresh_b, 200)
 
-      # Replay the OLD token A on an authed endpoint → 401 (reuse detected).
+      refresh_c =
+        conn |> put_req_header("authorization", "Bearer #{token_b}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_c} = json_response(refresh_c, 200)
+
+      # Replay the OLD token A (2-back) on an authed endpoint → 401 (reuse). Grace
+      # applies only to the immediate predecessor (B), never to A.
       replay_conn =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> get("/api/auth/me")
 
@@ -788,10 +797,10 @@ defmodule StacksWeb.AuthControllerTest do
       family = Repo.get(AuthTokenFamily, family_id)
       assert family.revoked_at
 
-      # ...so the CURRENT token B is ALSO rejected — a detected replay burns the
+      # ...so the CURRENT token C is ALSO rejected — a detected replay burns the
       # entire session, not just the replayed token.
       burned_conn =
-        conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
+        conn |> put_req_header("authorization", "Bearer #{token_c}") |> get("/api/auth/me")
 
       assert json_response(burned_conn, 401)
     end
@@ -844,6 +853,73 @@ defmodule StacksWeb.AuthControllerTest do
       # family_id (e.g. a thief's already-rotated chain) is rejected on next use.
       family = Repo.get(AuthTokenFamily, claims_b["family_id"])
       assert family.revoked_at
+    end
+  end
+
+  describe "rotation grace window (Issue #180, Phase 1)" do
+    # Rotation records the predecessor jti + rotated_at so the reuse gate can
+    # honour the JUST-rotated old token for a short grace window (20s) instead
+    # of burning the family on a benign in-flight / multi-tab race.
+    defp login_token_g!(conn, email) do
+      insert(:user,
+        email: email,
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      login_conn = post(conn, "/api/auth/login", %{email: email, password: "secret123"})
+      %{"token" => token} = json_response(login_conn, 200)
+      {:ok, claims} = Guardian.decode_and_verify(token)
+      {token, claims}
+    end
+
+    test "refresh records the predecessor jti and rotated_at on the family",
+         %{conn: conn} do
+      {token_a, claims_a} = login_token_g!(conn, "grace-predecessor@example.com")
+      family_id = claims_a["family_id"]
+
+      before = DateTime.utc_now()
+
+      refresh_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+      {:ok, claims_b} = Guardian.decode_and_verify(token_b)
+
+      family = Repo.get(AuthTokenFamily, family_id)
+      # The OLD token's jti is preserved as the predecessor; current advanced.
+      assert family.previous_jti == claims_a["jti"]
+      assert family.current_jti == claims_b["jti"]
+      # rotated_at was stamped ~now (at or after the pre-refresh timestamp).
+      assert family.rotated_at
+      assert DateTime.compare(family.rotated_at, before) in [:gt, :eq]
+    end
+
+    test "the just-rotated old token is honoured by the family gate within grace (no false burn)",
+         %{conn: conn} do
+      {token_a, claims_a} = login_token_g!(conn, "grace-inflight@example.com")
+
+      # Rotate → token B. token A's jti is now the immediate predecessor,
+      # rotated ~now. (guardian_db deletes token A's row on rotation, so we
+      # exercise the family gate directly with the captured predecessor jti.)
+      refresh_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+      {:ok, claims_b} = Guardian.decode_and_verify(token_b)
+
+      # An in-flight request carrying the just-rotated old token: honoured within
+      # grace (would 401 + burn the whole family under bare #179).
+      assert :ok =
+               Accounts.check_token_family(
+                 claims_b["family_id"],
+                 claims_a["jti"],
+                 claims_a["sub"]
+               )
+
+      # And the family is NOT revoked — the current token keeps working.
+      family = Repo.get(AuthTokenFamily, claims_b["family_id"])
+      assert is_nil(family.revoked_at)
     end
   end
 
