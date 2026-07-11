@@ -62,18 +62,25 @@ test.describe("Marketplace listing draft [#182]", () => {
     await page.fill("#contact-input", DRAFT_CONTACT);
     await page.fill("#description-input", DRAFT_DESCRIPTION);
 
-    // ── 3. Poison the token, then submit (the authed create → 401) ──────────
-    // Same mechanism as the auth.spec "Session expiry" tests: keep the stored
-    // session SHAPE so the SPA still believes it is authenticated, but swap in a
-    // token the server rejects with 401 — exactly the state a real expiry
-    // produces. We do NOT fabricate a session from nothing.
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
+    // ── 3. Revoke the session SERVER-SIDE, then submit (the authed create → 401) ─
+    // We deliberately do NOT use the auth.spec localStorage-poison trick here: that
+    // works only because those tests reload (page.goto) so the SPA re-reads the
+    // poisoned token from flags. A reload would wipe the in-memory form that is the
+    // whole point of this test. Instead we revoke the *current, still-valid* token
+    // server-side (guardian_db revocation, #124 A2) — exactly a "logged out
+    // elsewhere / revoked mid-compose" expiry — leaving the SPA's in-memory session
+    // (and the filled form) untouched. The next authed request (the submit) then
+    // comes back 401 in-session, with no reload.
+    const liveToken = await page.evaluate(
+      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
+    );
+    expect(liveToken).toBeTruthy();
+    const revokeResp = await page.request.delete("/api/auth/logout", {
+      headers: { Authorization: `Bearer ${liveToken}` },
     });
+    expect(revokeResp.status()).toBe(204);
 
-    // Submitting fires Api.createListing with the now-invalid token; the 401
+    // Submitting fires Api.createListing with the now server-revoked token; the 401
     // routes through CreateListing's SessionExpiredWithDraft → Main persists the
     // draft to localStorage and redirects to /login.
     await page
