@@ -1071,12 +1071,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Search.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSearch newSubModel }
-                    , Cmd.map SearchMsg subCmd
-                    )
+                    case outMsg of
+                        Search.NoOut ->
+                            ( { model | page = PageSearch newSubModel }
+                            , Cmd.map SearchMsg subCmd
+                            )
+
+                        Search.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1088,12 +1093,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Consent.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsConsent newSubModel }
-                    , Cmd.map ConsentMsg subCmd
-                    )
+                    case outMsg of
+                        Consent.NoOut ->
+                            ( { model | page = PageSettingsConsent newSubModel }
+                            , Cmd.map ConsentMsg subCmd
+                            )
+
+                        Consent.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1105,12 +1115,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AgeVerification.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsAgeVerification newSubModel }
-                    , Cmd.map AgeVerificationMsg subCmd
-                    )
+                    case outMsg of
+                        AgeVerification.NoOut ->
+                            ( { model | page = PageSettingsAgeVerification newSubModel }
+                            , Cmd.map AgeVerificationMsg subCmd
+                            )
+
+                        AgeVerification.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1187,12 +1202,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Catalogue.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageCatalogue newSubModel }
-                    , Cmd.map CatalogueMsg subCmd
-                    )
+                    case outMsg of
+                        Catalogue.NoOut ->
+                            ( { model | page = PageCatalogue newSubModel }
+                            , Cmd.map CatalogueMsg subCmd
+                            )
+
+                        Catalogue.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1252,12 +1272,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             MyListings.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageMarketplaceMyListings newSubModel }
-                    , Cmd.map MyListingsMsg subCmd
-                    )
+                    case outMsg of
+                        MyListings.NoOut ->
+                            ( { model | page = PageMarketplaceMyListings newSubModel }
+                            , Cmd.map MyListingsMsg subCmd
+                            )
+
+                        MyListings.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1283,12 +1308,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Privacy.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsPrivacy newSubModel }
-                    , Cmd.map PrivacyMsg subCmd
-                    )
+                    case outMsg of
+                        Privacy.NoOut ->
+                            ( { model | page = PageSettingsPrivacy newSubModel }
+                            , Cmd.map PrivacyMsg subCmd
+                            )
+
+                        Privacy.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1314,12 +1344,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             BlogEditor.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageBlogEditor newSubModel }
-                    , Cmd.map BlogEditorMsg subCmd
-                    )
+                    case outMsg of
+                        BlogEditor.NoOut ->
+                            ( { model | page = PageBlogEditor newSubModel }
+                            , Cmd.map BlogEditorMsg subCmd
+                            )
+
+                        BlogEditor.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1331,12 +1366,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             BlogPostPage.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageBlogPost newSubModel }
-                    , Cmd.map BlogPostMsg subCmd
-                    )
+                    case outMsg of
+                        BlogPostPage.NoOut ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
+                        BlogPostPage.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1348,12 +1388,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminSourceApproval.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageAdminSourceApproval newSubModel }
-                    , Cmd.map AdminSourceApprovalMsg subCmd
-                    )
+                    case outMsg of
+                        AdminSourceApproval.NoOut ->
+                            ( { model | page = PageAdminSourceApproval newSubModel }
+                            , Cmd.map AdminSourceApprovalMsg subCmd
+                            )
+
+                        AdminSourceApproval.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1362,12 +1407,17 @@ update msg model =
             case model.page of
                 PageAdminScraperConfig subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminScraperConfig.update subMsg subModel
                     in
-                    ( { model | page = PageAdminScraperConfig newSubModel }
-                    , Cmd.map AdminScraperConfigMsg subCmd
-                    )
+                    case outMsg of
+                        AdminScraperConfig.NoOut ->
+                            ( { model | page = PageAdminScraperConfig newSubModel }
+                            , Cmd.map AdminScraperConfigMsg subCmd
+                            )
+
+                        AdminScraperConfig.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1376,12 +1426,17 @@ update msg model =
             case model.page of
                 PageAdminMetrics subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminMetrics.update subMsg subModel
                     in
-                    ( { model | page = PageAdminMetrics newSubModel }
-                    , Cmd.map AdminMetricsMsg subCmd
-                    )
+                    case outMsg of
+                        AdminMetrics.NoOut ->
+                            ( { model | page = PageAdminMetrics newSubModel }
+                            , Cmd.map AdminMetricsMsg subCmd
+                            )
+
+                        AdminMetrics.SessionExpired ->
+                            sessionExpired model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1585,8 +1640,12 @@ update msg model =
                 Ok placements ->
                     ( { model | hasAnyPlacements = not (List.isEmpty placements) }, Cmd.none )
 
-                Err _ ->
-                    ( model, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        sessionExpired model
+
+                    else
+                        ( model, Cmd.none )
 
         RenewToken ->
             -- Proactive silent renewal tick. Only meaningful while authenticated;

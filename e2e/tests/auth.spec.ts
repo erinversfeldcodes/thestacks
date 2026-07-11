@@ -201,4 +201,100 @@ test.describe("Session expiry", () => {
     );
     expect(stored).toBeFalsy();
   });
+
+  test("Session expiry redirects from a newly-covered page (Settings/Privacy) [#178]", async ({
+    page,
+  }) => {
+    await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
+
+    // Same server-side-invalidation mechanism as the test above: keep the stored
+    // session SHAPE (so the SPA still boots "authenticated") but swap in a token
+    // the server will reject with 401 — exactly the state a real expiry produces.
+    // We do NOT fabricate a session from nothing.
+    await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      raw.token = `${raw.token}.expired`;
+      localStorage.setItem("stacks-auth", JSON.stringify(raw));
+    });
+
+    // Navigate to Settings/Privacy — a page newly covered by #178. Unlike a
+    // bookshelf, this page fires no authed request on load, so it renders while
+    // the SPA still believes it is authenticated (booting from the invalid token).
+    await page.goto("/settings/privacy");
+
+    // Confirm the Privacy page actually rendered (proves we did NOT bounce on the
+    // page load itself — the redirect below is driven by the authed ACTION).
+    const saveProfileVisibility = page.getByRole("button", {
+      name: "Save Profile Visibility",
+    });
+    await expect(saveProfileVisibility).toBeVisible({ timeout: 15000 });
+
+    // Take an authed action on this page: change the profile-visibility setting
+    // and save it. Saving issues a Bearer request (Api.updateProfileVisibility)
+    // that comes back 401 with the now-invalid token, which must route through
+    // the single global session-expiry interceptor.
+    await page.locator(".form-field__select").first().selectOption("platform");
+    await saveProfileVisibility.click();
+
+    // Redirected to the login form …
+    await page.waitForURL("**/login", { timeout: 15000 });
+    await expect(page.locator('input[id="email"]')).toBeVisible();
+
+    // … showing the DISTINCT session-expired notice (not invalid-credentials) …
+    const notice = page.getByTestId("session-expired-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("closed your session");
+
+    // … the invalid-credentials error is NOT what's shown here …
+    await expect(page.getByTestId("login-error")).toHaveCount(0);
+
+    // … and the local session has been cleared.
+    const stored = await page.evaluate(() =>
+      localStorage.getItem("stacks-auth")
+    );
+    expect(stored).toBeFalsy();
+  });
+
+  test("Session expiry redirects at boot when the placement check 401s (boot hook) [#178]", async ({
+    page,
+  }) => {
+    await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
+
+    // Same server-side-invalidation mechanism as the tests above: keep the stored
+    // session SHAPE (so the SPA still boots "authenticated") but swap in a token
+    // the server will reject with 401 — exactly the state a real expiry produces.
+    await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      raw.token = `${raw.token}.expired`;
+      localStorage.setItem("stacks-auth", JSON.stringify(raw));
+    });
+
+    // Fresh full navigation to Home (`/`). On any authed boot, Main.elm's `init`
+    // unconditionally fires `Api.getMyPlacements auth.token GotPlacementCheck`
+    // (Main.elm ~L208) — this is the BOOT hook wired in #178. Home is chosen
+    // deliberately because its page init is `Cmd.none` (no page-level authed
+    // request), so the ONLY Bearer request at boot is the placement check. That
+    // makes the redirect unambiguously attributable to the boot hook rather than
+    // to a page action or a page's own init request. The `GotPlacementCheck`
+    // handler routes an unauthorized result to the central session-expiry path.
+    await page.goto("/");
+
+    // Redirected to the login form purely by the boot request — NO user click …
+    await page.waitForURL("**/login", { timeout: 15000 });
+    await expect(page.locator('input[id="email"]')).toBeVisible();
+
+    // … showing the DISTINCT session-expired notice (not invalid-credentials) …
+    const notice = page.getByTestId("session-expired-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("closed your session");
+
+    // … the invalid-credentials error is NOT what's shown here …
+    await expect(page.getByTestId("login-error")).toHaveCount(0);
+
+    // … and the local session has been cleared.
+    const stored = await page.evaluate(() =>
+      localStorage.getItem("stacks-auth")
+    );
+    expect(stored).toBeFalsy();
+  });
 });

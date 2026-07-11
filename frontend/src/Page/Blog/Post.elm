@@ -1,6 +1,7 @@
 module Page.Blog.Post exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -45,6 +46,11 @@ type Msg
     | CommentDeleted (Result Http.Error ())
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : String -> Maybe String -> Maybe String -> ( Model, Cmd Msg )
 init postId maybeToken currentUserId =
     ( { postId = postId
@@ -63,127 +69,153 @@ init postId maybeToken currentUserId =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         PostLoaded result ->
             case result of
                 Ok post ->
-                    ( { model | post = Success post }, Cmd.none )
+                    ( { model | post = Success post }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | post = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | post = Failure err }, Cmd.none, NoOut )
 
         ConfirmAssociation associationId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
                     , Api.confirmAssociation model.postId associationId token AssociationActionCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         DismissAssociation associationId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
                     , Api.dismissAssociation model.postId associationId token AssociationActionCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         AssociationActionCompleted result ->
             case result of
                 Ok _ ->
                     ( { model | actionResult = Success () }
                     , Api.getBlogPost model.postId maybeToken PostLoaded
+                    , NoOut
                     )
 
                 Err err ->
-                    ( { model | actionResult = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | actionResult = Failure err }, Cmd.none, NoOut )
 
         CommentsLoaded result ->
             case result of
                 Ok comments ->
-                    ( { model | comments = Success comments }, Cmd.none )
+                    ( { model | comments = Success comments }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | comments = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | comments = Failure err }, Cmd.none, NoOut )
 
         CommentDraftChanged draft ->
-            ( { model | commentDraft = draft }, Cmd.none )
+            ( { model | commentDraft = draft }, Cmd.none, NoOut )
 
         ReplyClicked parentId ->
-            ( { model | replyDraft = Just { parentId = parentId, body = "" } }, Cmd.none )
+            ( { model | replyDraft = Just { parentId = parentId, body = "" } }, Cmd.none, NoOut )
 
         ReplyDraftChanged body ->
             case model.replyDraft of
                 Just draft ->
-                    ( { model | replyDraft = Just { draft | body = body } }, Cmd.none )
+                    ( { model | replyDraft = Just { draft | body = body } }, Cmd.none, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SubmitComment ->
             if String.trim model.commentDraft == "" then
-                ( model, Cmd.none )
+                ( model, Cmd.none, NoOut )
 
             else
                 case maybeToken of
                     Just token ->
                         ( { model | commentSubmitting = True }
                         , Api.createComment model.postId model.commentDraft Nothing token CommentSubmitted
+                        , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none )
+                        ( model, Cmd.none, NoOut )
 
         SubmitReply parentId ->
             case model.replyDraft of
                 Just draft ->
                     if String.trim draft.body == "" then
-                        ( model, Cmd.none )
+                        ( model, Cmd.none, NoOut )
 
                     else
                         case maybeToken of
                             Just token ->
                                 ( { model | commentSubmitting = True }
                                 , Api.createComment model.postId draft.body (Just parentId) token CommentSubmitted
+                                , NoOut
                                 )
 
                             Nothing ->
-                                ( model, Cmd.none )
+                                ( model, Cmd.none, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         CommentSubmitted result ->
             case result of
                 Ok _ ->
                     ( { model | commentSubmitting = False, commentDraft = "", replyDraft = Nothing }
                     , Api.getPostComments model.postId maybeToken CommentsLoaded
+                    , NoOut
                     )
 
-                Err _ ->
-                    ( { model | commentSubmitting = False }, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | commentSubmitting = False }, Cmd.none, NoOut )
 
         DeleteComment commentId ->
             case maybeToken of
                 Just token ->
-                    ( model, Api.deleteComment commentId token CommentDeleted )
+                    ( model, Api.deleteComment commentId token CommentDeleted, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         CommentDeleted result ->
             case result of
                 Ok _ ->
-                    ( model, Api.getPostComments model.postId maybeToken CommentsLoaded )
+                    ( model, Api.getPostComments model.postId maybeToken CommentsLoaded, NoOut )
 
-                Err _ ->
-                    ( model, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( model, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

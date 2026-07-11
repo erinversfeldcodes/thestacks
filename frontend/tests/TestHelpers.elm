@@ -946,7 +946,7 @@ searchProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _ ) =
+                    ( newModel, _, _ ) =
                         Search.update msg model maybeToken
                 in
                 ( newModel, searchEffects msg model maybeToken )
