@@ -20,9 +20,13 @@ defmodule Stacks.GDPR.DeletionTest do
   """
   use Core.DataCase, async: false
 
+  import Ecto.Query
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.Guardian
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
   alias Stacks.Audit
@@ -80,6 +84,66 @@ defmodule Stacks.GDPR.DeletionTest do
                  "UPDATE audit.audit_log SET action = $1 WHERE id = $2",
                  ["leak.test", Ecto.UUID.dump!(other_entry.id)]
                )
+    end
+  end
+
+  describe "delete_user_data/1 session revocation" do
+    # Mirrors the login path (auth_controller): generate a family_id, mint a
+    # token carrying it (which persists an op.guardian_tokens row via
+    # Guardian.DB's after_encode_and_sign hook), then open the token family.
+    defp open_session(user) do
+      fid = Ecto.UUID.generate()
+      {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
+
+      {:ok, _family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: claims["jti"],
+          session_started_at: DateTime.from_unix!(claims["sst"])
+        })
+
+      %{fid: fid, token: token}
+    end
+
+    defp guardian_token_count(user_id) do
+      Repo.aggregate(
+        from(t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)),
+        :count,
+        :jti
+      )
+    end
+
+    defp family_count(user_id) do
+      Repo.aggregate(from(f in AuthTokenFamily, where: f.user_id == ^user_id), :count, :family_id)
+    end
+
+    test "erasing a user deletes their auth_token_families and guardian_tokens rows" do
+      user = insert(:user)
+      _session = open_session(user)
+
+      # Pre-condition: the user has an active session tracked in both tables.
+      assert guardian_token_count(user.id) == 1
+      assert family_count(user.id) == 1
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # Post-condition: no lingering session state keyed to the erased user.
+      assert guardian_token_count(user.id) == 0
+      assert family_count(user.id) == 0
+    end
+
+    test "the erased user's live token no longer verifies" do
+      user = insert(:user)
+      %{token: token} = open_session(user)
+
+      # Sanity: the token verifies before erasure.
+      assert {:ok, _claims} = Guardian.decode_and_verify(token)
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # The live access token is dead: its family/guardian_tokens rows are gone.
+      assert {:error, _reason} = Guardian.decode_and_verify(token)
     end
   end
 
