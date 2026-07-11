@@ -1,10 +1,16 @@
 port module Main exposing
     ( Auth
+    , ExternalAuthOutcome(..)
     , LoginEffect(..)
+    , PendingLogout
+    , StoredAuthResolution(..)
+    , adoptExternalAuth
     , decodeFlags
     , loginEffects
     , main
+    , parkPending
     , renewAuthToken
+    , resolveRecheck
     , shouldShowOnboarding
     , viewNav
     )
@@ -106,6 +112,26 @@ port requestListingDraft : () -> Cmd msg
 port gotListingDraft : (Decode.Value -> msg) -> Sub msg
 
 
+{-| Cross-tab token propagation (Issue #180 Phase 2). Fires when ANOTHER tab
+writes `stacks-auth` in localStorage: `saveAuth` (a sibling tab just rotated its
+token → the raw new JSON string) or `clearAuth` (a sibling logged out → `null`).
+The writing tab never receives its own event, so there is no feedback loop. The
+payload is the raw string / `null`; it is decoded in Elm via `adoptExternalAuth`.
+-}
+port authChanged : (Decode.Value -> msg) -> Sub msg
+
+
+{-| Belt-and-suspenders re-check net (Issue #180 Phase 2). Asks JS to read the
+CURRENT `stacks-auth` from localStorage; the answer arrives on `gotStoredAuth`.
+Fired just before a 401-driven session expiry so a token another tab refreshed
+can be adopted instead of logging everyone out.
+-}
+port requestStoredAuth : () -> Cmd msg
+
+
+port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
+
+
 main : Program Decode.Value Model Msg
 main =
     Browser.application
@@ -161,6 +187,35 @@ type alias Auth =
     }
 
 
+{-| A parked session-expiry intent (Issue #180 Phase 2). Raised when an
+authenticated 401 wants to log out; the actual clear+redirect is deferred one
+port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
+refreshed can be adopted first.
+
+  - `draftSaved` carries the marketplace-draft-saved notice (#182) across that
+    round-trip so it still shows on the login page.
+  - `fromRenewal` records whether the expiry originated from a CONSUMED proactive
+    renewal tick (a failed silent refresh). Only then does adopting a newer token
+    on re-check re-arm renewal — a page-origin 401 still has its renewal tick
+    armed, so re-arming there would spawn a duplicate timer (a refresh storm).
+
+-}
+type alias PendingLogout =
+    { draftSaved : Bool, fromRenewal : Bool }
+
+
+{-| Merge a new parked expiry with any intent already in flight (Issue #180
+Phase 2, P2). Both flags are STICKY (OR-ed): a later plain expiry must not erase
+a `draftSaved` reassurance a draft-expiry parked, and if any origin consumed a
+renewal tick the eventual adopt must still re-arm renewal. Pure + testable.
+-}
+parkPending : Bool -> Bool -> Maybe PendingLogout -> PendingLogout
+parkPending draftSaved fromRenewal existing =
+    { draftSaved = draftSaved || (existing |> Maybe.map .draftSaved |> Maybe.withDefault False)
+    , fromRenewal = fromRenewal || (existing |> Maybe.map .fromRenewal |> Maybe.withDefault False)
+    }
+
+
 type alias BookDetailOverlay =
     { bookId : String
     , detail : BookDetail.Model
@@ -191,6 +246,11 @@ type alias Model =
     -- composing a marketplace listing (Issue #182), so the login notice can
     -- reassure the user their draft was saved.
     , draftSavedNotice : Bool
+
+    -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
+    -- re-check-before-logout port round-trip is in flight, cleared when it
+    -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
+    , pendingLogout : Maybe PendingLogout
     }
 
 
@@ -221,6 +281,7 @@ init flags url key =
       , hasAnyPlacements = True
       , sessionExpiredNotice = False
       , draftSavedNotice = False
+      , pendingLogout = Nothing
       }
     , Cmd.batch
         [ cmd
@@ -238,33 +299,38 @@ init flags url key =
     )
 
 
+{-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
+localStorage `stacks-auth`). Lifted to the top level so both `decodeFlags` (boot)
+and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
+-}
+authDecoder : Decode.Decoder Auth
+authDecoder =
+    Decode.map5
+        (\token userId email displayName role ->
+            { user =
+                { id = userId
+                , email = email
+                , displayName = displayName
+                , role = role
+                , countryCode = Nothing
+                , city = Nothing
+                }
+            , token = token
+            }
+        )
+        (Decode.field "token" Decode.string)
+        (Decode.field "userId" Decode.string)
+        (Decode.field "email" Decode.string)
+        (Decode.field "displayName" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "role" Decode.string
+            , Decode.succeed "user"
+            ]
+        )
+
+
 decodeFlags : Decode.Value -> Maybe Auth
 decodeFlags flags =
-    let
-        authDecoder =
-            Decode.map5
-                (\token userId email displayName role ->
-                    { user =
-                        { id = userId
-                        , email = email
-                        , displayName = displayName
-                        , role = role
-                        , countryCode = Nothing
-                        , city = Nothing
-                        }
-                    , token = token
-                    }
-                )
-                (Decode.field "token" Decode.string)
-                (Decode.field "userId" Decode.string)
-                (Decode.field "email" Decode.string)
-                (Decode.field "displayName" Decode.string)
-                (Decode.oneOf
-                    [ Decode.field "role" Decode.string
-                    , Decode.succeed "user"
-                    ]
-                )
-    in
     Decode.decodeValue authDecoder flags
         |> Result.toMaybe
 
@@ -582,27 +648,171 @@ encodeAuth auth =
         ]
 
 
-{-| The single, central session-expiry path (Issue #173). Every authenticated
-page routes its `SessionExpired` OutMsg here, and a failed silent renewal falls
-through here too. Mirrors sign-out (Main.elm sign-out handler): clears
-`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — but
-also raises `sessionExpiredNotice` so the login page shows an "expired" message
-distinct from invalid-credentials. The notice survives the `Nav.pushUrl`-driven
-`UrlChanged` re-init via the flag (consumed when the Login page is built).
+{-| The single, central deferred session-expiry entry point (Issue #173 + #180
+Phase 2). EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
+failed silent renewal falls through here too — so the re-check net lives in ONE
+place, not scattered across the ~25 call sites.
+
+Rather than logging out immediately, it parks a `pendingLogout` intent and asks
+JS for the CURRENT stored auth (`requestStoredAuth`). The answer arrives on
+`gotStoredAuth`, where `adoptExternalAuth` decides: if another tab has stored a
+newer token, adopt it (cancel the logout); otherwise fall through to
+`forceSessionExpiry`. The round-trip is a single JS tick, so there is no visible
+flash. In-memory `auth` is intentionally left intact during the round-trip.
+
 -}
-sessionExpired : Model -> ( Model, Cmd Msg )
-sessionExpired model =
+handleSessionExpiry : Model -> ( Model, Cmd Msg )
+handleSessionExpiry model =
+    ( { model | pendingLogout = Just (parkPending False False model.pendingLogout) }
+    , requestStoredAuth ()
+    )
+
+
+{-| As `handleSessionExpiry`, but for a CONSUMED renewal tick (a failed silent
+refresh). `fromRenewal = True` so a re-check that adopts a newer token re-arms
+renewal — the proactive tick that would have kept the session alive is gone.
+-}
+handleSessionExpiryFromRenewal : Model -> ( Model, Cmd Msg )
+handleSessionExpiryFromRenewal model =
+    ( { model | pendingLogout = Just (parkPending False True model.pendingLogout) }
+    , requestStoredAuth ()
+    )
+
+
+{-| As `handleSessionExpiry`, but for the marketplace-compose expiry (#182): the
+in-progress draft is persisted immediately, and the parked intent remembers to
+raise the draft-saved notice if the round-trip does end in a logout.
+-}
+handleSessionExpiryWithDraft : Json.Encode.Value -> Model -> ( Model, Cmd Msg )
+handleSessionExpiryWithDraft draft model =
+    ( { model | pendingLogout = Just (parkPending True False model.pendingLogout) }
+    , Cmd.batch
+        [ saveListingDraft draft
+        , requestStoredAuth ()
+        ]
+    )
+
+
+{-| The actual, irreversible session-expiry path (Issue #173). Reached only after
+the re-check net (`handleSessionExpiry` → `gotStoredAuth`) confirms there is no
+newer token to adopt, or from a sibling-tab `clearAuth`. Mirrors sign-out: clears
+`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — raising
+`sessionExpiredNotice` (and `draftSavedNotice` when a draft was parked) so the
+login page shows an "expired" message distinct from invalid-credentials. The
+notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
+-}
+forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
+forceSessionExpiry draftSaved model =
     ( { model
         | auth = Nothing
         , sessionExpiredNotice = True
+        , draftSavedNotice = model.draftSavedNotice || draftSaved
         , userMenu = UserMenu.init
         , bookDetailOverlay = Nothing
+        , pendingLogout = Nothing
       }
     , Cmd.batch
         [ clearAuth ()
         , Nav.pushUrl model.key (Route.toPath Login)
         ]
     )
+
+
+{-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
+for BOTH cross-tab propagation and the 401 re-check net.
+-}
+type ExternalAuthOutcome
+    = AdoptAuth Auth
+    | LogOutExternally
+    | IgnoreExternal
+
+
+{-| Pure, key-free decision for an externally-observed stored-auth value — a
+sibling tab's `storage` event (`AuthChangedExternally`) or the re-check response
+(`GotStoredAuth`). The port delivers the RAW localStorage payload: a JSON string
+(a `saveAuth` write), JSON `null` (a `clearAuth`), or something unexpected.
+
+  - a valid stored auth whose token DIFFERS from the in-memory token, while
+    authed → `AdoptAuth` the stored auth (new token, its user).
+  - the SAME token → `IgnoreExternal` (nothing changed; also the writer's own
+    echo defence).
+  - a valid stored auth while signed out → `IgnoreExternal` (a signed-out tab
+    does not spontaneously log in from a sibling).
+  - JSON `null` while authed → `LogOutExternally` (a sibling logged out).
+  - JSON `null` while signed out, or any garbage → `IgnoreExternal` (never crash
+    or log out on undecodable input).
+
+-}
+adoptExternalAuth : Decode.Value -> Maybe Auth -> ExternalAuthOutcome
+adoptExternalAuth value maybeAuth =
+    case Decode.decodeValue (Decode.nullable Decode.string) value of
+        Ok (Just raw) ->
+            case ( Decode.decodeString authDecoder raw, maybeAuth ) of
+                ( Ok incoming, Just current ) ->
+                    if incoming.token == current.token then
+                        IgnoreExternal
+
+                    else
+                        AdoptAuth incoming
+
+                ( Ok _, Nothing ) ->
+                    IgnoreExternal
+
+                ( Err _, _ ) ->
+                    IgnoreExternal
+
+        Ok Nothing ->
+            -- JSON null: a sibling `clearAuth`. Log this tab out too, but only if
+            -- it is currently authed (a signed-out tab has nothing to clear).
+            case maybeAuth of
+                Just _ ->
+                    LogOutExternally
+
+                Nothing ->
+                    IgnoreExternal
+
+        Err _ ->
+            -- Not a string and not null (unexpected shape): ignore, never log out.
+            IgnoreExternal
+
+
+{-| The resolution of a re-check (`gotStoredAuth`) answer against the parked
+intent (Issue #180 Phase 2). Pure, so the reschedule decision — opaque as a `Cmd`
+— is unit-testable.
+
+  - `ResolveAdopt auth reschedule` — adopt `auth`, cancel the logout; `reschedule`
+    is `True` only for a renewal-origin expiry (P1b: a page-origin 401 still has
+    its renewal tick armed, so re-arming would duplicate the timer).
+  - `ResolveForceLogout draftSaved` — nothing newer to adopt; proceed to logout.
+  - `ResolveNoop` — no parked intent (e.g. a cross-tab adopt already cancelled it,
+    P1a): a late answer must NOT log out.
+
+-}
+type StoredAuthResolution
+    = ResolveAdopt Auth Bool
+    | ResolveForceLogout Bool
+    | ResolveNoop
+
+
+{-| Decide what a re-check answer means, given the parked intent and the decoded
+outcome. See `StoredAuthResolution`. Pure and key-free.
+-}
+resolveRecheck : Maybe PendingLogout -> ExternalAuthOutcome -> StoredAuthResolution
+resolveRecheck maybePending outcome =
+    case maybePending of
+        Nothing ->
+            ResolveNoop
+
+        Just pending ->
+            case outcome of
+                AdoptAuth newAuth ->
+                    ResolveAdopt newAuth pending.fromRenewal
+
+                LogOutExternally ->
+                    ResolveForceLogout pending.draftSaved
+
+                IgnoreExternal ->
+                    ResolveForceLogout pending.draftSaved
 
 
 {-| Adopt a freshly-refreshed access token, keeping the same authenticated user.
@@ -741,6 +951,8 @@ type Msg
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
     | RenewToken
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
+    | AuthChangedExternally Decode.Value
+    | GotStoredAuth Decode.Value
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -925,7 +1137,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         Bookshelf.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         Bookshelf.NavigateTo (BookDetail bookId) ->
                             let
@@ -965,7 +1177,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         ReadingPile.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         ReadingPile.NavigateTo (BookDetail bookId) ->
                             let
@@ -1005,7 +1217,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         LookingForHome.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         LookingForHome.NavigateTo (Route.BookDetail bookId) ->
                             openOverlay baseModel bookId
@@ -1042,7 +1254,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         BookDetail.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         BookDetail.RequestCloseOverlay ->
                             ( baseModel, baseCmd )
@@ -1079,7 +1291,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         Upload.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         Upload.NavigateTo route ->
                             ( baseModel
@@ -1117,7 +1329,7 @@ update msg model =
                             )
 
                         Search.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1139,7 +1351,7 @@ update msg model =
                             )
 
                         Consent.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1161,7 +1373,7 @@ update msg model =
                             )
 
                         AgeVerification.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1248,7 +1460,7 @@ update msg model =
                             )
 
                         Catalogue.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1291,23 +1503,14 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         CreateListing.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         CreateListing.SessionExpiredWithDraft draft ->
-                            -- Persist the draft, then run the standard expiry
-                            -- path, and flag the login notice that a draft was
-                            -- saved (#182). `sessionExpired` reads the ORIGINAL
-                            -- model (the draft-save Cmd comes from here).
-                            let
-                                ( expiredModel, expiredCmd ) =
-                                    sessionExpired model
-                            in
-                            ( { expiredModel | draftSavedNotice = True }
-                            , Cmd.batch
-                                [ saveListingDraft draft
-                                , expiredCmd
-                                ]
-                            )
+                            -- Persist the draft and run the deferred expiry path,
+                            -- remembering (via the parked intent) to raise the
+                            -- draft-saved login notice IF the re-check ends in a
+                            -- logout (#182 + #180 Phase 2).
+                            handleSessionExpiryWithDraft draft model
 
                         CreateListing.ClearDraft ->
                             ( baseModel
@@ -1345,7 +1548,7 @@ update msg model =
                             )
 
                         MyListings.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1381,7 +1584,7 @@ update msg model =
                             )
 
                         Privacy.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1417,7 +1620,7 @@ update msg model =
                             )
 
                         BlogEditor.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1439,7 +1642,7 @@ update msg model =
                             )
 
                         BlogPostPage.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1461,7 +1664,7 @@ update msg model =
                             )
 
                         AdminSourceApproval.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1480,7 +1683,7 @@ update msg model =
                             )
 
                         AdminScraperConfig.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1499,7 +1702,7 @@ update msg model =
                             )
 
                         AdminMetrics.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1518,7 +1721,7 @@ update msg model =
                             )
 
                         Groups.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         Groups.NavigateTo route ->
                             ( { model | page = PageGroups newSubModel }
@@ -1545,7 +1748,7 @@ update msg model =
                             )
 
                         GroupsDetail.SessionExpired ->
-                            sessionExpired model
+                            handleSessionExpiry model
 
                         GroupsDetail.NavigateTo route ->
                             ( { model | page = PageGroupsDetail newSubModel }
@@ -1596,7 +1799,7 @@ update msg model =
                             )
 
                         BookDetail.SessionExpired ->
-                            sessionExpired { model | bookDetailOverlay = Nothing }
+                            handleSessionExpiry model
 
                 Nothing ->
                     ( model, Cmd.none )
@@ -1632,7 +1835,7 @@ update msg model =
 
                         -- Defense-in-depth (#182): a deliberate sign-out also
                         -- wipes any persisted listing draft (it carries PII).
-                        -- NB: the `sessionExpired` path deliberately does NOT do
+                        -- NB: the session-expiry path deliberately does NOT do
                         -- this — it must preserve the draft across the redirect.
                         , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
@@ -1711,7 +1914,7 @@ update msg model =
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        sessionExpired model
+                        handleSessionExpiry model
 
                     else
                         ( model, Cmd.none )
@@ -1744,8 +1947,59 @@ update msg model =
 
         TokenRefreshed (Err _) ->
             -- Renewal failed (token already expired/revoked, or the service is
-            -- down): fall through to the single global session-expiry path.
-            sessionExpired model
+            -- down): fall through to the session-expiry path, tagged as
+            -- renewal-origin so a re-check adopt re-arms the consumed tick (P1b).
+            handleSessionExpiryFromRenewal model
+
+        AuthChangedExternally value ->
+            -- A sibling tab wrote `stacks-auth` (Issue #180 Phase 2).
+            case adoptExternalAuth value model.auth of
+                AdoptAuth newAuth ->
+                    -- Adopt the token another tab rotated in. No `saveAuth` (that
+                    -- tab already persisted it) and NO reschedule: this tab still
+                    -- has its own renewal tick armed, so re-arming here would let
+                    -- every rotation spawn an extra timer per tab (a growing
+                    -- refresh storm — exactly what #180 fights).
+                    --
+                    -- P1a: adopting a VALID token also cancels any parked expiry —
+                    -- otherwise an in-flight `gotStoredAuth` (whose stored value now
+                    -- equals this adopted token → IgnoreExternal) would force a
+                    -- logout on a tab that just adopted a live credential.
+                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    , Cmd.none
+                    )
+
+                LogOutExternally ->
+                    -- A sibling `clearAuth`: a logout in one tab logs out all.
+                    forceSessionExpiry False model
+
+                IgnoreExternal ->
+                    ( model, Cmd.none )
+
+        GotStoredAuth value ->
+            -- The re-check-before-logout answer (Issue #180 Phase 2). The pure
+            -- resolver folds in the parked intent (origin + draft flags); a stray
+            -- answer with no parked intent is a no-op (P1a).
+            case resolveRecheck model.pendingLogout (adoptExternalAuth value model.auth) of
+                ResolveAdopt newAuth reschedule ->
+                    -- localStorage holds a newer token than the one that 401'd —
+                    -- adopt it and cancel the logout. Re-arm renewal ONLY for a
+                    -- renewal-origin expiry, whose proactive tick was consumed (P1b).
+                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    , if reschedule then
+                        scheduleRenewal
+
+                      else
+                        Cmd.none
+                    )
+
+                ResolveForceLogout draftSaved ->
+                    -- Nothing newer stored (same token / cleared / garbage):
+                    -- proceed to the real logout, carrying the draft notice.
+                    forceSessionExpiry draftSaved model
+
+                ResolveNoop ->
+                    ( model, Cmd.none )
 
         SwipeReceived direction ->
             let
@@ -1817,6 +2071,8 @@ subscriptions model =
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
         , onOnboardingStatus OnboardingStatusReceived
+        , authChanged AuthChangedExternally
+        , gotStoredAuth GotStoredAuth
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen

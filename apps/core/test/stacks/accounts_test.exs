@@ -413,6 +413,102 @@ defmodule Stacks.AccountsTest do
     end
   end
 
+  describe "token rotation grace window (Issue #180, Phase 1)" do
+    # #179 burns the whole family whenever a non-current jti is presented. That
+    # over-fires on a benign rotation race: an in-flight request (or a second
+    # tab) still carrying the JUST-rotated old token trips reuse detection and
+    # logs the user out. #180 honours the IMMEDIATELY-PREVIOUS token for a short
+    # grace window (20s) after rotation WITHOUT burning. Anything else — an older
+    # token (2+ rotations back), the previous token past grace, or an unknown
+    # jti — still burns, preserving #179's posture outside the tiny window.
+    setup do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+      %{user: user, fid: fid, sub: to_string(user.id)}
+    end
+
+    defp open_rotated_family(fid, user, rotated_at) do
+      {:ok, family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          previous_jti: "jti-previous",
+          rotated_at: rotated_at,
+          session_started_at: DateTime.utc_now()
+        })
+
+      family
+    end
+
+    test "the immediately-previous jti WITHIN grace returns :ok and does NOT burn the family",
+         %{user: user, fid: fid, sub: sub} do
+      open_rotated_family(fid, user, DateTime.utc_now())
+
+      # The benign in-flight / multi-tab replay of the just-rotated token: honoured.
+      assert :ok = Accounts.check_token_family(fid, "jti-previous", sub)
+
+      # NON-BURN is the key assertion: the family is untouched — not revoked,
+      # and current_jti did NOT advance to the previous token.
+      family = Repo.get(AuthTokenFamily, fid)
+      assert is_nil(family.revoked_at)
+      assert family.current_jti == "jti-current"
+      assert family.previous_jti == "jti-previous"
+    end
+
+    test "the previous jti PAST the grace window is REUSE: burns the family",
+         %{user: user, fid: fid, sub: sub} do
+      # rotated_at is 21s ago → outside the 20s grace: this token is now stale.
+      past = DateTime.add(DateTime.utc_now(), -21, :second)
+      open_rotated_family(fid, user, past)
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-previous", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "an OLDER/unknown jti burns even with a FRESH rotated_at (grace saves only previous_jti)",
+         %{user: user, fid: fid, sub: sub} do
+      # rotated_at is now (grace is wide open) but the presented token is neither
+      # current nor the immediate predecessor — it's two-plus rotations back or
+      # forged. Grace must NOT save it.
+      open_rotated_family(fid, user, DateTime.utc_now())
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-two-rotations-ago", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "the current jti still returns :ok (happy path unchanged)",
+         %{user: user, fid: fid, sub: sub} do
+      open_rotated_family(fid, user, DateTime.utc_now())
+      assert :ok = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a family with no rotation history (previous_jti nil) still burns a non-current jti",
+         %{user: user, sub: sub} do
+      # Non-vacuity: the grace branch requires BOTH previous_jti and rotated_at.
+      # A never-rotated family (legacy / just-opened) has neither, so a stale
+      # token against it burns exactly as #179 intended.
+      fid = Ecto.UUID.generate()
+
+      {:ok, _} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          session_started_at: DateTime.utc_now()
+        })
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-anything", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+  end
+
   describe "update_notifications/2" do
     test "toggles all four notification fields" do
       user =

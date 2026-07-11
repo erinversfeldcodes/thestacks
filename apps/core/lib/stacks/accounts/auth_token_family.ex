@@ -26,10 +26,25 @@ defmodule Stacks.Accounts.AuthTokenFamily do
     field :session_started_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
 
+    # Rotation grace window (Issue #180). `previous_jti` is the jti superseded by
+    # the last rotation; `rotated_at` is when that rotation happened. The reuse
+    # gate honours `previous_jti` for a short grace window after `rotated_at`
+    # without burning the family. Both nil until the family's first rotation.
+    field :previous_jti, :string
+    field :rotated_at, :utc_datetime_usec
+
     timestamps(type: :utc_datetime_usec, inserted_at: :created_at)
   end
 
-  @castable [:family_id, :user_id, :current_jti, :session_started_at, :revoked_at]
+  @castable [
+    :family_id,
+    :user_id,
+    :current_jti,
+    :session_started_at,
+    :revoked_at,
+    :previous_jti,
+    :rotated_at
+  ]
   @required [:family_id, :user_id, :current_jti, :session_started_at]
 
   @doc "Changeset for opening or updating a token family."

@@ -750,19 +750,23 @@ defmodule Stacks.Accounts do
   @doc """
   Advance a family's live token on refresh rotation.
 
-  Idempotent upsert keyed on `family_id`: an existing family has only its
-  `current_jti` (and `updated_at`) replaced — `session_started_at`, `user_id`
-  and `revoked_at` are preserved. A missing family (a legacy session minted
-  before families existed, or a direct-action test path) is created lazily so
-  the session becomes tracked from now rather than locking the user out. This
-  mirrors the Phase 1 `sst` policy of binding an untracked session from the
-  current moment instead of treating it as invalid.
+  Idempotent upsert keyed on `family_id`: an existing family has its
+  `current_jti`, `previous_jti`, `rotated_at` (and `updated_at`) replaced —
+  `session_started_at`, `user_id` and `revoked_at` are preserved. A missing
+  family (a legacy session minted before families existed, or a direct-action
+  test path) is created lazily so the session becomes tracked from now rather
+  than locking the user out. This mirrors the Phase 1 `sst` policy of binding an
+  untracked session from the current moment instead of treating it as invalid.
+
+  The caller records the rotation grace metadata (Issue #180): `previous_jti` is
+  the jti being superseded (the OLD `current_jti`) and `rotated_at` is now, so
+  the reuse gate can honour the just-rotated old token for a short grace window.
   """
   def rotate_token_family(attrs) do
     %AuthTokenFamily{}
     |> AuthTokenFamily.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:current_jti, :updated_at]},
+      on_conflict: {:replace, [:current_jti, :previous_jti, :rotated_at, :updated_at]},
       conflict_target: :family_id
     )
   end
@@ -804,21 +808,7 @@ defmodule Stacks.Accounts do
         {:error, :session_revoked}
 
       %AuthTokenFamily{} = family ->
-        cond do
-          # Ownership guard (defense-in-depth): `family_id` is a signed claim, so
-          # a cross-user family_id is not reachable today — but if `sub` and
-          # `family_id` ever desync, reject WITHOUT burning the innocent owner's
-          # family (a mismatched token must not revoke someone else's session).
-          to_string(family.user_id) != sub ->
-            {:error, :session_revoked}
-
-          family.current_jti == jti ->
-            :ok
-
-          true ->
-            revoke_family_and_burn(family)
-            {:error, :token_reuse_detected}
-        end
+        classify_live_family(family, jti, sub)
     end
   rescue
     error ->
@@ -827,6 +817,34 @@ defmodule Stacks.Accounts do
   end
 
   def check_token_family(_family_id, _jti, _sub), do: {:error, :session_revoked}
+
+  # Classify a token against its live (non-revoked, existing) family.
+  defp classify_live_family(%AuthTokenFamily{} = family, jti, sub) do
+    cond do
+      # Ownership guard (defense-in-depth): `family_id` is a signed claim, so a
+      # cross-user family_id is not reachable today — but if `sub` and
+      # `family_id` ever desync, reject WITHOUT burning the innocent owner's
+      # family (a mismatched token must not revoke someone else's session).
+      to_string(family.user_id) != sub ->
+        {:error, :session_revoked}
+
+      family.current_jti == jti ->
+        :ok
+
+      # Rotation grace window (Issue #180): the IMMEDIATELY-PREVIOUS token,
+      # presented within `grace_seconds` of the rotation that superseded it, is a
+      # benign in-flight / multi-tab race — NOT reuse. Honour it WITHOUT burning
+      # and WITHOUT advancing current_jti. Applies ONLY to `previous_jti` (the
+      # single immediate predecessor): an older token (2+ rotations back) has a
+      # different jti and falls through to burn.
+      within_rotation_grace?(family, jti) ->
+        :ok
+
+      true ->
+        revoke_family_and_burn(family)
+        {:error, :token_reuse_detected}
+    end
+  end
 
   @doc """
   Revoke a single token family by marking `revoked_at` (idempotent).
@@ -864,6 +882,35 @@ defmodule Stacks.Accounts do
 
     :ok
   end
+
+  # Rotation grace predicate (Issue #180). True IFF the presented jti is the
+  # family's immediate predecessor (`previous_jti`) AND that rotation happened no
+  # more than `session_rotation_grace` seconds ago. Requires BOTH `previous_jti`
+  # and `rotated_at` to be set (a never-rotated / legacy family has neither, so
+  # this is always false and the caller burns as #179 intended). The window is
+  # applied ONLY to `previous_jti`, never to an older jti.
+  defp within_rotation_grace?(%AuthTokenFamily{previous_jti: prev, rotated_at: rotated_at}, jti)
+       when is_binary(prev) and not is_nil(rotated_at) and prev == jti do
+    DateTime.diff(DateTime.utc_now(), rotated_at, :second) <= rotation_grace_seconds()
+  end
+
+  defp within_rotation_grace?(_family, _jti), do: false
+
+  # Grace window expressed as `{n, unit}` in config, converted to seconds here at
+  # the check site (mirrors the AuthController session-cap `unit_in_seconds/1`).
+  defp rotation_grace_seconds do
+    {n, unit} = Application.get_env(:core, :session_rotation_grace, {20, :second})
+    n * grace_unit_in_seconds(unit)
+  end
+
+  defp grace_unit_in_seconds(:second), do: 1
+  defp grace_unit_in_seconds(:minute), do: 60
+  defp grace_unit_in_seconds(:hour), do: 3_600
+  # Fail-safe catch-all: a misconfigured unit must NOT raise on every authed
+  # request (this runs in the verify gate). Treat unknown units as seconds — the
+  # smallest window, so a misconfig fails toward LESS grace (more secure), never
+  # toward an auth outage or a wider honoured-token window.
+  defp grace_unit_in_seconds(_unknown), do: 1
 
   # Reuse response: mark the family revoked and burn all the user's live tokens.
   # `update_all` (not scoped to unrevoked) is fine — re-stamping an already-set

@@ -249,15 +249,24 @@ defmodule StacksWeb.AuthController do
       # cap does not reset on renewal (survives rotation).
       revoke_refresh_token(old_token)
 
+      # The jti being superseded — the OLD current token — becomes the family's
+      # `previous_jti` so the reuse gate can honour it for a short grace window
+      # (Issue #180). A legacy token with no jti claim yields nil (no grace).
+      old_jti = claims["jti"]
+
       {:ok, token, new_claims} =
         Guardian.encode_and_sign(user, %{"sst" => session_start, "family_id" => family_id})
 
       # Advance the family's live token to the newly minted jti (lazy-creates the
-      # row for a legacy/untracked session — see rotate_token_family).
+      # row for a legacy/untracked session — see rotate_token_family). Record the
+      # predecessor jti + rotation time atomically so the grace window applies to
+      # the just-rotated old token only (Issue #180).
       Accounts.rotate_token_family(%{
         family_id: family_id,
         user_id: user.id,
         current_jti: new_claims["jti"],
+        previous_jti: old_jti,
+        rotated_at: DateTime.utc_now(),
         session_started_at: DateTime.from_unix!(session_start)
       })
 

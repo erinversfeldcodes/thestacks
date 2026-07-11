@@ -205,6 +205,44 @@ if (app.ports && app.ports.clearAuth) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-tab token propagation (Issue #180 Phase 2)
+// The `storage` event fires in OTHER tabs of the same origin when this tab
+// writes `stacks-auth` (the writing tab never receives its own event, so there
+// is no feedback loop). `e.newValue` is the new JSON string (a sibling rotated
+// its token → adopt) or `null` (a sibling `clearAuth` → log out). The raw
+// string / null is handed to Elm, which decodes it via `adoptExternalAuth`.
+// ---------------------------------------------------------------------------
+if (app.ports && app.ports.authChanged) {
+  window.addEventListener("storage", function (e) {
+    if (e.key === "stacks-auth") {
+      app.ports.authChanged.send(e.newValue);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Port: Re-check-before-logout net (Issue #180 Phase 2)
+// On request, read the CURRENT stored auth and hand the raw string (or null when
+// absent) back to Elm on `gotStoredAuth`. Elm reuses `adoptExternalAuth` to
+// decide whether a token another tab refreshed should be adopted instead of
+// logging out.
+// ---------------------------------------------------------------------------
+if (app.ports && app.ports.requestStoredAuth) {
+  app.ports.requestStoredAuth.subscribe(function () {
+    var current = null;
+    try {
+      current = localStorage.getItem("stacks-auth");
+    } catch (e) {
+      // localStorage unavailable — treat as no stored auth
+      current = null;
+    }
+    if (app.ports && app.ports.gotStoredAuth) {
+      app.ports.gotStoredAuth.send(current);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Port: Persist an in-progress marketplace listing draft (Issue #182)
 // Mirrors the auth persistence above but under a separate key so a session
 // revocation mid-compose doesn't discard the user's work.
