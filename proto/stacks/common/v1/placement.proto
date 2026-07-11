@@ -95,13 +95,16 @@ message PlacementRef {
 // Used for quick lookups of which books are on which shelves.
 //
 // Source: Shelving.get_user_placements_summary/1
-// JSON shape: {book_id, bookshelf_name}
+// JSON shape: {book_id, bookshelf_name, title}
 message PlacementSummary {
   // UUID of the book.
   string book_id = 1 [json_name = "book_id"];
 
   // Name of the bookshelf (e.g. "library", "antilibrary").
   string bookshelf_name = 2 [json_name = "bookshelf_name"];
+
+  // Title of the book (for display, e.g. in the marketplace listing dropdown).
+  string title = 3 [json_name = "title"];
 }
 
 // BookPlacement is the shape returned by BookController for the current user's placement

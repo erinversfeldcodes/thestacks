@@ -34,7 +34,7 @@ import Types.RemoteData exposing (RemoteData(..))
 
 type alias Model =
     { placements : RemoteData Http.Error (List Placement)
-    , selectedPlacementId : Maybe String
+    , selectedBookId : Maybe String
     , condition : Condition
     , pricingMode : PricingMode
     , priceInput : String
@@ -51,7 +51,7 @@ type alias Model =
 
 type Msg
     = PlacementsReceived (Result Http.Error (List Placement))
-    | PlacementSelected String
+    | BookSelected String
     | ConditionSelected String
     | PricingModeSelected String
     | PriceChanged String
@@ -83,7 +83,7 @@ users (a mismatched or corrupt draft is discarded, never shown).
 -}
 type alias Draft =
     { userId : String
-    , selectedPlacementId : Maybe String
+    , selectedBookId : Maybe String
     , condition : Condition
     , pricingMode : PricingMode
     , priceInput : String
@@ -104,7 +104,7 @@ init maybeToken =
                     ( NotAsked, Cmd.none )
     in
     ( { placements = placementsState
-      , selectedPlacementId = Nothing
+      , selectedBookId = Nothing
       , condition = Good
       , pricingMode = Fixed
       , priceInput = ""
@@ -133,14 +133,14 @@ update msg model maybeToken maybeUserId =
                     else
                         ( { model | placements = Failure err }, Cmd.none, NoOut )
 
-        PlacementSelected placementId ->
+        BookSelected bookId ->
             ( { model
-                | selectedPlacementId =
-                    if String.isEmpty placementId then
+                | selectedBookId =
+                    if String.isEmpty bookId then
                         Nothing
 
                     else
-                        Just placementId
+                        Just bookId
               }
             , Cmd.none
             , NoOut
@@ -162,11 +162,11 @@ update msg model maybeToken maybeUserId =
             ( { model | description = desc }, Cmd.none, NoOut )
 
         SubmitListing ->
-            case ( maybeToken, model.selectedPlacementId ) of
-                ( Just token, Just placementId ) ->
+            case ( maybeToken, model.selectedBookId ) of
+                ( Just token, Just bookId ) ->
                     let
                         params =
-                            { placementId = placementId
+                            { bookId = bookId
                             , condition = conditionToString model.condition
                             , pricingMode = pricingModeToString model.pricingMode
                             , priceZar = String.toInt model.priceInput
@@ -350,10 +350,10 @@ viewPlacementSelector model =
                     select
                         [ id "placement-select"
                         , class "form-input"
-                        , onInput PlacementSelected
+                        , onInput BookSelected
                         ]
-                        (option [ value "", selected (model.selectedPlacementId == Nothing) ] [ text "Select a book..." ]
-                            :: List.map (viewPlacementOption model.selectedPlacementId) placements
+                        (option [ value "", selected (model.selectedBookId == Nothing) ] [ text "Select a book..." ]
+                            :: List.map (viewPlacementOption model.selectedBookId) placements
                         )
 
             NotAsked ->
@@ -362,8 +362,13 @@ viewPlacementSelector model =
 
 
 viewPlacementOption : Maybe String -> Placement -> Html Msg
-viewPlacementOption selectedId placement =
+viewPlacementOption selectedBookId placement =
     let
+        bookId =
+            placement.book
+                |> Maybe.map .id
+                |> Maybe.withDefault ""
+
         bookTitle =
             placement.book
                 |> Maybe.map .title
@@ -373,7 +378,7 @@ viewPlacementOption selectedId placement =
             placement.bookshelfName
                 |> Maybe.withDefault ""
     in
-    option [ value placement.id, selected (selectedId == Just placement.id) ]
+    option [ value bookId, selected (selectedBookId == Just bookId) ]
         [ text (bookTitle ++ " (" ++ shelfName ++ ")") ]
 
 
@@ -484,7 +489,7 @@ viewSubmitButton : Model -> Html Msg
 viewSubmitButton model =
     let
         isValid =
-            model.selectedPlacementId /= Nothing && not (String.isEmpty model.contactInfo)
+            model.selectedBookId /= Nothing && not (String.isEmpty model.contactInfo)
 
         isSubmitting =
             model.submitState == Loading
@@ -582,7 +587,7 @@ never match a real user, so such a draft can only ever be discarded).
 toDraft : Model -> Maybe String -> Draft
 toDraft model maybeUserId =
     { userId = Maybe.withDefault "" maybeUserId
-    , selectedPlacementId = model.selectedPlacementId
+    , selectedBookId = model.selectedBookId
     , condition = model.condition
     , pricingMode = model.pricingMode
     , priceInput = model.priceInput
@@ -593,12 +598,12 @@ toDraft model maybeUserId =
 
 {-| Hydrate the six persisted fields from a restored draft and mark the form as
 restored so the view can offer a Discard affordance. `placements` is not touched
-(it is re-fetched by `init`); `selectedPlacementId` re-selects once they load.
+(it is re-fetched by `init`); `selectedBookId` re-selects once they load.
 -}
 hydrateFromDraft : Draft -> Model -> Model
 hydrateFromDraft draft model =
     { model
-        | selectedPlacementId = draft.selectedPlacementId
+        | selectedBookId = draft.selectedBookId
         , condition = draft.condition
         , pricingMode = draft.pricingMode
         , priceInput = draft.priceInput
@@ -613,7 +618,7 @@ hydrateFromDraft draft model =
 resetForm : Model -> Model
 resetForm model =
     { model
-        | selectedPlacementId = Nothing
+        | selectedBookId = Nothing
         , condition = Good
         , pricingMode = Fixed
         , priceInput = ""
@@ -627,8 +632,8 @@ encodeDraft : Draft -> Json.Encode.Value
 encodeDraft draft =
     Json.Encode.object
         [ ( "userId", Json.Encode.string draft.userId )
-        , ( "selectedPlacementId"
-          , case draft.selectedPlacementId of
+        , ( "selectedBookId"
+          , case draft.selectedBookId of
                 Just id_ ->
                     Json.Encode.string id_
 
@@ -647,7 +652,7 @@ decodeDraft : Decoder Draft
 decodeDraft =
     Decode.map7 Draft
         (Decode.field "userId" Decode.string)
-        (Decode.field "selectedPlacementId" (Decode.nullable Decode.string))
+        (Decode.field "selectedBookId" (Decode.nullable Decode.string))
         (Decode.field "condition" (Decode.map parseCondition Decode.string))
         (Decode.field "pricingMode" (Decode.map parsePricingMode Decode.string))
         (Decode.field "priceInput" Decode.string)

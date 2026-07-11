@@ -47,7 +47,7 @@ filledModel =
             Tuple.first (CreateListing.init (Just "tok"))
     in
     { base
-        | selectedPlacementId = Just "plc-1"
+        | selectedBookId = Just "plc-1"
         , condition = New
         , pricingMode = Offer
         , priceInput = "150"
@@ -64,7 +64,7 @@ emptyModel =
 sampleDraft : CreateListing.Draft
 sampleDraft =
     { userId = "user-1"
-    , selectedPlacementId = Just "plc-9"
+    , selectedBookId = Just "plc-9"
     , condition = LikeNew
     , pricingMode = Fixed
     , priceInput = "99"
@@ -107,7 +107,7 @@ suite =
                                 |> Expect.equal
                                     (Ok
                                         { userId = "user-1"
-                                        , selectedPlacementId = Just "plc-1"
+                                        , selectedBookId = Just "plc-1"
                                         , condition = New
                                         , pricingMode = Offer
                                         , priceInput = "150"
@@ -144,7 +144,7 @@ suite =
                                 (Just "user-1")
                     in
                     ( outMsg
-                    , ( newModel.selectedPlacementId
+                    , ( newModel.selectedBookId
                       , newModel.condition
                       , newModel.pricingMode
                       )
@@ -168,7 +168,7 @@ suite =
                                 (Just "tok")
                                 (Just "someone-else")
                     in
-                    ( newModel.selectedPlacementId, newModel.contactInfo, outMsg )
+                    ( newModel.selectedBookId, newModel.contactInfo, outMsg )
                         |> Expect.equal ( Nothing, "", CreateListing.ClearDraft )
             , test "undecodable value is a no-op that clears the draft" <|
                 \() ->
@@ -192,7 +192,7 @@ suite =
                 \() ->
                     let
                         draft =
-                            { sampleDraft | selectedPlacementId = Nothing, condition = Fair, pricingMode = Offer }
+                            { sampleDraft | selectedBookId = Nothing, condition = Fair, pricingMode = Offer }
                     in
                     Decode.decodeValue CreateListing.decodeDraft (CreateListing.encodeDraft draft)
                         |> Expect.equal (Ok draft)
@@ -223,7 +223,7 @@ suite =
                                 (Just "user-1")
                     in
                     ( outMsg
-                    , ( newModel.selectedPlacementId, newModel.contactInfo, newModel.description )
+                    , ( newModel.selectedBookId, newModel.contactInfo, newModel.description )
                     , ( newModel.condition, newModel.pricingMode, newModel.priceInput )
                     )
                         |> Expect.equal

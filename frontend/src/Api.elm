@@ -98,7 +98,7 @@ import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
-import Types.Placement exposing (Placement, placementDecoder)
+import Types.Placement exposing (Placement, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
 import Url.Builder
@@ -992,7 +992,7 @@ mergeFormat bookId body token toMsg =
 {-| Parameters for creating a new listing.
 -}
 type alias ListingParams =
-    { placementId : String
+    { bookId : String
     , condition : String
     , pricingMode : String
     , priceZar : Maybe Int
@@ -1058,7 +1058,10 @@ createListing params token toMsg =
         , body =
             Http.jsonBody
                 (Requests.encodeCreateListingRequest
-                    { placementId = params.placementId
+                    { -- Backend Marketplace.create_listing reads book_id; the
+                      -- legacy placement_id field is left empty.
+                      placementId = ""
+                    , bookId = params.bookId
                     , condition = params.condition
                     , pricingMode = params.pricingMode
                     , priceZar = params.priceZar
@@ -1142,7 +1145,7 @@ getMyPlacements token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementDecoder))
+        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
         , timeout = Nothing
         , tracker = Nothing
         }
