@@ -3715,3 +3715,52 @@ h4 {
     background: #d4a029;
 }
 
+/* -- Restored-draft notice (Issue #182): shown atop the Create Listing form
+      when a draft persisted at session-expiry has been restored. Shares the
+      login page's calm "lamplight" amber register (see
+      .login-card__notice--session-expired) so the two expiry surfaces read as
+      one voice — dark brass text on an amber-tinted parchment panel. Laid out
+      as a flex row so the reassurance copy and the Discard action sit sensibly
+      side by side, with clear separation from the form below. -- */
+
+.marketplace-create__draft-notice {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 1.5rem;
+    color: #6b4310;
+    background-color: rgba(184, 134, 11, 0.12);
+    border: 1px solid rgba(184, 134, 11, 0.35);
+    border-left: 4px solid rgba(184, 134, 11, 0.65);
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(92, 58, 30, 0.08);
+}
+
+.marketplace-create__draft-notice-text {
+    flex: 1 1 16rem;
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: var(--size-sm);
+    line-height: 1.5;
+}
+
+.marketplace-create__draft-discard {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.9rem;
+    color: #6b4310;
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    background-color: rgba(255, 250, 240, 0.6);
+    border: 1px solid rgba(184, 134, 11, 0.5);
+    border-radius: 3px;
+}
+
+.marketplace-create__draft-discard:hover {
+    color: #3d2610;
+    background-color: rgba(255, 250, 240, 0.95);
+    border-color: rgba(184, 134, 11, 0.8);
+}
+

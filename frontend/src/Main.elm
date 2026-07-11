@@ -89,6 +89,23 @@ port openUploadStream : { url : String } -> Cmd msg
 port uploadStreamEvent : (String -> msg) -> Sub msg
 
 
+{-| Persist / clear / request an in-progress marketplace listing draft in
+localStorage (Issue #182). `saveListingDraft` is fired when a session expires
+mid-compose; `requestListingDraft` is fired when the create page is (re)built and
+its answer arrives on `gotListingDraft` (the parsed value, or `null` when absent).
+-}
+port saveListingDraft : Json.Encode.Value -> Cmd msg
+
+
+port clearListingDraft : () -> Cmd msg
+
+
+port requestListingDraft : () -> Cmd msg
+
+
+port gotListingDraft : (Decode.Value -> msg) -> Sub msg
+
+
 main : Program Decode.Value Model Msg
 main =
     Browser.application
@@ -169,6 +186,11 @@ type alias Model =
     -- Raised by `sessionExpired`; consumed when the Login page is (re)built so the
     -- global session-expiry notice survives the redirect's `UrlChanged`.
     , sessionExpiredNotice : Bool
+
+    -- Raised alongside `sessionExpiredNotice` when the expiry happened while
+    -- composing a marketplace listing (Issue #182), so the login notice can
+    -- reassure the user their draft was saved.
+    , draftSavedNotice : Bool
     }
 
 
@@ -198,6 +220,7 @@ init flags url key =
       , onboardingCompleted = False
       , hasAnyPlacements = True
       , sessionExpiredNotice = False
+      , draftSavedNotice = False
       }
     , Cmd.batch
         [ cmd
@@ -431,7 +454,14 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                 ( model, cmd ) =
                     CreateListing.init maybeToken
             in
-            ( PageMarketplaceCreate model, Cmd.map CreateListingMsg cmd )
+            -- Ask JS for any persisted draft; the answer arrives on
+            -- `gotListingDraft` and is routed to CreateListing.DraftLoaded (#182).
+            ( PageMarketplaceCreate model
+            , Cmd.batch
+                [ Cmd.map CreateListingMsg cmd
+                , requestListingDraft ()
+                ]
+            )
 
         MarketplaceMyListings ->
             let
@@ -749,7 +779,11 @@ update msg model =
                 -- message survives this `UrlChanged` re-init.
                 page =
                     if newRoute == Login && model.sessionExpiredNotice then
-                        PageLogin Login.expiredInit
+                        if model.draftSavedNotice then
+                            PageLogin Login.expiredDraftInit
+
+                        else
+                            PageLogin Login.expiredInit
 
                     else
                         initialisedPage
@@ -763,6 +797,8 @@ update msg model =
                 , userMenu = UserMenu.init
                 , sessionExpiredNotice =
                     model.sessionExpiredNotice && newRoute /= Login
+                , draftSavedNotice =
+                    model.draftSavedNotice && newRoute /= Login
               }
             , cmd
             )
@@ -1238,8 +1274,11 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
+                        maybeUserId =
+                            Maybe.map (.user >> .id) model.auth
+
                         ( newSubModel, subCmd, outMsg ) =
-                            CreateListing.update subMsg subModel maybeToken
+                            CreateListing.update subMsg subModel maybeToken maybeUserId
 
                         baseModel =
                             { model | page = PageMarketplaceCreate newSubModel }
@@ -1253,6 +1292,30 @@ update msg model =
 
                         CreateListing.SessionExpired ->
                             sessionExpired model
+
+                        CreateListing.SessionExpiredWithDraft draft ->
+                            -- Persist the draft, then run the standard expiry
+                            -- path, and flag the login notice that a draft was
+                            -- saved (#182). `sessionExpired` reads the ORIGINAL
+                            -- model (the draft-save Cmd comes from here).
+                            let
+                                ( expiredModel, expiredCmd ) =
+                                    sessionExpired model
+                            in
+                            ( { expiredModel | draftSavedNotice = True }
+                            , Cmd.batch
+                                [ saveListingDraft draft
+                                , expiredCmd
+                                ]
+                            )
+
+                        CreateListing.ClearDraft ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , clearListingDraft ()
+                                ]
+                            )
 
                         CreateListing.NavigateTo route ->
                             ( baseModel
@@ -1566,6 +1629,12 @@ update msg model =
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
+
+                        -- Defense-in-depth (#182): a deliberate sign-out also
+                        -- wipes any persisted listing draft (it carries PII).
+                        -- NB: the `sessionExpired` path deliberately does NOT do
+                        -- this — it must preserve the draft across the redirect.
+                        , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
@@ -1770,6 +1839,9 @@ subscriptions model =
                             _ ->
                                 UploadMsg (Upload.StreamEvent raw)
                     )
+
+            PageMarketplaceCreate _ ->
+                gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
 
             _ ->
                 Sub.none

@@ -176,6 +176,7 @@ formValidationTests =
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
                         , sessionExpired = False
+                        , draftSaved = False
                         }
 
                     html =
@@ -210,6 +211,7 @@ formValidationTests =
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
                         , sessionExpired = False
+                        , draftSaved = False
                         }
 
                     html =
