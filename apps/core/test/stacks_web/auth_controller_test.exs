@@ -5,6 +5,7 @@ defmodule StacksWeb.AuthControllerTest do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.Guardian
   alias StacksWeb.AuthController
 
@@ -531,6 +532,318 @@ defmodule StacksWeb.AuthControllerTest do
 
       # The degraded case is now counted/alertable.
       assert_receive {:telemetry, [:stacks, :auth, :refresh, :revoke_failed], %{count: 1}, %{}}
+    end
+
+    # ---------------------------------------------------------------------
+    # Issue #179, Phase 1: absolute session-lifetime cap (7 days).
+    #
+    # A session carries a "sst" (session-start) anchor stamped in unix seconds
+    # at LOGIN. Refresh may rotate the token indefinitely up to 7 days from that
+    # ORIGINAL issue; the anchor is carried forward on every rotation (it does
+    # NOT reset), so once 7 days elapse from the first login the session can no
+    # longer be renewed and refresh returns 401.
+    # ---------------------------------------------------------------------
+
+    test "an in-cap refresh preserves the original sst anchor (survives rotation)",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-sst-preserved@example.com", email_confirmed: true)
+      now = System.system_time(:second)
+      original_sst = now - 3600
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user, %{"sst" => original_sst})
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+
+      # Non-vacuity: a normal in-cap refresh still rotates to a fresh token.
+      assert new_token != old_token
+
+      # Survive-rotation: the NEW token's sst equals the ORIGINAL, not reset to now.
+      assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
+      assert new_claims["sst"] == original_sst
+    end
+
+    test "refresh past the absolute cap returns 401 session_expired and revokes the old token",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-cap-exceeded@example.com", email_confirmed: true)
+      now = System.system_time(:second)
+      # 8 days ago — beyond the 7-day cap.
+      old_sst = now - 8 * 24 * 3600
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user, %{"sst" => old_sst})
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"error" => "session_expired"} = json_response(refresh_conn, 401)
+
+      # The presented token is revoked even though no new token was minted:
+      # a follow-up authed request with it is rejected 401.
+      stale_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> get("/api/auth/me")
+
+      assert json_response(stale_conn, 401)
+    end
+
+    test "minting a token stamps a session-start anchor (sst) approximately now",
+         %{conn: _conn} do
+      user = insert(:user, email: "sst-stamp@example.com", email_confirmed: true)
+      now = System.system_time(:second)
+
+      # login/2 mints via Guardian.encode_and_sign(user) with no explicit claims.
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      assert {:ok, claims} = Guardian.decode_and_verify(token)
+      assert is_integer(claims["sst"])
+      assert_in_delta claims["sst"], now, 5
+    end
+
+    test "a legacy session with no sst claim is stamped forward (bounded from now), not locked out",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-legacy@example.com", email_confirmed: true)
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
+      now = System.system_time(:second)
+
+      # Simulate a token minted BEFORE the absolute-cap change: current_claims
+      # carries no "sst". Drive the action directly with a real, revocable token
+      # so the missing-sst policy (stamp forward to now) is exercised without a
+      # production seam.
+      refresh_conn =
+        conn
+        |> Guardian.Plug.put_current_resource(user)
+        |> Guardian.Plug.put_current_token(old_token)
+        |> Guardian.Plug.put_current_claims(%{"sub" => to_string(user.id)})
+        |> AuthController.refresh(%{})
+
+      # Not a 500, not a lock-out: a fresh token is minted and returned.
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+
+      # The legacy session is now bounded: sst is stamped forward to ~now.
+      assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
+      assert is_integer(new_claims["sst"])
+      assert_in_delta new_claims["sst"], now, 5
+    end
+  end
+
+  describe "refresh-token families (Issue #179, Phase 2a)" do
+    # A session opens exactly one family at login. The family's current_jti
+    # tracks the single live access token; refresh advances that jti in place
+    # (same row, same family_id) rather than opening a new family, so the whole
+    # rotation chain remains one revocable unit (Phase 2b).
+
+    test "login opens exactly one family whose current_jti is the minted token's jti",
+         %{conn: conn} do
+      user =
+        insert(:user,
+          email: "family-login@example.com",
+          password_hash: Argon2.hash_pwd_salt("secret123"),
+          email_confirmed: true
+        )
+
+      login_conn =
+        post(conn, "/api/auth/login", %{email: "family-login@example.com", password: "secret123"})
+
+      assert %{"token" => token} = json_response(login_conn, 200)
+      assert {:ok, claims} = Guardian.decode_and_verify(token)
+
+      # Exactly one family row (sandboxed transaction → only this test's rows).
+      assert Repo.aggregate(AuthTokenFamily, :count, :family_id) == 1
+
+      family = Repo.get(AuthTokenFamily, claims["family_id"])
+      assert family
+      assert family.current_jti == claims["jti"]
+      assert family.user_id == user.id
+      assert is_nil(family.revoked_at)
+    end
+
+    test "the minted login token carries a family_id claim", %{conn: conn} do
+      insert(:user,
+        email: "family-claim@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      login_conn =
+        post(conn, "/api/auth/login", %{email: "family-claim@example.com", password: "secret123"})
+
+      assert %{"token" => token} = json_response(login_conn, 200)
+      assert {:ok, claims} = Guardian.decode_and_verify(token)
+      assert is_binary(claims["family_id"])
+    end
+
+    test "refresh advances the SAME family's current_jti and preserves the family_id",
+         %{conn: conn} do
+      insert(:user,
+        email: "family-refresh@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      login_conn =
+        post(conn, "/api/auth/login", %{
+          email: "family-refresh@example.com",
+          password: "secret123"
+        })
+
+      assert %{"token" => old_token} = json_response(login_conn, 200)
+      assert {:ok, old_claims} = Guardian.decode_and_verify(old_token)
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+      assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
+
+      # Same family carried across rotation; the token itself rotated.
+      assert new_claims["family_id"] == old_claims["family_id"]
+      assert new_claims["jti"] != old_claims["jti"]
+
+      # Still exactly one family — refresh updated, did not open a new one.
+      assert Repo.aggregate(AuthTokenFamily, :count, :family_id) == 1
+
+      family = Repo.get(AuthTokenFamily, old_claims["family_id"])
+      assert family.current_jti == new_claims["jti"]
+      refute family.current_jti == old_claims["jti"]
+    end
+
+    test "a legacy token with no family_id is adopted into a family on refresh (no 500)",
+         %{conn: conn} do
+      user =
+        insert(:user, email: "family-legacy@example.com", email_confirmed: true)
+
+      # Token minted the old way: no family_id claim. Drive the action directly
+      # with claims that carry neither sst nor family_id (a pre-Phase-2a session)
+      # so the lazy-adopt path is exercised without a production seam.
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
+
+      refresh_conn =
+        conn
+        |> Guardian.Plug.put_current_resource(user)
+        |> Guardian.Plug.put_current_token(old_token)
+        |> Guardian.Plug.put_current_claims(%{"sub" => to_string(user.id)})
+        |> AuthController.refresh(%{})
+
+      # Not a 500, not a lock-out: a fresh token is minted and returned.
+      assert %{"token" => new_token} = json_response(refresh_conn, 200)
+      assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
+
+      # The legacy session is now tracked: a family row was lazily created.
+      assert is_binary(new_claims["family_id"])
+      family = Repo.get(AuthTokenFamily, new_claims["family_id"])
+      assert family
+      assert family.current_jti == new_claims["jti"]
+      assert family.user_id == user.id
+    end
+  end
+
+  describe "reuse detection & family revocation (Issue #179, Phase 2b)" do
+    # A refresh-token family is one rotation chain. `current_jti` names the
+    # single live token; every OTHER jti in the family is superseded. Presenting
+    # a superseded token on any authed request is REUSE (an already-rotated
+    # token replayed, benignly by a stale tab or maliciously by a thief). The
+    # verify_claims gate — which runs on EVERY request, before guardian_db's
+    # on_verify row-presence check — detects the non-current jti and revokes the
+    # WHOLE family, burning the live token too. Accepted false-positive: a benign
+    # multi-tab replay of the just-rotated token trips this and logs the user out
+    # everywhere; the grace window that fixes it is deferred to #180.
+    defp login_token!(conn, email) do
+      insert(:user,
+        email: email,
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      login_conn = post(conn, "/api/auth/login", %{email: email, password: "secret123"})
+      %{"token" => token} = json_response(login_conn, 200)
+      {:ok, claims} = Guardian.decode_and_verify(token)
+      {token, claims}
+    end
+
+    test "replaying a rotated (non-current) token 401s AND revokes the whole family",
+         %{conn: conn} do
+      {token_a, claims_a} = login_token!(conn, "reuse-detect@example.com")
+      family_id = claims_a["family_id"]
+
+      # Rotate once → token B; token A is now the superseded (non-current) token.
+      refresh_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+
+      # Replay the OLD token A on an authed endpoint → 401 (reuse detected).
+      replay_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> get("/api/auth/me")
+
+      assert json_response(replay_conn, 401)
+
+      # The whole family is now revoked (revoked_at stamped)...
+      family = Repo.get(AuthTokenFamily, family_id)
+      assert family.revoked_at
+
+      # ...so the CURRENT token B is ALSO rejected — a detected replay burns the
+      # entire session, not just the replayed token.
+      burned_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
+
+      assert json_response(burned_conn, 401)
+    end
+
+    test "the current token keeps working after a refresh (no false revoke)",
+         %{conn: conn} do
+      {token_a, _claims_a} = login_token!(conn, "reuse-happy@example.com")
+
+      refresh_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+      assert {:ok, claims_b} = Guardian.decode_and_verify(token_b)
+
+      # Non-vacuity: the legit CURRENT token verifies repeatedly and does NOT
+      # trip the reuse gate (guards against over-revoking on every request).
+      ok1 = conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
+      assert json_response(ok1, 200)
+      ok2 = conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
+      assert json_response(ok2, 200)
+
+      family = Repo.get(AuthTokenFamily, claims_b["family_id"])
+      assert is_nil(family.revoked_at)
+    end
+
+    test "logout revokes the family so an attacker's rotated chain dies too",
+         %{conn: conn} do
+      {token_a, _claims_a} = login_token!(conn, "logout-family@example.com")
+
+      # Refresh so the family has a live current token (token B).
+      refresh_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
+
+      assert %{"token" => token_b} = json_response(refresh_conn, 200)
+      assert {:ok, claims_b} = Guardian.decode_and_verify(token_b)
+
+      # Log out with the current token.
+      logout_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_b}") |> delete("/api/auth/logout")
+
+      assert response(logout_conn, 204)
+
+      # The current token is dead...
+      after_conn =
+        conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
+
+      assert json_response(after_conn, 401)
+
+      # ...and the family is marked revoked, so any rotated token sharing this
+      # family_id (e.g. a thief's already-rotated chain) is rejected on next use.
+      family = Repo.get(AuthTokenFamily, claims_b["family_id"])
+      assert family.revoked_at
     end
   end
 

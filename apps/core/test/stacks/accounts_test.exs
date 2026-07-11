@@ -7,6 +7,7 @@ defmodule Stacks.AccountsTest do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
 
   describe "register/1" do
     test "creates a user with hashed password" do
@@ -332,6 +333,83 @@ defmodule Stacks.AccountsTest do
       Accounts.change_password(user, "wrong", "newpass456")
 
       assert event_count("user.password_changed") == before_count
+    end
+  end
+
+  describe "token family reuse detection (Issue #179, Phase 2b)" do
+    setup do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          session_started_at: DateTime.utc_now()
+        })
+
+      %{user: user, fid: fid, sub: to_string(user.id)}
+    end
+
+    test "check_token_family/3 returns :ok for the family's current jti", %{fid: fid, sub: sub} do
+      assert :ok = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a non-current jti is REUSE: revokes the whole family and returns error",
+         %{fid: fid, sub: sub} do
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-superseded", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "an already-revoked family rejects even its current jti", %{fid: fid, sub: sub} do
+      {:ok, _} = Accounts.revoke_token_family(fid)
+      assert {:error, :session_revoked} = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a missing family is treated as revoked" do
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(Ecto.UUID.generate(), "anything", "some-sub")
+    end
+
+    test "a family owned by a DIFFERENT user is rejected and NOT revoked",
+         %{fid: fid} do
+      # A token whose sub does not match the family's user_id must never be
+      # treated as this user's session — reject, and leave the innocent owner's
+      # family untouched (no cross-user revocation).
+      other_sub = Ecto.UUID.generate()
+
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(fid, "jti-current", other_sub)
+
+      # The real owner's family is still live — the mismatched check did not
+      # revoke it.
+      assert is_nil(Repo.get(AuthTokenFamily, fid).revoked_at)
+    end
+
+    test "revoke_token_family/1 is idempotent (second call revokes nothing new)",
+         %{fid: fid} do
+      assert {:ok, 1} = Accounts.revoke_token_family(fid)
+      assert {:ok, 0} = Accounts.revoke_token_family(fid)
+    end
+
+    test "revoke_all_user_sessions/1 revokes every live family of the user",
+         %{user: user, fid: fid} do
+      other = Ecto.UUID.generate()
+
+      {:ok, _} =
+        Accounts.open_token_family(%{
+          family_id: other,
+          user_id: user.id,
+          current_jti: "jti-other",
+          session_started_at: DateTime.utc_now()
+        })
+
+      assert :ok = Accounts.revoke_all_user_sessions(user.id)
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+      assert Repo.get(AuthTokenFamily, other).revoked_at
     end
   end
 

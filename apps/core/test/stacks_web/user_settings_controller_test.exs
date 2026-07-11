@@ -217,6 +217,38 @@ defmodule StacksWeb.UserSettingsControllerTest do
       conn = put(conn, "/api/settings/password", %{current_password: "x", new_password: "y"})
       assert json_response(conn, 401)
     end
+
+    # Issue #179, Phase 2b: a successful password change logs the user out
+    # everywhere — every one of the user's tokens (and families) is revoked, so
+    # a stolen/leaked token cannot outlive the credential it was minted under.
+    test "logs the user out everywhere (existing token 401s after the change)",
+         %{conn: conn} do
+      # Factory default password_hash is Argon2 hash of "password123".
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      # Sanity: the token authenticates BEFORE the password change.
+      before_conn =
+        conn |> put_req_header("authorization", "Bearer #{token}") |> get("/api/auth/me")
+
+      assert json_response(before_conn, 200)
+
+      change_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put("/api/settings/password", %{
+          current_password: "password123",
+          new_password: "newpassword456"
+        })
+
+      assert %{"ok" => true} = json_response(change_conn, 200)
+
+      # Logged out everywhere: the same token no longer authenticates.
+      after_conn =
+        conn |> put_req_header("authorization", "Bearer #{token}") |> get("/api/auth/me")
+
+      assert json_response(after_conn, 401)
+    end
   end
 
   describe "PUT /api/settings/notifications" do

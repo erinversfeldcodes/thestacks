@@ -111,6 +111,31 @@ defmodule StacksWeb.GuardianJwtDeployedTest do
     {:ok, conn: conn}
   end
 
+  # Reads the persisted "sst" (session-start anchor) from the newest
+  # guardian_tokens row for a user, extracted as text via the jsonb `->>`
+  # operator so we do not depend on a Postgrex jsonb decoder being configured on
+  # this bare direct connection. Returns {:ok, sst_text}, {:ok, nil} when the
+  # key is absent/null, or :none when the user has no rows.
+  defp latest_token_sst(conn, user_id) do
+    %Postgrex.Result{rows: rows} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT claims->>'sst'
+          FROM op.guardian_tokens
+         WHERE sub = $1
+         ORDER BY inserted_at DESC, exp DESC
+         LIMIT 1
+        """,
+        [user_id]
+      )
+
+    case rows do
+      [[sst]] -> {:ok, sst}
+      [] -> :none
+    end
+  end
+
   describe "raw JWT store on the live Fly + Neon stack" do
     @tag timeout: 120_000
     test "after a real login, the persisted guardian_tokens row holds no bearer token", %{
@@ -150,6 +175,54 @@ defmodule StacksWeb.GuardianJwtDeployedTest do
           # replayable bearer token on the real Neon DB.
           assert jwt == nil,
                  "op.guardian_tokens.jwt held a bearer token on the live stack (#{inspect(jwt)}) — a DB dump yields a replayable session"
+
+        :none ->
+          flunk(
+            "no op.guardian_tokens row found for #{@dev_email} (#{user_id}) after a successful login"
+          )
+      end
+    end
+
+    # Issue #179, Phase 1 live invariant: the absolute-cap anchor must actually
+    # be persisted on the real stack. guardian_db writes the FULL claims map to
+    # op.guardian_tokens.claims (jsonb), so after a real login through the
+    # preview the persisted claims must carry a non-null integer "sst". We do NOT
+    # fast-forward 7 days live — the unit tests cover the past-cap 401; this test
+    # only proves the anchor reaches the durable store.
+    @tag timeout: 120_000
+    test "after a real login, the persisted claims carry a non-null session-start anchor (sst)",
+         %{
+           conn: conn
+         } do
+      base_url = @base_url
+
+      resp =
+        Req.post!("#{base_url}/api/auth/login",
+          json: %{email: @dev_email, password: @dev_password},
+          receive_timeout: 60_000,
+          retry: :transient,
+          max_retries: 8,
+          retry_delay: fn attempt ->
+            min(:timer.seconds(2) * (attempt + 1), :timer.seconds(10))
+          end
+        )
+
+      assert resp.status == 200,
+             "expected 200 from login through preview, got #{resp.status}: #{inspect(resp.body)}"
+
+      user_id = user_id_for_email(conn, @dev_email)
+      assert user_id, "seeded owner #{@dev_email} not found in preview op.users"
+
+      case latest_token_sst(conn, user_id) do
+        {:ok, sst} ->
+          # THE CAP-ANCHOR INVARIANT: the persisted session row must carry a
+          # non-null session-start anchor so the absolute 7-day cap can be
+          # enforced from the session's original issue across rotations.
+          assert sst not in [nil, ""],
+                 "op.guardian_tokens.claims carried no sst on the live stack — the absolute session cap cannot be anchored"
+
+          assert {n, ""} = Integer.parse(sst)
+          assert n > 0, "persisted sst was not a positive unix timestamp: #{inspect(sst)}"
 
         :none ->
           flunk(

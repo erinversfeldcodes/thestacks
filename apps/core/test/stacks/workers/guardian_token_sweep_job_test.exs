@@ -15,6 +15,7 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Workers.GuardianTokenSweepJob
 
   # Inserts a raw row into op.guardian_tokens. exp is a unix timestamp (bigint),
@@ -67,5 +68,59 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
 
       assert remaining_jtis() == ["live-token"]
     end
+
+    # Issue #179, Phase 2b: the sweep also prunes dead auth_token_families so the
+    # session table does not grow unbounded. "Dead" = long-revoked, or so far
+    # past the absolute session cap that no live token can exist. A live family
+    # (unrevoked, session within the cap) must NEVER be deleted.
+    test "prunes long-revoked and past-cap families but keeps live ones" do
+      now = DateTime.utc_now()
+      user_id = Ecto.UUID.generate()
+
+      live = insert_family(user_id, session_started_at: now, revoked_at: nil)
+
+      just_revoked =
+        insert_family(user_id,
+          session_started_at: DateTime.add(now, -3600, :second),
+          revoked_at: now
+        )
+
+      long_revoked =
+        insert_family(user_id,
+          session_started_at: DateTime.add(now, -30 * 86_400, :second),
+          revoked_at: DateTime.add(now, -30 * 86_400, :second)
+        )
+
+      past_cap =
+        insert_family(user_id,
+          session_started_at: DateTime.add(now, -60 * 86_400, :second),
+          revoked_at: nil
+        )
+
+      assert :ok = perform_job(GuardianTokenSweepJob, %{})
+
+      # Live and just-revoked (still within retention) survive; the long-dead
+      # rows are reaped.
+      assert Repo.get(AuthTokenFamily, live)
+      assert Repo.get(AuthTokenFamily, just_revoked)
+      refute Repo.get(AuthTokenFamily, long_revoked)
+      refute Repo.get(AuthTokenFamily, past_cap)
+    end
+  end
+
+  # Inserts an auth_token_families row and returns its family_id.
+  defp insert_family(user_id, opts) do
+    {:ok, family} =
+      %AuthTokenFamily{}
+      |> AuthTokenFamily.changeset(%{
+        family_id: Ecto.UUID.generate(),
+        user_id: user_id,
+        current_jti: "jti-#{System.unique_integer([:positive])}",
+        session_started_at: Keyword.fetch!(opts, :session_started_at),
+        revoked_at: Keyword.get(opts, :revoked_at)
+      })
+      |> Repo.insert()
+
+    family.family_id
   end
 end

@@ -91,6 +91,15 @@ config :core, Stacks.Accounts.Guardian,
   ttl: {8, :hours},
   secret_key: "change_me_in_production_via_runtime_exs_at_least_32_chars_long"
 
+# Absolute session-lifetime cap (Issue #179, Phase 1). A session — identified by
+# the "sst" (session-start) anchor stamped at login and carried forward across
+# every refresh — may be renewed via /api/auth/refresh only up to this window
+# from its ORIGINAL issue. #173's silent renewal otherwise lets a session slide
+# forever; this bounds it. Past the cap, refresh returns 401 and the #173
+# frontend interceptor routes the user to /login. Expressed as `{n, unit}` and
+# converted to seconds at the check site; configurable so ops can tune it.
+config :core, :session_absolute_cap, {7, :day}
+
 # Guardian.DB — server-side JWT tracking so logout / revoke actually invalidates
 # a token (Issue #124, A2). Each issued token is stored in op.guardian_tokens on
 # encode_and_sign, checked on every verify, and deleted on revoke. Only "access"
