@@ -36,8 +36,8 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     test "returns summary of user's active placements", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
-      book1 = insert(:book)
-      book2 = insert(:book)
+      book1 = insert(:book, title: "The Left Hand of Darkness")
+      book2 = insert(:book, title: "A Wizard of Earthsea")
       insert(:placement, bookshelf: bookshelf, book: book1)
       insert(:placement, bookshelf: bookshelf, book: book2)
 
@@ -53,6 +53,13 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       book_ids = Enum.map(placements, & &1["book_id"])
       assert book1.id in book_ids
       assert book2.id in book_ids
+
+      # Each summary carries the book title for the marketplace listing dropdown.
+      assert Enum.all?(placements, &(is_binary(&1["title"]) and &1["title"] != ""))
+
+      titles = Enum.map(placements, & &1["title"])
+      assert "The Left Hand of Darkness" in titles
+      assert "A Wizard of Earthsea" in titles
     end
 
     test "excludes removed placements", %{conn: conn} do
