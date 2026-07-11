@@ -20,6 +20,30 @@ Comprehensive end-to-end test coverage for the reading journey lifecycle: moving
 - [ ] This issue includes router wiring and is user-facing when complete.
 - [x] This issue is implementation only. Wired by issue #___ (test infrastructure).
 
+## Feature-Completeness Pre-Check
+<!--
+Run the `feature-completeness` skill BEFORE writing any test suites for this issue. It proves each
+named user story's happy path is actually BUILT end-to-end (and driven live), not merely that tests
+are missing — the gate #124 lacked (US-14.3.2 was named, the audit went GREEN, yet the feature was
+deferred to #173 → the #178/#179/#180/#182 cascade).
+
+A 🟡 PARTIAL / ❌ MISSING verdict on a named story's happy path is a BLOCKING finding, NOT a
+Test-Audit cell to reclassify `n/a (see #NNN)`. Resolve it exactly one of two ways: (a) build it
+in-scope (add implementation phases; a design pass FIRST for non-trivial features), or (b) de-scope
+it — delete the story from Summary + User Stories above and spin out a feature issue. Baseline =
+"to verify"; fill verdicts + file:line evidence when this issue is picked up.
+-->
+
+| User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
+|-----------|------------------------------|-------------------|---------|------------|
+| US-1.6.1 — Move a Book Between Shelves | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.2 — Abandon a Book Back to AntiLibrary | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.3 — Record Multiple Reads | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.4 — Remove a Book from the Collection | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.5 — Empty Shelf States | ⬜ to verify | ⬜ to verify | ⬜ | — |
+
+Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
+
 ## Test Suites
 
 ### 1. Playwright UI Tests
@@ -539,6 +563,7 @@ are partially blocked on feature-code fixes.
 ## Definition of Done
 - [ ] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local`
 - [ ] No flaky tests
+- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
 - [ ] `just verify` passes
 

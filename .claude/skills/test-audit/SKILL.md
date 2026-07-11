@@ -17,7 +17,7 @@ API calls · auth & middleware guards · database interactions · event flow & l
 ## Rules (non-negotiable)
 1. **Classify every cell** `✅` (real coverage) / `⚠️` (shallow) / `❌` (missing) / `n/a` (one-line rationale). Every `n/a` carries a reason (covered at a higher level like the SLO gate, genuinely N/A, or a deliberate design decision).
 2. **Never invent a test name.** Every `✅` cites a test file + description string you verified by grep/Read of the actual suites: `apps/core/test/**`, `frontend/tests/**`, `e2e/tests/*.spec.ts`, `dbt/**/schema.yml` + `dbt/tests/**`, `apps/vision/tests/**`, `apps/scraper/` cargo tests.
-3. **Distinguish "test missing, feature exists" from "feature not implemented"** — check `apps/core/lib` / `frontend/src` before deciding; the latter becomes a spin-out feature issue, not a test punch item.
+3. **Distinguish "test missing, feature exists" from "feature not implemented"** — check `apps/core/lib` / `frontend/src` before deciding; the latter is a **feature gap, not a test gap**. For a *named* user story, a missing/partial happy path is out of this skill's remit: it belongs to the `feature-completeness` pre-check, which must run and be ✅ *before* this audit. **Never reach GREEN by reclassifying a named story's core behaviour to `n/a (see #NNN)`** — that is exactly the hole that let #124 ship green with US-14.3.2 deferred. In this audit, `n/a` is only ever a genuinely-not-applicable *layer* of a *built* story (e.g. "logout emits no events by design"), never the story's own happy path.
 4. **Layers 11/12 are usually `n/a — covered by SLO gate`** (`scripts/check-slo-gate.sh`); telemetry *firing* tests count where they exist.
 5. Write the audit incrementally to a file/section as you verify — don't hold the whole thing in memory for one final write (it can be lost mid-run).
 6. **Every applicable cell names a validation path, not just a status.** A `✅`/`❌` is backed by *how* the behaviour is (or will be) proven — the right layer per the `write-validation-test` skill. Crucially: when browser/Playwright E2E is the wrong tool (backend-only behaviour, a security invariant, a harness/CI change), that cell is **not** `n/a` — it demands an acceptance or live-stack test that reaches the state the way a real user would. `n/a` means genuinely-not-applicable or covered-at-a-higher-level, never "hard to E2E". A behaviour with no validation path is a `❌` punch item.
@@ -35,6 +35,9 @@ API calls · auth & middleware guards · database interactions · event flow & l
 - Many issues → fan out one agent per issue (they're independent), each writing its own `plans/<slug>-test-audit.md` or embedding directly. Spot-check citations afterward (grep a sample of cited test strings to confirm they exist).
 
 ## Related skills
+- `feature-completeness` runs **before** this skill — it proves each named user story is actually
+  *built* end-to-end (and driven live). This audit answers "is it *tested*?"; that one answers "is it
+  *built*?". Do not start this audit on a named story until its feature-completeness verdict is ✅.
 - `create-issue` embeds a **baseline** audit at ticket-creation time — this skill is its step 4.
 - `write-validation-test` is how a `❌` cell becomes `✅`: it picks the right layer and keeps
   live-stack tests honest (realistic user behaviour, no artificial pokes).

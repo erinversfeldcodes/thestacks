@@ -184,6 +184,28 @@ The confirmation email was never received after registration on the preview depl
 - E2E tests for the full email confirmation flow require a way to retrieve the confirmation token without email delivery (e.g., read `email_confirmation_token` from the database via a test helper endpoint, or use `scripts/seed.sh` to pre-confirm the test user).
 - Proto decoders are lenient — they return default-value structs rather than failing on unexpected JSON shapes. This is why Bug 2 manifests as a silent wrong-path rather than a visible decode error.
 
+## Feature-Completeness Pre-Check
+<!--
+Retrospective exemplar — #124 is the ORIGIN CASE for this pre-check. It shipped GREEN with five
+stories genuinely built + driven live, but a sixth (US-14.3.2) was named, deferred to #173, and
+papered over in the Test Audit as `n/a (see #173)`. That silent reclassification is the hole this
+section closes. Run the `feature-completeness` skill on future validation issues BEFORE writing
+tests; a 🟡/❌ on a named story is a blocking finding — build it in-scope (design pass first for
+non-trivial features) or de-scope it (delete from Summary + User Stories and spin out), never
+reclassify it `n/a` to reach GREEN.
+-->
+
+| User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
+|-----------|------------------------------|-------------------|---------|------------|
+| US-14.1.1 — Register a New Account | router → AuthController.register → Accounts.register + EmailConfirmationHandler → Page/Login.elm register-pending | ✅ driven (register.spec.ts + confirm-email.spec.ts) | ✅ implemented | built in-scope (Bugs 1–3 fixed) |
+| US-14.1.2 — First-Time Onboarding | Main.elm login-completion → Components.OnboardingOverlay (4-step) | ✅ driven (onboarding.spec.ts) — E2E gate caught the trigger bug | ✅ implemented | built in-scope (fixed) |
+| US-14.2.1 — Sign In | router → AuthController.login → Guardian issue → Main.elm transition | ✅ driven (auth.spec.ts + login.spec.ts, incl. 403 unconfirmed) | ✅ implemented | built in-scope (Bug 4 fixed) |
+| US-14.3.1 — Authenticated Nav State | Main.elm viewNav + role propagation via LoginTransitionCompleted | ✅ driven (auth.spec.ts owner/non-owner) — E2E gate caught the role-propagation bug | ✅ implemented | built in-scope (fixed) |
+| US-14.3.2 — Session Expiry & Token Refresh | global 401 interceptor + refresh — NOT built in #124 | ❌ not driven — feature absent at #124 | 🟡 de-scoped | de-scoped to #173 (401 interceptor/refresh). ⚠️ Was papered over as `n/a (see #173)` — the failure this pre-check prevents; refresh later shipped without a design pass → #178/#179/#180/#182 cascade |
+| US-14.3.3 — Log Out | UserMenu SignOut → Main.elm clearAuth + Api.logout → Guardian revoke | ✅ driven (auth.spec.ts — token 401 after logout) — E2E gate caught the no-revoke bug | ✅ implemented | built in-scope (server-side revocation added) |
+
+Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial/de-scoped · ❌ missing. **Lesson: US-14.3.2 should have been de-scoped explicitly (removed from this issue's claimed stories) rather than reclassified `n/a`. #124 claims six stories but delivered five.**
+
 ## Test Audit
 
 _Test-coverage map for this issue (13 layers × user story, happy/sad columns). This is the **post-implementation re-baseline** after Issues #124 Phases 1-3 landed. Every cell was re-verified by grep/Read of the real suites — each `✅` cites a test string that exists in the tree today. The issue is Done when this audit is green (see Definition of Done)._
@@ -538,6 +560,7 @@ just tests). Status legend: ✅ DONE (test shipped) · ↪︎ RECLASSIFIED.
 - [ ] Tests pass with `TEST_TARGET=local`
 - [ ] No flaky tests
 - [ ] `just verify` passes
+- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`. (Retrospective note: US-14.3.2 was de-scoped to #173 — the exemplar this rule prevents repeating.)
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
 
 ## Dependencies

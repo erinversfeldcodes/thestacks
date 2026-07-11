@@ -21,6 +21,30 @@
 - [ ] This issue includes router wiring and is user-facing when complete.
 - [ ] This issue is implementation only. Wired by issue #___.
 
+## Feature-Completeness Pre-Check
+<!--
+REQUIRED for any issue whose job is to VALIDATE user stories (E2E / coverage /
+test-hardening). Run the `feature-completeness` skill BEFORE writing any test suite.
+It proves each named user story's happy path is actually BUILT end-to-end — and driven
+live — not merely that tests are missing. This is the gate #124 lacked: a validation
+issue must not go GREEN while a named story's core behaviour is silently deferred to
+another issue (US-14.3.2 → the #173/#178/#179/#180/#182 cascade).
+
+Rule: a 🟡 PARTIAL / ❌ MISSING verdict on a named story's happy path is a BLOCKING
+finding, NOT a Test-Audit cell to reclassify `n/a (see #NNN)`. Resolve it exactly one
+of two ways — (a) build it in-scope (add implementation phases; a design pass FIRST for
+non-trivial features), or (b) de-scope it: delete the story from Summary + User Stories
+above and spin out a feature issue. Baseline = "to verify"; fill verdicts + file:line
+evidence when the issue is picked up. Delete this whole section only for issues with no
+user stories (pure infra/CI/harness — note "n/a — no user stories" and move on).
+-->
+
+| User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
+|-----------|------------------------------|-------------------|---------|------------|
+| <one row per named US> | ⬜ to verify | ⬜ to verify | ⬜ | — |
+
+Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
+
 ## Technical Requirements
 [Specific technical details, constraints, architecture references.]
 
@@ -61,6 +85,10 @@ B. FULL (feature issues with user stories) — 13 layers × each US, happy/sad c
 Rules (from the test-audit skill — non-negotiable):
 - Never invent a test name. Every ✅ cites a real test file + description you verified by grep/Read.
 - Distinguish "test missing, feature exists" (punch item) from "feature not implemented" (spin-out issue).
+- A NAMED user story's missing/partial happy path is NOT a Test-Audit concern and must NOT be
+  reclassified `n/a (see #NNN)` here — it is resolved in the Feature-Completeness Pre-Check above
+  (build in-scope or de-scope). `n/a` in this audit is only ever a genuinely-not-applicable *layer*
+  of a *built* story, never the story's own core behaviour.
 - Layers 11/12 are usually `n/a — covered by SLO gate` (scripts/check-slo-gate.sh).
 -->
 
@@ -69,6 +97,9 @@ Rules (from the test-audit skill — non-negotiable):
 ## Definition of Done
 - [ ] [Specific, measurable criterion]
 - [ ] [Specific, measurable criterion]
+- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path
+      built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope
+      or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] Every behaviour has a validation path — unit/integration where sufficient; an
       acceptance or live-stack test (realistic user behaviour, `TEST_TARGET=deployed`) where
       Playwright/browser E2E is inappropriate; or `n/a` with a one-line rationale.
