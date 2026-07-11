@@ -24,6 +24,11 @@ Option A (seed data) is simplest and most reliable. Cost records are determinist
 - Modify seeds.exs to include platform_costs records
 - ~20 LOC
 
+## Feature-Completeness Pre-Check
+
+n/a — this issue has no user stories (test fixture / infra / harness). It ships data or test
+machinery, not user-facing behaviour, so there is no named-story happy path to pre-check.
+
 ## Test Audit
 
 This fixture is audit-relevant, not audit-bearing: it unblocks the cost

@@ -23,6 +23,33 @@ Comprehensive end-to-end test coverage for the enrichment pipeline: price scrapi
 - [ ] This issue includes router wiring and is user-facing when complete.
 - [x] This issue is implementation only. Wired by issue #___ (test infrastructure).
 
+## Feature-Completeness Pre-Check
+<!--
+Run the `feature-completeness` skill BEFORE writing any test suites for this issue. It proves each
+named user story's happy path is actually BUILT end-to-end (and driven live), not merely that tests
+are missing — the gate #124 lacked (US-14.3.2 was named, the audit went GREEN, yet the feature was
+deferred to #173 → the #178/#179/#180/#182 cascade).
+
+A 🟡 PARTIAL / ❌ MISSING verdict on a named story's happy path is a BLOCKING finding, NOT a
+Test-Audit cell to reclassify `n/a (see #NNN)`. Resolve it exactly one of two ways: (a) build it
+in-scope (add implementation phases; a design pass FIRST for non-trivial features), or (b) de-scope
+it — delete the story from Summary + User Stories above and spin out a feature issue. Baseline =
+"to verify"; fill verdicts + file:line evidence when this issue is picked up.
+-->
+
+| User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
+|-----------|------------------------------|-------------------|---------|------------|
+| US-2.1.1 — View Aggregated Review Sentiments | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.2.1 — View Prices Across Bookshops | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.2.2 — Configure Bookshop Scrapers | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.3.1 — View Author Information and Latest Activity | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.4.1 — Discover Relevant Bookstore Events | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.5.1 — Automatic Discovery of New Sources | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.5.2 — Geographic Discovery Sweep | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-2.5.3 — Business Opt-Out from Platform Listings | ⬜ to verify | ⬜ to verify | ⬜ | — |
+
+Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
+
 ## Test Suites
 
 ### 1. Playwright UI Tests
@@ -899,6 +926,7 @@ production wiring before their tests can be written.
 - [ ] Scraper deployment prerequisites documented above are met before attempting deployed tests
 - [ ] No flaky tests
 - [ ] `just verify` passes
+- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
 
 ## Agent Assignment
