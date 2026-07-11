@@ -1,6 +1,7 @@
 module Page.Admin.Metrics exposing
     ( Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -35,6 +36,11 @@ type Msg
     | EnrichmentGapsReceived (Result Http.Error EnrichmentGaps)
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
@@ -66,40 +72,56 @@ init maybeToken =
             )
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
         DashboardReceived result ->
             case result of
                 Ok data ->
-                    ( { model | dashboard = Success data }, Cmd.none )
+                    ( { model | dashboard = Success data }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | dashboard = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | dashboard = Failure err }, Cmd.none, NoOut )
 
         QualityTrendsReceived result ->
             case result of
                 Ok data ->
-                    ( { model | qualityTrends = Success data }, Cmd.none )
+                    ( { model | qualityTrends = Success data }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | qualityTrends = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | qualityTrends = Failure err }, Cmd.none, NoOut )
 
         SourceHealthReceived result ->
             case result of
                 Ok data ->
-                    ( { model | sourceHealth = Success data }, Cmd.none )
+                    ( { model | sourceHealth = Success data }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | sourceHealth = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | sourceHealth = Failure err }, Cmd.none, NoOut )
 
         EnrichmentGapsReceived result ->
             case result of
                 Ok data ->
-                    ( { model | enrichmentGaps = Success data }, Cmd.none )
+                    ( { model | enrichmentGaps = Success data }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | enrichmentGaps = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | enrichmentGaps = Failure err }, Cmd.none, NoOut )
 
 
 

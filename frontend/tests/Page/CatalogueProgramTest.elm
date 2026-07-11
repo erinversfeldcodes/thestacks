@@ -57,7 +57,7 @@ catalogueProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _ ) =
+                    ( newModel, _, _ ) =
                         Catalogue.update msg model maybeToken
                 in
                 ( newModel, catalogueEffects msg model maybeToken )

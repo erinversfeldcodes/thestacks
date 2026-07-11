@@ -1,6 +1,7 @@
 module Page.Catalogue exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -70,6 +71,11 @@ type Msg
     | PlaceBookCompleted String String (Result Http.Error Placement)
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
@@ -101,7 +107,7 @@ init maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         CatalogueReceived result ->
@@ -122,18 +128,26 @@ update msg model maybeToken =
                         , availableSubjects = merged
                       }
                     , Cmd.none
+                    , NoOut
                     )
 
+                -- `Api.getCatalogue` is a genuinely public request that never
+                -- sends an auth header, so its failure stays LOCAL — a 401 here
+                -- is not a session-expiry signal and must not be routed.
                 Err err ->
-                    ( { model | books = Failure err }, Cmd.none )
+                    ( { model | books = Failure err }, Cmd.none, NoOut )
 
         UserPlacementsLoaded result ->
             case result of
                 Ok placements ->
-                    ( { model | userPlacements = Success placements }, Cmd.none )
+                    ( { model | userPlacements = Success placements }, Cmd.none, NoOut )
 
-                Err _ ->
-                    ( { model | userPlacements = Success [] }, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | userPlacements = Success [] }, Cmd.none, NoOut )
 
         SearchChanged query ->
             let
@@ -150,6 +164,7 @@ update msg model maybeToken =
                 , books = Loading
               }
             , debounceCmd
+            , NoOut
             )
 
         ClearSearch ->
@@ -157,7 +172,7 @@ update msg model maybeToken =
                 newModel =
                     { model | search = "", page = 1, books = Loading }
             in
-            ( newModel, fetchCatalogue newModel )
+            ( newModel, fetchCatalogue newModel, NoOut )
 
         DebounceExpired count ->
             if count == model.debounceCount then
@@ -165,10 +180,10 @@ update msg model maybeToken =
                     newModel =
                         { model | page = 1 }
                 in
-                ( newModel, fetchCatalogue newModel )
+                ( newModel, fetchCatalogue newModel, NoOut )
 
             else
-                ( model, Cmd.none )
+                ( model, Cmd.none, NoOut )
 
         SubjectSelected subject ->
             let
@@ -184,47 +199,48 @@ update msg model maybeToken =
                         , books = Loading
                     }
             in
-            ( newModel, fetchCatalogue newModel )
+            ( newModel, fetchCatalogue newModel, NoOut )
 
         ClearSubject ->
             let
                 newModel =
                     { model | activeSubject = Nothing, page = 1, books = Loading }
             in
-            ( newModel, fetchCatalogue newModel )
+            ( newModel, fetchCatalogue newModel, NoOut )
 
         SortChanged newSort ->
             let
                 newModel =
                     { model | sort = newSort, page = 1, books = Loading }
             in
-            ( newModel, fetchCatalogue newModel )
+            ( newModel, fetchCatalogue newModel, NoOut )
 
         PageChanged newPage ->
             let
                 newModel =
                     { model | page = newPage, books = Loading }
             in
-            ( newModel, fetchCatalogue newModel )
+            ( newModel, fetchCatalogue newModel, NoOut )
 
         CollectionFilterChanged filter ->
-            ( { model | collectionFilter = filter }, Cmd.none )
+            ( { model | collectionFilter = filter }, Cmd.none, NoOut )
 
         OpenShelfPicker bookId ->
-            ( { model | shelfPickerBookId = Just bookId }, Cmd.none )
+            ( { model | shelfPickerBookId = Just bookId }, Cmd.none, NoOut )
 
         CloseShelfPicker ->
-            ( { model | shelfPickerBookId = Nothing }, Cmd.none )
+            ( { model | shelfPickerBookId = Nothing }, Cmd.none, NoOut )
 
         PlaceOnShelf shelfName bookId ->
             case maybeToken of
                 Just token ->
                     ( { model | shelfPickerBookId = Nothing, placeBookState = Loading }
                     , Api.placeBook shelfName bookId token (PlaceBookCompleted shelfName bookId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         PlaceBookCompleted shelfName bookId result ->
             case result of
@@ -241,10 +257,14 @@ update msg model maybeToken =
                                 _ ->
                                     Success [ newSummary ]
                     in
-                    ( { model | placeBookState = NotAsked, userPlacements = updatedPlacements }, Cmd.none )
+                    ( { model | placeBookState = NotAsked, userPlacements = updatedPlacements }, Cmd.none, NoOut )
 
-                Err _ ->
-                    ( { model | placeBookState = Failure Http.NetworkError }, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | placeBookState = Failure Http.NetworkError }, Cmd.none, NoOut )
 
 
 fetchCatalogue : Model -> Cmd Msg

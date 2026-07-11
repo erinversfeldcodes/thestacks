@@ -1,6 +1,7 @@
 module Page.Settings.Consent exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -26,6 +27,11 @@ type Msg
     | SaveCompleted (Result Http.Error ())
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Model
 init =
     { analyticsConsent = False
@@ -33,29 +39,34 @@ init =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ToggleAnalytics ->
-            ( { model | analyticsConsent = not model.analyticsConsent }, Cmd.none )
+            ( { model | analyticsConsent = not model.analyticsConsent }, Cmd.none, NoOut )
 
         SaveConsent ->
             case maybeToken of
                 Just token ->
                     ( { model | saving = Loading }
                     , Api.saveConsent model.analyticsConsent token SaveCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none )
+                    ( { model | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | saving = Failure err }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg
