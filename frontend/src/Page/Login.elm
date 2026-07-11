@@ -7,6 +7,7 @@ module Page.Login exposing
     , SubmitError(..)
     , TransitionState(..)
     , errorMessage
+    , expiredDraftInit
     , expiredInit
     , init
     , isSubmitDisabled
@@ -50,6 +51,11 @@ type alias Model =
     -- redirected here after their token expired/was revoked. Drives a notice
     -- distinct from invalid-credentials, and is cleared once they interact.
     , sessionExpired : Bool
+
+    -- Set when the expiry happened mid-compose of a marketplace listing (Issue
+    -- #182) and the draft was persisted; upgrades the expiry notice copy to
+    -- reassure the user their listing is safe.
+    , draftSaved : Bool
     }
 
 
@@ -107,6 +113,7 @@ init =
     , passwordConfirmValidation = Pristine
     , displayNameValidation = Pristine
     , sessionExpired = False
+    , draftSaved = False
     }
 
 
@@ -116,6 +123,15 @@ to `init` but with the session-expired notice raised. See `Main.sessionExpired`.
 expiredInit : Model
 expiredInit =
     { init | sessionExpired = True }
+
+
+{-| Like `expiredInit`, but for an expiry that happened while composing a
+marketplace listing (Issue #182): the draft was saved, so the notice reassures
+the user their work is safe.
+-}
+expiredDraftInit : Model
+expiredDraftInit =
+    { init | sessionExpired = True, draftSaved = True }
 
 
 validateEmail : String -> FieldValidation
@@ -205,6 +221,7 @@ update msg model =
                 , passwordConfirmValidation = Pristine
                 , displayNameValidation = Pristine
                 , sessionExpired = False
+                , draftSaved = False
               }
             , Cmd.none
             , NoOut
@@ -230,7 +247,7 @@ update msg model =
                         RegistrationPending _ ->
                             Cmd.none
             in
-            ( { model | submitState = Loading, sessionExpired = False }, cmd, NoOut )
+            ( { model | submitState = Loading, sessionExpired = False, draftSaved = False }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
             ( { model | submitState = Success authResponse, transitionState = Transitioning }
@@ -545,10 +562,22 @@ viewSessionExpiredNotice model =
             , class "login-card__notice login-card__notice--session-expired"
             , testId "session-expired-notice"
             ]
-            [ text "The library closed your session for safekeeping — sign in again to return." ]
+            [ text (sessionExpiredNoticeText model.draftSaved) ]
 
     else
         text ""
+
+
+{-| Copy for the session-expiry notice. When a marketplace listing draft was
+saved on the way here (Issue #182), reassure the user their work survived.
+-}
+sessionExpiredNoticeText : Bool -> String
+sessionExpiredNoticeText draftSaved =
+    if draftSaved then
+        "The library closed your session for safekeeping — your listing draft is saved. Sign in and return to Sell a Book to finish it."
+
+    else
+        "The library closed your session for safekeeping — sign in again to return."
 
 
 viewError : Model -> Html Msg

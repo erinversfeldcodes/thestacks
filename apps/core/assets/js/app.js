@@ -205,6 +205,53 @@ if (app.ports && app.ports.clearAuth) {
 }
 
 // ---------------------------------------------------------------------------
+// Port: Persist an in-progress marketplace listing draft (Issue #182)
+// Mirrors the auth persistence above but under a separate key so a session
+// revocation mid-compose doesn't discard the user's work.
+// ---------------------------------------------------------------------------
+var LISTING_DRAFT_KEY = "stacks-listing-draft";
+
+if (app.ports && app.ports.saveListingDraft) {
+  app.ports.saveListingDraft.subscribe(function (data) {
+    try {
+      localStorage.setItem(LISTING_DRAFT_KEY, JSON.stringify(data));
+    } catch (e) {
+      // localStorage may be full or unavailable
+    }
+  });
+}
+
+if (app.ports && app.ports.clearListingDraft) {
+  app.ports.clearListingDraft.subscribe(function () {
+    try {
+      localStorage.removeItem(LISTING_DRAFT_KEY);
+    } catch (e) {
+      // Ignore
+    }
+  });
+}
+
+// Read the stored draft on request and hand it back to Elm. Sends the parsed
+// value, or null when absent/corrupt (Elm treats a decode failure as "no draft").
+if (app.ports && app.ports.requestListingDraft) {
+  app.ports.requestListingDraft.subscribe(function () {
+    var draft = null;
+    try {
+      var rawDraft = localStorage.getItem(LISTING_DRAFT_KEY);
+      if (rawDraft) {
+        draft = JSON.parse(rawDraft);
+      }
+    } catch (e) {
+      // Corrupted localStorage data — treat as no draft
+      draft = null;
+    }
+    if (app.ports && app.ports.gotListingDraft) {
+      app.ports.gotListingDraft.send(draft);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Port: Swipe gesture detection for bookshelf navigation (mobile)
 // ---------------------------------------------------------------------------
 (function (app) {
