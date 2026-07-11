@@ -47,6 +47,12 @@
 # Usage:
 #   scripts/deploy-stack.sh
 #   scripts/deploy-stack.sh --branch my-feature-branch
+#
+# SKIP_VISION: when set (non-empty), skips the Modal vision deploy, the vision
+# warmup, and the vision completion probe — and e2e/tests/upload.spec.ts skips
+# itself. Use it to avoid Modal credit spend on changes that don't touch the
+# vision path (apps/vision / the upload→vision code path). Unset it to re-enable
+# full vision validation when that path changes.
 
 set -euo pipefail
 
@@ -391,7 +397,7 @@ else
 fi
 
 # ── Deploy vision service to Modal ────────────────────────────────────────────
-if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
+if [[ -z "${SKIP_VISION:-}" ]] && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     # Pick a Python that has the `modal` SDK importable.
     #
     # Local dev: the interactive shell's `python3` resolves to
@@ -485,6 +491,8 @@ print(urls[0] if urls else '')
     fi
     echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
+elif [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
 fi
@@ -1032,6 +1040,9 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 fi
 
 # ── Vision pipeline warmup ────────────────────────────────────────────────────
+if [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP warmup: SKIP_VISION set — vision not deployed, skipping warmup"
+else
 # Queue 6 warmup uploads so Modal starts scaling out before the SLO gate
 # starts probing. The gate fires 6 parallel canaries every 15s; queueing 6
 # Oban vision jobs upfront causes Modal to spawn 6 containers in parallel
@@ -1215,6 +1226,7 @@ elif [[ ${#warmup_ids[@]} -lt ${#warmup_canaries[@]} ]]; then
 else
     echo "PASS warmup: ${#warmup_ids[@]} canaries queued — Oban vision jobs will scale Modal in parallel with the gate"
 fi
+fi
 
 # ── Vision pipeline completion probe ─────────────────────────────────────────
 # The warmup above only proves /api/upload accepts uploads — not that vision
@@ -1229,7 +1241,9 @@ fi
 # Note: this runs AFTER the parallel warmup so Modal is already scaling up.
 # 180s is generous enough for cold-start (1-3 min observed) but short
 # enough that a genuinely-broken pipeline surfaces here, not in E2E.
-if [[ ${#warmup_ids[@]} -gt 0 ]]; then
+if [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP probe: SKIP_VISION set — skipping vision completion probe"
+elif [[ ${#warmup_ids[@]} -gt 0 ]]; then
     probe_id="${warmup_ids[0]}"
     echo ""
     echo "==> Vision pipeline completion probe (image_id=${probe_id})..."
