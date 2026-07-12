@@ -207,32 +207,35 @@ test.describe("Session expiry", () => {
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    // Same server-side-invalidation mechanism as the test above: keep the stored
-    // session SHAPE (so the SPA still boots "authenticated") but swap in a token
-    // the server will reject with 401 — exactly the state a real expiry produces.
-    // We do NOT fabricate a session from nothing.
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    });
-
-    // Navigate to Settings/Privacy — a page newly covered by #178. Unlike a
-    // bookshelf, this page fires no authed request on load, so it renders while
-    // the SPA still believes it is authenticated (booting from the invalid token).
+    // Load Settings/Privacy with a VALID token so the page actually renders. The
+    // page itself fires no authed request on load, but the SPA's boot hook does
+    // (Main.init → Api.getMyPlacements). Booting from an already-invalid token
+    // would 401 there and bounce to /login BEFORE Privacy renders — that boot-hook
+    // path is covered by the next test. Here we need the page rendered so the
+    // redirect below is driven by an authed ACTION, not by page load.
     await page.goto("/settings/privacy");
 
-    // Confirm the Privacy page actually rendered (proves we did NOT bounce on the
-    // page load itself — the redirect below is driven by the authed ACTION).
     const saveProfileVisibility = page.getByRole("button", {
       name: "Save Profile Visibility",
     });
     await expect(saveProfileVisibility).toBeVisible({ timeout: 15000 });
 
-    // Take an authed action on this page: change the profile-visibility setting
-    // and save it. Saving issues a Bearer request (Api.updateProfileVisibility)
-    // that comes back 401 with the now-invalid token, which must route through
-    // the single global session-expiry interceptor.
+    // Now revoke this session SERVER-SIDE (a real expiry: DELETE /api/auth/logout
+    // → Guardian.revoke), leaving the SPA's in-memory token in place — so the NEXT
+    // authed action is the first request the server rejects. A client-side token
+    // swap can't reach the already-booted in-memory token without a reload, and a
+    // reload would trip the boot hook above.
+    await page.evaluate(async () => {
+      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      await fetch("/api/auth/logout", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${raw.token}` },
+      });
+    });
+
+    // Take an authed action on this page: saving issues a Bearer request
+    // (Api.updateProfileVisibility) that returns 401 with the now server-revoked
+    // token, which must route through the single global session-expiry interceptor.
     await page.locator(".form-field__select").first().selectOption("platform");
     await saveProfileVisibility.click();
 
