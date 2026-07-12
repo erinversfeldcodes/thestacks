@@ -1,10 +1,30 @@
 # Issue #121: E2E Test Suite — GDPR Compliance
 
 ## Summary
-Comprehensive E2E test coverage for all GDPR features: data export (US-8.1), account deletion (US-8.2), consent management (US-8.3), image retention (US-8.4), and audit log (US-8.5).
+**Epic + v1 test-hardening.** Issue #121 hardens test coverage — and adds GDPR-specific telemetry —
+for the **built v1** GDPR surface: image retention (US-8.4, end-to-end) and the backend + API layers of
+data export (US-8.1), account deletion (US-8.2), consent (US-8.3, analytics), and audit-log writes
+(US-8.5). The Feature-Completeness Pre-Check (below) found the originally-chartered **v2** surface is
+unbuilt; it is de-scoped from this issue's deliverable and tracked as seven ordered child issues,
+**#183–#189** (see Epic). No named story reaches a green audit via a feature that isn't built.
 
 ## User Stories
-US-8.1 (Export Personal Data), US-8.2 (Delete All Personal Data), US-8.3 (Consent Management), US-8.4 (Image Retention Policy), US-8.5 (Audit Log)
+Validated here (v1 built surface): US-8.4 (Image Retention, end-to-end) · US-8.1 / US-8.2 / US-8.3 /
+US-8.5 (backend + API only). The unbuilt UI/feature surface — US-8.1 export UI (→ #187), US-8.2 delete
+UI (→ #188), US-8.3 writing-assistant consent (→ #184), US-8.5 audit-log read (→ #189), plus the shared
+data-model / richer-export / deeper-cascade work (#183 / #186 / #185) — is delivered by the child
+issues, NOT by #121.
+
+## Epic — child issues (implement in this order, AFTER #121)
+1. **#183 — GDPR data-model foundation** (root dependency)
+2. **#184 — Writing-assistant consent (end-to-end)** — needs #183
+3. **#185 — Deeper deletion cascade** — needs #183
+4. **#186 — Richer export payload** — needs #183
+5. **#187 — Export UI (Elm)** — independent (backend exists)
+6. **#188 — Delete-account UI (Elm)** — independent (backend exists)
+7. **#189 — Audit-log read API + page** — independent
+
+Plan: `plans/121-e2e-gdpr-plan.md`.
 
 ## Goal
 Validate the complete GDPR compliance surface: data portability, right to erasure with cascade deletion, consent with timestamps, automated image cleanup, and immutable audit logging with encryption.
@@ -35,11 +55,11 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-8.1 — Export Personal Data | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-8.2 — Delete All Personal Data | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-8.3 — Consent Management | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-8.4 — Image Retention Policy | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-8.5 — Audit Log | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-8.1 — Export Personal Data | `gdpr_controller.ex:export/2` (202) → `DataExportJob` → `GDPR.Export.export_user_data/2` (4/8 keys). No Elm export UI (`grep UserClicksExport` → 0). | backend 202 verified; no UI to drive | 🟡 partial | v1 backend/API tested here; export UI → **#187**, richer payload → **#186** |
+| US-8.2 — Delete All Personal Data | `gdpr_controller.ex:delete_account/2` (202 + `user.deletion_requested` audit) → `AccountDeletionJob` → `Deletion.delete_user_data/1` Multi. No Elm delete UI (grep → 0). | backend 202 verified; no UI to drive | 🟡 partial | v1 backend/API + erasure invariants tested here (Ph1); delete UI → **#188**, deeper cascade → **#185** |
+| US-8.3 — Consent Management | analytics: `update_consent/2` + `GDPR.Consent` + `Page.Settings.Consent` toggle — end-to-end. writing-assistant half absent (no column/worker/plug/Msg; grep → 0). | analytics drivable; writing-assistant absent | 🟡 partial | analytics tested + E2E-hardened here (Ph5); writing-assistant consent → **#184** |
+| US-8.4 — Image Retention Policy | `ImageRetention.cleanup_expired/stuck` + `missing_purge_check/0`; `ImageRetentionJob` (cron). Backend-only, no UI by design. | job runs stuck→expired→orphan; storage assertions added (Ph3) | ✅ implemented | in scope — Ph2/Ph3 |
+| US-8.5 — Audit Log | write path: `Audit.log/3` + DB append-only trigger (GUC-gated erasure) — strong. No read API / Elm page (grep → 0). | write path drivable + append-only enforced | 🟡 partial | write path tested here; read API + page → **#189** |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
