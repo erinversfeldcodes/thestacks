@@ -857,7 +857,19 @@ jobs:
       GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
       SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      # Real Resend email delivery on the preview is OFF by default (Bug 5,
+      # Issue #124). Without the `preview-real-email` PR label this resolves to
+      # an empty string, so deploy-stack.sh's `${RESEND_API_KEY:+...}` guard is a
+      # no-op: the preview keeps Swoosh.Adapters.Local (deterministic, no
+      # external send) and ordinary CI runs never touch Resend. Apply the
+      # `preview-real-email` label to opt a PR IN — the RESEND_API_KEY secret is
+      # then exported, deploy-stack.sh stages RESEND_API_KEY + EMAIL_PROVIDER=resend
+      # as Fly secrets, and Swoosh sends via Resend so real delivery is validated
+      # before merge. The key is never hardcoded; it comes from the secret store.
+      # Labeling alone does not re-trigger CI (the `pull_request` trigger only
+      # fires on opened/synchronize/reopened) — label, then push or re-run the
+      # workflow. See docs/deployment/FLY_SETUP.md § "Real email on a preview".
+      RESEND_API_KEY: ${{ contains(github.event.pull_request.labels.*.name, 'preview-real-email') && secrets.RESEND_API_KEY || '' }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

@@ -19,6 +19,7 @@ defmodule Stacks.GDPR.Deletion do
 
   alias Core.Repo
   alias Ecto.Multi
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.User
   alias Stacks.Audit
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -64,6 +65,33 @@ defmodule Stacks.GDPR.Deletion do
         nil -> {:error, :user_not_found}
         user -> repo.delete(user)
       end
+    end)
+    |> Multi.run(:revoke_sessions, fn repo, _ ->
+      # Kill every live auth session belonging to the erased user. Neither
+      # op.auth_token_families (no FK on user_id) nor op.guardian_tokens
+      # (schemaless; `sub` is a plain string, not an FK) cascades from the
+      # user delete, so without this step a hard-deleted user's access token
+      # keeps passing verify_claims for up to its 8h TTL and their session
+      # rows linger indefinitely.
+      #
+      # We DELETE the rows rather than mark `revoked_at`: this is an ERASURE,
+      # so the goal is full removal of the user's identifiers. Marking revoked
+      # would leave rows still keyed to the deleted user's UUID forever, which
+      # contradicts the right-to-erasure intent; deletion also achieves the
+      # same security outcome (the family vanishes ⇒ verify_claims fails
+      # closed, and the guardian_tokens row is gone ⇒ the JWT is unverifiable).
+      #
+      # Both deletes run on the Multi's `repo`, so they commit/rollback
+      # atomically with the rest of the erasure.
+      {family_count, _} =
+        repo.delete_all(from f in AuthTokenFamily, where: f.user_id == ^user_id)
+
+      {token_count, _} =
+        repo.delete_all(
+          from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
+        )
+
+      {:ok, family_count + token_count}
     end)
     |> Multi.run(:audit, fn _repo, _ ->
       Audit.log(nil, "user.data_deleted", resource_type: "user", resource_id: user_id)

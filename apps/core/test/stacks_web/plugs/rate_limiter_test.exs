@@ -158,24 +158,120 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     end
   end
 
-  # ── IP extraction ─────────────────────────────────────────────────────────────
+  # ── IP extraction (trusted Fly client IP — Issue #176) ─────────────────────────
+  #
+  # Buckets must key on the `fly-client-ip` header (Fly overwrites it at the
+  # edge, so it is unspoofable) and never on the client-supplied
+  # `x-forwarded-for`. When `fly-client-ip` is absent (local dev / ExUnit)
+  # the limiter falls back to `conn.remote_ip`.
 
   describe "call/2 IP extraction" do
-    test "uses x-forwarded-for header when present", %{conn: conn} do
-      conn =
-        conn
-        |> Map.put(:remote_ip, {127, 0, 0, 1})
-        |> put_req_header("x-forwarded-for", "203.0.113.1")
+    test "keys on fly-client-ip: different Fly-Client-IP values are isolated buckets",
+         %{conn: conn} do
+      # Both clients share the SAME remote_ip; only Fly-Client-IP differs. A
+      # limiter that keys on the trusted header isolates them; one that keys
+      # on remote_ip (or ignores the header) would collapse them into one
+      # bucket and leak client A's exhaustion onto client B.
+      base = %{conn | remote_ip: {10, 5, 0, 1}}
+      client_a = put_req_header(base, "fly-client-ip", "198.51.100.20")
+      client_b = put_req_header(base, "fly-client-ip", "198.51.100.21")
 
-      result = RateLimiter.call(conn, bucket: :auth)
-      refute result.halted
+      # Exhaust client A's auth bucket (5 allowed under the pinned limit).
+      for _ <- 1..5, do: RateLimiter.call(client_a, bucket: :auth)
+      assert RateLimiter.call(client_a, bucket: :auth).halted
+
+      # Client B, sharing remote_ip but a distinct Fly-Client-IP, is untouched.
+      refute RateLimiter.call(client_b, bucket: :auth).halted
     end
 
-    test "falls back to remote_ip when x-forwarded-for is absent", %{conn: conn} do
+    test "keys on fly-client-ip: same Fly-Client-IP shares one bucket and is limited",
+         %{conn: conn} do
+      # Vary remote_ip per request to prove the shared bucket comes from the
+      # trusted header, not from remote_ip.
+      fly_ip = "198.51.100.30"
+
+      for n <- 1..5 do
+        c = %{conn | remote_ip: {10, 5, 1, n}} |> put_req_header("fly-client-ip", fly_ip)
+        refute RateLimiter.call(c, bucket: :auth).halted
+      end
+
+      sixth = %{conn | remote_ip: {10, 5, 1, 200}} |> put_req_header("fly-client-ip", fly_ip)
+      result = RateLimiter.call(sixth, bucket: :auth)
+      assert result.halted
+      assert result.status == 429
+    end
+
+    test "SECURITY: rotating X-Forwarded-For with a fixed Fly-Client-IP is still rate-limited",
+         %{conn: conn} do
+      # Core of Issue #176. An attacker behind Fly rotates X-Forwarded-For per
+      # request to try to reset the counter. Fly overwrites Fly-Client-IP with
+      # the real client IP, so the bucket must stay keyed on that and hit 429
+      # at the threshold regardless of the spoofed XFF.
+      base =
+        %{conn | remote_ip: {10, 4, 0, 1}} |> put_req_header("fly-client-ip", "198.51.100.10")
+
+      # First 5 requests, each with a DIFFERENT spoofed X-Forwarded-For.
+      for n <- 1..5 do
+        c = put_req_header(base, "x-forwarded-for", "203.0.113.#{n}")
+        refute RateLimiter.call(c, bucket: :auth).halted
+      end
+
+      # 6th request, yet another fresh spoofed XFF, same trusted Fly-Client-IP.
+      spoofed = put_req_header(base, "x-forwarded-for", "203.0.113.6")
+      result = RateLimiter.call(spoofed, bucket: :auth)
+      assert result.halted
+      assert result.status == 429
+    end
+
+    test "SECURITY: password_change bucket — rotating XFF with a fixed Fly-Client-IP is still rate-limited",
+         %{conn: conn} do
+      # Mirror of the :auth spoof test for the :password_change bucket, whose
+      # pinned limit is 3 (see setup). Disjoint IP range (10.7.x / 198.51.100.40
+      # / 203.0.113.30+) so no ETS bucket bleed with the other tests.
+      base =
+        %{conn | remote_ip: {10, 7, 0, 1}} |> put_req_header("fly-client-ip", "198.51.100.40")
+
+      # First 3 requests, each with a DIFFERENT spoofed X-Forwarded-For.
+      for n <- 1..3 do
+        c = put_req_header(base, "x-forwarded-for", "203.0.113.#{30 + n}")
+        refute RateLimiter.call(c, bucket: :password_change).halted
+      end
+
+      # 4th request, yet another fresh spoofed XFF, same trusted Fly-Client-IP.
+      spoofed = put_req_header(base, "x-forwarded-for", "203.0.113.99")
+      result = RateLimiter.call(spoofed, bucket: :password_change)
+      assert result.halted
+      assert result.status == 429
+    end
+
+    test "SECURITY: X-Forwarded-For is not trusted — rotating XFF shares the remote_ip bucket",
+         %{conn: conn} do
+      # No Fly-Client-IP header (so the limiter must fall back to remote_ip).
+      # Rotating X-Forwarded-For must NOT create fresh buckets: all requests
+      # from one remote_ip stay in a single bucket and get limited.
+      base = %{conn | remote_ip: {10, 6, 0, 1}}
+
+      for n <- 1..5 do
+        c = put_req_header(base, "x-forwarded-for", "203.0.113.#{100 + n}")
+        refute RateLimiter.call(c, bucket: :auth).halted
+      end
+
+      spoofed = put_req_header(base, "x-forwarded-for", "203.0.113.200")
+      result = RateLimiter.call(spoofed, bucket: :auth)
+      assert result.halted
+      assert result.status == 429
+    end
+
+    test "falls back to remote_ip when fly-client-ip is absent", %{conn: conn} do
+      # No fly-client-ip and no x-forwarded-for → key on conn.remote_ip.
+      # Requests from the same remote_ip accumulate and are limited.
       conn = %{conn | remote_ip: {192, 0, 2, 1}}
 
+      for _ <- 1..5, do: RateLimiter.call(conn, bucket: :auth)
+
       result = RateLimiter.call(conn, bucket: :auth)
-      refute result.halted
+      assert result.halted
+      assert result.status == 429
     end
   end
 

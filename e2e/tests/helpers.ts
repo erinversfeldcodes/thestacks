@@ -1,5 +1,5 @@
 import path from "path";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
 export const DEV_EMAIL = "owner@thestacks.app";
@@ -189,4 +189,76 @@ export async function apiCallFromPage(
     },
     { method, path, body }
   );
+}
+
+// ── Auth-lifecycle helpers (Issue #124) ────────────────────────────────────
+
+/**
+ * Generate a unique, never-before-seen email so registration tests never
+ * collide with prior runs or with seeded users. Uses the `.test` TLD, which
+ * matches the E2E user convention and is never delivered to a real inbox.
+ */
+export function uniqueEmail(prefix = "e2e-reg"): string {
+  const rand = Math.floor(Math.random() * 1_000_000);
+  return `${prefix}-${Date.now()}-${rand}@thestacks.test`;
+}
+
+/**
+ * Register a user directly via the API (no email delivery). Newly-registered
+ * users are UNCONFIRMED — the server sends a confirmation email we never read
+ * in CI. Returns the raw APIResponse so callers can assert on status/body.
+ */
+export async function registerViaApi(
+  request: APIRequestContext,
+  opts: { email: string; password: string; displayName?: string }
+) {
+  return request.post("/api/auth/register", {
+    data: {
+      email: opts.email,
+      password: opts.password,
+      display_name: opts.displayName ?? "E2E Newcomer",
+    },
+  });
+}
+
+/**
+ * Retrieve a user's email-confirmation token via the test-helper endpoint.
+ * This endpoint only exists when the server is booted with
+ * STACKS_E2E_TEST_HELPERS=1; it 404s otherwise (or if the user is unknown).
+ *
+ * Returns the token string, or `null` when the helper is unavailable — callers
+ * should `test.skip(token === null, ...)` so the spec is skipped rather than
+ * failing when the flag is off (e.g. against production-like environments).
+ */
+export async function fetchConfirmationToken(
+  request: APIRequestContext,
+  email: string
+): Promise<string | null> {
+  const resp = await request.get(
+    `/api/test/confirmation-token?email=${encodeURIComponent(email)}`
+  );
+  if (resp.status() === 404) return null;
+  if (!resp.ok()) {
+    throw new Error(
+      `confirmation-token helper returned HTTP ${resp.status()} for ${email}`
+    );
+  }
+  const body = await resp.json();
+  return body.token as string;
+}
+
+/**
+ * Sign in through the login form and wait for the post-login redirect.
+ * Mirrors the flow the real user takes (fill → submit → door transition).
+ */
+export async function signInViaForm(
+  page: Page,
+  email: string,
+  password: string
+): Promise<void> {
+  await page.goto("/login");
+  await page.fill('input[id="email"]', email);
+  await page.fill('input[id="password"]', password);
+  await page.getByTestId("login-submit").click();
+  await page.waitForURL("**/antilibrary", { timeout: 15000 });
 }

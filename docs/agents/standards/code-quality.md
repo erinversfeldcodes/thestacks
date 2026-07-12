@@ -12,6 +12,16 @@ Inspired by John Ousterhout's "A Philosophy of Software Design":
 
 ---
 
+## Agent Deliverable Conventions
+
+Apply to every specialist, reviewer, and the orchestrator:
+
+- **Large deliverables go to a file, not the chat.** Audits, review reports, plans, and multi-section analyses are written to a file (`plans/<slug>.md`, an issue's embedded `## Test Audit` section, or `docs/`) and the agent returns a **concise summary** — verdict, key findings, and where the full artifact lives. Printing a long report inline risks output-token truncation and loses the artifact.
+- **Evidence over assertion.** "Tests pass" / "verify passes" is never a report. Cite the number (`2259 tests, 0 failures`), the `file:line`, or the specific gate output. A claim a reviewer cannot re-check is not done.
+- **Never invent a citation.** Every `✅` or reference to a test, function, or line must be something you verified by grep/Read — not inferred from a name.
+
+---
+
 ## Elixir Conventions
 
 ### Contexts as Bounded Domains

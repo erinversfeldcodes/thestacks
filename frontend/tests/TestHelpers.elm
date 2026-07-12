@@ -11,6 +11,8 @@ module TestHelpers exposing
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulateMergeFormatResponse
+    , simulateRegisterResponse
+    , simulateRegisterValidationResponse
     , testBook
     , testPlacement
     , uploadProgram
@@ -23,7 +25,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, BookDetailResponse, PollStatus(..), streamEventDecoder)
+import Api exposing (AuthResponse, BookDetailResponse, PollStatus(..), RegisterError(..), streamEventDecoder)
 import Components.ISBNInput
 import Dict
 import Http
@@ -361,6 +363,49 @@ simulateAuthResponse token userId email displayName =
         , headers = Dict.empty
         }
         json
+
+
+{-| A successful registration HTTP response (201 with confirmation message).
+The backend returns `{"message": "confirmation_email_sent"}` on register — NOT
+an auth response with a token.
+-}
+simulateRegisterResponse : Http.Response String
+simulateRegisterResponse =
+    Http.GoodStatus_
+        { url = "/api/auth/register"
+        , statusCode = 201
+        , statusText = "Created"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object [ ( "message", Encode.string "confirmation_email_sent" ) ])
+        )
+
+
+{-| Create a 422 registration validation error response carrying per-field
+error messages, mirroring the backend's `{"errors": {field: [msg, ...]}}` shape
+(see `format_errors/1` in the Elixir `ChangesetHelpers`).
+-}
+simulateRegisterValidationResponse : List ( String, List String ) -> Http.Response String
+simulateRegisterValidationResponse fieldErrors =
+    Http.BadStatus_
+        { url = "/api/auth/register"
+        , statusCode = 422
+        , statusText = "Unprocessable Entity"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "errors"
+                  , Encode.object
+                        (List.map
+                            (\( field, messages ) -> ( field, Encode.list Encode.string messages ))
+                            fieldErrors
+                        )
+                  )
+                ]
+            )
+        )
 
 
 {-| Create an auth error HTTP response with the given status code.
@@ -901,7 +946,7 @@ searchProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _ ) =
+                    ( newModel, _, _ ) =
                         Search.update msg model maybeToken
                 in
                 ( newModel, searchEffects msg model maybeToken )
@@ -924,6 +969,51 @@ decodeAuthResponse =
             , Decode.succeed "user"
             ]
         )
+
+
+{-| Decode a registration response. Mirrors Api.registrationResponseDecoder,
+which only checks for the `"message"` key and does NOT attempt to read a token.
+-}
+decodeRegistrationResponse : Decode.Decoder ()
+decodeRegistrationResponse =
+    Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
+
+
+{-| Mirror `Api.expectRegister`: decode the 422 `{"errors": ...}` body so program
+tests exercise the same field-error surfacing as production rather than losing
+the body the way `expectJson` would.
+-}
+registerResponseResult : Http.Response String -> Result RegisterError ()
+registerResponseResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (RegisterRequestFailed (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (RegisterRequestFailed Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (RegisterRequestFailed Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString (Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))) bodyText of
+                    Ok errors ->
+                        Err (RegisterValidationFailed errors)
+
+                    Err _ ->
+                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+            else
+                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString decodeRegistrationResponse bodyText of
+                Ok value ->
+                    Ok value
+
+                Err err ->
+                    Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
 {-| Translate Login page Cmds into SimulatedEffects.
@@ -963,10 +1053,13 @@ loginEffects msg model =
                                     , ( "display_name", Encode.string model.displayName )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse decodeAuthResponse
+                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse registerResponseResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }
+
+                Login.RegistrationPending _ ->
+                    SimulatedEffect.Cmd.none
 
         _ ->
             SimulatedEffect.Cmd.none

@@ -11,12 +11,16 @@ defmodule Stacks.Accounts do
   # chained call. This is a known false positive.
   @dialyzer :no_opaque
 
+  require Logger
+
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2]
 
   alias Core.Repo
   alias Ecto.Multi
+  alias Guardian.DB.Token, as: GuardianDbToken
   alias Stacks.Accounts.ArgonPool
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.User
   alias Stacks.Events
   alias Stacks.Workers.VisibilityRecapJob
@@ -196,8 +200,15 @@ defmodule Stacks.Accounts do
     Multi.new()
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
-      token =
-        Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+      # Generate the FINAL, verifiable confirmation token synchronously so it is
+      # stable the moment registration commits. It is a Phoenix.Token signed with
+      # the "email_confirm" salt to match Stacks.Email.confirm_email/1's verify;
+      # the async EmailConfirmationHandler only DELIVERS this token, it never
+      # regenerates it. Previously this stored a raw random token that the handler
+      # later overwrote with a Phoenix.Token — a register↔handler race where a
+      # token read before the handler ran (E2E helper, or a fast client) failed
+      # verification and redirected to /confirm-email/error.
+      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
 
       user
       |> email_confirmation_changeset(%{
@@ -720,6 +731,206 @@ defmodule Stacks.Accounts do
       {:ok, saved} -> {:ok, Repo.reload!(saved)}
       error -> error
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Refresh-token families (Issue #179, Phase 2a)
+  #
+  # A family is a rotation chain, opened at login and updated on every refresh.
+  # `current_jti` tracks the single live access token of the session so a later
+  # phase can detect reuse of a superseded token and revoke the whole family.
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Open a token family at login.
+
+  Returns `{:ok, family}` or `{:error, changeset}`. The caller (login) treats a
+  failure as fatal: a token whose family row did not persist would violate the
+  invariant that every live access token is tracked by exactly one family.
+  """
+  def open_token_family(attrs) do
+    %AuthTokenFamily{}
+    |> AuthTokenFamily.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Advance a family's live token on refresh rotation.
+
+  Idempotent upsert keyed on `family_id`: an existing family has its
+  `current_jti`, `previous_jti`, `rotated_at` (and `updated_at`) replaced —
+  `session_started_at`, `user_id` and `revoked_at` are preserved. A missing
+  family (a legacy session minted before families existed, or a direct-action
+  test path) is created lazily so the session becomes tracked from now rather
+  than locking the user out. This mirrors the Phase 1 `sst` policy of binding an
+  untracked session from the current moment instead of treating it as invalid.
+
+  The caller records the rotation grace metadata (Issue #180): `previous_jti` is
+  the jti being superseded (the OLD `current_jti`) and `rotated_at` is now, so
+  the reuse gate can honour the just-rotated old token for a short grace window.
+  """
+  def rotate_token_family(attrs) do
+    %AuthTokenFamily{}
+    |> AuthTokenFamily.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace, [:current_jti, :previous_jti, :rotated_at, :updated_at]},
+      conflict_target: :family_id
+    )
+  end
+
+  # ---------------------------------------------------------------------------
+  # Reuse detection + family revocation (Issue #179, Phase 2b)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Reuse-detection gate for a family-bearing access token.
+
+  Called from `Stacks.Accounts.Guardian.verify_claims/2` on EVERY authenticated
+  request. Returns:
+
+    * `:ok` — the presented `jti` IS the family's live token (happy path).
+    * `{:error, :session_revoked}` — the family is missing (already reaped or
+      never opened) or has `revoked_at` set. Fail closed.
+    * `{:error, :token_reuse_detected}` — a NON-current `jti` was presented in a
+      still-live family. This is a superseded token being replayed (a stale tab,
+      or a stolen already-rotated token). Response: revoke the WHOLE family
+      (`revoked_at` + `destroy_by_sub` burns every one of the user's
+      `guardian_tokens` rows, killing the live token too) and reject.
+
+  The revoke on reuse is a WRITE performed inside verify_claims. It is
+  idempotent (a second call sees the now-revoked family and returns
+  `:session_revoked` without re-burning) and fails CLOSED: any DB error is
+  logged and mapped to `{:error, :family_check_failed}` (a 401), never a crash,
+  so a transient DB hiccup in the gate cannot 500 an authenticated request.
+  """
+  @spec check_token_family(binary(), binary(), binary()) ::
+          :ok | {:error, :session_revoked | :token_reuse_detected | :family_check_failed}
+  def check_token_family(family_id, jti, sub)
+      when is_binary(family_id) and is_binary(jti) and is_binary(sub) do
+    case Repo.get(AuthTokenFamily, family_id) do
+      nil ->
+        {:error, :session_revoked}
+
+      %AuthTokenFamily{revoked_at: revoked} when not is_nil(revoked) ->
+        {:error, :session_revoked}
+
+      %AuthTokenFamily{} = family ->
+        classify_live_family(family, jti, sub)
+    end
+  rescue
+    error ->
+      Logger.error("check_token_family failed (failing closed): #{inspect(error)}")
+      {:error, :family_check_failed}
+  end
+
+  def check_token_family(_family_id, _jti, _sub), do: {:error, :session_revoked}
+
+  # Classify a token against its live (non-revoked, existing) family.
+  defp classify_live_family(%AuthTokenFamily{} = family, jti, sub) do
+    cond do
+      # Ownership guard (defense-in-depth): `family_id` is a signed claim, so a
+      # cross-user family_id is not reachable today — but if `sub` and
+      # `family_id` ever desync, reject WITHOUT burning the innocent owner's
+      # family (a mismatched token must not revoke someone else's session).
+      to_string(family.user_id) != sub ->
+        {:error, :session_revoked}
+
+      family.current_jti == jti ->
+        :ok
+
+      # Rotation grace window (Issue #180): the IMMEDIATELY-PREVIOUS token,
+      # presented within `grace_seconds` of the rotation that superseded it, is a
+      # benign in-flight / multi-tab race — NOT reuse. Honour it WITHOUT burning
+      # and WITHOUT advancing current_jti. Applies ONLY to `previous_jti` (the
+      # single immediate predecessor): an older token (2+ rotations back) has a
+      # different jti and falls through to burn.
+      within_rotation_grace?(family, jti) ->
+        :ok
+
+      true ->
+        revoke_family_and_burn(family)
+        {:error, :token_reuse_detected}
+    end
+  end
+
+  @doc """
+  Revoke a single token family by marking `revoked_at` (idempotent).
+
+  Used by logout: any token sharing this `family_id` — including an attacker's
+  already-rotated chain — is rejected at the `verify_claims` gate on next use.
+  Returns `{:ok, revoked_count}` where the count is 0 if it was already revoked.
+  """
+  @spec revoke_token_family(binary()) :: {:ok, non_neg_integer()}
+  def revoke_token_family(family_id) when is_binary(family_id) do
+    now = DateTime.utc_now()
+
+    {count, _} =
+      from(f in AuthTokenFamily, where: f.family_id == ^family_id and is_nil(f.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now, updated_at: now])
+
+    {:ok, count}
+  end
+
+  @doc """
+  Revoke ALL of a user's sessions ("log out everywhere").
+
+  Marks every live family of the user `revoked_at` AND deletes every one of the
+  user's `guardian_tokens` rows (`destroy_by_sub`), so no existing access token
+  survives. Used on password change. Idempotent.
+  """
+  @spec revoke_all_user_sessions(binary()) :: :ok
+  def revoke_all_user_sessions(user_id) do
+    now = DateTime.utc_now()
+
+    from(f in AuthTokenFamily, where: f.user_id == ^user_id and is_nil(f.revoked_at))
+    |> Repo.update_all(set: [revoked_at: now, updated_at: now])
+
+    GuardianDbToken.destroy_by_sub(to_string(user_id))
+
+    :ok
+  end
+
+  # Rotation grace predicate (Issue #180). True IFF the presented jti is the
+  # family's immediate predecessor (`previous_jti`) AND that rotation happened no
+  # more than `session_rotation_grace` seconds ago. Requires BOTH `previous_jti`
+  # and `rotated_at` to be set (a never-rotated / legacy family has neither, so
+  # this is always false and the caller burns as #179 intended). The window is
+  # applied ONLY to `previous_jti`, never to an older jti.
+  defp within_rotation_grace?(%AuthTokenFamily{previous_jti: prev, rotated_at: rotated_at}, jti)
+       when is_binary(prev) and not is_nil(rotated_at) and prev == jti do
+    DateTime.diff(DateTime.utc_now(), rotated_at, :second) <= rotation_grace_seconds()
+  end
+
+  defp within_rotation_grace?(_family, _jti), do: false
+
+  # Grace window expressed as `{n, unit}` in config, converted to seconds here at
+  # the check site (mirrors the AuthController session-cap `unit_in_seconds/1`).
+  defp rotation_grace_seconds do
+    {n, unit} = Application.get_env(:core, :session_rotation_grace, {20, :second})
+    n * grace_unit_in_seconds(unit)
+  end
+
+  defp grace_unit_in_seconds(:second), do: 1
+  defp grace_unit_in_seconds(:minute), do: 60
+  defp grace_unit_in_seconds(:hour), do: 3_600
+  # Fail-safe catch-all: a misconfigured unit must NOT raise on every authed
+  # request (this runs in the verify gate). Treat unknown units as seconds — the
+  # smallest window, so a misconfig fails toward LESS grace (more secure), never
+  # toward an auth outage or a wider honoured-token window.
+  defp grace_unit_in_seconds(_unknown), do: 1
+
+  # Reuse response: mark the family revoked and burn all the user's live tokens.
+  # `update_all` (not scoped to unrevoked) is fine — re-stamping an already-set
+  # revoked_at is harmless and keeps the primitive branch-free.
+  defp revoke_family_and_burn(%AuthTokenFamily{} = family) do
+    now = DateTime.utc_now()
+
+    from(f in AuthTokenFamily, where: f.family_id == ^family.family_id)
+    |> Repo.update_all(set: [revoked_at: now, updated_at: now])
+
+    GuardianDbToken.destroy_by_sub(to_string(family.user_id))
+
+    :ok
   end
 
   defp normalize_steps(nil), do: Map.new(@valid_onboarding_steps, &{&1, false})

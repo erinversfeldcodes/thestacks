@@ -6,9 +6,22 @@ defmodule Stacks.EmailTest do
 
   alias Stacks.Email
 
+  # A user whose confirmation token has been persisted the way
+  # Accounts.register/1 does it — a signed Phoenix.Token. Both
+  # send_registration_confirmation/1 and confirm_email/1 operate on this token.
+  defp user_with_confirmation_token(attrs \\ []) do
+    user = insert(:user, Keyword.merge([email_confirmed: false], attrs))
+    token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+
+    {:ok, user} =
+      user |> Ecto.Changeset.change(%{email_confirmation_token: token}) |> Core.Repo.update()
+
+    user
+  end
+
   describe "send_registration_confirmation/1" do
-    test "enqueues an EmailDeliveryJob for the user" do
-      user = insert(:user)
+    test "enqueues an EmailDeliveryJob using the user's persisted token" do
+      user = user_with_confirmation_token()
 
       assert {:ok, _user} = Email.send_registration_confirmation(user)
 
@@ -18,19 +31,29 @@ defmodule Stacks.EmailTest do
       )
     end
 
-    test "stores the confirmation token on the user" do
-      user = insert(:user)
-      assert {:ok, updated_user} = Email.send_registration_confirmation(user)
-      assert updated_user.email_confirmation_token != nil
+    test "delivers the persisted token without regenerating/overwriting it" do
+      user = user_with_confirmation_token()
+      original = user.email_confirmation_token
+
+      assert {:ok, returned} = Email.send_registration_confirmation(user)
+
+      # The async handler must never overwrite the token Accounts.register/1
+      # persisted — otherwise a token already read for this user is invalidated
+      # (the register↔handler race this fixes).
+      assert returned.email_confirmation_token == original
+      assert Core.Repo.reload!(user).email_confirmation_token == original
+    end
+
+    test "errors when the user has no confirmation token" do
+      user = insert(:user, email_confirmation_token: nil)
+      assert {:error, :missing_confirmation_token} = Email.send_registration_confirmation(user)
     end
   end
 
   describe "confirm_email/1" do
     test "sets email_confirmed to true with a valid token" do
-      user = insert(:user)
-      {:ok, user_with_token} = Email.send_registration_confirmation(user)
-
-      token = user_with_token.email_confirmation_token
+      user = user_with_confirmation_token()
+      token = user.email_confirmation_token
 
       assert {:ok, confirmed_user} = Email.confirm_email(token)
       assert confirmed_user.email_confirmed == true

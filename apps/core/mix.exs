@@ -46,6 +46,7 @@ defmodule Core.MixProject do
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
       {:guardian, "~> 2.3"},
+      {:guardian_db, "~> 3.0"},
       {:argon2_elixir, "~> 4.1"},
       {:oban, "~> 2.18"},
       {:fuse, "~> 2.5"},

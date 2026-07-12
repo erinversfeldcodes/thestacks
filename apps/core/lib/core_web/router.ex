@@ -73,6 +73,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :admin
   end
 
+  pipeline :rate_limit_e2e_helper do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :e2e_helper
+  end
+
   pipeline :partner_auth do
     plug StacksWeb.PartnerAuthPlug
   end
@@ -165,6 +169,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated]
 
     delete "/auth/logout", AuthController, :logout
+    post "/auth/refresh", AuthController, :refresh
     get "/auth/me", AuthController, :me
 
     get "/books/isbn/:isbn", BookController, :show_by_isbn
@@ -325,6 +330,23 @@ defmodule CoreWeb.Router do
     pipe_through :api
     post "/vision/associate", InternalController, :vision_associate
     post "/smoke/circuit_breakers", InternalController, :smoke_circuit_breakers
+  end
+
+  # Test-only helper endpoints (Issue #124). Unauthenticated by design — the
+  # E2E suite calls these before it has a session. The E2ETestHelper plug is
+  # the sole gate: it returns 404 for every request unless the server flag
+  # STACKS_E2E_TEST_HELPERS=1 is set, which production never sets. This is why
+  # the guard lives in the router pipeline (fails closed) rather than in the
+  # controller. The endpoint leaks an account-activation token, so a real 404
+  # (not the SPA catch-all's index.html) is returned when the flag is off.
+  #
+  # PE-gate hardening (Issue #124): on public preview apps the flag IS on, so
+  # (1) the controller scopes lookups to `@thestacks.test` accounts only — a
+  # real user's token can never resolve — and (2) the `:e2e_helper` rate-limit
+  # bucket (10/min per IP) bounds brute-force enumeration / token harvesting.
+  scope "/api/test", StacksWeb do
+    pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
+    get "/confirmation-token", TestHelperController, :confirmation_token
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)

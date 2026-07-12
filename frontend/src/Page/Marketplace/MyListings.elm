@@ -1,6 +1,7 @@
 module Page.Marketplace.MyListings exposing
     ( Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -38,6 +39,11 @@ type Msg
     | ListingUpdated String (Result Http.Error Listing)
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
@@ -52,46 +58,53 @@ init maybeToken =
             )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ListingsReceived result ->
             case result of
                 Ok response ->
-                    ( { model | listings = Success response }, Cmd.none )
+                    ( { model | listings = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | listings = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | listings = Failure err }, Cmd.none, NoOut )
 
         ActivateListing listingId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
                     , Api.activateListing listingId token (ListingUpdated listingId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         DeactivateListing listingId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
                     , Api.deactivateListing listingId token (ListingUpdated listingId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         MarkSold listingId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
                     , Api.soldListing listingId token (ListingUpdated listingId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         ListingUpdated listingId result ->
             case result of
@@ -101,10 +114,15 @@ update msg model maybeToken =
                         , actionState = NotAsked
                       }
                     , Cmd.none
+                    , NoOut
                     )
 
-                Err _ ->
-                    ( { model | actionState = Failure Http.NetworkError }, Cmd.none )
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | actionState = Failure Http.NetworkError }, Cmd.none, NoOut )
 
 
 

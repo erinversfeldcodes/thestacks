@@ -9,6 +9,11 @@ const PIPELINE_TIMEOUT = 300_000;
 test.use({ storageState: suiteAuthFile("upload") });
 
 test.describe("Upload pipeline — barcode pre-pass", () => {
+  test.skip(
+    !!process.env.SKIP_VISION,
+    "Modal vision disabled to save credit (SKIP_VISION). Re-enable by unsetting SKIP_VISION — required when changing apps/vision or the upload→vision code path."
+  );
+
   test(
     "identifies The Name of the Rose from barcode_isbn_clean.jpg via local OCR",
     async ({ page }) => {

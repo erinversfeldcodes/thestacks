@@ -12,7 +12,21 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   import Swoosh.TestAssertions
   import Stacks.Factory
 
+  alias Stacks.Email
   alias Stacks.Workers.EmailDeliveryJob
+
+  # A user whose confirmation token has been persisted the way
+  # Accounts.register/1 does it (a signed Phoenix.Token). send_registration_
+  # confirmation/1 delivers this token; it no longer mints one.
+  defp user_with_confirmation_token do
+    user = insert(:user, email_confirmed: false)
+    token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+
+    {:ok, user} =
+      user |> Ecto.Changeset.change(%{email_confirmation_token: token}) |> Core.Repo.update()
+
+    user
+  end
 
   describe "perform/1 — notification preference gating" do
     test "delivers marketplace_sale when notify_marketplace is true" do
@@ -108,6 +122,57 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                })
 
       assert_email_sent(subject: "Your data export is ready — The Stacks")
+    end
+  end
+
+  # Punch #7 (Issue #124): enqueue shape + rate limiting. Emails are enqueued as
+  # EmailDeliveryJob rows by Stacks.Email; the enqueuer enforces a per-user
+  # (10/hr) and a global (100/hr) cap before writing any job. The confirmation
+  # job must always carry params.token so the worker can build the link.
+  describe "enqueue shape (Stacks.Email -> EmailDeliveryJob)" do
+    test "registration_confirmation enqueues a job whose args.params.token is present" do
+      user = user_with_confirmation_token()
+
+      assert {:ok, _user} = Email.send_registration_confirmation(user)
+
+      assert_enqueued(worker: EmailDeliveryJob, args: %{"user_id" => user.id})
+
+      [job] = all_enqueued(worker: EmailDeliveryJob)
+      assert job.args["template"] == "registration_confirmation"
+      assert is_binary(job.args["params"]["token"])
+      assert job.args["params"]["token"] != ""
+    end
+  end
+
+  describe "rate limiting" do
+    test "per-user limit: the 11th confirmation within the hour is rejected" do
+      user = user_with_confirmation_token()
+
+      # 10 successful enqueues fill the per-user hourly bucket.
+      for _ <- 1..10 do
+        assert {:ok, _user} = Email.send_registration_confirmation(user)
+      end
+
+      # The 11th is rate limited — no further job is enqueued for this user.
+      assert {:error, :rate_limited} = Email.send_registration_confirmation(user)
+
+      assert length(all_enqueued(worker: EmailDeliveryJob)) == 10
+    end
+
+    test "global limit: a fresh user is rejected once 100 emails are in-flight" do
+      # Saturate the global hourly bucket with jobs from other recipients.
+      for _ <- 1..100 do
+        EmailDeliveryJob.new(%{
+          "template" => "registration_confirmation",
+          "user_id" => Ecto.UUID.generate(),
+          "params" => %{"token" => "seed"}
+        })
+        |> Oban.insert!()
+      end
+
+      # A brand-new user (0 personal emails) is still blocked by the global cap.
+      fresh_user = insert(:user)
+      assert {:error, :rate_limited} = Email.send_registration_confirmation(fresh_user)
     end
   end
 

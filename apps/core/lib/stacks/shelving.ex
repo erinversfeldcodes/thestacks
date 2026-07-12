@@ -453,8 +453,9 @@ defmodule Stacks.Shelving do
   def get_user_placements_summary(user_id) do
     Placement
     |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
+    |> join(:inner, [p], b in Book, on: b.id == p.book_id)
     |> where([p], is_nil(p.removed_at))
-    |> select([p, bs], %{book_id: p.book_id, bookshelf_name: bs.name})
+    |> select([p, bs, b], %{book_id: p.book_id, bookshelf_name: bs.name, title: b.title})
     |> Repo.all()
   end
 

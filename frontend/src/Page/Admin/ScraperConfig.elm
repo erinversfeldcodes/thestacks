@@ -1,6 +1,7 @@
 module Page.Admin.ScraperConfig exposing
     ( Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -29,6 +30,11 @@ type Msg
     = SourceHealthReceived (Result Http.Error (List SourceHealth))
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
@@ -43,16 +49,20 @@ init maybeToken =
             ( { sourceHealth = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
         SourceHealthReceived result ->
             case result of
                 Ok sources ->
-                    ( { model | sourceHealth = Success sources }, Cmd.none )
+                    ( { model | sourceHealth = Success sources }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | sourceHealth = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | sourceHealth = Failure err }, Cmd.none, NoOut )
 
 
 

@@ -1,6 +1,7 @@
 module Page.Admin.SourceApproval exposing
     ( Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -47,6 +48,11 @@ type Msg
     | RejectCompleted String (Result Http.Error AdminSource)
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
@@ -61,50 +67,56 @@ init maybeToken =
     ( model, fetchSources model maybeToken )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SourcesReceived result ->
             case result of
                 Ok response ->
-                    ( { model | sources = Success response }, Cmd.none )
+                    ( { model | sources = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | sources = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | sources = Failure err }, Cmd.none, NoOut )
 
         SetStatusFilter filter ->
             let
                 newModel =
                     { model | statusFilter = filter, page = 1, sources = Loading }
             in
-            ( newModel, fetchSources newModel maybeToken )
+            ( newModel, fetchSources newModel maybeToken, NoOut )
 
         PageChanged newPage ->
             let
                 newModel =
                     { model | page = newPage, sources = Loading }
             in
-            ( newModel, fetchSources newModel maybeToken )
+            ( newModel, fetchSources newModel maybeToken, NoOut )
 
         ApproveClicked sourceId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionInProgress = Just sourceId }
                     , Api.approveSource sourceId token (ApproveCompleted sourceId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         RejectClicked sourceId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionInProgress = Just sourceId }
                     , Api.rejectSource sourceId token (RejectCompleted sourceId)
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         ApproveCompleted sourceId result ->
             handleActionResult model sourceId result
@@ -113,7 +125,7 @@ update msg model maybeToken =
             handleActionResult model sourceId result
 
 
-handleActionResult : Model -> String -> Result Http.Error AdminSource -> ( Model, Cmd Msg )
+handleActionResult : Model -> String -> Result Http.Error AdminSource -> ( Model, Cmd Msg, OutMsg )
 handleActionResult model sourceId result =
     case result of
         Ok updatedSource ->
@@ -138,10 +150,14 @@ handleActionResult model sourceId result =
                         other ->
                             other
             in
-            ( { model | sources = updatedSources, actionInProgress = Nothing, actionError = Nothing }, Cmd.none )
+            ( { model | sources = updatedSources, actionInProgress = Nothing, actionError = Nothing }, Cmd.none, NoOut )
 
-        Err _ ->
-            ( { model | actionInProgress = Nothing, actionError = Just "Action failed. Please try again." }, Cmd.none )
+        Err err ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | actionInProgress = Nothing, actionError = Just "Action failed. Please try again." }, Cmd.none, NoOut )
 
 
 fetchSources : Model -> Maybe String -> Cmd Msg

@@ -111,14 +111,14 @@ suite =
             [ test "Ok sets comments to Success" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (CommentsLoaded (Ok [ testComment ])) testModel Nothing
                     in
                     Expect.equal (Success [ testComment ]) model.comments
             , test "Err sets comments to Failure" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (CommentsLoaded (Err (Http.BadStatus 500))) testModel Nothing
                     in
                     case model.comments of
@@ -132,7 +132,7 @@ suite =
             [ test "updates commentDraft" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (CommentDraftChanged "hello") testModel Nothing
                     in
                     Expect.equal "hello" model.commentDraft
@@ -141,7 +141,7 @@ suite =
             [ test "sets replyDraft with parentId and empty body" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (ReplyClicked "parent-id") testModel Nothing
                     in
                     Expect.equal (Just { parentId = "parent-id", body = "" }) model.replyDraft
@@ -153,14 +153,14 @@ suite =
                         modelWithDraft =
                             { testModel | replyDraft = Just { parentId = "parent-id", body = "" } }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (ReplyDraftChanged "my reply") modelWithDraft Nothing
                     in
                     Expect.equal (Just { parentId = "parent-id", body = "my reply" }) model.replyDraft
             , test "does nothing when no draft exists" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (ReplyDraftChanged "my reply") testModel Nothing
                     in
                     Expect.equal Nothing model.replyDraft
@@ -172,7 +172,7 @@ suite =
                         submittingModel =
                             { testModel | commentSubmitting = True, commentDraft = "hello" }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (CommentSubmitted (Ok testComment)) submittingModel Nothing
                     in
                     Expect.all
@@ -187,7 +187,7 @@ suite =
                         submittingModel =
                             { testModel | commentSubmitting = True, commentDraft = "hello" }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update (CommentSubmitted (Err (Http.BadStatus 500))) submittingModel Nothing
                     in
                     Expect.all
@@ -200,7 +200,7 @@ suite =
             [ test "empty draft does not submit" <|
                 \_ ->
                     let
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update SubmitComment testModel (Just "token")
                     in
                     Expect.equal False model.commentSubmitting
@@ -210,7 +210,7 @@ suite =
                         draftModel =
                             { testModel | commentDraft = "hello" }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update SubmitComment draftModel (Just "token")
                     in
                     Expect.equal True model.commentSubmitting
@@ -220,7 +220,7 @@ suite =
                         draftModel =
                             { testModel | commentDraft = "hello" }
 
-                        ( model, _ ) =
+                        ( model, _, _ ) =
                             Post.update SubmitComment draftModel Nothing
                     in
                     Expect.equal False model.commentSubmitting

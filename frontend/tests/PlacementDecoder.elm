@@ -3,7 +3,18 @@ module PlacementDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Placement exposing (Format(..), ReadingStatus(..), placementDecoder)
+import Types.Placement exposing (Format(..), ReadingStatus(..), placementDecoder, placementSummaryDecoder)
+
+
+summaryJson : String
+summaryJson =
+    """
+    {
+        "book_id": "bk-1",
+        "bookshelf_name": "library",
+        "title": "The Bell Jar"
+    }
+    """
 
 
 minimalPlacementJson : String
@@ -207,4 +218,23 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , describe "placementSummaryDecoder (GET /api/placements/mine)"
+            [ test "builds a stub book carrying the real book_id + title" <|
+                \_ ->
+                    case Decode.decodeString placementSummaryDecoder summaryJson of
+                        Ok placement ->
+                            Expect.all
+                                [ \p ->
+                                    Expect.equal (Just "bk-1")
+                                        (p.book |> Maybe.map .id)
+                                , \p ->
+                                    Expect.equal (Just "The Bell Jar")
+                                        (p.book |> Maybe.map .title)
+                                , \p -> Expect.equal (Just "library") p.bookshelfName
+                                ]
+                                placement
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            ]
         ]

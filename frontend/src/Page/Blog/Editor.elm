@@ -1,7 +1,8 @@
 module Page.Blog.Editor exposing
     ( Mode(..)
     , Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -43,6 +44,11 @@ type Msg
     | PostLoaded (Result Http.Error BlogPost)
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Mode -> Maybe String -> ( Model, Cmd Msg )
 init mode maybeToken =
     let
@@ -74,14 +80,14 @@ init mode maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetTitle val ->
-            ( { model | title = val, saving = NotAsked }, Cmd.none )
+            ( { model | title = val, saving = NotAsked }, Cmd.none, NoOut )
 
         SetBody val ->
-            ( { model | body = val, saving = NotAsked }, Cmd.none )
+            ( { model | body = val, saving = NotAsked }, Cmd.none, NoOut )
 
         SetVisibility val ->
             let
@@ -96,7 +102,7 @@ update msg model maybeToken =
                         _ ->
                             Owner
             in
-            ( { model | visibility = vis, saving = NotAsked }, Cmd.none )
+            ( { model | visibility = vis, saving = NotAsked }, Cmd.none, NoOut )
 
         SaveDraft ->
             case maybeToken of
@@ -116,10 +122,10 @@ update msg model maybeToken =
                                 Edit postId ->
                                     Api.updateBlogPost postId postData token SaveCompleted
                     in
-                    ( { model | saving = Loading }, cmd )
+                    ( { model | saving = Loading }, cmd, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         Publish ->
             case maybeToken of
@@ -136,16 +142,18 @@ update msg model maybeToken =
                             -- Save first, then publish on SaveCompleted
                             ( { model | publishing = Loading, saving = Loading }
                             , Api.updateBlogPost postId postData token SaveCompleted
+                            , NoOut
                             )
 
                         New ->
                             -- Create first, then publish on SaveCompleted
                             ( { model | publishing = Loading, saving = Loading }
                             , Api.createBlogPost postData token SaveCompleted
+                            , NoOut
                             )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
@@ -181,18 +189,27 @@ update msg model maybeToken =
                     in
                     ( { model | saving = Success (), mode = newMode }
                     , publishCmd
+                    , NoOut
                     )
 
                 Err err ->
-                    ( { model | saving = Failure err, publishing = NotAsked }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | saving = Failure err, publishing = NotAsked }, Cmd.none, NoOut )
 
         PublishCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | publishing = Success () }, Cmd.none )
+                    ( { model | publishing = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | publishing = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | publishing = Failure err }, Cmd.none, NoOut )
 
         PostLoaded result ->
             case result of
@@ -204,10 +221,15 @@ update msg model maybeToken =
                         , loading = Success ()
                       }
                     , Cmd.none
+                    , NoOut
                     )
 
                 Err err ->
-                    ( { model | loading = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | loading = Failure err }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

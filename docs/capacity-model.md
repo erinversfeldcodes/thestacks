@@ -67,6 +67,15 @@ Latency targets are P50/P95/P99 at the Phoenix controller level (not including n
 | `GET /api/metrics` | 50ms | 200ms | 500ms | Reads from pre-computed dbt mart. Cacheable. |
 | `GET /feed/:bookshelf` | 30ms | 100ms | 200ms | RSS feed generation from shelf data. |
 
+**Note — authenticated-request overhead (Issue #124, ADR 016):** every
+authenticated request now includes one PK-indexed `SELECT` on `op.guardian_tokens`
+(`guardian_db` `on_verify`) as part of JWT verification, and every login adds one
+INSERT to the same table. This DB round-trip is now on the auth hot path (auth is
+no longer purely CPU-bound signature checking) and must be validated against the
+latency/throughput targets above — in particular `auth_p95_ms ≤ 500` and the
+per-endpoint P95 budgets, since the `SELECT` applies to *all* authenticated
+endpoints, not just the auth routes.
+
 ### Vision-related (dominated by Modal cold start)
 
 | Endpoint | P50 | P95 | P99 | Notes |

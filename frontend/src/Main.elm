@@ -1,4 +1,19 @@
-port module Main exposing (main)
+port module Main exposing
+    ( Auth
+    , ExternalAuthOutcome(..)
+    , LoginEffect(..)
+    , PendingLogout
+    , StoredAuthResolution(..)
+    , adoptExternalAuth
+    , decodeFlags
+    , loginEffects
+    , main
+    , parkPending
+    , renewAuthToken
+    , resolveRecheck
+    , shouldShowOnboarding
+    , viewNav
+    )
 
 import Animation.RoomTransition as RoomTransition
 import Animation.SlideTransition as SlideTransition
@@ -45,6 +60,7 @@ import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
 import Page.Settings.Profile as Profile
 import Page.Upload as Upload
+import Process
 import Task
 import Types.Placement
 import Types.RemoteData
@@ -77,6 +93,43 @@ port openUploadStream : { url : String } -> Cmd msg
 
 
 port uploadStreamEvent : (String -> msg) -> Sub msg
+
+
+{-| Persist / clear / request an in-progress marketplace listing draft in
+localStorage (Issue #182). `saveListingDraft` is fired when a session expires
+mid-compose; `requestListingDraft` is fired when the create page is (re)built and
+its answer arrives on `gotListingDraft` (the parsed value, or `null` when absent).
+-}
+port saveListingDraft : Json.Encode.Value -> Cmd msg
+
+
+port clearListingDraft : () -> Cmd msg
+
+
+port requestListingDraft : () -> Cmd msg
+
+
+port gotListingDraft : (Decode.Value -> msg) -> Sub msg
+
+
+{-| Cross-tab token propagation (Issue #180 Phase 2). Fires when ANOTHER tab
+writes `stacks-auth` in localStorage: `saveAuth` (a sibling tab just rotated its
+token → the raw new JSON string) or `clearAuth` (a sibling logged out → `null`).
+The writing tab never receives its own event, so there is no feedback loop. The
+payload is the raw string / `null`; it is decoded in Elm via `adoptExternalAuth`.
+-}
+port authChanged : (Decode.Value -> msg) -> Sub msg
+
+
+{-| Belt-and-suspenders re-check net (Issue #180 Phase 2). Asks JS to read the
+CURRENT `stacks-auth` from localStorage; the answer arrives on `gotStoredAuth`.
+Fired just before a 401-driven session expiry so a token another tab refreshed
+can be adopted instead of logging everyone out.
+-}
+port requestStoredAuth : () -> Cmd msg
+
+
+port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -134,6 +187,35 @@ type alias Auth =
     }
 
 
+{-| A parked session-expiry intent (Issue #180 Phase 2). Raised when an
+authenticated 401 wants to log out; the actual clear+redirect is deferred one
+port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
+refreshed can be adopted first.
+
+  - `draftSaved` carries the marketplace-draft-saved notice (#182) across that
+    round-trip so it still shows on the login page.
+  - `fromRenewal` records whether the expiry originated from a CONSUMED proactive
+    renewal tick (a failed silent refresh). Only then does adopting a newer token
+    on re-check re-arm renewal — a page-origin 401 still has its renewal tick
+    armed, so re-arming there would spawn a duplicate timer (a refresh storm).
+
+-}
+type alias PendingLogout =
+    { draftSaved : Bool, fromRenewal : Bool }
+
+
+{-| Merge a new parked expiry with any intent already in flight (Issue #180
+Phase 2, P2). Both flags are STICKY (OR-ed): a later plain expiry must not erase
+a `draftSaved` reassurance a draft-expiry parked, and if any origin consumed a
+renewal tick the eventual adopt must still re-arm renewal. Pure + testable.
+-}
+parkPending : Bool -> Bool -> Maybe PendingLogout -> PendingLogout
+parkPending draftSaved fromRenewal existing =
+    { draftSaved = draftSaved || (existing |> Maybe.map .draftSaved |> Maybe.withDefault False)
+    , fromRenewal = fromRenewal || (existing |> Maybe.map .fromRenewal |> Maybe.withDefault False)
+    }
+
+
 type alias BookDetailOverlay =
     { bookId : String
     , detail : BookDetail.Model
@@ -155,6 +237,20 @@ type alias Model =
     , onboarding : OnboardingOverlay.Model
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
+
+    -- Raised by `sessionExpired`; consumed when the Login page is (re)built so the
+    -- global session-expiry notice survives the redirect's `UrlChanged`.
+    , sessionExpiredNotice : Bool
+
+    -- Raised alongside `sessionExpiredNotice` when the expiry happened while
+    -- composing a marketplace listing (Issue #182), so the login notice can
+    -- reassure the user their draft was saved.
+    , draftSavedNotice : Bool
+
+    -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
+    -- re-check-before-logout port round-trip is in flight, cleared when it
+    -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
+    , pendingLogout : Maybe PendingLogout
     }
 
 
@@ -183,6 +279,9 @@ init flags url key =
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
+      , sessionExpiredNotice = False
+      , draftSavedNotice = False
+      , pendingLogout = Nothing
       }
     , Cmd.batch
         [ cmd
@@ -191,6 +290,7 @@ init flags url key =
                 Cmd.batch
                     [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
                     , Api.getMyPlacements auth.token GotPlacementCheck
+                    , scheduleRenewal
                     ]
 
             Nothing ->
@@ -199,33 +299,38 @@ init flags url key =
     )
 
 
+{-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
+localStorage `stacks-auth`). Lifted to the top level so both `decodeFlags` (boot)
+and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
+-}
+authDecoder : Decode.Decoder Auth
+authDecoder =
+    Decode.map5
+        (\token userId email displayName role ->
+            { user =
+                { id = userId
+                , email = email
+                , displayName = displayName
+                , role = role
+                , countryCode = Nothing
+                , city = Nothing
+                }
+            , token = token
+            }
+        )
+        (Decode.field "token" Decode.string)
+        (Decode.field "userId" Decode.string)
+        (Decode.field "email" Decode.string)
+        (Decode.field "displayName" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "role" Decode.string
+            , Decode.succeed "user"
+            ]
+        )
+
+
 decodeFlags : Decode.Value -> Maybe Auth
 decodeFlags flags =
-    let
-        authDecoder =
-            Decode.map5
-                (\token userId email displayName role ->
-                    { user =
-                        { id = userId
-                        , email = email
-                        , displayName = displayName
-                        , role = role
-                        , countryCode = Nothing
-                        , city = Nothing
-                        }
-                    , token = token
-                    }
-                )
-                (Decode.field "token" Decode.string)
-                (Decode.field "userId" Decode.string)
-                (Decode.field "email" Decode.string)
-                (Decode.field "displayName" Decode.string)
-                (Decode.oneOf
-                    [ Decode.field "role" Decode.string
-                    , Decode.succeed "user"
-                    ]
-                )
-    in
     Decode.decodeValue authDecoder flags
         |> Result.toMaybe
 
@@ -415,7 +520,14 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                 ( model, cmd ) =
                     CreateListing.init maybeToken
             in
-            ( PageMarketplaceCreate model, Cmd.map CreateListingMsg cmd )
+            -- Ask JS for any persisted draft; the answer arrives on
+            -- `gotListingDraft` and is routed to CreateListing.DraftLoaded (#182).
+            ( PageMarketplaceCreate model
+            , Cmd.batch
+                [ Cmd.map CreateListingMsg cmd
+                , requestListingDraft ()
+                ]
+            )
 
         MarketplaceMyListings ->
             let
@@ -536,6 +648,261 @@ encodeAuth auth =
         ]
 
 
+{-| The single, central deferred session-expiry entry point (Issue #173 + #180
+Phase 2). EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
+failed silent renewal falls through here too — so the re-check net lives in ONE
+place, not scattered across the ~25 call sites.
+
+Rather than logging out immediately, it parks a `pendingLogout` intent and asks
+JS for the CURRENT stored auth (`requestStoredAuth`). The answer arrives on
+`gotStoredAuth`, where `adoptExternalAuth` decides: if another tab has stored a
+newer token, adopt it (cancel the logout); otherwise fall through to
+`forceSessionExpiry`. The round-trip is a single JS tick, so there is no visible
+flash. In-memory `auth` is intentionally left intact during the round-trip.
+
+-}
+handleSessionExpiry : Model -> ( Model, Cmd Msg )
+handleSessionExpiry model =
+    ( { model | pendingLogout = Just (parkPending False False model.pendingLogout) }
+    , requestStoredAuth ()
+    )
+
+
+{-| As `handleSessionExpiry`, but for a CONSUMED renewal tick (a failed silent
+refresh). `fromRenewal = True` so a re-check that adopts a newer token re-arms
+renewal — the proactive tick that would have kept the session alive is gone.
+-}
+handleSessionExpiryFromRenewal : Model -> ( Model, Cmd Msg )
+handleSessionExpiryFromRenewal model =
+    ( { model | pendingLogout = Just (parkPending False True model.pendingLogout) }
+    , requestStoredAuth ()
+    )
+
+
+{-| As `handleSessionExpiry`, but for the marketplace-compose expiry (#182): the
+in-progress draft is persisted immediately, and the parked intent remembers to
+raise the draft-saved notice if the round-trip does end in a logout.
+-}
+handleSessionExpiryWithDraft : Json.Encode.Value -> Model -> ( Model, Cmd Msg )
+handleSessionExpiryWithDraft draft model =
+    ( { model | pendingLogout = Just (parkPending True False model.pendingLogout) }
+    , Cmd.batch
+        [ saveListingDraft draft
+        , requestStoredAuth ()
+        ]
+    )
+
+
+{-| The actual, irreversible session-expiry path (Issue #173). Reached only after
+the re-check net (`handleSessionExpiry` → `gotStoredAuth`) confirms there is no
+newer token to adopt, or from a sibling-tab `clearAuth`. Mirrors sign-out: clears
+`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — raising
+`sessionExpiredNotice` (and `draftSavedNotice` when a draft was parked) so the
+login page shows an "expired" message distinct from invalid-credentials. The
+notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
+-}
+forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
+forceSessionExpiry draftSaved model =
+    ( { model
+        | auth = Nothing
+        , sessionExpiredNotice = True
+        , draftSavedNotice = model.draftSavedNotice || draftSaved
+        , userMenu = UserMenu.init
+        , bookDetailOverlay = Nothing
+        , pendingLogout = Nothing
+      }
+    , Cmd.batch
+        [ clearAuth ()
+        , Nav.pushUrl model.key (Route.toPath Login)
+        ]
+    )
+
+
+{-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
+for BOTH cross-tab propagation and the 401 re-check net.
+-}
+type ExternalAuthOutcome
+    = AdoptAuth Auth
+    | LogOutExternally
+    | IgnoreExternal
+
+
+{-| Pure, key-free decision for an externally-observed stored-auth value — a
+sibling tab's `storage` event (`AuthChangedExternally`) or the re-check response
+(`GotStoredAuth`). The port delivers the RAW localStorage payload: a JSON string
+(a `saveAuth` write), JSON `null` (a `clearAuth`), or something unexpected.
+
+  - a valid stored auth whose token DIFFERS from the in-memory token, while
+    authed → `AdoptAuth` the stored auth (new token, its user).
+  - the SAME token → `IgnoreExternal` (nothing changed; also the writer's own
+    echo defence).
+  - a valid stored auth while signed out → `IgnoreExternal` (a signed-out tab
+    does not spontaneously log in from a sibling).
+  - JSON `null` while authed → `LogOutExternally` (a sibling logged out).
+  - JSON `null` while signed out, or any garbage → `IgnoreExternal` (never crash
+    or log out on undecodable input).
+
+-}
+adoptExternalAuth : Decode.Value -> Maybe Auth -> ExternalAuthOutcome
+adoptExternalAuth value maybeAuth =
+    case Decode.decodeValue (Decode.nullable Decode.string) value of
+        Ok (Just raw) ->
+            case ( Decode.decodeString authDecoder raw, maybeAuth ) of
+                ( Ok incoming, Just current ) ->
+                    if incoming.token == current.token then
+                        IgnoreExternal
+
+                    else
+                        AdoptAuth incoming
+
+                ( Ok _, Nothing ) ->
+                    IgnoreExternal
+
+                ( Err _, _ ) ->
+                    IgnoreExternal
+
+        Ok Nothing ->
+            -- JSON null: a sibling `clearAuth`. Log this tab out too, but only if
+            -- it is currently authed (a signed-out tab has nothing to clear).
+            case maybeAuth of
+                Just _ ->
+                    LogOutExternally
+
+                Nothing ->
+                    IgnoreExternal
+
+        Err _ ->
+            -- Not a string and not null (unexpected shape): ignore, never log out.
+            IgnoreExternal
+
+
+{-| The resolution of a re-check (`gotStoredAuth`) answer against the parked
+intent (Issue #180 Phase 2). Pure, so the reschedule decision — opaque as a `Cmd`
+— is unit-testable.
+
+  - `ResolveAdopt auth reschedule` — adopt `auth`, cancel the logout; `reschedule`
+    is `True` only for a renewal-origin expiry (P1b: a page-origin 401 still has
+    its renewal tick armed, so re-arming would duplicate the timer).
+  - `ResolveForceLogout draftSaved` — nothing newer to adopt; proceed to logout.
+  - `ResolveNoop` — no parked intent (e.g. a cross-tab adopt already cancelled it,
+    P1a): a late answer must NOT log out.
+
+-}
+type StoredAuthResolution
+    = ResolveAdopt Auth Bool
+    | ResolveForceLogout Bool
+    | ResolveNoop
+
+
+{-| Decide what a re-check answer means, given the parked intent and the decoded
+outcome. See `StoredAuthResolution`. Pure and key-free.
+-}
+resolveRecheck : Maybe PendingLogout -> ExternalAuthOutcome -> StoredAuthResolution
+resolveRecheck maybePending outcome =
+    case maybePending of
+        Nothing ->
+            ResolveNoop
+
+        Just pending ->
+            case outcome of
+                AdoptAuth newAuth ->
+                    ResolveAdopt newAuth pending.fromRenewal
+
+                LogOutExternally ->
+                    ResolveForceLogout pending.draftSaved
+
+                IgnoreExternal ->
+                    ResolveForceLogout pending.draftSaved
+
+
+{-| Adopt a freshly-refreshed access token, keeping the same authenticated user.
+A token refresh only rotates the credential — identity, role, and location are
+unchanged — so the refresh response's user fields are ignored in favour of the
+current ones. Pure and key-free, so the renewal-success path is unit-testable.
+-}
+renewAuthToken : Api.AuthResponse -> Auth -> Auth
+renewAuthToken authResponse auth =
+    { auth | token = authResponse.token }
+
+
+{-| How long to wait after receiving an access token before silently renewing it.
+The access token TTL is 8h (server-side, Issue #124); we refresh comfortably
+before that so an active session never hits a hard 401. A single fixed delay is
+used rather than decoding the JWT `exp` claim (the token is opaque to the SPA).
+-}
+renewalDelayMs : Float
+renewalDelayMs =
+    7 * 60 * 60 * 1000
+
+
+{-| Schedule one proactive silent-renewal tick. Fired on every token receipt
+(stored-auth `init`, fresh login, and after each successful renewal) so renewal
+keeps rolling for the life of the session without a busy loop.
+-}
+scheduleRenewal : Cmd Msg
+scheduleRenewal =
+    Process.sleep renewalDelayMs
+        |> Task.perform (\_ -> RenewToken)
+
+
+{-| The side-effects a completed form login must fire.
+
+A stored-auth reload runs the placements + onboarding check in `init`; a fresh
+login must run the _same_ effects, otherwise `hasAnyPlacements` never leaves its
+optimistic init value (`True`) and the onboarding overlay can never appear for a
+brand-new, placement-free user. Exposed so tests can assert the fetch happens.
+
+-}
+type LoginEffect
+    = PersistAuth
+    | NavigateHome
+    | FetchPlacements
+    | InitOnboarding
+    | ScheduleRenewal
+
+
+{-| Effects performed when a login completes (form login, both the immediate and
+post-transition paths). Mirrors what `init` does for a stored auth.
+-}
+loginEffects : List LoginEffect
+loginEffects =
+    [ PersistAuth
+    , NavigateHome
+    , FetchPlacements
+    , InitOnboarding
+    , ScheduleRenewal
+    ]
+
+
+{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+-}
+loginEffectCmd : Nav.Key -> Auth -> LoginEffect -> Cmd Msg
+loginEffectCmd key auth effect =
+    case effect of
+        PersistAuth ->
+            saveAuth (encodeAuth auth)
+
+        NavigateHome ->
+            Nav.pushUrl key (Route.toPath AntiLibrary)
+
+        FetchPlacements ->
+            Api.getMyPlacements auth.token GotPlacementCheck
+
+        InitOnboarding ->
+            Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
+
+        ScheduleRenewal ->
+            scheduleRenewal
+
+
+{-| All commands a completed login must fire, given the base command already
+produced by the login sub-update.
+-}
+loginCompletionCmd : Nav.Key -> Auth -> Cmd Msg -> Cmd Msg
+loginCompletionCmd key auth baseCmd =
+    Cmd.batch (baseCmd :: List.map (loginEffectCmd key auth) loginEffects)
+
+
 
 -- UPDATE
 
@@ -582,6 +949,10 @@ type Msg
     | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
+    | RenewToken
+    | TokenRefreshed (Result Http.Error Api.AuthResponse)
+    | AuthChangedExternally Decode.Value
+    | GotStoredAuth Decode.Value
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -612,8 +983,22 @@ update msg model =
                 transition =
                     Just (transitionClass model.route newRoute)
 
-                ( page, cmd ) =
+                ( initialisedPage, cmd ) =
                     initPage newRoute model.auth (Just model.route)
+
+                -- Consume a pending session-expiry notice: when the redirect lands
+                -- on /login, build the Login page in its expired-notice state so the
+                -- message survives this `UrlChanged` re-init.
+                page =
+                    if newRoute == Login && model.sessionExpiredNotice then
+                        if model.draftSavedNotice then
+                            PageLogin Login.expiredDraftInit
+
+                        else
+                            PageLogin Login.expiredInit
+
+                    else
+                        initialisedPage
             in
             ( { model
                 | url = url
@@ -622,6 +1007,10 @@ update msg model =
                 , previousRoute = Just model.route
                 , transition = transition
                 , userMenu = UserMenu.init
+                , sessionExpiredNotice =
+                    model.sessionExpiredNotice && newRoute /= Login
+                , draftSavedNotice =
+                    model.draftSavedNotice && newRoute /= Login
               }
             , cmd
             )
@@ -669,8 +1058,14 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , loginCompletionCmd model.key auth baseCmd
                             )
+
+                        Login.RegistrationSucceeded _ ->
+                            -- Registration only sends a confirmation email; no JWT is
+                            -- issued and no navigation happens. The Login page has already
+                            -- switched itself to the pending state via its own model.
+                            ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
@@ -696,7 +1091,7 @@ update msg model =
                                         { id = ar.userId
                                         , email = ar.email
                                         , displayName = ar.displayName
-                                        , role = "user"
+                                        , role = ar.role
                                         , countryCode = Nothing
                                         , city = Nothing
                                         }
@@ -704,7 +1099,7 @@ update msg model =
                                     }
                             in
                             ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , Cmd.batch [ baseCmd, saveAuth (encodeAuth auth), Nav.pushUrl model.key (Route.toPath AntiLibrary) ]
+                            , loginCompletionCmd model.key auth baseCmd
                             )
 
                         _ ->
@@ -740,6 +1135,9 @@ update msg model =
                     case outMsg of
                         Bookshelf.NoOut ->
                             ( baseModel, baseCmd )
+
+                        Bookshelf.SessionExpired ->
+                            handleSessionExpiry model
 
                         Bookshelf.NavigateTo (BookDetail bookId) ->
                             let
@@ -778,6 +1176,9 @@ update msg model =
                         ReadingPile.NoOut ->
                             ( baseModel, baseCmd )
 
+                        ReadingPile.SessionExpired ->
+                            handleSessionExpiry model
+
                         ReadingPile.NavigateTo (BookDetail bookId) ->
                             let
                                 ( overlayModel, overlayCmd ) =
@@ -815,6 +1216,9 @@ update msg model =
                         LookingForHome.NoOut ->
                             ( baseModel, baseCmd )
 
+                        LookingForHome.SessionExpired ->
+                            handleSessionExpiry model
+
                         LookingForHome.NavigateTo (Route.BookDetail bookId) ->
                             openOverlay baseModel bookId
 
@@ -848,6 +1252,9 @@ update msg model =
                     case outMsg of
                         BookDetail.NoOut ->
                             ( baseModel, baseCmd )
+
+                        BookDetail.SessionExpired ->
+                            handleSessionExpiry model
 
                         BookDetail.RequestCloseOverlay ->
                             ( baseModel, baseCmd )
@@ -883,6 +1290,9 @@ update msg model =
                         Upload.NoOut ->
                             ( baseModel, baseCmd )
 
+                        Upload.SessionExpired ->
+                            handleSessionExpiry model
+
                         Upload.NavigateTo route ->
                             ( baseModel
                             , Cmd.batch
@@ -909,12 +1319,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Search.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSearch newSubModel }
-                    , Cmd.map SearchMsg subCmd
-                    )
+                    case outMsg of
+                        Search.NoOut ->
+                            ( { model | page = PageSearch newSubModel }
+                            , Cmd.map SearchMsg subCmd
+                            )
+
+                        Search.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -926,12 +1341,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Consent.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsConsent newSubModel }
-                    , Cmd.map ConsentMsg subCmd
-                    )
+                    case outMsg of
+                        Consent.NoOut ->
+                            ( { model | page = PageSettingsConsent newSubModel }
+                            , Cmd.map ConsentMsg subCmd
+                            )
+
+                        Consent.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -943,12 +1363,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AgeVerification.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsAgeVerification newSubModel }
-                    , Cmd.map AgeVerificationMsg subCmd
-                    )
+                    case outMsg of
+                        AgeVerification.NoOut ->
+                            ( { model | page = PageSettingsAgeVerification newSubModel }
+                            , Cmd.map AgeVerificationMsg subCmd
+                            )
+
+                        AgeVerification.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1025,12 +1450,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Catalogue.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageCatalogue newSubModel }
-                    , Cmd.map CatalogueMsg subCmd
-                    )
+                    case outMsg of
+                        Catalogue.NoOut ->
+                            ( { model | page = PageCatalogue newSubModel }
+                            , Cmd.map CatalogueMsg subCmd
+                            )
+
+                        Catalogue.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1056,8 +1486,11 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
+                        maybeUserId =
+                            Maybe.map (.user >> .id) model.auth
+
                         ( newSubModel, subCmd, outMsg ) =
-                            CreateListing.update subMsg subModel maybeToken
+                            CreateListing.update subMsg subModel maybeToken maybeUserId
 
                         baseModel =
                             { model | page = PageMarketplaceCreate newSubModel }
@@ -1068,6 +1501,24 @@ update msg model =
                     case outMsg of
                         CreateListing.NoOut ->
                             ( baseModel, baseCmd )
+
+                        CreateListing.SessionExpired ->
+                            handleSessionExpiry model
+
+                        CreateListing.SessionExpiredWithDraft draft ->
+                            -- Persist the draft and run the deferred expiry path,
+                            -- remembering (via the parked intent) to raise the
+                            -- draft-saved login notice IF the re-check ends in a
+                            -- logout (#182 + #180 Phase 2).
+                            handleSessionExpiryWithDraft draft model
+
+                        CreateListing.ClearDraft ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , clearListingDraft ()
+                                ]
+                            )
 
                         CreateListing.NavigateTo route ->
                             ( baseModel
@@ -1087,12 +1538,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             MyListings.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageMarketplaceMyListings newSubModel }
-                    , Cmd.map MyListingsMsg subCmd
-                    )
+                    case outMsg of
+                        MyListings.NoOut ->
+                            ( { model | page = PageMarketplaceMyListings newSubModel }
+                            , Cmd.map MyListingsMsg subCmd
+                            )
+
+                        MyListings.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1118,12 +1574,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Privacy.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsPrivacy newSubModel }
-                    , Cmd.map PrivacyMsg subCmd
-                    )
+                    case outMsg of
+                        Privacy.NoOut ->
+                            ( { model | page = PageSettingsPrivacy newSubModel }
+                            , Cmd.map PrivacyMsg subCmd
+                            )
+
+                        Privacy.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1149,12 +1610,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             BlogEditor.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageBlogEditor newSubModel }
-                    , Cmd.map BlogEditorMsg subCmd
-                    )
+                    case outMsg of
+                        BlogEditor.NoOut ->
+                            ( { model | page = PageBlogEditor newSubModel }
+                            , Cmd.map BlogEditorMsg subCmd
+                            )
+
+                        BlogEditor.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1166,12 +1632,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             BlogPostPage.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageBlogPost newSubModel }
-                    , Cmd.map BlogPostMsg subCmd
-                    )
+                    case outMsg of
+                        BlogPostPage.NoOut ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
+                        BlogPostPage.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1183,12 +1654,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token model.auth
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminSourceApproval.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageAdminSourceApproval newSubModel }
-                    , Cmd.map AdminSourceApprovalMsg subCmd
-                    )
+                    case outMsg of
+                        AdminSourceApproval.NoOut ->
+                            ( { model | page = PageAdminSourceApproval newSubModel }
+                            , Cmd.map AdminSourceApprovalMsg subCmd
+                            )
+
+                        AdminSourceApproval.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1197,12 +1673,17 @@ update msg model =
             case model.page of
                 PageAdminScraperConfig subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminScraperConfig.update subMsg subModel
                     in
-                    ( { model | page = PageAdminScraperConfig newSubModel }
-                    , Cmd.map AdminScraperConfigMsg subCmd
-                    )
+                    case outMsg of
+                        AdminScraperConfig.NoOut ->
+                            ( { model | page = PageAdminScraperConfig newSubModel }
+                            , Cmd.map AdminScraperConfigMsg subCmd
+                            )
+
+                        AdminScraperConfig.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1211,12 +1692,17 @@ update msg model =
             case model.page of
                 PageAdminMetrics subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             AdminMetrics.update subMsg subModel
                     in
-                    ( { model | page = PageAdminMetrics newSubModel }
-                    , Cmd.map AdminMetricsMsg subCmd
-                    )
+                    case outMsg of
+                        AdminMetrics.NoOut ->
+                            ( { model | page = PageAdminMetrics newSubModel }
+                            , Cmd.map AdminMetricsMsg subCmd
+                            )
+
+                        AdminMetrics.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1233,6 +1719,9 @@ update msg model =
                             ( { model | page = PageGroups newSubModel }
                             , Cmd.map GroupsMsg subCmd
                             )
+
+                        Groups.SessionExpired ->
+                            handleSessionExpiry model
 
                         Groups.NavigateTo route ->
                             ( { model | page = PageGroups newSubModel }
@@ -1257,6 +1746,9 @@ update msg model =
                             ( { model | page = PageGroupsDetail newSubModel }
                             , Cmd.map GroupsDetailMsg subCmd
                             )
+
+                        GroupsDetail.SessionExpired ->
+                            handleSessionExpiry model
 
                         GroupsDetail.NavigateTo route ->
                             ( { model | page = PageGroupsDetail newSubModel }
@@ -1306,6 +1798,9 @@ update msg model =
                             , Cmd.map OverlayBookDetailMsg subCmd
                             )
 
+                        BookDetail.SessionExpired ->
+                            handleSessionExpiry model
+
                 Nothing ->
                     ( model, Cmd.none )
 
@@ -1337,6 +1832,12 @@ update msg model =
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
+
+                        -- Defense-in-depth (#182): a deliberate sign-out also
+                        -- wipes any persisted listing draft (it carries PII).
+                        -- NB: the session-expiry path deliberately does NOT do
+                        -- this — it must preserve the draft across the redirect.
+                        , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
@@ -1411,7 +1912,93 @@ update msg model =
                 Ok placements ->
                     ( { model | hasAnyPlacements = not (List.isEmpty placements) }, Cmd.none )
 
-                Err _ ->
+                Err err ->
+                    if Api.isUnauthorized err then
+                        handleSessionExpiry model
+
+                    else
+                        ( model, Cmd.none )
+
+        RenewToken ->
+            -- Proactive silent renewal tick. Only meaningful while authenticated;
+            -- a signed-out session simply drops the tick.
+            case model.auth of
+                Just auth ->
+                    ( model, Api.refresh auth.token TokenRefreshed )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        TokenRefreshed (Ok authResponse) ->
+            -- Renewal succeeded: adopt the fresh token (keeping the same user),
+            -- persist it, and roll the next renewal. No navigation, no logout.
+            case model.auth of
+                Just auth ->
+                    let
+                        renewedAuth =
+                            renewAuthToken authResponse auth
+                    in
+                    ( { model | auth = Just renewedAuth }
+                    , Cmd.batch [ saveAuth (encodeAuth renewedAuth), scheduleRenewal ]
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        TokenRefreshed (Err _) ->
+            -- Renewal failed (token already expired/revoked, or the service is
+            -- down): fall through to the session-expiry path, tagged as
+            -- renewal-origin so a re-check adopt re-arms the consumed tick (P1b).
+            handleSessionExpiryFromRenewal model
+
+        AuthChangedExternally value ->
+            -- A sibling tab wrote `stacks-auth` (Issue #180 Phase 2).
+            case adoptExternalAuth value model.auth of
+                AdoptAuth newAuth ->
+                    -- Adopt the token another tab rotated in. No `saveAuth` (that
+                    -- tab already persisted it) and NO reschedule: this tab still
+                    -- has its own renewal tick armed, so re-arming here would let
+                    -- every rotation spawn an extra timer per tab (a growing
+                    -- refresh storm — exactly what #180 fights).
+                    --
+                    -- P1a: adopting a VALID token also cancels any parked expiry —
+                    -- otherwise an in-flight `gotStoredAuth` (whose stored value now
+                    -- equals this adopted token → IgnoreExternal) would force a
+                    -- logout on a tab that just adopted a live credential.
+                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    , Cmd.none
+                    )
+
+                LogOutExternally ->
+                    -- A sibling `clearAuth`: a logout in one tab logs out all.
+                    forceSessionExpiry False model
+
+                IgnoreExternal ->
+                    ( model, Cmd.none )
+
+        GotStoredAuth value ->
+            -- The re-check-before-logout answer (Issue #180 Phase 2). The pure
+            -- resolver folds in the parked intent (origin + draft flags); a stray
+            -- answer with no parked intent is a no-op (P1a).
+            case resolveRecheck model.pendingLogout (adoptExternalAuth value model.auth) of
+                ResolveAdopt newAuth reschedule ->
+                    -- localStorage holds a newer token than the one that 401'd —
+                    -- adopt it and cancel the logout. Re-arm renewal ONLY for a
+                    -- renewal-origin expiry, whose proactive tick was consumed (P1b).
+                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    , if reschedule then
+                        scheduleRenewal
+
+                      else
+                        Cmd.none
+                    )
+
+                ResolveForceLogout draftSaved ->
+                    -- Nothing newer stored (same token / cleared / garbage):
+                    -- proceed to the real logout, carrying the draft notice.
+                    forceSessionExpiry draftSaved model
+
+                ResolveNoop ->
                     ( model, Cmd.none )
 
         SwipeReceived direction ->
@@ -1484,6 +2071,8 @@ subscriptions model =
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
         , onOnboardingStatus OnboardingStatusReceived
+        , authChanged AuthChangedExternally
+        , gotStoredAuth GotStoredAuth
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
@@ -1506,6 +2095,9 @@ subscriptions model =
                             _ ->
                                 UploadMsg (Upload.StreamEvent raw)
                     )
+
+            PageMarketplaceCreate _ ->
+                gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
 
             _ ->
                 Sub.none
@@ -1535,7 +2127,7 @@ view model =
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
-            , viewNav model
+            , viewNav model.route model.auth model.userMenu
             , main_
                 [ id "main-content"
                 , class
@@ -1665,8 +2257,8 @@ pageTitle route =
             "Not Found — The Stacks"
 
 
-viewNav : Model -> Html Msg
-viewNav model =
+viewNav : Route -> Maybe Auth -> UserMenu.Model -> Html Msg
+viewNav route maybeAuth userMenu =
     header [ class "app-header" ]
         [ div [ class "app-header__brand app-nav__dropdown" ]
             [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
@@ -1679,33 +2271,33 @@ viewNav model =
             ]
         , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
-                (case model.auth of
+                (case maybeAuth of
                     Nothing ->
-                        [ navItem model.route Catalogue "Catalogue"
-                        , navItem model.route MarketplaceBrowse "Marketplace"
-                        , navItem model.route Login "Sign In"
+                        [ navItem route Catalogue "Catalogue"
+                        , navItem route MarketplaceBrowse "Marketplace"
+                        , navItem route Login "Sign In"
                         ]
 
                     Just auth ->
-                        [ navItem model.route Library "Library"
-                        , navItem model.route AntiLibrary "Antilibrary"
-                        , navItem model.route WishList "Wish List"
-                        , navItem model.route ReadingPile "Reading Pile"
-                        , navItem model.route LookingForHome "Looking for a Home"
-                        , navDropdown model.route
+                        [ navItem route Library "Library"
+                        , navItem route AntiLibrary "Antilibrary"
+                        , navItem route WishList "Wish List"
+                        , navItem route ReadingPile "Reading Pile"
+                        , navItem route LookingForHome "Looking for a Home"
+                        , navDropdown route
                             Catalogue
                             "Catalogue"
                             [ ( Search, "Search" )
                             , ( Upload, "Add Book" )
                             ]
-                        , navDropdown model.route
+                        , navDropdown route
                             MarketplaceBrowse
                             "Marketplace"
                             [ ( MarketplaceCreate, "Create Listing" )
                             , ( MarketplaceMyListings, "My Listings" )
                             ]
                         , if auth.user.role == "owner" then
-                            navDropdown model.route
+                            navDropdown route
                                 Route.AdminMetrics
                                 "Admin"
                                 [ ( Route.AdminSourceApproval, "Sources" )
@@ -1716,7 +2308,7 @@ viewNav model =
                             text ""
                         , li
                             [ class
-                                (if isSettingsRoute model.route then
+                                (if isSettingsRoute route then
                                     "app-nav__item app-nav__item--active app-nav__dropdown"
 
                                  else
@@ -1724,7 +2316,7 @@ viewNav model =
                                 )
                             ]
                             [ Html.map UserMenuMsg
-                                (UserMenu.view auth.user model.userMenu)
+                                (UserMenu.view auth.user userMenu)
                             ]
                         ]
                 )
@@ -1900,21 +2492,29 @@ viewOverlay model =
             text ""
 
 
+{-| The onboarding overlay is shown for an authenticated user who has not yet
+completed onboarding and has no placements on any bookshelf.
+-}
+shouldShowOnboarding : Maybe Auth -> Bool -> Bool -> Bool
+shouldShowOnboarding maybeAuth onboardingCompleted hasAnyPlacements =
+    case maybeAuth of
+        Just _ ->
+            not onboardingCompleted && not hasAnyPlacements
+
+        Nothing ->
+            False
+
+
 {-| Show onboarding overlay for authenticated users with no placements
 who haven't completed onboarding yet.
 -}
 viewOnboarding : Model -> Html Msg
 viewOnboarding model =
-    case model.auth of
-        Just _ ->
-            if not model.onboardingCompleted && not model.hasAnyPlacements then
-                Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+    if shouldShowOnboarding model.auth model.onboardingCompleted model.hasAnyPlacements then
+        Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
 
-            else
-                text ""
-
-        Nothing ->
-            text ""
+    else
+        text ""
 
 
 viewHome : Html Msg

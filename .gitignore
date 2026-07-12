@@ -101,3 +101,6 @@ apps/core/priv/static/textures/
 apps/core/priv/static/css/
 apps/core/priv/static/cache_manifest.json
 apps/core/assets/node_modules/
+
+# Local, uncommitted working notes
+notes/
