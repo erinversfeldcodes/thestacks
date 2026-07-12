@@ -28,23 +28,25 @@ defmodule Stacks.Email do
   @spec send_registration_confirmation(User.t()) :: {:ok, User.t()} | {:error, term()}
   def send_registration_confirmation(user) do
     with :ok <- check_rate_limit(user.id) do
-      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+      # The confirmation token is generated + persisted synchronously by
+      # Accounts.register/1 (a signed Phoenix.Token). This handler runs
+      # asynchronously (Oban), so it must NOT regenerate/overwrite the token:
+      # overwriting would invalidate a token already read for this user and
+      # reintroduce the register↔handler race. We only DELIVER the persisted token.
+      case user.email_confirmation_token do
+        token when is_binary(token) ->
+          EmailDeliveryJob.new(%{
+            "template" => "registration_confirmation",
+            "user_id" => user.id,
+            "params" => %{"token" => token}
+          })
+          |> Oban.insert!()
 
-      Repo.transaction(fn ->
-        user =
-          user
-          |> Accounts.email_confirmation_changeset(%{email_confirmation_token: token})
-          |> Repo.update!()
+          {:ok, user}
 
-        EmailDeliveryJob.new(%{
-          "template" => "registration_confirmation",
-          "user_id" => user.id,
-          "params" => %{"token" => token}
-        })
-        |> Oban.insert!()
-
-        user
-      end)
+        _ ->
+          {:error, :missing_confirmation_token}
+      end
     end
   end
 

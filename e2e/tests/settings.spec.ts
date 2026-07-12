@@ -5,8 +5,6 @@ import {
   uniqueEmail,
   registerViaApi,
   fetchConfirmationToken,
-  signInViaForm,
-  apiCallFromPage,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -260,18 +258,18 @@ test.describe("Settings — Profile & Account API", () => {
  * the shared suite token is never touched.
  */
 test.describe("Settings — Password change (isolated)", () => {
-  // Start unauthenticated: do NOT load the shared settings storageState here, so
-  // signInViaForm drives a clean login as the throwaway user.
+  // Purely API-level (request fixture only): no shared storageState, no UI login.
+  // Auth is carried by an explicit Authorization header on this user's own JWT.
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test("PUT /api/settings/password changes password with correct current password", async ({
-    page,
     request,
   }) => {
-    // Mint a fresh, confirmed throwaway user so a successful change only revokes
-    // this user's own session — never the shared suite token.
+    // Mint a fresh throwaway user so a successful change revokes ONLY this user's
+    // own session, never the shared suite token.
     const email = uniqueEmail("e2e-settings-pw");
     const reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+    test.skip(reg.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
     expect(reg.ok()).toBeTruthy();
 
     const token = await fetchConfirmationToken(request, email);
@@ -279,21 +277,25 @@ test.describe("Settings — Password change (isolated)", () => {
       token === null,
       "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
     );
-    const confirm = await request.get(`/api/auth/confirm/${token}`);
-    expect(confirm.ok()).toBeTruthy();
+    await request.get(`/api/auth/confirm/${token}`);
 
-    await signInViaForm(page, email, E2E_PASSWORD);
-
-    // Argon2 (verify + hash) uses ~128 MB total. On the small Fly preview machine
-    // concurrent requests can OOM and return 502 — a capacity limit, not an endpoint
-    // bug. Skip gracefully so this never hard-fails the chromium project. Tracked
-    // in Issue #166 (NimblePool fix).
-    const { status } = await apiCallFromPage(page, "PUT", "/api/settings/password", {
-      current_password: E2E_PASSWORD,
-      new_password: E2E_PASSWORD,
+    // Log in via the API to obtain THIS user's own JWT. Skip only on 502 — a
+    // genuine Argon2 OOM capacity flake on the small preview machine (Issue #166).
+    // A 403 here would mean the just-confirmed throwaway user is still unconfirmed
+    // (an email-confirm regression) — that must FAIL loudly, not skip.
+    const login = await request.post("/api/auth/login", {
+      data: { email, password: E2E_PASSWORD },
     });
-    test.skip(status === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(status).toBe(200);
+    test.skip(login.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
+    expect(login.ok()).toBeTruthy();
+    const authToken = (await login.json()).token as string;
+
+    const resp = await request.put("/api/settings/password", {
+      headers: { Authorization: `Bearer ${authToken}` },
+      data: { current_password: E2E_PASSWORD, new_password: E2E_PASSWORD },
+    });
+    test.skip(resp.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
+    expect(resp.status()).toBe(200);
   });
 });
 

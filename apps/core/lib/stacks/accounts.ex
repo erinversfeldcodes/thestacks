@@ -200,8 +200,15 @@ defmodule Stacks.Accounts do
     Multi.new()
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
-      token =
-        Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+      # Generate the FINAL, verifiable confirmation token synchronously so it is
+      # stable the moment registration commits. It is a Phoenix.Token signed with
+      # the "email_confirm" salt to match Stacks.Email.confirm_email/1's verify;
+      # the async EmailConfirmationHandler only DELIVERS this token, it never
+      # regenerates it. Previously this stored a raw random token that the handler
+      # later overwrote with a Phoenix.Token — a register↔handler race where a
+      # token read before the handler ran (E2E helper, or a fast client) failed
+      # verification and redirected to /confirm-email/error.
+      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
 
       user
       |> email_confirmation_changeset(%{
