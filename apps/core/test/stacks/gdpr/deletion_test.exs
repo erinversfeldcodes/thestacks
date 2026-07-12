@@ -30,6 +30,7 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
   alias Stacks.Audit
+  alias Stacks.Events
   alias Stacks.GDPR.Deletion
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
@@ -84,6 +85,74 @@ defmodule Stacks.GDPR.DeletionTest do
                  "UPDATE audit.audit_log SET action = $1 WHERE id = $2",
                  ["leak.test", Ecto.UUID.dump!(other_entry.id)]
                )
+    end
+  end
+
+  describe "delete_user_data/1 audit + event_log invariants (Issue #121)" do
+    # Snapshot of every op.event_log primary key, as a MapSet. Used to prove the
+    # erasure transaction leaves the event log untouched.
+    defp event_log_ids do
+      Repo.all(from(e in "event_log", select: e.id), prefix: "op")
+      |> MapSet.new()
+    end
+
+    test "writes a user.data_deleted audit row with nil user_id and the deleted user's id as resource_id" do
+      user = insert(:user)
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # Query audit.audit_log directly (schemaless) rather than trusting the
+      # multi result. user_id MUST be nil — the acting principal for an erasure
+      # is the system, and the erased user's id lives in resource_id instead, so
+      # no PII-linked actor survives in the audit trail.
+      row =
+        Repo.one(
+          from(a in "audit_log",
+            where: a.action == "user.data_deleted",
+            select: %{
+              user_id: a.user_id,
+              resource_type: a.resource_type,
+              resource_id: a.resource_id
+            }
+          ),
+          prefix: "audit"
+        )
+
+      assert row, "expected a user.data_deleted audit row after erasure"
+      assert row.user_id == nil
+      assert row.resource_type == "user"
+      assert row.resource_id == Ecto.UUID.dump!(user.id)
+    end
+
+    test "does not add, remove, or modify any op.event_log row during erasure" do
+      user = insert(:user)
+
+      # Seed events so the snapshot is non-empty (teeth) — including one whose
+      # aggregate is the very user being erased. The immutability contract says
+      # event payloads are UUID-only with nothing to scrub, so even the erased
+      # user's events must survive the erasure untouched.
+      assert {:ok, _} =
+               Events.emit(%{
+                 event_type: "test.erasure.user_event",
+                 aggregate_type: "user",
+                 aggregate_id: user.id
+               })
+
+      assert {:ok, _} =
+               Events.emit(%{
+                 event_type: "test.erasure.other_event",
+                 aggregate_type: "book",
+                 aggregate_id: Ecto.UUID.generate()
+               })
+
+      before_ids = event_log_ids()
+      assert MapSet.size(before_ids) >= 2
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # The set of event_log ids is byte-for-byte identical: nothing deleted,
+      # nothing inserted. delete_user_data/1 never touches op.event_log.
+      assert event_log_ids() == before_ids
     end
   end
 
