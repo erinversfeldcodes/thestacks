@@ -8,7 +8,13 @@ defmodule Stacks.Notifications.EmailConfirmationHandlerTest do
 
   describe "handle_event/1" do
     test "enqueues EmailDeliveryJob on user.registered" do
+      # The handler delivers the token Accounts.register/1 persisted; mirror that
+      # post-registration state by persisting a signed token first.
       user = insert(:user, email_confirmed: false)
+      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+
+      {:ok, user} =
+        user |> Ecto.Changeset.change(%{email_confirmation_token: token}) |> Core.Repo.update()
 
       assert :ok =
                EmailConfirmationHandler.handle_event(%{

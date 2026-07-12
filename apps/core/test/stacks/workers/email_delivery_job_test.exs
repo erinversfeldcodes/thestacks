@@ -15,6 +15,19 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   alias Stacks.Email
   alias Stacks.Workers.EmailDeliveryJob
 
+  # A user whose confirmation token has been persisted the way
+  # Accounts.register/1 does it (a signed Phoenix.Token). send_registration_
+  # confirmation/1 delivers this token; it no longer mints one.
+  defp user_with_confirmation_token do
+    user = insert(:user, email_confirmed: false)
+    token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+
+    {:ok, user} =
+      user |> Ecto.Changeset.change(%{email_confirmation_token: token}) |> Core.Repo.update()
+
+    user
+  end
+
   describe "perform/1 — notification preference gating" do
     test "delivers marketplace_sale when notify_marketplace is true" do
       user = insert(:user, notify_marketplace: true)
@@ -118,7 +131,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   # job must always carry params.token so the worker can build the link.
   describe "enqueue shape (Stacks.Email -> EmailDeliveryJob)" do
     test "registration_confirmation enqueues a job whose args.params.token is present" do
-      user = insert(:user)
+      user = user_with_confirmation_token()
 
       assert {:ok, _user} = Email.send_registration_confirmation(user)
 
@@ -133,7 +146,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   describe "rate limiting" do
     test "per-user limit: the 11th confirmation within the hour is rejected" do
-      user = insert(:user)
+      user = user_with_confirmation_token()
 
       # 10 successful enqueues fill the per-user hourly bucket.
       for _ <- 1..10 do
