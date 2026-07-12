@@ -1,5 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile, E2E_PASSWORD } from "./helpers";
+import {
+  suiteAuthFile,
+  E2E_PASSWORD,
+  uniqueEmail,
+  registerViaApi,
+  fetchConfirmationToken,
+  signInViaForm,
+  apiCallFromPage,
+} from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
 
@@ -156,20 +164,11 @@ test.describe("Settings — Profile & Account API", () => {
     expect(status).toBe(200);
   });
 
-  test("PUT /api/settings/password changes password with correct current password", async ({
-    page,
-  }) => {
-    // Argon2 (verify + hash) uses ~128 MB total. On the small Fly preview machine
-    // concurrent requests can OOM and return 502 — a capacity limit, not an endpoint
-    // bug. Skip gracefully so this never hard-fails the chromium project and blocks
-    // the upload suite. Tracked in Issue #166 (NimblePool fix).
-    const { status } = await apiCall(page, "PUT", "/api/settings/password", {
-      current_password: E2E_PASSWORD,
-      new_password: E2E_PASSWORD,
-    });
-    test.skip(status === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(status).toBe(200);
-  });
+  // NOTE: the happy-path "changes password with correct current password" test
+  // lives in its OWN isolated describe below. A successful change revokes ALL of
+  // the user's sessions, which would kill the shared suite token this describe
+  // relies on. The wrong-password / short-password cases below FAIL the change,
+  // so they never revoke — they can safely keep sharing the suite token.
 
   test("PUT /api/settings/password rejects wrong current password", async ({
     page,
@@ -241,6 +240,60 @@ test.describe("Settings — Profile & Account API", () => {
     for (const result of unauthResults) {
       expect(result.status, `${result.path} should require auth`).toBe(401);
     }
+  });
+});
+
+/**
+ * Password-change happy path — ISOLATED from the shared suite token.
+ *
+ * A SUCCESSFUL password change calls Accounts.revoke_all_user_sessions/1
+ * (Issue #178/#179/#180 — correct security behaviour: changing your password
+ * invalidates every existing session). If this test used the shared
+ * `suiteAuthFile("settings")` token, that revocation would destroy the token
+ * for EVERY other settings test. Under `fullyParallel: true` the tests race, so
+ * reordering can't protect them — any test that reuses the revoked token gets a
+ * spurious 401 (observed: "rejects wrong current password", "rejects short
+ * password", "profile_visibility updates" all 401'd after this test ran).
+ *
+ * So this test mints its OWN throwaway user (register → confirm → sign in) and
+ * changes THAT user's password. The revocation only burns the throwaway token;
+ * the shared suite token is never touched.
+ */
+test.describe("Settings — Password change (isolated)", () => {
+  // Start unauthenticated: do NOT load the shared settings storageState here, so
+  // signInViaForm drives a clean login as the throwaway user.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("PUT /api/settings/password changes password with correct current password", async ({
+    page,
+    request,
+  }) => {
+    // Mint a fresh, confirmed throwaway user so a successful change only revokes
+    // this user's own session — never the shared suite token.
+    const email = uniqueEmail("e2e-settings-pw");
+    const reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+    expect(reg.ok()).toBeTruthy();
+
+    const token = await fetchConfirmationToken(request, email);
+    test.skip(
+      token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    const confirm = await request.get(`/api/auth/confirm/${token}`);
+    expect(confirm.ok()).toBeTruthy();
+
+    await signInViaForm(page, email, E2E_PASSWORD);
+
+    // Argon2 (verify + hash) uses ~128 MB total. On the small Fly preview machine
+    // concurrent requests can OOM and return 502 — a capacity limit, not an endpoint
+    // bug. Skip gracefully so this never hard-fails the chromium project. Tracked
+    // in Issue #166 (NimblePool fix).
+    const { status } = await apiCallFromPage(page, "PUT", "/api/settings/password", {
+      current_password: E2E_PASSWORD,
+      new_password: E2E_PASSWORD,
+    });
+    test.skip(status === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
+    expect(status).toBe(200);
   });
 });
 

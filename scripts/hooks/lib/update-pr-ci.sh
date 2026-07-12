@@ -16,12 +16,26 @@ _parse_ci_output() {
     local table
     table="| Check | Status |"$'\n'"| --- | --- |"
 
+    # NB: split with case/parameter-expansion rather than `[[ =~ ]]` +
+    # BASH_REMATCH. This function is `source`d and may run under the caller's
+    # interactive shell — under zsh, `=~` populates $match, NOT BASH_REMATCH, so
+    # the capture came back empty and the check-name column rendered blank
+    # (see PR #211). case globs + `${line#PASS}` work identically in bash 3.2,
+    # bash 5, and zsh.
+    local name
     while IFS= read -r line; do
-        if [[ "$line" =~ ^PASS[[:space:]]+(.*) ]]; then
-            table+=$'\n'"| ${BASH_REMATCH[1]} | ✅ passed |"
-        elif [[ "$line" =~ ^FAIL[[:space:]]+(.*) ]]; then
-            table+=$'\n'"| ${BASH_REMATCH[1]} | ❌ failed |"
-        fi
+        case "$line" in
+            PASS[[:space:]]*)
+                name="${line#PASS}"
+                name="${name#"${name%%[![:space:]]*}"}"
+                table+=$'\n'"| ${name} | ✅ passed |"
+                ;;
+            FAIL[[:space:]]*)
+                name="${line#FAIL}"
+                name="${name#"${name%%[![:space:]]*}"}"
+                table+=$'\n'"| ${name} | ❌ failed |"
+                ;;
+        esac
     done <<< "$output"
 
     echo "$table"
