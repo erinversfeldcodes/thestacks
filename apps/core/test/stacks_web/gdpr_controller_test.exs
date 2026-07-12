@@ -12,6 +12,7 @@ defmodule StacksWeb.GDPRControllerTest do
   use CoreWeb.ConnCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
@@ -59,6 +60,45 @@ defmodule StacksWeb.GDPRControllerTest do
         |> delete("/api/gdpr/account")
 
       assert %{"status" => "accepted"} = json_response(conn, 202)
+      assert_enqueued(worker: AccountDeletionJob, args: %{"user_id" => user.id})
+    end
+
+    test "writes a user.deletion_requested audit row for the acting user, independent of the job",
+         %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> delete("/api/gdpr/account")
+
+      assert %{"status" => "accepted"} = json_response(conn, 202)
+
+      # The audit row is written synchronously by the controller. Oban is in
+      # :manual mode (see @moduledoc), so the AccountDeletionJob is enqueued but
+      # never executes — therefore any user.deletion_requested row in the table
+      # must have been written by the request handler itself, BEFORE / independent
+      # of the job. Query audit.audit_log directly rather than trusting the job.
+      row =
+        Core.Repo.one(
+          from(a in "audit_log",
+            where: a.action == "user.deletion_requested",
+            select: %{
+              user_id: a.user_id,
+              resource_type: a.resource_type,
+              resource_id: a.resource_id
+            }
+          ),
+          prefix: "audit"
+        )
+
+      assert row, "expected a user.deletion_requested audit row to be written by the controller"
+      assert row.user_id == Ecto.UUID.dump!(user.id)
+      assert row.resource_type == "user"
+      assert row.resource_id == Ecto.UUID.dump!(user.id)
+
+      # The job is enqueued but has NOT run (manual mode), proving the audit row
+      # above is written independently of job execution.
       assert_enqueued(worker: AccountDeletionJob, args: %{"user_id" => user.id})
     end
 
