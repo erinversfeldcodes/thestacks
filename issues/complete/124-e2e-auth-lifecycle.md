@@ -201,10 +201,10 @@ reclassify it `n/a` to reach GREEN.
 | US-14.1.2 — First-Time Onboarding | Main.elm login-completion → Components.OnboardingOverlay (4-step) | ✅ driven (onboarding.spec.ts) — E2E gate caught the trigger bug | ✅ implemented | built in-scope (fixed) |
 | US-14.2.1 — Sign In | router → AuthController.login → Guardian issue → Main.elm transition | ✅ driven (auth.spec.ts + login.spec.ts, incl. 403 unconfirmed) | ✅ implemented | built in-scope (Bug 4 fixed) |
 | US-14.3.1 — Authenticated Nav State | Main.elm viewNav + role propagation via LoginTransitionCompleted | ✅ driven (auth.spec.ts owner/non-owner) — E2E gate caught the role-propagation bug | ✅ implemented | built in-scope (fixed) |
-| US-14.3.2 — Session Expiry & Token Refresh | global 401 interceptor + refresh — NOT built in #124 | ❌ not driven — feature absent at #124 | 🟡 de-scoped | de-scoped to #173 (401 interceptor/refresh). ⚠️ Was papered over as `n/a (see #173)` — the failure this pre-check prevents; refresh later shipped without a design pass → #178/#179/#180/#182 cascade |
+| US-14.3.2 — Session Expiry & Token Refresh | global 401 interceptor (all authed pages + boot hook) + `POST /api/auth/refresh` + 7h silent renewal + 7-day cap + reuse-detection + rotation grace/cross-tab | ✅ NOW driven live (session-expiry redirect E2E; reuse-detection + grace over HTTP; two-tab cross-tab E2E) — but the feature was ABSENT at #124's original scope | 🟡 at #124 → **✅ delivered in-branch** | Originally de-scoped to #173 and ⚠️ papered over as `n/a (see #173)` — the failure this pre-check exists to prevent; the skipped design pass is why it landed as the #173/#178/#179/#180/#182 cascade instead of one design. **Update (feat/124-e2e-auth): now delivered end-to-end AND hardened in the SAME branch/PR as #124, and live-driven — the de-scope is honoured (shipped in the same PR).** |
 | US-14.3.3 — Log Out | UserMenu SignOut → Main.elm clearAuth + Api.logout → Guardian revoke | ✅ driven (auth.spec.ts — token 401 after logout) — E2E gate caught the no-revoke bug | ✅ implemented | built in-scope (server-side revocation added) |
 
-Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial/de-scoped · ❌ missing. **Lesson: US-14.3.2 should have been de-scoped explicitly (removed from this issue's claimed stories) rather than reclassified `n/a`. #124 claims six stories but delivered five.**
+Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial/de-scoped · ❌ missing. **Lesson (still stands): US-14.3.2 should have been de-scoped EXPLICITLY (removed from this issue's claimed stories) with an up-front design pass, rather than reclassified `n/a` — the skipped design is precisely why it became the #178/#179/#180/#182 cascade discovered one follow-up at a time. Update (reconciliation): US-14.3.2 has SINCE been delivered end-to-end and security-hardened in the same branch/PR as #124 (#173/#178/#179/#180/#182) and live-driven, so #124's six named stories are now all built. The historical record — #124-the-issue delivered five and de-scoped the sixth — is retained as the exemplar; the sixth was completed in the same PR.**
 
 ## Test Audit
 
@@ -259,8 +259,14 @@ now propagates through `LoginTransitionCompleted`** (`Main.elm role = ar.role`;
   reachable for other server-only validations) — noted in the US-14.1.1 sad
   cell.
 
-US-14.3.2 (session expiry / silent refresh) remains **NOT IMPLEMENTED** per its
-spec §2; the global 401 interceptor is tracked out-of-scope (see #173).
+US-14.3.2 (session expiry / silent refresh) was **NOT IMPLEMENTED at #124's
+Phase 1-3 re-baseline** (2026-07-08); the audit tables below reflect that
+point-in-time state and its `n/a (see #173)` cells. **It has SINCE been
+delivered end-to-end and hardened in the same branch/PR (`feat/124-e2e-auth`)
+via #173 (401 interceptor + refresh), #178 (all-pages + boot hook), #179
+(cap + reuse-detection), #180 (rotation grace + cross-tab), #182 (draft
+preservation), and live-driven** — see the reconciled Feature-Completeness
+Pre-Check above. The dated audit cells are retained as the historical record.
 
 ---
 
