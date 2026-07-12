@@ -3,11 +3,12 @@ module Types.Placement exposing
     , Placement
     , ReadingStatus(..)
     , placementDecoder
+    , placementSummaryDecoder
     )
 
 import Json.Decode as Decode exposing (Decoder)
 import Stacks.Common.V1.Placement as Proto
-import Types.Book exposing (Book, fromProtoBook)
+import Types.Book exposing (Book, VisibilityTier(..), fromProtoBook)
 import Types.ProtoHelpers exposing (emptyToNothing, zeroToNothing)
 
 
@@ -97,6 +98,57 @@ placementDecoder =
         [ placementWithBookDecoder
         , placementWithoutBookDecoder
         ]
+
+
+{-| Decode the slim placement summary returned by GET /api/placements/mine
+(`{book_id, bookshelf_name, title}`). Unlike `placementDecoder`, this reads the
+flat summary shape directly and builds a display-only Placement whose `book` is
+a stub carrying just the book id and title — enough for the CreateListing
+dropdown, which uses the book id as the option value and the title as the label.
+
+The other consumer of GET /api/placements/mine (`Main.GotPlacementCheck`) only
+inspects `List.isEmpty`, so the stub shape is safe for it too.
+
+-}
+placementSummaryDecoder : Decoder Placement
+placementSummaryDecoder =
+    Decode.map3
+        (\bookId bsName title ->
+            { id = bookId
+            , book = Just (bookStub bookId title)
+            , position = Nothing
+            , placedAt = Nothing
+            , formats = []
+            , personalRating = Nothing
+            , notes = Nothing
+            , bookshelfName = emptyToNothing bsName
+            , readingStatus = Nothing
+            , currentPage = Nothing
+            , startedAt = Nothing
+            , finishedAt = Nothing
+            }
+        )
+        (Decode.oneOf [ Decode.field "book_id" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "bookshelf_name" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "title" Decode.string, Decode.succeed "" ])
+
+
+{-| A display-only Book stub carrying just an id and title. All other fields are
+defaulted — the CreateListing dropdown only needs the id (option value) and the
+title (label).
+-}
+bookStub : String -> String -> Book
+bookStub bookId title =
+    { id = bookId
+    , title = title
+    , author = Nothing
+    , description = Nothing
+    , editions = []
+    , primaryEdition = Nothing
+    , editionCount = 0
+    , subjects = []
+    , visibilityTier = Public
+    }
 
 
 {-| Decode a placement that has an embedded book (PlacementDetail shape).

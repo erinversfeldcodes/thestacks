@@ -14,6 +14,7 @@ module Api exposing
     , PollResponse
     , PollStatus(..)
     , QualityTrends
+    , RegisterError(..)
     , SourceHealth
     , UploadInit
     , acceptInvitation
@@ -51,6 +52,7 @@ module Api exposing
     , getUserPlacements
     , initUpload
     , inviteToGroup
+    , isUnauthorized
     , leaveGroup
     , login
     , logout
@@ -60,6 +62,7 @@ module Api exposing
     , placeBook
     , publishBlogPost
     , putFileToR2
+    , refresh
     , register
     , rejectIdentification
     , rejectSource
@@ -95,7 +98,7 @@ import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
-import Types.Placement exposing (Placement, placementDecoder)
+import Types.Placement exposing (Placement, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
 import Url.Builder
@@ -135,6 +138,19 @@ fromProtoAuthResponse proto =
 authResponseDecoder : Decoder AuthResponse
 authResponseDecoder =
     Decode.map fromProtoAuthResponse ProtoAuth.decodeAuthResponse
+
+
+{-| Decoder for the registration response.
+
+The backend returns `{"message": "confirmation_email_sent"}` on HTTP 201 — it
+does NOT return an auth token. We deliberately require the `"message"` key so a
+missing/unexpected body fails loudly (Err BadBody) rather than silently
+succeeding the way the lenient proto AuthResponse decoder would.
+
+-}
+registrationResponseDecoder : Decoder ()
+registrationResponseDecoder =
+    Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
 
 
 {-| The identification status of an uploaded image.
@@ -223,9 +239,30 @@ streamEventDecoder =
         )
 
 
+{-| A registration failure.
+
+A 422 carries per-field validation errors (keyed by field name — `email`,
+`password`, `display_name`) so the UI can explain the _actual_ problem rather
+than guessing. Every other failure (network, timeout, unexpected status, or a
+422 whose body we could not parse) is a `RegisterRequestFailed`.
+
+-}
+type RegisterError
+    = RegisterValidationFailed (List ( String, List String ))
+    | RegisterRequestFailed Http.Error
+
+
+{-| Decode the backend's `{"errors": {field: [msg, ...]}}` 422 body. See
+`format_errors/1` in the Elixir `StacksWeb.ChangesetHelpers`.
+-}
+registerErrorsDecoder : Decoder (List ( String, List String ))
+registerErrorsDecoder =
+    Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))
+
+
 register :
     { email : String, password : String, displayName : String }
-    -> (Result Http.Error AuthResponse -> msg)
+    -> (Result RegisterError () -> msg)
     -> Cmd msg
 register body toMsg =
     Http.post
@@ -238,8 +275,48 @@ register body toMsg =
                     , displayName = body.displayName
                     }
                 )
-        , expect = Http.expectJson toMsg authResponseDecoder
+        , expect = expectRegister toMsg
         }
+
+
+{-| `Http.expectJson` discards the response body on a non-2xx status, which
+would throw away the structured `{"errors": ...}` payload a 422 carries. This
+custom expect keeps those field errors so the caller can surface the real
+reason a registration was rejected.
+-}
+expectRegister : (Result RegisterError () -> msg) -> Http.Expect msg
+expectRegister toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (RegisterRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (RegisterRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (RegisterRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    if metadata.statusCode == 422 then
+                        case Decode.decodeString registerErrorsDecoder bodyText of
+                            Ok errors ->
+                                Err (RegisterValidationFailed errors)
+
+                            Err _ ->
+                                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+                    else
+                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ bodyText ->
+                    case Decode.decodeString registrationResponseDecoder bodyText of
+                        Ok value ->
+                            Ok value
+
+                        Err err ->
+                            Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
 login :
@@ -260,7 +337,47 @@ login body toMsg =
         }
 
 
-{-| POST /api/auth/logout — invalidate the current session.
+{-| True when an `Http.Error` is an authentication failure (HTTP 401) from an
+authenticated request — the signal the global session-expiry interceptor uses to
+distinguish an expired/revoked token from any other load failure. A 403 is NOT
+unauthorized here: it is used for the age-gate and stays local to the page.
+-}
+isUnauthorized : Http.Error -> Bool
+isUnauthorized err =
+    case err of
+        Http.BadStatus 401 ->
+            True
+
+        _ ->
+            False
+
+
+{-| POST /api/auth/refresh — exchange the current (still-valid) access token for
+a fresh one before it expires (Issue #173 proactive silent renewal). The 200
+body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
+here means the session is no longer renewable and the caller falls through to the
+session-expiry interceptor.
+-}
+refresh :
+    String
+    -> (Result Http.Error AuthResponse -> msg)
+    -> Cmd msg
+refresh token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/auth/refresh"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg authResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/auth/logout — invalidate the current session server-side
+(revokes the token via guardian\_db, Issue #124 A2). The method MUST be DELETE
+to match the router; a POST silently 404s the SPA catch-all, leaving the token
+valid until its TTL — caught by the logout E2E (auth.spec.ts).
 -}
 logout :
     String
@@ -268,7 +385,7 @@ logout :
     -> Cmd msg
 logout token toMsg =
     Http.request
-        { method = "POST"
+        { method = "DELETE"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
@@ -875,7 +992,7 @@ mergeFormat bookId body token toMsg =
 {-| Parameters for creating a new listing.
 -}
 type alias ListingParams =
-    { placementId : String
+    { bookId : String
     , condition : String
     , pricingMode : String
     , priceZar : Maybe Int
@@ -941,7 +1058,10 @@ createListing params token toMsg =
         , body =
             Http.jsonBody
                 (Requests.encodeCreateListingRequest
-                    { placementId = params.placementId
+                    { -- Backend Marketplace.create_listing reads book_id; the
+                      -- legacy placement_id field is left empty.
+                      placementId = ""
+                    , bookId = params.bookId
                     , condition = params.condition
                     , pricingMode = params.pricingMode
                     , priceZar = params.priceZar
@@ -1025,7 +1145,7 @@ getMyPlacements token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementDecoder))
+        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
         , timeout = Nothing
         , tracker = Nothing
         }

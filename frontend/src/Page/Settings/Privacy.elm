@@ -1,6 +1,7 @@
 module Page.Settings.Privacy exposing
     ( Model
-    , Msg
+    , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -38,6 +39,11 @@ type Msg
     | SaveShelfVisibilityCompleted (Result Http.Error ())
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 defaultShelves : List ShelfVisibility
 defaultShelves =
     [ { name = "library", label = "Library", visibility = "platform" }
@@ -57,11 +63,11 @@ init =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetProfileVisibility val ->
-            ( { model | profileVisibility = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | profileVisibility = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetShelfVisibility shelfName val ->
             let
@@ -76,25 +82,30 @@ update msg model maybeToken =
                         )
                         model.shelfVisibilities
             in
-            ( { model | shelfVisibilities = updated, savingShelf = NotAsked }, Cmd.none )
+            ( { model | shelfVisibilities = updated, savingShelf = NotAsked }, Cmd.none, NoOut )
 
         SaveProfileVisibility ->
             case maybeToken of
                 Just token ->
                     ( { model | savingProfile = Loading }
                     , Api.updateProfileVisibility model.profileVisibility token SaveProfileVisibilityCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveProfileVisibilityCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | savingProfile = Success () }, Cmd.none )
+                    ( { model | savingProfile = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | savingProfile = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
 
         SaveShelfVisibility shelfName ->
             case maybeToken of
@@ -109,18 +120,23 @@ update msg model maybeToken =
                     in
                     ( { model | savingShelf = Loading }
                     , Api.updateShelfVisibility shelfName vis token SaveShelfVisibilityCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveShelfVisibilityCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | savingShelf = Success () }, Cmd.none )
+                    ( { model | savingShelf = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | savingShelf = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | savingShelf = Failure err }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

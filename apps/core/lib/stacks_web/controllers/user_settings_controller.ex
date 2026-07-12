@@ -75,6 +75,10 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.change_password(user, current, new_pw) do
       {:ok, _} ->
+        # Password change logs the user out everywhere (Issue #179, Phase 2b):
+        # revoke all the user's families AND burn all their guardian_tokens so a
+        # stolen/leaked token cannot outlive the credential it was minted under.
+        Accounts.revoke_all_user_sessions(user.id)
         json(conn, %{ok: true})
 
       {:error, :invalid_password} ->

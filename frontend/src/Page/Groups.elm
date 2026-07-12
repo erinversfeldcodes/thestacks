@@ -39,6 +39,7 @@ type Msg
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | SessionExpired
 
 
 init : String -> String -> ( Model, Cmd Msg )
@@ -90,15 +91,19 @@ update msg model =
         GroupCreated (Ok group) ->
             ( model, Cmd.none, NavigateTo (GroupDetail group.id) )
 
-        GroupCreated (Err _) ->
-            let
-                oldForm =
-                    model.createForm
-            in
-            ( { model | createForm = { oldForm | error = Just "Could not create group. Please try again.", submitting = False } }
-            , Cmd.none
-            , NoOut
-            )
+        GroupCreated (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                let
+                    oldForm =
+                        model.createForm
+                in
+                ( { model | createForm = { oldForm | error = Just "Could not create group. Please try again.", submitting = False } }
+                , Cmd.none
+                , NoOut
+                )
 
         AcceptInvitation groupId invId ->
             ( model
@@ -122,8 +127,12 @@ update msg model =
             , NoOut
             )
 
-        InvitationAccepted _ (Err _) ->
-            ( model, Cmd.none, NoOut )
+        InvitationAccepted _ (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( model, Cmd.none, NoOut )
 
         InvitationDeclined invId (Ok ()) ->
             let
@@ -135,8 +144,12 @@ update msg model =
             , NoOut
             )
 
-        InvitationDeclined _ (Err _) ->
-            ( model, Cmd.none, NoOut )
+        InvitationDeclined _ (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( model, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

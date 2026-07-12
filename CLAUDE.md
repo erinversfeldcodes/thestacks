@@ -104,6 +104,24 @@ See `AGENTS.md` for the full registry and domain routing table. See `docs/agents
 - **SQL/dbt:** Lowercase, snake_case. All tables UUID PKs + TIMESTAMPTZ. dbt models: staging -> intermediate -> marts.
 - **Protobuf:** `buf lint`. Field numbers are forever. Never reuse a number. Additive changes only.
 
+## Shell & Bash Conventions
+
+Bash commands run under the user's shell (**zsh**). To avoid the recurring "no matches found" failures:
+
+- **Quote globs and brace-expansions** passed to any command: `ls "plans/124-"*state*.json`, `git show "HEAD:issues/124-"*.md`, `grep -rn "pat" "apps/core"`. Unquoted `**`, `*foo*`, and `{a,b,c}` are expanded by zsh *before* the tool runs and abort the whole command when nothing matches.
+- **Prefer `find` / `ls dir/ | grep`** over bare recursive globs for discovery: `find apps/core -name "*book_detail_cache*"`, not `apps/core/**/*book_detail_cache*`.
+- **Run long commands in the background.** Deploys, `just verify`, full test suites, E2E, and dialyzer PLT builds should use `run_in_background: true` and be polled via their log — don't block a foreground call. Foreground `sleep` is blocked.
+- **Load `.env` before scripts/mix tasks that need runtime secrets** (`CLOAK_KEY`, `DATABASE_URL`, `FLY_API_TOKEN`): `set -a; source .env; set +a`. Many `scripts/*.sh` and `mix` tasks fail without it.
+
+### Toolchain — NEVER run bare `mix` / `elixir` from a non-direnv shell
+
+The Elixir toolchain is pinned by `flake.nix` (**Elixir 1.18.4 / OTP 27**), activated in interactive shells via direnv (`.envrc` = `use flake`). **A non-interactive shell — an AI agent's Bash tool, a git hook, or CI — gets NEITHER direnv NOR nix on PATH, so bare `mix`/`elixir` silently falls back to a SYSTEM Elixir (e.g. Homebrew 1.19.5 / OTP 28).** Compiling `_build` with the system toolchain and then loading those beams under the flake toolchain (as the pre-push hook and `just ci` do via `nix develop`) corrupts `_build` — you get `corrupt atom table` on core modules (`Elixir.Inspect`, `Elixir.List.Chars`), and stale/again-missing dialyzer PLTs. Symptoms recur after every clean rebuild until the toolchain stops being mixed.
+
+- **Run Elixir tooling through the pinned shell, never bare.** Use the `just run` wrapper (added for this): `just run mix test`, `just run mix dialyzer`, `just run just verify`, `just run just ci`. It puts nix on PATH (`/nix/var/nix/profiles/default/bin`) and execs under `nix develop`; it's a no-op wrapper when already inside the dev shell (`STACKS_DEV_SHELL=1`).
+- **`just doctor`** reports whether the bare-shell Elixir matches the pinned one — run it first if you see `corrupt atom table` or dialyzer "no PLT found" errors.
+- **If `_build` is already poisoned:** `rm -rf _build` then rebuild via `just run just verify` (single, consistent toolchain). Don't interleave a bare `mix …` call in between — that re-poisons it.
+- **DB roles after fresh-DB:** the `test-elixir`/fresh-DB path can leave `stacks_dbt` (and `stacks_app`/`stacks_readonly`) as `NOLOGIN`, breaking `dbt: checkpoint` (`role "stacks_dbt" is not permitted to log in`). Re-apply with `psql -h localhost -U postgres -d postgres -c "ALTER ROLE stacks_dbt WITH LOGIN;"` (also `stacks_app`, `stacks_readonly`). The `fix_db_role_login` migration should make this idempotent — a known follow-up.
+
 ## Do Not
 
 - Skip ISBN verification for any book entering the system

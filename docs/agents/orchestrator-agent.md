@@ -260,7 +260,41 @@ Run this phase **before** planning whenever starting work on a new feature or ro
     the already-approved scope. This prevents the "debate → implement → re-review" cycle that
     adds review rounds without delivering new value.
 
+    **De-scoping a named user story is NOT a silent reclassification.** If the Feature-Completeness
+    Pre-Check (below) finds a named story unbuilt and the plan chooses to defer it, the story must be
+    **deleted from the issue's Summary + User Stories** and spun out as its own feature issue — never
+    left claimed-but-deferred and reclassified `n/a (see #NNN)` in the Test Audit. An issue may not
+    claim a story it is not delivering. (This is the #124/US-14.3.2 failure the pre-check exists to
+    prevent.)
+
 11. Create the initial state file at `plans/<NNN>-<slug>-state.json` with all phases set to `pending`. See the **State File** section below for the schema.
+
+### Feature-Completeness Pre-Check (validation & E2E issues) ⛔ PLANNING GATE
+
+For any issue whose deliverable is to **validate** user stories (E2E / coverage / test-hardening —
+the 110–127 family, or any issue that names user stories and ships mostly tests), run this **during
+planning, after research, before finalising the phase list**. It answers "is each named story
+actually *built* end-to-end?" — the question that must pass before any test-writing phase is planned.
+"Audit GREEN" must mean *every named story is built and correct*, not *everything in the test-only
+charter is covered*.
+
+1. Invoke the **`feature-completeness` skill** (or delegate it to a specialist) for the issue. For
+   each named user story it traces the happy path through the real code (route → controller/context
+   returning real data → side-effects → frontend render → reachable in nav, each with file:line) AND
+   **drives it live** (`run`/`verify`) — code-reading alone is insufficient (three of #124's worst
+   bugs passed code-reading and only fell to a live drive).
+2. It returns a per-US verdict: ✅ implemented · 🟡 partial · ❌ missing. Embed the pre-check table in
+   the issue above the Test Audit.
+3. **For every 🟡/❌ on a named story — this is a planning fork, resolve it in the plan, not later:**
+   - **Build in-scope:** add implementation phases to the plan. For non-trivial features (auth/session,
+     payments, security- or state-heavy), add a **design-pass phase FIRST** (a design doc / a
+     `docs/decisions/` record) — never a "Phase 4 stretch, last, before PR". The #173 refresh cascade
+     (#178/#179/#180/#182) is the cost of a skipped design pass.
+   - **De-scope:** apply the scope-lock de-scope rule above (edit Summary + User Stories, spin out a
+     feature issue via `create-issue`).
+4. **MANDATORY STOP** if any named story is 🟡/❌: present the pre-check verdicts and the
+   build-in-scope-vs-de-scope decision to the human before finalising the plan. A validation issue
+   may not proceed to test-writing phases while a named story it claims is unbuilt.
 
 ---
 

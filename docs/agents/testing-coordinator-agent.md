@@ -44,6 +44,22 @@ Every user story in `docs/user-stories.md` must have at least one acceptance tes
 
 Reference: `docs/implementation-mapping.md` maps each story to its technical components — use this to identify what to mock and what to assert.
 
+## Feature-Completeness Pre-Check — run BEFORE authoring E2E/acceptance suites
+
+Before writing a single E2E or acceptance test for a story, confirm the story is actually **built**.
+Use the **`feature-completeness` skill**: trace the happy path end-to-end through the real code and
+**drive it live** (`run`/`verify`). A test is only meaningful against a feature that exists.
+
+- If a named story is 🟡 **partial** or ❌ **missing**: **do NOT write a test for it.** A test
+  against a stub either fails forever or passes vacuously — both are worse than an honest gap.
+  **Stop and report it to the orchestrator** as a feature-completeness blocker (which story, which
+  hop is missing, file:line), so it is built in-scope or de-scoped. Do **not** paper over it by
+  reclassifying the Test-Audit cell to `n/a (see #NNN)` — that is the #124/US-14.3.2 failure.
+- Only stories that are ✅ **implemented (built end-to-end + observed live)** proceed to test
+  authoring.
+
+This runs before the Test-First Protocol below: "built?" then "write the failing test".
+
 ## Chaos Test Scenarios
 
 | Scenario | What Breaks | Expected Behaviour |

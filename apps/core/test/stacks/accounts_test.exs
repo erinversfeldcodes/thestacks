@@ -7,6 +7,7 @@ defmodule Stacks.AccountsTest do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
 
   describe "register/1" do
     test "creates a user with hashed password" do
@@ -69,6 +70,45 @@ defmodule Stacks.AccountsTest do
       assert is_binary(user.role)
       # Email must not be part of the event payload (it's stripped in the Multi.run block)
       # The source of truth is the code: payload: %{role: user.role} — no :email key
+    end
+  end
+
+  # Punch #5 (Issue #124): the user.registered event is emitted INSIDE the
+  # registration Ecto.Multi. If the transaction rolls back, no event row must be
+  # written to event_log — an event that describes a registration that never
+  # happened would corrupt every downstream projection.
+  describe "register/1 negative event emission (rollback)" do
+    test "does not emit user.registered when the email is a duplicate" do
+      insert(:user, email: "dupe_event@example.com")
+      before_count = event_count("user.registered")
+
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{
+                 "email" => "dupe_event@example.com",
+                 "password" => "password123"
+               })
+
+      assert event_count("user.registered") == before_count
+    end
+
+    test "does not emit user.registered when the changeset is invalid" do
+      before_count = event_count("user.registered")
+
+      # Invalid email format — the :user insert step fails, rolling back the Multi
+      # before :emit_event ever runs.
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{"email" => "not-an-email", "password" => "password123"})
+
+      assert event_count("user.registered") == before_count
+    end
+
+    test "does not emit user.registered when the password is too short" do
+      before_count = event_count("user.registered")
+
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.register(%{"email" => "shortpw_event@example.com", "password" => "x"})
+
+      assert event_count("user.registered") == before_count
     end
   end
 
@@ -293,6 +333,179 @@ defmodule Stacks.AccountsTest do
       Accounts.change_password(user, "wrong", "newpass456")
 
       assert event_count("user.password_changed") == before_count
+    end
+  end
+
+  describe "token family reuse detection (Issue #179, Phase 2b)" do
+    setup do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          session_started_at: DateTime.utc_now()
+        })
+
+      %{user: user, fid: fid, sub: to_string(user.id)}
+    end
+
+    test "check_token_family/3 returns :ok for the family's current jti", %{fid: fid, sub: sub} do
+      assert :ok = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a non-current jti is REUSE: revokes the whole family and returns error",
+         %{fid: fid, sub: sub} do
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-superseded", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "an already-revoked family rejects even its current jti", %{fid: fid, sub: sub} do
+      {:ok, _} = Accounts.revoke_token_family(fid)
+      assert {:error, :session_revoked} = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a missing family is treated as revoked" do
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(Ecto.UUID.generate(), "anything", "some-sub")
+    end
+
+    test "a family owned by a DIFFERENT user is rejected and NOT revoked",
+         %{fid: fid} do
+      # A token whose sub does not match the family's user_id must never be
+      # treated as this user's session — reject, and leave the innocent owner's
+      # family untouched (no cross-user revocation).
+      other_sub = Ecto.UUID.generate()
+
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(fid, "jti-current", other_sub)
+
+      # The real owner's family is still live — the mismatched check did not
+      # revoke it.
+      assert is_nil(Repo.get(AuthTokenFamily, fid).revoked_at)
+    end
+
+    test "revoke_token_family/1 is idempotent (second call revokes nothing new)",
+         %{fid: fid} do
+      assert {:ok, 1} = Accounts.revoke_token_family(fid)
+      assert {:ok, 0} = Accounts.revoke_token_family(fid)
+    end
+
+    test "revoke_all_user_sessions/1 revokes every live family of the user",
+         %{user: user, fid: fid} do
+      other = Ecto.UUID.generate()
+
+      {:ok, _} =
+        Accounts.open_token_family(%{
+          family_id: other,
+          user_id: user.id,
+          current_jti: "jti-other",
+          session_started_at: DateTime.utc_now()
+        })
+
+      assert :ok = Accounts.revoke_all_user_sessions(user.id)
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+      assert Repo.get(AuthTokenFamily, other).revoked_at
+    end
+  end
+
+  describe "token rotation grace window (Issue #180, Phase 1)" do
+    # #179 burns the whole family whenever a non-current jti is presented. That
+    # over-fires on a benign rotation race: an in-flight request (or a second
+    # tab) still carrying the JUST-rotated old token trips reuse detection and
+    # logs the user out. #180 honours the IMMEDIATELY-PREVIOUS token for a short
+    # grace window (20s) after rotation WITHOUT burning. Anything else — an older
+    # token (2+ rotations back), the previous token past grace, or an unknown
+    # jti — still burns, preserving #179's posture outside the tiny window.
+    setup do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+      %{user: user, fid: fid, sub: to_string(user.id)}
+    end
+
+    defp open_rotated_family(fid, user, rotated_at) do
+      {:ok, family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          previous_jti: "jti-previous",
+          rotated_at: rotated_at,
+          session_started_at: DateTime.utc_now()
+        })
+
+      family
+    end
+
+    test "the immediately-previous jti WITHIN grace returns :ok and does NOT burn the family",
+         %{user: user, fid: fid, sub: sub} do
+      open_rotated_family(fid, user, DateTime.utc_now())
+
+      # The benign in-flight / multi-tab replay of the just-rotated token: honoured.
+      assert :ok = Accounts.check_token_family(fid, "jti-previous", sub)
+
+      # NON-BURN is the key assertion: the family is untouched — not revoked,
+      # and current_jti did NOT advance to the previous token.
+      family = Repo.get(AuthTokenFamily, fid)
+      assert is_nil(family.revoked_at)
+      assert family.current_jti == "jti-current"
+      assert family.previous_jti == "jti-previous"
+    end
+
+    test "the previous jti PAST the grace window is REUSE: burns the family",
+         %{user: user, fid: fid, sub: sub} do
+      # rotated_at is 21s ago → outside the 20s grace: this token is now stale.
+      past = DateTime.add(DateTime.utc_now(), -21, :second)
+      open_rotated_family(fid, user, past)
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-previous", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "an OLDER/unknown jti burns even with a FRESH rotated_at (grace saves only previous_jti)",
+         %{user: user, fid: fid, sub: sub} do
+      # rotated_at is now (grace is wide open) but the presented token is neither
+      # current nor the immediate predecessor — it's two-plus rotations back or
+      # forged. Grace must NOT save it.
+      open_rotated_family(fid, user, DateTime.utc_now())
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-two-rotations-ago", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
+    end
+
+    test "the current jti still returns :ok (happy path unchanged)",
+         %{user: user, fid: fid, sub: sub} do
+      open_rotated_family(fid, user, DateTime.utc_now())
+      assert :ok = Accounts.check_token_family(fid, "jti-current", sub)
+    end
+
+    test "a family with no rotation history (previous_jti nil) still burns a non-current jti",
+         %{user: user, sub: sub} do
+      # Non-vacuity: the grace branch requires BOTH previous_jti and rotated_at.
+      # A never-rotated family (legacy / just-opened) has neither, so a stale
+      # token against it burns exactly as #179 intended.
+      fid = Ecto.UUID.generate()
+
+      {:ok, _} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          session_started_at: DateTime.utc_now()
+        })
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-anything", sub)
+
+      assert Repo.get(AuthTokenFamily, fid).revoked_at
     end
   end
 

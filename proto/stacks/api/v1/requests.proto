@@ -96,8 +96,9 @@ message MergeFormatRequest {
 
 // POST /api/listings
 message CreateListingRequest {
-  // UUID of the bookshelf placement being listed.
-  string placement_id = 1 [json_name = "placement_id"];
+  // Deprecated: use book_id (field 7) instead. The listing seller placement is
+  // resolved server-side by book_id; this field is always empty from the client.
+  string placement_id = 1 [json_name = "placement_id", deprecated = true];
   // Book condition (e.g. "like_new", "good", "fair").
   string condition = 2 [json_name = "condition"];
   // Pricing mode: "fixed" or "offer".
@@ -108,6 +109,9 @@ message CreateListingRequest {
   string contact_info = 5 [json_name = "contact_info"];
   // Description of the listing.
   string description = 6 [json_name = "description"];
+  // UUID of the book being listed. The server resolves the seller's active
+  // placement of this book. Replaces the deprecated placement_id field.
+  string book_id = 7 [json_name = "book_id"];
 }
 
 // POST /api/blog/posts

@@ -19,8 +19,12 @@ SUITES=(
     "$HERE/rollback_production_test.sh"
     "$HERE/deploy_production_workflow_test.sh"
     "$HERE/deploy_stack_retry_test.sh"
+    "$HERE/deploy_stack_neon_lookup_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
+    "$HERE/e2e_warmup_guard_test.sh"
+    "$HERE/e2e_global_setup_guard_test.sh"
+    "$HERE/e2e_global_setup_behavior_test.sh"
 )
 
 OVERALL=0

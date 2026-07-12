@@ -1,6 +1,7 @@
 module Page.Search exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -42,6 +43,11 @@ type Msg
     | ClearFilters
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Model
 init =
     { query = ""
@@ -53,7 +59,7 @@ init =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         QueryChanged query ->
@@ -76,10 +82,11 @@ update msg model maybeToken =
                         Loading
               }
             , debounceCmd
+            , NoOut
             )
 
         ClearQuery ->
-            ( { model | query = "", results = NotAsked }, Cmd.none )
+            ( { model | query = "", results = NotAsked }, Cmd.none, NoOut )
 
         DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
@@ -92,18 +99,22 @@ update msg model maybeToken =
                             Nothing ->
                                 Cmd.none
                 in
-                ( model, cmd )
+                ( model, cmd, NoOut )
 
             else
-                ( model, Cmd.none )
+                ( model, Cmd.none, NoOut )
 
         SearchCompleted result ->
             case result of
                 Ok books ->
-                    ( { model | results = Success books }, Cmd.none )
+                    ( { model | results = Success books }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | results = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | results = Failure err }, Cmd.none, NoOut )
 
         SortChanged sortStr ->
             let
@@ -121,10 +132,10 @@ update msg model maybeToken =
                         _ ->
                             ByTitle
             in
-            ( { model | sort = newSort }, Cmd.none )
+            ( { model | sort = newSort }, Cmd.none, NoOut )
 
         ToggleFilterPanel ->
-            ( { model | filterPanelOpen = not model.filterPanelOpen }, Cmd.none )
+            ( { model | filterPanelOpen = not model.filterPanelOpen }, Cmd.none, NoOut )
 
         YearFromChanged str ->
             let
@@ -134,7 +145,7 @@ update msg model maybeToken =
                 newFilters =
                     { oldFilters | yearFrom = String.toInt str }
             in
-            ( { model | filters = newFilters }, Cmd.none )
+            ( { model | filters = newFilters }, Cmd.none, NoOut )
 
         YearToChanged str ->
             let
@@ -144,10 +155,10 @@ update msg model maybeToken =
                 newFilters =
                     { oldFilters | yearTo = String.toInt str }
             in
-            ( { model | filters = newFilters }, Cmd.none )
+            ( { model | filters = newFilters }, Cmd.none, NoOut )
 
         ClearFilters ->
-            ( { model | filters = defaultFilterState }, Cmd.none )
+            ( { model | filters = defaultFilterState }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

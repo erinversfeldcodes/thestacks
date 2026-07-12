@@ -238,3 +238,53 @@ test-deployed:
 # Deploy ephemeral preview + run E2E against it + destroy
 deploy-preview:
     scripts/deploy-preview.sh
+
+# ── Pinned-toolchain runner ───────────────────────────────────────────────────
+# Run ANY command inside the pinned Nix dev shell (Elixir 1.18.4 / OTP 27).
+#
+# WHY THIS EXISTS: shells WITHOUT direnv active — git hooks, CI, and AI coding
+# agents whose non-interactive Bash never triggers `.envrc` — fall back to a
+# SYSTEM Elixir (e.g. Homebrew 1.18/1.19/OTP 28). Compiling `_build` with the
+# system toolchain and then loading those beams under the flake toolchain (as the
+# pre-push hook and CI do via `nix develop`) corrupts `_build` ("corrupt atom
+# table" on core modules, stale/again-missing dialyzer PLTs). The fix is to run
+# every Elixir/mix/iex command — and the `verify`/`ci` recipes — through the SAME
+# pinned shell. Examples:
+#   just run mix test
+#   just run mix dialyzer
+#   just run just verify
+#   just run just ci
+run *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Non-interactive shells often lack nix on PATH even when it is installed.
+    export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
+    if [[ -n "${STACKS_DEV_SHELL:-}" ]]; then
+        # Already inside the pinned dev shell — run directly, don't re-wrap.
+        exec {{ARGS}}
+    fi
+    if ! command -v nix >/dev/null 2>&1; then
+        echo "ERROR: nix not found (looked on PATH + /nix/var/nix/profiles/default/bin)." >&2
+        echo "Install Nix, or run from a direnv-activated shell, before using 'just run'." >&2
+        exit 1
+    fi
+    exec nix develop --command {{ARGS}}
+
+# Diagnose the Elixir toolchain: does the bare shell match the pinned dev shell?
+# If they differ, do NOT run bare `mix` — use `just run mix ...` (see `just run`).
+doctor:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "bare-shell elixir:   $(elixir --version 2>/dev/null | tail -1 || echo 'not found')"
+    export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
+    if command -v nix >/dev/null 2>&1; then
+        pinned="$(nix develop --command elixir --version 2>/dev/null | tail -1)"
+        echo "pinned (nix) elixir: ${pinned}"
+        if [[ "$(elixir --version 2>/dev/null | tail -1)" != "${pinned}" ]]; then
+            echo "MISMATCH: run Elixir tooling via 'just run …' (never bare mix) to avoid corrupting _build."
+        else
+            echo "OK: bare shell matches the pinned toolchain."
+        fi
+    else
+        echo "nix: NOT found — bare 'mix' will use the system toolchain; prefer 'just run' once nix is available."
+    fi

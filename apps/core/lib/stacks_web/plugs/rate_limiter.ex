@@ -65,6 +65,12 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @public_limit 30
   # Admin endpoints — tighter than auth; break-glass access is not high-throughput.
   @admin_limit 30
+  # E2E test-helper endpoints (Issue #124). These leak account-activation
+  # tokens for `.test`-domain accounts and are reachable on public preview
+  # apps, so keep the per-IP cap very tight to bound brute-force
+  # enumeration / token harvesting. The E2E suite only calls this a handful
+  # of times per run, so 10/min is ample headroom for legitimate use.
+  @e2e_helper_limit 10
 
   def init(opts), do: opts
 
@@ -110,6 +116,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
   defp get_limit(:social), do: @social_limit
   defp get_limit(:public), do: @public_limit
   defp get_limit(:admin), do: Application.get_env(:core, :rate_limit_admin, @admin_limit)
+
+  defp get_limit(:e2e_helper),
+    do: Application.get_env(:core, :rate_limit_e2e_helper, @e2e_helper_limit)
+
   defp get_limit(_), do: @global_limit
 
   # Upload and social buckets key on user ID so the limit is per-user, not per-IP.
@@ -149,10 +159,17 @@ defmodule StacksWeb.Plugs.RateLimiter do
     end
   end
 
+  # Key per-IP buckets on the *trusted* client IP. Fly sets and overwrites the
+  # `fly-client-ip` header at the edge with the real client address, so it
+  # cannot be spoofed by the client. `x-forwarded-for` is deliberately NOT
+  # consulted — behind Fly its first hop is client-supplied and trivially
+  # rotated, which would let an attacker reset every per-IP counter (Issue
+  # #176). When the header is absent or empty (local dev / ExUnit conns) we
+  # fall back to `conn.remote_ip`.
   defp get_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [ip | _] -> ip
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
+    case get_req_header(conn, "fly-client-ip") do
+      [ip | _] when ip != "" -> ip
+      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
 

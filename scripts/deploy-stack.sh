@@ -47,6 +47,12 @@
 # Usage:
 #   scripts/deploy-stack.sh
 #   scripts/deploy-stack.sh --branch my-feature-branch
+#
+# SKIP_VISION: when set (non-empty), skips the Modal vision deploy, the vision
+# warmup, and the vision completion probe — and e2e/tests/upload.spec.ts skips
+# itself. Use it to avoid Modal credit spend on changes that don't touch the
+# vision path (apps/vision / the upload→vision code path). Unset it to re-enable
+# full vision validation when that path changes.
 
 set -euo pipefail
 
@@ -73,6 +79,75 @@ deploy_with_retry() {
     sleep 5
     if "$@"; then return 0; fi
     echo "FAIL deploy: ${name} failed twice; aborting" >&2
+    return 1
+}
+
+# Resolve a Neon branch id by name, distinguishing a genuine "branch absent"
+# from a transient/hard Neon API failure (Issue #177). The old inline
+# `curl … | python3 … 2>/dev/null || true` collapsed every failure — network
+# blip, 5xx/429, expired key, malformed body — into an empty id, which the
+# caller then misreported as "branch not found." This helper surfaces the real
+# error instead.
+#
+# Usage: neon_branch_id_by_name <project_id> <branch_name>
+#   stdout: the matching branch id, or EMPTY if the name is genuinely absent
+#   return 0: API succeeded (branch found OR genuinely absent)
+#   return 1: API failed (network error, 5xx/429 after bounded retries, or a
+#             non-transient 4xx) — a distinct "Neon API" message goes to stderr
+#             and NO id is printed. The caller decides how to react.
+#
+# Reads NEON_STAGING_API_KEY from the environment (same as the rest of the
+# script). Retries transient failures a bounded number of times with backoff;
+# `sleep` between attempts keeps this from hammering the API.
+neon_branch_id_by_name() {
+    local project_id="$1"
+    local branch_name="$2"
+    local max_attempts=3
+    local attempt=0
+    local response curl_rc http_code body
+    while (( attempt < max_attempts )); do
+        attempt=$(( attempt + 1 ))
+        response="$(curl -sS -w '\n%{http_code}' \
+            -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${project_id}/branches")"
+        curl_rc=$?
+        # HTTP status is the final line; the JSON body is everything above it.
+        http_code="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+
+        # Transient: transport error, rate limit (429), or any 5xx → retry.
+        if (( curl_rc != 0 )) || [[ "$http_code" == 429 || "$http_code" == 5?? ]]; then
+            if (( attempt < max_attempts )); then
+                sleep "$attempt"
+                continue
+            fi
+            echo "FAIL deploy: Neon API call failed (HTTP ${http_code:-none} / curl rc ${curl_rc}) after ${attempt} attempts querying branches for project ${project_id}" >&2
+            return 1
+        fi
+
+        # Non-transient API error (e.g. 401/403/404) — do not retry.
+        if [[ "$http_code" != 2?? ]]; then
+            echo "FAIL deploy: Neon API call failed (HTTP ${http_code} / curl rc ${curl_rc}) querying branches for project ${project_id}" >&2
+            return 1
+        fi
+
+        # Success: parse the body and print the matching id (empty if absent).
+        # Pass branch_name OUT-OF-BAND as argv[1] (single-quoted python source,
+        # no shell interpolation) so a name containing a single quote — e.g. a
+        # git ref like preview/foo'bar — can't break the python literal and get
+        # silently misclassified as "branch absent".
+        printf '%s' "$body" | python3 -c '
+import json, sys
+target = sys.argv[1]
+branches = json.load(sys.stdin).get("branches", [])
+match = [b["id"] for b in branches if b.get("name") == target]
+print(match[0] if match else "")
+' "$branch_name"
+        return 0
+    done
+    # Unreachable in practice (the loop returns on every path), but keep a
+    # defensive non-zero so a logic slip can never masquerade as success.
+    echo "FAIL deploy: Neon API call exhausted retries querying branches for project ${project_id}" >&2
     return 1
 }
 
@@ -192,6 +267,13 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # branch. Suppress branch creation by clearing NEON_STAGING_API_KEY
     # locally so the preview-branch block below is a no-op.
     NEON_STAGING_API_KEY=""
+    # Test-only helper endpoints (e.g. GET /api/test/confirmation-token,
+    # Issue #124) must NEVER be enabled in production — they leak an
+    # account-activation token. Force the gate env empty here so no stale
+    # shell/.env export can promote it onto the prod app; the prod-only
+    # "Purge test-helper flag" block below also unsets any lingering Fly
+    # secret as defense-in-depth.
+    STACKS_E2E_TEST_HELPERS=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -206,6 +288,13 @@ else
     fi
     CORE_APP="${PREVIEW_CORE_APP}"
     MODAL_APP="${PREVIEW_MODAL_APP}"
+    # Enable the E2E test-helper endpoints (Issue #124) on PREVIEW apps only.
+    # GET /api/test/confirmation-token returns 404 unless this server env
+    # == "1"; the confirm-email + onboarding E2E specs need it live on the
+    # preview app. This is set ONLY in the preview branch of this
+    # conditional — the --production branch above forces it empty so it can
+    # never reach the prod app.
+    STACKS_E2E_TEST_HELPERS="1"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -246,15 +335,11 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
     # See docs/deployment/NEON_BRANCH_TOPOLOGY.md.
     NEON_PARENT_BRANCH="${NEON_PARENT_BRANCH:-staging}"
     echo "    Parent branch: ${NEON_PARENT_BRANCH}"
-    NEON_PARENT_BRANCH_ID="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == '${NEON_PARENT_BRANCH}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
+    # A helper non-zero (real Neon API failure) aborts via `|| exit 1` with the
+    # helper's distinct "Neon API" stderr; a helper 0 + empty id is a GENUINE
+    # absence and gets the "parent branch not found" message. The two are now
+    # never conflated (Issue #177).
+    NEON_PARENT_BRANCH_ID="$(neon_branch_id_by_name "${NEON_STAGING_PROJECT_ID}" "${NEON_PARENT_BRANCH}")" || exit 1
 
     if [[ -z "$NEON_PARENT_BRANCH_ID" ]]; then
         echo "FAIL deploy: Neon parent branch '${NEON_PARENT_BRANCH}' not found in project ${NEON_STAGING_PROJECT_ID}" >&2
@@ -262,15 +347,14 @@ print(match[0] if match else '')
     fi
     echo "    Parent branch ID: ${NEON_PARENT_BRANCH_ID}"
 
-    stale_id="$(curl -sL \
-        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches" \
-        | python3 -c "
-import json,sys
-branches = json.load(sys.stdin).get('branches', [])
-match = [b['id'] for b in branches if b['name'] == '${PREVIEW_NEON_BRANCH}']
-print(match[0] if match else '')
-" 2>/dev/null || true)"
+    # Stale sibling-branch lookup. Unlike the parent lookup, an API failure here
+    # is NOT fatal: worst case a stale preview branch lingers (the create step
+    # below would then fail loudly on its own). Surface the failure as a WARNING
+    # and continue rather than aborting the whole deploy — but never swallow it.
+    if ! stale_id="$(neon_branch_id_by_name "${NEON_STAGING_PROJECT_ID}" "${PREVIEW_NEON_BRANCH}")"; then
+        echo "    WARNING: stale-branch lookup for ${PREVIEW_NEON_BRANCH} failed (see Neon API error above); skipping stale cleanup and continuing." >&2
+        stale_id=""
+    fi
     if [[ -n "$stale_id" ]]; then
         echo "    Deleting stale branch ${PREVIEW_NEON_BRANCH}..."
         curl -sL -X DELETE \
@@ -313,7 +397,7 @@ else
 fi
 
 # ── Deploy vision service to Modal ────────────────────────────────────────────
-if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
+if [[ -z "${SKIP_VISION:-}" ]] && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     # Pick a Python that has the `modal` SDK importable.
     #
     # Local dev: the interactive shell's `python3` resolves to
@@ -407,6 +491,8 @@ print(urls[0] if urls else '')
     fi
     echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
+elif [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
 fi
@@ -591,8 +677,25 @@ fly secrets set \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
     ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
+    ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
+
+# ── Purge test-helper flag (prod only, Issue #124) ───────────────────────────
+# Belt-and-suspenders: production and preview use disjoint Fly app names
+# (thestacks-core vs preview-*), so this script never stages the flag onto
+# the prod app in the first place — the ${STACKS_E2E_TEST_HELPERS:+...}
+# expansion above sees an empty value in prod mode. Still, explicitly unset
+# the secret on prod so any value set by hand (or a future code path) can't
+# linger and silently expose GET /api/test/confirmation-token in production.
+# --stage keeps it batched with the deploy above; || true tolerates the
+# common case where the secret was never present.
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    echo ""
+    echo "==> Ensuring test-helper flag is unset on ${CORE_APP} (prod safety)..."
+    fly secrets unset STACKS_E2E_TEST_HELPERS --app "${CORE_APP}" --stage 2>/dev/null \
+        || echo "    (STACKS_E2E_TEST_HELPERS not present — nothing to unset)"
+fi
 
 # ── DATABASE_URL assertion (prod only, P2 #9) ────────────────────────────────
 # On a brand-new prod app no DATABASE_URL is configured yet, and
@@ -804,6 +907,39 @@ if [[ -n "${machine_id}" ]]; then
         || { echo "FAIL deploy: migrations failed"; exit 1; }
     echo "PASS deploy: migrations applied"
 
+    # ── Migration integrity guard (Issue #180 follow-up) ─────────────────────
+    # `Stacks.Release.migrate()` only applies migrations that are PRESENT IN THE
+    # IMAGE, and reports "already up" when it finds none pending. If a migration
+    # exists in the repo but never reached the image (classically: an
+    # uncommitted/untracked migration file that was absent from the working tree
+    # at image-build time), migrate() silently succeeds while the deployed schema
+    # stays behind the code — which surfaces later as fail-closed auth/DB
+    # outages (see docs/runbooks/auth-session-family-outage.md). Guard against it
+    # by asserting every migration VERSION present in the repo is actually
+    # applied on the deployed DB. This runs for prod AND preview deploys.
+    echo "==> Verifying migration integrity (repo migrations vs applied)..."
+    applied_versions="$(fly machine exec "${machine_id}" \
+        "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.print_applied_versions()'\"" \
+        --app "${CORE_APP}" --timeout 60 2>/dev/null \
+        | grep -oE 'APPLIED_VERSION [0-9]+' | awk '{print $2}' | sort -u)"
+    repo_versions="$(find "${REPO_ROOT}/apps/core/priv/repo/migrations" -name '*.exs' -type f 2>/dev/null \
+        | xargs -n1 basename 2>/dev/null | grep -oE '^[0-9]+' | sort -u)"
+    if [[ -z "${applied_versions//[[:space:]]/}" ]]; then
+        echo "FAIL deploy: could not read applied migration versions from ${CORE_APP} — cannot verify integrity" >&2
+        exit 1
+    fi
+    unapplied="$(comm -23 <(echo "${repo_versions}") <(echo "${applied_versions}") | grep -E '^[0-9]+' || true)"
+    if [[ -n "${unapplied//[[:space:]]/}" ]]; then
+        echo "FAIL deploy: migrations present in the repo are NOT applied on ${CORE_APP}'s DB:" >&2
+        echo "${unapplied}" | sed 's/^/  - /' >&2
+        echo "  The deployed image is missing a migration — most often an uncommitted or" >&2
+        echo "  untracked migration file that was absent at image-build time. Commit the" >&2
+        echo "  migration (so it is embedded in the image) and redeploy. Deploying with a" >&2
+        echo "  schema behind the code causes fail-closed outages." >&2
+        exit 1
+    fi
+    echo "PASS deploy: migration integrity verified ($(echo "${repo_versions}" | grep -cE '^[0-9]+') repo migrations all applied)"
+
     # ── Seed ─────────────────────────────────────────────────────────────────
     # Production: seed_prod creates exactly one owner from PROD_OWNER_*.
     # Preview: only re-seed if THIS PR has unmerged changes to seeds.exs.
@@ -937,6 +1073,9 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 fi
 
 # ── Vision pipeline warmup ────────────────────────────────────────────────────
+if [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP warmup: SKIP_VISION set — vision not deployed, skipping warmup"
+else
 # Queue 6 warmup uploads so Modal starts scaling out before the SLO gate
 # starts probing. The gate fires 6 parallel canaries every 15s; queueing 6
 # Oban vision jobs upfront causes Modal to spawn 6 containers in parallel
@@ -1120,6 +1259,7 @@ elif [[ ${#warmup_ids[@]} -lt ${#warmup_canaries[@]} ]]; then
 else
     echo "PASS warmup: ${#warmup_ids[@]} canaries queued — Oban vision jobs will scale Modal in parallel with the gate"
 fi
+fi
 
 # ── Vision pipeline completion probe ─────────────────────────────────────────
 # The warmup above only proves /api/upload accepts uploads — not that vision
@@ -1134,7 +1274,9 @@ fi
 # Note: this runs AFTER the parallel warmup so Modal is already scaling up.
 # 180s is generous enough for cold-start (1-3 min observed) but short
 # enough that a genuinely-broken pipeline surfaces here, not in E2E.
-if [[ ${#warmup_ids[@]} -gt 0 ]]; then
+if [[ -n "${SKIP_VISION:-}" ]]; then
+    echo "SKIP probe: SKIP_VISION set — skipping vision completion probe"
+elif [[ ${#warmup_ids[@]} -gt 0 ]]; then
     probe_id="${warmup_ids[0]}"
     echo ""
     echo "==> Vision pipeline completion probe (image_id=${probe_id})..."

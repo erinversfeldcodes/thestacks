@@ -13,7 +13,7 @@ import Page.Login as Login
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (loginProgram, simulateAuthErrorResponse, simulateAuthResponse)
+import TestHelpers exposing (loginProgram, simulateAuthErrorResponse, simulateAuthResponse, simulateRegisterResponse, simulateRegisterValidationResponse)
 
 
 {-| Helper to start a login program test.
@@ -36,7 +36,174 @@ suite =
         , invalidEmailShowsErrorHint
         , validEmailShowsValidState
         , modeSwitchResetsValidation
+        , registerHappyShowsPending
+        , registerPendingNamesEmail
+        , registerMismatchDisablesSubmit
+        , registerDuplicateEmailShowsMessage
+        , registerValidationEmailShowsMessage
+        , registerWeakPasswordShowsPasswordMessage
+        , backToSignInResetsToLogin
+        , login403ShowsConfirmEmailMessage
+        , login423ShowsAccountLockedMessage
+        , login503ShowsServiceBusyMessage
         ]
+
+
+{-| Fill in every register field with valid, matching values and submit.
+-}
+fillRegisterFormAndSubmit : ProgramTest.ProgramTest Login.Model Login.Msg (ProgramTest.SimulatedEffect Login.Msg) -> ProgramTest.ProgramTest Login.Model Login.Msg (ProgramTest.SimulatedEffect Login.Msg)
+fillRegisterFormAndSubmit program =
+    program
+        |> ProgramTest.clickButton "Register"
+        |> ProgramTest.fillIn "display-name" "Display Name" "New Reader"
+        |> ProgramTest.fillIn "email" "Email" "new@stacks.dev"
+        |> ProgramTest.fillIn "password" "Password" "secret123"
+        |> ProgramTest.fillIn "password-confirm" "Confirm Password" "secret123"
+        |> ProgramTest.clickButton "Request Entry"
+
+
+registerHappyShowsPending : Test
+registerHappyShowsPending =
+    test "register_happy_shows_pending: successful registration shows the check-inbox card, not a login" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    simulateRegisterResponse
+                |> ProgramTest.ensureViewHas [ Selector.text "Check your inbox!" ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "Request Entry" ]
+
+
+registerPendingNamesEmail : Test
+registerPendingNamesEmail =
+    test "register_pending_names_email: pending card names the registered email address" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    simulateRegisterResponse
+                |> ProgramTest.expectViewHas [ Selector.text "new@stacks.dev" ]
+
+
+registerMismatchDisablesSubmit : Test
+registerMismatchDisablesSubmit =
+    test "register_mismatch_disables_submit: mismatched confirm shows hint and disables submit" <|
+        \() ->
+            startLogin
+                |> ProgramTest.clickButton "Register"
+                |> ProgramTest.fillIn "display-name" "Display Name" "New Reader"
+                |> ProgramTest.fillIn "email" "Email" "new@stacks.dev"
+                |> ProgramTest.fillIn "password" "Password" "secret123"
+                |> ProgramTest.fillIn "password-confirm" "Confirm Password" "different"
+                |> ProgramTest.ensureViewHas [ Selector.text "Passwords do not match" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "login-card__submit"
+                    , Selector.disabled True
+                    ]
+
+
+registerDuplicateEmailShowsMessage : Test
+registerDuplicateEmailShowsMessage =
+    test "register_duplicate_email_shows_message: 422 on register shows the email-in-use message" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    (simulateAuthErrorResponse 422)
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
+
+
+registerValidationEmailShowsMessage : Test
+registerValidationEmailShowsMessage =
+    test "register_validation_email_shows_message: a 422 with a duplicate-email error shows the email-in-use message" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    (simulateRegisterValidationResponse [ ( "email", [ "has already been taken" ] ) ])
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "That password is too slight; please choose at least eight characters." ]
+
+
+registerWeakPasswordShowsPasswordMessage : Test
+registerWeakPasswordShowsPasswordMessage =
+    test "register_weak_password_shows_password_message: a 422 with a password error shows a password message, not the email-in-use copy" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    (simulateRegisterValidationResponse [ ( "password", [ "must be at least 8 characters" ] ) ])
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "That password is too slight; please choose at least eight characters." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
+
+
+backToSignInResetsToLogin : Test
+backToSignInResetsToLogin =
+    test "back_to_sign_in_resets_to_login: pending card 'Back to Sign In' returns to the login form" <|
+        \() ->
+            startLogin
+                |> fillRegisterFormAndSubmit
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/register"
+                    simulateRegisterResponse
+                |> ProgramTest.ensureViewHas [ Selector.text "Check your inbox!" ]
+                |> ProgramTest.clickButton "Back to Sign In"
+                |> ProgramTest.expectViewHas [ Selector.text "Present your credentials to enter" ]
+
+
+login403ShowsConfirmEmailMessage : Test
+login403ShowsConfirmEmailMessage =
+    test "login_403_shows_confirm_email_message: unconfirmed-email login shows the confirm-email guidance" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
+                |> ProgramTest.fillIn "password" "Password" "secret123"
+                |> ProgramTest.clickButton "Enter the Stacks"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/login"
+                    (simulateAuthErrorResponse 403)
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Please confirm your email address before signing in. Check your inbox for the confirmation email." ]
+
+
+login423ShowsAccountLockedMessage : Test
+login423ShowsAccountLockedMessage =
+    test "login_423_shows_account_locked_message: locked account shows a lockout message, not invalid credentials" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
+                |> ProgramTest.fillIn "password" "Password" "secret123"
+                |> ProgramTest.clickButton "Enter the Stacks"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/login"
+                    (simulateAuthErrorResponse 423)
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "This account is temporarily locked after too many failed attempts. Please try again in a little while." ]
+
+
+login503ShowsServiceBusyMessage : Test
+login503ShowsServiceBusyMessage =
+    test "login_503_shows_service_busy_message: overloaded auth service shows a try-again-shortly message" <|
+        \() ->
+            startLogin
+                |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
+                |> ProgramTest.fillIn "password" "Password" "secret123"
+                |> ProgramTest.clickButton "Enter the Stacks"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/login"
+                    (simulateAuthErrorResponse 503)
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "The library is briefly overloaded. Please try again in a few seconds." ]
 
 
 loginFormSubmitShowsSpinner : Test

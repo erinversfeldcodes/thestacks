@@ -1,6 +1,7 @@
 module Page.Settings.AgeVerification exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -29,6 +30,11 @@ type Msg
     | SaveCompleted (Result Http.Error ())
 
 
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
 init : Model
 init =
     { ageVerified = False
@@ -37,11 +43,11 @@ init =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ToggleRequested ->
-            ( { model | confirmModalOpen = True }, Cmd.none )
+            ( { model | confirmModalOpen = True }, Cmd.none, NoOut )
 
         ConfirmToggle ->
             let
@@ -52,22 +58,27 @@ update msg model maybeToken =
                 Just token ->
                     ( { model | confirmModalOpen = False, saving = Loading }
                     , Api.updateAgeVerification newValue token SaveCompleted
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( { model | confirmModalOpen = False }, Cmd.none )
+                    ( { model | confirmModalOpen = False }, Cmd.none, NoOut )
 
         CancelToggle ->
-            ( { model | confirmModalOpen = False }, Cmd.none )
+            ( { model | confirmModalOpen = False }, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
                 Ok _ ->
                     -- Flip the local state only after the server confirms it.
-                    ( { model | ageVerified = not model.ageVerified, saving = Success () }, Cmd.none )
+                    ( { model | ageVerified = not model.ageVerified, saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none )
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | saving = Failure err }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

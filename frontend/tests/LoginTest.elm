@@ -1,9 +1,9 @@
 module LoginTest exposing (suite)
 
-import Api exposing (AuthResponse)
+import Api exposing (AuthResponse, RegisterError(..))
 import Expect
 import Http
-import Page.Login as Login exposing (FieldValidation(..), Msg(..))
+import Page.Login as Login exposing (FieldValidation(..), Msg(..), SubmitError(..))
 import Test exposing (Test, describe, test)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -16,6 +16,31 @@ fakeAuthResponse =
     , displayName = "A Reader"
     , role = "user"
     }
+
+
+{-| Build a fully-valid RegisterMode model (email "user@test.com") with the given
+password and confirm-password values, driving the real update function so the
+validations reflect production behaviour.
+-}
+registerModelWith : String -> String -> Login.Model
+registerModelWith password confirm =
+    let
+        ( m1, _, _ ) =
+            Login.update (ModeSwitched Login.RegisterMode) Login.init
+
+        ( m2, _, _ ) =
+            Login.update (EmailChanged "user@test.com") m1
+
+        ( m3, _, _ ) =
+            Login.update (DisplayNameChanged "Reader") m2
+
+        ( m4, _, _ ) =
+            Login.update (PasswordChanged password) m3
+
+        ( m5, _, _ ) =
+            Login.update (PasswordConfirmChanged confirm) m4
+    in
+    m5
 
 
 suite : Test
@@ -75,11 +100,15 @@ suite =
                             , password = ""
                             , displayName = ""
                             , mode = Login.LoginMode
-                            , submitState = Failure Http.NetworkError
+                            , passwordConfirm = ""
+                            , submitState = Failure (SubmitHttpError Http.NetworkError)
                             , transitionState = Login.Idle
                             , emailValidation = Pristine
                             , passwordValidation = Pristine
+                            , passwordConfirmValidation = Pristine
                             , displayNameValidation = Pristine
+                            , sessionExpired = False
+                            , draftSaved = False
                             }
 
                         ( model, _, _ ) =
@@ -128,7 +157,7 @@ suite =
                         ( model, _, _ ) =
                             Login.update (GotAuthResponse (Err Http.NetworkError)) Login.init
                     in
-                    model.submitState |> Expect.equal (Failure Http.NetworkError)
+                    model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
         , describe "transition completion"
             [ test "TransitionCompleted sets transitionState to Complete and emits LoggedIn" <|
@@ -150,7 +179,7 @@ suite =
                         ( model, _, _ ) =
                             Login.update (GotAuthResponse (Err (Http.BadStatus 401))) Login.init
                     in
-                    model.submitState |> Expect.equal (Failure (Http.BadStatus 401))
+                    model.submitState |> Expect.equal (Failure (SubmitHttpError (Http.BadStatus 401)))
             ]
         , describe "validateEmail"
             [ test "empty email is Pristine" <|
@@ -223,5 +252,130 @@ suite =
                             Login.update (PasswordChanged "longpassword") m2
                     in
                     Login.isSubmitDisabled m3 |> Expect.equal True
+            ]
+        , describe "validatePasswordConfirm"
+            [ test "empty confirm is Pristine" <|
+                \_ ->
+                    Login.validatePasswordConfirm "secret123" "" |> Expect.equal Pristine
+            , test "matching confirm is Valid" <|
+                \_ ->
+                    Login.validatePasswordConfirm "secret123" "secret123" |> Expect.equal Valid
+            , test "mismatched confirm is Invalid" <|
+                \_ ->
+                    Login.validatePasswordConfirm "secret123" "different"
+                        |> Expect.equal (Invalid "Passwords do not match")
+            ]
+        , describe "password confirm wiring"
+            [ test "PasswordConfirmChanged updates passwordConfirm and validates against current password" <|
+                \_ ->
+                    let
+                        ( m1, _, _ ) =
+                            Login.update (PasswordChanged "longpassword") Login.init
+
+                        ( m2, _, _ ) =
+                            Login.update (PasswordConfirmChanged "longpassword") m1
+                    in
+                    Expect.all
+                        [ \m -> m.passwordConfirm |> Expect.equal "longpassword"
+                        , \m -> m.passwordConfirmValidation |> Expect.equal Valid
+                        ]
+                        m2
+            , test "mismatched confirm password disables submit in RegisterMode" <|
+                \_ ->
+                    Login.isSubmitDisabled (registerModelWith "longpassword" "different")
+                        |> Expect.equal True
+            , test "matching confirm password enables submit in RegisterMode" <|
+                \_ ->
+                    Login.isSubmitDisabled (registerModelWith "longpassword" "longpassword")
+                        |> Expect.equal False
+            , test "pristine confirm password disables submit in RegisterMode" <|
+                \_ ->
+                    Login.isSubmitDisabled (registerModelWith "longpassword" "")
+                        |> Expect.equal True
+            ]
+        , describe "registration response"
+            [ test "GotRegisterResponse Ok switches to RegistrationPending carrying the email" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Login.update (GotRegisterResponse (Ok ()))
+                                (registerModelWith "longpassword" "longpassword")
+                    in
+                    model.mode |> Expect.equal (Login.RegistrationPending "user@test.com")
+            , test "GotRegisterResponse Ok emits RegistrationSucceeded carrying the email and does NOT start the door transition" <|
+                \_ ->
+                    let
+                        ( model, _, outMsg ) =
+                            Login.update (GotRegisterResponse (Ok ()))
+                                (registerModelWith "longpassword" "longpassword")
+
+                        succeededEmail =
+                            case outMsg of
+                                Login.RegistrationSucceeded email ->
+                                    Just email
+
+                                _ ->
+                                    Nothing
+                    in
+                    Expect.all
+                        [ \_ -> succeededEmail |> Expect.equal (Just "user@test.com")
+                        , \_ -> model.transitionState |> Expect.equal Login.Idle
+                        ]
+                        ()
+            , test "GotRegisterResponse Ok does not store a Success auth response (no blank JWT)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Login.update (GotRegisterResponse (Ok ()))
+                                (registerModelWith "longpassword" "longpassword")
+                    in
+                    model.submitState |> Expect.equal NotAsked
+            , test "GotRegisterResponse Err (RegisterRequestFailed ...) sets Failure with the wrapped Http error" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Login.update (GotRegisterResponse (Err (RegisterRequestFailed (Http.BadStatus 422))))
+                                (registerModelWith "longpassword" "longpassword")
+                    in
+                    model.submitState |> Expect.equal (Failure (SubmitHttpError (Http.BadStatus 422)))
+            , test "GotRegisterResponse Err (RegisterValidationFailed ...) stores the field errors" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Login.update
+                                (GotRegisterResponse (Err (RegisterValidationFailed [ ( "password", [ "must be at least 8 characters" ] ) ])))
+                                (registerModelWith "longpassword" "longpassword")
+                    in
+                    model.submitState
+                        |> Expect.equal (Failure (SubmitValidationError [ ( "password", [ "must be at least 8 characters" ] ) ]))
+            ]
+        , describe "errorMessage for registration validation"
+            [ test "a password validation error surfaces the password message" <|
+                \_ ->
+                    Login.errorMessage Login.RegisterMode
+                        (SubmitValidationError [ ( "password", [ "must be at least 8 characters" ] ) ])
+                        |> Expect.equal "That password is too slight; please choose at least eight characters."
+            , test "a password validation error is NOT the email-in-use copy" <|
+                \_ ->
+                    Login.errorMessage Login.RegisterMode
+                        (SubmitValidationError [ ( "password", [ "must be at least 8 characters" ] ) ])
+                        |> Expect.notEqual "A reader with that email already frequents these halls. Try signing in instead."
+            , test "a duplicate-email validation error surfaces the email-in-use message" <|
+                \_ ->
+                    Login.errorMessage Login.RegisterMode
+                        (SubmitValidationError [ ( "email", [ "has already been taken" ] ) ])
+                        |> Expect.equal "A reader with that email already frequents these halls. Try signing in instead."
+            , test "403 message is unchanged" <|
+                \_ ->
+                    Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 403))
+                        |> Expect.equal "Please confirm your email address before signing in. Check your inbox for the confirmation email."
+            , test "423 message is unchanged" <|
+                \_ ->
+                    Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 423))
+                        |> Expect.equal "This account is temporarily locked after too many failed attempts. Please try again in a little while."
+            , test "503 message is unchanged" <|
+                \_ ->
+                    Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 503))
+                        |> Expect.equal "The library is briefly overloaded. Please try again in a few seconds."
             ]
         ]

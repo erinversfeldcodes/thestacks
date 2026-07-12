@@ -3,15 +3,16 @@ defmodule StacksWeb.EmailVerificationControllerTest do
 
   import Stacks.Factory
 
-  alias Stacks.Email
-
   describe "GET /api/auth/confirm/:token" do
     test "redirects to /confirm-email/success and confirms email with a valid token", %{
       conn: conn
     } do
-      user = insert(:user)
-      {:ok, user_with_token} = Email.send_registration_confirmation(user)
-      token = user_with_token.email_confirmation_token
+      # Mirror post-registration state: register/1 persists a signed Phoenix.Token.
+      user = insert(:user, email_confirmed: false)
+      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+
+      {:ok, user} =
+        user |> Ecto.Changeset.change(%{email_confirmation_token: token}) |> Core.Repo.update()
 
       conn = get(conn, "/api/auth/confirm/#{token}")
 
