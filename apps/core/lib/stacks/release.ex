@@ -25,6 +25,8 @@ defmodule Stacks.Release do
   gate, not `ALLOW_SEEDS`.
   """
 
+  alias Ecto.Adapters.SQL
+
   @app :core
 
   def migrate do
@@ -33,6 +35,35 @@ defmodule Stacks.Release do
     for repo <- repos() do
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
     end
+  end
+
+  @doc """
+  Prints the migration versions applied on the connected DB, one per line,
+  prefixed with `APPLIED_VERSION `.
+
+  Consumed by `scripts/deploy-stack.sh`'s migration-integrity guard: the deploy
+  compares these against the migration files present in the repo and FAILS if
+  the repo contains a migration that is not applied on the deployed DB. This
+  catches the silent failure where `migrate/0` reports "already up" but a
+  migration never reached the image (e.g. an uncommitted/untracked migration
+  file absent from the working tree at image-build time) → the deployed schema
+  ends up behind the code → fail-closed auth/DB outages.
+  """
+  def print_applied_versions do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &emit_applied_versions/1)
+    end
+  end
+
+  # Read schema_migrations directly rather than via
+  # Ecto.Migrator.migrated_versions/1: the guard needs an exact, unambiguous
+  # list of every recorded version, and the direct query matches what a plain
+  # `SELECT` sees.
+  defp emit_applied_versions(started_repo) do
+    %{rows: rows} = SQL.query!(started_repo, "SELECT version FROM schema_migrations", [])
+    Enum.each(rows, fn [version] -> IO.puts("APPLIED_VERSION #{version}") end)
   end
 
   def seed do

@@ -907,6 +907,39 @@ if [[ -n "${machine_id}" ]]; then
         || { echo "FAIL deploy: migrations failed"; exit 1; }
     echo "PASS deploy: migrations applied"
 
+    # ── Migration integrity guard (Issue #180 follow-up) ─────────────────────
+    # `Stacks.Release.migrate()` only applies migrations that are PRESENT IN THE
+    # IMAGE, and reports "already up" when it finds none pending. If a migration
+    # exists in the repo but never reached the image (classically: an
+    # uncommitted/untracked migration file that was absent from the working tree
+    # at image-build time), migrate() silently succeeds while the deployed schema
+    # stays behind the code — which surfaces later as fail-closed auth/DB
+    # outages (see docs/runbooks/auth-session-family-outage.md). Guard against it
+    # by asserting every migration VERSION present in the repo is actually
+    # applied on the deployed DB. This runs for prod AND preview deploys.
+    echo "==> Verifying migration integrity (repo migrations vs applied)..."
+    applied_versions="$(fly machine exec "${machine_id}" \
+        "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.print_applied_versions()'\"" \
+        --app "${CORE_APP}" --timeout 60 2>/dev/null \
+        | grep -oE 'APPLIED_VERSION [0-9]+' | awk '{print $2}' | sort -u)"
+    repo_versions="$(find "${REPO_ROOT}/apps/core/priv/repo/migrations" -name '*.exs' -type f 2>/dev/null \
+        | xargs -n1 basename 2>/dev/null | grep -oE '^[0-9]+' | sort -u)"
+    if [[ -z "${applied_versions//[[:space:]]/}" ]]; then
+        echo "FAIL deploy: could not read applied migration versions from ${CORE_APP} — cannot verify integrity" >&2
+        exit 1
+    fi
+    unapplied="$(comm -23 <(echo "${repo_versions}") <(echo "${applied_versions}") | grep -E '^[0-9]+' || true)"
+    if [[ -n "${unapplied//[[:space:]]/}" ]]; then
+        echo "FAIL deploy: migrations present in the repo are NOT applied on ${CORE_APP}'s DB:" >&2
+        echo "${unapplied}" | sed 's/^/  - /' >&2
+        echo "  The deployed image is missing a migration — most often an uncommitted or" >&2
+        echo "  untracked migration file that was absent at image-build time. Commit the" >&2
+        echo "  migration (so it is embedded in the image) and redeploy. Deploying with a" >&2
+        echo "  schema behind the code causes fail-closed outages." >&2
+        exit 1
+    fi
+    echo "PASS deploy: migration integrity verified ($(echo "${repo_versions}" | grep -cE '^[0-9]+') repo migrations all applied)"
+
     # ── Seed ─────────────────────────────────────────────────────────────────
     # Production: seed_prod creates exactly one owner from PROD_OWNER_*.
     # Preview: only re-seed if THIS PR has unmerged changes to seeds.exs.
