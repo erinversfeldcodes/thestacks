@@ -183,6 +183,84 @@ defmodule Core.PromEx.Plugins.Stacks do
           measurement: :state,
           description: "Circuit breaker state (1 = healthy, 0 = blown).",
           tags: [:fuse_name]
+        ),
+
+        # ── GDPR: data-export job outcomes (Issue #121, Phase 4) ──────
+        # One event per DataExportJob. `result` is `:ok` | `:error`.
+        # Exported as `stacks_gdpr_export_count_total`.
+        counter(
+          [:stacks, :gdpr, :export, :count, :total],
+          event_name: [:stacks, :gdpr, :export],
+          description: "GDPR data-export job outcomes (right to portability).",
+          tags: [:result]
+        ),
+
+        # ── GDPR: account-deletion job outcomes + failed step ─────────
+        # One event per AccountDeletionJob. On failure, `failed_step` carries
+        # the Ecto.Multi step id where the erasure broke (e.g. `:delete_user`),
+        # so a broken right-to-erasure is not just alertable but diagnosable.
+        # Exported as `stacks_gdpr_deletion_count_total`.
+        counter(
+          [:stacks, :gdpr, :deletion, :count, :total],
+          event_name: [:stacks, :gdpr, :deletion],
+          description: "GDPR account-deletion job outcomes (right to erasure).",
+          tags: [:result, :failed_step]
+        ),
+
+        # ── GDPR: consent grant / revoke counters ─────────────────────
+        # One event per successful consent transition. Exported as
+        # `stacks_gdpr_consent_grant_count_total` and
+        # `stacks_gdpr_consent_revoke_count_total`.
+        counter(
+          [:stacks, :gdpr, :consent, :grant, :count, :total],
+          event_name: [:stacks, :gdpr, :consent, :grant],
+          description: "Analytics-consent grants recorded with timestamps.",
+          tags: [:feature]
+        ),
+        counter(
+          [:stacks, :gdpr, :consent, :revoke, :count, :total],
+          event_name: [:stacks, :gdpr, :consent, :revoke],
+          description: "Analytics-consent revocations.",
+          tags: [:feature]
+        ),
+
+        # ── GDPR: image-retention counts (30-day deletion promise) ────
+        # These use `sum` over the `:count` measurement because each event
+        # carries the batch size (N images purged this run), not a single
+        # occurrence. `:expired` is tagged by `:reason` ("expired" for the
+        # natural-TTL sweep, "stuck" for the safety-net sweep) to give the
+        # image.expired-by-reason breakdown. Exported as
+        # `stacks_gdpr_image_{expired,stuck,orphan}_count_total`.
+        sum(
+          [:stacks, :gdpr, :image, :expired, :count, :total],
+          event_name: [:stacks, :gdpr, :image, :expired],
+          measurement: :count,
+          description: "Images purged past their 30-day deadline, by reason.",
+          tags: [:reason]
+        ),
+        sum(
+          [:stacks, :gdpr, :image, :stuck, :count, :total],
+          event_name: [:stacks, :gdpr, :image, :stuck],
+          measurement: :count,
+          description: "Images cleaned by the stuck-pending safety net.",
+          tags: [:reason]
+        ),
+        sum(
+          [:stacks, :gdpr, :image, :orphan, :count, :total],
+          event_name: [:stacks, :gdpr, :image, :orphan],
+          measurement: :count,
+          description: "Images past expiry still in the DB (retention-gap alarm)."
+        ),
+
+        # ── GDPR: audit-log write throughput ──────────────────────────
+        # One event per successful audit_log insert. Watching this rate
+        # surfaces both throughput anomalies and silent audit-logging stalls.
+        # Exported as `stacks_gdpr_audit_write_count_total`.
+        counter(
+          [:stacks, :gdpr, :audit, :write, :count, :total],
+          event_name: [:stacks, :gdpr, :audit, :write],
+          description: "Audit-log write throughput (one per successful insert).",
+          tags: [:action, :resource_type]
         )
       ])
     ]

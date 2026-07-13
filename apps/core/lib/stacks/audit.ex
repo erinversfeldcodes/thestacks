@@ -66,8 +66,21 @@ defmodule Stacks.Audit do
     }
 
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
-      {1, _} -> {:ok, result_params}
-      _ -> {:error, :insert_failed}
+      {1, _} ->
+        # GDPR telemetry: audit-log write throughput. One event per successful
+        # audit insert so operators can watch the write rate and spot both
+        # throughput anomalies and silent audit-logging stalls. Tagged by
+        # `:action` and `:resource_type`. Registered in
+        # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_write_count_total`.
+        :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
+          action: action,
+          resource_type: resource_type
+        })
+
+        {:ok, result_params}
+
+      _ ->
+        {:error, :insert_failed}
     end
   rescue
     error -> {:error, error}
