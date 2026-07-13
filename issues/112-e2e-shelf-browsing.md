@@ -44,6 +44,14 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
+> **Cross-reference — physical shelves (US-1.7.1):** the shelf *rendering* this issue exercises
+> (`bookcase__shelf` rows, `list_shelves/1`, `#151` shelf grouping) is the **read side** of
+> US-1.7.1 "Organize Books into Shelves". US-1.7.1's *management* surface (create / reorder / delete
+> shelves, move a book between shelves — `ShelfController` + `BookshelfPlacementController.move_to_shelf`)
+> is **out of this issue's browsing scope** (it would trip this issue's "BookshelfController only"
+> scope check) and is tracked separately in **#183 (Shelf Organization)**. Do not fold shelf
+> management into #112.
+
 ## Test Suites
 
 ### 1. Playwright UI Tests
