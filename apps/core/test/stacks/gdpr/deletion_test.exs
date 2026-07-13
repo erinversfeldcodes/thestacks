@@ -17,6 +17,10 @@ defmodule Stacks.GDPR.DeletionTest do
 
   Until Phase 1's implementation lands, the GUC is never set, so the audit
   trigger blocks any cleanup the multi attempts and the deletion fails.
+
+  Also covers Issue #121: the erasure audit-row invariants and the
+  `op.event_log` immutability invariant (no rows added, removed, or modified
+  in place during `delete_user_data/1`).
   """
   use Core.DataCase, async: false
 
@@ -89,10 +93,28 @@ defmodule Stacks.GDPR.DeletionTest do
   end
 
   describe "delete_user_data/1 audit + event_log invariants (Issue #121)" do
-    # Snapshot of every op.event_log primary key, as a MapSet. Used to prove the
-    # erasure transaction leaves the event log untouched.
-    defp event_log_ids do
-      Repo.all(from(e in "event_log", select: e.id), prefix: "op")
+    # Snapshot of every op.event_log row's FULL content, as a MapSet of maps.
+    # Selecting all columns (not just the PK) means an in-place UPDATE of
+    # payload/metadata/etc. on an existing row — same id — changes the set and
+    # is detected. Column list mirrors the select in `Stacks.Events.fetch_batch/3`
+    # so it tracks the real op.event_log schema.
+    defp event_log_rows do
+      Repo.all(
+        from(e in "event_log",
+          select: %{
+            id: e.id,
+            event_type: e.event_type,
+            aggregate_type: e.aggregate_type,
+            aggregate_id: e.aggregate_id,
+            schema_version: e.schema_version,
+            payload: e.payload,
+            metadata: e.metadata,
+            occurred_at: e.occurred_at,
+            published_at: e.published_at
+          }
+        ),
+        prefix: "op"
+      )
       |> MapSet.new()
     end
 
@@ -145,14 +167,16 @@ defmodule Stacks.GDPR.DeletionTest do
                  aggregate_id: Ecto.UUID.generate()
                })
 
-      before_ids = event_log_ids()
-      assert MapSet.size(before_ids) >= 2
+      before_rows = event_log_rows()
+      assert MapSet.size(before_rows) >= 2
 
       assert {:ok, _result} = Deletion.delete_user_data(user.id)
 
-      # The set of event_log ids is byte-for-byte identical: nothing deleted,
-      # nothing inserted. delete_user_data/1 never touches op.event_log.
-      assert event_log_ids() == before_ids
+      # The full row content of op.event_log is byte-for-byte identical: nothing
+      # deleted, nothing inserted, and no row modified in place (an UPDATE of any
+      # column — e.g. payload or metadata — would change the set and fail here).
+      # delete_user_data/1 never touches op.event_log.
+      assert event_log_rows() == before_rows
     end
   end
 
