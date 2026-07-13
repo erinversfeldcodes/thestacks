@@ -177,6 +177,7 @@ formValidationTests =
                         , displayNameValidation = Pristine
                         , sessionExpired = False
                         , draftSaved = False
+                        , accountDeleted = False
                         }
 
                     html =
@@ -212,6 +213,7 @@ formValidationTests =
                         , displayNameValidation = Pristine
                         , sessionExpired = False
                         , draftSaved = False
+                        , accountDeleted = False
                         }
 
                     html =
