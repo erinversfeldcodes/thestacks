@@ -240,14 +240,14 @@ jobs:
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
             _build
           key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: priv/plts
           key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
@@ -297,7 +297,7 @@ jobs:
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
@@ -333,7 +333,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ needs.versions.outputs.node }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.elm
           key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
@@ -363,7 +363,7 @@ jobs:
           # gate in scripts/test-rust.sh. Locally it's installed by
           # setup.sh via `rustup component add llvm-tools-preview`.
           components: rustfmt, clippy, llvm-tools
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -487,7 +487,7 @@ jobs:
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
@@ -942,7 +942,7 @@ jobs:
           python3 scripts/gen_python_proto.py --language rust
           python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
