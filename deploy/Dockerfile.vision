@@ -8,9 +8,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY requirements/ /requirements/
-COPY apps/vision/requirements.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Hash-pinned lock (self-contained; regenerate with `just lock-vision`).
+COPY apps/vision/requirements.lock requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY apps/vision/app app/
 

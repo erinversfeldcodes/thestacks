@@ -408,7 +408,7 @@ jobs:
       # `zbar` package; on Ubuntu CI runners it's `libzbar0`.
       - run: sudo apt-get update && sudo apt-get install -y libzbar0
       - working-directory: apps/vision
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.lock
       # apps/vision/app/proto/gen/ is gitignored; lint and tests both
       # `from app.proto.gen.vision import ...`, which fails to resolve
       # without first running the generator. Same shape as test-rust.
@@ -511,7 +511,9 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
       - name: Install dbt-postgres, sqlfluff, and dbt-checkpoint
-        run: pip install dbt-postgres==1.10.2 sqlfluff==4.2.2 sqlfluff-templater-dbt==4.2.2 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'
+        # dbt-checkpoint pinned by commit SHA (= tag v2.0.8) rather than the
+        # mutable tag, so the git dependency is immutable (Scorecard pinning).
+        run: pip install dbt-postgres==1.10.2 sqlfluff==4.2.2 sqlfluff-templater-dbt==4.2.2 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@ff0bdf428ef49ed6ba70185bc797c76d4ad5b56b'
       - name: Seed and test dbt staging layer
         env:
           MIX_ENV: dev

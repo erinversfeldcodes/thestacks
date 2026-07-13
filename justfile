@@ -392,3 +392,21 @@ close-dependabot-prs COMBINED:
             && echo "closed #$n"
     done
     echo "Done. Any Dependabot PRs left open were NOT in the bundle (conflicts) — handle those separately."
+
+# Regenerate the hash-pinned vision lockfiles from requirements.txt INSIDE the
+# runtime image (python:3.14-slim) so resolution + hashes match production
+# exactly. requirements.txt / requirements-dev.txt stay the human-edited source
+# (Dependabot watches them); run this after any bump so the locks don't drift.
+lock-vision:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker run --rm -v "$PWD":/repo -w /repo python:3.14-slim bash -c '
+      set -e
+      pip install --quiet --root-user-action=ignore pip-tools
+      pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+        --output-file apps/vision/requirements.lock apps/vision/requirements.txt
+      pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+        --output-file apps/vision/requirements-dev.lock \
+        apps/vision/requirements.txt apps/vision/requirements-dev.txt
+    '
+    echo "Regenerated apps/vision/requirements.lock + requirements-dev.lock"
