@@ -41,7 +41,9 @@ generate_to() {
     if command -v elm-format &>/dev/null; then
         elm-format --yes "$dest" 2>/dev/null || true
     elif npx --no-install elm-format --help &>/dev/null 2>&1; then
-        npx elm-format --yes "$dest" 2>/dev/null || true
+        # --no-install: use only the locally-installed (lockfile-pinned)
+        # elm-format; never fetch an unpinned copy from the registry.
+        npx --no-install elm-format --yes "$dest" 2>/dev/null || true
     else
         echo "WARNING: elm-format not found; generated code may not be format-clean." >&2
     fi

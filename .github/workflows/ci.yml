@@ -319,7 +319,7 @@ jobs:
       - name: Build frontend into priv/static
         working-directory: apps/core/assets
         run: |
-          npm install
+          npm ci
           npm run deploy
       - run: scripts/test-elixir.sh
 
@@ -451,7 +451,7 @@ jobs:
         # against the release manifest.
         run: |
           mkdir -p "$HOME/.local/bin"
-          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.4/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run actionlint
         # No-arg invocation auto-discovers .github/workflows/*.yml. Composite
@@ -511,7 +511,7 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
       - name: Install dbt-postgres, sqlfluff, and dbt-checkpoint
-        run: pip install dbt-postgres sqlfluff sqlfluff-templater-dbt 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'
+        run: pip install dbt-postgres==1.10.2 sqlfluff==4.2.2 sqlfluff-templater-dbt==4.2.2 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@v2.0.8'
       - name: Seed and test dbt staging layer
         env:
           MIX_ENV: dev
@@ -607,7 +607,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install squawk
-        run: npm install -g squawk-cli
+        # Pinned: matches the security-squawk job's 2.47.0 (verified against
+        # the Phase 2 fixtures). Bump both together.
+        run: npm install -g squawk-cli@2.47.0
       - name: Lint changed migrations
         run: scripts/security-squawk.sh origin/main
 
@@ -932,9 +934,9 @@ jobs:
         run: mix deps.get
       - name: Install frontend deps (for node build.js inside deploy-stack.sh)
         working-directory: apps/core/assets
-        run: npm install
+        run: npm ci
       - name: Install Modal (for vision deploy inside deploy-stack.sh)
-        run: pip install modal
+        run: pip install modal==1.5.2
       - name: Generate proto artifacts for Docker builds
         run: |
           python3 scripts/gen_python_proto.py --language rust
@@ -948,7 +950,7 @@ jobs:
       - name: Install E2E deps and Playwright browsers
         working-directory: e2e
         run: |
-          npm install
+          npm ci
           npx playwright install --with-deps chromium
       - name: Deploy preview stack + warm vision pipeline
         run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit "${PIPESTATUS[0]}"

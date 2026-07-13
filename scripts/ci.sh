@@ -93,7 +93,7 @@ fi
 # ── Elm ───────────────────────────────────────────────────────────────────────
 if has_group elm; then
     echo -e "\n${CYAN}${BOLD}=== elm: deps ===${RESET}"
-    (cd frontend && npm install --save-dev elm elm-format elm-test)
+    (cd frontend && npm ci)
 
     if ! run_group "elm: lint" bash scripts/lint-elm.sh; then FAILED+=(elm-lint); fi
     if ! run_group "elm: test" bash scripts/test-elm.sh; then FAILED+=(elm-test); fi

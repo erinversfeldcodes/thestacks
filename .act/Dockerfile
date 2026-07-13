@@ -5,7 +5,7 @@
 #
 # checkov:skip=CKV_DOCKER_2: act runner image, not a production container — no healthcheck needed
 # checkov:skip=CKV_DOCKER_3: act runner requires root to simulate GitHub Actions runner
-FROM catthehacker/ubuntu:act-24.04
+FROM catthehacker/ubuntu:act-24.04@sha256:3d98df0137c62626482789b786d4bfe941d139baed30f237ebbabe363ea9bf08
 # hadolint ignore=DL3008,DL3059
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libssl1.1 2>/dev/null || \

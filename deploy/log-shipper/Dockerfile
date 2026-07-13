@@ -34,7 +34,7 @@
 #
 # checkov:skip=CKV_DOCKER_2: liveness owned by Fly [[checks]], not Docker HEALTHCHECK
 # hadolint ignore=DL3007
-FROM timberio/vector:latest-debian
+FROM timberio/vector:latest-debian@sha256:f109ff8fad3ad541eef979e30a236cbd473aa1fa6154406089af5863e0c6e108
 
 # The upstream image ships a demo `/etc/vector/vector.yaml` that
 # generates fake syslog lines (appname="BronzeGamer" etc. — Vector's
