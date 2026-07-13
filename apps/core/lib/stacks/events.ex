@@ -3,8 +3,11 @@ defmodule Stacks.Events do
   Event emission module. Inserts events into the `op.event_log` table and
   dispatches them to registered handlers via `Stacks.Events.SubscriberWorker`.
 
-  The event_log is append-only — records are never updated or deleted (except
-  GDPR erasure, which zeroes out payloads for deleted-user events).
+  The event_log is append-only — records are never updated or deleted, including
+  during GDPR erasure: event payloads carry only UUIDs (no PII), so there is
+  nothing to scrub and the erasure path leaves `op.event_log` untouched
+  (`Stacks.GDPR.Deletion`). Issue #183 may revisit this if the writing-assistant /
+  embeddings data model ever lets richer content into payloads.
   """
 
   require Logger

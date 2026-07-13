@@ -49,6 +49,16 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - `op.*` tables are proto-generated — `mix proto.sync --check` runs in CI; drift fails the build. Add fields via the proto, not the schema file.
 - `book_content_chunks` holds no personal data (shared corpus) — its preservation under erasure is load-bearing for #185.
 
+### ⚠️ Revisit on this issue — event_log "nothing to scrub" assumption
+GDPR erasure currently leaves `op.event_log` **untouched** because event payloads carry only UUIDs
+(no PII) — asserted by #121 Phase 1 (`deletion_test.exs` full-row immutability test) and now stated in
+`Stacks.Events`' moduledoc (corrected 2026-07-13, replacing a stale "erasure zeroes out payloads" line
+that described unbuilt behavior). **If the writing-assistant / embeddings data model (this issue) ever
+emits events whose payloads contain richer, PII-adjacent content**, that assumption breaks and erasure
+must scrub or the payload contract must stay UUID-only. Decide this here: either (a) keep new events'
+payloads strictly UUID-only, or (b) add payload-scrubbing to `Stacks.GDPR.Deletion` and update the
+`Events` moduledoc + the #121 immutability test accordingly.
+
 ## Test Audit
 Test Audit: generated when picked up.
 
