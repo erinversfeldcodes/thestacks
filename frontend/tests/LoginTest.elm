@@ -15,6 +15,7 @@ fakeAuthResponse =
     , email = "reader@stacks.dev"
     , displayName = "A Reader"
     , role = "user"
+    , consentWritingAssistant = False
     }
 
 

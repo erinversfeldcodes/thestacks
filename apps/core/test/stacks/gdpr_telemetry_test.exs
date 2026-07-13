@@ -113,6 +113,25 @@ defmodule Stacks.GDPRTelemetryTest do
       assert_receive {:telemetry_event, [:stacks, :gdpr, :consent, :revoke], %{count: 1},
                       %{feature: "analytics"}}
     end
+
+    test "consent telemetry carries the bounded writing_assistant feature label" do
+      attach_telemetry([
+        [:stacks, :gdpr, :consent, :grant],
+        [:stacks, :gdpr, :consent, :revoke]
+      ])
+
+      user = insert(:user)
+
+      assert {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
+
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :consent, :grant], %{count: 1},
+                      %{feature: "writing_assistant"}}
+
+      assert {:ok, _} = Consent.revoke_consent(user.id, "writing_assistant")
+
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :consent, :revoke], %{count: 1},
+                      %{feature: "writing_assistant"}}
+    end
   end
 
   # ── Image retention: expired / stuck / orphan + by-reason ──────────────────

@@ -74,6 +74,7 @@ module Api exposing
     , removeBook
     , requestExport
     , saveConsent
+    , saveWritingAssistantConsent
     , searchBooks
     , soldListing
     , streamEventDecoder
@@ -121,6 +122,7 @@ type alias AuthResponse =
     , email : String
     , displayName : String
     , role : String
+    , consentWritingAssistant : Bool
     }
 
 
@@ -138,6 +140,7 @@ fromProtoAuthResponse proto =
 
         else
             proto.user.role
+    , consentWritingAssistant = proto.user.consentWritingAssistant
     }
 
 
@@ -733,6 +736,34 @@ saveConsent consent token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/gdpr/consent"
         , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/gdpr/consent — save the user's writing-assistant consent
+preference. Sends `type: "writing_assistant"` so the backend targets the
+`consent_writing_assistant` flag (Issue #184). Revoking triggers a server-side
+purge of the user's writing-assistant data.
+-}
+saveWritingAssistantConsent :
+    Bool
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+saveWritingAssistantConsent consent token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/gdpr/consent"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "consent", Encode.bool consent )
+                    , ( "type", Encode.string "writing_assistant" )
+                    ]
+                )
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing

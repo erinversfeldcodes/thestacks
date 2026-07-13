@@ -23,6 +23,13 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.OptionalAuthPipeline
   end
 
+  # Gates a route behind writing-assistant consent (Issue #184). Halts with 403
+  # when the current user has not granted `consent_writing_assistant`. Runs after
+  # :authenticated so a current resource is present.
+  pipeline :writing_assistant_consent do
+    plug StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"
+  end
+
   pipeline :rate_limit_auth do
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
   end
@@ -240,6 +247,14 @@ defmodule CoreWeb.Router do
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
+  end
+
+  # Writing-assistant chat (Issue #184) — authenticated + gated by
+  # writing_assistant consent. A user without consent gets 403 at the pipeline;
+  # with consent, the action returns an honest "under construction" response.
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :writing_assistant_consent]
+    post "/blog/posts/:id/chat", BlogController, :chat
   end
 
   # Content display routes — support ?view_as=<perspective> for preview

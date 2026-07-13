@@ -16,7 +16,7 @@ defmodule StacksWeb.GDPRControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
-  alias Stacks.Workers.{AccountDeletionJob, DataExportJob}
+  alias Stacks.Workers.{AccountDeletionJob, DataExportJob, WritingAssistantDataPurgeWorker}
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -160,6 +160,72 @@ defmodule StacksWeb.GDPRControllerTest do
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = post(conn, "/api/gdpr/consent", %{consent: true})
       assert json_response(conn, 401)
+    end
+  end
+
+  describe "POST /api/gdpr/consent — writing_assistant feature" do
+    test "grants writing_assistant consent and returns the flag + timestamp", %{conn: conn} do
+      user = insert(:user, consent_writing_assistant: false)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/gdpr/consent", %{consent: true, type: "writing_assistant"})
+
+      body = json_response(conn, 200)
+      assert body["consent_writing_assistant"] == true
+      assert body["consent_writing_assistant_at"] != nil
+    end
+
+    test "revoking writing_assistant consent returns 200 and enqueues the purge worker",
+         %{conn: conn} do
+      user = insert(:user, consent_writing_assistant: true)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/gdpr/consent", %{consent: false, type: "writing_assistant"})
+
+      assert %{"consent_writing_assistant" => false} = json_response(conn, 200)
+
+      assert_enqueued(
+        worker: WritingAssistantDataPurgeWorker,
+        args: %{"user_id" => user.id}
+      )
+    end
+
+    test "granting writing_assistant consent does NOT enqueue the purge worker", %{conn: conn} do
+      user = insert(:user, consent_writing_assistant: false)
+
+      conn
+      |> auth_conn(user)
+      |> post("/api/gdpr/consent", %{consent: true, type: "writing_assistant"})
+
+      refute_enqueued(worker: WritingAssistantDataPurgeWorker)
+    end
+
+    test "an unknown consent type is rejected with 422 (whitelist)", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/gdpr/consent", %{consent: true, type: "marketing_🎯"})
+
+      assert %{"error" => _} = json_response(conn, 422)
+      # Never enqueue / never mutate on an invalid type.
+      refute_enqueued(worker: WritingAssistantDataPurgeWorker)
+    end
+
+    test "invalid consent value with a valid type is rejected with 422", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/gdpr/consent", %{consent: "maybe", type: "writing_assistant"})
+
+      assert %{"error" => _} = json_response(conn, 422)
     end
   end
 end

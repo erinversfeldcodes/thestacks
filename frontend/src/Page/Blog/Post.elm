@@ -9,6 +9,7 @@ module Page.Blog.Post exposing
 
 import Api
 import Components.BookAssociations as BookAssociations
+import Components.WritingAssistant as WritingAssistant
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
 import Html.Events exposing (onClick, onInput)
@@ -22,6 +23,7 @@ type alias Model =
     { postId : String
     , post : RemoteData Http.Error BlogPost
     , currentUserId : Maybe String
+    , writingAssistantConsent : Bool
     , actionResult : RemoteData Http.Error ()
     , comments : RemoteData Http.Error (List Comment)
     , commentDraft : String
@@ -51,11 +53,12 @@ type OutMsg
     | SessionExpired
 
 
-init : String -> Maybe String -> Maybe String -> ( Model, Cmd Msg )
-init postId maybeToken currentUserId =
+init : String -> Maybe String -> Maybe String -> Bool -> ( Model, Cmd Msg )
+init postId maybeToken currentUserId writingAssistantConsent =
     ( { postId = postId
       , post = Loading
       , currentUserId = currentUserId
+      , writingAssistantConsent = writingAssistantConsent
       , actionResult = NotAsked
       , comments = Loading
       , commentDraft = ""
@@ -238,6 +241,11 @@ view model =
                 in
                 div []
                     [ viewPost post isOwner
+                    , if isOwner then
+                        WritingAssistant.view { hasConsent = model.writingAssistantConsent }
+
+                      else
+                        text ""
                     , viewComments model
                     ]
         ]
