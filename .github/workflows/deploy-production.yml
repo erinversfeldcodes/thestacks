@@ -157,14 +157,14 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Modal
-        run: pip install modal
+        run: pip install modal==1.5.2
 
       - name: Install Elixir deps (for proto gen inside deploy-stack.sh)
         run: mix deps.get
 
       - name: Install frontend deps (for esbuild)
         working-directory: apps/core/assets
-        run: npm install
+        run: npm ci
 
       - name: record-prev-state — capture current core image and vision commit
         id: prev
