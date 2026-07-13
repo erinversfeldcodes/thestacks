@@ -774,6 +774,36 @@ if [[ "${PROD_MODE}" == 1 ]]; then
         echo "FAIL deploy: DATABASE_URL is required for prod migrate (compose it before invoking deploy-stack.sh --production)"
         exit 1
     fi
+
+    # ── Warm up the Neon compute before migrating ──────────────────────────────
+    # Prod runs on Neon with autosuspend. The Docker build + deps compile above
+    # takes ~8 min, long enough for the compute (last woken by the capture-LSN
+    # step) to scale to zero. `mix ecto.migrate`'s pool then can't establish a
+    # connection before its ~5s checkout timeout and the migration aborts with
+    # `DBConnection.ConnectionError: connection not available ... dropped from
+    # queue` (run 29206609072). A cold Neon compute takes a few seconds to wake
+    # on first connect, so poll `SELECT 1` with backoff until it answers — this
+    # wakes the compute and confirms connectivity before the heavier migrate.
+    if command -v psql &>/dev/null; then
+        echo "==> Warming up Neon compute (poll SELECT 1, up to 60s)..."
+        _warm_ok=0
+        for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if psql "$DATABASE_URL" -q -t -A -c "SELECT 1" >/dev/null 2>&1; then
+                echo "    Neon compute responded on attempt ${attempt}"
+                _warm_ok=1
+                break
+            fi
+            echo "    attempt ${attempt}: compute not ready yet, retrying in 6s..."
+            sleep 6
+        done
+        if [[ "${_warm_ok}" != 1 ]]; then
+            echo "FAIL deploy: Neon compute did not accept a connection within ~60s — aborting before migrate (old image still serving traffic)"
+            exit 1
+        fi
+    else
+        echo "WARN: psql not found — skipping Neon warmup (migrate may hit a cold-start connection timeout)"
+    fi
+
     if ! (cd "$REPO_ROOT/apps/core" && \
             MIX_ENV=prod mix deps.get --only prod && \
             MIX_ENV=prod mix compile && \
