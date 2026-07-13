@@ -19,8 +19,9 @@ defmodule Stacks.GDPR.DeletionTest do
   trigger blocks any cleanup the multi attempts and the deletion fails.
 
   Also covers Issue #121: the erasure audit-row invariants and the
-  `op.event_log` immutability invariant (no rows added, removed, or modified
-  in place during `delete_user_data/1`).
+  `op.event_log` GDPR-scrub invariant — the erased user's own event rows are
+  preserved (immutability: never deleted) but their PII-bearing payload and
+  metadata are redacted in place, while unrelated rows are left untouched.
   """
   use Core.DataCase, async: false
 
@@ -35,6 +36,7 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.AdminSession
   alias Stacks.Audit
   alias Stacks.Events
+  alias Stacks.Events.EventLog
   alias Stacks.GDPR.Deletion
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
@@ -93,31 +95,6 @@ defmodule Stacks.GDPR.DeletionTest do
   end
 
   describe "delete_user_data/1 audit + event_log invariants (Issue #121)" do
-    # Snapshot of every op.event_log row's FULL content, as a MapSet of maps.
-    # Selecting all columns (not just the PK) means an in-place UPDATE of
-    # payload/metadata/etc. on an existing row — same id — changes the set and
-    # is detected. Column list mirrors the select in `Stacks.Events.fetch_batch/3`
-    # so it tracks the real op.event_log schema.
-    defp event_log_rows do
-      Repo.all(
-        from(e in "event_log",
-          select: %{
-            id: e.id,
-            event_type: e.event_type,
-            aggregate_type: e.aggregate_type,
-            aggregate_id: e.aggregate_id,
-            schema_version: e.schema_version,
-            payload: e.payload,
-            metadata: e.metadata,
-            occurred_at: e.occurred_at,
-            published_at: e.published_at
-          }
-        ),
-        prefix: "op"
-      )
-      |> MapSet.new()
-    end
-
     test "writes a user.data_deleted audit row with nil user_id and the deleted user's id as resource_id" do
       user = insert(:user)
 
@@ -146,37 +123,52 @@ defmodule Stacks.GDPR.DeletionTest do
       assert row.resource_id == Ecto.UUID.dump!(user.id)
     end
 
-    test "does not add, remove, or modify any op.event_log row during erasure" do
+    test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
+      other_id = Ecto.UUID.generate()
 
-      # Seed events so the snapshot is non-empty (teeth) — including one whose
-      # aggregate is the very user being erased. The immutability contract says
-      # event payloads are UUID-only with nothing to scrub, so even the erased
-      # user's events must survive the erasure untouched.
+      # Seed a LEGACY PII-bearing event on the erased user's aggregate — the
+      # shape older emitters wrote before Issue #121 made user.* events
+      # UUID-only. Both payload and metadata carry PII here.
       assert {:ok, _} =
                Events.emit(%{
-                 event_type: "test.erasure.user_event",
+                 event_type: "user.profile_updated",
                  aggregate_type: "user",
-                 aggregate_id: user.id
+                 aggregate_id: user.id,
+                 payload: %{display_name: "Ada Lovelace"},
+                 metadata: %{ip: "10.0.0.1"}
                })
 
+      # An unrelated event on a DIFFERENT aggregate — must be left untouched.
       assert {:ok, _} =
                Events.emit(%{
-                 event_type: "test.erasure.other_event",
+                 event_type: "book.created",
                  aggregate_type: "book",
-                 aggregate_id: Ecto.UUID.generate()
+                 aggregate_id: other_id,
+                 payload: %{isbn: "9780262510875", title: "SICP"}
                })
 
-      before_rows = event_log_rows()
-      assert MapSet.size(before_rows) >= 2
+      before_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_id))
 
-      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
 
-      # The full row content of op.event_log is byte-for-byte identical: nothing
-      # deleted, nothing inserted, and no row modified in place (an UPDATE of any
-      # column — e.g. payload or metadata — would change the set and fail here).
-      # delete_user_data/1 never touches op.event_log.
-      assert event_log_rows() == before_rows
+      # A dedicated scrub step ran inside the same erasure transaction.
+      assert Map.has_key?(result, :scrub_event_log)
+
+      # (a) The erased user's event row STILL EXISTS (immutability) but its
+      #     payload AND metadata are now empty — the PII is scrubbed in place.
+      user_rows =
+        Repo.all(
+          from(e in EventLog, where: e.aggregate_type == "user" and e.aggregate_id == ^user.id)
+        )
+
+      assert length(user_rows) == 1
+      assert Enum.all?(user_rows, &(&1.payload == %{}))
+      assert Enum.all?(user_rows, &(&1.metadata == %{}))
+
+      # (b) The unrelated event row is byte-for-byte identical — untouched.
+      after_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_id))
+      assert after_other == before_other
     end
   end
 

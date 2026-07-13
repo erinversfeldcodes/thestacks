@@ -543,11 +543,14 @@ defmodule Stacks.Accounts do
         email_changeset(u, %{"email" => attrs["email"]})
       end)
       |> Multi.run(:emit_event, fn _repo, %{email: u} ->
+        # UUID-only payload: display_name is PII and must not enter
+        # op.event_log (GDPR — Issue #121). Consumers read the current
+        # profile from the user record via aggregate_id.
         Events.emit_safe(%{
           event_type: "user.profile_updated",
           aggregate_type: "user",
           aggregate_id: u.id,
-          payload: %{display_name: u.display_name}
+          payload: %{}
         })
 
         {:ok, u}
@@ -561,11 +564,14 @@ defmodule Stacks.Accounts do
   end
 
   defp tap_emit_profile_updated({:ok, user} = result) do
+    # UUID-only payload: display_name is PII and must not enter op.event_log
+    # (GDPR — Issue #121). Consumers read the current profile from the user
+    # record via aggregate_id.
     Events.emit_safe(%{
       event_type: "user.profile_updated",
       aggregate_type: "user",
       aggregate_id: user.id,
-      payload: %{display_name: user.display_name}
+      payload: %{}
     })
 
     result
@@ -574,7 +580,10 @@ defmodule Stacks.Accounts do
   defp tap_emit_profile_updated(error), do: error
 
   @doc """
-  Updates the country_code and city for a user. Emits `user.location_updated` event.
+  Updates the country_code and city for a user. Emits `user.location_updated`
+  event with a UUID-only payload — the city/country_code are PII and are read
+  back from the user record by consumers (see
+  `Stacks.Discovery.Handlers.LocationUpdatedHandler`).
   """
   @spec update_location(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_location(%User{} = user, attrs) do
@@ -585,11 +594,13 @@ defmodule Stacks.Accounts do
 
     case result do
       {:ok, updated} ->
+        # UUID-only payload: city + country_code are PII and must not enter
+        # op.event_log (GDPR — Issue #121).
         Events.emit_safe(%{
           event_type: "user.location_updated",
           aggregate_type: "user",
           aggregate_id: updated.id,
-          payload: %{country_code: updated.country_code, city: updated.city}
+          payload: %{}
         })
 
         {:ok, updated}

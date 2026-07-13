@@ -8,6 +8,7 @@ defmodule Stacks.AccountsTest do
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Events.EventLog
 
   describe "register/1" do
     test "creates a user with hashed password" do
@@ -258,6 +259,19 @@ defmodule Stacks.AccountsTest do
 
       assert event_count("user.profile_updated") == before_count + 1
     end
+
+    test "user.profile_updated payload carries no PII (UUID-only)" do
+      # GDPR (Issue #121): the display_name is PII and must NOT be written into
+      # op.event_log. The event carries only the aggregate_id — the payload is
+      # empty.
+      user = insert(:user)
+
+      assert {:ok, _} = Accounts.update_profile(user, %{"display_name" => "Grace Hopper"})
+
+      payload = latest_payload("user.profile_updated", user.id)
+      refute Map.has_key?(payload, "display_name")
+      assert payload == %{}
+    end
   end
 
   describe "update_location/2" do
@@ -284,13 +298,28 @@ defmodule Stacks.AccountsTest do
       assert %{city: [_]} = errors_on(changeset)
     end
 
-    test "emits user.location_updated event with correct payload" do
+    test "emits user.location_updated event" do
       user = insert(:user)
       before_count = event_count("user.location_updated")
 
       Accounts.update_location(user, %{"country_code" => "ZA", "city" => "Cape Town"})
 
       assert event_count("user.location_updated") == before_count + 1
+    end
+
+    test "user.location_updated payload carries no PII (UUID-only)" do
+      # GDPR (Issue #121): city + country_code are PII and must NOT be written
+      # into op.event_log. The discovery handler re-reads the location from the
+      # user record, so the event payload stays empty.
+      user = insert(:user)
+
+      assert {:ok, _} =
+               Accounts.update_location(user, %{"country_code" => "ZA", "city" => "Cape Town"})
+
+      payload = latest_payload("user.location_updated", user.id)
+      refute Map.has_key?(payload, "city")
+      refute Map.has_key?(payload, "country_code")
+      assert payload == %{}
     end
   end
 
@@ -728,6 +757,19 @@ defmodule Stacks.AccountsTest do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
       :count
+    )
+  end
+
+  # Latest event payload for an aggregate — uses the EventLog schema so
+  # aggregate_id casts from the UUID string and payload loads as a map.
+  defp latest_payload(event_type, aggregate_id) do
+    Repo.one(
+      from(e in EventLog,
+        where: e.event_type == ^event_type and e.aggregate_id == ^aggregate_id,
+        order_by: [desc: e.occurred_at],
+        limit: 1,
+        select: e.payload
+      )
     )
   end
 end

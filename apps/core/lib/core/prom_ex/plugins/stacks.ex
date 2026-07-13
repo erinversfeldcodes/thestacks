@@ -235,7 +235,11 @@ defmodule Core.PromEx.Plugins.Stacks do
           [:stacks, :gdpr, :image, :expired, :count, :total],
           event_name: [:stacks, :gdpr, :image, :expired],
           measurement: :count,
-          description: "Images purged past their 30-day deadline, by reason.",
+          # NOTE: reason="stuck" MIRRORS the :stuck metric — query :expired split
+          # by :reason; never sum :expired + :stuck (double-counts stuck).
+          # See Stacks.GDPR.ImageRetention.cleanup_stuck_images/0.
+          description:
+            "Images purged past their 30-day deadline, BY :reason (expired=TTL sweep, stuck=safety-net). Query split by reason; do not sum with the stuck metric.",
           tags: [:reason]
         ),
         sum(
