@@ -1,6 +1,6 @@
 # Shared runtime dependencies — pinned versions used across all Python services.
 # Reference from a service: -r ../../requirements/base.txt
-pydantic==2.10.4
-pydantic-settings==2.7.1
+pydantic==2.13.4
+pydantic-settings==2.14.2
 httpx==0.28.1
 structlog==24.4.0
