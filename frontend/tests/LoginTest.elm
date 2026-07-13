@@ -109,6 +109,7 @@ suite =
                             , displayNameValidation = Pristine
                             , sessionExpired = False
                             , draftSaved = False
+                            , accountDeleted = False
                             }
 
                         ( model, _, _ ) =

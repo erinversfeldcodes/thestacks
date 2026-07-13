@@ -33,6 +33,7 @@ module Api exposing
     , createListing
     , deactivateListing
     , declineInvitation
+    , deleteAccount
     , deleteComment
     , dismissAssociation
     , getAdminSources
@@ -688,6 +689,30 @@ requestExport token toMsg =
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/gdpr/export"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/gdpr/account — queue erasure of the user's account and personal
+data.
+
+The backend responds 202 Accepted and processes the deletion asynchronously, so
+the client only needs to confirm the request was queued; the response body is
+not consumed. On success the caller is logged out.
+
+-}
+deleteAccount :
+    String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+deleteAccount token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/gdpr/account"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing

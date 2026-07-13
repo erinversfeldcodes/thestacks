@@ -1578,6 +1578,45 @@ h4 {
     padding-top: 1.5rem;
 }
 
+/* -- Danger zone (Issue #188): a warm-maroon treatment so the destructive
+      account-deletion section reads as dangerous before the eye reaches the
+      button. Extra top separation, a maroon left rail, and a faint tinted
+      panel set it apart from the calm settings sections above. -- */
+
+.settings-section--danger {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    border: 1px solid rgba(176, 48, 48, 0.4);
+    border-left: 4px solid #b03030;
+    border-radius: 4px;
+    background-color: rgba(176, 48, 48, 0.05);
+}
+
+.settings-section--danger .settings-section__title {
+    color: #b03030;
+}
+
+.privacy__delete-confirm {
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid rgba(176, 48, 48, 0.25);
+    border-radius: 4px;
+    background-color: rgba(176, 48, 48, 0.03);
+}
+
+.privacy__delete-confirm .settings-actions {
+    display: flex;
+    gap: 0.75rem;
+    padding-top: 1rem;
+}
+
+.privacy__delete-hint {
+    margin-top: 0.5rem;
+    color: var(--text-muted, #a09070);
+    font-size: var(--size-sm);
+    font-style: italic;
+}
+
 .toggle-row {
     display: flex;
     align-items: center;
@@ -2381,6 +2420,24 @@ h4 {
       >= 4.5:1 contrast on the login card. -- */
 
 .login-card__notice--session-expired {
+    color: #6b4310;
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: var(--size-sm);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background-color: rgba(184, 134, 11, 0.12);
+    border: 1px solid rgba(184, 134, 11, 0.35);
+    border-radius: 3px;
+    line-height: 1.5;
+}
+
+/* -- Account-deleted farewell (Issue #188): a calm, warm goodbye. Reuses the
+      lamplight-amber notice treatment (the user did nothing wrong) but is
+      raised on its own class so the copy and future styling stay independent
+      of the session-expiry surface. -- */
+
+.login-card__notice--account-deleted {
     color: #6b4310;
     font-family: var(--font-heading);
     font-style: italic;
