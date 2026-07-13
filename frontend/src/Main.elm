@@ -313,8 +313,8 @@ and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map6
-        (\token userId email displayName role consentWritingAssistant ->
+    Decode.map7
+        (\token userId email displayName role consentAnalytics consentWritingAssistant ->
             { user =
                 { id = userId
                 , email = email
@@ -322,6 +322,7 @@ authDecoder =
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
+                , consentAnalytics = consentAnalytics
                 , consentWritingAssistant = consentWritingAssistant
                 }
             , token = token
@@ -334,6 +335,11 @@ authDecoder =
         (Decode.oneOf
             [ Decode.field "role" Decode.string
             , Decode.succeed "user"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "consentAnalytics" Decode.bool
+            , Decode.succeed False
             ]
         )
         (Decode.oneOf
@@ -473,7 +479,18 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             ( PageSearch Search.init, Cmd.none )
 
         SettingsConsent ->
-            ( PageSettingsConsent Consent.init, Cmd.none )
+            let
+                consentSeed =
+                    case maybeAuth of
+                        Just auth ->
+                            { analytics = auth.user.consentAnalytics
+                            , writingAssistant = auth.user.consentWritingAssistant
+                            }
+
+                        Nothing ->
+                            { analytics = False, writingAssistant = False }
+            in
+            ( PageSettingsConsent (Consent.init consentSeed), Cmd.none )
 
         SettingsAgeVerification ->
             ( PageSettingsAgeVerification AgeVerification.init, Cmd.none )
@@ -507,7 +524,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -519,7 +536,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -639,7 +656,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         Groups ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     Groups.init auth.user.id auth.token
@@ -649,7 +666,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         GroupDetail groupId ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     GroupsDetail.init groupId auth.user.id auth.token
@@ -671,6 +688,7 @@ encodeAuth auth =
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
         , ( "role", Json.Encode.string auth.user.role )
+        , ( "consentAnalytics", Json.Encode.bool auth.user.consentAnalytics )
         , ( "consentWritingAssistant", Json.Encode.bool auth.user.consentWritingAssistant )
         ]
 
@@ -1113,6 +1131,7 @@ update msg model =
                                         , role = authResponse.role
                                         , countryCode = Nothing
                                         , city = Nothing
+                                        , consentAnalytics = authResponse.consentAnalytics
                                         , consentWritingAssistant = authResponse.consentWritingAssistant
                                         }
                                     , token = authResponse.token
@@ -1155,6 +1174,7 @@ update msg model =
                                         , role = ar.role
                                         , countryCode = Nothing
                                         , city = Nothing
+                                        , consentAnalytics = ar.consentAnalytics
                                         , consentWritingAssistant = ar.consentWritingAssistant
                                         }
                                     , token = ar.token

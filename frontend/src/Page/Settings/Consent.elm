@@ -44,10 +44,15 @@ writingAssistantOffDescription =
     "Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."
 
 
-init : Model
-init =
-    { analyticsConsent = False
-    , writingAssistantConsent = False
+{-| Seed the consent page from the current user's actual consent state so the
+toggles reflect reality on open (Issue FF-1). Previously both toggles were
+hard-coded OFF, so a user who had already granted consent saw them as OFF and
+their first click re-granted instead of revoking.
+-}
+init : { analytics : Bool, writingAssistant : Bool } -> Model
+init consent =
+    { analyticsConsent = consent.analytics
+    , writingAssistantConsent = consent.writingAssistant
     , saving = NotAsked
     }
 
