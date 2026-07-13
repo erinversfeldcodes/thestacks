@@ -170,6 +170,56 @@ defmodule Stacks.GDPR.DeletionTest do
       after_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_id))
       assert after_other == before_other
     end
+
+    test "scrubs the user's free-text PII from events under NON-user aggregates (#185)" do
+      user = insert(:user)
+      other_user = insert(:user)
+      post_id = Ecto.UUID.generate()
+      other_post_id = Ecto.UUID.generate()
+
+      # blog.post_created carries the user's free-text post TITLE + user_id
+      # under aggregate_type "post" — Phase 7's aggregate_type == "user" scrub
+      # does NOT reach it, so this is the cross-aggregate leak #185 closes.
+      assert {:ok, _} =
+               Events.emit(%{
+                 event_type: "blog.post_created",
+                 aggregate_type: "post",
+                 aggregate_id: post_id,
+                 payload: %{
+                   user_id: user.id,
+                   title: "My deeply personal post title",
+                   visibility: "public"
+                 }
+               })
+
+      # A DIFFERENT user's blog post — must be left untouched.
+      assert {:ok, _} =
+               Events.emit(%{
+                 event_type: "blog.post_created",
+                 aggregate_type: "post",
+                 aggregate_id: other_post_id,
+                 payload: %{
+                   user_id: other_user.id,
+                   title: "Someone else's post",
+                   visibility: "public"
+                 }
+               })
+
+      before_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_post_id))
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # The erased user's post-event row survives (immutability) but its
+      # free-text title is scrubbed to an empty payload.
+      erased_row = Repo.one(from(e in EventLog, where: e.aggregate_id == ^post_id))
+      assert erased_row.payload == %{}
+      assert erased_row.metadata == %{}
+
+      # The other user's post event is untouched.
+      after_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_post_id))
+      assert after_other == before_other
+      assert after_other.payload["title"] == "Someone else's post"
+    end
   end
 
   describe "delete_user_data/1 session revocation" do
@@ -246,6 +296,43 @@ defmodule Stacks.GDPR.DeletionTest do
 
       assert is_nil(Repo.get(UserMFA, mfa.id))
       assert is_nil(Repo.get(AdminSession, session.id))
+    end
+  end
+
+  describe "erasure completeness — schema-level guard (#185)" do
+    test "every op.* FK that references op.users cascades or nullifies on delete" do
+      # Future-proofing: erasure reaches personal data via `repo.delete(user)`
+      # + FK ON DELETE CASCADE (or explicit Multi steps). A new personal table
+      # whose FK to op.users is RESTRICT / NO ACTION would either break the
+      # erasure transaction at `repo.delete(user)` or silently orphan the
+      # user's data. This audits EVERY FK whose target is op.users — regardless
+      # of the referencing column's name (user_id, author_id, seller_id,
+      # owner_id, blocker_id, …) — and fails loudly if any is not CASCADE ('c')
+      # or SET NULL ('n'). confdeltype: c=cascade n=set-null a=no-action
+      # r=restrict d=set-default.
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT c.relname, a.attname, con.confdeltype
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_class rc ON rc.oid = con.confrelid
+        JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+        JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey)
+        WHERE n.nspname = 'op'
+          AND con.contype = 'f'
+          AND rn.nspname = 'op'
+          AND rc.relname = 'users'
+        """)
+
+      offenders =
+        for [table, col, deltype] <- rows,
+            deltype not in ["c", "n"],
+            do: "#{table}.#{col} (#{deltype})"
+
+      assert offenders == [],
+             "op.* FKs referencing op.users that neither CASCADE nor SET NULL on delete " <>
+               "(erasure would orphan or break): #{inspect(offenders)}"
     end
   end
 end
