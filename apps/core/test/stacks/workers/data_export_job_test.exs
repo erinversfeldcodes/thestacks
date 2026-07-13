@@ -29,4 +29,14 @@ defmodule Stacks.Workers.DataExportJobTest do
                perform_job(DataExportJob, %{"user_id" => Ecto.UUID.generate()})
     end
   end
+
+  describe "job config (Issue #121 §6)" do
+    test "runs on the :default queue" do
+      assert DataExportJob.__opts__()[:queue] == :default
+    end
+
+    test "is configured with max_attempts of 3" do
+      assert DataExportJob.__opts__()[:max_attempts] == 3
+    end
+  end
 end
