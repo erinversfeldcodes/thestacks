@@ -107,6 +107,16 @@ jobs:
       - name: Generate Ecto schemas from proto
         run: bash scripts/gen-ecto-proto.sh
 
+      # gen-ecto-proto.sh only emits the *persisted* Ecto schemas. The full app
+      # (which `mix ecto.migrate` compiles below) also references non-persisted
+      # inter-service proto structs — Stacks.Proto.Vision.AssociateRequest /
+      # AssociateCallback, Stacks.Proto.Scraper.ScrapeRequest — which are
+      # generated separately and gitignored. deploy-stack.sh generates these at
+      # lines 749-751; this step is the reseed workflow's equivalent. Without it
+      # the migrate step fails to compile (undefined struct errors).
+      - name: Generate inter-service Elixir proto structs
+        run: bash scripts/gen-elixir-proto.sh
+
       - name: Apply migrations to staging
         working-directory: apps/core
         env:
