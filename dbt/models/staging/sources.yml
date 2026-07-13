@@ -235,6 +235,10 @@ sources:
             description: Whether the user consented to analytics.
           - name: consent_analytics_at
             description: Timestamp of analytics consent decision.
+          - name: consent_writing_assistant
+            description: Whether the user consented to writing-assistant personalisation.
+          - name: consent_writing_assistant_at
+            description: Timestamp of writing-assistant consent decision.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -834,6 +838,81 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+
+      # ── Writing-assistant / embeddings (Issue #183 / #184) ────────────
+      # The vector tables (op.embeddings, op.book_content_chunks) are skip_dbt
+      # (raw vectors / query text never enter the warehouse) so have no source
+      # here. The three append-only tables override loaded_at_field to created_at
+      # (they have no updated_at column).
+      - name: blog_assistant_sessions
+        description: Writing-assistant chat sessions (user-scoped).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to the owning user.
+          - name: status
+            description: Session status.
+          - name: topic
+            description: Free-text session topic.
+          - name: model
+            description: Model identifier used for the session.
+          - name: started_at
+            description: When the session started.
+          - name: created_at
+            description: Row creation timestamp.
+          - name: updated_at
+            description: Row update timestamp.
+      - name: turn_feedback
+        loaded_at_field: created_at
+        description: Per-turn feedback on writing-assistant sessions (append-only).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: session_id
+            description: FK to blog_assistant_sessions (cascades on session delete).
+          - name: turn_index
+            description: Zero-based index of the turn within the session.
+          - name: rating
+            description: User rating for the turn.
+          - name: comment
+            description: Free-text feedback comment.
+          - name: created_at
+            description: Row creation timestamp.
+      - name: retrieval_log
+        loaded_at_field: created_at
+        description: RAG retrieval log per assistant turn (append-only; raw query text is excluded from the warehouse).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: session_id
+            description: FK to blog_assistant_sessions (cascades on session delete).
+          - name: query
+            description: Raw RAG query text. Present in the DB but deliberately EXCLUDED from the staging model (PII / free-text never enters the warehouse).
+          - name: retrieved_ids
+            description: IDs of the chunks retrieved for the turn.
+          - name: scores
+            description: Similarity scores for the retrieved chunks.
+          - name: turn_index
+            description: Zero-based index of the turn within the session.
+          - name: created_at
+            description: Row creation timestamp.
+      - name: user_book_content_access
+        loaded_at_field: created_at
+        description: User access grants to book content for personalisation (append-only).
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to the owning user.
+          - name: book_id
+            description: FK to the book whose content is accessible.
+          - name: access_type
+            description: Kind of access granted.
+          - name: granted_at
+            description: When access was granted.
+          - name: created_at
+            description: Row creation timestamp.
 
   - name: audit
     schema: audit
