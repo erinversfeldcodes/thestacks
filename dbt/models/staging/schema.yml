@@ -1117,3 +1117,116 @@ models:
         description: Position.
       - name: created_at
         description: Created at.
+
+  - name: stg_user_book_content_access
+    description: >
+      Proto-synced staging model for user_book_content_access.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: User id.
+        tests:
+          - not_null
+      - name: book_id
+        description: Book id.
+        tests:
+          - not_null
+      - name: access_type
+        description: Access type.
+        tests:
+          - not_null
+      - name: granted_at
+        description: Granted at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+
+  - name: stg_blog_assistant_sessions
+    description: >
+      Proto-synced staging model for blog_assistant_sessions.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: User id.
+        tests:
+          - not_null
+      - name: status
+        description: Status.
+        tests:
+          - not_null
+      - name: topic
+        description: Topic.
+      - name: model
+        description: Model.
+      - name: started_at
+        description: Started at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_retrieval_log
+    description: >
+      Proto-synced staging model for retrieval_log.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: session_id
+        description: Session id.
+        tests:
+          - not_null
+      - name: retrieved_ids
+        description: Retrieved ids.
+      - name: scores
+        description: Scores.
+      - name: turn_index
+        description: Turn index.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+
+  - name: stg_turn_feedback
+    description: >
+      Proto-synced staging model for turn_feedback.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: session_id
+        description: Session id.
+        tests:
+          - not_null
+      - name: turn_index
+        description: Turn index.
+        tests:
+          - not_null
+      - name: rating
+        description: Rating.
+        tests:
+          - accepted_values:
+              values: ['up', 'down']
+      - name: comment
+        description: Comment.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null

@@ -969,6 +969,182 @@
         space_id: %{belongs_to: Stacks.Enrichment.ThirdSpace},
         related_authors: %{ecto_type: {:array, :string}}
       }
+    },
+
+    # -------------------------------------------------------------------------
+    # Writing Assistant / Embeddings (Issue #183 — GDPR data-model foundation)
+    #
+    # Ownership + erasure classification (see docs/decisions/017):
+    #   embeddings, blog_assistant_sessions, turn_feedback, retrieval_log,
+    #   user_book_content_access  — PERSONAL, cascade-deleted on user erasure
+    #     (every user_id / session_id FK is on_delete: :delete_all, so a single
+    #      `Repo.delete(user)` in Stacks.GDPR.Deletion reaches them).
+    #   book_content_chunks       — SHARED, NON-personal, PRESERVED by erasure
+    #     (NO user_id column — nothing to erase; book_id FK only).
+    #
+    # embeddings + book_content_chunks carry a pgvector `vector(1024)` column
+    # that proto CANNOT express. They therefore use `skip_ecto: true` (schema is
+    # hand-written with the Pgvector.Ecto.Vector field, outside gen/) and
+    # `migration_exists: true` (CREATE EXTENSION + table + vector col + HNSW
+    # index are in a hand-written migration). proto.sync still enforces, via
+    # --check, that every SCALAR proto field appears as a column in that
+    # migration; the vector column is invisible to the codegen path.
+    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "BlogAssistantSession",
+      table_name: "blog_assistant_sessions",
+      schema_prefix: "op",
+      ecto_module: Stacks.WritingAssistant.Session,
+      ecto_path: "lib/stacks/gen/writing_assistant/session.ex",
+      dbt_path: "stg_blog_assistant_sessions.sql",
+      timestamps: :standard,
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        status: %{default: "active", null: false},
+        started_at: %{ecto_type: :utc_datetime_usec}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "TurnFeedback",
+      table_name: "turn_feedback",
+      schema_prefix: "op",
+      ecto_module: Stacks.WritingAssistant.TurnFeedback,
+      ecto_path: "lib/stacks/gen/writing_assistant/turn_feedback.ex",
+      dbt_path: "stg_turn_feedback.sql",
+      timestamps: {:standard, updated_at: false},
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        session_id: %{
+          belongs_to: Stacks.WritingAssistant.Session,
+          references_table: :blog_assistant_sessions,
+          on_delete: :delete_all,
+          null: false
+        },
+        turn_index: %{null: false},
+        rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "RetrievalLog",
+      table_name: "retrieval_log",
+      schema_prefix: "op",
+      ecto_module: Stacks.WritingAssistant.RetrievalLog,
+      ecto_path: "lib/stacks/gen/writing_assistant/retrieval_log.ex",
+      dbt_path: "stg_retrieval_log.sql",
+      timestamps: {:standard, updated_at: false},
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        session_id: %{
+          belongs_to: Stacks.WritingAssistant.Session,
+          references_table: :blog_assistant_sessions,
+          on_delete: :delete_all,
+          null: false
+        },
+        # User free-text query — PII-adjacent. Exclude from dbt analytics.
+        query: %{dbt_exclude: true},
+        retrieved_ids: %{ecto_type: {:array, :binary_id}, default: []},
+        scores: %{default: []}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "UserBookContentAccess",
+      table_name: "user_book_content_access",
+      schema_prefix: "op",
+      ecto_module: Stacks.WritingAssistant.UserBookContentAccess,
+      ecto_path: "lib/stacks/gen/writing_assistant/user_book_content_access.ex",
+      dbt_path: "stg_user_book_content_access.sql",
+      timestamps: {:standard, updated_at: false},
+      migration_exists: false,
+      dbt_grant: true,
+      indexes: [],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          references_table: :books,
+          on_delete: :delete_all,
+          null: false
+        },
+        access_type: %{default: "granted", null: false},
+        granted_at: %{ecto_type: :utc_datetime_usec}
+      }
+    },
+    # embeddings + book_content_chunks: hand-written migration + schema (pgvector
+    # vector(1024) column). skip_ecto keeps the Pgvector schema out of gen/;
+    # migration_exists keeps the CREATE EXTENSION / vector / HNSW migration
+    # hand-written. --check still verifies scalar columns are present.
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "Embedding",
+      table_name: "embeddings",
+      schema_prefix: "op",
+      # Hand-written (skip_ecto) — carries `field :embedding, Pgvector.Ecto.Vector`.
+      ecto_module: Stacks.WritingAssistant.Embedding,
+      ecto_path: "lib/stacks/writing_assistant/embedding.ex",
+      dbt_path: "stg_embeddings.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      skip_ecto: true,
+      skip_dbt: true,
+      indexes: [],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        source_type: %{null: false},
+        source_id: %{ecto_type: :binary_id},
+        content_date: %{ecto_type: :utc_datetime_usec}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/writing_assistant.proto",
+      proto_message: "BookContentChunk",
+      table_name: "book_content_chunks",
+      schema_prefix: "op",
+      # Hand-written (skip_ecto) — carries `field :embedding, Pgvector.Ecto.Vector`.
+      # SHARED, NON-personal: no user_id column ⇒ preserved by erasure.
+      ecto_module: Stacks.WritingAssistant.BookContentChunk,
+      ecto_path: "lib/stacks/writing_assistant/book_content_chunk.ex",
+      dbt_path: "stg_book_content_chunks.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      skip_ecto: true,
+      skip_dbt: true,
+      indexes: [],
+      field_overrides: %{
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          references_table: :books,
+          on_delete: :delete_all,
+          null: false
+        },
+        chunk_index: %{null: false},
+        content: %{null: false}
+      }
     }
   ],
 
