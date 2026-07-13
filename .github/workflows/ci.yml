@@ -162,6 +162,7 @@ jobs:
       iac: ${{ steps.filter.outputs.iac }}
       lockfiles: ${{ steps.filter.outputs.lockfiles }}
       source: ${{ steps.filter.outputs.source }}
+      vision_deps: ${{ steps.filter.outputs.vision_deps }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
@@ -215,6 +216,10 @@ jobs:
               - 'apps/vision/requirements*.txt'
               - 'scripts/mcp/requirements.txt'
               - 'flake.lock'
+            vision_deps:
+              - 'apps/vision/requirements*.txt'
+              - 'apps/vision/requirements*.lock'
+              - 'requirements/**'
             source:
               - 'apps/**'
               - 'frontend/**'
@@ -583,6 +588,40 @@ jobs:
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+  # Fail if the hash-pinned vision lockfiles drift from their source
+  # requirements — e.g. a Dependabot bump to requirements.txt that wasn't
+  # followed by `just lock-vision`. Without this the Docker build would keep
+  # installing the stale locked versions, silently ignoring the update (and any
+  # security fix in it). Regenerates in python:3.14-slim with the same pinned
+  # pip-tools as the recipe, so output is byte-identical when in sync.
+  vision-lock-drift:
+    needs: changes
+    if: needs.changes.outputs.vision_deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: python:3.14-slim
+    steps:
+      - name: Install git (slim image lacks it)
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends git \
+            && rm -rf /var/lib/apt/lists/*
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Regenerate vision locks and fail on drift
+        run: |
+          set -euo pipefail
+          pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+          pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+            --output-file apps/vision/requirements.lock apps/vision/requirements.txt
+          pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+            --output-file apps/vision/requirements-dev.lock \
+            apps/vision/requirements.txt apps/vision/requirements-dev.txt
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if ! git diff --exit-code apps/vision/requirements.lock apps/vision/requirements-dev.lock; then
+            echo "::error::vision lockfiles are stale — run 'just lock-vision' and commit the result"
+            exit 1
+          fi
 
   checkov:
     needs: changes
