@@ -119,16 +119,33 @@ jobs:
 
       - name: Apply migrations to staging
         working-directory: apps/core
+        # MIX_ENV=prod (job-level) loads config/runtime.exs, which fail-fasts on
+        # these prod secrets even though migrate only touches the DB. They exist
+        # as repo secrets (deploy-production uses them). VISION_SERVICE_URL is a
+        # non-secret URL that only needs to be non-empty here.
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
         run: mix ecto.migrate
 
       - name: Run seeds against staging
         working-directory: apps/core
+        # Same prod-secret requirement as the migrate step above (runtime.exs).
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
           ALLOW_SEEDS: "true"
         # `mix run priv/repo/seeds.exs` directly (rather than going through
         # Stacks.Release.seed/0) because we're running from a checked-out
