@@ -5,9 +5,13 @@ defmodule Stacks.GDPR.Deletion do
   All operations run in a single `Ecto.Multi` transaction to ensure atomicity.
   A deletion record is inserted into the audit_log after all data is removed.
 
-  The event_log is NOT modified. Event payloads contain no real-world PII
-  (name, email, etc.) — only opaque UUIDs and system metadata — so there is
-  nothing to scrub. The audit trail is preserved intact.
+  `op.event_log` rows are preserved (the event stream is immutable — events are
+  never deleted, including during erasure), but the erased user's own rows are
+  scrubbed in place: their `payload` and `metadata` are redacted to `{}` so no
+  PII survives. Current `user.*` emitters are UUID-only, so this only bites
+  legacy rows written before Issue #121 — but it runs unconditionally as a
+  safety net. `op.event_log` has no append-only trigger (unlike
+  `audit.audit_log`), so the scrub is a plain UPDATE needing no GUC.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -22,6 +26,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.User
   alias Stacks.Audit
+  alias Stacks.Events.EventLog
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -65,6 +70,25 @@ defmodule Stacks.GDPR.Deletion do
         nil -> {:error, :user_not_found}
         user -> repo.delete(user)
       end
+    end)
+    |> Multi.run(:scrub_event_log, fn repo, _ ->
+      # GDPR erasure: redact any PII that legacy `user.*` events may have
+      # written into op.event_log payload/metadata (current emitters are
+      # UUID-only). We UPDATE rather than DELETE to preserve event-stream
+      # immutability — the event survives, only its PII is emptied.
+      #
+      # op.event_log has NO append-only trigger (unlike audit.audit_log), so
+      # this plain UPDATE needs no `app.audit_gdpr_erasure` GUC. It runs on the
+      # Multi's `repo`, so it commits/rolls back atomically with the erasure.
+      {count, _} =
+        repo.update_all(
+          from(e in EventLog,
+            where: e.aggregate_type == "user" and e.aggregate_id == ^user_id
+          ),
+          set: [payload: %{}, metadata: %{}]
+        )
+
+      {:ok, count}
     end)
     |> Multi.run(:revoke_sessions, fn repo, _ ->
       # Kill every live auth session belonging to the erased user. Neither

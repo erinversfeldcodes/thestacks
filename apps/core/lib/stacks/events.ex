@@ -3,11 +3,15 @@ defmodule Stacks.Events do
   Event emission module. Inserts events into the `op.event_log` table and
   dispatches them to registered handlers via `Stacks.Events.SubscriberWorker`.
 
-  The event_log is append-only — records are never updated or deleted, including
-  during GDPR erasure: event payloads carry only UUIDs (no PII), so there is
-  nothing to scrub and the erasure path leaves `op.event_log` untouched
-  (`Stacks.GDPR.Deletion`). Issue #183 may revisit this if the writing-assistant /
-  embeddings data model ever lets richer content into payloads.
+  The event_log is append-only — records are never deleted, including during
+  GDPR erasure. For `user` aggregates the going-forward contract is that
+  payloads are UUID-only (no PII): consumers read the current state from the
+  user record via `aggregate_id`. As a defence-in-depth safety net for any
+  legacy rows that predate that contract, GDPR erasure (`Stacks.GDPR.Deletion`)
+  redacts the erased user's own rows in place — emptying `payload` and
+  `metadata` to `{}` — rather than deleting them, preserving the event stream
+  while scrubbing PII (matches the CLAUDE.md invariant: "immutable, except GDPR
+  erasure of PII in payloads").
   """
 
   require Logger
