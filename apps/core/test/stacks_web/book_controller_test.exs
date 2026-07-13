@@ -12,6 +12,16 @@ defmodule StacksWeb.BookControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.MockHttpClient
 
+  # Reset the resolver's circuit breakers before each test. :fuse state is
+  # global, so a fuse blown by an earlier suite test can leak in and turn a
+  # mocked ISBN resolve into :circuit_open → isbn_not_found (an order-dependent
+  # flake observed in the full-suite run but not in isolation).
+  setup do
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+    :ok
+  end
+
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
