@@ -1,0 +1,64 @@
+name: Dependabot lock auto-regen
+
+# When Dependabot bumps a Python dep that feeds the hash-pinned vision locks
+# (requirements/** or apps/vision/requirements*.txt), the committed lockfiles go
+# stale and the `vision-lock-drift` guard in ci.yml would fail the PR. This
+# workflow regenerates the locks (same pinned pip-tools + flags as
+# `just lock-vision`) and commits them back to the Dependabot PR branch, so the
+# PR converges without any manual `just lock-vision`.
+#
+# Only runs for Dependabot-authored PRs. The triggering paths deliberately
+# EXCLUDE the *.lock files, so the auto-commit can't retrigger this workflow
+# (a GITHUB_TOKEN push wouldn't retrigger CI anyway — belt and suspenders).
+on:
+  pull_request:
+    paths:
+      - 'requirements/**'
+      - 'apps/vision/requirements*.txt'
+
+# Least-privilege: only the write needed to push the regenerated lock back.
+permissions:
+  contents: read
+
+jobs:
+  regen:
+    # Dependabot-authored PRs only. GitHub gives Dependabot runs a read-only
+    # token by default; the job-level permission below grants the write we need.
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the regenerated lockfiles to the PR branch
+    container:
+      image: python:3.14-slim
+    steps:
+      - name: Install git (slim image lacks it)
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends git \
+            && rm -rf /var/lib/apt/lists/*
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.head_ref }}
+          # persist-credentials (default) keeps the token so `git push` works.
+      - name: Regenerate vision locks
+        run: |
+          set -euo pipefail
+          pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+          pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+            --output-file apps/vision/requirements.lock apps/vision/requirements.txt
+          pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+            --output-file apps/vision/requirements-dev.lock \
+            apps/vision/requirements.txt apps/vision/requirements-dev.txt
+      - name: Commit and push if the locks changed
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet apps/vision/requirements.lock apps/vision/requirements-dev.lock; then
+            echo "Locks already in sync — nothing to push."
+          else
+            git add apps/vision/requirements.lock apps/vision/requirements-dev.lock
+            git commit -m "chore(deps): regenerate hash-pinned vision locks [dependabot skip]"
+            git push origin "HEAD:${GITHUB_HEAD_REF}"
+          fi

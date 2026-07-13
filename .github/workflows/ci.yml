@@ -597,7 +597,10 @@ jobs:
   # pip-tools as the recipe, so output is byte-identical when in sync.
   vision-lock-drift:
     needs: changes
-    if: needs.changes.outputs.vision_deps == 'true'
+    # Dependabot PRs are handled by dependabot-lock-autoregen.yml (which commits
+    # the regenerated lock back), so skip the hard-fail guard for them. Human
+    # PRs and pushes to main still fail closed on stale locks.
+    if: ${{ needs.changes.outputs.vision_deps == 'true' && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
