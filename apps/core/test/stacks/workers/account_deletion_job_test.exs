@@ -14,6 +14,7 @@ defmodule Stacks.Workers.AccountDeletionJobTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  import ExUnit.CaptureLog
   import Stacks.Factory
 
   alias Stacks.Workers.AccountDeletionJob
@@ -32,6 +33,29 @@ defmodule Stacks.Workers.AccountDeletionJobTest do
       # The Multi fails at :delete_user when Repo.get! raises for unknown user
       assert {:error, _reason} =
                perform_job(AccountDeletionJob, %{"user_id" => Ecto.UUID.generate()})
+    end
+
+    test "logs the failed step name when the deletion Multi fails" do
+      # An unknown user_id makes the Multi fail at the :delete_user step
+      # (Deletion returns {:error, :delete_user, :user_not_found, _}). The worker
+      # must surface WHICH step failed so a partial erasure is diagnosable.
+      user_id = Ecto.UUID.generate()
+
+      log =
+        capture_log(fn ->
+          assert {:error, _reason} =
+                   perform_job(AccountDeletionJob, %{"user_id" => user_id})
+        end)
+
+      assert log =~ "deletion failed at delete_user"
+    end
+  end
+
+  describe "job config (Issue #121 §6 — destructive-op safety)" do
+    test "is configured with max_attempts of 1 (erasure must not retry)" do
+      # Retrying a destructive erasure risks partial/duplicated deletion and
+      # masks the original failure. max_attempts MUST be 1.
+      assert AccountDeletionJob.__opts__()[:max_attempts] == 1
     end
   end
 end
