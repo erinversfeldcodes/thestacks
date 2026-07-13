@@ -9,6 +9,7 @@ defmodule Stacks.GDPR.Export do
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
   @doc """
   Exports all data for a user. Returns a JSON-serialisable map.
@@ -36,6 +37,31 @@ defmodule Stacks.GDPR.Export do
       |> where([h], h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids)
       |> Repo.all()
 
+    sessions =
+      Session
+      |> where([s], s.user_id == ^user_id)
+      |> Repo.all()
+
+    feedback =
+      TurnFeedback
+      |> join(:inner, [f], s in Session, on: f.session_id == s.id)
+      |> where([_f, s], s.user_id == ^user_id)
+      |> Repo.all()
+
+    # Summary only — the `embedding` vector column is deliberately NOT selected,
+    # so the raw vector never leaves the database. Vectors are not human-readable
+    # and carry no portability value; exporting them would be a data-leak risk.
+    embeddings_summary =
+      Embedding
+      |> where([e], e.user_id == ^user_id)
+      |> select([e], %{
+        source_type: e.source_type,
+        source_title: e.title,
+        shelf: e.shelf,
+        date_embedded: e.content_date
+      })
+      |> Repo.all()
+
     export = %{
       exported_at: DateTime.utc_now(),
       user: %{
@@ -51,7 +77,10 @@ defmodule Stacks.GDPR.Export do
       },
       bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),
       placements: Enum.map(placements, &placement_to_map/1),
-      placement_history: Enum.map(histories, &history_to_map/1)
+      placement_history: Enum.map(histories, &history_to_map/1),
+      writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
+      writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
+      embeddings_summary: embeddings_summary
     }
 
     {:ok, export}
@@ -92,6 +121,28 @@ defmodule Stacks.GDPR.Export do
       from_bookshelf: history.from_bookshelf,
       to_bookshelf: history.to_bookshelf,
       moved_at: history.moved_at
+    }
+  end
+
+  defp session_to_map(session) do
+    %{
+      id: session.id,
+      status: session.status,
+      topic: session.topic,
+      model: session.model,
+      started_at: session.started_at,
+      created_at: session.created_at
+    }
+  end
+
+  defp feedback_to_map(feedback) do
+    %{
+      id: feedback.id,
+      session_id: feedback.session_id,
+      turn_index: feedback.turn_index,
+      rating: feedback.rating,
+      comment: feedback.comment,
+      created_at: feedback.created_at
     }
   end
 end
