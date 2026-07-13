@@ -32,6 +32,7 @@ type Route
     | SettingsNotifications
     | SettingsConsent
     | SettingsAgeVerification
+    | SettingsAuditLog
     | CostTransparency
     | Catalogue
     | MarketplaceBrowse
@@ -70,6 +71,7 @@ parser =
         , Parser.map SettingsNotifications (s "settings" </> s "notifications")
         , Parser.map SettingsConsent (s "settings" </> s "consent")
         , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
+        , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Settings (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Catalogue (s "catalogue")
@@ -149,6 +151,9 @@ toPath route =
         SettingsAgeVerification ->
             "/settings/age-verification"
 
+        SettingsAuditLog ->
+            "/settings/audit-log"
+
         CostTransparency ->
             "/costs"
 
@@ -226,6 +231,9 @@ isSettingsRoute route =
             True
 
         SettingsAgeVerification ->
+            True
+
+        SettingsAuditLog ->
             True
 
         SettingsPrivacy ->

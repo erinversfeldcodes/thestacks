@@ -137,6 +137,114 @@ defmodule Stacks.Audit do
     end
   end
 
+  @default_per_page 25
+  @max_per_page 100
+
+  @doc """
+  Lists a single user's own audit-log entries, most recent first, paginated.
+
+  Read-only: this issues a single SELECT and never mutates the append-only
+  `audit.audit_log` table. Results are scoped to `user_id` — a caller can only
+  ever see their own rows.
+
+  For each entry the Cloak-encrypted `metadata` is decrypted via
+  `Stacks.Vault` and returned as a plain map for display. The hashed
+  `ip_address` column is **never selected** and therefore never surfaced.
+
+  Returns `{entries, total, page, per_page}` where:
+    * `entries` — list of maps with `:id`, `:action`, `:resource_type`,
+      `:resource_id`, `:occurred_at` (`%DateTime{}`) and decrypted `:metadata`
+    * `total` — total row count for the user (across all pages)
+    * `page` / `per_page` — the clamped pagination values actually applied
+
+  ## Options
+    * `:page` — 1-based page number (default 1, floored at 1)
+    * `:per_page` — items per page (default #{@default_per_page}, max #{@max_per_page})
+  """
+  @spec list_for_user(binary(), keyword()) ::
+          {[map()], non_neg_integer(), pos_integer(), pos_integer()}
+  def list_for_user(user_id, opts \\ []) when is_binary(user_id) do
+    page = opts |> Keyword.get(:page, 1) |> normalise_page()
+    per_page = opts |> Keyword.get(:per_page, @default_per_page) |> clamp_per_page()
+    offset = (page - 1) * per_page
+
+    user_id_binary = Ecto.UUID.dump!(user_id)
+
+    # Graceful on query error (e.g. a pathologically large page whose offset
+    # overflows bigint): return an empty page rather than crashing the request
+    # with a MatchError/500. Mirrors Stacks.Admin.Data.list_audit_log.
+    total =
+      case Repo.query("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary]) do
+        {:ok, %{rows: [[count]]}} -> count
+        _ -> 0
+      end
+
+    # NOTE: ip_address is deliberately NOT selected — hashed IPs must never
+    # be surfaced to the read API/UI.
+    # ORDER BY includes id as a tiebreaker: rows sharing an occurred_at (bulk/
+    # transactional audit writes can collide at microsecond resolution) would
+    # otherwise order nondeterministically across page boundaries, duplicating
+    # or skipping rows.
+    sql = """
+    SELECT id, action, resource_type, resource_id, metadata, occurred_at
+    FROM audit.audit_log
+    WHERE user_id = $1
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT $2 OFFSET $3
+    """
+
+    rows =
+      case Repo.query(sql, [user_id_binary, per_page, offset]) do
+        {:ok, %{rows: r}} -> r
+        _ -> []
+      end
+
+    {Enum.map(rows, &decode_read_row/1), total, page, per_page}
+  end
+
+  defp normalise_page(page) when is_integer(page) and page >= 1, do: page
+  defp normalise_page(_), do: 1
+
+  defp clamp_per_page(per_page) when is_integer(per_page) and per_page >= 1,
+    do: min(per_page, @max_per_page)
+
+  defp clamp_per_page(_), do: @default_per_page
+
+  defp decode_read_row([id, action, resource_type, resource_id, metadata, occurred_at]) do
+    %{
+      id: decode_read_uuid(id),
+      action: action,
+      resource_type: resource_type,
+      resource_id: decode_read_uuid(resource_id),
+      metadata: decrypt_metadata(metadata),
+      occurred_at: decode_read_timestamp(occurred_at)
+    }
+  end
+
+  defp decode_read_uuid(nil), do: nil
+
+  defp decode_read_uuid(bin) when is_binary(bin) and byte_size(bin) == 16,
+    do: Ecto.UUID.load!(bin)
+
+  defp decode_read_uuid(other), do: other
+
+  defp decode_read_timestamp(%NaiveDateTime{} = naive), do: DateTime.from_naive!(naive, "Etc/UTC")
+  defp decode_read_timestamp(other), do: other
+
+  # Old rows (pre-encryption) and metadata-less rows have a nil column; treat
+  # as an empty map. Decryption/JSON failures are swallowed to a safe empty map
+  # so a single bad row can never break the whole listing.
+  defp decrypt_metadata(nil), do: %{}
+
+  defp decrypt_metadata(bin) when is_binary(bin) do
+    case Stacks.Vault.decrypt(bin) do
+      {:ok, json} -> Jason.decode!(json)
+      _ -> %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
   defp hash_ip(ip) when is_binary(ip) do
     :crypto.hash(:sha256, ip)
     |> Base.encode16(case: :lower)
