@@ -107,6 +107,16 @@ defmodule Stacks.GDPR.ImageRetention do
     # GDPR telemetry: the stuck-safety-net count (its own signal so operators
     # can alert on a rising stuck rate), plus an image.expired-by-reason event
     # mirroring the emitted image.expired domain events (reason: "stuck").
+    #
+    # DOUBLE-COUNT WARNING: stuck images are counted in BOTH the `:stuck`
+    # metric AND the `:expired{reason:"stuck"}` metric (and `:expired` also
+    # carries the natural-TTL sweep under `reason:"expired"`). Therefore:
+    #   - NEVER sum `:stuck` + `:expired` — that counts stuck images twice.
+    #   - ALWAYS query `:expired` split BY `:reason`
+    #     (`reason="expired"` = real 30-day TTL purge,
+    #      `reason="stuck"`   = safety-net purge, mirrors `:stuck`).
+    # We keep the mirror (rather than dropping it) so the `image.expired`
+    # telemetry series stays 1:1 with the emitted `image.expired` domain events.
     :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: count}, %{reason: "stuck"})
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "stuck"})
 
