@@ -43,7 +43,7 @@ jobs:
       # access to repo secrets. Since deploy-production only fires on
       # `push: branches: [main]`, the head_sha is always a maintainer-merged
       # main commit, but checking out main keeps the threat model trivial.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Create lightweight tag for the just-deployed commit
