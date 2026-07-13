@@ -52,7 +52,7 @@ defmodule Core.MixProject do
       {:fuse, "~> 2.5"},
       {:cloak_ecto, "~> 1.3"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.8"},
+      {:bandit, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
       {:prom_ex, "~> 1.9"},
       {:telemetry_metrics, "~> 1.0"},
