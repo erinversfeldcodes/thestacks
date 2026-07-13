@@ -77,6 +77,7 @@ aReader =
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
+    , consentWritingAssistant = False
     }
 
 

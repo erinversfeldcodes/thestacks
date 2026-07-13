@@ -55,5 +55,25 @@ defmodule StacksWeb.Plugs.ConsentCheckTest do
       result = ConsentCheck.call(conn, [])
       assert result.halted
     end
+
+    test "passes through when writing_assistant consent is granted", %{conn: conn} do
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, feature: "writing_assistant")
+      refute result.halted
+    end
+
+    test "halts with 403 when writing_assistant consent is not granted", %{conn: conn} do
+      # analytics-only consent must NOT satisfy the writing_assistant gate.
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id, "analytics")
+      conn = with_current_user(conn, user)
+
+      result = ConsentCheck.call(conn, feature: "writing_assistant")
+      assert result.halted
+      assert result.status == 403
+    end
   end
 end

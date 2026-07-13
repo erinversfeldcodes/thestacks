@@ -51,7 +51,12 @@ defmodule Stacks.Accounts do
   @doc "Changeset for consent updates."
   def consent_changeset(user, attrs) do
     user
-    |> cast(attrs, [:consent_analytics, :consent_analytics_at])
+    |> cast(attrs, [
+      :consent_analytics,
+      :consent_analytics_at,
+      :consent_writing_assistant,
+      :consent_writing_assistant_at
+    ])
   end
 
   @doc "Changeset for user settings (age verification)."

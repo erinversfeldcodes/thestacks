@@ -313,8 +313,8 @@ and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map5
-        (\token userId email displayName role ->
+    Decode.map6
+        (\token userId email displayName role consentWritingAssistant ->
             { user =
                 { id = userId
                 , email = email
@@ -322,6 +322,7 @@ authDecoder =
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
+                , consentWritingAssistant = consentWritingAssistant
                 }
             , token = token
             }
@@ -333,6 +334,11 @@ authDecoder =
         (Decode.oneOf
             [ Decode.field "role" Decode.string
             , Decode.succeed "user"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "consentWritingAssistant" Decode.bool
+            , Decode.succeed False
             ]
         )
 
@@ -501,7 +507,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -513,7 +519,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }
+                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -587,8 +593,13 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                 currentUserId =
                     Maybe.map (.user >> .id) maybeAuth
 
+                writingAssistantConsent =
+                    maybeAuth
+                        |> Maybe.map (.user >> .consentWritingAssistant)
+                        |> Maybe.withDefault False
+
                 ( postModel, postCmd ) =
-                    BlogPostPage.init postId maybeToken currentUserId
+                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 
@@ -628,7 +639,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         Groups ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     Groups.init auth.user.id auth.token
@@ -638,7 +649,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         GroupDetail groupId ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     GroupsDetail.init groupId auth.user.id auth.token
@@ -660,6 +671,7 @@ encodeAuth auth =
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
         , ( "role", Json.Encode.string auth.user.role )
+        , ( "consentWritingAssistant", Json.Encode.bool auth.user.consentWritingAssistant )
         ]
 
 
@@ -1101,6 +1113,7 @@ update msg model =
                                         , role = authResponse.role
                                         , countryCode = Nothing
                                         , city = Nothing
+                                        , consentWritingAssistant = authResponse.consentWritingAssistant
                                         }
                                     , token = authResponse.token
                                     }
@@ -1142,6 +1155,7 @@ update msg model =
                                         , role = ar.role
                                         , countryCode = Nothing
                                         , city = Nothing
+                                        , consentWritingAssistant = ar.consentWritingAssistant
                                         }
                                     , token = ar.token
                                     }

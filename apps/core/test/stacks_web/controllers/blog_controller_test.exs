@@ -445,4 +445,47 @@ defmodule StacksWeb.BlogControllerTest do
       assert json_response(conn, 404)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # POST /api/blog/posts/:id/chat — writing-assistant (consent-gated, Issue #184)
+  # ---------------------------------------------------------------------------
+
+  describe "POST /api/blog/posts/:id/chat" do
+    alias Stacks.GDPR.Consent
+
+    test "returns 403 when writing_assistant consent is NOT granted", %{conn: conn} do
+      user = insert(:user, consent_writing_assistant: false)
+      post = insert(:post, user: user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/blog/posts/#{post.id}/chat", %{message: "help me write"})
+
+      assert %{"error" => "consent_required", "feature" => "writing_assistant"} =
+               json_response(conn, 403)
+    end
+
+    test "returns an under_construction response when consent IS granted", %{conn: conn} do
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
+      post = insert(:post, user: user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/blog/posts/#{post.id}/chat", %{message: "help me write"})
+
+      assert %{"status" => "under_construction", "message" => message} = json_response(conn, 200)
+      assert message =~ "coming soon"
+    end
+
+    test "returns 401 when unauthenticated", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      conn = post(conn, "/api/blog/posts/#{post.id}/chat", %{message: "hi"})
+      assert conn.status == 401
+    end
+  end
 end
