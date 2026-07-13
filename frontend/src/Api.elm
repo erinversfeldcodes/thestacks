@@ -122,6 +122,7 @@ type alias AuthResponse =
     , email : String
     , displayName : String
     , role : String
+    , consentAnalytics : Bool
     , consentWritingAssistant : Bool
     }
 
@@ -140,6 +141,7 @@ fromProtoAuthResponse proto =
 
         else
             proto.user.role
+    , consentAnalytics = proto.user.consentAnalytics
     , consentWritingAssistant = proto.user.consentWritingAssistant
     }
 
