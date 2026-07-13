@@ -57,6 +57,11 @@ defmodule Stacks.GDPR.ImageRetention do
       })
     end)
 
+    # GDPR telemetry: how many images the natural-TTL sweep purged this run.
+    # `reason: "expired"` mirrors the image.expired domain event and gives the
+    # expired-by-reason breakdown alongside the stuck-sweep's `reason: "stuck"`.
+    :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "expired"})
+
     {:ok, count}
   rescue
     error -> {:error, error}
@@ -99,6 +104,12 @@ defmodule Stacks.GDPR.ImageRetention do
       })
     end)
 
+    # GDPR telemetry: the stuck-safety-net count (its own signal so operators
+    # can alert on a rising stuck rate), plus an image.expired-by-reason event
+    # mirroring the emitted image.expired domain events (reason: "stuck").
+    :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: count}, %{reason: "stuck"})
+    :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "stuck"})
+
     {:ok, count}
   rescue
     error -> {:error, error}
@@ -125,14 +136,18 @@ defmodule Stacks.GDPR.ImageRetention do
       )
 
     orphaned = Repo.all(query)
+    count = length(orphaned)
 
     if orphaned != [] do
-      count = length(orphaned)
-
       Logger.warning(
         "ImageRetention: missing-purge alarm — #{count} image(s) past expiry still in DB"
       )
     end
+
+    # GDPR telemetry: the retention-gap size. A non-zero orphan count means the
+    # retention job missed images past their 30-day deadline. Registered in
+    # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_image_orphan_count_total`.
+    :telemetry.execute([:stacks, :gdpr, :image, :orphan], %{count: count}, %{})
 
     Enum.map(orphaned, & &1.id)
   end
