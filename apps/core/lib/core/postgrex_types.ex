@@ -1,4 +1,4 @@
 Postgrex.Types.define(
   Core.PostgrexTypes,
-  [Core.Extensions.UUIDString]
+  [Core.Extensions.UUIDString] ++ Pgvector.extensions()
 )
