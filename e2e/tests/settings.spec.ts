@@ -31,21 +31,94 @@ test.describe("Settings — Privacy & Consent", () => {
     expect(newText).not.toEqual(initialText);
   });
 
-  test("save button is visible and clickable", async ({ page }) => {
+  test("saving consent shows the 'Saved!' success state", async ({ page }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
-    const saveBtn = page.locator("button", { hasText: "Save" });
+    // The clickable save button (Consent.elm renders "Save Preferences" in the
+    // idle state and only wires onClick there — not in the Loading/Success states).
+    const saveBtn = page.locator(".settings-actions button");
     await expect(saveBtn).toBeVisible();
 
-    // Toggle then save
-    await page.locator(".toggle").click();
+    // Toggle analytics so there's a change to persist, then save.
+    await page.locator("button.toggle").click();
     await saveBtn.click();
 
-    // Should show success or at least not error
-    await page.waitForTimeout(1000);
-    const errorCount = await page.locator(".error").count();
-    expect(errorCount).toBe(0);
+    // On success Consent.elm swaps the button label to "Saved!" (Consent.elm:110-112).
+    await expect(
+      page.getByRole("button", { name: "Saved!" })
+    ).toBeVisible({ timeout: 5000 });
+
+    // And no error paragraph should be present.
+    await expect(page.locator(".error")).toHaveCount(0);
+  });
+
+  test("save failure surfaces the error message", async ({ page }) => {
+    await page.goto("/settings/consent");
+    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
+
+    // Force the save call to fail BEFORE clicking Save. saveConsent posts to
+    // /api/gdpr/consent (Api.elm:681); a 500 drives the Failure branch.
+    await page.route("**/api/gdpr/consent", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: "{}",
+      })
+    );
+
+    const saveBtn = page.locator(".settings-actions button");
+    await expect(saveBtn).toBeVisible();
+
+    await page.locator("button.toggle").click();
+    await saveBtn.click();
+
+    // Consent.elm:118-121 renders this exact copy on Failure.
+    await expect(page.locator(".error")).toContainText(
+      "Could not save preferences. Please try again."
+    );
+  });
+});
+
+/**
+ * API-level auth guards for the GDPR endpoints (Issue #121, Phase 5).
+ *
+ * These run against the real server via fetch() inside page.evaluate() with NO
+ * Authorization header. All three routes live under the `:authenticated`
+ * pipeline (router.ex — scope "/api" pipe_through [:api, :authenticated]) so
+ * each must reject an anonymous caller with 401.
+ */
+test.describe("GDPR — auth guards", () => {
+  // Clean context: no shared suite token, no localStorage. The requests below
+  // deliberately omit any Authorization header.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("GDPR endpoints return 401 when not authenticated", async ({ page }) => {
+    await page.goto("/");
+
+    const unauthResults = await page.evaluate(async () => {
+      const endpoints = [
+        { method: "POST", path: "/api/gdpr/export" },
+        { method: "DELETE", path: "/api/gdpr/account" },
+        { method: "POST", path: "/api/gdpr/consent" },
+      ];
+
+      const results = await Promise.all(
+        endpoints.map(async ({ method, path }) => {
+          const resp = await fetch(path, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          return { path, status: resp.status };
+        })
+      );
+      return results;
+    });
+
+    for (const result of unauthResults) {
+      expect(result.status, `${result.path} should require auth`).toBe(401);
+    }
   });
 });
 
