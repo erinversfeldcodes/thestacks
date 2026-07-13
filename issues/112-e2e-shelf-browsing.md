@@ -49,7 +49,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 > US-1.7.1 "Organize Books into Shelves". US-1.7.1's *management* surface (create / reorder / delete
 > shelves, move a book between shelves — `ShelfController` + `BookshelfPlacementController.move_to_shelf`)
 > is **out of this issue's browsing scope** (it would trip this issue's "BookshelfController only"
-> scope check) and is tracked separately in **#183 (Shelf Organization)**. Do not fold shelf
+> scope check) and is tracked separately in **#190 (Shelf Organization)**. Do not fold shelf
 > management into #112.
 
 ## Test Suites

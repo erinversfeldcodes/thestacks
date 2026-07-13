@@ -1,4 +1,4 @@
-# Issue #183: Shelf Organization — Manage Books Across Physical Shelves
+# Issue #190: Shelf Organization — Manage Books Across Physical Shelves
 
 ## Summary
 Build the frontend management surface for **physical shelves** (US-1.7.1) — the ordered horizontal rows within a bookshelf's bookcase (`op.shelves`, shipped backend-first in #151). The backend is fully built and tested; the SPA currently only *renders* shelves and can *create* one. This issue adds the missing management UI (move a book between shelves, reorder shelves, delete a shelf) and validates the whole US-1.7.1 journey end-to-end.
