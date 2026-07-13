@@ -225,6 +225,7 @@
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
+        consent_writing_assistant: %{default: false},
         # generated_always: true suppresses default and cast — Postgres generates this column.
         onboarding_completed: %{generated_always: true},
         onboarding_steps: %{ecto_type: :map, default: %{}},

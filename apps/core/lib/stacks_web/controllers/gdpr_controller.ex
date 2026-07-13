@@ -44,23 +44,30 @@ defmodule StacksWeb.GDPRController do
     |> json(%{status: "accepted", message: "Account deletion has been queued."})
   end
 
-  @doc "POST /api/gdpr/consent — grant analytics consent."
-  def update_consent(conn, %{"consent" => consent}) do
+  # Bounded whitelist of consent features. A raw user-supplied string must NEVER
+  # reach Stacks.GDPR.Consent — it is fired as a `:telemetry` metadata tag, so an
+  # unbounded value would blow up Prometheus label cardinality (PE P3). Anything
+  # not in this map is rejected with 422 before we touch Consent.
+  @consent_types %{"analytics" => "analytics", "writing_assistant" => "writing_assistant"}
+
+  @doc """
+  POST /api/gdpr/consent — grant or revoke consent for a feature.
+
+  Body: `consent` (bool, required) + optional `type` ("analytics" default |
+  "writing_assistant"). An unknown `type` → 422 (whitelisted, never passed
+  through raw). Returns the matching consent flag + timestamp.
+  """
+  def update_consent(conn, %{"consent" => consent} = params) do
     user = Guardian.Plug.current_resource(conn)
 
-    result =
-      case consent do
-        true -> Consent.grant_consent(user.id)
-        false -> Consent.revoke_consent(user.id)
-        _ -> {:error, :invalid_consent_value}
-      end
-
-    case result do
-      {:ok, updated_user} ->
-        json(conn, %{
-          consent_analytics: updated_user.consent_analytics,
-          consent_analytics_at: updated_user.consent_analytics_at
-        })
+    with {:ok, feature} <- whitelist_type(Map.get(params, "type", "analytics")),
+         {:ok, updated_user} <- apply_consent(user.id, consent, feature) do
+      json(conn, consent_payload(updated_user, feature))
+    else
+      {:error, :invalid_consent_type} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "type must be one of: analytics, writing_assistant"})
 
       {:error, :invalid_consent_value} ->
         conn
@@ -78,5 +85,30 @@ defmodule StacksWeb.GDPRController do
     conn
     |> put_status(422)
     |> json(%{error: "consent parameter is required"})
+  end
+
+  defp whitelist_type(type) do
+    case Map.fetch(@consent_types, type) do
+      {:ok, feature} -> {:ok, feature}
+      :error -> {:error, :invalid_consent_type}
+    end
+  end
+
+  defp apply_consent(user_id, true, feature), do: Consent.grant_consent(user_id, feature)
+  defp apply_consent(user_id, false, feature), do: Consent.revoke_consent(user_id, feature)
+  defp apply_consent(_user_id, _consent, _feature), do: {:error, :invalid_consent_value}
+
+  defp consent_payload(user, "writing_assistant") do
+    %{
+      consent_writing_assistant: user.consent_writing_assistant,
+      consent_writing_assistant_at: user.consent_writing_assistant_at
+    }
+  end
+
+  defp consent_payload(user, _analytics) do
+    %{
+      consent_analytics: user.consent_analytics,
+      consent_analytics_at: user.consent_analytics_at
+    }
   end
 end

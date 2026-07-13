@@ -15,4 +15,5 @@ type alias User =
     , role : String
     , countryCode : Maybe String
     , city : Maybe String
+    , consentWritingAssistant : Bool
     }

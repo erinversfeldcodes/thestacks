@@ -5,6 +5,7 @@ module Page.Settings.Consent exposing
     , init
     , update
     , view
+    , writingAssistantOffDescription
     )
 
 import Api
@@ -17,14 +18,17 @@ import Types.RemoteData exposing (RemoteData(..))
 
 type alias Model =
     { analyticsConsent : Bool
+    , writingAssistantConsent : Bool
     , saving : RemoteData Http.Error ()
     }
 
 
 type Msg
     = ToggleAnalytics
+    | ToggleWritingAssistant
     | SaveConsent
     | SaveCompleted (Result Http.Error ())
+    | SaveWritingAssistantCompleted (Result Http.Error ())
 
 
 type OutMsg
@@ -32,9 +36,18 @@ type OutMsg
     | SessionExpired
 
 
+{-| The verbatim copy shown under the writing-assistant toggle when it is OFF.
+Kept as a named constant so tests can assert the exact wording (Issue #184).
+-}
+writingAssistantOffDescription : String
+writingAssistantOffDescription =
+    "Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."
+
+
 init : Model
 init =
     { analyticsConsent = False
+    , writingAssistantConsent = False
     , saving = NotAsked
     }
 
@@ -44,6 +57,24 @@ update msg model maybeToken =
     case msg of
         ToggleAnalytics ->
             ( { model | analyticsConsent = not model.analyticsConsent }, Cmd.none, NoOut )
+
+        ToggleWritingAssistant ->
+            let
+                newValue =
+                    not model.writingAssistantConsent
+            in
+            case maybeToken of
+                Just token ->
+                    -- Persist writing-assistant consent immediately: turning it
+                    -- OFF triggers a server-side purge, so the toggle is not a
+                    -- staged preference — it takes effect on click.
+                    ( { model | writingAssistantConsent = newValue, saving = Loading }
+                    , Api.saveWritingAssistantConsent newValue token SaveWritingAssistantCompleted
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( { model | writingAssistantConsent = newValue }, Cmd.none, NoOut )
 
         SaveConsent ->
             case maybeToken of
@@ -55,6 +86,18 @@ update msg model maybeToken =
 
                 Nothing ->
                     ( model, Cmd.none, NoOut )
+
+        SaveWritingAssistantCompleted result ->
+            case result of
+                Ok _ ->
+                    ( { model | saving = Success () }, Cmd.none, NoOut )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | saving = Failure err }, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
@@ -93,6 +136,39 @@ view model =
                     ]
                     [ text
                         (if model.analyticsConsent then
+                            "On"
+
+                         else
+                            "Off"
+                        )
+                    ]
+                ]
+            ]
+        , div [ class "settings-section" ]
+            [ h2 [ class "settings-section__title" ] [ text "Writing assistant" ]
+            , p [ class "settings-section__desc" ]
+                [ text
+                    (if model.writingAssistantConsent then
+                        "Your shelf and writing history are used to personalise writing suggestions."
+
+                     else
+                        writingAssistantOffDescription
+                    )
+                ]
+            , div [ class "toggle-row" ]
+                [ label [ class "toggle-row__label" ] [ text "Writing assistant" ]
+                , button
+                    [ class
+                        (if model.writingAssistantConsent then
+                            "toggle toggle--on"
+
+                         else
+                            "toggle toggle--off"
+                        )
+                    , onClick ToggleWritingAssistant
+                    ]
+                    [ text
+                        (if model.writingAssistantConsent then
                             "On"
 
                          else
