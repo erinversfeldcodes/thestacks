@@ -180,9 +180,9 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 
 ## Test Audit
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns), first baselined 2026-07-08 and **regenerated post-implementation** on 2026-07-13. This is the shipped state after Phases 1–5: every in-scope test-hardening item landed and GDPR telemetry was instrumented in-scope (Phase 4). The former `❌`/`⚠️` work-queue cells are now either `✅` (a real test landed — cited below) or `n/a` (an unbuilt feature de-scoped to a child issue #183–#189). The audit is green (0 `❌`, 0 `⚠️`); see Definition of Done._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #121)
+Last regenerated: 2026-07-13 (regenerated post-implementation — Phases 1–5 shipped)
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -204,13 +204,14 @@ auth guards are flagged **SECURITY** inline.
 
 ---
 
-### Feature status — CRITICAL: issue outruns the implementation
+### Feature status — resolved: epic split into v1 (here) + child issues #183–#189
 
-Issue #121 specifies a **v2** GDPR surface. The **v1** code that actually
-exists is a strict subset. This audit baselines the implemented surface
-and flags every issue requirement that has **no code behind it** as a
-feature gap (a new issue under the scope-lock rule), distinct from
-"feature exists, test missing".
+Issue #121 originally specified a **v2** GDPR surface. At scope-lock this was
+resolved (Approach A): #121 ships the **v1** built surface (test-hardening +
+in-scope GDPR telemetry) and the v2 feature gaps were **de-scoped to seven
+ordered child issues, #183–#189** (see Epic). What follows is the shipped v1
+inventory plus the Phase 1–5 additions; the "de-scoped" list below is no
+longer a blocking alarm — it is the tracked child-issue backlog.
 
 **Implemented (verified by Read):**
 - `StacksWeb.GDPRController` — `export/2` (202), `delete_account/2` (202 +
@@ -236,29 +237,51 @@ feature gap (a new issue under the scope-lock rule), distinct from
 - Elm `Page.Settings.Consent` — analytics toggle + save only.
 - dbt `stg_audit_log` (proto-generated).
 
-**NOT implemented — issue requirements with no code (feature gaps):**
-- **Writing-assistant consent** end to end: no `type: "writing_assistant"`
-  handling in the controller, no `consent_writing_assistant[_at]` column
-  (only `consent_analytics[_at]` exists in `gen/accounts/user.ex`), no
-  `ToggleWritingAssistant` Msg in Elm.
-- **`WritingAssistantDataPurgeWorker`** — does not exist anywhere.
+**Added by Phases 1–5 (this issue's deliverable — verified by Read/grep):**
+- **Erasure invariants (Phase 1, SECURITY):** `deletion_test.exs` asserts
+  the `user.data_deleted` audit row (`user_id: nil`, resource_id = deleted
+  user) and that `op.event_log` is **byte-identical (all 9 columns)**
+  before/after erasure; `gdpr_controller_test.exs` asserts the
+  `user.deletion_requested` audit row is written synchronously by the
+  controller, independent of the job.
+- **Job-config + destructive-op safety (Phase 2):** `DataExportJob`
+  `queue: :default` / `max_attempts: 3`; `AccountDeletionJob`
+  **`max_attempts: 1`** + logs the failed step; `ImageRetentionJob` cron
+  `{"0 2 * * *", …}` registration — all asserted.
+- **Storage-call + failure resilience (Phase 3):** `image_retention_test.exs`
+  proves `Storage.delete_image/1` fires once per expired/stuck image (via a
+  `RecordingStorage` spy) and that a storage failure logs a warning **and
+  still deletes the DB record** (via a `FailingStorage`).
+- **GDPR telemetry (Phase 4, instrumented in-scope):** 8 signals
+  `[:stacks, :gdpr, …]` (export/deletion-with-failed-step, consent
+  grant/revoke, image expired/stuck/orphan, audit write) emitted from the
+  domain/worker layer, registered in `Core.PromEx.Plugins.Stacks`, with
+  firing tests in `gdpr_telemetry_test.exs`.
+- **E2E hardening (Phase 5):** `settings.spec.ts` asserts the consent
+  "Saved!" success state and the "Could not save preferences…" error copy,
+  and a new "GDPR — auth guards" describe asserts `/api/gdpr/*` return 401
+  unauthenticated (green against the live preview stack).
+
+**De-scoped to child issues #183–#189 (v2 feature gaps — not delivered here,
+tracked):**
+- **Writing-assistant consent** end to end (`type: "writing_assistant"`
+  handling, `consent_writing_assistant[_at]` column, `ToggleWritingAssistant`
+  Msg, blog-chat 403 gate) → **#184** (needs #183 data-model foundation).
+- **`WritingAssistantDataPurgeWorker`** → **#184**.
 - **Richer export payload** — `writing_assistant_sessions`,
-  `writing_assistant_feedback`, `embeddings_summary` keys (issue §4) are
-  absent from `export.ex`.
+  `writing_assistant_feedback`, `embeddings_summary` keys (issue §4) → **#186**.
 - **Deeper deletion cascade** — `op.blog_assistant_sessions`,
   `op.turn_feedback`, `op.retrieval_log`, `op.embeddings`,
-  `op.user_book_content_access` (issue §5) are neither deleted nor even
-  present as tables/migrations. `book_content_chunks` preservation is moot.
-- **`consent_writing_assistant`-gated blog chat 403** (issue §3) — the
-  `ConsentCheck` plug only knows analytics.
+  `op.user_book_content_access` (issue §5); tables not yet built → **#185**.
 - **Audit-log read API + Elm audit-log page** (US-8.5 §3/§12) — write-only
-  today; no `/settings/audit-log`, no list endpoint.
+  today → **#189**.
 - **Export/Delete Elm UI** — no `UserClicksExport`, no
-  `UserTypesDeleteConfirmation`/`UserClicksDeleteAccount` in `frontend/src`.
+  `UserTypesDeleteConfirmation`/`UserClicksDeleteAccount` in `frontend/src`
+  → **#187** (export UI) / **#188** (delete UI).
 
-Cells whose only gap is a **feature gap** are marked ❌/⚠️ with a
-`(feature not implemented)` tag so the punch list can route them to new
-issues rather than to test-only work.
+Cells whose only gap is a de-scoped feature are now `n/a — tracked by #18x`
+(the shipped part, where one exists, is `✅` with a "→ #18x" note); every
+former ❌/⚠️ is resolved to `✅` or `n/a`.
 
 ---
 
@@ -266,9 +289,9 @@ issues rather than to test-only work.
 
 | Layer       | US-8.1 Export | US-8.2 Delete | US-8.3 Consent | US-8.4 Retention | US-8.5 Audit |
 |-------------|---------------|---------------|----------------|------------------|--------------|
-| Elixir      | ⚠️ (export payload = 4 of 8 issue keys) | ⚠️ (shelving cascade OK; audit-entry + `event_log`-preserved assertions missing; deeper cascade unimpl.) | ⚠️ (analytics solid; writing_assistant unimpl.) | ✅ (retention core well covered; storage-failure path ❌ at L6/L7) | ✅ **strong** (log + append-only trigger) |
-| Elm unit    | ❌ (no export UI — feature gap) | ❌ (no delete UI — feature gap) | ✅ (SettingsTest — 5 Msgs) | n/a — backend only | n/a — no page (feature gap) |
-| E2E         | ❌ (no export flow) | ❌ (no delete flow) | ⚠️ (consent smoke only; no save-result assert, no gdpr 401) | n/a — backend only | n/a — no UI |
+| Elixir      | ✅ (v1 4-key payload tested; richer payload → #186) | ✅ (shelving cascade + audit-row + `event_log`-preserved invariants tested, Ph1; deeper cascade → #185) | ✅ (analytics solid; writing_assistant → #184) | ✅ (retention core + storage-call + storage-failure path, Ph3) | ✅ **strong** (log + append-only trigger) |
+| Elm unit    | n/a (export UI → #187) | n/a (delete UI → #188) | ✅ (SettingsTest — 5 Msgs; `ToggleWritingAssistant` → #184) | n/a — backend only | n/a — no page (→ #189) |
+| E2E         | n/a UI (→ #187); 401 ✅ (Ph5) | n/a UI (→ #188); 401 ✅ (Ph5) | ✅ (Ph5 — "Saved!" success + error copy asserted) | n/a — backend only | n/a — no UI |
 | dbt         | n/a — operational tables | n/a — operational tables | n/a | n/a | ✅ `stg_audit_log` |
 | Python      | n/a — vision uninvolved | n/a | n/a | n/a | n/a |
 
@@ -276,20 +299,25 @@ issues rather than to test-only work.
 
 ### Coverage tally
 
-Counted per happy/sad cell across the 13 × 5 matrix (130 cells).
+Counted per happy/sad cell across the 13 × 5 matrix (130 cells), recounted
+against the regenerated tables below.
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **27** |
-| ⚠️ shallow | **13** |
-| ❌ missing | **12** |
-| n/a (higher-level / not applicable / by-design / feature-gap-with-no-surface) | **78** |
+| ✅ STRONG | **43** |
+| ⚠️ shallow | **0** |
+| ❌ missing | **0** |
+| n/a (higher-level / not applicable / by-design / de-scoped to #183–#189) | **87** |
 
-Of the 12 ❌ and 13 ⚠️, **~9 are feature gaps** (code does not exist — new
-issues), the rest are test gaps against existing code. This is the
-pre-implementation baseline; Issue #121's DoD requires regenerating to
-0 ❌ / 0 ⚠️ after the test punch list lands and the feature gaps are
-either descoped or spun into new issues.
+**Arithmetic (sums to 130):** the pre-implementation tables held 26 ✅,
+13 ⚠️, 8 ❌, 83 n/a (= 130; the earlier summary's 27/13/12/78 double-counted
+the summary-table E2E row, which is a separate 5×5 view, not part of the 130
+full-table cells). Regeneration reclassified the 21 former ⚠️/❌ cells:
+**17 RESOLVED → ✅** (L1 8.3-h; L3 8.1-h, 8.2-h; L4 8.2 h+s; L5 8.1-h, 8.2-h,
+8.4-h; L6 8.4 h+s; L7 8.4 h+s; L11 8.1–8.5 sad = 5) and **4 DE-SCOPED → n/a**
+(L10 8.1 h+s → #187, L10 8.2 h+s → #188). So ✅ 26 + 17 = **43**, ⚠️ 13 − 13 =
+**0**, ❌ 8 − 8 = **0**, n/a 83 + 4 = **87**; 43 + 0 + 0 + 87 = **130**. The
+DoD's 0 ❌ / 0 ⚠️ target is met: every cell is `✅` or `n/a`-with-rationale.
 
 ---
 
@@ -326,7 +354,7 @@ either descoped or spun into new issues.
 |-----|------------|---------|----------|---------|
 | 8.1 | ✅ gdpr_controller_test.exs — "returns 202 and enqueues DataExportJob" (asserts `{status: accepted}` + `assert_enqueued`). | ✅ | ✅ gdpr_controller_test.exs — "returns 401 when not authenticated" (also serves L2). No request-body validation exists (empty body). | ✅ |
 | 8.2 | ✅ gdpr_controller_test.exs — "returns 202 and enqueues AccountDeletionJob". | ✅ | ✅ gdpr_controller_test.exs — "returns 401 when not authenticated". | ✅ |
-| 8.3 | ⚠️ gdpr_controller_test.exs — "returns 200 and grants consent when consent: true" + "…revokes… when consent: false" (analytics). The issue-§3 `type: "writing_assistant"` 200 variant (`consent_writing_assistant` + `_at`) has **no code** — controller ignores `type`. **(feature not implemented)** | ⚠️ | ✅ gdpr_controller_test.exs — "returns 422 when consent has an invalid value" + "returns 422 when consent parameter is missing". | ✅ |
+| 8.3 | ✅ gdpr_controller_test.exs — "returns 200 and grants consent when consent: true" + "…revokes… when consent: false" (analytics — the shipped v1 field). The issue-§3 `type: "writing_assistant"` 200 variant (`consent_writing_assistant` + `_at`) is a de-scoped feature → **#184**; analytics grant/revoke is fully tested here. | ✅ | ✅ gdpr_controller_test.exs — "returns 422 when consent has an invalid value" + "returns 422 when consent parameter is missing". | ✅ |
 | 8.4 | n/a — background-only feature; no API endpoint (US-8.4 §3). | n/a | n/a — same. | n/a |
 | 8.5 | n/a — audit log is write-only; no read/list endpoint exists (US-8.5 §3). Issue's paginated audit API is a **feature gap** (routed to L3 DB write instead). | n/a | n/a — same. | n/a |
 
@@ -344,8 +372,8 @@ either descoped or spun into new issues.
 
 | US  | Happy Path | Verdict | Sad Path | Verdict |
 |-----|------------|---------|----------|---------|
-| 8.1 | ⚠️ gdpr_test.exs — "returns a map with user data", "includes bookshelves and placements" cover user/bookshelves/placements/history. But issue-§4 export payload requires `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary` keys — **not implemented** in `export.ex` (4 of 8 keys). **(feature not implemented)** | ⚠️ | ✅ gdpr_test.exs — "returns error for unknown user" (rescue → `{:error, _}`). | ✅ |
-| 8.2 | ⚠️ **SECURITY / erasure completeness.** gdpr_test.exs — "removes all user data", "removes placement history for user's bookshelves"; deletion_test.exs — "deletes user_mfa and admin_sessions when user is deleted", GUC set + scoped. **Gaps:** (a) **no test asserts the `user.data_deleted` audit row** (action + `user_id: nil`) the Multi inserts; (b) issue-§5 deeper cascade (embeddings, assistant_sessions, turn_feedback, retrieval_log, user_book_content_access) is **not implemented** — those tables don't exist; (c) `book_content_chunks` preservation is untestable (no table). | ⚠️ | ✅ account_deletion_job_test.exs — "returns {:error, _} for a nonexistent user_id" (`:delete_user` → `:user_not_found`, Multi rolls back atomically). | ✅ |
+| 8.1 | ✅ gdpr_test.exs — "returns a map with user data", "includes bookshelves and placements" cover the shipped v1 4-key payload (user/bookshelves/placements/history). The issue-§4 richer keys (`writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary`) are a de-scoped feature → **#186**; what is built is tested. | ✅ | ✅ gdpr_test.exs — "returns error for unknown user" (rescue → `{:error, _}`). | ✅ |
+| 8.2 | ✅ **SECURITY / erasure completeness.** gdpr_test.exs — "removes all user data", "removes placement history for user's bookshelves"; deletion_test.exs — "deletes user_mfa and admin_sessions when user is deleted", GUC set + scoped; **and (Phase 1)** deletion_test.exs — "writes a user.data_deleted audit row with nil user_id and the deleted user's id as resource_id" now asserts the erasure audit row. The issue-§5 deeper cascade (embeddings, assistant_sessions, turn_feedback, retrieval_log, user_book_content_access) is a de-scoped feature (tables not yet built) → **#185**; the shipped shelving cascade + erasure invariants are tested. | ✅ | ✅ account_deletion_job_test.exs — "returns {:error, _} for a nonexistent user_id" (`:delete_user` → `:user_not_found`, Multi rolls back atomically). | ✅ |
 | 8.3 | ✅ gdpr_test.exs — "sets consent_analytics to true and records timestamp" + "sets consent_analytics to false"; check_consent true/false/unknown. Writing-assistant columns don't exist — **feature gap**, not a test gap for the shipped field. | ✅ | n/a — invalid/missing consent is rejected before any DB write (see L1). | n/a |
 | 8.4 | ✅ gdpr_test.exs + image_retention_test.exs — "deletes images past their expires_at", "deletes pending images stuck for more than 2 hours", "does not delete images not yet expired", "does not delete non-pending images regardless of age"; missing_purge_check finds orphans (image_retention_job_test.exs — "logs warning for images past expiry still in DB after cleanup"). | ✅ | ✅ image_retention_test.exs — "does not delete images not yet expired", "does not delete pending images uploaded recently". | ✅ |
 | 8.5 | ✅ **SECURITY.** audit_test.exs — "inserts an audit entry successfully", "hashes the IP address before storing" (SHA-256, len 64, ≠ raw), "stores metadata in the entry", "works with nil user_id for system actions", admin-column persistence; encryption via `Stacks.Vault` exercised implicitly by every insert. audit_append_only_test.exs — "raw UPDATE … is blocked", "raw DELETE … is blocked", "trigger blocks even from privileged roles", GUC-gated erasure UPDATE/DELETE permitted, SET LOCAL scoping. | ✅ | ✅ audit_test.exs — "handles non-UUID resource_id gracefully (encode_uuid returns nil)"; log_rollback "does NOT emit telemetry when the underlying audit insert fails". | ✅ |
@@ -355,7 +383,7 @@ either descoped or spun into new issues.
 | US  | Happy Path | Verdict | Sad Path | Verdict |
 |-----|------------|---------|----------|---------|
 | 8.1 | n/a — export emits no events by design (US-8.1 §6); the only side effect is the Oban job insertion, asserted at L1/L5. | n/a | n/a — same. | n/a |
-| 8.2 | ❌ **SECURITY — the headline gap.** Deletion records **audit** entries, not `Events.emit`: `user.deletion_requested` (controller, pre-enqueue) and `user.data_deleted` (inside the Multi). **Neither is asserted anywhere** (grep for both strings in `apps/core/test` → 0 hits). Separately, **no test asserts `event_log` is NOT modified during deletion** — the immutability-by-design invariant (issue §5, US-8.2 §5). This is the single most important sad-path for right-to-erasure and it is unverified. | ❌ | ❌ Same — no negative-emission / no-scrub assertion exists. | ❌ |
+| 8.2 | ✅ **SECURITY — headline gap RESOLVED (Phase 1).** Deletion records **audit** entries, not `Events.emit`: `user.deletion_requested` (controller, pre-enqueue) and `user.data_deleted` (inside the Multi). Both are now asserted — gdpr_controller_test.exs — "writes a user.deletion_requested audit row for the acting user, independent of the job"; deletion_test.exs — "writes a user.data_deleted audit row with nil user_id and the deleted user's id as resource_id". | ✅ | ✅ **SECURITY — erasure invariant RESOLVED (Phase 1).** deletion_test.exs — "does not add, remove, or modify any op.event_log row during erasure" snapshots all 9 columns of `op.event_log` and asserts byte-identity before/after `delete_user_data/1`, encoding the immutability-by-design contract (issue §5, US-8.2 §5). | ✅ |
 | 8.3 | n/a — consent emits no events by design (US-8.3 §6); state is the timestamp on the user row (asserted at L3). Writing-assistant revoke would enqueue `WritingAssistantDataPurgeWorker` — **feature gap** (see L5). | n/a | n/a — same. | n/a |
 | 8.4 | ✅ image_retention_test.exs — "emits image.expired event for each deleted record" (count +2), "emits image.expired event for each stuck image deleted" (`reason: "stuck"`); image_retention_job_test.exs — "emits image.expired event with reason stuck". | ✅ | ✅ image_retention_test.exs — "returns {:ok, 0} and emits no events when nothing is expired". | ✅ |
 | 8.5 | n/a — audit is a terminal write destination, emits no events (US-8.5 §6). | n/a | n/a — same. | n/a |
@@ -364,10 +392,10 @@ either descoped or spun into new issues.
 
 | US  | Happy Path | Verdict | Sad Path | Verdict |
 |-----|------------|---------|----------|---------|
-| 8.1 | ⚠️ data_export_job_test.exs — "returns :ok for a valid user_id" (behaviour covered). But issue-§6 config (`queue :default`, `max_attempts 3`) is **unasserted**. | ⚠️ | ✅ data_export_job_test.exs — "returns {:error, _} for a nonexistent user_id" (propagates export failure for retry). | ✅ |
-| 8.2 | ⚠️ **SECURITY / safety.** account_deletion_job_test.exs — "returns :ok and deletes user data for a valid user_id". But `max_attempts: 1` (no retries on a destructive op — issue §6, Reviewer Context) is **unasserted**, and "logs failed step name on failure" is unasserted. ConfirmDeletionJob stub fully covered (confirm_deletion_job_test.exs — 3 tests). | ⚠️ | ✅ account_deletion_job_test.exs — "returns {:error, _} for a nonexistent user_id" (returns `deletion failed at delete_user`, no retry). | ✅ |
+| 8.1 | ✅ data_export_job_test.exs — "returns :ok for a valid user_id" (behaviour) **plus (Phase 2)** "runs on the :default queue" + "is configured with max_attempts of 3" now assert the issue-§6 config. | ✅ | ✅ data_export_job_test.exs — "returns {:error, _} for a nonexistent user_id" (propagates export failure for retry). | ✅ |
+| 8.2 | ✅ **SECURITY / safety (Phase 2).** account_deletion_job_test.exs — "returns :ok and deletes user data for a valid user_id", **plus** "is configured with max_attempts of 1 (erasure must not retry)" and "logs the failed step name when the deletion Multi fails" (`capture_log` ~ "deletion failed at delete_user") now lock the destructive-op safety config. ConfirmDeletionJob stub fully covered (confirm_deletion_job_test.exs — 3 tests). | ✅ | ✅ account_deletion_job_test.exs — "returns {:error, _} for a nonexistent user_id" (returns `deletion failed at delete_user`, no retry). | ✅ |
 | 8.3 | n/a — consent is synchronous, no Oban job. Writing-assistant revoke → `WritingAssistantDataPurgeWorker` enqueue (issue §6) is a **feature gap** (worker does not exist). | n/a | n/a — same. | n/a |
-| 8.4 | ⚠️ image_retention_job_test.exs — "expires images stuck in pending past threshold", "deletes images past their expires_at", "handles no images gracefully" (perform/1 runs stuck → expired → orphan check). But issue-§6 **cron registration** (`{"0 2 * * *", ImageRetentionJob}` in `config.exs:50`) is **unasserted**. | ⚠️ | ✅ image_retention_job_test.exs — "does NOT expire pending images within threshold", "does NOT expire resolved images regardless of age", "does NOT delete images before their expires_at", "handles no images gracefully". | ✅ |
+| 8.4 | ✅ image_retention_job_test.exs — "expires images stuck in pending past threshold", "deletes images past their expires_at", "handles no images gracefully" (perform/1 runs stuck → expired → orphan check), **plus (Phase 2)** "is scheduled nightly at 02:00 via the Oban Cron plugin" asserts the `{"0 2 * * *", ImageRetentionJob}` cron registration. | ✅ | ✅ image_retention_job_test.exs — "does NOT expire pending images within threshold", "does NOT expire resolved images regardless of age", "does NOT delete images before their expires_at", "handles no images gracefully". | ✅ |
 | 8.5 | n/a — audit logging is synchronous/inline (US-8.5 §7). | n/a | n/a — same. | n/a |
 
 #### Layer 6: External Service Calls
@@ -377,7 +405,7 @@ either descoped or spun into new issues.
 | 8.1 | n/a — export reads the local DB only (US-8.1 §8). | n/a | n/a — same. | n/a |
 | 8.2 | n/a — deletion is DB-only; images are handled by US-8.4 (US-8.2 §8). | n/a | n/a — same. | n/a |
 | 8.3 | n/a — consent is DB-only (US-8.3 §8). | n/a | n/a — same. | n/a |
-| 8.4 | ⚠️ `Storage.delete_image/1` is invoked per expired/stuck image via `Storage.Mock`, but **no test asserts the call happens** (no spy/expectation on the storage backend; deletion counts don't distinguish DB-delete from storage-delete). | ⚠️ | ❌ issue-§7 "storage deletion failure → warning logged, DB record still deleted" is **unasserted** — `delete_storage_objects/1`'s `{:error, reason}` warning branch (image_retention.ex:147) has no test. **Key sad-path for the 30-day promise.** | ❌ |
+| 8.4 | ✅ **(Phase 3).** image_retention_test.exs — "cleanup_expired_images/0 calls Storage.delete_image once per expired image" + "cleanup_stuck_images/0 calls Storage.delete_image once per stuck image" — a `RecordingStorage` spy (`send(self(), {:storage_delete, key})`) with `assert_received` per path + `refute_received` catching extras/dupes. | ✅ | ✅ **(Phase 3) — key sad-path for the 30-day promise.** image_retention_test.exs — "expired-image cleanup logs a warning and still deletes the DB record on storage failure" + the stuck-image variant: a `FailingStorage` (`{:error, :simulated_storage_outage}`) → the `image_retention.ex:148` warning fires AND `Repo.get(UploadedImage, id) == nil`. | ✅ |
 | 8.5 | n/a — audit is a local write; encryption/hashing are in-process, not external services (US-8.5 §8). | n/a | n/a — same. | n/a |
 
 #### Layer 7: Storage (R2 / Local)
@@ -387,7 +415,7 @@ either descoped or spun into new issues.
 | 8.1 | n/a — export R2 upload is an explicit stub / future work (US-8.1 §9). | n/a | n/a — same. | n/a |
 | 8.2 | n/a — deletion performs no storage ops (US-8.2 §9). | n/a | n/a — same. | n/a |
 | 8.3 | n/a — no storage in the consent path. | n/a | n/a — same. | n/a |
-| 8.4 | ⚠️ `Storage.Mock` is the test backend; object deletion at `storage_path` happens but is **not asserted** (same gap as L6 happy — no assertion that the R2/Mock object is removed). | ⚠️ | ❌ Same storage-failure branch as L6 sad — DB-record-still-deleted-on-storage-error is unverified. | ❌ |
+| 8.4 | ✅ **(Phase 3).** Object deletion at `storage_path` is now asserted via the `RecordingStorage` spy in image_retention_test.exs (same tests as L6 happy — "calls Storage.delete_image once per expired image" / "…per stuck image"), proving the R2/Mock object is removed. | ✅ | ✅ **(Phase 3).** Same storage-failure branch as L6 sad — image_retention_test.exs "…logs a warning and still deletes the DB record on storage failure" verifies DB-record-still-deleted-on-storage-error. | ✅ |
 | 8.5 | n/a — audit has no storage interaction. | n/a | n/a — same. | n/a |
 
 #### Layer 8: Cache Interactions
@@ -414,9 +442,9 @@ either descoped or spun into new issues.
 
 | US  | Happy Path | Verdict | Sad Path | Verdict |
 |-----|------------|---------|----------|---------|
-| 8.1 | ❌ **(feature not implemented).** Issue §11 wants `UserClicksExport → Loading → GotExportResponse → Success`. No export Msg/flow exists in `frontend/src` (grep `UserClicksExport` → 0 hits); `Page.Settings.Consent` has no export button. | ❌ | ❌ Same — no export failure-state handling exists. | ❌ |
-| 8.2 | ❌ **(feature not implemented).** Issue §11 wants `UserTypesDeleteConfirmation "DELETE"` enabling the button → `UserClicksDeleteAccount → Loading → Success`. No such Msg/flow in `frontend/src` (grep → 0 hits). | ❌ | ❌ Same — no "button disabled until exactly DELETE" test because the UI doesn't exist. | ❌ |
-| 8.3 | ✅ SettingsTest.elm — "ToggleAnalytics flips analyticsConsent", "SaveConsent with token sets saving to Loading", "SaveConsent without token leaves saving as NotAsked", "SaveCompleted Ok sets saving to Success". Init `{analyticsConsent = False, saving = NotAsked}` matches. `ToggleWritingAssistant` (issue §11) = **feature gap** (Msg does not exist). | ✅ | ✅ SettingsTest.elm — "SaveCompleted Err sets saving to Failure". | ✅ |
+| 8.1 | n/a — export UI not built; tracked by **#187**. Issue §11's `UserClicksExport → Loading → GotExportResponse → Success` flow is a de-scoped v1 feature (no export Msg/flow in `frontend/src`; backend export exists and is tested at L1/L3/L5). | n/a | n/a — export failure-state handling ships with the UI → **#187**. | n/a |
+| 8.2 | n/a — delete UI not built; tracked by **#188**. Issue §11's `UserTypesDeleteConfirmation "DELETE"` → `UserClicksDeleteAccount → Loading → Success` flow is a de-scoped v1 feature (backend delete exists and is tested at L1/L3/L5). | n/a | n/a — "button disabled until exactly DELETE" ships with the UI → **#188**. | n/a |
+| 8.3 | ✅ SettingsTest.elm — "ToggleAnalytics flips analyticsConsent", "SaveConsent with token sets saving to Loading", "SaveConsent without token leaves saving as NotAsked", "SaveCompleted Ok sets saving to Success". Init `{analyticsConsent = False, saving = NotAsked}` matches. The `ToggleWritingAssistant` Msg (issue §11) is a de-scoped feature → **#184**; the analytics Msgs are fully tested. | ✅ | ✅ SettingsTest.elm — "SaveCompleted Err sets saving to Failure". | ✅ |
 | 8.4 | n/a — backend-only feature, no frontend (US-8.4 §12). | n/a | n/a — same. | n/a |
 | 8.5 | n/a — no audit-log Elm page exists (US-8.5 §12 — "Not yet implemented"). **(feature gap, but issue §11 marks N/A)**. | n/a | n/a — same. | n/a |
 
@@ -424,7 +452,7 @@ either descoped or spun into new issues.
 
 | US  | Happy Path | Verdict | Sad Path | Verdict |
 |-----|------------|---------|----------|---------|
-| 8.1–8.5 | n/a — per-route latency and Oban job counts are covered by the SLO gate (`scripts/check-slo-gate.sh` scrapes `/internal/metrics` post-deploy) plus automatic Phoenix-endpoint and Oban telemetry. Per project convention, per-US repetition of firing tests adds no guarantee. | n/a | ⚠️ Issue §12 asks for **GDPR-specific instrumentation** — `DataExportJob`/`AccountDeletionJob` outcome counts (incl. failed-step id), consent grant/revoke counts, image stuck/expired/orphan counts, `image.expired`-by-reason, audit-log throughput/encryption overhead. **None is instrumented** (grep of `observability_telemetry_test.exs` for gdpr/export/deletion/consent/image → 0 hits). Needs a decision: instrument + add firing tests (pattern: `upload_telemetry_test.exs`), or descope §12 to the SLO gate. Partly blocked on instrumentation (feature gap). | ⚠️ |
+| 8.1–8.5 | n/a — per-route latency and Oban job counts are covered by the SLO gate (`scripts/check-slo-gate.sh` scrapes `/internal/metrics` post-deploy) plus automatic Phoenix-endpoint and Oban telemetry. Per project convention, per-US repetition of firing tests adds no guarantee. | n/a | ✅ **RESOLVED (Phase 4) — instrumented in-scope** (per human decision). Eight GDPR-specific signals `[:stacks, :gdpr, …]` — export + deletion (with `failed_step`) outcome, consent grant/revoke, image expired/stuck/orphan, `image.expired`-by-`reason`, audit-write throughput — are emitted from the domain/worker layer and registered in `Core.PromEx.Plugins.Stacks`, with firing tests in `gdpr_telemetry_test.exs` (e.g. "emits [:stacks, :gdpr, :deletion] with result :error and the failed-step id", "emits [:stacks, :gdpr, :consent, :grant] on grant", "cleanup_stuck_images/0 emits both :stuck and :expired(by-reason \"stuck\")", "Audit.log/3 emits [:stacks, :gdpr, :audit, :write] on a successful insert"). | ✅ |
 
 #### Layer 12: Performance & Usability Metrics
 
@@ -441,83 +469,89 @@ either descoped or spun into new issues.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (regenerated — all 16 items resolved or routed)
 
-Every ❌/⚠️ cell converted to a numbered item. No tests were written or
-modified during this audit (pre-implementation baseline). `[FG]` = feature
-gap (code does not exist — spin a new issue per scope-lock); `[TEST]` =
-feature exists, test missing (in scope for #121).
+Every former ❌/⚠️ cell as a numbered item, now closed. `[TEST]` items
+(feature exists, test missing) were the in-scope work for #121 and **landed in
+Phases 1–5**; `[FG]` items (unbuilt v2 feature) were **de-scoped and routed to
+child issues #183–#189**. No item is left open. Status: **✅** = resolved in a
+phase · **→ #18x** = routed to a child issue.
 
-| # | Cell | What's needed | Where it belongs |
-|--:|------|---------------|------------------|
-| 1 | **L4 US-8.2 happy** — **SECURITY, top priority** `[TEST]` | Assert the two audit rows deletion writes: `user.deletion_requested` (controller, before enqueue) with `user_id` = the user; and `user.data_deleted` (inside the Multi) with **`user_id: nil`** + `resource_type: "user"`, `resource_id: <deleted user id>`. Query `audit.audit_log` after the flow. | `apps/core/test/stacks_web/gdpr_controller_test.exs` (requested) + `apps/core/test/stacks/gdpr/deletion_test.exs` (data_deleted) |
-| 2 | **L4 US-8.2 sad** — **SECURITY, erasure invariant** `[TEST]` | Assert **`event_log` is NOT modified during deletion** — snapshot `op.event_log` row count/ids before `delete_user_data/1`, assert unchanged after. Encodes the "payloads are UUID-only, nothing to scrub" design contract. | `apps/core/test/stacks/gdpr/deletion_test.exs` |
-| 3 | L1/L3 US-8.1 happy `[FG]` | Export payload completeness: `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary` (source type/title/shelf/date, **no raw vectors**) keys — requires implementing the export extension **and** the underlying tables. New issue. | `apps/core/lib/stacks/gdpr/export.ex` + new migrations → then `gdpr_test.exs` |
-| 4 | L3 US-8.2 happy `[FG]` — **SECURITY, erasure completeness** | Deeper deletion cascade: `op.embeddings`, `op.blog_assistant_sessions`, `op.turn_feedback`, `op.retrieval_log`, `op.user_book_content_access` deleted; `op.book_content_chunks` preserved. Tables don't exist yet. New issue (blocks the writing-assistant feature). | `apps/core/lib/stacks/gdpr/deletion.ex` + migrations → then `deletion_test.exs` |
-| 5 | L1/L2/L3/L5/L10 US-8.3 `[FG]` | Writing-assistant consent end to end: `type` param in controller, `consent_writing_assistant[_at]` columns, `ConsentCheck` writing_assistant gate (403 on blog chat), `WritingAssistantDataPurgeWorker` (enqueued on revoke, idempotent), `ToggleWritingAssistant` Elm Msg. New issue. | `gdpr_controller.ex`, `consent.ex`, `plugs/consent_check.ex`, new worker, `Consent.elm` → then tests |
-| 6 | L1 US-8.3 happy `[TEST]` | Once #5 lands: consent endpoint 200 for `type: "writing_assistant"` grant (`consent_writing_assistant: true` + `_at`) and revoke (enqueues purge worker). | `apps/core/test/stacks_web/gdpr_controller_test.exs` |
-| 7 | L5 US-8.1 happy `[TEST]` | Assert `DataExportJob` config: `queue: :default`, `max_attempts: 3` (via `__opts__`/job struct). | `apps/core/test/stacks/workers/data_export_job_test.exs` |
-| 8 | L5 US-8.2 happy `[TEST]` — **SECURITY/safety** | Assert `AccountDeletionJob` has **`max_attempts: 1`** (destructive, no retries) and logs the failed step name on `{:error, step, …}`. | `apps/core/test/stacks/workers/account_deletion_job_test.exs` |
-| 9 | L5 US-8.4 happy `[TEST]` | Assert `ImageRetentionJob` is registered in the Oban cron plugin (`{"0 2 * * *", ImageRetentionJob}` in `config.exs`). | `apps/core/test/stacks/workers/image_retention_job_test.exs` |
-| 10 | L6/L7 US-8.4 happy `[TEST]` | Assert `Storage.delete_image/1` is actually invoked (per expired + per stuck image) — spy/expectation on the storage backend, not just DB-count. | `apps/core/test/stacks/gdpr/image_retention_test.exs` |
-| 11 | L6/L7 US-8.4 sad `[TEST]` — **retention integrity** | Assert storage-failure resilience: when `Storage.delete_image/1` returns `{:error, _}`, a warning is logged **and the DB record is still deleted** (`delete_storage_objects/1` error branch, image_retention.ex:147). | `apps/core/test/stacks/gdpr/image_retention_test.exs` |
-| 12 | L10 US-8.1 `[FG]` | Elm export flow: `UserClicksExport → Loading → GotExportResponse (Ok/Err)` on the Settings page, wired to `POST /api/gdpr/export`. New issue (UI does not exist). | `frontend/src/Page/Settings/*` → then a program/unit test |
-| 13 | L10 US-8.2 `[FG]` | Elm delete flow: `UserTypesDeleteConfirmation` enabling the button only on exact `"DELETE"`, `UserClicksDeleteAccount → Loading → Success`, farewell/logout OutMsg. New issue (UI does not exist). | `frontend/src/Page/Settings/*` → then a test |
-| 14 | E2E US-8.1/8.2 `[FG]` | Playwright: Export ("Preparing your export…" → "Export queued") and Delete (confirm dialog → type DELETE → "Account deletion has been queued", button disabled until exact match) UI flows; plus auth-guard checks that `/api/gdpr/*` return 401 unauthenticated (settings.spec.ts covers `/api/settings/*` 401 but **not** gdpr). Blocked on #12/#13 for the UI portions; the 401 API checks can land now. | `e2e/tests/settings.spec.ts` (or new `gdpr.spec.ts`) |
-| 15 | E2E US-8.3 `[TEST]` | Strengthen consent E2E beyond smoke: assert "Saved!" success text after save, and the "Could not save preferences…" error path on failure (settings.spec.ts currently only asserts no `.error` element appears). | `e2e/tests/settings.spec.ts` |
-| 16 | L11 US-8.* sad `[FG/decision]` | Decide + implement GDPR telemetry (export/deletion outcomes incl. failed-step, consent grant/revoke, image stuck/expired/orphan, `image.expired`-by-reason, audit throughput) with firing tests (pattern: `upload_telemetry_test.exs`) — **or** formally descope issue §12 to the SLO gate and reclassify n/a. Partly blocked on instrumentation. | `apps/core/lib/stacks/**` + new telemetry test, or a scope note |
+| # | Cell | What's needed | Where it belongs | Status |
+|--:|------|---------------|------------------|--------|
+| 1 | **L4 US-8.2 happy** — **SECURITY, top priority** `[TEST]` | Assert the two audit rows deletion writes: `user.deletion_requested` (controller, before enqueue) with `user_id` = the user; and `user.data_deleted` (inside the Multi) with **`user_id: nil`** + `resource_type: "user"`, `resource_id: <deleted user id>`. Query `audit.audit_log` after the flow. | `apps/core/test/stacks_web/gdpr_controller_test.exs` (requested) + `apps/core/test/stacks/gdpr/deletion_test.exs` (data_deleted) | ✅ **RESOLVED (Phase 1)** — both audit-row assertions landed. |
+| 2 | **L4 US-8.2 sad** — **SECURITY, erasure invariant** `[TEST]` | Assert **`event_log` is NOT modified during deletion** — snapshot `op.event_log` row count/ids before `delete_user_data/1`, assert unchanged after. Encodes the "payloads are UUID-only, nothing to scrub" design contract. | `apps/core/test/stacks/gdpr/deletion_test.exs` | ✅ **RESOLVED (Phase 1)** — full 9-column byte-identity snapshot. |
+| 3 | L1/L3 US-8.1 happy `[FG]` | Export payload completeness: `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary` (source type/title/shelf/date, **no raw vectors**) keys — requires implementing the export extension **and** the underlying tables. | `apps/core/lib/stacks/gdpr/export.ex` + new migrations → then `gdpr_test.exs` | → **#186** (richer export payload). v1 4-key payload tested here. |
+| 4 | L3 US-8.2 happy `[FG]` — **SECURITY, erasure completeness** | Deeper deletion cascade: `op.embeddings`, `op.blog_assistant_sessions`, `op.turn_feedback`, `op.retrieval_log`, `op.user_book_content_access` deleted; `op.book_content_chunks` preserved. Tables don't exist yet. | `apps/core/lib/stacks/gdpr/deletion.ex` + migrations → then `deletion_test.exs` | → **#185** (deeper cascade, needs #183). v1 shelving cascade + invariants tested here. |
+| 5 | L1/L2/L3/L5/L10 US-8.3 `[FG]` | Writing-assistant consent end to end: `type` param in controller, `consent_writing_assistant[_at]` columns, `ConsentCheck` writing_assistant gate (403 on blog chat), `WritingAssistantDataPurgeWorker` (enqueued on revoke, idempotent), `ToggleWritingAssistant` Elm Msg. | `gdpr_controller.ex`, `consent.ex`, `plugs/consent_check.ex`, new worker, `Consent.elm` → then tests | → **#184** (writing-assistant consent, needs #183). |
+| 6 | L1 US-8.3 happy `[TEST]` | Once #5 lands: consent endpoint 200 for `type: "writing_assistant"` grant (`consent_writing_assistant: true` + `_at`) and revoke (enqueues purge worker). | `apps/core/test/stacks_web/gdpr_controller_test.exs` | → **#184** (test ships with the feature). |
+| 7 | L5 US-8.1 happy `[TEST]` | Assert `DataExportJob` config: `queue: :default`, `max_attempts: 3` (via `__opts__`/job struct). | `apps/core/test/stacks/workers/data_export_job_test.exs` | ✅ **RESOLVED (Phase 2)**. |
+| 8 | L5 US-8.2 happy `[TEST]` — **SECURITY/safety** | Assert `AccountDeletionJob` has **`max_attempts: 1`** (destructive, no retries) and logs the failed step name on `{:error, step, …}`. | `apps/core/test/stacks/workers/account_deletion_job_test.exs` | ✅ **RESOLVED (Phase 2)**. |
+| 9 | L5 US-8.4 happy `[TEST]` | Assert `ImageRetentionJob` is registered in the Oban cron plugin (`{"0 2 * * *", ImageRetentionJob}` in `config.exs`). | `apps/core/test/stacks/workers/image_retention_job_test.exs` | ✅ **RESOLVED (Phase 2)**. |
+| 10 | L6/L7 US-8.4 happy `[TEST]` | Assert `Storage.delete_image/1` is actually invoked (per expired + per stuck image) — spy/expectation on the storage backend, not just DB-count. | `apps/core/test/stacks/gdpr/image_retention_test.exs` | ✅ **RESOLVED (Phase 3)** — `RecordingStorage` spy. |
+| 11 | L6/L7 US-8.4 sad `[TEST]` — **retention integrity** | Assert storage-failure resilience: when `Storage.delete_image/1` returns `{:error, _}`, a warning is logged **and the DB record is still deleted** (`delete_storage_objects/1` error branch, image_retention.ex:148). | `apps/core/test/stacks/gdpr/image_retention_test.exs` | ✅ **RESOLVED (Phase 3)** — `FailingStorage` spy. |
+| 12 | L10 US-8.1 `[FG]` | Elm export flow: `UserClicksExport → Loading → GotExportResponse (Ok/Err)` on the Settings page, wired to `POST /api/gdpr/export`. | `frontend/src/Page/Settings/*` → then a program/unit test | → **#187** (export UI). |
+| 13 | L10 US-8.2 `[FG]` | Elm delete flow: `UserTypesDeleteConfirmation` enabling the button only on exact `"DELETE"`, `UserClicksDeleteAccount → Loading → Success`, farewell/logout OutMsg. | `frontend/src/Page/Settings/*` → then a test | → **#188** (delete UI). |
+| 14 | E2E US-8.1/8.2 `[FG]`/`[TEST]` | Playwright: Export/Delete UI flows; plus auth-guard checks that `/api/gdpr/*` return 401 unauthenticated. | `e2e/tests/settings.spec.ts` (or new `gdpr.spec.ts`) | ✅ **401 portion RESOLVED (Phase 5)** — "GDPR — auth guards" (green on live preview); the Export/Delete **UI flows** → **#187 / #188**. |
+| 15 | E2E US-8.3 `[TEST]` | Strengthen consent E2E beyond smoke: assert "Saved!" success text after save, and the "Could not save preferences…" error path on failure. | `e2e/tests/settings.spec.ts` | ✅ **RESOLVED (Phase 5)** — success + error-copy tests, green on live preview. |
+| 16 | L11 US-8.* sad `[FG/decision]` | GDPR telemetry (export/deletion outcomes incl. failed-step, consent grant/revoke, image stuck/expired/orphan, `image.expired`-by-reason, audit throughput) with firing tests. | `apps/core/lib/stacks/**` + new telemetry test | ✅ **RESOLVED (Phase 4)** — instrumented in-scope (human decision); 8 signals + `gdpr_telemetry_test.exs`. |
 
 ---
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved, and the issue materially
-outruns the implementation.** State across the 13-layer × 5-US matrix
-(130 happy/sad cells):
+**GREEN for the kept v1 surface — audit resolved.** After Phases 1–5, the
+13-layer × 5-US matrix (130 happy/sad cells) carries **0 ❌ and 0 ⚠️**: every
+cell is `✅` or `n/a`-with-rationale. The epic split (Approach A) is what makes
+this honest — the v2 feature gaps were **de-scoped**, not tested-around.
 
-- **27 ✅ STRONG** — the implemented v1 core is genuinely well covered:
-  API 202/401 for export & delete, consent grant/revoke/422s, the full
-  image-retention DB matrix + `image.expired` emission, and an
-  **excellent** audit surface (log/3, IP-hashing, encryption, and a
-  DB-level append-only trigger with GUC-gated erasure and SET LOCAL
-  scoping).
-- **13 ⚠️ shallow** — export payload (4 of 8 issue keys), deletion cascade
-  (shelving-only + unasserted audit/event-log invariants), analytics-only
-  consent, unasserted job config (`max_attempts`, cron), storage-call
-  assertions, and missing GDPR telemetry.
-- **12 ❌ missing** — the **event-log / audit-entry erasure invariants**
-  (US-8.2 L4, SECURITY), the storage-failure retention path (US-8.4
-  L6/L7), and the entirely absent Export/Delete Elm + E2E flows.
-- **78 n/a** — external services, cache, dbt (except audit), performance,
-  cost, and the many background/no-UI combinations, each with an inline
-  rationale.
+- **43 ✅ STRONG** — the v1 core plus the Phase 1–5 hardening: API 202/401 for
+  export & delete, consent grant/revoke/422s, the full image-retention DB
+  matrix + `image.expired` emission, an **excellent** audit surface (log/3,
+  IP-hashing, encryption, DB-level append-only trigger with GUC-gated erasure
+  and SET LOCAL scoping), and now: the erasure invariants (Phase 1), job-config
+  + destructive-op safety (Phase 2), storage-call + failure resilience
+  (Phase 3), 8 GDPR telemetry signals (Phase 4), and consent success/error +
+  `/api/gdpr/*` 401 E2E (Phase 5).
+- **0 ⚠️ / 0 ❌** — the DoD's green target is met for the in-scope surface.
+- **87 n/a** — external services, cache, dbt (except audit), performance,
+  cost, the many background/no-UI combinations, **and the de-scoped v2 UI
+  cells** (Elm export/delete flows → #187/#188), each with an inline rationale.
 
-**Headline findings (highest-value gaps):**
-1. **Erasure invariants are unverified (SECURITY).** Nothing asserts that
-   `delete_user_data/1` writes the `user.data_deleted` audit row
-   (`user_id: nil`) or the `user.deletion_requested` pre-audit, and —
-   critically — **nothing asserts `event_log` is left untouched** during
-   erasure. The immutable-event-log-except-GDPR-PII contract is documented
-   in code but has zero test teeth (punch #1, #2).
-2. **Erasure is incomplete vs. the issue (SECURITY).** The deletion Multi
-   only reaches shelving tables + user; the issue's writing-assistant /
-   embeddings / retrieval-log / content-access cascade — and the whole
-   writing-assistant consent surface — **does not exist in code**
-   (punch #4, #5). Right-to-erasure currently cannot cover data the issue
-   says it must, because that data model isn't built.
-3. **Export payload is a 4-of-8-key subset** and the **entire Export/Delete
-   Elm + E2E journey is unbuilt** (punch #3, #12, #13, #14). US-8.3
-   (consent) is the only fully-wired UI, and even it lacks writing-assistant
-   and save-result E2E assertions.
+**What is verified now (was the highest-value gap set):**
+1. **Erasure invariants have test teeth (SECURITY, Phase 1).** `delete_user_data/1`
+   writing the `user.data_deleted` audit row (`user_id: nil`) and the
+   `user.deletion_requested` pre-audit are both asserted, and — critically —
+   `op.event_log` is proven byte-identical (all 9 columns) across erasure
+   (punch #1, #2 closed).
+2. **GDPR telemetry is instrumented in-scope (Phase 4).** Eight
+   `[:stacks, :gdpr, …]` signals with firing tests, registered in the PromEx
+   plugin (punch #16 closed) — per the human "instrument in-scope" decision.
+3. **Storage-failure retention integrity and destructive-op safety are locked**
+   (punch #10, #11, #8) and the consent E2E asserts real save-result copy
+   (punch #15).
 
-**Test-runner totals at baseline (GDPR-related):** Elixir ~65 tests across
-9 files (all passing), Elm 5 Consent Msg tests, Playwright 3 consent smoke
-tests, dbt 6 generic column tests on `stg_audit_log`. **Punch list: 16
-items** — of which **~9 are feature gaps** requiring new issues (writing-
-assistant consent, deeper cascade, richer export, export/delete UI, audit-
-log read API, GDPR telemetry) and **7 are in-scope test additions** for
-Issue #121 (audit-entry + event-log invariants, storage-failure path,
-job-config assertions, cron registration, consent E2E hardening).
+**Explicitly NOT delivered here — de-scoped, tracked (not tested-around):**
+- Richer export payload → **#186**; deeper deletion cascade → **#185**;
+  writing-assistant consent end-to-end (controller/column/plug/worker/Msg) →
+  **#184** (all three need the **#183** data-model foundation).
+- Export UI (Elm) → **#187**; delete-account UI (Elm) → **#188**; audit-log
+  read API + page → **#189**.
+
+These are real feature gaps: the code does not exist. The corresponding audit
+cells are `n/a — tracked by #18x` (with the shipped part `✅`-and-noted where
+one exists), **not** GREEN-by-omission. Right-to-erasure over the unbuilt data
+model, and the export/delete UI journeys, are delivered by the child issues,
+NOT by #121.
+
+**Test-runner totals after Phases 1–5 (GDPR-related):** Elixir grew from ~65 to
+the Phase-2/3 regression counts (202 → 206 GDPR/audit/workers tests, 0 failures;
+full-suite 1539/0 at Phase 4) with new erasure, job-config, storage-spy, and
+`gdpr_telemetry_test.exs` (10 firing tests) coverage; Elm 5 Consent Msg tests;
+Playwright `settings.spec.ts` 21/21 green on the live preview (incl. the 3 new
+GDPR tests); dbt 6 generic column tests on `stg_audit_log`. **Punch list: 16/16
+closed** — 10 resolved in-scope (Phases 1–5, incl. the 401 half of #14) and 6
+routed to child issues #184–#188.
 ## Definition of Done
 - [ ] All 11 test categories implemented with specific test cases listed above
 - [ ] Tests pass with `TEST_TARGET=local`
