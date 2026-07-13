@@ -1,0 +1,96 @@
+version: 2
+
+# Dependency-update automation. Closes the OpenSSF Scorecard
+# "Dependency-Update-Tool" check and is the standing mechanism for the
+# "Vulnerabilities" check — Dependabot opens PRs for advisories across every
+# ecosystem below (mix, pip, cargo, npm, docker) plus the pinned GitHub
+# Actions. Grouped minor/patch updates keep PR volume manageable; majors and
+# security fixes still come through individually.
+updates:
+  # ── GitHub Actions (all workflows are SHA-pinned; this keeps the pins fresh)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # ── Elixir (umbrella root + apps/core)
+  - package-ecosystem: mix
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      elixir-minor-patch:
+        update-types: [minor, patch]
+
+  # ── Python (vision sidecar + shared requirements)
+  - package-ecosystem: pip
+    directory: /apps/vision
+    schedule:
+      interval: weekly
+    groups:
+      vision-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+    groups:
+      py-minor-patch:
+        update-types: [minor, patch]
+
+  # ── Rust (scraper microservice)
+  - package-ecosystem: cargo
+    directory: /apps/scraper
+    schedule:
+      interval: weekly
+    groups:
+      scraper-minor-patch:
+        update-types: [minor, patch]
+
+  # ── JavaScript (frontend build, core assets, e2e, root tooling)
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /apps/core/assets
+    schedule:
+      interval: weekly
+    groups:
+      assets-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    groups:
+      e2e-minor-patch:
+        update-types: [minor, patch]
+
+  # ── Docker base images (core / vision / scraper / searxng / log-shipper)
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /apps/vision
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /deploy/searxng
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /deploy/log-shipper
+    schedule:
+      interval: weekly
