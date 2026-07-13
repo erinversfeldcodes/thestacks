@@ -12,6 +12,16 @@ defmodule Stacks.Books.ISBNResolverTest do
 
   alias Stacks.Books.{ISBNResolver, MockHttpClient}
 
+  # Reset the resolver's circuit breakers before each test. :fuse state is
+  # global (ETS-backed), so a fuse blown by an earlier suite test (e.g. a
+  # failure-path/burst test) can otherwise leak in and turn a mocked resolve
+  # into :circuit_open → :not_found — an order-dependent flake in the full run.
+  setup do
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+    :ok
+  end
+
   # ---------------------------------------------------------------------------
   # Fixture helpers
   # ---------------------------------------------------------------------------
