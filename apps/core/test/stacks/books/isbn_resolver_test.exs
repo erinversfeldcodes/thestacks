@@ -1,5 +1,12 @@
 defmodule Stacks.Books.ISBNResolverTest do
-  use ExUnit.Case, async: true
+  # async: false — `capture_resolver_log/1` temporarily raises the GLOBAL
+  # Logger level to :info (test.exs pins it at :warning) so the resolver's
+  # Logger.info diagnostics reach capture_log. That toggle is process-global:
+  # run async, two concurrent capture_resolver_log calls race and one test's
+  # `after` restores :warning mid-capture in another, dropping its expected
+  # log line (observed: the "floored" plausibility-floor assertion flaking on
+  # `log == ""`). Serialising this module removes the race.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
