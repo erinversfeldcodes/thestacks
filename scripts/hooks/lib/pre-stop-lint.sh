@@ -13,6 +13,20 @@ set -uo pipefail
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null || echo "$CLAUDE_PROJECT_DIR")"
 
+# Elixir tooling must run under the pinned Nix dev shell (flake 1.18.4 / OTP 27),
+# never the system Homebrew Elixir. A non-direnv shell (this hook) otherwise
+# resolves the system toolchain, which corrupts _build by mixing toolchains and,
+# after a deps bump, fails with "the dependency build is outdated". Mirrors the
+# pre-push hook (update-pr-ci.sh) and the `just run` recipe. Bare fallback only if
+# nix is unavailable (e.g. CI runners without nix).
+MIX_CMD="mix"
+if [[ -z "${STACKS_DEV_SHELL:-}" ]]; then
+  export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
+  if command -v nix >/dev/null 2>&1; then
+    MIX_CMD="nix develop '${REPO_ROOT}' --command mix"
+  fi
+fi
+
 INPUT=$(cat)
 
 # Guard: if this hook is already running due to a previous stop-hook block,
@@ -93,7 +107,7 @@ if [[ $HAS_ELIXIR -eq 1 ]]; then
     run_check \
       "mix format --check-formatted ${ABS}" \
       "cd ${REPO_ROOT}/apps/core && mix format ${ABS}" \
-      bash -c "cd '${REPO_ROOT}/apps/core' && mix format --check-formatted '${ABS}'"
+      bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} format --check-formatted '${ABS}'"
   done <<< "$ELIXIR_FILES"
 
   # Run credo across apps/core for any Elixir change.
@@ -101,23 +115,23 @@ if [[ $HAS_ELIXIR -eq 1 ]]; then
     run_check \
       "mix credo --strict (apps/core)" \
       "cd ${REPO_ROOT}/apps/core && mix credo --strict" \
-      bash -c "cd '${REPO_ROOT}/apps/core' && mix credo --strict"
+      bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} credo --strict"
   fi
 
   # Run sobelow security scan across apps/core for any Elixir change.
   if [[ $FAIL -eq 0 ]]; then
     run_check "mix sobelow (apps/core)" \
         "cd '${REPO_ROOT}/apps/core' && mix sobelow --exit" \
-        bash -c "cd '${REPO_ROOT}/apps/core' && mix sobelow"
+        bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} sobelow"
   fi
 
   # Run deps.audit for any Elixir change — skip gracefully if task not available.
   if [[ $FAIL -eq 0 ]]; then
-    if bash -c "cd '${REPO_ROOT}/apps/core' && mix help deps.audit" > /dev/null 2>&1; then
+    if bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} help deps.audit" > /dev/null 2>&1; then
       run_check \
         "mix deps.audit (apps/core)" \
         "cd ${REPO_ROOT}/apps/core && mix deps.audit" \
-        bash -c "cd '${REPO_ROOT}/apps/core' && mix deps.audit"
+        bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} deps.audit"
     else
       : # SKIP: mix deps.audit not available (mix_audit package not installed)
     fi
@@ -209,7 +223,7 @@ if [[ $HAS_PROTO -eq 1 ]]; then
     run_check \
       "mix proto.sync --check" \
       "cd ${REPO_ROOT}/apps/core && mix proto.sync" \
-      bash -c "cd '${REPO_ROOT}/apps/core' && mix proto.sync --check"
+      bash -c "cd '${REPO_ROOT}/apps/core' && ${MIX_CMD} proto.sync --check"
   fi
 fi
 
