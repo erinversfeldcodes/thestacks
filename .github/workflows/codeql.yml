@@ -1,16 +1,27 @@
 name: CodeQL
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "0 4 * * 1" # Weekly on Monday at 04:00 UTC
   workflow_dispatch:
+
+# Least-privilege default for the whole workflow (Scorecard Token-Permissions).
+# The analyze job re-grants exactly what CodeQL needs at the job level.
+permissions:
+  contents: read
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      security-events: write
+      contents: read # checkout
+      security-events: write # upload CodeQL results
+      actions: read # read workflow run metadata for analysis
     strategy:
       fail-fast: false
       matrix:
