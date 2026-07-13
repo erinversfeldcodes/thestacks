@@ -26,6 +26,7 @@ testUser =
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
+    , consentAnalytics = False
     , consentWritingAssistant = False
     }
 

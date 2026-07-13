@@ -25,12 +25,12 @@ import Types.User exposing (User)
 
 ownerUser : User
 ownerUser =
-    { id = "u1", email = "owner@stacks.dev", displayName = "The Owner", role = "owner", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
+    { id = "u1", email = "owner@stacks.dev", displayName = "The Owner", role = "owner", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
 
 
 readerUser : User
 readerUser =
-    { id = "u2", email = "reader@stacks.dev", displayName = "A Reader", role = "user", countryCode = Nothing, city = Nothing, consentWritingAssistant = False }
+    { id = "u2", email = "reader@stacks.dev", displayName = "A Reader", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
 
 
 ownerAuth : Main.Auth

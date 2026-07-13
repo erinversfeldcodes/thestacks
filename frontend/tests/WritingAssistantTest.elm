@@ -17,14 +17,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.ToggleWritingAssistant Consent.init Nothing
+                            Consent.update Consent.ToggleWritingAssistant (Consent.init { analytics = False, writingAssistant = False }) Nothing
                     in
                     model.writingAssistantConsent |> Expect.equal True
             , test "ToggleWritingAssistant with a token saves immediately (Loading)" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.ToggleWritingAssistant Consent.init (Just "tok")
+                            Consent.update Consent.ToggleWritingAssistant (Consent.init { analytics = False, writingAssistant = False }) (Just "tok")
                     in
                     Expect.all
                         [ \m -> m.writingAssistantConsent |> Expect.equal True
@@ -36,7 +36,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Consent.update (Consent.SaveWritingAssistantCompleted (Ok ()))
-                                Consent.init
+                                (Consent.init { analytics = False, writingAssistant = False })
                                 (Just "tok")
                     in
                     model.saving |> Expect.equal (Success ())
@@ -47,7 +47,7 @@ suite =
                             "Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."
             , test "the Consent view renders the OFF description when consent is off" <|
                 \_ ->
-                    Consent.view Consent.init
+                    Consent.view (Consent.init { analytics = False, writingAssistant = False })
                         |> Query.fromHtml
                         |> Query.has [ Selector.text Consent.writingAssistantOffDescription ]
             ]

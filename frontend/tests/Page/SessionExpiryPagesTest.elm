@@ -86,7 +86,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err unauthorized))
-                                Consent.init
+                                (Consent.init { analytics = False, writingAssistant = False })
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Consent.SessionExpired
@@ -96,7 +96,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err nonAuth))
-                                Consent.init
+                                (Consent.init { analytics = False, writingAssistant = False })
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Consent.NoOut
@@ -106,7 +106,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Ok ()))
-                                Consent.init
+                                (Consent.init { analytics = False, writingAssistant = False })
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Consent.NoOut

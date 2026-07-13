@@ -959,7 +959,7 @@ searchProgram maybeToken =
 -}
 decodeAuthResponse : Decode.Decoder AuthResponse
 decodeAuthResponse =
-    Decode.map6 AuthResponse
+    Decode.map7 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
@@ -967,6 +967,11 @@ decodeAuthResponse =
         (Decode.oneOf
             [ Decode.at [ "user", "role" ] Decode.string
             , Decode.succeed "user"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.at [ "user", "consent_analytics" ] Decode.bool
+            , Decode.succeed False
             ]
         )
         (Decode.oneOf
