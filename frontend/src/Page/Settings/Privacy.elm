@@ -20,6 +20,7 @@ type alias Model =
     , shelfVisibilities : List ShelfVisibility
     , savingProfile : RemoteData Http.Error ()
     , savingShelf : RemoteData Http.Error ()
+    , exporting : RemoteData Http.Error ()
     }
 
 
@@ -37,6 +38,8 @@ type Msg
     | SaveProfileVisibilityCompleted (Result Http.Error ())
     | SaveShelfVisibility String
     | SaveShelfVisibilityCompleted (Result Http.Error ())
+    | UserClicksExport
+    | GotExportResponse (Result Http.Error ())
 
 
 type OutMsg
@@ -60,6 +63,7 @@ init =
     , shelfVisibilities = defaultShelves
     , savingProfile = NotAsked
     , savingShelf = NotAsked
+    , exporting = NotAsked
     }
 
 
@@ -138,6 +142,29 @@ update msg model maybeToken =
                     else
                         ( { model | savingShelf = Failure err }, Cmd.none, NoOut )
 
+        UserClicksExport ->
+            case maybeToken of
+                Just token ->
+                    ( { model | exporting = Loading }
+                    , Api.requestExport token GotExportResponse
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        GotExportResponse result ->
+            case result of
+                Ok _ ->
+                    ( { model | exporting = Success () }, Cmd.none, NoOut )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | exporting = Failure err }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -169,7 +196,45 @@ view model =
             , div [ class "privacy__shelves" ]
                 (List.map viewShelfRow model.shelfVisibilities)
             ]
+        , viewExportSection model.exporting
         ]
+
+
+viewExportSection : RemoteData Http.Error () -> Html Msg
+viewExportSection exporting =
+    div [ class "settings-section" ]
+        [ h2 [ class "settings-section__title" ] [ text "Your Data" ]
+        , p [ class "settings-section__desc" ]
+            [ text "Request a copy of your personal data — including your shelves, reading history, notes, and preferences. We'll email you when it's ready to download." ]
+        , div [ class "settings-actions" ]
+            [ viewExportButton exporting ]
+        , viewExportFeedback exporting
+        ]
+
+
+viewExportButton : RemoteData Http.Error () -> Html Msg
+viewExportButton exporting =
+    case exporting of
+        Loading ->
+            button [ class "btn btn--primary btn--disabled", disabled True ]
+                [ text "Preparing your export…" ]
+
+        _ ->
+            button [ class "btn btn--primary", onClick UserClicksExport ]
+                [ text "Export My Data" ]
+
+
+viewExportFeedback : RemoteData Http.Error () -> Html Msg
+viewExportFeedback exporting =
+    case exporting of
+        Success _ ->
+            p [ class "success" ] [ text "Export queued. We'll email you when it's ready." ]
+
+        Failure _ ->
+            p [ class "error" ] [ text "We couldn't queue your export. Please try again." ]
+
+        _ ->
+            text ""
 
 
 viewShelfRow : ShelfVisibility -> Html Msg

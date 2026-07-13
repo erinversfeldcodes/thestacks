@@ -71,6 +71,7 @@ module Api exposing
     , rejectIdentification
     , rejectSource
     , removeBook
+    , requestExport
     , saveConsent
     , searchBooks
     , soldListing
@@ -664,6 +665,29 @@ removeBook placementId token toMsg =
         { method = "DELETE"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/" ++ placementId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/gdpr/export — queue an export of the user's personal data.
+
+The backend responds 202 Accepted and processes the export asynchronously, so
+the client only needs to confirm the request was queued; the response body is
+not consumed.
+
+-}
+requestExport :
+    String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+requestExport token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/gdpr/export"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
