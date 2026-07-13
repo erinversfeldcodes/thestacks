@@ -15,6 +15,10 @@ set -euo pipefail
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="${INSTALL_DIR}/flyctl"
 
+# Pinned flyctl version (supply-chain: no floating "latest" download).
+# Override with FLYCTL_VERSION=x.y.z to bump; keep in sync intentionally.
+PINNED_VERSION="${FLYCTL_VERSION:-0.4.69}"
+
 _latest_version() {
     curl -fsSL "https://api.github.com/repos/superfly/flyctl/releases/latest" \
         | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'].lstrip('v'))"
@@ -48,14 +52,16 @@ _download_url() {
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
 
-latest="$(_latest_version)"
+latest="${PINNED_VERSION}"
 current="$(_current_version)"
 
 echo "flyctl current: ${current}"
-echo "flyctl latest:  ${latest}"
+echo "flyctl pinned:  ${latest}"
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-    [[ "${current}" == "${latest}" ]] && echo "Up to date." || echo "Update available."
+    upstream="$(_latest_version)"
+    echo "flyctl upstream latest: ${upstream}"
+    [[ "${current}" == "${latest}" ]] && echo "At pinned version." || echo "Pinned version not installed."
     exit 0
 fi
 
