@@ -303,8 +303,10 @@ combine-dependabot:
     BASE="${DEPENDABOT_BASE:-main}"
     COMBINE_BRANCH="combined-deps"
 
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "ERROR: working tree is dirty — commit or stash before combining." >&2
+    # Only tracked changes block us — untracked files (e.g. local plans/*.md)
+    # ride along safely across the branch switch + cherry-picks.
+    if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        echo "ERROR: uncommitted tracked changes — commit or stash before combining (untracked files are fine)." >&2
         exit 1
     fi
     ORIG="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse HEAD)"
