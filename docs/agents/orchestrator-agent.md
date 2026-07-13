@@ -757,6 +757,81 @@ When all plan phases are approved and committed:
 
 ---
 
+## Epic Parallel Execution
+
+An **epic** is a root issue (e.g. #121) that spins out multiple child issues to be delivered
+together on one integration branch under a single PR. Epic mode coordinates many per-issue
+orchestrations; it does not replace the per-issue flow — **each child issue still runs the full
+Phase 0–3 flow** (research → plan → per-phase gates → 2F PE gate → completion).
+
+### When it applies
+The human explicitly requests it: "complete the epic", "work the child issues in parallel and
+merge on `<branch>`", "one PR when the whole epic is done", or similar. Do not enter epic mode
+by inference.
+
+### Integration branch
+- The epic root's branch (e.g. `feat/e2e-121`) is the **integration branch**. It is NOT merged
+  to `main` until every child issue is complete.
+- Each child issue is developed on its own branch **cut from the integration branch**
+  (`feat/<root>-<child-slug>`), and merged **back into the integration branch** on completion —
+  never directly into `main`.
+- The PR (integration branch → `main`) opens **only** when: all child issues complete, the
+  integration branch is green under `just verify`, and the **epic-level 2F PE gate** passes on
+  the cumulative diff.
+
+### Dependency DAG & parallelism
+- Child issues form a dependency DAG, recorded in the epic state (`child_order`). Only issues
+  whose dependencies are **complete + merged** may start.
+- Issues within the same dependency level run **in parallel, each in its own git worktree**
+  (`isolation: worktree` for the specialist agents) so concurrent file edits never collide.
+- After a level completes and merges, re-derive the ready set and launch the next level.
+
+### Mandatory stops in epic mode (batched)
+Running N children with three stops each would mean 3N interruptions. Instead:
+1. **Epic kickoff stop (once):** present the epic execution plan — the DAG, each child's scope
+   summary, branch/worktree strategy, and the merge order — and get one approval to proceed.
+   This approval covers the child **plans** at the level of scope; a child whose Phase-1 research
+   uncovers a **scope surprise** (new controllers/endpoints/data-model beyond its stub, or a
+   security finding) escalates to an individual stop.
+2. **Per-child completion is auto-progressed** (commit on the child branch, merge to integration,
+   update epic state) **without a stop**, UNLESS: a reviewer returns NEEDS_REVISION twice, the 2F
+   PE gate flags a P0/P1, a merge conflict needs a human call, or `just verify` fails on the
+   integration branch after merge.
+3. **Epic finalization stop (once):** present the cumulative epic diff + epic-level PE gate before
+   opening the PR.
+Between batched stops, keep the human informed via the epic state block (below) each response;
+the human may interrupt at any time.
+
+### Merge & integration discipline
+- A child is "done" only after: its own full flow passes, its branch is committed, it is merged
+  into the integration branch, and `just verify` is **re-run green on the integration branch
+  post-merge** (a child green in isolation can break integration).
+- Order merges within a level to minimise conflicts (smallest / most-foundational first).
+- Resolve conflicts on the integration branch; if a resolution is non-mechanical, stop for the human.
+- New issues discovered mid-epic (e.g. from a PE note) are added to the DAG and **must also complete
+  before the PR** — record them in the epic state.
+
+### Epic state file
+Maintain `plans/<root>-<slug>-epic-state.json` alongside the per-child state files:
+```json
+{
+  "epic_issue": 121,
+  "integration_branch": "feat/e2e-121",
+  "pr_opened": false,
+  "children": {
+    "183": {"status": "in_progress", "branch": "feat/e2e-121-gdpr-data-model", "worktree": "...",
+             "depends_on": [], "merged": false, "state_file": "plans/183-...-state.json"},
+    "184": {"status": "blocked", "depends_on": [183], "merged": false}
+  },
+  "ready_set": [183],
+  "discovered_issues": []
+}
+```
+Update it at every child transition. Report an **Epic State** block (children by status, ready set,
+merge/PR gate) each response, in addition to the per-child Orchestrator State when a child is active.
+
+---
+
 ## State File
 
 Each active plan has a companion state file at `plans/{NNN}-{slug}-state.json`. Create it when the plan is approved (Phase 1, step 10). Update it at every transition listed in Phase 2. Only the Orchestrator writes this file — specialist agents never touch it.
@@ -906,6 +981,10 @@ Three mandatory stops where you **must** present output and wait for human confi
 3. **After completion** (end of Phase 3)
 
 Do not proceed past any stop without explicit human confirmation.
+
+**In Epic Parallel Execution mode** these three per-issue stops are batched to two epic-level stops
+(kickoff + finalization); per-child progress auto-advances except on the escalation triggers listed
+in that section. See **Epic Parallel Execution**.
 
 ---
 
