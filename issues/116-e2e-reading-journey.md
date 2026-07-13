@@ -1,7 +1,7 @@
 # Issue #116: E2E Test Suite — Reading Journey
 
 ## Summary
-Comprehensive end-to-end test coverage for the reading journey lifecycle: moving books between shelves, abandoning books, re-reading, removing from collection, and empty shelf states with per-shelf themed messages.
+Comprehensive end-to-end test coverage for the reading journey lifecycle: moving books between shelves, abandoning books, re-reading, removing from collection, empty shelf states with per-shelf themed messages, and tracking reading progress through a book. US-1.6.6 (reading progress) was added to scope 2026-07 as the sixth story in the US-1.6 reading-journey family; its feature is currently **partial** (backend built, frontend UI orphaned) — see the Feature-Completeness Pre-Check.
 
 ## User Stories Covered
 - [US-1.6.1 — Move a Book Between Shelves](../docs/user_stories/US-1.6.1-move-book.md)
@@ -9,6 +9,7 @@ Comprehensive end-to-end test coverage for the reading journey lifecycle: moving
 - [US-1.6.3 — Record Multiple Reads](../docs/user_stories/US-1.6.3-record-reads.md)
 - [US-1.6.4 — Remove a Book from the Collection](../docs/user_stories/US-1.6.4-remove-book.md)
 - [US-1.6.5 — Empty Shelf States](../docs/user_stories/US-1.6.5-empty-shelf-states.md)
+- [US-1.6.6 — Track Reading Progress](../docs/user_stories/US-1.6.6-reading-progress.md) — *added to scope 2026-07; feature partial (see Pre-Check)*
 
 ## Scope Check
 - Does this issue touch more than 3 controllers? No (BookshelfPlacementController, BookshelfController).
@@ -41,6 +42,7 @@ it — delete the story from Summary + User Stories above and spin out a feature
 | US-1.6.3 — Record Multiple Reads | ⬜ to verify | ⬜ to verify | ⬜ | — |
 | US-1.6.4 — Remove a Book from the Collection | ⬜ to verify | ⬜ to verify | ⬜ | — |
 | US-1.6.5 — Empty Shelf States | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.6 — Track Reading Progress | `PUT /placements/:id/progress` → `update_progress` + `Shelving.update_reading_progress/3` built; `reading_status`/`current_page` cols exist. **Frontend orphaned**: `Components.PlacementCard` mounted nowhere, no `Api.updateProgress`; `placement.reading_started/completed` unregistered in `Events.Registry`; no page-count ceiling | ❌ not driven (no UI wired) | 🟡 partial | **build in-scope**: mount progress UI in ReadingPile/BookDetail + wire `Api.updateProgress`, register events, add page ≤ total guard (see US-1.6.6 Implementation Status). Do NOT E2E-green until built. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
