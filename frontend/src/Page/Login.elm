@@ -9,6 +9,7 @@ module Page.Login exposing
     , errorMessage
     , expiredDraftInit
     , expiredInit
+    , farewellInit
     , init
     , isSubmitDisabled
     , update
@@ -56,6 +57,10 @@ type alias Model =
     -- #182) and the draft was persisted; upgrades the expiry notice copy to
     -- reassure the user their listing is safe.
     , draftSaved : Bool
+
+    -- Set after a successful account deletion (Issue #188) when the user is
+    -- redirected here. Drives a warm farewell notice distinct from an expiry.
+    , accountDeleted : Bool
     }
 
 
@@ -114,6 +119,7 @@ init =
     , displayNameValidation = Pristine
     , sessionExpired = False
     , draftSaved = False
+    , accountDeleted = False
     }
 
 
@@ -132,6 +138,15 @@ the user their work is safe.
 expiredDraftInit : Model
 expiredDraftInit =
     { init | sessionExpired = True, draftSaved = True }
+
+
+{-| Initial login state shown after a successful account deletion (Issue #188):
+identical to `init` but with the farewell notice raised. See
+`Main.handleAccountDeleted`.
+-}
+farewellInit : Model
+farewellInit =
+    { init | accountDeleted = True }
 
 
 validateEmail : String -> FieldValidation
@@ -222,6 +237,7 @@ update msg model =
                 , displayNameValidation = Pristine
                 , sessionExpired = False
                 , draftSaved = False
+                , accountDeleted = False
               }
             , Cmd.none
             , NoOut
@@ -247,7 +263,7 @@ update msg model =
                         RegistrationPending _ ->
                             Cmd.none
             in
-            ( { model | submitState = Loading, sessionExpired = False, draftSaved = False }, cmd, NoOut )
+            ( { model | submitState = Loading, sessionExpired = False, draftSaved = False, accountDeleted = False }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
             ( { model | submitState = Success authResponse, transitionState = Transitioning }
@@ -343,6 +359,7 @@ viewFormCard model =
                 )
             ]
         , viewSessionExpiredNotice model
+        , viewAccountDeletedNotice model
         , div
             [ class "login-card__tabs"
             , attribute "role" "tablist"
@@ -578,6 +595,33 @@ sessionExpiredNoticeText draftSaved =
 
     else
         "The library closed your session for safekeeping — sign in again to return."
+
+
+{-| Warm farewell shown after a successful account deletion (Issue #188). Kept
+distinct from the session-expiry notice so a deliberate goodbye reads differently
+from a forced logout. Suppressed once a submit failure is showing.
+-}
+viewAccountDeletedNotice : Model -> Html Msg
+viewAccountDeletedNotice model =
+    let
+        submitFailed =
+            case model.submitState of
+                Failure _ ->
+                    True
+
+                _ ->
+                    False
+    in
+    if model.accountDeleted && not submitFailed then
+        div
+            [ attribute "role" "status"
+            , class "login-card__notice login-card__notice--account-deleted"
+            , testId "account-deleted-notice"
+            ]
+            [ text "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks." ]
+
+    else
+        text ""
 
 
 viewError : Model -> Html Msg

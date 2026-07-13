@@ -249,6 +249,11 @@ type alias Model =
     -- reassure the user their draft was saved.
     , draftSavedNotice : Bool
 
+    -- Raised after a successful account-deletion request (Issue #188); consumed
+    -- when the Login page is (re)built so a warm farewell survives the redirect's
+    -- `UrlChanged`, mirroring `sessionExpiredNotice`.
+    , accountDeletedNotice : Bool
+
     -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
     -- re-check-before-logout port round-trip is in flight, cleared when it
     -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
@@ -283,6 +288,7 @@ init flags url key =
       , hasAnyPlacements = True
       , sessionExpiredNotice = False
       , draftSavedNotice = False
+      , accountDeletedNotice = False
       , pendingLogout = Nothing
       }
     , Cmd.batch
@@ -727,6 +733,33 @@ forceSessionExpiry draftSaved model =
     )
 
 
+{-| The farewell/logout path after a successful account-deletion request
+(Issue #188). The backend has queued the erasure; here we tear down the local
+session the same way a deliberate sign-out does — clear `model.auth`, reset the
+user menu, wipe any persisted listing draft (it carries PII), and redirect to
+`/login`. Rather than a bare login page, we raise `accountDeletedNotice` so the
+redirect's `UrlChanged` builds the Login page in its farewell state (mirroring
+`forceSessionExpiry` → `sessionExpiredNotice`), giving the user a warm goodbye
+distinct from an expiry. No `sessionExpiredNotice`: this was a deliberate,
+successful action.
+-}
+handleAccountDeleted : Model -> ( Model, Cmd Msg )
+handleAccountDeleted model =
+    ( { model
+        | auth = Nothing
+        , accountDeletedNotice = True
+        , userMenu = UserMenu.init
+        , bookDetailOverlay = Nothing
+        , pendingLogout = Nothing
+      }
+    , Cmd.batch
+        [ clearAuth ()
+        , clearListingDraft ()
+        , Nav.pushUrl model.key (Route.toPath Login)
+        ]
+    )
+
+
 {-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
 for BOTH cross-tab propagation and the 401 re-check net.
 -}
@@ -1000,7 +1033,10 @@ update msg model =
                 -- on /login, build the Login page in its expired-notice state so the
                 -- message survives this `UrlChanged` re-init.
                 page =
-                    if newRoute == Login && model.sessionExpiredNotice then
+                    if newRoute == Login && model.accountDeletedNotice then
+                        PageLogin Login.farewellInit
+
+                    else if newRoute == Login && model.sessionExpiredNotice then
                         if model.draftSavedNotice then
                             PageLogin Login.expiredDraftInit
 
@@ -1021,6 +1057,8 @@ update msg model =
                     model.sessionExpiredNotice && newRoute /= Login
                 , draftSavedNotice =
                     model.draftSavedNotice && newRoute /= Login
+                , accountDeletedNotice =
+                    model.accountDeletedNotice && newRoute /= Login
               }
             , cmd
             )
@@ -1617,6 +1655,9 @@ update msg model =
 
                         Privacy.SessionExpired ->
                             handleSessionExpiry model
+
+                        Privacy.AccountDeleted ->
+                            handleAccountDeleted model
 
                 _ ->
                     ( model, Cmd.none )
