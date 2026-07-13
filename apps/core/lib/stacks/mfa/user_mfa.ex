@@ -10,6 +10,8 @@ defmodule Stacks.MFA.UserMFA do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @schema_prefix "op"
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
