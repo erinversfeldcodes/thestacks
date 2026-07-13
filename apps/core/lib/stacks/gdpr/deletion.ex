@@ -72,18 +72,36 @@ defmodule Stacks.GDPR.Deletion do
       end
     end)
     |> Multi.run(:scrub_event_log, fn repo, _ ->
-      # GDPR erasure: redact any PII that legacy `user.*` events may have
-      # written into op.event_log payload/metadata (current emitters are
-      # UUID-only). We UPDATE rather than DELETE to preserve event-stream
-      # immutability — the event survives, only its PII is emptied.
+      # GDPR erasure: redact any PII/free-text the erased user's events wrote
+      # into op.event_log payload/metadata. We UPDATE rather than DELETE to
+      # preserve event-stream immutability — the event survives, only its PII
+      # is emptied. Two classes of row are scrubbed:
+      #
+      #   1. The user's OWN aggregate (`aggregate_type == "user"`, e.g. legacy
+      #      user.profile_updated with display_name; current emitters are
+      #      UUID-only but this is a safety net for legacy rows).
+      #   2. Events *about* the user emitted under a DIFFERENT aggregate whose
+      #      payload references the user — notably `blog.post_created` /
+      #      `blog.post_published` (aggregate_type "post") which carry the
+      #      user's free-text post `title` alongside `user_id`. We match those
+      #      by the payload's user-reference keys (user_id/author_id/seller_id),
+      #      closing the cross-aggregate free-text leak (#185). Bare-UUID
+      #      references that remain elsewhere are acceptable per the
+      #      UUIDs-are-not-PII contract.
       #
       # op.event_log has NO append-only trigger (unlike audit.audit_log), so
       # this plain UPDATE needs no `app.audit_gdpr_erasure` GUC. It runs on the
       # Multi's `repo`, so it commits/rolls back atomically with the erasure.
+      uid = to_string(user_id)
+
       {count, _} =
         repo.update_all(
           from(e in EventLog,
-            where: e.aggregate_type == "user" and e.aggregate_id == ^user_id
+            where:
+              (e.aggregate_type == "user" and e.aggregate_id == ^user_id) or
+                fragment("? ->> 'user_id' = ?", e.payload, ^uid) or
+                fragment("? ->> 'author_id' = ?", e.payload, ^uid) or
+                fragment("? ->> 'seller_id' = ?", e.payload, ^uid)
           ),
           set: [payload: %{}, metadata: %{}]
         )
