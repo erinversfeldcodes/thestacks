@@ -41,7 +41,7 @@ defmodule Core.MixProject do
 
   defp deps do
     [
-      {:phoenix, "~> 1.7.22"},
+      {:phoenix, "~> 1.8.9"},
       {:phoenix_ecto, "~> 4.6"},
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
@@ -52,7 +52,7 @@ defmodule Core.MixProject do
       {:fuse, "~> 2.5"},
       {:cloak_ecto, "~> 1.3"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.8"},
+      {:bandit, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
       {:prom_ex, "~> 1.9"},
       {:telemetry_metrics, "~> 1.0"},
@@ -87,7 +87,7 @@ defmodule Core.MixProject do
       {:nimble_csv, "~> 1.2"},
       {:nimble_pool, "~> 1.1"},
       {:libcluster, "~> 3.3"},
-      {:nimble_totp, "~> 0.1"}
+      {:nimble_totp, "~> 1.0"}
     ]
   end
 

@@ -38,7 +38,7 @@ jobs:
     env:
       MIX_ENV: prod
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Read .versions
         id: v
         run: |
@@ -54,7 +54,7 @@ jobs:
         with:
           otp-version: ${{ steps.v.outputs.otp }}
           elixir-version: ${{ steps.v.outputs.elixir }}
-      - uses: bufbuild/buf-setup-action@9672cee01808979ea1249f81d6d321217b9a10f6 # v1.47.2
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
 
@@ -107,18 +107,45 @@ jobs:
       - name: Generate Ecto schemas from proto
         run: bash scripts/gen-ecto-proto.sh
 
+      # gen-ecto-proto.sh only emits the *persisted* Ecto schemas. The full app
+      # (which `mix ecto.migrate` compiles below) also references non-persisted
+      # inter-service proto structs — Stacks.Proto.Vision.AssociateRequest /
+      # AssociateCallback, Stacks.Proto.Scraper.ScrapeRequest — which are
+      # generated separately and gitignored. deploy-stack.sh generates these at
+      # lines 749-751; this step is the reseed workflow's equivalent. Without it
+      # the migrate step fails to compile (undefined struct errors).
+      - name: Generate inter-service Elixir proto structs
+        run: bash scripts/gen-elixir-proto.sh
+
       - name: Apply migrations to staging
         working-directory: apps/core
+        # MIX_ENV=prod (job-level) loads config/runtime.exs, which fail-fasts on
+        # these prod secrets even though migrate only touches the DB. They exist
+        # as repo secrets (deploy-production uses them). VISION_SERVICE_URL is a
+        # non-secret URL that only needs to be non-empty here.
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
         run: mix ecto.migrate
 
       - name: Run seeds against staging
         working-directory: apps/core
+        # Same prod-secret requirement as the migrate step above (runtime.exs).
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
           ALLOW_SEEDS: "true"
         # `mix run priv/repo/seeds.exs` directly (rather than going through
         # Stacks.Release.seed/0) because we're running from a checked-out

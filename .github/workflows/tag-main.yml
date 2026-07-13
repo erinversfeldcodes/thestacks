@@ -17,8 +17,11 @@ on:
     workflows: ["Deploy production"]
     types: [completed]
 
+# Least-privilege default (Scorecard Token-Permissions): read-only at the
+# workflow level; the tag-main job elevates to contents: write only where it
+# actually pushes the tag.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   tag-main:
@@ -28,6 +31,8 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write # create + push the main-<sha> tag
     steps:
       # Check out the default branch (NOT the workflow_run head_sha). We only
       # need git history to create a lightweight tag pointing at the deployed
@@ -38,7 +43,7 @@ jobs:
       # access to repo secrets. Since deploy-production only fires on
       # `push: branches: [main]`, the head_sha is always a maintainer-merged
       # main commit, but checking out main keeps the threat model trivial.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Create lightweight tag for the just-deployed commit

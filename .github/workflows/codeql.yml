@@ -1,24 +1,35 @@
 name: CodeQL
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "0 4 * * 1" # Weekly on Monday at 04:00 UTC
   workflow_dispatch:
+
+# Least-privilege default for the whole workflow (Scorecard Token-Permissions).
+# The analyze job re-grants exactly what CodeQL needs at the job level.
+permissions:
+  contents: read
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      security-events: write
+      contents: read # checkout
+      security-events: write # upload CodeQL results
+      actions: read # read workflow run metadata for analysis
     strategy:
       fail-fast: false
       matrix:
         language: [python]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
-      - uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0

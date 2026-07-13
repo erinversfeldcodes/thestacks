@@ -112,7 +112,9 @@ if command -v nix &>/dev/null; then
     success "Nix $(nix --version | awk '{print $NF}') already installed"
 else
     info "Installing Nix (Determinate Systems installer)..."
-    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+    # Pinned installer version (supply-chain: no floating installer). Bump
+    # deliberately; see https://github.com/DeterminateSystems/nix-installer/releases
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix/tag/v3.21.5 \
         | sh -s -- install --no-confirm  # nosemgrep: bash.curl.security.curl-pipe-bash.curl-pipe-bash
     # Source Nix for the rest of this script
     if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
@@ -199,7 +201,7 @@ fi
 # ── 5. Elm / Node tooling ─────────────────────────────────────────────────────
 step "Elm / Node"
 info "Installing npm packages in frontend/..."
-(cd frontend && npm install --save-dev elm elm-format elm-test)
+(cd frontend && npm ci)
 success "Elm tooling installed"
 
 # squawk-cli — lints Postgres migrations for safety issues (runs in CI).

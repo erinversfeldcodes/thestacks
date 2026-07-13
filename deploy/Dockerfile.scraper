@@ -1,5 +1,5 @@
 # Chef stage — installs cargo-chef and musl toolchain once, reused by planner + builder
-FROM rust:1.88 AS chef
+FROM rust:1.97@sha256:44637ff22d0a6571a221bfaf137849711ad02ff4723dbb4736e297538f6a3e60 AS chef
 
 # --locked pins cargo-chef's transitive deps (e.g. cargo-platform) to the
 # versions it was published with. Without this, cargo-platform 0.3.3 gets
@@ -25,7 +25,7 @@ COPY apps/scraper/ .
 RUN cargo build --release --target x86_64-unknown-linux-musl
 
 # Runtime stage
-FROM alpine:3.21
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # hadolint ignore=DL3018
 RUN apk add --no-cache ca-certificates && addgroup -S stacks && adduser -S stacks -G stacks

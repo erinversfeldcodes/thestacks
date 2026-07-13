@@ -288,3 +288,126 @@ doctor:
     else
         echo "nix: NOT found — bare 'mix' will use the system toolchain; prefer 'just run' once nix is available."
     fi
+
+# Bundle every open Dependabot PR into ONE combined branch + one PR, so the
+# expensive post-merge checks (perf gate, prod deploy) run a single time instead
+# of once per PR. Cherry-picks each PR onto a fresh branch off main (linear
+# history → the combined PR can be rebase-merged, no squash needed). Bumps that
+# touch different files combine cleanly; same-file lockfile conflicts are skipped
+# and listed in the PR body — re-run this after the combined PR merges, or merge
+# those few by hand. After merging the combined PR, run:
+#   just close-dependabot-prs <combined-pr-number>
+combine-dependabot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASE="${DEPENDABOT_BASE:-main}"
+    COMBINE_BRANCH="combined-deps"
+
+    # Only tracked changes block us — untracked files (e.g. local plans/*.md)
+    # ride along safely across the branch switch + cherry-picks.
+    if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        echo "ERROR: uncommitted tracked changes — commit or stash before combining (untracked files are fine)." >&2
+        exit 1
+    fi
+    ORIG="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse HEAD)"
+    trap 'git switch "$ORIG" >/dev/null 2>&1 || true' EXIT
+
+    echo "==> Collecting open Dependabot PRs..."
+    mapfile -t ROWS < <(gh pr list --state open --json number,headRefName,title,author -L 200 \
+        --jq '.[] | select(.author.login=="app/dependabot") | "\(.number)\t\(.headRefName)\t\(.title)"')
+    if [[ ${#ROWS[@]} -eq 0 ]]; then echo "No open Dependabot PRs — nothing to combine."; exit 0; fi
+    echo "    Found ${#ROWS[@]} Dependabot PR(s)."
+
+    echo "==> Rebuilding '${COMBINE_BRANCH}' from origin/${BASE}..."
+    git fetch --quiet origin "$BASE"
+    git switch -C "$COMBINE_BRANCH" "origin/${BASE}"
+
+    included=(); skipped=()
+    for row in "${ROWS[@]}"; do
+        num="${row%%$'\t'*}"; rest="${row#*$'\t'}"
+        branch="${rest%%$'\t'*}"; title="${rest##*$'\t'}"
+        printf '==> #%s (%s): ' "$num" "$branch"
+        if ! git fetch --quiet origin "$branch" 2>/dev/null; then
+            echo "fetch failed — skipped"; skipped+=("#${num} — ${title} (fetch failed)"); continue
+        fi
+        if git cherry-pick "origin/${BASE}..origin/${branch}" >/dev/null 2>&1; then
+            echo "picked"; included+=("#${num}")
+        else
+            git cherry-pick --abort >/dev/null 2>&1 || true
+            echo "conflict — skipped"; skipped+=("#${num} — ${title} (conflict)")
+        fi
+    done
+
+    if [[ ${#included[@]} -eq 0 ]]; then
+        echo "Nothing cherry-picked cleanly — leaving nothing to push." >&2
+        exit 1
+    fi
+
+    echo "==> Pushing '${COMBINE_BRANCH}'..."
+    git push --force origin "$COMBINE_BRANCH"
+
+    nums="${included[*]//#/}"   # bare PR numbers, space-separated
+    body="Combines $(IFS=' '; echo "${included[*]}") into one PR so the post-merge checks run once instead of per-PR."$'\n\n'"## Included"$'\n'"$(printf '%s\n' "${included[@]}" | sed 's/^/- /')"$'\n'
+    if [[ ${#skipped[@]} -gt 0 ]]; then
+        body+=$'\n'"## Skipped (same-file conflicts — NOT in this PR; merge individually or re-run \`just combine-dependabot\` after this merges)"$'\n'"$(printf '%s\n' "${skipped[@]}" | sed 's/^/- /')"$'\n'
+    fi
+    body+=$'\n'"After merging this PR: \`just close-dependabot-prs <this-pr-number>\`"
+    # Machine-readable marker so close-dependabot-prs closes ONLY the bundled PRs
+    # (never the skipped ones, which still carry un-merged updates).
+    body+=$'\n\n'"<!-- combined-includes: ${nums} -->"
+
+    existing="$(gh pr list --head "$COMBINE_BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
+    if [[ -n "$existing" ]]; then
+        gh pr edit "$existing" --body "$body" >/dev/null
+        echo "==> Updated combined PR #${existing}  (included ${#included[@]}, skipped ${#skipped[@]})"
+    else
+        gh pr create --base "$BASE" --head "$COMBINE_BRANCH" \
+            --title "chore(deps): combined Dependabot updates" --body "$body"
+        echo "==> Opened combined PR  (included ${#included[@]}, skipped ${#skipped[@]})"
+    fi
+
+# Close every open Dependabot PR after the combined PR has merged.
+# Usage: just close-dependabot-prs 250
+# Refuses unless PR 250 is actually merged, so you never drop unmerged updates.
+close-dependabot-prs COMBINED:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    merged="$(gh pr view {{COMBINED}} --json merged --jq .merged 2>/dev/null || echo false)"
+    if [[ "$merged" != "true" ]]; then
+        echo "ERROR: PR #{{COMBINED}} is not merged yet — refusing to close Dependabot PRs." >&2
+        exit 1
+    fi
+    # Close ONLY the PRs actually bundled into the combined PR — read the
+    # machine-readable marker its body carries. Skipped/conflicting PRs are left
+    # open because they still carry updates that never reached main.
+    body="$(gh pr view {{COMBINED}} --json body --jq .body)"
+    nums="$(printf '%s\n' "$body" | grep -oE 'combined-includes:[0-9 ]+' | head -1 | sed 's/combined-includes://')"
+    if [[ -z "${nums// /}" ]]; then
+        echo "ERROR: no 'combined-includes' marker in PR #{{COMBINED}} — was it made by 'just combine-dependabot'?" >&2
+        exit 1
+    fi
+    for n in $nums; do
+        gh pr close "$n" --delete-branch \
+            --comment "Superseded by combined Dependabot PR #{{COMBINED}} (merged). Closed to avoid a redundant post-merge run." \
+            && echo "closed #$n"
+    done
+    echo "Done. Any Dependabot PRs left open were NOT in the bundle (conflicts) — handle those separately."
+
+# Regenerate the hash-pinned vision lockfiles from requirements.txt INSIDE the
+# runtime image (python:3.14-slim) so resolution + hashes match production
+# exactly. requirements.txt / requirements-dev.txt stay the human-edited source
+# (Dependabot watches them); run this after any bump so the locks don't drift.
+lock-vision:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # pip-tools pinned so output is byte-identical to the CI drift-guard.
+    docker run --rm -v "$PWD":/repo -w /repo python:3.14-slim bash -c '
+      set -e
+      pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+      pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+        --output-file apps/vision/requirements.lock apps/vision/requirements.txt
+      pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
+        --output-file apps/vision/requirements-dev.lock \
+        apps/vision/requirements.txt apps/vision/requirements-dev.txt
+    '
+    echo "Regenerated apps/vision/requirements.lock + requirements-dev.lock"

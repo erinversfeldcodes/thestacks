@@ -105,7 +105,7 @@ warm_remote_preview() {
 # ── Install E2E deps if needed ─────────────────────────────────────────────────
 if [[ ! -d "$REPO_ROOT/e2e/node_modules" ]]; then
     echo "==> Installing E2E dependencies..."
-    (cd "$REPO_ROOT/e2e" && npm install)
+    (cd "$REPO_ROOT/e2e" && npm ci)
 fi
 
 # Install Playwright browsers if needed

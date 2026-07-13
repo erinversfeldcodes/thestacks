@@ -1,9 +1,9 @@
 # Shared dev/test dependencies — pinned versions used across all Python services.
 # Reference from a service: -r ../../requirements/dev.txt
 -r base.txt
-pytest==8.3.4
-pytest-asyncio==0.24.0
-pytest-cov==6.0.0
-ruff==0.8.6
-mypy==1.14.1
-pip-audit==2.9.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+ruff==0.15.21
+mypy==2.3.0
+pip-audit==2.10.1

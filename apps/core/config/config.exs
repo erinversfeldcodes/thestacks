@@ -75,6 +75,10 @@ config :core, Oban,
   queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
+  # Bandit instead of Cowboy: drops the cowboy/cowlib/ranch chain, which
+  # eliminates the unpatched cowlib CVEs (EEF-CVE-2026-43966/43969, Scorecard
+  # Vulnerabilities #55 — no cowlib release fixes them). Phoenix 1.8's default.
+  adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
   render_errors: [formats: [json: CoreWeb.ErrorJSON], layout: false],
   pubsub_server: Core.PubSub
