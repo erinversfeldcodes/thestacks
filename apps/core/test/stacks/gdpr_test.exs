@@ -35,6 +35,92 @@ defmodule Stacks.GDPRTest do
     test "returns error for unknown user" do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
+
+    test "payload contains all 8 documented keys" do
+      user = insert(:user)
+      assert {:ok, export} = Export.export_user_data(user.id)
+
+      assert MapSet.new(Map.keys(export)) ==
+               MapSet.new([
+                 :exported_at,
+                 :user,
+                 :bookshelves,
+                 :placements,
+                 :placement_history,
+                 :writing_assistant_sessions,
+                 :writing_assistant_feedback,
+                 :embeddings_summary
+               ])
+    end
+
+    test "includes only the user's writing-assistant sessions and feedback" do
+      user = insert(:user)
+      session = insert(:blog_assistant_session, user: user, topic: "My draft post")
+      insert(:turn_feedback, session: session, rating: "up", comment: "Great help.")
+
+      # Another user's data must NOT leak in.
+      other = insert(:user)
+      other_session = insert(:blog_assistant_session, user: other)
+      insert(:turn_feedback, session: other_session)
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+
+      assert [exported_session] = export.writing_assistant_sessions
+      assert exported_session.id == session.id
+      assert exported_session.topic == "My draft post"
+
+      assert [exported_feedback] = export.writing_assistant_feedback
+      assert exported_feedback.session_id == session.id
+      assert exported_feedback.rating == "up"
+      assert exported_feedback.comment == "Great help."
+    end
+
+    test "embeddings_summary lists metadata but NEVER the raw vector" do
+      user = insert(:user)
+      # Seed a real, distinctive vector so the no-leak assertion is non-vacuous.
+      sentinel = 0.4242
+      vector = List.duplicate(sentinel, 1024)
+
+      insert(:embedding,
+        user: user,
+        source_type: "shelf",
+        title: "The Name of the Rose",
+        shelf: "library",
+        content_date: ~U[2026-01-02 03:04:05.000000Z],
+        embedding: Pgvector.new(vector)
+      )
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [entry] = export.embeddings_summary
+
+      # Only the four documented, human-readable fields — nothing else.
+      assert MapSet.new(Map.keys(entry)) ==
+               MapSet.new([:source_type, :source_title, :shelf, :date_embedded])
+
+      assert entry.source_type == "shelf"
+      assert entry.source_title == "The Name of the Rose"
+      assert entry.shelf == "library"
+      assert entry.date_embedded == ~U[2026-01-02 03:04:05.000000Z]
+
+      # The raw vector must not appear under any key…
+      refute Map.has_key?(entry, :embedding)
+
+      refute Enum.any?(Map.values(entry), fn v ->
+               match?(%Pgvector{}, v) or (is_list(v) and sentinel in v)
+             end)
+
+      # …nor anywhere in the JSON-serialised export the user downloads.
+      assert {:ok, json} = Jason.encode(export)
+      refute json =~ "0.4242"
+    end
+
+    test "embeddings_summary and writing-assistant keys default to empty lists" do
+      user = insert(:user)
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert export.writing_assistant_sessions == []
+      assert export.writing_assistant_feedback == []
+      assert export.embeddings_summary == []
+    end
   end
 
   describe "Deletion.delete_user_data/1" do
