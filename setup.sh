@@ -14,7 +14,7 @@
 #   6b. Create Python 3.13+ virtualenv for scripts/mcp (project tools MCP server)
 #   7. Install pip-based global tools (dbt-postgres, sqlfluff, checkov, dbt-checkpoint)
 #   8. Install Rust components (rustfmt, clippy, llvm-tools-preview), cargo-audit, cargo-llvm-cov
-#   9. Ensure PostgreSQL is running and create the dev database + run migrations
+#   9. Ensure PostgreSQL is running, install pgvector, create the dev database + run migrations
 #  10. Load seed fixtures into the dev database
 #  11. Print a summary of what is ready
 #
@@ -422,7 +422,16 @@ if [[ "$SKIP_DB" == "true" ]]; then
 else
     step "PostgreSQL"
 
-    # Start postgresql@16 if not already running
+    # Ensure the server on :5432 is postgresql@16 — the canonical version
+    # (Brewfile, mise, flake.nix, CI/Docker all pin @16). A stale
+    # postgresql@15 (or other) may be holding :5432; stop it and start @16 so
+    # local matches CI and pgvector (built for @16 below/above) resolves.
+    for other in 14 15 17 18; do
+        if brew services list 2>/dev/null | grep -qE "^postgresql@${other}\s+started"; then
+            warn "Stopping postgresql@${other} (aligning local on the canonical postgresql@16)..."
+            brew services stop "postgresql@${other}" >/dev/null 2>&1 || true
+        fi
+    done
     if ! "$PG_BIN/pg_isready" -h localhost -p 5432 -q 2>/dev/null; then
         info "Starting postgresql@16..."
         brew services start postgresql@16
@@ -436,7 +445,54 @@ else
             ((attempts--))
         done
     fi
-    success "PostgreSQL is running"
+    # Verify the running server really is @16 — guards against a leftover
+    # older server on :5432 that would silently diverge from CI.
+    server_ver_num="$(psql -h localhost -p 5432 -U postgres -d postgres -tAc "show server_version_num" 2>/dev/null || echo 0)"
+    if [[ "$server_ver_num" -lt 160000 || "$server_ver_num" -ge 170000 ]]; then
+        warn "The server on :5432 reports version_num=$server_ver_num, not postgresql@16. Check 'brew services list' — a non-@16 server may be holding the port."
+    fi
+    success "PostgreSQL (postgresql@16) is running"
+
+    # Ensure a `postgres` superuser role exists. Homebrew's initdb makes the
+    # OS user the cluster superuser, but the app config (dev.exs/test.exs) and
+    # dbt connect as `postgres`. A fresh @16 cluster won't have that role, so
+    # ecto.create would fail with "role postgres does not exist". We connect as
+    # the OS-user superuser (no -U) to create it. Idempotent.
+    if ! psql -h localhost -p 5432 -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then
+        info "Creating 'postgres' superuser role (fresh cluster)..."
+        psql -h localhost -p 5432 -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER;" >/dev/null 2>&1 \
+            && success "'postgres' role created" \
+            || warn "Could not create 'postgres' role — run manually: psql -d postgres -c \"CREATE ROLE postgres WITH LOGIN SUPERUSER;\""
+    fi
+
+    # ── 9a. pgvector extension ─────────────────────────────────────────────────
+    # The writing-assistant / embeddings tables (op.embeddings,
+    # op.book_content_chunks) use pgvector `vector(1024)` columns + HNSW ANN
+    # indexes (embedding model: Together AI BAAI/bge-m3, 1024-dim). Homebrew's
+    # `pgvector` formula builds against its own pinned Postgres, which may not
+    # match postgresql@16 — so we build from source against pg16's pg_config to
+    # guarantee the extension files land in pg16's sharedir. The migrations run
+    # `CREATE EXTENSION IF NOT EXISTS vector`; this step only makes the extension
+    # *available* on the server (covers both the dev and test databases).
+    # Idempotent: skips if vector.control is already present.
+    PGVECTOR_VERSION="v0.8.0"
+    PG_SHAREDIR="$("$PG_BIN/pg_config" --sharedir)"
+    if [[ -f "$PG_SHAREDIR/extension/vector.control" ]]; then
+        success "pgvector already installed for postgresql@16"
+    else
+        info "Building pgvector $PGVECTOR_VERSION for postgresql@16 from source..."
+        PGVECTOR_TMP="$(mktemp -d)"
+        # Homebrew's Postgres cellar is user-writable, so `make install` needs no sudo.
+        if git clone --depth 1 --branch "$PGVECTOR_VERSION" \
+                https://github.com/pgvector/pgvector.git "$PGVECTOR_TMP" 2>/dev/null \
+            && make -C "$PGVECTOR_TMP" PG_CONFIG="$PG_BIN/pg_config" \
+            && make -C "$PGVECTOR_TMP" PG_CONFIG="$PG_BIN/pg_config" install; then
+            success "pgvector $PGVECTOR_VERSION installed for postgresql@16"
+        else
+            warn "pgvector build failed — vector (op.embeddings) migrations will fail until it is installed. See https://github.com/pgvector/pgvector#installation"
+        fi
+        rm -rf "$PGVECTOR_TMP"
+    fi
 
     # Drop and recreate the dev database to guarantee a clean state.
     # This is intentional: setup.sh is a bootstrap script, not an upgrade path.
