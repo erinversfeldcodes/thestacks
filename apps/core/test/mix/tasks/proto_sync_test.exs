@@ -1363,16 +1363,25 @@ defmodule Mix.Tasks.Proto.SyncTest do
           fields =
             Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-          ecto_result =
-            DriftChecker.check(
-              EctoGenerator.generate(table, fields),
-              Path.join(core_root, table.ecto_path)
-            )
+          # `skip_ecto: true` tables have a hand-written schema (e.g. a pgvector
+          # column proto cannot express) — don't drift-check a file the codegen
+          # does not own. Mirrors Mix.Tasks.Proto.Sync's run_check.
+          ecto_results =
+            if Map.get(table, :skip_ecto, false) do
+              []
+            else
+              [
+                DriftChecker.check(
+                  EctoGenerator.generate(table, fields),
+                  Path.join(core_root, table.ecto_path)
+                )
+              ]
+            end
 
           # `skip_dbt: true` tables intentionally have no staging model —
           # don't drift-check a file that by design doesn't exist.
           if Map.get(table, :skip_dbt, false) do
-            [ecto_result]
+            ecto_results
           else
             dbt_result =
               DriftChecker.check(
@@ -1380,7 +1389,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
                 Path.join(dbt_root, table.dbt_path)
               )
 
-            [ecto_result, dbt_result]
+            ecto_results ++ [dbt_result]
           end
         end)
 

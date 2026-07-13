@@ -45,6 +45,11 @@ defmodule Core.MixProject do
       {:phoenix_ecto, "~> 4.6"},
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
+      # pgvector: Ecto/Postgrex support for the `vector` column type on
+      # op.embeddings / op.book_content_chunks (Issue #183). Registered in
+      # Core.PostgrexTypes and used via Pgvector.Ecto.Vector in the
+      # hand-written writing-assistant schemas.
+      {:pgvector, "~> 0.3"},
       {:guardian, "~> 2.3"},
       {:guardian_db, "~> 3.0"},
       {:argon2_elixir, "~> 4.1"},

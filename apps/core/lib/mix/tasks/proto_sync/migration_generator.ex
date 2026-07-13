@@ -212,6 +212,14 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     "\n\n      timestamps(type: :utc_datetime_usec)"
   end
 
+  # Append-only tables (`updated_at: false`) still need the `created_at` column.
+  # Without this clause the catch-all emitted no timestamps block, so the
+  # generated migration lacked `created_at` while the generated Ecto schema
+  # (EctoGenerator handles this case) expected it — an insert-time mismatch.
+  defp timestamps_block(%{timestamps: {:standard, updated_at: false}}) do
+    "\n\n      timestamps(type: :utc_datetime_usec, updated_at: false)"
+  end
+
   defp timestamps_block(_), do: ""
 
   defp index_block(table) do

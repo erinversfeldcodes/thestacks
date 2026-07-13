@@ -1,0 +1,192 @@
+// writing_assistant.proto — Operational tables backing the writing-assistant /
+// embeddings feature (US-12.2.1, US-5.1, US-8.1). JSON on the wire. Field
+// numbers are forever — never reuse a number.
+//
+// GDPR data-model foundation (Issue #183). Ownership + erasure classification:
+//   Embedding                — PERSONAL (user-scoped). Erasure: cascade-deleted.
+//   BlogAssistantSession     — PERSONAL (user-scoped). Erasure: cascade-deleted.
+//   TurnFeedback             — PERSONAL (session-child). Erasure: cascade-deleted.
+//   RetrievalLog             — PERSONAL (session-child). Erasure: cascade-deleted.
+//   UserBookContentAccess    — PERSONAL (user-scoped). Erasure: cascade-deleted.
+//   BookContentChunk         — SHARED, NON-personal corpus. Erasure: PRESERVED
+//                              (no user_id column — nothing to erase).
+//
+// NOTE: the pgvector `embedding vector(1024)` column on Embedding and
+// BookContentChunk is intentionally ABSENT from these messages. Proto has no
+// type that maps to pgvector `vector`, and the proto→migration codegen
+// (`mix proto.sync`) cannot express it. The vector column is added by a
+// hand-written raw-SQL migration; these messages define only the
+// scalar/metadata columns. See docs/decisions/017.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "WritingAssistantProto";
+option java_multiple_files = true;
+
+// Embedding is a user-scoped vector record over the user's own content
+// (shelves, blog posts, books, placements). The vector itself lives in a
+// pgvector column added out-of-band (see file header); this message carries the
+// retrieval metadata. Table: op.embeddings.
+message Embedding {
+  // UUID of the embedding record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the owning user. FK op.users, ON DELETE CASCADE (erasure reach).
+  string user_id = 2 [json_name = "user_id"];
+
+  // What the embedding was derived from: "shelf", "blog_post", "book",
+  // "placement".
+  string source_type = 3 [json_name = "source_type"];
+
+  // UUID of the source record (polymorphic — no FK; interpreted per
+  // source_type). Mirrors the polymorphic-UUID pattern on
+  // bookshelf_placement_history.
+  string source_id = 4 [json_name = "source_id"];
+
+  // Human-readable title of the source content (denormalized for display).
+  string title = 5 [json_name = "title"];
+
+  // Bookshelf name/category the source item sits on, when applicable.
+  string shelf = 6 [json_name = "shelf"];
+
+  // Timestamp of the source content (the "date" retrieval dimension).
+  string content_date = 7 [json_name = "content_date"];
+
+  // When this embedding record was created.
+  string created_at = 8 [json_name = "created_at"];
+
+  // When this embedding record was last updated.
+  string updated_at = 9 [json_name = "updated_at"];
+}
+
+// BlogAssistantSession records a writing-assistant session. User-scoped.
+// Table: op.blog_assistant_sessions.
+message BlogAssistantSession {
+  // UUID of the session record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the owning user. FK op.users, ON DELETE CASCADE (erasure reach).
+  string user_id = 2 [json_name = "user_id"];
+
+  // Session lifecycle status: "active", "completed", "abandoned".
+  string status = 3 [json_name = "status"];
+
+  // Free-text topic/prompt the session is about.
+  string topic = 4 [json_name = "topic"];
+
+  // Identifier of the assistant model that produced the session
+  // (e.g. "together/BAAI/bge-m3" for retrieval, or the generation model).
+  string model = 5 [json_name = "model"];
+
+  // When the session was started.
+  string started_at = 6 [json_name = "started_at"];
+
+  // When the session record was created.
+  string created_at = 7 [json_name = "created_at"];
+
+  // When the session record was last updated.
+  string updated_at = 8 [json_name = "updated_at"];
+}
+
+// TurnFeedback captures per-turn feedback within a session. Session-child;
+// cascade-deleted with its session (and thus with the user). Append-only.
+// Table: op.turn_feedback.
+message TurnFeedback {
+  // UUID of the feedback record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the parent session. FK op.blog_assistant_sessions, ON DELETE
+  // CASCADE.
+  string session_id = 2 [json_name = "session_id"];
+
+  // Zero-based index of the conversation turn this feedback is about.
+  int32 turn_index = 3 [json_name = "turn_index"];
+
+  // Feedback rating: "up" or "down".
+  string rating = 4 [json_name = "rating"];
+
+  // Optional free-text comment.
+  string comment = 5 [json_name = "comment"];
+
+  // When the feedback was recorded.
+  string created_at = 6 [json_name = "created_at"];
+}
+
+// RetrievalLog audits a RAG retrieval performed for a session turn.
+// Session-child; cascade-deleted with its session. Append-only.
+// Table: op.retrieval_log.
+message RetrievalLog {
+  // UUID of the log record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the parent session. FK op.blog_assistant_sessions, ON DELETE
+  // CASCADE.
+  string session_id = 2 [json_name = "session_id"];
+
+  // The retrieval query text (user free text — PII-adjacent; excluded from dbt).
+  string query = 3 [json_name = "query"];
+
+  // UUIDs of the records returned by retrieval (embeddings/chunks).
+  repeated string retrieved_ids = 4 [json_name = "retrieved_ids"];
+
+  // Similarity scores aligned with retrieved_ids.
+  repeated double scores = 5 [json_name = "scores"];
+
+  // Zero-based index of the conversation turn this retrieval served.
+  int32 turn_index = 6 [json_name = "turn_index"];
+
+  // When the retrieval was performed.
+  string created_at = 7 [json_name = "created_at"];
+}
+
+// UserBookContentAccess records that a user has access to a book's content
+// (chunks). User-scoped. Table: op.user_book_content_access.
+message UserBookContentAccess {
+  // UUID of the access record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the owning user. FK op.users, ON DELETE CASCADE (erasure reach).
+  string user_id = 2 [json_name = "user_id"];
+
+  // UUID of the book whose content the user may access. FK op.books.
+  string book_id = 3 [json_name = "book_id"];
+
+  // How access was granted: "granted", "purchased", "sample".
+  string access_type = 4 [json_name = "access_type"];
+
+  // When access was granted.
+  string granted_at = 5 [json_name = "granted_at"];
+
+  // When the access record was created.
+  string created_at = 6 [json_name = "created_at"];
+}
+
+// BookContentChunk is a chunk of a book's shared text corpus, used as retrieval
+// context. SHARED and NON-personal — it carries NO user_id and is PRESERVED by
+// GDPR erasure. The pgvector embedding column is added out-of-band (see file
+// header). Table: op.book_content_chunks.
+message BookContentChunk {
+  // UUID of the chunk record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the book this chunk belongs to. FK op.books, ON DELETE CASCADE
+  // (chunk lifecycle follows the book, not any user).
+  string book_id = 2 [json_name = "book_id"];
+
+  // Zero-based ordinal of this chunk within the book.
+  int32 chunk_index = 3 [json_name = "chunk_index"];
+
+  // The chunk text.
+  string content = 4 [json_name = "content"];
+
+  // Token count of the chunk (for context-window budgeting).
+  int32 token_count = 5 [json_name = "token_count"];
+
+  // When the chunk was created.
+  string created_at = 6 [json_name = "created_at"];
+
+  // When the chunk was last updated.
+  string updated_at = 7 [json_name = "updated_at"];
+}

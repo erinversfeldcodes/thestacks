@@ -27,6 +27,15 @@ defmodule Stacks.Factory do
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
+  alias Stacks.WritingAssistant.{
+    BookContentChunk,
+    Embedding,
+    RetrievalLog,
+    Session,
+    TurnFeedback,
+    UserBookContentAccess
+  }
+
   def user_factory do
     %User{
       email: sequence(:email, &"user#{&1}@example.com"),
@@ -401,6 +410,68 @@ defmodule Stacks.Factory do
       condition: "good",
       quantity: 1,
       synced_at: DateTime.utc_now()
+    }
+  end
+
+  # ── Writing Assistant / Embeddings (Issue #183) ──────────────────────────
+
+  def blog_assistant_session_factory do
+    %Session{
+      user: build(:user),
+      status: "active",
+      topic: sequence(:wa_topic, &"Writing topic #{&1}"),
+      model: "together/BAAI/bge-m3",
+      started_at: DateTime.utc_now()
+    }
+  end
+
+  def turn_feedback_factory do
+    %TurnFeedback{
+      session: build(:blog_assistant_session),
+      turn_index: 0,
+      rating: "up",
+      comment: "Helpful suggestion."
+    }
+  end
+
+  def retrieval_log_factory do
+    %RetrievalLog{
+      session: build(:blog_assistant_session),
+      query: sequence(:wa_query, &"retrieval query #{&1}"),
+      retrieved_ids: [],
+      scores: [],
+      turn_index: 0
+    }
+  end
+
+  def user_book_content_access_factory do
+    %UserBookContentAccess{
+      user: build(:user),
+      book: build(:book),
+      access_type: "granted",
+      granted_at: DateTime.utc_now()
+    }
+  end
+
+  def embedding_factory do
+    %Embedding{
+      user: build(:user),
+      source_type: "shelf",
+      source_id: Ecto.UUID.generate(),
+      title: sequence(:embedding_title, &"Embedded item #{&1}"),
+      shelf: "library",
+      content_date: DateTime.utc_now(),
+      embedding: Pgvector.new(List.duplicate(0.1, 1024))
+    }
+  end
+
+  def book_content_chunk_factory do
+    %BookContentChunk{
+      book: build(:book),
+      chunk_index: 0,
+      content: "Shared corpus text — not personal.",
+      token_count: 5,
+      embedding: Pgvector.new(List.duplicate(0.1, 1024))
     }
   end
 end
