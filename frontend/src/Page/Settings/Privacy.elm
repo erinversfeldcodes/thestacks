@@ -8,8 +8,8 @@ module Page.Settings.Privacy exposing
     )
 
 import Api
-import Html exposing (Html, button, div, h1, h2, label, option, p, select, text)
-import Html.Attributes exposing (class, disabled, selected, value)
+import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, text)
+import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -21,6 +21,9 @@ type alias Model =
     , savingProfile : RemoteData Http.Error ()
     , savingShelf : RemoteData Http.Error ()
     , exporting : RemoteData Http.Error ()
+    , deleteRequested : Bool
+    , deleteConfirmation : String
+    , deleting : RemoteData Http.Error ()
     }
 
 
@@ -40,11 +43,46 @@ type Msg
     | SaveShelfVisibilityCompleted (Result Http.Error ())
     | UserClicksExport
     | GotExportResponse (Result Http.Error ())
+    | UserClicksDeleteMyData
+    | UserCancelsDelete
+    | UserTypesDeleteConfirmation String
+    | UserClicksDeleteAccount
+    | GotDeleteResponse (Result Http.Error ())
 
 
 type OutMsg
     = NoOut
     | SessionExpired
+    | AccountDeleted
+
+
+{-| The literal a user must type to arm the destructive account-deletion action.
+The confirmation text must equal this EXACTLY (case-sensitive, no surrounding
+whitespace) before the submit button is enabled.
+-}
+deleteConfirmationPhrase : String
+deleteConfirmationPhrase =
+    "DELETE"
+
+
+{-| True only when the typed confirmation exactly matches the required phrase.
+-}
+deleteConfirmed : String -> Bool
+deleteConfirmed typed =
+    typed == deleteConfirmationPhrase
+
+
+{-| True while an account-deletion request is in flight. The single-flight guard
+depends on this so a second DELETE can never be fired mid-request.
+-}
+isDeleting : RemoteData Http.Error () -> Bool
+isDeleting deleting =
+    case deleting of
+        Loading ->
+            True
+
+        _ ->
+            False
 
 
 defaultShelves : List ShelfVisibility
@@ -64,6 +102,9 @@ init =
     , savingProfile = NotAsked
     , savingShelf = NotAsked
     , exporting = NotAsked
+    , deleteRequested = False
+    , deleteConfirmation = ""
+    , deleting = NotAsked
     }
 
 
@@ -165,6 +206,64 @@ update msg model maybeToken =
                     else
                         ( { model | exporting = Failure err }, Cmd.none, NoOut )
 
+        UserClicksDeleteMyData ->
+            ( { model | deleteRequested = True }, Cmd.none, NoOut )
+
+        UserCancelsDelete ->
+            -- Back out of the danger zone entirely, discarding what was typed.
+            -- Ignored while a request is in flight (the input/button are locked).
+            if isDeleting model.deleting then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | deleteRequested = False, deleteConfirmation = "", deleting = NotAsked }
+                , Cmd.none
+                , NoOut
+                )
+
+        UserTypesDeleteConfirmation typed ->
+            -- Ignore edits while a deletion is in flight: clearing `deleting`
+            -- here would re-enable the submit button and let a second DELETE
+            -- fire. The single-flight invariant lives in the handler, not the
+            -- view alone.
+            if isDeleting model.deleting then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | deleteConfirmation = typed, deleting = NotAsked }, Cmd.none, NoOut )
+
+        UserClicksDeleteAccount ->
+            -- Fire only on an exact confirmation AND when no request is already
+            -- in flight — a real single-flight guard in the handler, not just a
+            -- disabled attribute in the view.
+            if deleteConfirmed model.deleteConfirmation && not (isDeleting model.deleting) then
+                case maybeToken of
+                    Just token ->
+                        ( { model | deleting = Loading }
+                        , Api.deleteAccount token GotDeleteResponse
+                        , NoOut
+                        )
+
+                    Nothing ->
+                        ( model, Cmd.none, NoOut )
+
+            else
+                ( model, Cmd.none, NoOut )
+
+        GotDeleteResponse result ->
+            case result of
+                Ok _ ->
+                    -- Queued server-side. Confirm to the user, then hand off to
+                    -- Main to clear the session and show the farewell.
+                    ( { model | deleting = Success () }, Cmd.none, AccountDeleted )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | deleting = Failure err }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -197,6 +296,7 @@ view model =
                 (List.map viewShelfRow model.shelfVisibilities)
             ]
         , viewExportSection model.exporting
+        , viewDangerZone model
         ]
 
 
@@ -232,6 +332,109 @@ viewExportFeedback exporting =
 
         Failure _ ->
             p [ class "error" ] [ text "We couldn't queue your export. Please try again." ]
+
+        _ ->
+            text ""
+
+
+{-| The destructive account-deletion flow. Kept visually distinct ("Danger
+Zone") and gated behind an explicit reveal plus a type-to-confirm guard.
+-}
+viewDangerZone : Model -> Html Msg
+viewDangerZone model =
+    div [ class "settings-section settings-section--danger" ]
+        [ h2 [ class "settings-section__title" ] [ text "Danger Zone" ]
+        , p [ class "settings-section__desc" ]
+            [ text "This will permanently delete all your data from The Stacks — your shelves, reading history, notes, and preferences. Analytics data will be anonymised. This cannot be undone." ]
+        , if model.deleteRequested then
+            viewDeleteConfirm model.deleteConfirmation model.deleting
+
+          else
+            div [ class "settings-actions" ]
+                [ button
+                    [ class "btn btn--danger"
+                    , onClick UserClicksDeleteMyData
+                    ]
+                    [ text "Delete My Data" ]
+                ]
+        ]
+
+
+viewDeleteConfirm : String -> RemoteData Http.Error () -> Html Msg
+viewDeleteConfirm confirmation deleting =
+    let
+        loading =
+            isDeleting deleting
+
+        confirmed =
+            deleteConfirmed confirmation
+    in
+    div [ class "privacy__delete-confirm" ]
+        [ div [ class "form-field" ]
+            [ label [ class "form-field__label", for "delete-confirmation" ]
+                [ text "Type DELETE to confirm" ]
+            , input
+                [ id "delete-confirmation"
+                , class "form-field__input"
+                , type_ "text"
+                , value confirmation
+                , placeholder "DELETE"
+                , disabled loading
+                , onInput UserTypesDeleteConfirmation
+                ]
+                []
+            ]
+        , if not confirmed && not loading then
+            p [ class "privacy__delete-hint" ]
+                [ text "Enter DELETE above to enable this button." ]
+
+          else
+            text ""
+        , div [ class "settings-actions" ]
+            [ viewDeleteButton confirmed deleting
+            , button
+                [ class "btn btn--secondary"
+                , disabled loading
+                , onClick UserCancelsDelete
+                ]
+                [ text "Cancel" ]
+            ]
+        , viewDeleteFeedback deleting
+        ]
+
+
+viewDeleteButton : Bool -> RemoteData Http.Error () -> Html Msg
+viewDeleteButton confirmed deleting =
+    case deleting of
+        Loading ->
+            button [ class "btn btn--danger btn--disabled", disabled True ]
+                [ text "Queuing account deletion…" ]
+
+        _ ->
+            button
+                [ class
+                    (if confirmed then
+                        "btn btn--danger"
+
+                     else
+                        "btn btn--danger btn--disabled"
+                    )
+                , disabled (not confirmed)
+                , onClick UserClicksDeleteAccount
+                ]
+                [ text "Delete My Data" ]
+
+
+viewDeleteFeedback : RemoteData Http.Error () -> Html Msg
+viewDeleteFeedback deleting =
+    case deleting of
+        Success _ ->
+            p [ attribute "aria-live" "polite", class "success" ]
+                [ text "Account deletion has been queued. Signing you out…" ]
+
+        Failure _ ->
+            p [ attribute "aria-live" "assertive", class "error" ]
+                [ text "We couldn't queue your account deletion. Please try again." ]
 
         _ ->
             text ""
