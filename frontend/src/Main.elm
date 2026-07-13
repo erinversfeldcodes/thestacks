@@ -54,6 +54,7 @@ import Page.Marketplace.MyListings as MyListings
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
+import Page.Settings.AuditLog as AuditLog
 import Page.Settings.Consent as Consent
 import Page.Settings.Notifications as Notifications
 import Page.Settings.Password as Password
@@ -159,6 +160,7 @@ type Page
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
+    | PageSettingsAuditLog AuditLog.Model
     | PageSettingsProfile Profile.Model
     | PageSettingsPassword Password.Model
     | PageSettingsNotifications Notifications.Model
@@ -463,6 +465,13 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
 
         SettingsAgeVerification ->
             ( PageSettingsAgeVerification AgeVerification.init, Cmd.none )
+
+        SettingsAuditLog ->
+            let
+                ( model, cmd ) =
+                    AuditLog.init maybeToken
+            in
+            ( PageSettingsAuditLog model, Cmd.map AuditLogMsg cmd )
 
         CostTransparency ->
             let
@@ -920,6 +929,7 @@ type Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
+    | AuditLogMsg AuditLog.Msg
     | ProfileMsg Profile.Msg
     | PasswordMsg Password.Msg
     | NotificationsMsg Notifications.Msg
@@ -1351,6 +1361,28 @@ update msg model =
                             )
 
                         Consent.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AuditLogMsg subMsg ->
+            case model.page of
+                PageSettingsAuditLog subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            AuditLog.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        AuditLog.NoOut ->
+                            ( { model | page = PageSettingsAuditLog newSubModel }
+                            , Cmd.map AuditLogMsg subCmd
+                            )
+
+                        AuditLog.SessionExpired ->
                             handleSessionExpiry model
 
                 _ ->
@@ -2199,6 +2231,9 @@ pageTitle route =
         SettingsAgeVerification ->
             "Age Verification — The Stacks"
 
+        SettingsAuditLog ->
+            "Audit Log — The Stacks"
+
         CostTransparency ->
             "Cost Transparency — The Stacks"
 
@@ -2407,6 +2442,10 @@ viewPage model =
         PageSettingsAgeVerification subModel ->
             viewSettingsHub model.route
                 (Html.map AgeVerificationMsg (AgeVerification.view subModel))
+
+        PageSettingsAuditLog subModel ->
+            viewSettingsHub model.route
+                (Html.map AuditLogMsg (AuditLog.view subModel))
 
         PageSettingsProfile subModel ->
             viewSettingsHub model.route

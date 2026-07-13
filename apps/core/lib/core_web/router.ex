@@ -207,6 +207,7 @@ defmodule CoreWeb.Router do
     put "/settings/location", UserSettingsController, :update_location
     put "/settings/notifications", UserSettingsController, :update_notifications
     get "/settings/blocked-users", SocialController, :blocked_users
+    get "/settings/audit-log", AuditLogController, :index
 
     put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility

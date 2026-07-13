@@ -1,6 +1,8 @@
 module Api exposing
     ( AdminSource
     , AdminSourcesResponse
+    , AuditLogEntry
+    , AuditLogResponse
     , AuthResponse
     , BookDetailResponse
     , CatalogueResponse
@@ -21,6 +23,7 @@ module Api exposing
     , activateListing
     , addShelf
     , approveSource
+    , auditLogResponseDecoder
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
@@ -33,6 +36,7 @@ module Api exposing
     , deleteComment
     , dismissAssociation
     , getAdminSources
+    , getAuditLog
     , getBlogPost
     , getBlogPosts
     , getBook
@@ -731,6 +735,66 @@ fromProtoCatalogueResponse proto =
 catalogueResponseDecoder : Decoder CatalogueResponse
 catalogueResponseDecoder =
     Decode.map fromProtoCatalogueResponse ProtoBookResp.decodeCatalogueResponse
+
+
+{-| A single audit-log entry as shown on the read-only audit page.
+The backend never includes any IP field, so none is decoded here.
+-}
+type alias AuditLogEntry =
+    { id : String
+    , action : String
+    , resourceType : String
+    , resourceId : Maybe String
+    , occurredAt : String
+    }
+
+
+{-| Response from GET /api/settings/audit-log — the user's own paginated
+audit history.
+-}
+type alias AuditLogResponse =
+    { entries : List AuditLogEntry
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+auditLogEntryDecoder : Decoder AuditLogEntry
+auditLogEntryDecoder =
+    Decode.map5 AuditLogEntry
+        (Decode.field "id" Decode.string)
+        (Decode.field "action" Decode.string)
+        (Decode.field "resource_type" Decode.string)
+        (Decode.field "resource_id" (Decode.nullable Decode.string))
+        (Decode.field "occurred_at" Decode.string)
+
+
+auditLogResponseDecoder : Decoder AuditLogResponse
+auditLogResponseDecoder =
+    Decode.map4 AuditLogResponse
+        (Decode.field "entries" (Decode.list auditLogEntryDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.field "per_page" Decode.int)
+
+
+{-| GET /api/settings/audit-log — fetch the current user's audit history.
+-}
+getAuditLog :
+    String
+    -> (Result Http.Error AuditLogResponse -> msg)
+    -> Cmd msg
+getAuditLog token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/audit-log?page=1"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg auditLogResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 {-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
