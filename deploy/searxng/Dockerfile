@@ -51,7 +51,7 @@
 # checkov:skip=CKV_DOCKER_3: upstream image drops to `searxng` user
 # checkov:skip=CKV_DOCKER_2: liveness owned by Fly [[checks]], not Docker HEALTHCHECK
 # hadolint ignore=DL3007
-FROM searxng/searxng:latest
+FROM searxng/searxng:latest@sha256:f433294b46a93564993c4371005341e013d94aa8ea4662d8ee521cd2cccb08e8
 
 # `settings.rendered.yml` is generated at deploy time by
 # scripts/deploy-stack.sh and sits in the same directory as this
