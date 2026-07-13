@@ -210,6 +210,7 @@ startingUser =
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
+    , consentWritingAssistant = False
     }
 
 
@@ -230,7 +231,7 @@ byte-identical to login's (contract confirmed), so the same shape decodes it.
 -}
 authResponseDecoder : Decode.Decoder Api.AuthResponse
 authResponseDecoder =
-    Decode.map5 Api.AuthResponse
+    Decode.map6 Api.AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
@@ -238,6 +239,11 @@ authResponseDecoder =
         (Decode.oneOf
             [ Decode.at [ "user", "role" ] Decode.string
             , Decode.succeed "user"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.at [ "user", "consent_writing_assistant" ] Decode.bool
+            , Decode.succeed False
             ]
         )
 
@@ -352,6 +358,7 @@ renewAuthTokenSwapsTokenKeepsUser =
                         , email = "ignored@example.com"
                         , displayName = "Ignored"
                         , role = "owner"
+                        , consentWritingAssistant = False
                         }
                         startingAuth
             in

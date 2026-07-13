@@ -279,7 +279,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.PostLoaded (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -289,7 +289,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentsLoaded (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -299,7 +299,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.AssociationActionCompleted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -309,7 +309,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentSubmitted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -319,7 +319,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentDeleted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -329,7 +329,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.PostLoaded (Err nonAuth))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1")))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.NoOut

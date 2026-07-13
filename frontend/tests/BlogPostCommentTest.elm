@@ -30,6 +30,7 @@ testModel =
     { postId = "post-1"
     , post = NotAsked
     , currentUserId = Nothing
+    , writingAssistantConsent = False
     , actionResult = NotAsked
     , comments = NotAsked
     , commentDraft = ""

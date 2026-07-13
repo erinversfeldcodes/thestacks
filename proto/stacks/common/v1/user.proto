@@ -68,6 +68,10 @@ message User {
   // Whether the user has consented to analytics data collection.
   bool consent_analytics = 7 [json_name = "consent_analytics"];
 
+  // Whether the user has consented to writing-assistant personalisation
+  // (shelf + writing history used to personalise suggestions).
+  bool consent_writing_assistant = 30 [json_name = "consent_writing_assistant"];
+
   // Whether the user has verified their age for age-gated content.
   bool age_verified = 8 [json_name = "age_verified"];
 
@@ -88,6 +92,9 @@ message User {
 
   // Timestamp of when analytics consent was granted or revoked.
   google.protobuf.Timestamp consent_analytics_at = 12 [json_name = "consent_analytics_at"];
+
+  // Timestamp of when writing-assistant consent was granted or revoked.
+  google.protobuf.Timestamp consent_writing_assistant_at = 31 [json_name = "consent_writing_assistant_at"];
 
   // Whether the user has completed onboarding.
   bool onboarding_completed = 13 [json_name = "onboarding_completed"];
