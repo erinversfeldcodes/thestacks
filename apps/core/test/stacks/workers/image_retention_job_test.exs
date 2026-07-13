@@ -121,4 +121,19 @@ defmodule Stacks.Workers.ImageRetentionJobTest do
       assert :ok = perform_job(ImageRetentionJob, %{})
     end
   end
+
+  describe "cron registration (Issue #121 §6)" do
+    test "is scheduled nightly at 02:00 via the Oban Cron plugin" do
+      crontab =
+        :core
+        |> Application.get_env(Oban)
+        |> Keyword.fetch!(:plugins)
+        |> Enum.find_value(fn
+          {Oban.Plugins.Cron, opts} -> Keyword.get(opts, :crontab)
+          _ -> nil
+        end)
+
+      assert {"0 2 * * *", ImageRetentionJob} in crontab
+    end
+  end
 end
