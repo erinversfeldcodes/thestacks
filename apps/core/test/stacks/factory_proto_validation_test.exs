@@ -74,7 +74,13 @@ defmodule Stacks.FactoryProtoValidationTest do
     partner:
       {Stacks.Partners.Partner,
        ~w(api_key_prefix hmac_secret approved_by_id approved_at website_url third_space_id)a},
-    partner_inventory_item: {Stacks.Partners.InventoryItem, ~w()a}
+    partner_inventory_item: {Stacks.Partners.InventoryItem, ~w()a},
+    blog_assistant_session: {Stacks.WritingAssistant.Session, ~w()a},
+    turn_feedback: {Stacks.WritingAssistant.TurnFeedback, ~w()a},
+    retrieval_log: {Stacks.WritingAssistant.RetrievalLog, ~w()a},
+    user_book_content_access: {Stacks.WritingAssistant.UserBookContentAccess, ~w()a},
+    embedding: {Stacks.WritingAssistant.Embedding, ~w()a},
+    book_content_chunk: {Stacks.WritingAssistant.BookContentChunk, ~w()a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.

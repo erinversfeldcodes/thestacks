@@ -68,11 +68,18 @@ defmodule Mix.Tasks.Proto.Sync do
       Enum.reduce(manifest.tables, %{}, fn table, blocks ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-        ecto_content = EctoGenerator.generate(table, fields)
-        ecto_path = Path.join(core_root, table.ecto_path)
-        File.mkdir_p!(Path.dirname(ecto_path))
-        File.write!(ecto_path, ecto_content)
-        Mix.shell().info("Generated #{ecto_path}")
+        # `skip_ecto: true` opts out of Ecto schema generation. Used for tables
+        # whose schema carries a column proto cannot express (e.g. a pgvector
+        # `vector` field via Pgvector.Ecto.Vector) — the schema is hand-written
+        # outside gen/ and must not be clobbered/drift-flagged. Migration + dbt
+        # generation still run (or are governed by their own skip flags).
+        unless Map.get(table, :skip_ecto, false) do
+          ecto_content = EctoGenerator.generate(table, fields)
+          ecto_path = Path.join(core_root, table.ecto_path)
+          File.mkdir_p!(Path.dirname(ecto_path))
+          File.write!(ecto_path, ecto_content)
+          Mix.shell().info("Generated #{ecto_path}")
+        end
 
         generate_migration(table, fields, migrations_dir)
 
@@ -234,11 +241,21 @@ defmodule Mix.Tasks.Proto.Sync do
       Enum.map_reduce(manifest.tables, %{}, fn table, blocks_acc ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-        ecto_result =
-          DriftChecker.check(
-            EctoGenerator.generate(table, fields),
-            Path.join(core_root, table.ecto_path)
-          )
+        # `skip_ecto: true` opts out of Ecto schema drift-checking (the schema
+        # is hand-written outside gen/ — e.g. a pgvector column proto cannot
+        # express). Must match run_generate, else the hand-written schema is
+        # flagged as drift on every check.
+        ecto_results =
+          if Map.get(table, :skip_ecto, false) do
+            []
+          else
+            [
+              DriftChecker.check(
+                EctoGenerator.generate(table, fields),
+                Path.join(core_root, table.ecto_path)
+              )
+            ]
+          end
 
         migration_result = check_migration_drift(table, fields, migrations_dir)
 
@@ -247,7 +264,7 @@ defmodule Mix.Tasks.Proto.Sync do
         # .sql file would be flagged as drift for every infra-plumbing
         # table.
         if Map.get(table, :skip_dbt, false) do
-          {[ecto_result | migration_result], blocks_acc}
+          {ecto_results ++ migration_result, blocks_acc}
         else
           dbt_result =
             DriftChecker.check(
@@ -259,7 +276,7 @@ defmodule Mix.Tasks.Proto.Sync do
           block = SchemaYmlGenerator.generate(table, fields, descriptor)
           blocks_acc = Map.put(blocks_acc, model_name, block)
 
-          {[ecto_result, dbt_result | migration_result], blocks_acc}
+          {ecto_results ++ [dbt_result | migration_result], blocks_acc}
         end
       end)
 
