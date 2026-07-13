@@ -9,4 +9,4 @@
 # Or via the just target (which is the supported entry point for
 # real fuzz iterations as opposed to seed-corpus regression):
 #   just fuzz-vision -- -atheris_runs=100000
-atheris==2.3.0; sys_platform == "linux"
+atheris==3.1.0; sys_platform == "linux"
