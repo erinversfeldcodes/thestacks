@@ -87,7 +87,7 @@ defmodule Core.MixProject do
       {:nimble_csv, "~> 1.2"},
       {:nimble_pool, "~> 1.1"},
       {:libcluster, "~> 3.3"},
-      {:nimble_totp, "~> 0.1"}
+      {:nimble_totp, "~> 1.0"}
     ]
   end
 
