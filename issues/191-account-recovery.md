@@ -1,4 +1,4 @@
-# Issue #184: Account Recovery — Password Reset + Resend Confirmation
+# Issue #191: Account Recovery — Password Reset + Resend Confirmation
 
 ## Summary
 Close the two account-recovery gaps that no issue currently owns: **password reset** (US-14.4.1 — backend built but no frontend, and the reset email links to a route that doesn't exist) and **resend confirmation email** (US-14.4.2 — nothing built; the register→confirm flow dead-ends when the 48h token expires). Both are Phase-1-essential: a user who forgets their password or loses the confirmation email is currently locked out with no recovery path. This issue builds the missing pieces and validates both flows end-to-end.
@@ -13,7 +13,7 @@ A locked-out user recovers access without support: (a) requests a password-reset
 ## Scope Check
 - Touch more than 3 controllers? No — `AuthController` (+ Elm frontend).
 - Add more than 2 new endpoints? No — **one** new endpoint (`POST /auth/resend-confirmation`); password reset adds none (backend exists).
-- Exceed ~300 lines of production code? Possibly (two flows). These are **related** (account recovery, same Login-page surface, same email infra), so combined here. **If planning shows >300 LOC, split into 184a (password reset) / 184b (resend confirmation).**
+- Exceed ~300 lines of production code? Possibly (two flows). These are **related** (account recovery, same Login-page surface, same email infra), so combined here. **If planning shows >300 LOC, split into 191a (password reset) / 191b (resend confirmation).**
 - Combine unrelated concerns? No — both are account recovery.
 
 ## Wiring
