@@ -465,6 +465,29 @@ else
             || warn "Could not create 'postgres' role — run manually: psql -d postgres -c \"CREATE ROLE postgres WITH LOGIN SUPERUSER;\""
     fi
 
+    # Ensure the application DB roles exist. The create_db_roles migration only
+    # creates stacks_app/stacks_dbt when STACKS_APP_DB_PASSWORD/STACKS_DBT_DB_PASSWORD
+    # are set, so on a fresh cluster without those env vars the roles are absent and
+    # later migrations' GRANTs fail with 'role "stacks_app" does not exist'. Create
+    # them here (local dev passwords; the migration's IF NOT EXISTS makes it a no-op
+    # when they already exist, and hosted envs set the real passwords). Idempotent.
+    info "Ensuring application DB roles (stacks_app / stacks_dbt / stacks_readonly)..."
+    psql -h localhost -p 5432 -U postgres -d postgres >/dev/null 2>&1 <<'SQL' \
+        && success "application DB roles present" \
+        || warn "Could not ensure stacks_* roles — see create_db_roles migration"
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='stacks_app') THEN
+    CREATE ROLE stacks_app LOGIN PASSWORD 'stacks_app_dev';
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='stacks_dbt') THEN
+    CREATE ROLE stacks_dbt LOGIN PASSWORD 'stacks_dbt_dev';
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='stacks_readonly') THEN
+    CREATE ROLE stacks_readonly NOLOGIN;
+  END IF;
+END $$;
+SQL
+
     # ── 9a. pgvector extension ─────────────────────────────────────────────────
     # The writing-assistant / embeddings tables (op.embeddings,
     # op.book_content_chunks) use pgvector `vector(1024)` columns + HNSW ANN
