@@ -344,7 +344,7 @@ jobs:
           key: elm-${{ runner.os }}-${{ hashFiles('frontend/elm.json') }}
           restore-keys: elm-${{ runner.os }}-
       - working-directory: frontend
-        run: npm install --save-dev elm elm-format elm-test
+        run: npm ci
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
