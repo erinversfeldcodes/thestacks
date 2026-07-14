@@ -1442,11 +1442,8 @@ update msg model =
             case model.page of
                 PageSettingsAuditLog subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
-
                         ( newSubModel, subCmd, outMsg ) =
-                            AuditLog.update subMsg subModel maybeToken
+                            AuditLog.update subMsg subModel
                     in
                     case outMsg of
                         AuditLog.NoOut ->

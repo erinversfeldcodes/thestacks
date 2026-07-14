@@ -10,7 +10,7 @@ list of entries), error, and empty states.
 import Api
 import Http
 import Json.Encode as Encode
-import Page.Settings.AuditLog as AuditLog exposing (Msg(..))
+import Page.Settings.AuditLog as AuditLog
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
@@ -47,7 +47,7 @@ program maybeToken =
             \msg model ->
                 let
                     ( newModel, _, _ ) =
-                        AuditLog.update msg model maybeToken
+                        AuditLog.update msg model
                 in
                 ( newModel, SimulatedEffect.Cmd.none )
         , view = AuditLog.view
