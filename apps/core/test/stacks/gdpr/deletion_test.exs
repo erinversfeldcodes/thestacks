@@ -35,6 +35,7 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
   alias Stacks.Audit
+  alias Stacks.Blog.PostComment
   alias Stacks.Events
   alias Stacks.Events.EventLog
   alias Stacks.GDPR.Deletion
@@ -299,17 +300,94 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "delete_user_data/1 blog comment erasure (#185)" do
+    test "tombstones the erased user's post_comment bodies but leaves other users' comments intact" do
+      # op.post_comments.body is user-authored free-text PII. The author_id FK
+      # is ON DELETE SET NULL, so deleting the user nulls authorship but leaves
+      # the comment body behind — a right-to-erasure leak. Comments are threaded
+      # (parent_id → replies), so erasure ANONYMISES (tombstones the body +
+      # nulls author_id) rather than hard-deletes, preserving thread structure.
+      erased_user = insert(:user)
+      other_user = insert(:user)
+
+      mine =
+        insert(:post_comment, author: erased_user, body: "my deeply personal confession")
+
+      # A reply BY someone else TO the erased user's comment — proves thread
+      # structure survives (the reply is not orphaned/deleted).
+      reply =
+        insert(:post_comment,
+          post: mine.post,
+          author: other_user,
+          parent_id: mine.id,
+          body: "a stranger's reply"
+        )
+
+      theirs = insert(:post_comment, author: other_user, body: "unrelated public thoughts")
+
+      assert {:ok, result} = Deletion.delete_user_data(erased_user.id)
+      assert Map.has_key?(result, :erase_comments)
+
+      # (a) The erased user's comment: body PII gone, author nulled, row survives.
+      reloaded_mine = Repo.get(PostComment, mine.id)
+      assert reloaded_mine, "the comment row must survive (thread structure preserved)"
+      refute reloaded_mine.body =~ "confession"
+      assert reloaded_mine.body == "[deleted]"
+      assert reloaded_mine.author_id == nil
+
+      # (b) The reply (by another user) is untouched — no orphaning.
+      reloaded_reply = Repo.get(PostComment, reply.id)
+      assert reloaded_reply.body == "a stranger's reply"
+      assert reloaded_reply.author_id == other_user.id
+      assert reloaded_reply.parent_id == mine.id
+
+      # (c) An unrelated comment by another user is byte-for-byte untouched.
+      reloaded_theirs = Repo.get(PostComment, theirs.id)
+      assert reloaded_theirs.body == "unrelated public thoughts"
+      assert reloaded_theirs.author_id == other_user.id
+    end
+  end
+
   describe "erasure completeness — schema-level guard (#185)" do
-    test "every op.* FK that references op.users cascades or nullifies on delete" do
+    # ------------------------------------------------------------------------
+    # SET NULL allowlist. CASCADE ('c') is ALWAYS safe for erasure — the user's
+    # row is deleted outright. SET NULL ('n') is only safe when either the
+    # referencing table carries NO user free-text/PII (so nulling the FK fully
+    # de-links the user), OR the table's free-text IS erased by an explicit
+    # Multi step in `delete_user_data/1`. A bare nilify user-FK on a NEW
+    # personal table would silently leave that user's PII behind (exactly the
+    # #185 post_comments leak). So SET NULL is permitted ONLY for these tables,
+    # each with a documented justification; every OTHER nilify user-FK FAILS.
+    #
+    # Keyed by referencing table name → justification.
+    @nilify_user_fk_allowlist %{
+      # Financial/legal record: transactions must be retained for audit &
+      # tax/dispute obligations beyond the counterparty's erasure. No
+      # user-authored free-text columns (only currency + provider refs), so
+      # nulling buyer_id/seller_id fully de-links the erased user.
+      "transactions" => "financial-audit / legal retention; no user free-text",
+      # Business entity, not personal data: `approved_by` records which admin
+      # approved a partner. The partner row is a business record; nulling the
+      # approver de-links the person without losing the business entity.
+      "partners" => "business entity (partner record); approver de-linked on erasure",
+      # User-authored free-text (comment body) IS PII, BUT it is explicitly
+      # erased by the `:erase_comments` Multi step in delete_user_data/1 (body
+      # tombstoned + author_id nulled). Nilify on author_id is retained to
+      # preserve threaded replies. See the "blog comment erasure" test above.
+      "post_comments" => "free-text body erased by :erase_comments step; nilify preserves thread"
+    }
+
+    test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
       # Future-proofing: erasure reaches personal data via `repo.delete(user)`
       # + FK ON DELETE CASCADE (or explicit Multi steps). A new personal table
-      # whose FK to op.users is RESTRICT / NO ACTION would either break the
-      # erasure transaction at `repo.delete(user)` or silently orphan the
-      # user's data. This audits EVERY FK whose target is op.users — regardless
-      # of the referencing column's name (user_id, author_id, seller_id,
-      # owner_id, blocker_id, …) — and fails loudly if any is not CASCADE ('c')
-      # or SET NULL ('n'). confdeltype: c=cascade n=set-null a=no-action
-      # r=restrict d=set-default.
+      # whose FK to op.users is RESTRICT / NO ACTION would break the erasure
+      # transaction; a bare SET NULL would silently orphan the user's PII. This
+      # audits EVERY FK whose target is op.users — regardless of the
+      # referencing column's name (user_id, author_id, seller_id, owner_id,
+      # blocker_id, …). CASCADE ('c') always passes; SET NULL ('n') passes ONLY
+      # for allowlisted tables (see @nilify_user_fk_allowlist); anything else
+      # FAILS. confdeltype: c=cascade n=set-null a=no-action r=restrict
+      # d=set-default.
       {:ok, %{rows: rows}} =
         Repo.query("""
         SELECT c.relname, a.attname, con.confdeltype
@@ -327,12 +405,16 @@ defmodule Stacks.GDPR.DeletionTest do
 
       offenders =
         for [table, col, deltype] <- rows,
-            deltype not in ["c", "n"],
+            deltype != "c",
+            not (deltype == "n" and Map.has_key?(@nilify_user_fk_allowlist, table)),
             do: "#{table}.#{col} (#{deltype})"
 
       assert offenders == [],
-             "op.* FKs referencing op.users that neither CASCADE nor SET NULL on delete " <>
-               "(erasure would orphan or break): #{inspect(offenders)}"
+             "op.* FKs referencing op.users that are neither CASCADE nor an allowlisted " <>
+               "SET NULL (erasure would orphan/leak PII or break). Offenders: " <>
+               "#{inspect(offenders)}. If a nilify is intentional, add the table to " <>
+               "@nilify_user_fk_allowlist WITH a justification AND ensure any user free-text " <>
+               "on it is erased by a delete_user_data/1 step."
     end
   end
 end
