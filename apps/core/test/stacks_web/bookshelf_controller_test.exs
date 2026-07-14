@@ -315,9 +315,55 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
+  describe "GET /api/bookshelves/:bookshelf_name — view_as content filtering" do
+    test "owner viewing own bookshelf as unauthenticated sees only platform-visible placements",
+         %{conn: conn} do
+      user = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      visible_book = insert(:book)
+      hidden_book = insert(:book)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: visible_book,
+        visibility: "platform"
+      )
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: hidden_book,
+        visibility: "owner"
+      )
+
+      # Baseline: as the owner (no view_as) both placements are visible.
+      baseline =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+        |> json_response(200)
+
+      assert baseline["count"] == 2
+
+      # With ?view_as=unauthenticated the payload is FILTERED to the simulated
+      # audience: the owner-only placement is dropped, the platform one remains.
+      filtered =
+        build_conn()
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library?view_as=unauthenticated")
+        |> json_response(200)
+
+      assert filtered["count"] == 1
+      [placement] = all_placements(filtered)
+      assert placement["book"]["id"] == visible_book.id
+    end
+  end
+
   describe "PUT /api/bookshelves/:id/visibility" do
     test "updates bookshelf visibility", %{conn: conn} do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
       conn =
@@ -326,6 +372,22 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
 
       assert %{"id" => _, "visibility" => "platform"} = json_response(conn, 200)
+    end
+
+    test "returns 422 when the new visibility exceeds the profile ceiling (US-10.2.1)", %{
+      conn: conn
+    } do
+      # profile_visibility "owner" is the most restrictive ceiling: no bookshelf
+      # may be made more visible than the profile.
+      user = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+
+      assert %{"errors" => %{"visibility" => [_ | _]}} = json_response(conn, 422)
     end
 
     test "returns 403 when user does not own the bookshelf", %{conn: conn} do

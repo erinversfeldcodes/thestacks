@@ -4,7 +4,11 @@ defmodule StacksWeb.SocialControllerTest do
   and GET /api/settings/blocked-users.
   """
 
-  use CoreWeb.ConnCase, async: true
+  # async: false — the :rate_limit_social test flips the global
+  # `:rate_limiting_enabled` Application env and mutates the shared ETS
+  # rate-limiter table, which would bleed into concurrently-running async
+  # tests. Same rationale as StacksWeb.Plugs.RateLimiterTest.
+  use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
 
@@ -134,6 +138,48 @@ defmodule StacksWeb.SocialControllerTest do
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = get(conn, "/api/settings/blocked-users")
       assert json_response(conn, 401)
+    end
+  end
+
+  describe ":rate_limit_social — per-user block/unblock throttle" do
+    setup do
+      original = Application.get_env(:core, :rate_limiting_enabled)
+      Application.put_env(:core, :rate_limiting_enabled, true)
+
+      on_exit(fn ->
+        Application.put_env(:core, :rate_limiting_enabled, original)
+
+        if :ets.whereis(:rate_limiter) != :undefined do
+          :ets.delete_all_objects(:rate_limiter)
+        end
+      end)
+
+      :ok
+    end
+
+    test "returns 429 on the 21st block within the window" do
+      # The :social bucket is 20 requests / 60s per authenticated user.
+      blocker = insert(:user)
+      targets = for _ <- 1..21, do: insert(:user)
+
+      # The first 20 block requests succeed.
+      for target <- Enum.take(targets, 20) do
+        conn =
+          build_conn()
+          |> auth_conn(blocker)
+          |> post("/api/users/#{target.id}/block")
+
+        assert %{"blocked" => true} = json_response(conn, 200)
+      end
+
+      # The 21st request from the same user is rate limited.
+      conn =
+        build_conn()
+        |> auth_conn(blocker)
+        |> post("/api/users/#{Enum.at(targets, 20).id}/block")
+
+      assert %{"error" => "rate_limit_exceeded"} = json_response(conn, 429)
+      assert get_resp_header(conn, "retry-after") == ["60"]
     end
   end
 end

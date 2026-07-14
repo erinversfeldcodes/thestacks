@@ -21,6 +21,19 @@ defmodule Stacks.BlogTest do
     )
   end
 
+  # Fetch the payload of the most recent event of the given type for an aggregate.
+  defp latest_event_payload(event_type, aggregate_id) do
+    Repo.one(
+      from(e in "event_log",
+        prefix: "op",
+        where: e.event_type == ^event_type and e.aggregate_id == ^aggregate_id,
+        order_by: [desc: e.occurred_at],
+        limit: 1,
+        select: e.payload
+      )
+    )
+  end
+
   # ---------------------------------------------------------------------------
   # create_post/2
   # ---------------------------------------------------------------------------
@@ -85,6 +98,23 @@ defmodule Stacks.BlogTest do
 
       assert event_count("blog.post_created") == before_count + 1
     end
+
+    test "blog.post_created event payload includes user_id, title, and visibility" do
+      user = insert(:user, profile_visibility: "platform")
+
+      {:ok, post} =
+        Blog.create_post(user, %{
+          title: "Payload Post",
+          body: "Body.",
+          visibility: "platform"
+        })
+
+      payload = latest_event_payload("blog.post_created", post.id)
+
+      assert payload["user_id"] == user.id
+      assert payload["title"] == "Payload Post"
+      assert payload["visibility"] == "platform"
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -124,6 +154,20 @@ defmodule Stacks.BlogTest do
       Blog.update_post(post, user, %{title: "New Title"})
 
       assert event_count("blog.post_updated") == before_count + 1
+    end
+
+    test "blog.post_updated event payload includes user_id, title, and visibility" do
+      user = insert(:user, profile_visibility: "platform")
+      post = insert(:post, user: user, visibility: "platform", title: "Original")
+
+      {:ok, _updated} =
+        Blog.update_post(post, user, %{title: "Updated Title", visibility: "owner"})
+
+      payload = latest_event_payload("blog.post_updated", post.id)
+
+      assert payload["user_id"] == user.id
+      assert payload["title"] == "Updated Title"
+      assert payload["visibility"] == "owner"
     end
   end
 

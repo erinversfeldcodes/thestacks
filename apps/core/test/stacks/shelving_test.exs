@@ -354,17 +354,39 @@ defmodule Stacks.ShelvingTest do
   describe "update_bookshelf_visibility/3" do
     setup :setup_user_bookshelf_book
 
-    test "owner can update bookshelf visibility", %{user: user, bookshelf: bookshelf} do
+    test "owner can update bookshelf visibility" do
+      # profile_visibility "platform" so raising the bookshelf to "platform"
+      # is within the profile ceiling (US-10.2.1).
+      user = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
       assert {:ok, updated} =
                Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "platform")
 
       assert updated.visibility == "platform"
     end
 
-    test "DB record is updated", %{user: user, bookshelf: bookshelf} do
+    test "DB record is updated" do
+      user = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
       Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "platform")
       reloaded = Repo.get!(Bookshelf, bookshelf.id)
       assert reloaded.visibility == "platform"
+    end
+
+    test "rejects visibility that exceeds the profile ceiling (US-10.2.1)" do
+      # profile_visibility "owner" is a hard ceiling — the bookshelf cannot be
+      # made more visible than the profile.
+      user = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      assert {:error, changeset} =
+               Shelving.update_bookshelf_visibility(bookshelf.id, user.id, "platform")
+
+      assert %{visibility: [_]} = errors_on(changeset)
+      # Stored value is unchanged.
+      assert Repo.get!(Bookshelf, bookshelf.id).visibility == "owner"
     end
 
     test "returns :unauthorized when user does not own the bookshelf", %{bookshelf: bookshelf} do
