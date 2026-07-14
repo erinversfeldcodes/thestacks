@@ -408,9 +408,16 @@ update msg model maybeToken =
         PlacementVisibilitySelected raw ->
             case ( Visibility.fromString raw, model.placement, maybeToken ) of
                 ( Just vis, Just placement, Just token ) ->
-                    -- Guard client-side against the ceiling (mirrors the server
-                    -- 422): a disabled option should never reach the wire.
-                    if Visibility.exceedsCeiling model.shelfCeiling vis then
+                    -- Ignore a new selection while a prior save is still in flight,
+                    -- so previousVisibility retains the last CONFIRMED value for
+                    -- rollback (a rapid double-change under latency would otherwise
+                    -- capture an unconfirmed optimistic value).
+                    if model.visibilityState == Loading then
+                        ( model, Cmd.none, NoOut )
+                        -- Guard client-side against the ceiling (mirrors the server
+                        -- 422): a disabled option should never reach the wire.
+
+                    else if Visibility.exceedsCeiling model.shelfCeiling vis then
                         ( model, Cmd.none, NoOut )
 
                     else
