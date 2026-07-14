@@ -40,7 +40,8 @@ defmodule StacksWeb.UserSettingsController do
         json(conn, %{
           display_name: updated.display_name,
           website_url: updated.website_url,
-          email: updated.email
+          email: updated.email,
+          handle: updated.handle
         })
 
       {:error, :invalid_password} ->

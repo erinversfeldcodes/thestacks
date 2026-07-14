@@ -70,8 +70,10 @@ defmodule Stacks.Accounts do
   @doc "Changeset for profile update (display_name, website_url)."
   def profile_changeset(user, attrs) do
     user
-    |> cast(attrs, [:display_name, :website_url])
+    |> cast(attrs, [:display_name, :website_url, :handle])
     |> validate_length(:website_url, max: 500)
+    # No-op unless :handle is being changed — keeps other profile updates unaffected.
+    |> validate_handle()
   end
 
   @doc "Changeset for email update. Requires current_password to be verified externally."

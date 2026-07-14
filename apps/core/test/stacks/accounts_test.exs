@@ -132,6 +132,25 @@ defmodule Stacks.AccountsTest do
 
       refute short.valid?
     end
+
+    test "update_profile/2 sets a valid new handle (normalised to lowercase)" do
+      user = insert(:user, handle: "old_handle")
+      {:ok, updated} = Accounts.update_profile(user, %{"handle" => "New_Handle"})
+      assert updated.handle == "new_handle"
+    end
+
+    test "update_profile/2 rejects a reserved handle" do
+      user = insert(:user)
+      assert {:error, cs} = Accounts.update_profile(user, %{"handle" => "admin"})
+      assert "is reserved" in errors_on(cs).handle
+    end
+
+    test "update_profile/2 rejects a handle already taken (case-insensitive)" do
+      insert(:user, handle: "taken_one")
+      user = insert(:user)
+      assert {:error, cs} = Accounts.update_profile(user, %{"handle" => "TAKEN_ONE"})
+      assert "has already been taken" in errors_on(cs).handle
+    end
   end
 
   # Punch #5 (Issue #124): the user.registered event is emitted INSIDE the
