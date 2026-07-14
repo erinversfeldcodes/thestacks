@@ -266,18 +266,32 @@ defmodule StacksWeb.ProtoJSON do
 
   Matches `BookController.format_placement_or_nil/1`. Returns `nil` when
   the placement is nil.
+
+  Emits `visibility` (the placement's own visibility) and `bookshelf_visibility`
+  (the parent bookshelf's visibility — the ceiling the #194 frontend greys
+  options against). When the bookshelf association is not loaded, both the
+  name and the ceiling default to `nil` rather than crashing.
   """
   @spec book_placement(map() | nil) :: map() | nil
   def book_placement(nil), do: nil
 
   def book_placement(placement) do
+    bookshelf = loaded_bookshelf(placement.bookshelf)
+
     Gen.placement(placement)
     |> Map.take([:id, :book_id, :personal_rating, :notes])
     |> Map.merge(%{
-      bookshelf_name: placement.bookshelf.name,
-      formats: placement.formats || []
+      bookshelf_name: bookshelf && bookshelf.name,
+      formats: placement.formats || [],
+      visibility: placement.visibility,
+      bookshelf_visibility: bookshelf && bookshelf.visibility
     })
   end
+
+  @spec loaded_bookshelf(term()) :: map() | nil
+  defp loaded_bookshelf(%Ecto.Association.NotLoaded{}), do: nil
+  defp loaded_bookshelf(nil), do: nil
+  defp loaded_bookshelf(bookshelf), do: bookshelf
 
   # ---------------------------------------------------------------------------
   # User
