@@ -99,14 +99,15 @@ None. Every applicable cell is ✅; all `n/a` carry an inline rationale.
 **GREEN.** 8 ✅ / 0 ⚠️ / 0 ❌ / 18 n/a. The Elm state-machine layer (the meat for a frontend issue) is fully covered by `GdprExportProgramTest.elm`'s four states — button, Loading, 202-Success, and HTTP-failure. The API/auth/job layers the UI leans on are proven by `gdpr_controller_test.exs` (owned by #186). Remaining layers are genuinely N/A to a button-and-request UI.
 
 ## Definition of Done
-- [ ] "Export My Data" button + `UserClicksExport` Msg
-- [ ] Loading state ("Preparing your export…")
-- [ ] `GotExportResponse (Ok/Err)` handling → Success ("Export queued") / error
-- [ ] Wired to `POST /api/gdpr/export` via `RemoteData`
-- [ ] `just verify` passes
-- [ ] E2E / elm-test coverage
-- [ ] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
+- [x] "Export My Data" button + `UserClicksExport` Msg — `Privacy.elm`; `GdprExportProgramTest.elm` "export_button"
+- [x] Loading state ("Preparing your export…") — `GdprExportProgramTest.elm` "loading_state"
+- [x] `GotExportResponse (Ok/Err)` handling → Success / error — `GdprExportProgramTest.elm` "success_state" (202) / "error_state"
+- [x] Wired to `POST /api/gdpr/export` via `RemoteData` — `Api.elm` `requestExport`
+- [x] `just verify` passes
+- [x] E2E / elm-test coverage
+- [x] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
+- [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — export UI wired to the 202 endpoint, 4-state program test green.
 
 ## Dependencies
 None — the export backend endpoint already exists (returns 202).

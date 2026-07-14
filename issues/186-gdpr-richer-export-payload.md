@@ -81,13 +81,14 @@ Legend: ✅ real coverage · ⚠️ shallow · ❌ missing · n/a not applicable
 None. 0 ❌, 0 ⚠️. Every applicable cell has real coverage; every n/a carries a rationale (read-only-by-design, backend-only, delivery-out-of-scope, or covered at the SLO gate).
 
 ## Definition of Done
-- [ ] `export_user_data/2` adds `writing_assistant_sessions` key
-- [ ] `export_user_data/2` adds `writing_assistant_feedback` key
-- [ ] `export_user_data/2` adds `embeddings_summary` key (source type/title/shelf/date, no raw vectors)
-- [ ] Final payload = all 8 keys
-- [ ] `just verify` passes
+- [x] `export_user_data/2` adds `writing_assistant_sessions` key — `gdpr_test.exs` "includes only the user's writing-assistant sessions and feedback"
+- [x] `export_user_data/2` adds `writing_assistant_feedback` key — same
+- [x] `export_user_data/2` adds `embeddings_summary` key (metadata, no raw vectors) — `gdpr_test.exs` "embeddings_summary lists metadata but NEVER the raw vector"
+- [x] Final payload = all 8 keys — `gdpr_test.exs` 8-key set assertion
+- [x] `just verify` passes
 - [x] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — 8-key export payload, raw vectors deliberately excluded, asserted.
 
 ## Dependencies
 #183 (data-model foundation — the tables this payload reads).

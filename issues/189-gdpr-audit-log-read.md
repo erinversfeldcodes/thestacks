@@ -101,15 +101,16 @@ None. Every applicable cell is ✅; every other cell is `n/a` with rationale. 0 
 **GREEN.** 8 ✅ across the meaningful layers (API, auth, DB read path, Vault decryption, Elm state machine), 0 ❌, 0 ⚠️, 18 `n/a`-with-rationale. The three US-8.5 security invariants each have a real, named test: user-scoping (`WHERE user_id`), never-surface-IP (belt-and-braces hash-absence assertion), and Vault metadata decryption. All cited tests were verified by Read against the shipped suites.
 
 ## Definition of Done
-- [ ] Paginated read endpoint over `audit.audit_log`
-- [ ] `metadata` decrypted via `Stacks.Vault` for display
-- [ ] Hashed IPs never exposed in response/UI
-- [ ] `/settings/audit-log` Elm page (action, resource, `occurred_at`)
-- [ ] Read-only — append-only trigger unchanged
-- [ ] `just verify` passes
-- [ ] E2E / elm-test coverage
+- [x] Paginated read endpoint over `audit.audit_log` — `audit_log_controller.ex` (`router.ex:217`); `audit_log_controller_test.exs` "paginates results…orders newest first"
+- [x] `metadata` decrypted via `Stacks.Vault` for display — "decrypts metadata via Stacks.Vault for display"
+- [x] Hashed IPs never exposed in response/UI — `Audit.list_for_user/2` selects no `ip_address`; "never exposes a raw or hashed IP in the response"
+- [x] `/settings/audit-log` Elm page — `Page/Settings/AuditLog.elm`; `AuditLogProgramTest.elm` (4 lifecycle tests)
+- [x] Read-only — append-only trigger unchanged (cross-user isolation: "excludes other users' audit rows")
+- [x] `just verify` passes
+- [x] E2E / elm-test coverage
 - [x] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — user-scoped audit read (no IP, Vault-decrypted, cross-user isolated), controller + Elm page tested.
 
 ## Dependencies
 None.
