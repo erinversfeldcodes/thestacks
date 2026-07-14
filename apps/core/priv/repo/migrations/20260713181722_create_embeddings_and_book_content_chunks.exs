@@ -54,10 +54,14 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
 
     create index(:embeddings, [:user_id], prefix: "op")
 
-    # HNSW ANN index with cosine distance. Built on an empty table (instant).
-    execute(
-      "CREATE INDEX embeddings_embedding_hnsw_idx ON op.embeddings USING hnsw (embedding vector_cosine_ops)"
-    )
+    # HNSW ANN index with cosine distance. Built on an empty table (instant),
+    # inside the migration transaction — CONCURRENTLY is both needless here and
+    # illegal in a transaction block, so the concurrency rule is ignored for
+    # this statement only (it still guards index builds on populated tables).
+    execute("""
+    -- squawk-ignore require-concurrent-index-creation
+    CREATE INDEX embeddings_embedding_hnsw_idx ON op.embeddings USING hnsw (embedding vector_cosine_ops)
+    """)
 
     # ---- op.book_content_chunks — SHARED, NON-personal (PRESERVED) ---------
     # NO user_id column: nothing to erase, so GDPR erasure preserves this table.
@@ -80,9 +84,11 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
 
     create index(:book_content_chunks, [:book_id], prefix: "op")
 
-    execute(
-      "CREATE INDEX book_content_chunks_embedding_hnsw_idx ON op.book_content_chunks USING hnsw (embedding vector_cosine_ops)"
-    )
+    # Empty table, in-transaction — same rationale as the embeddings HNSW index.
+    execute("""
+    -- squawk-ignore require-concurrent-index-creation
+    CREATE INDEX book_content_chunks_embedding_hnsw_idx ON op.book_content_chunks USING hnsw (embedding vector_cosine_ops)
+    """)
   end
 
   def down do
