@@ -38,14 +38,15 @@ _Compact — telemetry emission. Green when the event fires on revoke-failure an
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 11 Op metrics | yes | ❌ a telemetry test asserts the `[:stacks, :auth, :refresh, :revoke_failed]` event fires when `Guardian.revoke` fails during refresh (attach a handler in the test, force the failure). |
+| 11 Op metrics | yes | ✅ auth_controller_test "emits [:stacks, :auth, :refresh, :revoke_failed] telemetry when the old token cannot be revoked" (attaches a handler, forces the failure); registered as PromEx counter `stacks_auth_refresh_revoke_failed_count_total` (`prom_ex/plugins/stacks.ex:171`), asserted in `prom_ex_custom_metrics_test.exs`. |
 | others | no | n/a — metrics-only |
 
 ## Definition of Done
-- [ ] A telemetry event fires on the refresh revoke-failure branch; registered as a PromEx metric
-- [ ] Validation path: an ExUnit telemetry test (attach handler, simulate revoke failure, assert the event) — the existing warning is retained
-- [ ] `just verify` passes
-- [ ] Test audit (embedded) is GREEN
+- [x] A telemetry event fires on the refresh revoke-failure branch; registered as a PromEx metric (`stacks_auth_refresh_revoke_failed_count_total`, `stacks.ex:171`)
+- [x] Validation path: ExUnit telemetry test (attach handler, force revoke failure, assert the event) — auth_controller_test + `prom_ex_custom_metrics_test.exs`; the existing `Logger.warning` is retained
+- [x] `just verify` passes
+- [x] Test audit (embedded) is GREEN
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — metric fires + registered + firing-test asserted.
 
 ## Dependencies
 - #173 (the refresh endpoint / the revoke-failure branch).
