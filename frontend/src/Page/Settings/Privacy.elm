@@ -273,6 +273,8 @@ view model =
             [ h2 [ class "settings-section__title" ] [ text "Profile Visibility" ]
             , p [ class "settings-section__desc" ]
                 [ text "Control who can discover your profile." ]
+            , p [ class "settings-section__note" ]
+                [ text "Your profile and content will never appear in search engine results." ]
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Profile" ]
                 , select
@@ -294,6 +296,7 @@ view model =
                 [ text "Override visibility per shelf. Each shelf's visibility is capped by your profile visibility (the ceiling rule)." ]
             , div [ class "privacy__shelves" ]
                 (List.map viewShelfRow model.shelfVisibilities)
+            , viewFeedback model.savingShelf
             ]
         , viewExportSection model.exporting
         , viewDangerZone model
