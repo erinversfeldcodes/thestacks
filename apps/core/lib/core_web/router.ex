@@ -124,6 +124,8 @@ defmodule CoreWeb.Router do
     get "/listings/:id", ListingController, :show
     get "/blog/posts", BlogController, :index
     get "/blog/posts/:id", BlogController, :show
+    get "/u/:handle", ProfileController, :show
+    get "/u/:handle/bookshelves/:bookshelf_name", ProfileController, :shelf
   end
 
   scope "/api", StacksWeb do

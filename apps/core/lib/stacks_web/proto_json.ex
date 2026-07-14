@@ -564,6 +564,28 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
+  Serializes a user's PUBLIC profile for `/u/:handle` (#213). Deliberately
+  REDACTED — only the fields a stranger may see (handle, display_name, website,
+  location) plus the viewer-visible bookshelf summaries. NEVER emit email,
+  consent flags, notification prefs, role, or any other account/PII field
+  (`ProtoJson.user/1` leaks all of those and MUST NOT be used here).
+
+  `shelves` is the already visibility-filtered list from
+  `Stacks.Visibility.viewable_shelves/2`.
+  """
+  @spec public_profile(map(), [map()]) :: map()
+  def public_profile(user, shelves) do
+    %{
+      handle: user.handle,
+      display_name: user.display_name,
+      website_url: user.website_url,
+      city: user.city,
+      country_code: user.country_code,
+      bookshelves: Enum.map(shelves, &%{name: &1.name})
+    }
+  end
+
+  @doc """
   Serializes a placement's format update response.
 
   Matches the `%{id, formats}` shape returned by
