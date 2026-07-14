@@ -49,6 +49,8 @@ type Route
     | AdminMetrics
     | Groups
     | GroupDetail String
+    | Profile String
+    | ProfileShelf String String
     | ConfirmEmail ConfirmStatus
     | NotFound
 
@@ -89,6 +91,8 @@ parser =
         , Parser.map AdminMetrics (s "admin" </> s "metrics")
         , Parser.map GroupDetail (s "groups" </> string)
         , Parser.map Groups (s "groups")
+        , Parser.map ProfileShelf (s "u" </> string </> string)
+        , Parser.map Profile (s "u" </> string)
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         ]
@@ -201,6 +205,12 @@ toPath route =
 
         GroupDetail groupId ->
             "/groups/" ++ groupId
+
+        Profile handle ->
+            "/u/" ++ handle
+
+        ProfileShelf handle shelfName ->
+            "/u/" ++ handle ++ "/" ++ shelfName
 
         ConfirmEmail EmailConfirmed ->
             "/confirm-email/success"

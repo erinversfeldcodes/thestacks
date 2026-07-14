@@ -23,6 +23,7 @@ testUser =
     { id = "user-1"
     , email = "reader@stacks.dev"
     , displayName = "A Reader"
+    , handle = "a_reader"
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
