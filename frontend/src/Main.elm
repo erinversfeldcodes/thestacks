@@ -51,6 +51,7 @@ import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
 import Page.Marketplace.ListingDetail as ListingDetail
 import Page.Marketplace.MyListings as MyListings
+import Page.Profile as ProfilePage
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AgeVerification as AgeVerification
@@ -179,6 +180,7 @@ type Page
     | PageAdminMetrics AdminMetrics.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
+    | PageProfile ProfilePage.Model
     | PageConfirmEmail ConfirmStatus
     | PageNotFound
 
@@ -313,12 +315,13 @@ and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map7
-        (\token userId email displayName role consentAnalytics consentWritingAssistant ->
+    Decode.map8
+        (\token userId email displayName handle role consentAnalytics consentWritingAssistant ->
             { user =
                 { id = userId
                 , email = email
                 , displayName = displayName
+                , handle = handle
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
@@ -332,6 +335,11 @@ authDecoder =
         (Decode.field "userId" Decode.string)
         (Decode.field "email" Decode.string)
         (Decode.field "displayName" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "handle" Decode.string
+            , Decode.succeed ""
+            ]
+        )
         (Decode.oneOf
             [ Decode.field "role" Decode.string
             , Decode.succeed "user"
@@ -393,6 +401,12 @@ requiresAuth route =
             False
 
         BlogPost _ ->
+            False
+
+        Profile _ ->
+            False
+
+        ProfileShelf _ _ ->
             False
 
         ConfirmEmail _ ->
@@ -524,7 +538,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -536,7 +550,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             Profile.init auth.user
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
             in
             ( PageSettingsProfile profileModel, Cmd.none )
 
@@ -660,7 +674,7 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         Groups ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     Groups.init auth.user.id auth.token
@@ -670,12 +684,28 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
         GroupDetail groupId ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
 
                 ( m, cmd ) =
                     GroupsDetail.init groupId auth.user.id auth.token
             in
             ( PageGroupsDetail m, Cmd.map GroupsDetailMsg cmd )
+
+        Profile handle ->
+            let
+                ( m, cmd ) =
+                    ProfilePage.init maybeToken handle
+            in
+            ( PageProfile m, Cmd.map PublicProfileMsg cmd )
+
+        ProfileShelf handle _ ->
+            -- #215 will render the read-only shelf browse here; until then, land
+            -- on the profile hub so the shelf links never dead-end.
+            let
+                ( m, cmd ) =
+                    ProfilePage.init maybeToken handle
+            in
+            ( PageProfile m, Cmd.map PublicProfileMsg cmd )
 
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
@@ -691,6 +721,7 @@ encodeAuth auth =
         , ( "userId", Json.Encode.string auth.user.id )
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
+        , ( "handle", Json.Encode.string auth.user.handle )
         , ( "role", Json.Encode.string auth.user.role )
         , ( "consentAnalytics", Json.Encode.bool auth.user.consentAnalytics )
         , ( "consentWritingAssistant", Json.Encode.bool auth.user.consentWritingAssistant )
@@ -1015,6 +1046,7 @@ type Msg
     | AdminMetricsMsg AdminMetrics.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
+    | PublicProfileMsg ProfilePage.Msg
     | UserMenuMsg UserMenu.Msg
     | LogoutCompleted
     | SettingsMobileNavChanged String
@@ -1132,6 +1164,7 @@ update msg model =
                                         { id = authResponse.userId
                                         , email = authResponse.email
                                         , displayName = authResponse.displayName
+                                        , handle = authResponse.handle
                                         , role = authResponse.role
                                         , countryCode = Nothing
                                         , city = Nothing
@@ -1175,6 +1208,7 @@ update msg model =
                                         { id = ar.userId
                                         , email = ar.email
                                         , displayName = ar.displayName
+                                        , handle = ar.handle
                                         , role = ar.role
                                         , countryCode = Nothing
                                         , city = Nothing
@@ -1869,6 +1903,25 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        PublicProfileMsg subMsg ->
+            case model.page of
+                PageProfile subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            ProfilePage.update subMsg subModel
+                    in
+                    case outMsg of
+                        ProfilePage.NoOut ->
+                            ( { model | page = PageProfile newSubModel }
+                            , Cmd.map PublicProfileMsg subCmd
+                            )
+
+                        ProfilePage.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
         OverlayBookDetailMsg subMsg ->
             case model.bookDetailOverlay of
                 Just overlay ->
@@ -2358,6 +2411,12 @@ pageTitle route =
         GroupDetail _ ->
             "Group — The Stacks"
 
+        Profile _ ->
+            "Reader — The Stacks"
+
+        ProfileShelf _ _ ->
+            "Reader — The Stacks"
+
         ConfirmEmail EmailConfirmed ->
             "Email Confirmed — The Stacks"
 
@@ -2580,6 +2639,9 @@ viewPage model =
 
         PageGroupsDetail subModel ->
             Html.map GroupsDetailMsg (GroupsDetail.view subModel)
+
+        PageProfile subModel ->
+            Html.map PublicProfileMsg (ProfilePage.view subModel)
 
         PageConfirmEmail status ->
             viewConfirmEmail status

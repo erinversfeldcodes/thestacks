@@ -207,6 +207,7 @@ startingUser =
     { id = "user-1"
     , email = "reader@stacks.dev"
     , displayName = "A Reader"
+    , handle = "a_reader"
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
@@ -232,11 +233,16 @@ byte-identical to login's (contract confirmed), so the same shape decodes it.
 -}
 authResponseDecoder : Decode.Decoder Api.AuthResponse
 authResponseDecoder =
-    Decode.map7 Api.AuthResponse
+    Decode.map8 Api.AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "handle" ] Decode.string
+            , Decode.succeed ""
+            ]
+        )
         (Decode.oneOf
             [ Decode.at [ "user", "role" ] Decode.string
             , Decode.succeed "user"
@@ -363,6 +369,7 @@ renewAuthTokenSwapsTokenKeepsUser =
                         , userId = "ignored"
                         , email = "ignored@example.com"
                         , displayName = "Ignored"
+                        , handle = "ignored"
                         , role = "owner"
                         , consentAnalytics = False
                         , consentWritingAssistant = False

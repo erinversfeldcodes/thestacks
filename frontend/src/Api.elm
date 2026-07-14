@@ -19,6 +19,8 @@ module Api exposing
     , PollResponse
     , PollStatus(..)
     , PrivacySettings
+    , ProfileShelfSummary
+    , PublicProfile
     , QualityTrends
     , RegisterError(..)
     , ShelfVisibilitySetting
@@ -59,6 +61,7 @@ module Api exposing
     , getOnboardingStatus
     , getPostComments
     , getPrivacySettings
+    , getProfile
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
@@ -132,6 +135,7 @@ type alias AuthResponse =
     , userId : String
     , email : String
     , displayName : String
+    , handle : String
     , role : String
     , consentAnalytics : Bool
     , consentWritingAssistant : Bool
@@ -146,6 +150,7 @@ fromProtoAuthResponse proto =
     , userId = proto.user.id
     , email = proto.user.email
     , displayName = proto.user.displayName
+    , handle = proto.user.handle
     , role =
         if proto.user.role == "" then
             "user"
@@ -1856,6 +1861,79 @@ getPrivacySettings token toMsg =
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+
+-- PUBLIC PROFILE (/u/:handle) — #214
+
+
+{-| A user's public profile as seen by a viewer: redacted identity fields plus
+the bookshelves the viewer is allowed to see (visibility-filtered server-side).
+-}
+type alias PublicProfile =
+    { handle : String
+    , displayName : String
+    , websiteUrl : String
+    , city : String
+    , countryCode : String
+    , bookshelves : List ProfileShelfSummary
+    }
+
+
+type alias ProfileShelfSummary =
+    { name : String }
+
+
+publicProfileDecoder : Decoder PublicProfile
+publicProfileDecoder =
+    Decode.map6 PublicProfile
+        (Decode.field "handle" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (optionalString "website_url")
+        (optionalString "city")
+        (optionalString "country_code")
+        (Decode.field "bookshelves" (Decode.list profileShelfSummaryDecoder))
+
+
+profileShelfSummaryDecoder : Decoder ProfileShelfSummary
+profileShelfSummaryDecoder =
+    Decode.map ProfileShelfSummary (Decode.field "name" Decode.string)
+
+
+{-| Decodes a string field that may be absent or JSON null, defaulting to "".
+-}
+optionalString : String -> Decoder String
+optionalString field =
+    Decode.oneOf
+        [ Decode.field field Decode.string
+        , Decode.succeed ""
+        ]
+
+
+{-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
+the server resolves what THIS viewer may see; `Nothing` for an anonymous viewer.
+-}
+getProfile : Maybe String -> String -> (Result Http.Error PublicProfile -> msg) -> Cmd msg
+getProfile maybeToken handle toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = baseUrl ++ "/api/u/" ++ handle
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg publicProfileDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+authHeaders : Maybe String -> List Http.Header
+authHeaders maybeToken =
+    case maybeToken of
+        Just token ->
+            [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+        Nothing ->
+            []
 
 
 

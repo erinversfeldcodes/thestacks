@@ -1046,11 +1046,16 @@ searchProgram maybeToken =
 -}
 decodeAuthResponse : Decode.Decoder AuthResponse
 decodeAuthResponse =
-    Decode.map7 AuthResponse
+    Decode.map8 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "handle" ] Decode.string
+            , Decode.succeed ""
+            ]
+        )
         (Decode.oneOf
             [ Decode.at [ "user", "role" ] Decode.string
             , Decode.succeed "user"
