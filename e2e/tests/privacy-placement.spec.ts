@@ -70,6 +70,11 @@ async function setShelfCeiling(
   shelfName: string,
   visibility: string
 ): Promise<number> {
+  // localStorage (the auth token) is only readable once the app origin is
+  // loaded — a fresh page starts on about:blank, where access is denied.
+  if (!page.url().startsWith("http")) {
+    await page.goto("/");
+  }
   return page.evaluate(
     async ({ shelfName, visibility }) => {
       const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");

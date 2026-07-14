@@ -481,6 +481,22 @@ defmodule Stacks.Shelving do
     end
   end
 
+  @doc """
+  Sets the visibility of a user's named bookshelf, resolving (and lazily
+  creating) it by name. This is the UI/API path: the Elm settings page and the
+  `PUT /api/bookshelves/:bookshelf_name/visibility` route identify shelves by
+  their canonical name, never by UUID. Enforces the profile-visibility ceiling
+  (#195) exactly as `update_bookshelf_visibility/3` does.
+  """
+  @spec set_bookshelf_visibility(binary(), String.t(), String.t()) ::
+          {:ok, Bookshelf.t()} | {:error, Ecto.Changeset.t()}
+  def set_bookshelf_visibility(user_id, bookshelf_name, visibility) do
+    get_or_create_bookshelf(user_id, bookshelf_name)
+    |> bookshelf_changeset(%{visibility: visibility})
+    |> validate_bookshelf_profile_ceiling(user_id, visibility)
+    |> Repo.update()
+  end
+
   # A bookshelf may not be made more visible than the owner's profile ceiling
   # (US-10.2.1). Per Stacks.Visibility, only a "owner" profile acts as a hard
   # ceiling — it hides all content — so when the profile is "owner" the bookshelf

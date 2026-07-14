@@ -361,17 +361,31 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  describe "PUT /api/bookshelves/:id/visibility" do
+  describe "PUT /api/bookshelves/:bookshelf_name/visibility" do
     test "updates bookshelf visibility", %{conn: conn} do
       user = insert(:user, profile_visibility: "platform")
-      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+        |> put("/api/bookshelves/library/visibility", %{visibility: "platform"})
 
       assert %{"id" => _, "visibility" => "platform"} = json_response(conn, 200)
+    end
+
+    test "lazily creates the named shelf when it does not exist yet", %{conn: conn} do
+      # A user can set visibility on any of their 5 named shelves even before
+      # placing a book there (bookshelves are created lazily).
+      user = insert(:user, profile_visibility: "platform")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/wishlist/visibility", %{visibility: "platform"})
+
+      assert %{"visibility" => "platform"} = json_response(conn, 200)
+      assert Stacks.Shelving.get_bookshelf(user.id, "wishlist").visibility == "platform"
     end
 
     test "returns 422 when the new visibility exceeds the profile ceiling (US-10.2.1)", %{
@@ -380,68 +394,70 @@ defmodule StacksWeb.BookshelfControllerTest do
       # profile_visibility "owner" is the most restrictive ceiling: no bookshelf
       # may be made more visible than the profile.
       user = insert(:user, profile_visibility: "owner")
-      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+        |> put("/api/bookshelves/library/visibility", %{visibility: "platform"})
 
       assert %{"errors" => %{"visibility" => [_ | _]}} = json_response(conn, 422)
     end
 
-    test "returns 403 when user does not own the bookshelf", %{conn: conn} do
-      user = insert(:user)
-      other_user = insert(:user)
-      bookshelf = insert(:bookshelf, user: other_user, name: "library")
+    test "is scoped to the caller — never touches another user's like-named shelf (SECURITY)", %{
+      conn: conn
+    } do
+      user = insert(:user, profile_visibility: "platform")
+      other_user = insert(:user, profile_visibility: "platform")
+      insert(:bookshelf, user: other_user, name: "library", visibility: "owner")
 
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "platform"})
+      conn
+      |> auth_conn(user)
+      |> put("/api/bookshelves/library/visibility", %{visibility: "platform"})
+      |> json_response(200)
 
-      assert %{"error" => "forbidden"} = json_response(conn, 403)
+      # The other user's identically-named shelf is untouched — name-based routing
+      # is user-scoped by construction (get_or_create keys on the caller's id).
+      assert Stacks.Shelving.get_bookshelf(other_user.id, "library").visibility == "owner"
     end
 
-    test "returns 404 for nonexistent bookshelf", %{conn: conn} do
+    test "returns 404 for an invalid bookshelf name", %{conn: conn} do
       user = insert(:user)
 
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/bookshelves/00000000-0000-0000-0000-000000000000/visibility", %{
-          visibility: "platform"
-        })
+        |> put("/api/bookshelves/not_a_real_shelf/visibility", %{visibility: "platform"})
 
-      assert %{"error" => "not_found"} = json_response(conn, 404)
+      assert %{"error" => "invalid bookshelf name"} = json_response(conn, 404)
     end
 
     test "returns 422 for invalid visibility value", %{conn: conn} do
       user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "library")
+      insert(:bookshelf, user: user, name: "library")
 
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{visibility: "secret"})
+        |> put("/api/bookshelves/library/visibility", %{visibility: "secret"})
 
       assert %{"errors" => %{"visibility" => [_]}} = json_response(conn, 422)
     end
 
     test "returns 422 when visibility parameter is missing", %{conn: conn} do
       user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "library")
+      insert(:bookshelf, user: user, name: "library")
 
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/bookshelves/#{bookshelf.id}/visibility", %{})
+        |> put("/api/bookshelves/library/visibility", %{})
 
       assert %{"error" => "visibility is required"} = json_response(conn, 422)
     end
 
     test "returns 401 when not authenticated", %{conn: conn} do
-      conn = put(conn, "/api/bookshelves/some-id/visibility", %{visibility: "platform"})
+      conn = put(conn, "/api/bookshelves/library/visibility", %{visibility: "platform"})
       assert json_response(conn, 401)
     end
   end
