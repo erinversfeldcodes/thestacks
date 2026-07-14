@@ -22,6 +22,12 @@ defmodule StacksWeb.SocialController do
         conn |> put_status(422) |> json(%{error: "cannot_block_self"})
 
       Accounts.get_user(target_id) == nil ->
+        :telemetry.execute(
+          [:stacks, :social, :block_error],
+          %{count: 1},
+          %{reason: :not_found}
+        )
+
         conn |> put_status(404) |> json(%{error: "not_found"})
 
       true ->

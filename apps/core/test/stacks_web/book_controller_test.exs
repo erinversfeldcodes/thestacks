@@ -77,6 +77,33 @@ defmodule StacksWeb.BookControllerTest do
       assert is_list(placement["formats"])
     end
 
+    # Regression for the #122 live-E2E placement-greying bug: the shelf-visibility
+    # update endpoint was keyed by UUID `:id`, but every other bookshelf route
+    # (and both the Elm client and the E2E) address shelves by NAME. Setting the
+    # ceiling by name therefore never persisted, so the book-detail placement
+    # payload carried the default "owner" ceiling and the dropdown greyed the
+    # (equal-rank) "platform" option. After the fix the ceiling the client set is
+    # exactly what the greying sees.
+    test "shelf ceiling set by name reaches the book-detail placement payload", %{conn: conn} do
+      user = insert(:user, profile_visibility: "platform")
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      insert(:placement, bookshelf: bookshelf, book: book)
+
+      # Exactly what the client (Api.updateShelfVisibility) and the E2E do: PUT
+      # the visibility route with the shelf NAME in the path.
+      put_conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/bookshelves/library/visibility", %{"visibility" => "platform"})
+
+      assert %{"visibility" => "platform"} = json_response(put_conn, 200)
+
+      get_conn = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      assert %{"placement" => placement} = json_response(get_conn, 200)
+      assert placement["bookshelf_visibility"] == "platform"
+    end
+
     test "returns 404 when book does not exist", %{conn: conn} do
       user = insert(:user)
 

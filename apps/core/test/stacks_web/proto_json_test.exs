@@ -3,6 +3,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
   use Core.DataCase, async: true
 
+  import ExUnit.CaptureLog
   import Stacks.Factory
 
   alias StacksWeb.ProtoJSON
@@ -557,7 +558,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.formats == []
     end
 
-    test "defaults bookshelf_visibility sanely when the bookshelf association is absent" do
+    test "fails loud (logs) but does not crash when the bookshelf association is absent" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)
@@ -569,13 +570,16 @@ defmodule StacksWeb.ProtoJSONTest do
           visibility: "owner"
         )
 
-      # Simulate an unpreloaded bookshelf association — the serializer must not crash.
+      # Simulate an unpreloaded bookshelf association — a missing-preload BUG.
+      # The serializer must not crash, but must NOT degrade silently: it logs a
+      # warning so the missing preload is caught rather than quietly ungreying.
       placement = %{placement | bookshelf: %Ecto.Association.NotLoaded{}}
 
-      result = ProtoJSON.book_placement(placement)
+      {result, log} = with_log(fn -> ProtoJSON.book_placement(placement) end)
 
       assert result.visibility == "owner"
       assert result.bookshelf_visibility == nil
+      assert log =~ "not preloaded"
     end
   end
 

@@ -80,6 +80,16 @@ defmodule Stacks.VisibilityTelemetryTest do
       assert Visibility.classify_visibility_direction("owner", "platform") == :loosen
       assert Visibility.classify_visibility_direction("owner", "owner") == :same
     end
+
+    test "classify direction ranks a legacy 'group' profile between platform and owner" do
+      # "group" is a valid stored profile value (allowed at registration) even
+      # though updates only set platform/owner. It must rank between them so a
+      # change out of "group" is labelled precisely, not collapsed to rank 0.
+      assert Visibility.classify_visibility_direction("group", "owner") == :tighten
+      assert Visibility.classify_visibility_direction("group", "platform") == :loosen
+      assert Visibility.classify_visibility_direction("platform", "group") == :tighten
+      assert Visibility.classify_visibility_direction("group", "group") == :same
+    end
   end
 
   # ── Visibility recap outcome + cap counts ────────────────────────────────
@@ -173,6 +183,33 @@ defmodule Stacks.VisibilityTelemetryTest do
 
       assert_receive {:telemetry_event, [:stacks, :social, :block_error], %{count: 1},
                       %{reason: :cannot_block_self}}
+    end
+
+    test "emits block_error :not_found when blocking a nonexistent user via controller", %{
+      conn: conn
+    } do
+      attach_telemetry([[:stacks, :social, :block_error]])
+      user = insert(:user)
+
+      conn = Guardian.Plug.put_current_resource(conn, user)
+      resp = SocialController.block(conn, %{"id" => Ecto.UUID.generate()})
+
+      assert resp.status == 404
+
+      assert_receive {:telemetry_event, [:stacks, :social, :block_error], %{count: 1},
+                      %{reason: :not_found}}
+    end
+
+    test "emits block_error :invalid on a non-uniqueness changeset failure" do
+      attach_telemetry([[:stacks, :social, :block_error]])
+      blocked = insert(:user)
+
+      # A nil blocker_id fails validate_required, NOT the unique constraint — it
+      # must be tagged :invalid rather than mislabelled :already_blocked.
+      {:error, _} = Social.block_user(nil, blocked.id)
+
+      assert_receive {:telemetry_event, [:stacks, :social, :block_error], %{count: 1},
+                      %{reason: :invalid}}
     end
   end
 
