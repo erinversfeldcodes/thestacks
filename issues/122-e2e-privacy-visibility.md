@@ -1,10 +1,16 @@
 # Issue #122: E2E Test Suite — Privacy & Visibility
 
 ## Summary
-Comprehensive E2E test coverage for profile visibility ceiling (US-10.1.1), user blocking (US-10.1.2), shelf visibility (US-10.2.1), placement visibility with marketplace exception (US-10.2.2), blog post visibility (US-10.2.3), ViewAs preview (US-10.3.1), and search engine privacy (US-10.4.1).
+**Epic root.** Comprehensive test + E2E coverage for the Privacy & Visibility system. Issue #122 is the epic root on integration branch `feat/122-e2e`; it coordinates focused child issues (#193–#200) and opens a single PR when the whole epic is complete.
+
+A Feature-Completeness Pre-Check (2026-07-14) found that **two named stories' frontends were never built** despite this issue's original audit claiming they ship: **US-10.1.2 (Block a User) UI** and **US-10.2.2 (Override Placement Visibility) UI**. Per the de-scope rule, both are removed from this issue's claimed deliverable and built as child feature issues **#193** and **#194** within the epic. The §12 telemetry counters were also unbuilt → instrumented in **#197**.
+
+Coverage for the built/partial stories — profile visibility ceiling (US-10.1.1), shelf visibility (US-10.2.1), blog post visibility (US-10.2.3), ViewAs preview (US-10.3.1), and search engine privacy (US-10.4.1) — plus the small partial-story builds and all E2E flows is delivered by children #195, #196, #198, #199, #200.
 
 ## User Stories
-US-10.1.1 (Set Profile Visibility), US-10.1.2 (Block a User), US-10.2.1 (Set Shelf Visibility), US-10.2.2 (Override Placement Visibility), US-10.2.3 (Set Blog Post Visibility), US-10.3.1 (Preview Content Visibility), US-10.4.1 (Search Engine Privacy)
+Claimed by this issue (built/partial surface): US-10.1.1 (Set Profile Visibility), US-10.2.1 (Set Shelf Visibility), US-10.2.3 (Set Blog Post Visibility), US-10.3.1 (Preview Content Visibility), US-10.4.1 (Search Engine Privacy).
+
+**De-scoped to child feature issues** (frontends unbuilt — see Summary): US-10.1.2 (Block a User) → **#193**; US-10.2.2 (Override Placement Visibility) → **#194**. This issue no longer claims them.
 
 ## Goal
 Validate the complete visibility system: profile ceiling enforcement with async recap, bidirectional blocking, shelf/placement/blog visibility overrides, marketplace exception for Looking for a Home, ViewAs preview for different audiences, and robots.txt/noindex guarantees.
@@ -155,6 +161,15 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - The marketplace exception means `looking_for_home` placements with active listings bypass visibility checks.
 
 ## Test Audit
+
+> **⚠️ Correction (Feature-Completeness Pre-Check, 2026-07-14).** This baseline audit's "Feature
+> status" claim below is **partly wrong**: it states the block-user UI (modal + blocked-users list)
+> and placement-visibility UI ship in `frontend/src/`. They **do not** — grep confirms no block/unblock
+> or placement-visibility code or `Api` client exists. Those frontends are de-scoped to **#193** (block)
+> and **#194** (placement). Punch items #9/#14 (block Elm+E2E) and #10/#16 (placement Elm+E2E) test UI
+> that must be **built first** in those children. The §12 metrics counters are likewise unbuilt → **#197**.
+> Also partial (small builds needed, folded into #196): shelf save-confirmation render (US-10.2.1),
+> search-privacy info text (US-10.4.1), and the ViewAs banner label `"Not logged in"` (US-10.3.1).
 
 _Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
 
