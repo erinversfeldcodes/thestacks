@@ -193,11 +193,12 @@ defmodule CoreWeb.Telemetry do
         description: "Block errors by reason (cannot_block_self/already_blocked)"
       ),
 
-      # ── Rate limiting (Issue #197 — generic, tagged by bucket) ───────
-      counter("stacks.rate_limit.hit.count",
-        event_name: [:stacks, :rate_limit, :hit],
+      # ── Rate limiting (canonical `:rejected` event; #197's `:hit` renamed
+      # in #206 so the LiveDashboard series matches the Prometheus counter) ──
+      counter("stacks.rate_limit.rejected.count",
+        event_name: [:stacks, :rate_limit, :rejected],
         tags: [:bucket],
-        description: "Rate-limit rejections tagged by bucket (incl. :social)"
+        description: "Rate-limit rejections tagged by bucket (incl. :social, :auth)"
       ),
 
       # ── ViewAs preview (Issue #197 / #122 §12) ───────────────────────
