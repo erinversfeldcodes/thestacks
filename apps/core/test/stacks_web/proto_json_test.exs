@@ -484,7 +484,7 @@ defmodule StacksWeb.ProtoJSONTest do
   describe "book_placement/1" do
     test "matches BookController.format_placement_or_nil/1 shape" do
       user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "antilibrary")
+      bookshelf = insert(:bookshelf, user: user, name: "antilibrary", visibility: "owner")
       book = insert(:book)
 
       placement =
@@ -492,7 +492,8 @@ defmodule StacksWeb.ProtoJSONTest do
           bookshelf: bookshelf,
           book: book,
           formats: ["physical", "ebook"],
-          personal_rating: 4
+          personal_rating: 4,
+          visibility: "owner"
         )
 
       # Preload bookshelf so .bookshelf.name is available
@@ -506,8 +507,31 @@ defmodule StacksWeb.ProtoJSONTest do
                bookshelf_name: "antilibrary",
                formats: ["physical", "ebook"],
                personal_rating: 4,
-               notes: placement.notes
+               notes: placement.notes,
+               visibility: "owner",
+               bookshelf_visibility: "owner"
              }
+    end
+
+    test "emits placement visibility and parent bookshelf visibility independently (US-10.2.2)" do
+      user = insert(:user)
+      # Parent bookshelf is the ceiling (group); the placement overrides down to owner.
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          visibility: "owner"
+        )
+
+      placement = Core.Repo.preload(placement, :bookshelf)
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert result.visibility == "owner"
+      assert result.bookshelf_visibility == "group"
     end
 
     test "returns nil for nil" do
@@ -531,6 +555,27 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.book_placement(placement)
 
       assert result.formats == []
+    end
+
+    test "defaults bookshelf_visibility sanely when the bookshelf association is absent" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          visibility: "owner"
+        )
+
+      # Simulate an unpreloaded bookshelf association — the serializer must not crash.
+      placement = %{placement | bookshelf: %Ecto.Association.NotLoaded{}}
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert result.visibility == "owner"
+      assert result.bookshelf_visibility == nil
     end
   end
 
