@@ -162,18 +162,20 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 
 ## Test Audit
 
-> **⚠️ Correction (Feature-Completeness Pre-Check, 2026-07-14).** This baseline audit's "Feature
-> status" claim below is **partly wrong**: it states the block-user UI (modal + blocked-users list)
-> and placement-visibility UI ship in `frontend/src/`. They **do not** — grep confirms no block/unblock
-> or placement-visibility code or `Api` client exists. Those frontends are de-scoped to **#193** (block)
-> and **#194** (placement). Punch items #9/#14 (block Elm+E2E) and #10/#16 (placement Elm+E2E) test UI
-> that must be **built first** in those children. The §12 metrics counters are likewise unbuilt → **#197**.
-> Also partial (small builds needed, folded into #196): shelf save-confirmation render (US-10.2.1),
-> search-privacy info text (US-10.4.1), and the ViewAs banner label `"Not logged in"` (US-10.3.1).
+> **✅ Regenerated to GREEN (2026-07-14).** The 2026-07-08 baseline below was pre-implementation
+> (12 ❌ all-Elm + 6 ⚠️ Elixir + a 20-item punch list). The epic is now fully built and all 20
+> punch items are RESOLVED with real, named tests: the block UI (#193 — `BlockUserModalTest.elm`,
+> `PrivacyBlockedUsersTest.elm`, `privacy-block.spec.ts`), the placement-visibility UI (#194 —
+> `BookDetailVisibilityTest.elm`, `privacy-placement.spec.ts`), the privacy/shelf/blog/ViewAs Elm
+> surface (#196 — `SettingsPrivacyTest.elm`, `BlogEditorTest.elm`, `ViewAsBarTest.elm`), the browser
+> flows (#198 — `privacy.spec.ts`), and the §12 visibility metrics (#206 — `visibility_telemetry_test.exs`).
+> The six ⚠️ Elixir gaps (ceiling-422 HTTP, ViewAs payload-filter, `:rate_limit_social`, blocked-users
+> pagination, blog-event payload, recap `posts_capped`) are closed. Every cell below is now ✅ or
+> n/a-with-rationale.
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns). **Regenerated 2026-07-14 to the shipped state** — every `✅` cites a real test confirmed by grep/Read. The issue is Done when this audit is green (see Definition of Done)._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #122)
+Last regenerated: 2026-07-14 (GREEN — all 20 punch items resolved). Prior baseline: 2026-07-08 (pre-implementation).
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -230,11 +232,11 @@ frontend state-machine coverage and **near-zero** browser-flow coverage.
 
 | Layer       | 10.1.1 | 10.1.2 | 10.2.1 | 10.2.2 | 10.2.3 | 10.3.1 | 10.4.1 |
 |-------------|--------|--------|--------|--------|--------|--------|--------|
-| Elixir      | ✅ | ✅ | ✅ (⚠️ ceiling-422) | ✅ | ✅ | ✅ | ✅ |
-| Elm unit    | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | n/a |
-| Elm program | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | n/a |
+| Elixir      | ✅ | ✅ | ✅ (ceiling-422 now HTTP-tested) | ✅ | ✅ | ✅ | ✅ |
+| Elm unit    | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a |
+| Elm program | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a |
 | Python      | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| E2E         | ⚠️ (API only) | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ |
+| E2E         | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | dbt         | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
 **Existing test inventory (verified by grep/read):**
@@ -261,16 +263,17 @@ frontend state-machine coverage and **near-zero** browser-flow coverage.
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **39** |
-| ⚠️ shallow | **6** |
-| ❌ missing | **12** |
+| ✅ STRONG | **57** |
+| ⚠️ shallow | **0** |
+| ❌ missing | **0** |
 | n/a (covered higher up / not applicable / by-design) | **125** |
 
 182 cells total (13 layers × 7 US × happy/sad). E2E is tracked as a
 cross-cutting framework-summary row + punch-list items, not counted in the
-182-cell grid (consistent with the upload/marketplace audits). This is the
-pre-implementation baseline; Issue #122's DoD requires regenerating to
-0 ❌ / 0 ⚠️ after the punch list lands.
+182-cell grid (consistent with the upload/marketplace audits). **GREEN**
+(2026-07-14): the 12 ❌ (all Elm) + 6 ⚠️ (Elixir) baseline cells converted to
+real ✅ coverage (39 → 57), and the 7 E2E framework-row items + §12 metrics all
+landed — full citations in the regenerated tables + punch list below.
 
 ---
 
@@ -282,10 +285,10 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 |----|------------|---------|----------|---------|
 | 10.1.1 | ✅ user_settings_controller_test.exs — "returns 200 and sets profile_visibility to platform" + "…to owner" | ✅ | ✅ user_settings_controller_test.exs — "returns 422 when value is invalid", "returns 422 when parameter is missing" | ✅ |
 | 10.1.2 | ✅ social_controller_test.exs — "returns 200 when block succeeds", "returns 200 when unblock succeeds", "returns list of blocked users" | ✅ | ✅ social_controller_test.exs — "returns 404 when target user does not exist", "returns 422 when trying to block self", "returns 422 on duplicate block", unblock "returns 404 when no block exists" | ✅ |
-| 10.2.1 | ✅ bookshelf_controller_test.exs — "updates bookshelf visibility" (PUT /api/bookshelves/:id/visibility → 200 `{visibility: platform}`) | ✅ | ⚠️ bookshelf_controller_test.exs covers "returns 422 for invalid visibility value" + "returns 422 when visibility parameter is missing", but the Issue-§3 assertion "422 if shelf visibility **exceeds profile ceiling**" has no HTTP test (ceiling enforcement is verified only at the `validate_visibility_ceiling/3` unit level, never end-to-end through this endpoint) | ⚠️ |
+| 10.2.1 | ✅ bookshelf_controller_test.exs — "updates bookshelf visibility" (PUT /api/bookshelves/:bookshelf_name/visibility → 200) | ✅ | ✅ bookshelf_controller_test.exs — "returns 422 when the new visibility exceeds the profile ceiling (US-10.2.1)" (HTTP-level ceiling enforcement end-to-end through the endpoint), plus "returns 422 for invalid visibility value" + "…when visibility parameter is missing" | ✅ |
 | 10.2.2 | ✅ bookshelf_placement_controller_test.exs — "updates placement visibility within ceiling" (200) | ✅ | ✅ bookshelf_placement_controller_test.exs — "returns 422 when visibility exceeds bookshelf ceiling", "returns 422 when visibility parameter is missing" | ✅ |
 | 10.2.3 | ✅ blog_controller_test.exs — "creates a draft post when authenticated" (201, visibility "owner"), "updates a post when called by the owner" | ✅ | ✅ blog_controller_test.exs — "returns 422 when visibility exceeds ceiling" (create + update), "returns 422 when required fields are missing" | ✅ |
-| 10.3.1 | ⚠️ ViewAs is validated at the **plug** level (view_as_plug_test.exs — Phase 1 parse of `unauthenticated`/`platform`/`user:<uuid>`) and there is one content-endpoint halt test (bookshelf_controller_test.exs — "view_as halted"), but no positive content-endpoint integration test asserting that `GET …?view_as=unauthenticated` **actually filters** the returned payload to the simulated audience | ⚠️ | ✅ view_as_plug_test.exs — "user: (missing id) receives 422", "group:<id> receives 422 not_implemented", "unknown perspective receives 422" | ✅ |
+| 10.3.1 | ✅ bookshelf_controller_test.exs describe `GET /api/bookshelves/:bookshelf_name — view_as content filtering` → "owner viewing own bookshelf as unauthenticated sees only platform-visible placements" (positive payload-filter integration, not just the plug halt); view_as_plug_test.exs Phase-1 parse | ✅ | ✅ view_as_plug_test.exs — "user: (missing id) receives 422", "group:<id> receives 422 not_implemented", "unknown perspective receives 422" | ✅ |
 | 10.4.1 | ✅ robots_test.exs — "file exists in priv/static", "disallows crawlers from …/u/ …/shelf/ …/post/ …/listing/", "contains a User-agent directive" | ✅ | ✅ (SECURITY) blog_controller_test.exs — "returns 404 for owner-only post viewed by non-owner"; visibility_test.exs — "unauthenticated viewer + private bookshelf → :hidden" (unauthenticated requests return no personal data) | ✅ |
 
 #### Layer 2: Auth & Middleware Guards
@@ -293,7 +296,7 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 | US | Happy Path | Verdict | Sad Path | Verdict |
 |----|------------|---------|----------|---------|
 | 10.1.1 | ✅ user_settings_controller_test.exs — authenticated `auth_conn(user)` path drives the `:authenticated` pipeline | ✅ | ✅ user_settings_controller_test.exs — "returns 401 when not authenticated" | ✅ |
-| 10.1.2 | ✅ social_controller_test.exs — authenticated block/unblock/list | ✅ | ⚠️ 401 fully covered (social_controller_test.exs — "returns 401 when not authenticated" ×3), but the Issue-§3/§4 `:rate_limit_social` guard (20/min per user on block/unblock) has **no test** — no "429"/"rate_limit" match in any social test | ⚠️ |
+| 10.1.2 | ✅ social_controller_test.exs — authenticated block/unblock/list | ✅ | ✅ social_controller_test.exs — "returns 401 when not authenticated" ×3, and the `:rate_limit_social` guard (20/min per user) is now tested: describe `:rate_limit_social — per-user block/unblock throttle` → "returns 429 on the 21st block within the window" (`async: false`) | ✅ |
 | 10.2.1 | ✅ bookshelf_controller_test.exs — owner path via `auth_conn` | ✅ | ✅ bookshelf_controller_test.exs — "returns 403 when user does not own the bookshelf", "returns 401 when not authenticated" | ✅ |
 | 10.2.2 | ✅ bookshelf_placement_controller_test.exs — owner path | ✅ | ✅ (SECURITY) bookshelf_placement_controller_test.exs — "returns 403 when user does not own the placement", "returns 401 when not authenticated" | ✅ |
 | 10.2.3 | ✅ blog_controller_test.exs — owner create/update | ✅ | ✅ (SECURITY) blog_controller_test.exs — "returns 403 when called by a non-owner" (update/delete/publish), "returns 401 when unauthenticated" | ✅ |
@@ -305,7 +308,7 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 | US | Happy Path | Verdict | Sad Path | Verdict |
 |----|------------|---------|----------|---------|
 | 10.1.1 | ✅ accounts_test.exs — "updates profile_visibility to platform"; recap batch UPDATE covered in Layer 5 | ✅ | ✅ accounts_test.exs — "returns changeset error for invalid visibility value" | ✅ |
-| 10.1.2 | ⚠️ social_test.exs — "valid block → block row exists in DB", unblock "row removed", `blocked?`/`blocked_by?` bidirectional, `list_blocked_users` returns display_name + blocked_at. BUT the Issue-§4 assertions "paginated, 20 per page, ordered by `created_at desc`" are **not asserted** (only single-row lists tested; no >20 fixture, no ordering assertion) | ⚠️ | ✅ social_test.exs — "duplicate block → returns error (unique constraint)"; user_block_test.exs — "inserting a duplicate (same blocker + blocked) raises unique constraint error", "is invalid without blocker_id/blocked_id" | ✅ |
+| 10.1.2 | ✅ social_test.exs — block row exists, unblock removes it, `blocked?`/`blocked_by?` bidirectional; pagination + ordering now asserted (describe `list_blocked_users/2`): "paginates: >20 blocks returns 20 on page 1 with the correct total", "does not repeat entries across pages", "orders blocked users by created_at descending (most recent first)" | ✅ | ✅ social_test.exs — "duplicate block → returns error (unique constraint)"; user_block_test.exs — duplicate raises unique constraint, "is invalid without blocker_id/blocked_id" | ✅ |
 | 10.2.1 | ✅ bookshelf_controller_test.exs update + visibility_test.exs — "viewable_shelves/2 returns only visible bookshelves for platform user", "owner sees all their own bookshelves" | ✅ | ✅ bookshelf_controller_test.exs — "returns 422 for invalid visibility value" (changeset inclusion) | ✅ |
 | 10.2.2 | ✅ bookshelf_placement_controller_test.exs update; visibility_test.exs — placement group-visibility resolution | ✅ | ✅ bookshelf_placement_controller_test.exs — "returns 422 when visibility exceeds bookshelf ceiling" | ✅ |
 | 10.2.3 | ✅ blog_test.exs — "creates a post with valid attrs", "defaults to draft (visibility: owner)", "list_user_posts owner sees all incl. drafts", "non-owner sees only published", `tighten_posts_to_ceiling/2` "runs in a transaction (all or nothing)" | ✅ | ✅ (SECURITY) blog_test.exs — "non-owner cannot see owner-only posts even if published", "enforces visibility ceiling — rejects less restrictive than profile", "returns changeset error when required fields missing" | ✅ |
@@ -320,7 +323,7 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 | 10.1.2 | ✅ social_test.exs — "block_user/2 emits social.user_blocked event", "unblock_user/2 emits social.user_unblocked event" (payload `{blocked_id}`) | ✅ | n/a — a failed block short-circuits (self / not_found / already_blocked) **before** the insert+emit, so there is no rollback-emit path to negatively assert | n/a |
 | 10.2.1 | n/a — US §6: no events emitted for individual shelf visibility changes (recap handles bulk) | n/a | n/a — same | n/a |
 | 10.2.2 | n/a — US §6: no events for individual placement visibility changes | n/a | n/a — same | n/a |
-| 10.2.3 | ⚠️ blog_test.exs — "emits blog.post_created event on success", "emits blog.post_updated event on success" — BUT both assert `event_count` on `event_type` **only**; the Issue-§5 payload requirement `{user_id, title, visibility}` (visibility in payload) is never asserted | ⚠️ | n/a — ceiling/validation failures return `{:error, …}` before emit; no rollback-emit path | n/a |
+| 10.2.3 | ✅ blog_test.exs — "blog.post_created event payload includes user_id, title, and visibility", "blog.post_updated event payload includes user_id, title, and visibility" (payload asserted, not just event_type) | ✅ | n/a — ceiling/validation failures return `{:error, …}` before emit; no rollback-emit path | n/a |
 | 10.3.1 | n/a — US §6: ViewAs emits no events | n/a | n/a — same | n/a |
 | 10.4.1 | n/a — US §6: no events | n/a | n/a — same | n/a |
 
@@ -332,7 +335,7 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 | 10.1.2 | n/a — block/unblock are synchronous (US §7) | n/a | n/a — same | n/a |
 | 10.2.1 | n/a — cascading shelf caps are exercised through the recap job under US-10.1.1 (visibility_recap_job_test.exs bookshelf caps) | n/a | n/a — same | n/a |
 | 10.2.2 | n/a — cascading placement caps exercised through the recap job under US-10.1.1 ("caps placements stored as platform to owner") | n/a | n/a — same | n/a |
-| 10.2.3 | ⚠️ `tighten_posts_to_ceiling/2` itself is unit-tested (blog_test.exs), but the **recap-job → tighten path** and the `posts_capped` payload count are not asserted in visibility_recap_job_test.exs (only `bookshelves_capped` + `placements_capped` payload counts are verified) | ⚠️ | n/a — same tighten path | n/a |
+| 10.2.3 | ✅ visibility_recap_job_test.exs describe `perform/1 — posts capped via tighten_posts_to_ceiling`: "caps posts more visible than the ceiling and reports posts_capped in payload", "reports posts_capped: 0 when no posts violate the ceiling" | ✅ | n/a — same tighten path | n/a |
 | 10.3.1 | n/a — no jobs (US §7) | n/a | n/a — same | n/a |
 | 10.4.1 | n/a — no jobs (US §7) | n/a | n/a — same | n/a |
 
@@ -364,12 +367,12 @@ pre-implementation baseline; Issue #122's DoD requires regenerating to
 
 | US | Happy Path | Verdict | Sad Path | Verdict |
 |----|------------|---------|----------|---------|
-| 10.1.1 | ❌ `Page.Settings.Privacy` exists (`frontend/src/Page/Settings/Privacy.elm`) but has **no test** — SettingsTest.elm covers only Consent + AgeVerification. `SetProfileVisibility` / `SaveProfileVisibility` / `SaveProfileVisibilityCompleted (Ok)` untested | ❌ | ❌ `SaveProfileVisibilityCompleted (Err)` → `savingProfile = Failure` ("Could not save…") untested | ❌ |
-| 10.1.2 | ❌ Block confirmation modal (`UserClicksBlock → ConfirmBlock → PostBlock`) and blocked-users list rendering have no Elm test | ❌ | ❌ `GotBlockResponse (Err)` / already-blocked / not-found UI feedback untested | ❌ |
-| 10.2.1 | ❌ `SetShelfVisibility shelfName value` / `SaveShelfVisibility` / `SaveShelfVisibilityCompleted (Ok)` in `Page.Settings.Privacy` untested | ❌ | ❌ `SaveShelfVisibilityCompleted (Err)` failure state untested | ❌ |
-| 10.2.2 | ❌ placement-visibility UI (`UserSelectsPlacementVisibility → UpdatePlacementVisibility`, greyed-out ceiling options, faint-outline owner spine) untested | ❌ | ❌ ceiling-exceeded client-side disable + `GotUpdateResponse (Err)` untested | ❌ |
-| 10.2.3 | ❌ `Page.Blog.Editor` exists (`frontend/src/Page/Blog/Editor.elm`) but has **no test** — `SetVisibility String` → Visibility parse, `SaveDraft`/`Publish` untested | ❌ | ❌ `SaveCompleted (Err)` / `PublishCompleted (Err)` failure feedback untested | ❌ |
-| 10.3.1 | ❌ `Components.ViewAsBar` exists (`frontend/src/Components/ViewAsBar.elm`) but has **no test** — banner render when `view_as` present + `getViewAs` URL extraction untested | ❌ | ❌ `removeViewAs` URL rebuild (Exit preview) untested | ❌ |
+| 10.1.1 | ✅ `SettingsPrivacyTest.elm` describe "profile visibility (US-10.1.1)" — "SetProfileVisibility updates the local value", "SaveProfileVisibility with a token sets savingProfile to Loading", "SaveProfileVisibilityCompleted Ok sets savingProfile to Success" | ✅ | ✅ `SettingsPrivacyTest.elm` — "SaveProfileVisibilityCompleted Err sets savingProfile to Failure" | ✅ |
+| 10.1.2 | ✅ `BlockUserModalTest.elm` — "BlockRequested opens the confirmation modal and closes the menu", "BlockConfirmed with a token sets status to Loading", "BlockCompleted Ok marks Success and emits UserBlocked with the id"; `PrivacyBlockedUsersTest.elm` — "view lists each blocked reader with an Unblock button", "GotUnblockResponse Ok removes the reader from the list" | ✅ | ✅ `BlockUserModalTest.elm` — "BlockCompleted already_blocked shows a distinct message and stays local", "BlockCompleted not_found shows a distinct message", "BlockCompleted 401 escalates to SessionExpired"; `PrivacyBlockedUsersTest.elm` — "GotUnblockResponse not_found…keeps the row", "GotUnblockResponse non-401 failure surfaces an error" | ✅ |
+| 10.2.1 | ✅ `SettingsPrivacyTest.elm` describe "shelf visibility (US-10.2.1)" — "SetShelfVisibility updates only the matching shelf", "SaveShelfVisibility with a token sets savingShelf to Loading", "SaveShelfVisibilityCompleted Ok sets savingShelf to Success" | ✅ | ✅ `SettingsPrivacyTest.elm` — "SaveShelfVisibilityCompleted Err sets savingShelf to Failure" | ✅ |
+| 10.2.2 | ✅ `BookDetailVisibilityTest.elm` — "ceiling_greying: an option more permissive than the shelf ceiling is disabled", "select_saves: choosing an allowed visibility PUTs and records success", "helper_text: a restricting shelf ceiling shows always-visible helper text" (faint owner-only spine covered at E2E, punch #16) | ✅ | ✅ `BookDetailVisibilityTest.elm` — "server_error: a 422 ceiling rejection surfaces a warm failure message", "rollback: a failed save reverts the select to the prior visibility" | ✅ |
+| 10.2.3 | ✅ `BlogEditorTest.elm` describe "Page.Blog.Editor (US-10.2.3)" — "\"owner\" parses to Owner", "\"platform\" parses to Platform", "unknown value falls back to Owner", "SaveCompleted Ok sets saving to Success", "PublishCompleted Ok sets publishing to Success" | ✅ | ✅ `BlogEditorTest.elm` — "SaveCompleted Err sets saving to Failure", "PublishCompleted Err sets publishing to Failure" | ✅ |
+| 10.3.1 | ✅ `ViewAsBarTest.elm` — "renders the bar when view_as is present", "renders an Exit preview link when view_as is present", "getViewAs extracts the view_as value from the query" | ✅ | ✅ `ViewAsBarTest.elm` — "removeViewAs drops the view_as param and keeps the path", "unauthenticated perspective renders the 'Not logged in' label" | ✅ |
 | 10.4.1 | n/a — no Elm state machine (US §12); the "never appears in search results" line is static informational text with no interactive state | n/a | n/a — same | n/a |
 
 #### Layer 11: Operational Metrics
@@ -378,15 +381,15 @@ All cells `n/a — covered by SLO gate`. `scripts/check-slo-gate.sh` scrapes
 `/internal/metrics` post-deploy for per-route SLIs, and automatic Phoenix
 endpoint + Oban telemetry cover event firing.
 
-**Caveat (punch #20):** Issue #122 §12 enumerates ~10 visibility-specific
-metrics (profile-visibility change counts by direction, recap outcome/cap
-counts, block/unblock counts, block error rates, `:rate_limit_social` hits,
-ViewAs usage/error counts by perspective, ceiling-rejection counts, crawler
-+ robots.txt fetch counts). **None** of these is instrumented in
-`visibility.ex` / `social.ex` / `view_as_plug.ex`, and no visibility mention
-appears in any telemetry test (`observability_telemetry_test.exs` covers
-vision/fuse/budget/costs only). Needs a decision: instrument + firing tests,
-or descope §12 to the SLO gate.
+**Resolved (punch #20, via #206):** Issue #122 §12's visibility metrics are now
+instrumented AND firing-tested in `apps/core/test/stacks/visibility_telemetry_test.exs`:
+profile-visibility change direction (`visibility.ex:365 emit_profile_visibility_change/2`
+— tighten/loosen), `ceiling_rejection` (`visibility.ex:388`, whitelisted
+`:post`/`:placement`/`:bookshelf`), recap outcome + cap counts (`:capped`/`:noop`),
+block/unblock + block_error by reason (`social.ex` + `social_controller.ex`),
+`:rate_limit` tagged `:social` (`core_web/telemetry.ex`), ViewAs usage/error by
+perspective (`view_as_plug.ex:131/135`, uuid never leaked), and crawler `robots_fetch`.
+So the Layer-11 cells are covered by real firing tests rather than deferred to the SLO gate.
 
 #### Layer 12: Performance & Usability Metrics
 
@@ -403,11 +406,12 @@ Fly/Neon compute is covered by the cost dashboard at deploy time.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (all 20 RESOLVED — 2026-07-14)
 
-Every ❌/⚠️ cell converted to a numbered item. No tests were written or
-modified during this audit (pre-implementation baseline). Items marked
-**(SECURITY)** verify cross-user leakage / negative-access.
+Every ❌/⚠️ cell from the 2026-07-08 baseline, now resolved with a real named
+test (cited in the regenerated cells above; verified by grep/Read). Items marked
+**(SECURITY)** verify cross-user leakage / negative-access. The "Where it belongs"
+column records where each landed — every row is ✅ DONE.
 
 | # | Cell | What's needed | Where it belongs |
 |--:|------|---------------|------------------|
@@ -436,63 +440,61 @@ modified during this audit (pre-implementation baseline). Items marked
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved.** State across the
+**GREEN — audit resolved (2026-07-14).** State across the
 13-layer × 7-US matrix (182 cells):
 
-- **39 ✅ STRONG** — the entire server-side visibility stack. Profile/shelf/
-  placement/blog visibility endpoints, the 2-phase ViewAs plug, bidirectional
-  blocking, the recap job (with cross-user isolation), robots.txt, and — most
-  importantly — **cross-user leakage is genuinely well-covered**:
-  `visibility_test.exs` (40 tests + 6 properties) asserts blocked→hidden,
-  non-owner→hidden, unauthenticated→hidden, the marketplace exception, and
-  group membership; controller tests assert non-owner 403/404 on every
-  mutation and owner-only-post/owner-only-shelf leak-prevention on reads.
-- **6 ⚠️ shallow** — HTTP-level shelf ceiling-violation 422 (#1), ViewAs
-  content-endpoint filtering integration (#2), `:rate_limit_social` (#3),
-  blocked-users pagination/ordering (#4), blog event **payload** visibility
-  (#5), recap `posts_capped` path (#6).
-- **12 ❌ missing** — **all at the Elm layer**: `Page.Settings.Privacy`,
-  block modal + blocked list, shelf-visibility rows, placement visibility UI,
-  `Page.Blog.Editor` visibility, and `Components.ViewAsBar` have **zero**
-  tests despite all six modules existing in `frontend/src/`.
+- **57 ✅ STRONG** — the entire server-side visibility stack PLUS the full Elm +
+  E2E surface. Cross-user leakage remains the anchor: `visibility_test.exs`
+  (40 tests + 6 properties) asserts blocked→hidden, non-owner→hidden,
+  unauthenticated→hidden, the marketplace exception, and group membership;
+  controller tests assert non-owner 403/404 on every mutation. The 2026-07-14
+  regeneration added the 6 Elixir gap-fills (ceiling-422 HTTP, ViewAs
+  payload-filter, `:rate_limit_social` 429, blocked-users pagination/order,
+  blog-event payload, recap `posts_capped`) plus the full Elm layer
+  (`SettingsPrivacyTest`, `BlockUserModalTest`+`PrivacyBlockedUsersTest`,
+  `BookDetailVisibilityTest`, `BlogEditorTest`, `ViewAsBarTest`) and E2E flows.
+- **0 ⚠️ / 0 ❌** — the DoD bar is met; all 20 punch items resolved with real
+  named tests, §12 metrics fire in `visibility_telemetry_test.exs`.
 - **125 n/a** — external services, storage, cache, dbt (all seven US declare
   these N/A), operational/performance/cost metrics (SLO gate + no external
   spend), and the by-design event/job gaps (no events for individual shelf/
   placement changes; block/unblock synchronous).
 
-**Headline findings:**
-1. **Security enforcement is strong; UI verification is absent.** The
-   highest-value sad path — cross-user leakage — is thoroughly tested at the
-   Elixir context + controller + property layers (RLS + `resolve_visibility/2`
-   per ADR-006). The risk is not in the enforcement but in the **complete
-   absence of Elm and browser-level coverage** (12 ❌ + 7 E2E items): a UI
-   regression that, e.g., renders a hidden placement or a broken ViewAs
-   banner would not be caught by any current test.
-2. **The frontend privacy surface is entirely untested.** Three shipped Elm
-   modules (`Page.Settings.Privacy`, `Components.ViewAsBar`, `Page.Blog.Editor`)
-   have no state-machine tests, and `e2e/tests/` has no `privacy.spec.ts` —
-   only a single `PUT /api/settings/profile_visibility` API assertion in
-   `settings.spec.ts`.
-3. **Six enumerated Elixir gaps** are narrow but real: the shelf ceiling-422
-   and rate-limit guards named in Issue #122 §2–§4 are unproven at the HTTP
-   layer, blog events assert type-only (not visibility payload), and
-   blocked-users pagination/ordering is unverified.
+**Headline findings (resolved 2026-07-14):**
+1. **Security enforcement strong AND UI now verified.** Cross-user leakage is
+   thoroughly tested at the Elixir context + controller + property layers (RLS +
+   `resolve_visibility/2` per ADR-006); the Elm + browser layers that were absent
+   at baseline are now covered — a regression rendering a hidden placement or a
+   broken ViewAs banner is caught by `BookDetailVisibilityTest`, `ViewAsBarTest`,
+   and the `privacy*.spec.ts` browser flows.
+2. **The frontend privacy surface is fully tested.** `Page.Settings.Privacy`
+   (`SettingsPrivacyTest`), `Components.ViewAsBar` (`ViewAsBarTest`),
+   `Page.Blog.Editor` (`BlogEditorTest`), the block flow (`BlockUserModalTest` +
+   `PrivacyBlockedUsersTest`), and placement visibility (`BookDetailVisibilityTest`)
+   all have state-machine tests, backed by `privacy.spec` / `privacy-block.spec` /
+   `privacy-placement.spec` browser coverage.
+3. **The six Elixir gaps are closed:** shelf ceiling-422 + `:rate_limit_social`
+   429 proven at the HTTP layer, blog events assert the `{user_id, title,
+   visibility}` payload, blocked-users pagination/ordering asserted, ViewAs
+   payload-filter integration, and the recap `posts_capped` path.
 
-**Test runner totals at baseline (visibility-related, verified by grep/read):**
-Elixir ~90 tests across 9 files (visibility_test 40 + property 6, social,
-user_block, recap_job 11, accounts, blog, social_controller 13, view_as_plug
-18, robots 6, bookshelf/placement/blog/user_settings controller subsets);
-Elm **0** privacy tests; Playwright **2** profile-visibility assertions; dbt
-0 (N/A). Punch list: **20 items**, of which #20 is partially blocked on
-metrics instrumentation.
+**Test runner totals (visibility-related, verified by grep/read, 2026-07-14):**
+Elixir (visibility_test 40 + property 6, visibility_telemetry, social,
+user_block, recap_job incl. `posts_capped`, accounts, blog incl. event payload,
+social_controller incl. `:rate_limit_social` 429, view_as_plug 18, robots,
+bookshelf/placement/blog/user_settings controller incl. ceiling-422 + view_as
+payload filter); Elm privacy tests across `SettingsPrivacyTest`,
+`BlockUserModalTest`, `PrivacyBlockedUsersTest`, `BookDetailVisibilityTest`,
+`BlogEditorTest`, `ViewAsBarTest`; Playwright `privacy.spec`, `privacy-block.spec`,
+`privacy-placement.spec`; dbt N/A. Punch list: **20 items — all resolved**.
 ## Definition of Done
-- [ ] All 11 test categories implemented with specific test cases listed above
-- [ ] Tests pass with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] `just verify` passes
+- [x] All 11 test categories implemented with specific test cases listed above
+- [x] Tests pass with `TEST_TARGET=local`
+- [x] No flaky tests (the cross-spec flake was resolved by the #208 throwaway-user isolation — 39/39 local)
+- [x] `just verify` passes
 - [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`. *(Regenerated 2026-07-14 with file:line + local live-drive results; all 7 ✅.)*
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state. *(Pending — tracked in #207.)*
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`): stories driven live ✅ (38/39 local, the one cross-spec flake tracked in **#208**); every layer incl. events + metrics asserted ✅; no dangling P2/P3 (fixed or de-scoped to **#205**/#208) ✅; logs clean under the live drive ✅; tracking regenerated — Pre-Check ✅, 13-layer audit pending (**#207**); local live-drive before preview ✅.
+- [x] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️`. Regenerated 2026-07-14: all 20 punch items resolved with real named tests (39 → 57 ✅).
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`): stories driven live ✅ (39/39 local); every layer incl. events + metrics asserted ✅ (§12 metrics fire in `visibility_telemetry_test.exs`); no dangling P2/P3 (fixed or de-scoped to **#205**) ✅; logs clean under the live drive ✅; tracking regenerated — Pre-Check ✅ + 13-layer audit ✅; local live-drive done, preview gate deferred to post-#209 (single merge).
 
 ## Dependencies
 Requires Visibility module, Social context (blocking), ViewAs plug, VisibilityRecapJob, Blog context.
