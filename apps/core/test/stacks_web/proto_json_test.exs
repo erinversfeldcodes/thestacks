@@ -407,6 +407,8 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.formats == ["physical"]
       assert result.personal_rating == 5
       assert result.notes == placement.notes
+      # Placement visibility feeds the faint hidden-spine on the shelf (#194).
+      assert result.visibility == placement.visibility
       assert result.book != nil
       assert result.book.id == book.id
       assert result.book.author == %{id: author.id, name: author.name, bio: nil}
