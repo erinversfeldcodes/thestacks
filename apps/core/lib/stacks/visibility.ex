@@ -318,6 +318,27 @@ defmodule Stacks.Visibility do
   def can_view?(resource, viewer), do: resolve_visibility(resource, viewer) == :visible
 
   @doc """
+  Whether a user's PROFILE (the hub page at `/u/:handle`) is visible to `viewer`.
+  Visible when the viewer is the owner, OR the owner is not a ghost
+  (`profile_visibility != "owner"`) and there is no block between them. Ghosts and
+  blocked pairs → not visible (the controller renders 404, not 403). Distinct from
+  `resolve_visibility/2`, which gates a RESOURCE — the hub itself is not a resource,
+  so it needs an explicit gate that single-sources the profile-ceiling rule.
+  """
+  @spec profile_visible?(map(), term()) :: boolean()
+  def profile_visible?(%{id: owner_id, profile_visibility: pv}, {:platform_user, viewer_id}) do
+    cond do
+      viewer_id == owner_id -> true
+      pv == "owner" -> false
+      Social.blocked?(viewer_id, owner_id) -> false
+      true -> true
+    end
+  end
+
+  def profile_visible?(%{profile_visibility: pv}, :unauthenticated), do: pv != "owner"
+  def profile_visible?(_, _), do: false
+
+  @doc """
   Returns all bookshelves for the given user_id that are visible to the viewer.
   """
   @spec viewable_shelves(String.t(), term()) :: [Bookshelf.t()]
