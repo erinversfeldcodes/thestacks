@@ -277,7 +277,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:${{ needs.versions.outputs.postgres }}
+        image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -474,7 +474,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:${{ needs.versions.outputs.postgres }}
+        image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -773,7 +773,7 @@ jobs:
         # only reads DATABASE_URL in :prod, so the Postgres container name
         # MUST match `stacks_dev` for `mix ecto.migrate` (MIX_ENV=dev) to
         # connect. Do not change this without also changing dev.exs.
-        image: postgres:${{ needs.versions.outputs.postgres }}
+        image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
