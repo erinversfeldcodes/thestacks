@@ -491,10 +491,19 @@ defmodule Stacks.Shelving do
   @spec set_bookshelf_visibility(binary(), String.t(), String.t()) ::
           {:ok, Bookshelf.t()} | {:error, Ecto.Changeset.t()}
   def set_bookshelf_visibility(user_id, bookshelf_name, visibility) do
-    get_or_create_bookshelf(user_id, bookshelf_name)
-    |> bookshelf_changeset(%{visibility: visibility})
-    |> validate_bookshelf_profile_ceiling(user_id, visibility)
-    |> Repo.update()
+    if visibility in @valid_visibilities do
+      get_or_create_bookshelf(user_id, bookshelf_name)
+      |> bookshelf_changeset(%{visibility: visibility})
+      |> validate_bookshelf_profile_ceiling(user_id, visibility)
+      |> Repo.update()
+    else
+      # SEC-5: reject an invalid visibility value BEFORE lazily creating the
+      # shelf, so a 422 does not leave a stray empty bookshelf behind.
+      {:error,
+       %Bookshelf{user_id: user_id, name: bookshelf_name}
+       |> cast(%{visibility: visibility}, [:visibility])
+       |> validate_inclusion(:visibility, @valid_visibilities)}
+    end
   end
 
   # A bookshelf may not be made more visible than the owner's profile ceiling
