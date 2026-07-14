@@ -24,6 +24,19 @@ defmodule Stacks.Visibility do
   # exposed) — fail-safe: an unrecognised value is never treated as over-exposed.
   @audience_exposure %{"owner" => 0, "group" => 1, "platform" => 2, "public" => 3}
 
+  # The stored, user-settable Audience levels (owner < group < platform). The
+  # "public" rung is RESERVED (ADR-018) and not yet a stored value, so it is not
+  # offered here. Single source of truth for the per-context validate_inclusion
+  # lists (Shelving / Blog / Accounts), replacing their duplicated `~w(...)`.
+  @audience_levels ~w(owner group platform)
+
+  # Audience levels settable on a USER PROFILE — narrower than @audience_levels:
+  # a "group" profile ceiling is not yet enforced (a group profile currently
+  # behaves like platform), so it is RESERVED and not offered (ADR-018 per-entity
+  # matrix). Used by BOTH profile registration and settings-update, resolving the
+  # prior inconsistency where registration accepted "group" but settings did not.
+  @profile_audience_levels ~w(owner platform)
+
   # Whitelist of resource-type tags for the ceiling-rejection counter. Anything
   # else is coerced to :other so telemetry cardinality stays bounded and no raw
   # caller-supplied value leaks into a metric label.
@@ -348,6 +361,26 @@ defmodule Stacks.Visibility do
        "#{resource_type} visibility '#{child_visibility}' is less restrictive than parent visibility '#{parent_visibility}'"}
     end
   end
+
+  @doc """
+  The canonical stored Audience levels (`owner`, `group`, `platform`). Use this
+  as the single source of truth for `validate_inclusion` on visibility fields
+  rather than re-declaring the list per context (ADR-018 / #209).
+  """
+  @spec audience_levels() :: [String.t()]
+  def audience_levels, do: @audience_levels
+
+  @doc "Whether `value` is a valid stored Audience level."
+  @spec valid_audience_level?(term()) :: boolean()
+  def valid_audience_level?(value), do: value in @audience_levels
+
+  @doc """
+  The Audience levels settable on a user PROFILE (`owner`, `platform`). Narrower
+  than `audience_levels/0` — `group` is reserved (a group profile is not yet
+  enforced). Used by both registration and settings so the two agree.
+  """
+  @spec profile_audience_levels() :: [String.t()]
+  def profile_audience_levels, do: @profile_audience_levels
 
   # ---------------------------------------------------------------------------
   # Telemetry (Issue #197 — visibility/privacy observability)

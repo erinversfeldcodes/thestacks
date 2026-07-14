@@ -6,6 +6,45 @@ maps with a single canonical **`Audience`** ladder plus orthogonal overlays (Gra
 Discoverability, AgeGate, Block), defined **in protobuf as the source of truth** and
 generated across Elixir, Elm, dbt, Python, and Rust. Implements ADR-018.
 
+## Status (2026-07-14) — core DELIVERED; remainder reframed & de-risked
+
+Two findings from the implementation pass **substantially reduced this issue's scope**
+and disproved the "proto-first, far-reaching data migration" framing:
+
+1. **Storage is Postgres ENUMs, not strings.** `visibility_level ENUM (owner, group,
+   platform)` backs shelves/placements/profiles; `visibility_tier ENUM (public,
+   age_gated)` backs books (blog/group use `text`). **The stored enum values already
+   ARE the canonical Audience ladder** — so there is essentially nothing to migrate for
+   the ladder, and no `ALTER TYPE` is needed while `public` stays reserved.
+2. **`visibility_tier` has only two live values** (`public`, `age_gated`); the proto's
+   `unlisted`/`private` were never added to the DB enum and have **zero rows** (proven by
+   `visibility_tier_characterization_test.exs`). The "decompose into 3 axes" reduces to
+   "the `age_gated` boolean already IS the AgeGate axis."
+
+**DELIVERED (committed on `feat/122-e2e`):**
+- ✅ The correctness core — collapsed the two contradictory rank maps into ONE
+  `@audience_exposure` ladder (`owner<group<platform<public`); one ceiling check + one
+  tighten/loosen classifier. **Fixed a latent bug**: `group` children were wrongly
+  rejected under a platform parent. 178 tests + 6 properties green (parity verified
+  case-by-case for owner/platform/public).
+- ✅ Golden-master characterization test pinning `visibility_tier` resolution.
+- ✅ One canonical source (`Visibility.audience_levels/0` + `profile_audience_levels/0`);
+  Blog + Accounts point at it. **Resolved the profile inconsistency** — registration and
+  settings now agree (`owner`/`platform`; `group` reserved for profiles, per the matrix).
+- ✅ Fixed the stale `sources.yml` visibility docs; corrected the ADR migration table.
+
+**GENUINELY FUTURE (new features, NOT a migration — do NOT treat as almost-done):**
+these need new enum members + new resolver logic and have no existing data:
+- `public` rung as a stored value (unauth/internet-indexable) + the Discoverability axis
+  (`unlisted`) — gated on the US-10.4.1 opt-in-indexing story.
+- `private`/owner-only books (`visibility_tier` currently coerced to public at resolve).
+- Enforcing a `group` PROFILE as a real ceiling (SEC-3) — today a group profile behaves
+  like platform; making it restrict to group members is a behaviour change to design.
+- Proto contract-enum unification (one `Audience` proto enum) — low value since the
+  enums are contract docs, not storage; deferred unless a wire consumer needs it.
+- `shelving.ex` keeps a literal `@valid_visibilities` (its ceiling GUARD clause needs a
+  compile-time literal); it equals `Visibility.audience_levels/0` by construction.
+
 ## User Stories
 Cross-cutting — this is a refactor of the machinery behind the entire US-10.x epic
 (US-10.1.1 profile, US-10.2.1 shelf, US-10.2.2 placement, US-10.2.3 blog visibility,

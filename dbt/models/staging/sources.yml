@@ -28,7 +28,7 @@ sources:
           - name: bisac_codes
             description: Array of BISAC classification codes.
           - name: visibility_tier
-            description: Content-gate tier (public, unlisted, private).
+            description: Content-gate tier (public, age_gated).
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -96,7 +96,7 @@ sources:
           - name: name
             description: Bookshelf category name (library, antilibrary, wishlist, reading_pile, looking_for_home).
           - name: visibility
-            description: Who can see this bookshelf (public, followers, private, group).
+            description: Who can see this bookshelf (owner, group, platform).
           - name: visibility_group_id
             description: FK to groups; non-null when visibility is "group".
           - name: created_at
@@ -218,7 +218,7 @@ sources:
           - name: role
             description: User role (user, partner, admin).
           - name: profile_visibility
-            description: Profile visibility level (public, followers, private).
+            description: Profile visibility level (owner, group, platform).
           - name: website_url
             description: User personal website URL.
           - name: age_verified
@@ -508,7 +508,7 @@ sources:
           - name: type
             description: Group type (book_club, reading_circle, custom).
           - name: visibility
-            description: Group visibility (public, private, invite_only).
+            description: Group visibility (invite_only, platform).
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -580,7 +580,7 @@ sources:
           - name: body
             description: Post body content (Markdown).
           - name: visibility
-            description: Post visibility (public, followers, private, group).
+            description: Post visibility (owner, group, platform).
           - name: visibility_group_id
             description: FK to groups; non-null when visibility is "group".
           - name: published_at

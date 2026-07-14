@@ -43,7 +43,7 @@ defmodule Stacks.Accounts do
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
     |> validate_length(:password, min: 8, message: "must be at least 8 characters")
     |> validate_inclusion(:role, ["owner", "user"])
-    |> validate_inclusion(:profile_visibility, ["owner", "group", "platform"])
+    |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
     |> unique_constraint(:email)
     |> hash_password()
   end
@@ -113,7 +113,7 @@ defmodule Stacks.Accounts do
   def profile_visibility_changeset(user, attrs) do
     user
     |> cast(attrs, [:profile_visibility])
-    |> validate_inclusion(:profile_visibility, ["platform", "owner"])
+    |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
   end
 
   @doc "Changeset for updating onboarding_steps JSONB map."
