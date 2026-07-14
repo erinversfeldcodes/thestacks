@@ -165,9 +165,23 @@ migration/RLS), proto/schema work via `mix proto.sync`, elm-agent (Types/Visibil
 decoders), dbt for the warehouse phase. testing-coordinator owns the parity property
 suite gate.
 
+## Folded-in review findings (from the #122 code review, 2026-07-14)
+Two P3s from the #122 reviewers are Audience-refactor territory and are de-scoped here
+rather than patched piecemeal (fixing them properly means the unified model):
+- **SEC-3 — `group` profile ceiling is unenforced.** `accounts.ex:46` accepts
+  `["owner","group","platform"]` at registration, but `check_profile_ceiling/4`
+  (`visibility.ex`) only treats `"owner"` as a hard ceiling — a `"group"` profile does
+  not restrict `platform`/`public` shelves to group members. Resolve when the single
+  `Audience` ladder gives `group` a real rung + one ceiling comparison.
+- **FE-4 — ViewAsBar shows the raw `platform` label**, not the "Members" relabel
+  (`Components/ViewAsBar.elm`). The relabel belongs in the shared `Audience` label
+  function so every surface (placement dropdown, ViewAs banner) renders consistently.
+
 ## Progress Notes
 - 2026-07-14: Filed from the ADR-018 design pass during the #122 epic. Scope validated
   against the full visibility inventory (9 consumers, 4 vocabularies, 2 rank maps) and
   the user-story/architecture audit for future-scope flexibility (GroupType,
   visibility_grants, subscription/follower seam, marketplace ceiling-punch,
   multi-group, public-vs-platform). Phased to keep each step behind the property suite.
+- 2026-07-14: Folded in SEC-3 (unenforced `group` profile ceiling) and FE-4 (ViewAsBar
+  raw `platform` label) from the #122 review — both are Audience-model work.

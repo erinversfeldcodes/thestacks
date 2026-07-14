@@ -73,6 +73,8 @@ defmodule Stacks.GDPR.Export do
         age_verified: user.age_verified,
         consent_analytics: user.consent_analytics,
         consent_analytics_at: user.consent_analytics_at,
+        consent_writing_assistant: user.consent_writing_assistant,
+        consent_writing_assistant_at: user.consent_writing_assistant_at,
         created_at: user.created_at
       },
       bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),

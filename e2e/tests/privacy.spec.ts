@@ -73,15 +73,12 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
 
   // Punch #15 — per-shelf visibility save.
   //
-  // The shelf row Save button fires PUT /api/bookshelves/:name/visibility
-  // (Api.elm:1578-1591). IMPORTANT: the Elm view renders NO feedback element for
-  // `savingShelf` — "Visibility updated." is wired only to `savingProfile`
-  // (Privacy.elm:289; the Shelf Visibility section at :291-297 has no
-  // viewFeedback). So there is no visible success/ceiling copy to assert on for a
-  // shelf save. We therefore assert the observable, robust signal: the PUT fires
-  // and the backend accepts it (200), and no error copy surfaces. "Only me"
-  // (owner) is the most-restrictive value and is always within any profile
-  // ceiling, so this is 200 regardless of the seeded user's profile visibility.
+  // The shelf row Save button fires PUT /api/bookshelves/:name/visibility. The
+  // Shelf Visibility section renders `viewFeedback model.savingShelf` (built in
+  // #196), so a success shows "Visibility updated." — asserted below alongside
+  // the accepted PUT (200). "Only me" (owner) is the most-restrictive value and
+  // is always within any profile ceiling, so this is 200 regardless of the
+  // seeded user's profile visibility.
   test("shelf visibility: select 'Only me' → Save issues an accepted PUT", async ({
     page,
   }) => {
@@ -112,9 +109,17 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
     // model.savingShelf → "Visibility updated." on success — built in #196).
     await expect(page.getByText("Visibility updated.")).toBeVisible();
 
-    // Restore the shared shelf to its original visibility.
+    // Restore the shared shelf to its original visibility. Await the restore PUT
+    // so it completes before teardown — no residue on the shared seeded user.
     await firstShelfRow.locator("select").selectOption(original);
-    await firstShelfRow.getByRole("button", { name: "Save" }).click();
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          /\/api\/bookshelves\/[^/]+\/visibility$/.test(r.url()) &&
+          r.request().method() === "PUT"
+      ),
+      firstShelfRow.getByRole("button", { name: "Save" }).click(),
+    ]);
   });
 });
 
