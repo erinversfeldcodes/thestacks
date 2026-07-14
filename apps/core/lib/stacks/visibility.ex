@@ -13,9 +13,16 @@ defmodule Stacks.Visibility do
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social
 
-  # Visibility order: 0 = most permissive (public), 2 = most restrictive (owner).
-  # A child resource must be equally or more restrictive than its parent.
-  @visibility_rank %{"public" => 0, "platform" => 1, "owner" => 2}
+  # Canonical Audience ladder, ordered by EXPOSURE (ascending = more exposed):
+  #   owner (only self) < group (group members) < platform (any authed user)
+  #   < public (anyone, incl. unauthenticated).
+  # This single map (ADR-018 / #209 Phase 2) replaces the former TWO maps — the
+  # ceiling map (which omitted "group", defaulting it to 0 and thereby WRONGLY
+  # rejecting a group child under a platform/owner parent) and the profile
+  # change-direction map. It now drives BOTH the ceiling check and the
+  # tighten/loosen classification. Unknown values default to 0 (owner / least
+  # exposed) — fail-safe: an unrecognised value is never treated as over-exposed.
+  @audience_exposure %{"owner" => 0, "group" => 1, "platform" => 2, "public" => 3}
 
   # Whitelist of resource-type tags for the ceiling-rejection counter. Anything
   # else is coerced to :other so telemetry cardinality stays bounded and no raw
@@ -320,23 +327,21 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-  Validates that a child resource visibility is not less restrictive than the
-  parent resource visibility.
+  Validates that a child resource visibility is not MORE EXPOSED than its parent
+  (the ceiling rule). On the Audience ladder
+  `owner < group < platform < public` (exposure ascending), the child's exposure
+  must be `<=` the parent's.
 
-  Visibility order (most permissive to most restrictive):
-  `"public"` (0) < `"platform"` (1) < `"owner"` (2).
-
-  A child resource must have an equal or higher rank than its parent.
   Returns `:ok` if valid, or `{:error, reason}` if the child would expose
   more than the parent allows.
   """
   @spec validate_visibility_ceiling(String.t(), String.t(), atom()) ::
           :ok | {:error, String.t()}
   def validate_visibility_ceiling(child_visibility, parent_visibility, resource_type) do
-    child_rank = Map.get(@visibility_rank, child_visibility, 0)
-    parent_rank = Map.get(@visibility_rank, parent_visibility, 0)
+    child_exposure = Map.get(@audience_exposure, child_visibility, 0)
+    parent_exposure = Map.get(@audience_exposure, parent_visibility, 0)
 
-    if child_rank >= parent_rank do
+    if child_exposure <= parent_exposure do
       :ok
     else
       {:error,
@@ -351,32 +356,24 @@ defmodule Stacks.Visibility do
   # label cardinality stays bounded.
   # ---------------------------------------------------------------------------
 
-  # Profile-visibility exposure ranking for CHANGE-DIRECTION classification only.
-  # Distinct from @visibility_rank (which drives the shelf/placement ceiling and
-  # deliberately omits "group"): a profile may be stored as "group" (allowed at
-  # registration), and although updates only ever set "platform"/"owner", the
-  # PRIOR value can be "group". A group profile is more restrictive than
-  # "platform" (only group members) but less than "owner" (only self), so it sits
-  # between them. Ranking it explicitly keeps :tighten/:loosen precise instead of
-  # collapsing "group" to 0 (which mislabelled group→platform as a tighten).
-  @profile_visibility_rank %{"public" => 0, "platform" => 1, "group" => 2, "owner" => 3}
-
   @doc """
-  Classifies a profile-visibility change relative to the profile exposure
-  ranking (`"public"` < `"platform"` < `"group"` < `"owner"`).
+  Classifies a visibility change by movement along the Audience ladder
+  (`owner < group < platform < public`, exposure ascending). Uses the single
+  `@audience_exposure` map — `"group"` sits between `owner` and `platform`, so a
+  group→platform change is correctly a `:loosen` and platform→group a `:tighten`.
 
-  - `:tighten` — the new value is more restrictive
-  - `:loosen` — the new value is less restrictive
-  - `:same` — no change in restrictiveness
+  - `:tighten` — the new value is LESS exposed (more restrictive)
+  - `:loosen` — the new value is MORE exposed (less restrictive)
+  - `:same` — no change in exposure
   """
   @spec classify_visibility_direction(String.t(), String.t()) :: :tighten | :loosen | :same
   def classify_visibility_direction(old_visibility, new_visibility) do
-    old_rank = Map.get(@profile_visibility_rank, old_visibility, 0)
-    new_rank = Map.get(@profile_visibility_rank, new_visibility, 0)
+    old_exposure = Map.get(@audience_exposure, old_visibility, 0)
+    new_exposure = Map.get(@audience_exposure, new_visibility, 0)
 
     cond do
-      new_rank > old_rank -> :tighten
-      new_rank < old_rank -> :loosen
+      new_exposure < old_exposure -> :tighten
+      new_exposure > old_exposure -> :loosen
       true -> :same
     end
   end
