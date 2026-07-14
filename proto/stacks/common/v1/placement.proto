@@ -130,6 +130,15 @@ message BookPlacement {
 
   // User's personal notes about this book.
   string notes = 6 [json_name = "notes"];
+
+  // Who can see this placement (string on wire, e.g. "owner", "group", "platform").
+  // Drives the per-placement visibility dropdown selection on the frontend.
+  string visibility = 7 [json_name = "visibility"];
+
+  // The parent bookshelf's visibility — the ceiling used for client-side option
+  // greying (mirrors the server validate_visibility_ceiling/3 422). Denormalised
+  // onto the placement payload from op.bookshelves.visibility.
+  string bookshelf_visibility = 8 [json_name = "bookshelf_visibility"];
 }
 
 // Shelf represents a physical horizontal shelf within a bookshelf.
