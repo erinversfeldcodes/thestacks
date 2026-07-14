@@ -136,6 +136,20 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
+  Returns all of a user's bookshelves ordered by name, each as a `%{name, visibility}`
+  map. Used by the privacy settings screen to seed the current per-shelf visibility
+  so a returning user sees their saved values rather than defaults.
+  """
+  @spec list_user_bookshelves(binary()) :: [%{name: String.t(), visibility: String.t()}]
+  def list_user_bookshelves(user_id) do
+    Bookshelf
+    |> where([b], b.user_id == ^user_id)
+    |> order_by([b], b.name)
+    |> select([b], %{name: b.name, visibility: b.visibility})
+    |> Repo.all()
+  end
+
+  @doc """
   Returns all active (non-removed) placements for a user on the named bookshelf,
   with books preloaded.
   """

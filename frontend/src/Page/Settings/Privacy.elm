@@ -56,6 +56,7 @@ type Msg
     | UserTypesDeleteConfirmation String
     | UserClicksDeleteAccount
     | GotDeleteResponse (Result Http.Error ())
+    | GotPrivacySettings (Result Http.Error Api.PrivacySettings)
     | GotBlockedUsers (Result Http.Error Api.BlockedUsersResponse)
     | LoadMoreBlocked
     | UserClicksUnblock String
@@ -107,6 +108,24 @@ defaultShelves =
     ]
 
 
+{-| Overlay the persisted per-shelf visibilities from the server onto the fixed
+set of named shelves, preserving each shelf's human label and full ordering. A
+shelf the user has never customised keeps its default visibility.
+-}
+seedShelves : List Api.ShelfVisibilitySetting -> List ShelfVisibility
+seedShelves saved =
+    List.map
+        (\sv ->
+            case List.filter (\s -> s.name == sv.name) saved of
+                match :: _ ->
+                    { sv | visibility = match.visibility }
+
+                [] ->
+                    sv
+        )
+        defaultShelves
+
+
 init : Model
 init =
     { profileVisibility = "owner"
@@ -135,7 +154,10 @@ initWithToken maybeToken =
     case maybeToken of
         Just token ->
             ( { init | blockedUsers = Loading }
-            , Api.listBlockedUsers token 1 GotBlockedUsers
+            , Cmd.batch
+                [ Api.getPrivacySettings token GotPrivacySettings
+                , Api.listBlockedUsers token 1 GotBlockedUsers
+                ]
             )
 
         Nothing ->
@@ -298,6 +320,25 @@ update msg model maybeToken =
                     else
                         ( { model | deleting = Failure err }, Cmd.none, NoOut )
 
+        GotPrivacySettings result ->
+            case result of
+                Ok settings ->
+                    ( { model
+                        | profileVisibility = settings.profileVisibility
+                        , shelfVisibilities = seedShelves settings.shelves
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        -- Keep the defaults on failure; the user can still save.
+                        ( model, Cmd.none, NoOut )
+
         GotBlockedUsers result ->
             case result of
                 Ok response ->
@@ -411,7 +452,7 @@ view model =
             , p [ class "settings-section__desc" ]
                 [ text "Override visibility per shelf. Each shelf's visibility is capped by your profile visibility (the ceiling rule)." ]
             , div [ class "privacy__shelves" ]
-                (List.map viewShelfRow model.shelfVisibilities)
+                (List.map (viewShelfRow model.profileVisibility) model.shelfVisibilities)
             , viewFeedback model.savingShelf
             ]
         , viewExportSection model.exporting
@@ -644,8 +685,28 @@ viewDeleteFeedback deleting =
             text ""
 
 
-viewShelfRow : ShelfVisibility -> Html Msg
-viewShelfRow sv =
+{-| A shelf may not be _more visible_ than the profile ceiling. Mirrors the
+server rule in `Stacks.Shelving.validate_bookshelf_profile_ceiling/3`: only an
+`owner` profile acts as a hard ceiling — it hides all content — so when the
+profile is `owner` every shelf option other than `owner` is greyed out. A
+`platform` profile imposes no additional restriction, so nothing is greyed.
+-}
+shelfOptionExceedsCeiling : String -> String -> Bool
+shelfOptionExceedsCeiling profileVisibility optionValue =
+    profileVisibility == "owner" && optionValue /= "owner"
+
+
+viewShelfRow : String -> ShelfVisibility -> Html Msg
+viewShelfRow profileVisibility sv =
+    let
+        shelfOption optionValue optionLabel =
+            option
+                [ value optionValue
+                , selected (sv.visibility == optionValue)
+                , disabled (shelfOptionExceedsCeiling profileVisibility optionValue)
+                ]
+                [ text optionLabel ]
+    in
     div [ class "privacy__shelf-row" ]
         [ div [ class "form-field" ]
             [ label [ class "form-field__label" ] [ text sv.label ]
@@ -653,9 +714,9 @@ viewShelfRow sv =
                 [ class "form-field__select"
                 , onInput (SetShelfVisibility sv.name)
                 ]
-                [ option [ value "owner", selected (sv.visibility == "owner") ] [ text "Only me" ]
-                , option [ value "group", selected (sv.visibility == "group") ] [ text "Group" ]
-                , option [ value "platform", selected (sv.visibility == "platform") ] [ text "Platform" ]
+                [ shelfOption "owner" "Only me"
+                , shelfOption "group" "Group"
+                , shelfOption "platform" "Platform"
                 ]
             ]
         , button

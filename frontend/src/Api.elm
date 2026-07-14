@@ -18,8 +18,10 @@ module Api exposing
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
+    , PrivacySettings
     , QualityTrends
     , RegisterError(..)
+    , ShelfVisibilitySetting
     , SourceHealth
     , UploadInit
     , acceptInvitation
@@ -56,6 +58,7 @@ module Api exposing
     , getMyPlacements
     , getOnboardingStatus
     , getPostComments
+    , getPrivacySettings
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
@@ -1799,6 +1802,57 @@ listBlockedUsers token page toMsg =
         , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blockedUsersResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| A single shelf's saved visibility as returned by `GET /api/settings/privacy`.
+-}
+type alias ShelfVisibilitySetting =
+    { name : String
+    , visibility : String
+    }
+
+
+{-| The current user's saved privacy settings: their profile visibility plus the
+per-shelf visibility overrides. Used to seed the privacy screen so a returning
+user sees their stored values rather than hardcoded defaults.
+-}
+type alias PrivacySettings =
+    { profileVisibility : String
+    , shelves : List ShelfVisibilitySetting
+    }
+
+
+shelfVisibilitySettingDecoder : Decoder ShelfVisibilitySetting
+shelfVisibilitySettingDecoder =
+    Decode.map2 ShelfVisibilitySetting
+        (Decode.field "name" Decode.string)
+        (Decode.field "visibility" Decode.string)
+
+
+privacySettingsDecoder : Decoder PrivacySettings
+privacySettingsDecoder =
+    Decode.map2 PrivacySettings
+        (Decode.field "profile_visibility" Decode.string)
+        (Decode.field "shelves" (Decode.list shelfVisibilitySettingDecoder))
+
+
+{-| GET /api/settings/privacy — the current user's saved profile visibility and
+per-shelf visibility overrides, used to seed the privacy settings screen.
+-}
+getPrivacySettings :
+    String
+    -> (Result Http.Error PrivacySettings -> msg)
+    -> Cmd msg
+getPrivacySettings token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/privacy"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg privacySettingsDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

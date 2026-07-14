@@ -7,6 +7,7 @@ defmodule StacksWeb.UserSettingsController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias Stacks.Shelving
 
   @doc "PUT /api/settings/age_verification — set the age_verified flag for the current user."
   def update_age_verification(conn, %{"age_verified" => age_verified})
@@ -117,6 +118,27 @@ defmodule StacksWeb.UserSettingsController do
       {:error, changeset} ->
         conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
     end
+  end
+
+  @doc """
+  GET /api/settings/privacy — return the current user's profile visibility and
+  their per-shelf visibilities so the privacy screen can seed saved values
+  instead of hardcoded defaults.
+  """
+  def show_privacy(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+
+    shelves =
+      user.id
+      |> Shelving.list_user_bookshelves()
+      |> Enum.map(fn %{name: name, visibility: visibility} ->
+        %{name: name, visibility: visibility}
+      end)
+
+    json(conn, %{
+      profile_visibility: user.profile_visibility,
+      shelves: shelves
+    })
   end
 
   @doc "PUT /api/settings/profile_visibility — set the profile_visibility for the current user."
