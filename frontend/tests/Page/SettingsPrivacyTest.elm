@@ -1,6 +1,8 @@
 module Page.SettingsPrivacyTest exposing (suite)
 
+import Api
 import Expect
+import Html.Attributes
 import Http
 import Page.Settings.Privacy as Privacy exposing (Msg(..))
 import Test exposing (Test, describe, test)
@@ -176,7 +178,75 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "never appear in search engine results" ]
             ]
+        , describe "loading saved visibility (FE-1)"
+            [ test "GotPrivacySettings Ok seeds the profile visibility from the payload" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Privacy.update
+                                (GotPrivacySettings (Ok samplePrivacySettings))
+                                Privacy.init
+                                token
+                    in
+                    -- Persisted "platform" is reflected, not the hardcoded "owner" default.
+                    model.profileVisibility |> Expect.equal "platform"
+            , test "GotPrivacySettings Ok seeds shelf rows from the payload" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Privacy.update
+                                (GotPrivacySettings (Ok samplePrivacySettings))
+                                Privacy.init
+                                token
+
+                        wishlistVis =
+                            model.shelfVisibilities
+                                |> List.filter (\sv -> sv.name == "wishlist")
+                                |> List.head
+                                |> Maybe.map .visibility
+                    in
+                    -- Default is "platform"; the payload persists "owner".
+                    wishlistVis |> Expect.equal (Just "owner")
+            , test "GotPrivacySettings Ok keeps default label + full shelf set" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Privacy.update
+                                (GotPrivacySettings (Ok samplePrivacySettings))
+                                Privacy.init
+                                token
+                    in
+                    List.length model.shelfVisibilities |> Expect.equal 5
+            ]
+        , describe "shelf ceiling greying (FE-2)"
+            [ test "an owner profile greys shelf options above the ceiling" <|
+                \_ ->
+                    -- The "group" option is shelf-only (no such option in the
+                    -- profile select), so this isolates the shelf-row greying.
+                    { init0 | profileVisibility = "owner" }
+                        |> Privacy.view
+                        |> Query.fromHtml
+                        |> Query.findAll [ Selector.attribute (Html.Attributes.value "group") ]
+                        |> Query.each (Query.has [ Selector.disabled True ])
+            , test "a platform profile leaves shelf options enabled" <|
+                \_ ->
+                    { init0 | profileVisibility = "platform" }
+                        |> Privacy.view
+                        |> Query.fromHtml
+                        |> Query.findAll [ Selector.attribute (Html.Attributes.value "group") ]
+                        |> Query.each (Query.has [ Selector.disabled False ])
+            ]
         ]
+
+
+samplePrivacySettings : Api.PrivacySettings
+samplePrivacySettings =
+    { profileVisibility = "platform"
+    , shelves =
+        [ { name = "library", visibility = "platform" }
+        , { name = "wishlist", visibility = "owner" }
+        ]
+    }
 
 
 init0 : Privacy.Model
