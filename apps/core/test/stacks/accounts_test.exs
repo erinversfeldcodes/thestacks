@@ -74,6 +74,66 @@ defmodule Stacks.AccountsTest do
     end
   end
 
+  describe "handles (/u/:handle) — #211" do
+    test "register/1 auto-generates a valid, slugified handle from the display name" do
+      {:ok, user} =
+        Accounts.register(%{
+          "email" => "handle_gen@example.com",
+          "password" => "secret123",
+          "display_name" => "Ada Lovelace"
+        })
+
+      assert user.handle =~ ~r/^[a-z0-9_]{3,30}$/
+      assert String.starts_with?(user.handle, "ada_lovelace_")
+    end
+
+    test "register/1 falls back to a 'reader' base when the display name is blank" do
+      {:ok, user} =
+        Accounts.register(%{"email" => "no_name@example.com", "password" => "secret123"})
+
+      assert user.handle =~ ~r/^reader_[a-z0-9]{6}$/
+    end
+
+    test "generate_handle/1 slugifies the name and appends a random suffix" do
+      assert Accounts.generate_handle("Ada Lovelace!!") =~ ~r/^ada_lovelace_[a-z0-9]{6}$/
+      assert Accounts.generate_handle(nil) =~ ~r/^reader_[a-z0-9]{6}$/
+      assert Accounts.generate_handle("💥") =~ ~r/^reader_[a-z0-9]{6}$/
+    end
+
+    test "get_user_by_handle/1 is case-insensitive and trims" do
+      user = insert(:user, handle: "adalovelace")
+      assert Accounts.get_user_by_handle("AdaLovelace").id == user.id
+      assert Accounts.get_user_by_handle("  adalovelace  ").id == user.id
+      assert Accounts.get_user_by_handle("nobody") == nil
+    end
+
+    test "validate_handle/1 rejects bad format, reserved words, and too-short handles" do
+      import Ecto.Changeset, only: [cast: 3]
+
+      bad =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "No Spaces!"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute bad.valid?
+
+      reserved =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "Admin"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute reserved.valid?
+      assert "is reserved" in errors_on(reserved).handle
+
+      short =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "ab"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute short.valid?
+    end
+  end
+
   # Punch #5 (Issue #124): the user.registered event is emitted INSIDE the
   # registration Ecto.Multi. If the transaction rolls back, no event row must be
   # written to event_log — an event that describes a registration that never

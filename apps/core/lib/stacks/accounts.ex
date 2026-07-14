@@ -44,6 +44,8 @@ defmodule Stacks.Accounts do
     |> validate_length(:password, min: 8, message: "must be at least 8 characters")
     |> validate_inclusion(:role, ["owner", "user"])
     |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
+    |> maybe_put_handle()
+    |> validate_handle()
     |> unique_constraint(:email)
     |> hash_password()
   end
@@ -151,6 +153,82 @@ defmodule Stacks.Accounts do
 
   defp hash_password(changeset), do: changeset
 
+  # ---------------------------------------------------------------------------
+  # Public URL handle (/u/:handle) — #211
+  # ---------------------------------------------------------------------------
+
+  @handle_format ~r/^[a-z0-9_]{3,30}$/
+
+  @doc """
+  Validates/normalises the `:handle` field: force-lowercase, format
+  (`[a-z0-9_]{3,30}`), not reserved, and case-insensitively unique. Shared by
+  registration and the settings profile update.
+  """
+  def validate_handle(changeset) do
+    changeset
+    |> update_change(:handle, &normalise_handle/1)
+    |> validate_format(:handle, @handle_format,
+      message: "must be 3-30 characters: lowercase letters, numbers, underscores"
+    )
+    |> validate_reserved_handle()
+    |> unique_constraint(:handle, name: :users_lower_handle_index)
+  end
+
+  defp normalise_handle(value) when is_binary(value),
+    do: value |> String.trim() |> String.downcase()
+
+  defp normalise_handle(value), do: value
+
+  defp validate_reserved_handle(changeset) do
+    case get_change(changeset, :handle) do
+      handle when is_binary(handle) ->
+        if Stacks.Accounts.ReservedHandles.reserved?(handle),
+          do: add_error(changeset, :handle, "is reserved"),
+          else: changeset
+
+      _ ->
+        changeset
+    end
+  end
+
+  # Auto-assign a handle at registration when none is present, so every user has
+  # a reachable /u/:handle. Users can change it later in settings (#212).
+  defp maybe_put_handle(changeset) do
+    case get_field(changeset, :handle) do
+      nil -> put_change(changeset, :handle, generate_handle(get_field(changeset, :display_name)))
+      _ -> changeset
+    end
+  end
+
+  @doc """
+  Generates a likely-unique handle from a display name: a slug of the name
+  (≤20 chars, non-alphanumerics collapsed to `_`, `reader` when empty) plus a
+  6-char random suffix. The random suffix makes a collision astronomically
+  unlikely; `unique_constraint(:handle)` is the backstop. Mirrors the SQL backfill
+  in `20260714200500_backfill_and_constrain_user_handles`.
+  """
+  @spec generate_handle(String.t() | nil) :: String.t()
+  def generate_handle(display_name) do
+    slugify_handle_base(display_name) <> "_" <> handle_random_suffix()
+  end
+
+  defp slugify_handle_base(name) when is_binary(name) do
+    slug =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "_")
+      |> String.trim("_")
+      |> String.slice(0, 20)
+
+    if slug == "", do: "reader", else: slug
+  end
+
+  defp slugify_handle_base(_), do: "reader"
+
+  defp handle_random_suffix do
+    :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower) |> String.slice(0, 6)
+  end
+
   @doc """
   Returns a user by ID, or nil if not found.
   """
@@ -170,6 +248,18 @@ defmodule Stacks.Accounts do
   def get_user_by_email(email) do
     Repo.get_by(User, email: String.downcase(email))
   end
+
+  @doc """
+  Returns a user by public handle (case-insensitive), or nil if not found.
+  Keys the public profile at `/u/:handle`.
+  """
+  @spec get_user_by_handle(String.t()) :: User.t() | nil
+  def get_user_by_handle(handle) when is_binary(handle) do
+    normalised = String.downcase(String.trim(handle))
+    Repo.one(from u in User, where: fragment("lower(?)", u.handle) == ^normalised, limit: 1)
+  end
+
+  def get_user_by_handle(_), do: nil
 
   @doc """
   Marks a user's email as confirmed, clearing any pending confirmation token.
