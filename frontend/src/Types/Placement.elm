@@ -38,6 +38,7 @@ type alias Placement =
     , currentPage : Maybe Int
     , startedAt : Maybe String
     , finishedAt : Maybe String
+    , visibility : Maybe String
     }
 
 
@@ -94,6 +95,16 @@ falls back to the slim shape (with bookshelf\_name, no book).
 -}
 placementDecoder : Decoder Placement
 placementDecoder =
+    -- Capture a top-level `visibility` field regardless of which base placement
+    -- shape matched — the proto base decoders drop unknown fields, so we layer
+    -- the optional visibility read on top.
+    Decode.map2 (\p vis -> { p | visibility = vis })
+        placementBaseDecoder
+        (Decode.maybe (Decode.field "visibility" Decode.string))
+
+
+placementBaseDecoder : Decoder Placement
+placementBaseDecoder =
     Decode.oneOf
         [ placementWithBookDecoder
         , placementWithoutBookDecoder
@@ -126,6 +137,7 @@ placementSummaryDecoder =
             , currentPage = Nothing
             , startedAt = Nothing
             , finishedAt = Nothing
+            , visibility = Nothing
             }
         )
         (Decode.oneOf [ Decode.field "book_id" Decode.string, Decode.succeed "" ])
@@ -187,6 +199,7 @@ placementWithBookDecoder =
             , currentPage = zeroToNothing detail.currentPage
             , startedAt = emptyToNothing detail.startedAt
             , finishedAt = emptyToNothing detail.finishedAt
+            , visibility = Nothing
             }
         )
         Proto.decodePlacementDetail
@@ -228,6 +241,7 @@ fromProtoBookPlacement bp =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }
 
 
@@ -247,4 +261,5 @@ fromProtoPlacementRef pr =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }

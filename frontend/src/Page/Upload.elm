@@ -639,6 +639,7 @@ placementStub =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }
 
 

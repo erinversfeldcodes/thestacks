@@ -10,6 +10,7 @@ import Page.Bookshelf as Bookshelf
 import Test exposing (Test, describe, test)
 import Types.Book exposing (Author, Book, VisibilityTier(..))
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Visibility
 
 
 
@@ -48,6 +49,9 @@ bookDetailInit =
     , entryAnimationActive = False
     , isAuthenticated = True
     , availability = NotAsked
+    , placementVisibility = Types.Visibility.Platform
+    , shelfCeiling = Types.Visibility.Public
+    , visibilityState = NotAsked
     }
 
 
@@ -173,7 +177,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing }))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing }))
                                 bookDetailInit
                                 Nothing
                     in

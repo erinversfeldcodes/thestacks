@@ -77,6 +77,7 @@ dummyPlacement =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }
 
 
@@ -245,7 +246,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
@@ -261,7 +262,7 @@ suite =
                             { init_ | pendingBookIds = [ "book-1", "book-2" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.pendingBookIds |> Expect.equal [ "book-2" ]
@@ -290,7 +291,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing })) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , -- US-1.1.6 | Suite 10: Elm
@@ -603,7 +604,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBook, placement = Nothing }
+                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing }
 
                         ( model, _, _ ) =
                             Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
@@ -629,7 +630,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -640,7 +641,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing

@@ -174,6 +174,7 @@ book :
     , title : String
     , author : String
     , coverImageUrl : Maybe String
+    , hidden : Bool
     }
     -> Html msg
 book config =
@@ -268,6 +269,13 @@ book config =
                 Softened ->
                     ", well-loved"
 
+        hiddenSuffix =
+            if config.hidden then
+                ", hidden (only visible to you)"
+
+            else
+                ""
+
         ariaLabel =
             "Book: "
                 ++ config.title
@@ -277,16 +285,29 @@ book config =
                 ++ String.fromInt config.pageCount
                 ++ " pages"
                 ++ wearSuffix
+                ++ hiddenSuffix
+
+        -- Owner-only placements on an otherwise-visible shelf render as a
+        -- faint outline so the owner still sees the book is there but private.
+        hiddenAttrs =
+            if config.hidden then
+                [ class "book book--hidden"
+                , style "opacity" "0.35"
+                ]
+
+            else
+                [ class "book" ]
     in
     div
-        [ class "book"
-        , testId "book-spine"
-        , style "width" (String.fromInt widthPx ++ "px")
-        , style "height" (String.fromInt heightPx ++ "px")
-        , style "transform-style" "preserve-3d"
-        , title (config.title ++ " — " ++ config.author)
-        , attribute "aria-label" ariaLabel
-        ]
+        (hiddenAttrs
+            ++ [ testId "book-spine"
+               , style "width" (String.fromInt widthPx ++ "px")
+               , style "height" (String.fromInt heightPx ++ "px")
+               , style "transform-style" "preserve-3d"
+               , title (config.title ++ " — " ++ config.author)
+               , attribute "aria-label" ariaLabel
+               ]
+        )
         [ div
             [ class "book__face book__spine"
             , style "background-color" tex.bg
