@@ -504,7 +504,10 @@
         visibility_group_id: %{belongs_to: Stacks.Social.Group},
         published_at: %{ecto_type: :utc_datetime_usec},
         # API-only fields — no DB column, excluded from Ecto schema and dbt
-        associations: %{api_only: true}
+        associations: %{api_only: true},
+        # Denormalised projection of the author's users.display_name (block-user
+        # confirmation label). Serialized from post.user, never stored on blog_posts.
+        author_display_name: %{api_only: true}
       }
     },
     %{
@@ -1205,7 +1208,9 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
       function_name: :blog_post,
-      skip_fields: [:associations],
+      # author_display_name is projected from post.user by ProtoJSON.blog_post/1,
+      # not a struct field (api_only) — skip it in the base Gen serializer.
+      skip_fields: [:associations, :author_display_name],
       field_overrides: %{}
     },
     %{

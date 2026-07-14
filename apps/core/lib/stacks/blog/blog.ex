@@ -161,6 +161,9 @@ defmodule Stacks.Blog do
         nil
 
       post ->
+        # Preload the author so the serializer can emit author_display_name
+        # (the block-user confirmation label).
+        post = Repo.preload(post, :user)
         if Visibility.can_view?(post, viewer), do: post, else: nil
     end
   end
@@ -192,6 +195,8 @@ defmodule Stacks.Blog do
 
     query
     |> Repo.all()
+    # Preload authors so the serializer can emit author_display_name.
+    |> Repo.preload(:user)
     |> Enum.filter(&Visibility.can_view?(&1, viewer))
   end
 
