@@ -141,6 +141,81 @@ defmodule CoreWeb.Telemetry do
       sum("stacks.costs.recorded.amount_cents",
         tags: [:category, :service],
         description: "Platform cost recorded in cents"
+      ),
+
+      # ── Visibility & Privacy (Issue #197 / #122 §12) ─────────────────
+      counter("stacks.visibility.profile_change.count",
+        event_name: [:stacks, :visibility, :profile_change],
+        tags: [:direction],
+        description: "Profile-visibility changes, tagged tighten/loosen/same"
+      ),
+      counter("stacks.visibility.recap.count",
+        event_name: [:stacks, :visibility, :recap],
+        tags: [:outcome],
+        description: "Visibility recap job outcomes (capped/noop/error)"
+      ),
+      sum("stacks.visibility.recap.bookshelves_capped",
+        event_name: [:stacks, :visibility, :recap],
+        measurement: :bookshelves_capped,
+        tags: [:outcome],
+        description: "Bookshelves capped by the visibility recap job"
+      ),
+      sum("stacks.visibility.recap.placements_capped",
+        event_name: [:stacks, :visibility, :recap],
+        measurement: :placements_capped,
+        tags: [:outcome],
+        description: "Placements capped by the visibility recap job"
+      ),
+      sum("stacks.visibility.recap.posts_capped",
+        event_name: [:stacks, :visibility, :recap],
+        measurement: :posts_capped,
+        tags: [:outcome],
+        description: "Blog posts capped by the visibility recap job"
+      ),
+      counter("stacks.visibility.ceiling_rejection.count",
+        event_name: [:stacks, :visibility, :ceiling_rejection],
+        tags: [:resource_type],
+        description: "Visibility-ceiling rejections by resource type"
+      ),
+
+      # ── Social: blocking (Issue #197 / #122 §12) ─────────────────────
+      counter("stacks.social.block.count",
+        event_name: [:stacks, :social, :block],
+        description: "Successful user blocks"
+      ),
+      counter("stacks.social.unblock.count",
+        event_name: [:stacks, :social, :unblock],
+        description: "Successful user unblocks"
+      ),
+      counter("stacks.social.block_error.count",
+        event_name: [:stacks, :social, :block_error],
+        tags: [:reason],
+        description: "Block errors by reason (cannot_block_self/already_blocked)"
+      ),
+
+      # ── Rate limiting (Issue #197 — generic, tagged by bucket) ───────
+      counter("stacks.rate_limit.hit.count",
+        event_name: [:stacks, :rate_limit, :hit],
+        tags: [:bucket],
+        description: "Rate-limit rejections tagged by bucket (incl. :social)"
+      ),
+
+      # ── ViewAs preview (Issue #197 / #122 §12) ───────────────────────
+      counter("stacks.view_as.usage.count",
+        event_name: [:stacks, :view_as, :usage],
+        tags: [:perspective],
+        description: "ViewAs usage by simulated perspective"
+      ),
+      counter("stacks.view_as.error.count",
+        event_name: [:stacks, :view_as, :error],
+        tags: [:reason, :phase],
+        description: "ViewAs errors by reason + phase (parse/authorize)"
+      ),
+
+      # ── Search-engine privacy (Issue #197 / #122 §12) ────────────────
+      counter("stacks.crawler.robots_fetch.count",
+        event_name: [:stacks, :crawler, :robots_fetch],
+        description: "robots.txt fetch count"
       )
     ]
   end

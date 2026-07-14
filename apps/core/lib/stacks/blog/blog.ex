@@ -486,8 +486,12 @@ defmodule Stacks.Blog do
 
   defp validate_ceiling(child_visibility, parent_visibility) do
     case Visibility.validate_visibility_ceiling(child_visibility, parent_visibility, :post) do
-      :ok -> :ok
-      {:error, _reason} -> {:error, :visibility_ceiling}
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        Visibility.emit_ceiling_rejection(:post)
+        {:error, :visibility_ceiling}
     end
   end
 

@@ -496,14 +496,18 @@ defmodule Stacks.Accounts do
   @spec update_profile_visibility(binary(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_profile_visibility(user_id, visibility) do
+    existing = get_user!(user_id)
+    old_visibility = existing.profile_visibility
+
     result =
-      user_id
-      |> get_user!()
+      existing
       |> profile_visibility_changeset(%{profile_visibility: visibility})
       |> Repo.update()
 
     case result do
       {:ok, user} ->
+        Stacks.Visibility.emit_profile_visibility_change(old_visibility, visibility)
+
         Events.emit_safe(%{
           event_type: "user.profile_visibility_changed",
           aggregate_type: "user",

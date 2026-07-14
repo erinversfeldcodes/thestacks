@@ -10,6 +10,10 @@ defmodule CoreWeb.Endpoint do
 
   plug Plug.RequestId
 
+  # Must precede Plug.Static — it serves /robots.txt and halts before any
+  # later plug runs, so crawler-fetch telemetry has to be observed here first.
+  plug StacksWeb.Plugs.CrawlerTelemetry
+
   plug Plug.Static,
     at: "/",
     from: {:core, "priv/static"},
