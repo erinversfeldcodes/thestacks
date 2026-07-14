@@ -225,9 +225,18 @@ overlay types are defined **once** in proto and generated everywhere:
 | `platform` | profile/shelf/placement/blog | `AUDIENCE_PLATFORM` | — |
 | `public` (placement, phantom) | placement | `AUDIENCE_PLATFORM` | *(never truly public today)* |
 | `visibility_tier = public` | book | `AUDIENCE_PUBLIC` (reserved→PLATFORM effective) | `Listed` |
-| `visibility_tier = unlisted` | book | *(audience unchanged)* | `Unlisted` |
-| `visibility_tier = private` | book | `AUDIENCE_OWNER` | — |
 | `visibility_tier = age_gated` | book | *(audience unchanged)* | `AgeGate = true` |
+| `visibility_tier = unlisted` | book | *(audience unchanged)* | `Unlisted` — **⚠️ proto-only, ZERO rows** |
+| `visibility_tier = private` | book | `AUDIENCE_OWNER` | **⚠️ proto-only, ZERO rows** |
+
+> **Correction (2026-07-14, from the #209 characterization test).** The DB type is
+> `CREATE TYPE op.visibility_tier AS ENUM ('public', 'age_gated')` — the proto's
+> `unlisted`/`private` were never added to it and are **impossible to store**
+> (insert raises `invalid input value for enum`). So the book decomposition has only
+> two live values (`public`, `age_gated`) and **no `unlisted`/`private` rows to
+> migrate** — it reduces to "extract the `age_gated` boolean into an AgeGate axis."
+> Any future `unlisted`/`private` behaviour is a NEW feature (new enum members +
+> resolver logic), not a data migration.
 | `invite_only` / `platform` | group | *(NOT audience — GroupJoin enum, unchanged)* | — |
 
 **Testing requirement**
