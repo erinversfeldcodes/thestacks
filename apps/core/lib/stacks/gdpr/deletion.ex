@@ -26,6 +26,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.User
   alias Stacks.Audit
+  alias Stacks.Blog.PostComment
   alias Stacks.Events.EventLog
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
@@ -63,6 +64,24 @@ defmodule Stacks.GDPR.Deletion do
     end)
     |> Multi.run(:delete_bookshelves, fn repo, _ ->
       {count, _} = repo.delete_all(from bs in Bookshelf, where: bs.user_id == ^user_id)
+      {:ok, count}
+    end)
+    |> Multi.run(:erase_comments, fn repo, _ ->
+      # GDPR erasure: op.post_comments.body is user-authored free-text PII.
+      # The author_id FK is ON DELETE SET NULL, so `repo.delete(user)` below
+      # nulls authorship but leaves the comment BODY behind — a right-to-erasure
+      # leak (#185). Comments are threaded (parent_id → replies), so deleting
+      # the user's comments outright would orphan any replies hanging off them.
+      # We therefore ANONYMISE: tombstone the body (strips the PII) and null
+      # author_id in-step (keeping the row self-consistent within this txn; the
+      # FK would null it anyway on delete_user). Thread structure is preserved.
+      # Scoped strictly to the erased user's own comments.
+      {count, _} =
+        repo.update_all(
+          from(c in PostComment, where: c.author_id == ^user_id),
+          set: [body: "[deleted]", author_id: nil]
+        )
+
       {:ok, count}
     end)
     |> Multi.run(:delete_user, fn repo, _ ->
