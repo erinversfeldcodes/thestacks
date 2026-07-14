@@ -56,6 +56,10 @@ message User {
   // User-chosen display name shown on the platform.
   string display_name = 3 [json_name = "display_name"];
 
+  // Public URL handle — unique, lowercase [a-z0-9_], 3-30 chars. Keys the public
+  // profile at /u/:handle. Not PII (user-chosen public identifier).
+  string handle = 32 [json_name = "handle"];
+
   // The user's role on the platform (string on wire, e.g. "owner", "user").
   string role = 4 [json_name = "role"];
 
