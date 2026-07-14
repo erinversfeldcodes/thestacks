@@ -480,6 +480,19 @@ defmodule StacksWeb.BlogControllerTest do
       assert message =~ "coming soon"
     end
 
+    test "returns 403 when chatting about another user's post (FF-2 ownership)", %{conn: conn} do
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
+      other_post = insert(:post, user: insert(:user))
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/blog/posts/#{other_post.id}/chat", %{message: "help me write"})
+
+      assert conn.status == 403
+    end
+
     test "returns 401 when unauthenticated", %{conn: conn} do
       user = insert(:user)
       post = insert(:post, user: user)
