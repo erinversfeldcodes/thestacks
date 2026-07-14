@@ -476,9 +476,36 @@ defmodule Stacks.Shelving do
       bookshelf ->
         bookshelf
         |> bookshelf_changeset(%{visibility: visibility})
+        |> validate_bookshelf_profile_ceiling(user_id, visibility)
         |> Repo.update()
     end
   end
+
+  # A bookshelf may not be made more visible than the owner's profile ceiling
+  # (US-10.2.1). Per Stacks.Visibility, only a "owner" profile acts as a hard
+  # ceiling — it hides all content — so when the profile is "owner" the bookshelf
+  # visibility must also be "owner". A "platform" profile imposes no additional
+  # restriction beyond the bookshelf's own value. The error is added to the
+  # changeset so callers get an Ecto.Changeset (HTTP 422 with visibility errors),
+  # consistent with the other visibility validations. Only applied to otherwise-
+  # valid visibility values so invalid-inclusion errors are surfaced normally.
+  defp validate_bookshelf_profile_ceiling(changeset, user_id, visibility)
+       when visibility in @valid_visibilities do
+    profile_visibility =
+      Repo.one(from(u in User, where: u.id == ^user_id, select: u.profile_visibility))
+
+    if profile_visibility == "owner" and visibility != "owner" do
+      add_error(
+        changeset,
+        :visibility,
+        "is less restrictive than the profile visibility ceiling"
+      )
+    else
+      changeset
+    end
+  end
+
+  defp validate_bookshelf_profile_ceiling(changeset, _user_id, _visibility), do: changeset
 
   @doc """
   Updates the visibility of a placement. Verifies ownership and enforces that
