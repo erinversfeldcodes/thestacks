@@ -42,6 +42,8 @@ Partners (bookshops, reading groups, cafes) push data via JSON API validated aga
 ### GDPR by Default
 4-tier data classification (public, personal, sensitive, external personal). Right to erasure, right to export. 30-day image retention. Consent with timestamps.
 
+**Any change touching migrations, Ecto schemas, event emitters, user-data endpoints/routes, workers, or dbt models MUST pass the `gdpr-review` skill** (`.claude/skills/gdpr-review/`) — a per-diff lens proving each new piece of personal data is reachable by erasure (`GDPR.Deletion.delete_user_data/1` + the schema-guard — free-text must be deleted/anonymised, not just author-nulled), included in export (`GDPR.Export.export_user_data/2`), gated where required (`ConsentCheck`), and kept out of event_log/audit/warehouse. Run it as a lens during code-review for data-touching PRs.
+
 ### Testing Philosophy
 12-layer test strategy across 4 execution environments (local offline, local->deployed, CI, CI->deployed). `TEST_TARGET` env var controls mock/real service wiring. See `docs/technical-architecture.md` section 16.
 
