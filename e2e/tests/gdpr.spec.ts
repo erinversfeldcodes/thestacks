@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import {
   E2E_PASSWORD,
   uniqueEmail,
   registerViaApi,
   fetchConfirmationToken,
   signInViaForm,
-  suiteAuthFile,
   ensureBookOnLibrary,
 } from "./helpers";
 
@@ -18,23 +17,34 @@ import {
  * Previously only covered by elm-program-test, which stubs the HTTP boundary —
  * the real UI → deployed backend → session-teardown path was never observed
  * live. That gap matters most for account deletion (irreversible right to
- * erasure), so the delete journey is driven against the real preview stack.
+ * erasure), so both journeys are driven against the real preview stack.
  *
- * Export is NON-destructive, so it reuses the seeded `settings` suite user (which
- * has placements, so no onboarding overlay, and adds zero load to the shared
- * `:auth` rate bucket). Delete is destructive, so it mints a throwaway user per
- * run — which, being placement-free, gets the onboarding overlay; we place a book
- * to satisfy the onboarding check before driving the settings UI.
+ * Each test owns a throwaway user (single-owner fixtures, no cross-file sharing).
+ * Export is a side-effecting write (queues a DataExportJob + emits an audit
+ * event), so it must NOT run against another spec's seeded user. Delete is
+ * destructive, so it inherently needs its own user. A brand-new user is
+ * placement-free and so gets the global onboarding overlay (which intercepts
+ * clicks everywhere, incl. settings); placing a book satisfies the onboarding
+ * check before we drive the UI.
+ *
+ * Both require the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)
+ * and test.skip cleanly without it, matching onboarding.spec / confirm-email.spec.
  */
 
-test.describe("GDPR — Export My Data (live browser journey)", () => {
-  // Non-destructive: reuse the seeded settings user (has placements → no overlay).
-  test.use({ storageState: suiteAuthFile("settings") });
-
+test.describe("GDPR — Export & Delete (live browser journeys)", () => {
   test("export: requesting a data export queues it against the real backend", async ({
     page,
+    request,
   }) => {
+    const { email, token } = await registerAndConfirm(request, "e2e-gdpr-export");
+    test.skip(
+      token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+
+    await signInAndSuppressOnboarding(page, email);
     await page.goto("/settings/privacy");
+    await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
     const exportBtn = page.getByRole("button", { name: "Export My Data" });
     await expect(exportBtn).toBeVisible({ timeout: 10000 });
@@ -46,9 +56,7 @@ test.describe("GDPR — Export My Data (live browser journey)", () => {
     // The error paragraph must not appear on success.
     await expect(page.locator(".error")).toHaveCount(0);
   });
-});
 
-test.describe("GDPR — Delete My Data (live browser journey)", () => {
   test("delete: type-to-confirm deletes the account, logs out, and invalidates the session", async ({
     page,
     request,
@@ -59,12 +67,7 @@ test.describe("GDPR — Delete My Data (live browser journey)", () => {
       "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
     );
 
-    await signInViaForm(page, email, E2E_PASSWORD);
-
-    // A brand-new user has no placements, so the onboarding overlay renders as a
-    // global modal and intercepts clicks — even on the settings page. Place a
-    // book so the onboarding check is satisfied and the overlay stays hidden.
-    await ensureBookOnLibrary(page);
+    await signInAndSuppressOnboarding(page, email);
 
     // Capture the live session token BEFORE deletion so we can prove the session
     // is actually invalidated afterwards (localStorage is cleared on logout).
@@ -74,7 +77,6 @@ test.describe("GDPR — Delete My Data (live browser journey)", () => {
     expect(authToken).toBeTruthy();
 
     await page.goto("/settings/privacy");
-
     // Guard: the onboarding overlay must be gone, or it will silently eat clicks.
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
@@ -155,4 +157,15 @@ async function registerAndConfirm(
   const confirm = await request.get(`/api/auth/confirm/${token}`);
   expect(confirm.ok()).toBeTruthy();
   return { email, token };
+}
+
+/**
+ * Sign the fresh user in and suppress the onboarding overlay. A placement-free
+ * user gets the global onboarding modal, whose backdrop intercepts pointer
+ * events on every page (including settings); placing a book satisfies the
+ * onboarding check so the overlay stays hidden across reloads.
+ */
+async function signInAndSuppressOnboarding(page: Page, email: string): Promise<void> {
+  await signInViaForm(page, email, E2E_PASSWORD);
+  await ensureBookOnLibrary(page);
 }
