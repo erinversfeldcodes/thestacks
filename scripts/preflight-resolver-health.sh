@@ -72,6 +72,26 @@ fetch_with_code() {
   curl -sS -w '\n%{http_code}' --max-time 10 "${url}" 2>/dev/null || printf '\n000'
 }
 
+# Retrying fetch for the REQUIRED Open Library per-ISBN checks. OL latency
+# currently sits at 4-7s and spikes past a single 10s ceiling under load, so one
+# slow response must not fail the whole deploy gate (especially when Google
+# Books — the only fallback — is quota-exhausted). Retries transport/timeout
+# errors (curl rc != 0) up to 3 attempts with 3s backoff, per-attempt max 15s.
+# On success prints the body and returns 0; on exhaustion prints the last curl
+# error text and returns 1.
+ol_fetch_with_retry() {
+  local url="$1" attempt body
+  for attempt in 1 2 3; do
+    if body=$(curl -fsS --max-time 15 "${url}" 2>&1); then
+      printf '%s' "${body}"
+      return 0
+    fi
+    [[ "${attempt}" -lt 3 ]] && sleep 3
+  done
+  printf '%s' "${body}"
+  return 1
+}
+
 check_open_library_search_endpoint() {
   local url="https://openlibrary.org/search.json?title=the+great+gatsby&fields=key,title,isbn&limit=1"
   local response body http_code doc_count
@@ -146,8 +166,8 @@ check_open_library() {
   local isbn="$1"
   local url="https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data"
   local body
-  if ! body=$(curl -fsS --max-time 10 "${url}" 2>&1); then
-    echo "FAIL preflight: Open Library does not resolve ${isbn} (curl error)"
+  if ! body=$(ol_fetch_with_retry "${url}"); then
+    echo "FAIL preflight: Open Library does not resolve ${isbn} (curl error after 3 attempts)"
     echo "  curl -sS \"${url}\" returned: ${body}"
     OL_FAILED+=("${isbn}")
     return 1
