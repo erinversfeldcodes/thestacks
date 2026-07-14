@@ -741,6 +741,17 @@ After the reviewer approves the **final phase** of the plan (or after every phas
 
 ## Phase 3: Completion
 
+**⛔ Completion Bar gate.** Before writing any completion file, using completion
+language, or opening a PR, verify the work meets **every** item of
+`docs/agents/standards/completion-bar.md` — with evidence, on the fully-integrated
+branch. In particular: every named story **driven live** (local stack first, then
+preview — not unit/code-read alone), all 13 layers validated (events + metrics
+**asserted**), **no dangling reviewer findings** (P2/P3 fixed or de-scoped to a
+tracked issue), logs clean under the live drive, and the issue's Pre-Check +
+Test-Audit regenerated to reflect reality. If any item is unmet, the issue/epic is
+**not complete** — resolve it or spin a tracked follow-up (and, in an epic,
+complete that follow-up before the PR).
+
 When all plan phases are approved and committed:
 1. Write `plans/<NNN>-<slug>-complete.md`.
 1a. **State update:** Set top-level `status` → `complete`. Rename `plans/<NNN>-<slug>-state.json` → `plans/<NNN>-<slug>-state-complete.json` as the archived record.
