@@ -17,15 +17,16 @@ import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
-import Html exposing (Html, a, button, div, h1, h2, h3, img, li, option, p, section, select, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, href, id, selected, src, style, tabindex, value)
-import Html.Events exposing (onClick, onInput)
+import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
+import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, title, value)
+import Html.Events exposing (on, onClick, onInput, targetValue)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Types.Book exposing (Book, Edition, authorName)
 import Types.Placement exposing (Format, Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Visibility as Visibility exposing (Visibility)
 import Util.TestId exposing (testId)
 
 
@@ -55,6 +56,9 @@ type alias Model =
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
     , availability : RemoteData Http.Error (List AvailabilityItem)
+    , placementVisibility : Visibility
+    , shelfCeiling : Visibility
+    , visibilityState : RemoteData Http.Error ()
     }
 
 
@@ -84,6 +88,8 @@ type Msg
     | DismissAgeGate
     | CloseOverlay
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
+    | PlacementVisibilitySelected String
+    | PlacementVisibilityUpdated (Result Http.Error String)
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -111,6 +117,13 @@ init bookId maybeToken maybePreviousRoute =
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
       , availability = Loading
+
+      -- Placement visibility defaults to "platform" (the DB default); the shelf
+      -- ceiling defaults to the most permissive ("public") so nothing is greyed
+      -- until the real values arrive with the placement payload.
+      , placementVisibility = Visibility.Platform
+      , shelfCeiling = Visibility.Public
+      , visibilityState = NotAsked
       }
     , Cmd.batch [ bookCmd, availabilityCmd ]
     )
@@ -201,6 +214,17 @@ update msg model maybeToken =
                             response.placement
                                 |> Maybe.map .formats
                                 |> Maybe.withDefault []
+
+                        placementVisibility =
+                            response.placement
+                                |> Maybe.andThen .visibility
+                                |> Maybe.andThen Visibility.fromString
+                                |> Maybe.withDefault Visibility.Platform
+
+                        shelfCeiling =
+                            response.bookshelfVisibility
+                                |> Maybe.andThen Visibility.fromString
+                                |> Maybe.withDefault Visibility.Public
                     in
                     ( { model
                         | book = Success response.book
@@ -209,6 +233,8 @@ update msg model maybeToken =
                         , selectedBookshelf = firstAvailableBookshelf bookshelf
                         , selectedFormats = formats
                         , selectedEdition = response.book.primaryEdition
+                        , placementVisibility = placementVisibility
+                        , shelfCeiling = shelfCeiling
                       }
                     , Cmd.none
                     , NoOut
@@ -376,6 +402,43 @@ update msg model maybeToken =
             in
             ( { model | selectedFormats = newFormats }, Cmd.none, NoOut )
 
+        PlacementVisibilitySelected raw ->
+            case ( Visibility.fromString raw, model.placement, maybeToken ) of
+                ( Just vis, Just placement, Just token ) ->
+                    -- Guard client-side against the ceiling (mirrors the server
+                    -- 422): a disabled option should never reach the wire.
+                    if Visibility.exceedsCeiling model.shelfCeiling vis then
+                        ( model, Cmd.none, NoOut )
+
+                    else
+                        ( { model | placementVisibility = vis, visibilityState = Loading }
+                        , Api.updatePlacementVisibility placement.id (Visibility.toString vis) token PlacementVisibilityUpdated
+                        , NoOut
+                        )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        PlacementVisibilityUpdated result ->
+            case result of
+                Ok visStr ->
+                    ( { model
+                        | visibilityState = Success ()
+                        , placementVisibility =
+                            Visibility.fromString visStr
+                                |> Maybe.withDefault model.placementVisibility
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | visibilityState = Failure err }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -440,6 +503,7 @@ viewBook model book =
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
                         [ viewFormatsOnShelf model
+                        , viewVisibilityControl model
                         , viewShelfActions model
                         , viewDangerZone model
                         ]
@@ -612,6 +676,67 @@ viewFormatsOnShelf model =
             , onToggle = ToggleFormat
             }
         ]
+
+
+{-| "Who can see this book" — per-placement visibility override (US-10.2.2).
+Only shown when the user owns a placement. Options that would make the placement
+more visible than its parent shelf are greyed out with a tooltip, mirroring the
+server-side ceiling 422.
+-}
+viewVisibilityControl : Model -> Html Msg
+viewVisibilityControl model =
+    section
+        [ class "book-detail__section book-detail__visibility"
+        , attribute "role" "region"
+        , attribute "aria-labelledby" "section-visibility"
+        ]
+        [ h3 [ class "book-detail__section-title", id "section-visibility" ]
+            [ text "Who can see this book" ]
+        , label
+            [ class "book-detail__visibility-label"
+            , for "placement-visibility-select"
+            ]
+            [ text "Visibility" ]
+        , select
+            [ class "book-detail__visibility-select"
+            , id "placement-visibility-select"
+            , testId "placement-visibility-select"
+            , attribute "aria-label" "Placement visibility"
+            , on "change" (Decode.map PlacementVisibilitySelected targetValue)
+            ]
+            (List.map (viewVisibilityOption model.placementVisibility) (Visibility.placementOptions model.shelfCeiling))
+        , viewVisibilityState model.visibilityState
+        ]
+
+
+viewVisibilityOption : Visibility -> Visibility.PlacementOption -> Html Msg
+viewVisibilityOption current opt =
+    option
+        [ value (Visibility.toString opt.visibility)
+        , selected (opt.visibility == current)
+        , disabled opt.disabled
+        , title (Maybe.withDefault "" opt.tooltip)
+        ]
+        [ text opt.label ]
+
+
+viewVisibilityState : RemoteData Http.Error () -> Html Msg
+viewVisibilityState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Saving visibility..." ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Visibility saved." ]
+
+        Failure _ ->
+            div [ class "book-detail__status book-detail__status--error" ]
+                [ text "Could not update visibility. Please try again." ]
 
 
 viewAboutSection : Book -> Html Msg

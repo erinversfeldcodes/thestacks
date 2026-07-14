@@ -89,6 +89,7 @@ module Api exposing
     , updateLocation
     , updateNotifications
     , updatePassword
+    , updatePlacementVisibility
     , updateProfile
     , updateProfileVisibility
     , updateShelfVisibility
@@ -528,6 +529,7 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
 type alias BookDetailResponse =
     { book : Book
     , placement : Maybe Placement
+    , bookshelfVisibility : Maybe String
     }
 
 
@@ -539,7 +541,7 @@ decoded through the existing app-level decoders which already delegate to proto.
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
-    Decode.map2 BookDetailResponse
+    Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
         -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
         -- decodes JSON null as a default struct (all fields empty/zero) because each
@@ -548,6 +550,13 @@ bookDetailResponseDecoder =
         -- Decode.oneOf handles the case where the field is absent entirely.
         (Decode.oneOf
             [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
+        -- The parent bookshelf's visibility (the placement ceiling), denormalised
+        -- onto the placement payload. Absent → Nothing (no client-side greying).
+        (Decode.oneOf
+            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
             ]
         )
@@ -1592,6 +1601,36 @@ updateShelfVisibility shelfName visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/placements/:id/visibility — update a single placement's visibility.
+
+The server enforces the ceiling rule (a placement may not be more visible than
+its parent bookshelf) and returns 422 if violated. The 200 body is `{id,
+visibility}`; we decode the confirmed visibility string back so the caller can
+reconcile local state with what the server actually stored.
+
+-}
+updatePlacementVisibility :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error String -> msg)
+    -> Cmd msg
+updatePlacementVisibility placementId visibility token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/visibility"
+        , body =
+            Http.jsonBody
+                (Requests.encodeUpdateShelfVisibilityRequest
+                    { visibility = visibility }
+                )
+        , expect = Http.expectJson toMsg (Decode.field "visibility" Decode.string)
         , timeout = Nothing
         , tracker = Nothing
         }

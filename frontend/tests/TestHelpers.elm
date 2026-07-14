@@ -7,10 +7,12 @@ module TestHelpers exposing
     , simulateAuthResponse
     , simulateBookDetailResponse
     , simulateBookDetailResponseWithPlacement
+    , simulateBookDetailResponseWithVisibility
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulateMergeFormatResponse
+    , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
     , testBook
@@ -45,6 +47,7 @@ import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData
 import Types.Shelf exposing (shelvesResponseDecoder)
+import Types.Visibility
 
 
 
@@ -98,6 +101,7 @@ testPlacement =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }
 
 
@@ -496,6 +500,58 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         json
 
 
+{-| A book-detail response carrying a placement with an explicit visibility and
+a denormalised parent-shelf ceiling (`bookshelf_visibility`). Drives the
+placement-visibility dropdown and its ceiling-greying.
+-}
+simulateBookDetailResponseWithVisibility : String -> Book -> String -> String -> Http.Response String
+simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibility =
+    let
+        placementJson =
+            Encode.object
+                [ ( "id", Encode.string "placement-vis-001" )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "bookshelf_name", Encode.string "library" )
+                , ( "visibility", Encode.string visibility )
+                , ( "bookshelf_visibility", Encode.string bookshelfVisibility )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", placementJson )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A successful `PUT /api/placements/:id/visibility` response: `{id, visibility}`.
+-}
+simulatePlacementVisibilityResponse : String -> String -> Http.Response String
+simulatePlacementVisibilityResponse placementId visibility =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/visibility"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "id", Encode.string placementId )
+                , ( "visibility", Encode.string visibility )
+                ]
+            )
+        )
+
+
 
 -- DECODERS (not exposed from Api, rebuilt here for simulated effects)
 -- SIMULATED EFFECT TRANSLATORS
@@ -801,6 +857,32 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
+        BookDetail.PlacementVisibilitySelected _ ->
+            -- `model` here is the post-update model (bookDetailProgram passes
+            -- newModel). A Loading visibilityState means the client-side ceiling
+            -- guard passed and a PUT should be issued.
+            case ( model.placement, maybeToken, model.visibilityState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/visibility"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object
+                                    [ ( "visibility"
+                                      , Encode.string (Types.Visibility.toString model.placementVisibility)
+                                      )
+                                    ]
+                                )
+                        , expect = SimulatedEffect.Http.expectJson BookDetail.PlacementVisibilityUpdated (Decode.field "visibility" Decode.string)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -809,9 +891,14 @@ bookDetailEffects msg model maybeToken =
 -}
 decodeBookDetailResponse : Decode.Decoder BookDetailResponse
 decodeBookDetailResponse =
-    Decode.map2 BookDetailResponse
+    Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
         (Decode.maybe (Decode.field "placement" placementDecoder))
+        (Decode.oneOf
+            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 {-| Decode a MergeFormatResponse. Mirrors Api.mergeFormatResponseDecoder which is not exposed.
