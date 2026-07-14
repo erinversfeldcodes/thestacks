@@ -10,7 +10,7 @@ module Page.Settings.Consent exposing
 
 import Api
 import Html exposing (Html, button, div, h1, h2, label, p, text)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -137,6 +137,7 @@ view model =
                          else
                             "toggle toggle--off"
                         )
+                    , attribute "data-testid" "analytics-consent-toggle"
                     , onClick ToggleAnalytics
                     ]
                     [ text
@@ -170,6 +171,7 @@ view model =
                          else
                             "toggle toggle--off"
                         )
+                    , attribute "data-testid" "writing-assistant-consent-toggle"
                     , onClick ToggleWritingAssistant
                     ]
                     [ text
