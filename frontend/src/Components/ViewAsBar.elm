@@ -1,4 +1,4 @@
-module Components.ViewAsBar exposing (view)
+module Components.ViewAsBar exposing (getViewAs, removeViewAs, view)
 
 import Html exposing (Html, a, div, span, text)
 import Html.Attributes exposing (class, href)
@@ -11,7 +11,7 @@ view url =
         Just perspective ->
             div [ class "view-as-bar" ]
                 [ span [ class "view-as-bar__text" ]
-                    [ text ("Viewing as: " ++ perspective) ]
+                    [ text ("Viewing as: " ++ perspectiveLabel perspective) ]
                 , a
                     [ class "view-as-bar__exit"
                     , href (removeViewAs url)
@@ -21,6 +21,20 @@ view url =
 
         Nothing ->
             text ""
+
+
+{-| Human-readable label for a `view_as` perspective. The `unauthenticated`
+perspective is shown as "Not logged in"; any other perspective (e.g. `platform`,
+`user:<uuid>`) is rendered as-is.
+-}
+perspectiveLabel : String -> String
+perspectiveLabel perspective =
+    case perspective of
+        "unauthenticated" ->
+            "Not logged in"
+
+        other ->
+            other
 
 
 getViewAs : Url -> Maybe String
