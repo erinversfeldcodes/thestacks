@@ -6,6 +6,8 @@ import {
   registerViaApi,
   fetchConfirmationToken,
   signInViaForm,
+  suiteAuthFile,
+  ensureBookOnLibrary,
 } from "./helpers";
 
 /**
@@ -13,51 +15,25 @@ import {
  *   - Export My Data  (US-8.1, issue #187)
  *   - Delete My Data  (US-8.2, issue #188)
  *
- * These were previously only covered by elm-program-test, which stubs the HTTP
- * boundary — the real UI → deployed backend → session-teardown path was never
- * observed live. That gap matters most for account deletion (irreversible right
- * to erasure), so this spec drives both flows against the real preview stack
- * with a throwaway user per test (deletion destroys its own user, so it must
- * never touch a shared fixture).
+ * Previously only covered by elm-program-test, which stubs the HTTP boundary —
+ * the real UI → deployed backend → session-teardown path was never observed
+ * live. That gap matters most for account deletion (irreversible right to
+ * erasure), so the delete journey is driven against the real preview stack.
  *
- * Both tests require the /api/test/confirmation-token helper
- * (STACKS_E2E_TEST_HELPERS=1); they test.skip cleanly when it is absent, matching
- * onboarding.spec / confirm-email.spec.
+ * Export is NON-destructive, so it reuses the seeded `settings` suite user (which
+ * has placements, so no onboarding overlay, and adds zero load to the shared
+ * `:auth` rate bucket). Delete is destructive, so it mints a throwaway user per
+ * run — which, being placement-free, gets the onboarding overlay; we place a book
+ * to satisfy the onboarding check before driving the settings UI.
  */
 
-/**
- * Register a throwaway user via the API and confirm its email through the
- * test-helper token. Returns the email and the confirmation token (null when the
- * helper endpoint is unavailable, so the caller can test.skip).
- */
-async function registerAndConfirm(
-  request: APIRequestContext,
-  prefix: string
-): Promise<{ email: string; token: string | null }> {
-  const email = uniqueEmail(prefix);
-  const reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  expect(reg.ok()).toBeTruthy();
+test.describe("GDPR — Export My Data (live browser journey)", () => {
+  // Non-destructive: reuse the seeded settings user (has placements → no overlay).
+  test.use({ storageState: suiteAuthFile("settings") });
 
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return { email, token: null };
-
-  const confirm = await request.get(`/api/auth/confirm/${token}`);
-  expect(confirm.ok()).toBeTruthy();
-  return { email, token };
-}
-
-test.describe("GDPR — Export & Delete (live browser journeys)", () => {
   test("export: requesting a data export queues it against the real backend", async ({
     page,
-    request,
   }) => {
-    const { email, token } = await registerAndConfirm(request, "e2e-gdpr-export");
-    test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-
-    await signInViaForm(page, email, E2E_PASSWORD);
     await page.goto("/settings/privacy");
 
     const exportBtn = page.getByRole("button", { name: "Export My Data" });
@@ -70,7 +46,9 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     // The error paragraph must not appear on success.
     await expect(page.locator(".error")).toHaveCount(0);
   });
+});
 
+test.describe("GDPR — Delete My Data (live browser journey)", () => {
   test("delete: type-to-confirm deletes the account, logs out, and invalidates the session", async ({
     page,
     request,
@@ -83,6 +61,11 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 
     await signInViaForm(page, email, E2E_PASSWORD);
 
+    // A brand-new user has no placements, so the onboarding overlay renders as a
+    // global modal and intercepts clicks — even on the settings page. Place a
+    // book so the onboarding check is satisfied and the overlay stays hidden.
+    await ensureBookOnLibrary(page);
+
     // Capture the live session token BEFORE deletion so we can prove the session
     // is actually invalidated afterwards (localStorage is cleared on logout).
     const authToken = await page.evaluate(
@@ -91,6 +74,9 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     expect(authToken).toBeTruthy();
 
     await page.goto("/settings/privacy");
+
+    // Guard: the onboarding overlay must be gone, or it will silently eat clicks.
+    await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
     // Reveal the type-to-confirm dialog.
     await page.getByRole("button", { name: "Delete My Data" }).click();
@@ -140,3 +126,33 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
       .toBe(401);
   });
 });
+
+/**
+ * Register a throwaway user via the API and confirm its email through the
+ * test-helper token. Returns the email and the confirmation token (null when the
+ * helper endpoint is unavailable, so the caller can test.skip).
+ *
+ * `/api/auth/register` is under the `:auth` rate bucket (60/60s per IP), shared
+ * across the whole parallel suite, so a transient 429 burst is absorbed with a
+ * bounded backoff-retry rather than failing the test outright.
+ */
+async function registerAndConfirm(
+  request: APIRequestContext,
+  prefix: string
+): Promise<{ email: string; token: string | null }> {
+  const email = uniqueEmail(prefix);
+
+  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+  for (let attempt = 1; attempt <= 4 && !reg.ok() && reg.status() === 429; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+  }
+  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
+
+  const token = await fetchConfirmationToken(request, email);
+  if (token === null) return { email, token: null };
+
+  const confirm = await request.get(`/api/auth/confirm/${token}`);
+  expect(confirm.ok()).toBeTruthy();
+  return { email, token };
+}
