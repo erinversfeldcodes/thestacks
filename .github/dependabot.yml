@@ -6,12 +6,18 @@ version: 2
 # ecosystem below (mix, pip, cargo, npm, docker) plus the pinned GitHub
 # Actions. Grouped minor/patch updates keep PR volume manageable; majors and
 # security fixes still come through individually.
+#
+# Every ecosystem sets a 7-day `cooldown`: Dependabot waits a week after a
+# release before opening a bump PR, so freshly-published (and potentially
+# compromised) versions age out of the immediate-adoption window.
 updates:
   # ── GitHub Actions (all workflows are SHA-pinned; this keeps the pins fresh)
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         update-types: [minor, patch]
@@ -21,6 +27,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       elixir-minor-patch:
@@ -31,6 +39,8 @@ updates:
     directory: /apps/vision
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       vision-minor-patch:
         update-types: [minor, patch]
@@ -38,6 +48,8 @@ updates:
     directory: /requirements
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       py-minor-patch:
         update-types: [minor, patch]
@@ -47,6 +59,8 @@ updates:
     directory: /apps/scraper
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       scraper-minor-patch:
         update-types: [minor, patch]
@@ -56,6 +70,8 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       frontend-minor-patch:
         update-types: [minor, patch]
@@ -63,6 +79,8 @@ updates:
     directory: /apps/core/assets
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       assets-minor-patch:
         update-types: [minor, patch]
@@ -70,6 +88,8 @@ updates:
     directory: /e2e
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       e2e-minor-patch:
         update-types: [minor, patch]
@@ -79,6 +99,8 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
@@ -86,11 +108,17 @@ updates:
     directory: /apps/vision
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: /deploy/searxng
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: /deploy/log-shipper
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
