@@ -3,16 +3,18 @@ module Page.Settings.Privacy exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithToken
     , update
     , view
     )
 
 import Api
-import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, text)
+import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -24,6 +26,8 @@ type alias Model =
     , deleteRequested : Bool
     , deleteConfirmation : String
     , deleting : RemoteData Http.Error ()
+    , blockedUsers : RemoteData Http.Error (List Api.BlockedUser)
+    , unblocking : Maybe String
     }
 
 
@@ -48,6 +52,9 @@ type Msg
     | UserTypesDeleteConfirmation String
     | UserClicksDeleteAccount
     | GotDeleteResponse (Result Http.Error ())
+    | GotBlockedUsers (Result Http.Error Api.BlockedUsersResponse)
+    | UserClicksUnblock String
+    | GotUnblockResponse String (Result Http.Error ())
 
 
 type OutMsg
@@ -105,7 +112,25 @@ init =
     , deleteRequested = False
     , deleteConfirmation = ""
     , deleting = NotAsked
+    , blockedUsers = NotAsked
+    , unblocking = Nothing
     }
+
+
+{-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
+when authenticated, kicks off the blocked-users fetch. The bare `init` is kept
+for tests and flows that don't need the network.
+-}
+initWithToken : Maybe String -> ( Model, Cmd Msg )
+initWithToken maybeToken =
+    case maybeToken of
+        Just token ->
+            ( { init | blockedUsers = Loading }
+            , Api.listBlockedUsers token GotBlockedUsers
+            )
+
+        Nothing ->
+            ( init, Cmd.none )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -264,6 +289,53 @@ update msg model maybeToken =
                     else
                         ( { model | deleting = Failure err }, Cmd.none, NoOut )
 
+        GotBlockedUsers result ->
+            case result of
+                Ok response ->
+                    ( { model | blockedUsers = Success response.blockedUsers }, Cmd.none, NoOut )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | blockedUsers = Failure err }, Cmd.none, NoOut )
+
+        UserClicksUnblock userId ->
+            case maybeToken of
+                Just token ->
+                    ( { model | unblocking = Just userId }
+                    , Api.unblockUser userId token (GotUnblockResponse userId)
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        GotUnblockResponse userId result ->
+            case result of
+                Ok _ ->
+                    -- Drop the row locally; the reader's content reappears
+                    -- server-side on the next visibility-resolved fetch.
+                    let
+                        remaining =
+                            case model.blockedUsers of
+                                Success users ->
+                                    Success (List.filter (\u -> u.id /= userId) users)
+
+                                other ->
+                                    other
+                    in
+                    ( { model | blockedUsers = remaining, unblocking = Nothing }, Cmd.none, NoOut )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        -- Keep the row; just clear the in-flight flag.
+                        ( { model | unblocking = Nothing }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -299,7 +371,57 @@ view model =
             , viewFeedback model.savingShelf
             ]
         , viewExportSection model.exporting
+        , viewBlockedUsersSection model
         , viewDangerZone model
+        ]
+
+
+viewBlockedUsersSection : Model -> Html Msg
+viewBlockedUsersSection model =
+    div [ class "settings-section", testId "blocked-users-section" ]
+        [ h2 [ class "settings-section__title" ] [ text "Blocked Users" ]
+        , p [ class "settings-section__desc" ]
+            [ text "Readers you've blocked can't see your content, and you won't see theirs. Unblock anyone to restore that." ]
+        , case model.blockedUsers of
+            NotAsked ->
+                text ""
+
+            Loading ->
+                p [ class "loading" ] [ text "Loading your blocked list…" ]
+
+            Failure _ ->
+                p [ class "error" ] [ text "We couldn't load your blocked list. Please try again." ]
+
+            Success [] ->
+                p [ class "privacy__blocked-empty" ] [ text "You haven't blocked anyone." ]
+
+            Success users ->
+                div [ class "privacy__blocked-list" ]
+                    (List.map (viewBlockedRow model.unblocking) users)
+        ]
+
+
+viewBlockedRow : Maybe String -> Api.BlockedUser -> Html Msg
+viewBlockedRow unblocking user =
+    let
+        inFlight =
+            unblocking == Just user.id
+    in
+    div [ class "blocked-user privacy__blocked-row" ]
+        [ span [ class "blocked-user__name" ] [ text user.displayName ]
+        , button
+            [ class "btn btn--small btn--secondary blocked-user__unblock"
+            , disabled inFlight
+            , onClick (UserClicksUnblock user.id)
+            ]
+            [ text
+                (if inFlight then
+                    "Unblocking…"
+
+                 else
+                    "Unblock"
+                )
+            ]
         ]
 
 

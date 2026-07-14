@@ -8,6 +8,7 @@ module Page.Blog.Post exposing
     )
 
 import Api
+import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
 import Components.WritingAssistant as WritingAssistant
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
@@ -29,6 +30,7 @@ type alias Model =
     , commentDraft : String
     , replyDraft : Maybe { parentId : String, body : String }
     , commentSubmitting : Bool
+    , blockModal : Maybe BlockModal.Model
     }
 
 
@@ -46,6 +48,7 @@ type Msg
     | CommentSubmitted (Result Http.Error Comment)
     | DeleteComment String
     | CommentDeleted (Result Http.Error ())
+    | BlockModalMsg BlockModal.Msg
 
 
 type OutMsg
@@ -64,6 +67,7 @@ init postId maybeToken currentUserId writingAssistantConsent =
       , commentDraft = ""
       , replyDraft = Nothing
       , commentSubmitting = False
+      , blockModal = Nothing
       }
     , Cmd.batch
         [ Api.getBlogPost postId maybeToken PostLoaded
@@ -78,7 +82,10 @@ update msg model maybeToken =
         PostLoaded result ->
             case result of
                 Ok post ->
-                    ( { model | post = Success post }, Cmd.none, NoOut )
+                    ( { model | post = Success post, blockModal = blockModalFor model.currentUserId post }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
@@ -220,6 +227,55 @@ update msg model maybeToken =
                     else
                         ( model, Cmd.none, NoOut )
 
+        BlockModalMsg subMsg ->
+            case model.blockModal of
+                Just blockModal ->
+                    let
+                        ( newBlockModal, subCmd, outMsg ) =
+                            BlockModal.update subMsg blockModal maybeToken
+                    in
+                    case outMsg of
+                        BlockModal.NoOut ->
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.map BlockModalMsg subCmd
+                            , NoOut
+                            )
+
+                        BlockModal.UserBlocked ->
+                            -- Content should vanish: re-fetch the post, which now
+                            -- resolves to :hidden server-side (bidirectional block).
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.batch
+                                [ Cmd.map BlockModalMsg subCmd
+                                , Api.getBlogPost model.postId maybeToken PostLoaded
+                                ]
+                            , NoOut
+                            )
+
+                        BlockModal.SessionExpired ->
+                            ( model, Cmd.none, SessionExpired )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+
+{-| A block affordance is only offered to a signed-in reader who is not the
+post's author (you can't block yourself). The post payload carries no author
+display name, so a generic label is used.
+-}
+blockModalFor : Maybe String -> BlogPost -> Maybe BlockModal.Model
+blockModalFor currentUserId post =
+    case currentUserId of
+        Just uid ->
+            if uid == post.userId then
+                Nothing
+
+            else
+                Just (BlockModal.init { userId = post.userId, displayName = "the author" })
+
+        Nothing ->
+            Nothing
+
 
 view : Model -> Html Msg
 view model =
@@ -241,6 +297,12 @@ view model =
                 in
                 div []
                     [ viewPost post isOwner
+                    , case model.blockModal of
+                        Just blockModal ->
+                            Html.map BlockModalMsg (BlockModal.view blockModal)
+
+                        Nothing ->
+                            text ""
                     , if isOwner then
                         WritingAssistant.view { hasConsent = model.writingAssistantConsent }
 

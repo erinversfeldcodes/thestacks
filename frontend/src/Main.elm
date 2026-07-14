@@ -582,7 +582,11 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             ( PageMarketplaceDetail model, Cmd.map ListingDetailMsg cmd )
 
         SettingsPrivacy ->
-            ( PageSettingsPrivacy Privacy.init, Cmd.none )
+            let
+                ( privacyModel, privacyCmd ) =
+                    Privacy.initWithToken maybeToken
+            in
+            ( PageSettingsPrivacy privacyModel, Cmd.map PrivacyMsg privacyCmd )
 
         BlogArchive ->
             let
