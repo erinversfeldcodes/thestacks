@@ -246,6 +246,48 @@ defmodule Stacks.VisibilityTest do
     test "same visibility → ok" do
       assert :ok = Visibility.validate_visibility_ceiling("platform", "platform", :bookshelf)
     end
+
+    # Unified Audience ladder (owner < group < platform < public), #209 Phase 2.
+    # These are the cells the former two-rank-map implementation got WRONG:
+    # `@visibility_rank` omitted "group" (defaulting it to 0 = most permissive),
+    # so a group child was wrongly rejected under a platform/owner parent.
+    test "child group under platform parent → ok (group is more restrictive than platform)" do
+      assert :ok = Visibility.validate_visibility_ceiling("group", "platform", :bookshelf)
+    end
+
+    test "child platform under group parent → error (platform is more exposed than group)" do
+      assert {:error, _} = Visibility.validate_visibility_ceiling("platform", "group", :bookshelf)
+    end
+
+    test "child group under owner parent → error (owner ghost-mode caps everything to owner)" do
+      assert {:error, _} = Visibility.validate_visibility_ceiling("group", "owner", :bookshelf)
+    end
+
+    test "child owner under group parent → ok" do
+      assert :ok = Visibility.validate_visibility_ceiling("owner", "group", :bookshelf)
+    end
+  end
+
+  describe "classify_visibility_direction/2 (single ladder)" do
+    test "platform → owner is a tighten (less exposed)" do
+      assert :tighten = Visibility.classify_visibility_direction("platform", "owner")
+    end
+
+    test "owner → platform is a loosen (more exposed)" do
+      assert :loosen = Visibility.classify_visibility_direction("owner", "platform")
+    end
+
+    test "group sits between platform and owner: group → platform is a loosen" do
+      assert :loosen = Visibility.classify_visibility_direction("group", "platform")
+    end
+
+    test "platform → group is a tighten" do
+      assert :tighten = Visibility.classify_visibility_direction("platform", "group")
+    end
+
+    test "no change → same" do
+      assert :same = Visibility.classify_visibility_direction("platform", "platform")
+    end
   end
 
   # ---------------------------------------------------------------------------
