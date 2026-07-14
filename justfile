@@ -96,8 +96,8 @@ install-python-dev:
 test: test-elixir test-elm test-rust test-python test-dbt
 
 # Full pre-merge verification gate — run before requesting reviews.
-# Covers lint, tests, proto drift, dbt models, and dbt-checkpoint quality.
-verify: lint-elixir test-elixir lint-proto proto-sync-check test-dbt lint-dbt
+# Covers lint, tests, proto drift, dbt models, dbt-checkpoint quality, and Elm lint+tests.
+verify: lint-elixir test-elixir lint-elm test-elm lint-proto proto-sync-check test-dbt lint-dbt
 
 # Elixir tests
 test-elixir:
