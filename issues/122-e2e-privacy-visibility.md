@@ -41,13 +41,13 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-10.1.1 — Set Profile Visibility | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.1.2 — Block a User | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.2.1 — Set Shelf Visibility | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.2.2 — Override Placement Visibility | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.2.3 — Set Blog Post Visibility | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.3.1 — Preview Content Visibility | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-10.4.1 — Search Engine Privacy | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-10.1.1 — Set Profile Visibility | route→`UserSettingsController.update_profile_visibility`→`Page.Settings.Privacy` dropdown+save | ✅ live (`privacy.spec.ts:42` Discoverable→Save→"Saved!") | ✅ | built (v1) |
+| US-10.1.2 — Block a User | `SocialController.{block,unblock,blocked_users}` + **#193** `Components.BlockUserModal`+blocked-list; **#203** author name; **#206**/#122 group-feed affordance | ✅ live (`privacy-block.spec.ts:43` block→hide→unblock→restore) | ✅ | frontend built in #193 |
+| US-10.2.1 — Set Shelf Visibility | **name-based** `PUT /bookshelves/:bookshelf_name/visibility`→`Shelving.set_bookshelf_visibility` (get-or-create + #195 ceiling) | ✅ live (`privacy.spec.ts:85` shelf save→"Visibility updated.") — **fixed a 400 name/id bug** | ✅ | bug fixed this pass |
+| US-10.2.2 — Override Placement Visibility | **#194** dropdown+greying+faint-spine; **#201** `book_placement` serializer; shelf-spine `visibility` serialization (this pass) | ✅ live (`privacy-placement.spec.ts` 5/5 in isolation) — one cross-spec isolation flake tracked in **#208** | ✅ | built #194/#201 |
+| US-10.2.3 — Set Blog Post Visibility | `BlogController.{create,update}`→`Page.Blog.Editor` dropdown | ✅ live (`privacy.spec.ts:125` visibility→Save Draft→Publish) | ✅ | built (v1) |
+| US-10.3.1 — Preview Content Visibility | `ViewAsPlug` (2-phase) + `Components.ViewAsBar` (banner + exit) | ✅ live (`privacy.spec.ts:171` `?view_as=unauthenticated`→"Not logged in"→exit) | ✅ | built (v1) |
+| US-10.4.1 — Search Engine Privacy | `robots.txt` + `noindex` meta + on-page info text (**#196**) | ✅ live (`privacy.spec.ts:201/210/229` robots + noindex + info text) | ✅ | built (v1) |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -490,8 +490,9 @@ metrics instrumentation.
 - [ ] Tests pass with `TEST_TARGET=local`
 - [ ] No flaky tests
 - [ ] `just verify` passes
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`. *(Regenerated 2026-07-14 with file:line + local live-drive results; all 7 ✅.)*
+- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state. *(Pending — tracked in #207.)*
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`): stories driven live ✅ (38/39 local, the one cross-spec flake tracked in **#208**); every layer incl. events + metrics asserted ✅; no dangling P2/P3 (fixed or de-scoped to **#205**/#208) ✅; logs clean under the live drive ✅; tracking regenerated — Pre-Check ✅, 13-layer audit pending (**#207**); local live-drive before preview ✅.
 
 ## Dependencies
 Requires Visibility module, Social context (blocking), ViewAs plug, VisibilityRecapJob, Blog context.
