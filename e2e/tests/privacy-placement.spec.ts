@@ -1,6 +1,13 @@
 import { test, expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
-import { suiteAuthFile, ensureBookOnShelf } from "./helpers";
+import type { APIRequestContext, Page } from "@playwright/test";
+import {
+  ensureBookOnShelf,
+  E2E_PASSWORD,
+  uniqueEmail,
+  registerViaApi,
+  fetchConfirmationToken,
+  signInViaForm,
+} from "./helpers";
 
 /**
  * Browser E2E for per-placement visibility on the book-detail overlay
@@ -23,31 +30,44 @@ import { suiteAuthFile, ensureBookOnShelf } from "./helpers";
  *
  * REAL API — no route mocking. Assertions are driven against the live stack.
  *
- * NON-DESTRUCTIVE-USER CHOICE (mirrors gdpr.spec.ts rationale): this only
- * mutates the user's OWN placement/shelf visibility, so it rides the SEEDED
- * `settings` suite user rather than minting a throwaway. That user already has
- * placements, so it never triggers the global onboarding overlay (which
- * intercepts pointer events everywhere), and it adds ZERO load to the shared
- * `:auth` rate bucket (no register/login round-trip). We still call
- * `ensureBookOnShelf` so a spine exists to click before opening the overlay.
- *
- * SHARED-USER SAFETY: the suite runs `fullyParallel`, but these tests mutate
- * shared placement/shelf-ceiling state on ONE user, so the file runs SERIAL to
- * avoid intra-file races, and each test restores the state it changed (shelf
- * ceiling back to `public`, placement back to `platform`/Members) in a finally.
- *
- * CANNOT BE RUN LIVE HERE: no preview stack is available in this worktree, and
- * #201/#202 are not yet merged onto `feat/122-e2e`. Parse + discovery are
- * validated via `npx playwright test privacy-placement.spec.ts --list`; the live
- * run is deferred to the #122 epic-finalization E2E gate. Selectors below were
- * lifted verbatim from the built source (commits 49027a4 / b37c1ec), not
- * guessed — see the spec report for the exact provenance and any residual risk.
+ * ISOLATED THROWAWAY USER (Issue #208): a fresh user per test. These flows mutate
+ * profile + shelf + placement visibility, and `privacy.spec` / `settings.spec`
+ * mutate the SAME state on the seeded `settings` user in parallel — that race
+ * (a concurrent spec tightening the profile to `owner` forces every shelf to
+ * `owner` and disables the options this test needs) intermittently broke the
+ * faint-spine test. A dedicated user removes all sharing. `setShelfCeiling`
+ * loosens the fresh user's profile (default `owner`) to `platform` first so a
+ * `public`/`platform` shelf is within the ceiling; `ensureBookOnShelf` places a
+ * book (and suppresses the placement-free onboarding overlay).
  */
 
-test.use({ storageState: suiteAuthFile("settings") });
 test.describe.configure({ mode: "serial" });
 
 const SHELF = "library";
+
+/**
+ * Register + confirm a throwaway user, then sign in through the form so `page`
+ * holds a live session. Absorbs transient 429s on the shared `:auth` bucket and
+ * test.skips when the confirmation-token helper is off (STACKS_E2E_TEST_HELPERS).
+ */
+async function signInFreshUser(page: Page, request: APIRequestContext): Promise<void> {
+  const email = uniqueEmail("e2e-placement");
+  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+  for (let attempt = 1; attempt <= 4 && !reg.ok() && reg.status() === 429; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000 * attempt));
+    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
+  }
+  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
+
+  const token = await fetchConfirmationToken(request, email);
+  test.skip(
+    token === null,
+    "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+  );
+  const confirm = await request.get(`/api/auth/confirm/${token}`);
+  expect(confirm.ok()).toBeTruthy();
+  await signInViaForm(page, email, E2E_PASSWORD);
+}
 
 // Ceiling helper copy — from Types.Visibility.ceilingHelperText. Uses a curly
 // apostrophe (’) and em dash (—) in the real string; we assert on ASCII-safe
@@ -122,7 +142,9 @@ async function openFirstBookOverlay(page: Page, shelfName: string) {
 test.describe("Placement visibility — book-detail overlay (live browser)", () => {
   test("dropdown shows current visibility and greys sub-ceiling options with helper text", async ({
     page,
+    request,
   }) => {
+    await signInFreshUser(page, request);
     // Precondition: tighten the shelf ceiling to Members(platform) so that the
     // more-permissive "Public" option must be greyed out and the ceiling helper
     // text appears. A public shelf greys nothing, so no helper text would show.
@@ -159,7 +181,9 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
 
   test('the visibility label reads "Members", never "Platform"', async ({
     page,
+    request,
   }) => {
+    await signInFreshUser(page, request);
     const overlay = await openFirstBookOverlay(page, SHELF);
     const select = overlay.getByTestId("placement-visibility-select");
     await expect(select).toBeVisible();
@@ -178,11 +202,15 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
 
   test('setting a placement to "Only me" renders the spine faint/hidden on the shelf', async ({
     page,
+    request,
   }) => {
-    // Make the shelf public so every placement option is selectable — the
-    // shared seeded shelf may have been left tighter by a concurrent spec, which
-    // would otherwise disable "platform"/"public" and break the restore below.
-    expect(await setShelfCeiling(page, SHELF, "public")).toBe(200);
+    await signInFreshUser(page, request);
+    // Set the shelf to the most permissive VALID bookshelf visibility so both
+    // the "owner" and "platform" placement options this test uses are selectable.
+    // (Bookshelves are owner/group/platform — "public" is a placement-only tier,
+    // so it would 422 on invalid-inclusion.) setShelfCeiling loosens the fresh
+    // user's default "owner" profile to platform first so this is within ceiling.
+    expect(await setShelfCeiling(page, SHELF, "platform")).toBe(200);
     const overlay = await openFirstBookOverlay(page, SHELF);
     const title = (await overlay.getByTestId("book-title").textContent())?.trim();
     expect(title, "book-detail overlay should expose a title").toBeTruthy();
