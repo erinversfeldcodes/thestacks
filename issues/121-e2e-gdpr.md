@@ -40,6 +40,15 @@ Validate the complete GDPR compliance surface: data portability, right to erasur
 - [x] This issue is implementation only. Wired by issue #___ (test-only issue).
 
 ## Feature-Completeness Pre-Check
+
+> **⚠️ Epic-branch status (updated 2026-07-14) — read before trusting the 🟡 cells below.**
+> The table below is #121's **standalone v1 scope** at scope-lock: it deliberately marks the v2
+> surface 🟡 "not built *in #121*". On the epic branch `feat/121-183-184-185-186-187-188-189-gdpr`,
+> that v2 surface **is built and verified** by child issues #183–#189 — export UI (#187), delete UI
+> (#188), writing-assistant consent (#184), audit-log read (#189), plus data-model/richer-export/deeper-cascade
+> (#183/#186/#185). Verified on-branch: 124/0 GDPR Elixir tests, 665/0 elm-test, a passing `deploy-preview`
+> live E2E gate, and browser E2E for the export/delete journeys (`e2e/tests/gdpr.spec.ts`). **Do not read
+> this #121 table as the branch's completeness state** — see each child issue's own audit for that.
 <!--
 Run the `feature-completeness` skill BEFORE writing any test suites for this issue. It proves each
 named user story's happy path is actually BUILT end-to-end (and driven live), not merely that tests
@@ -179,6 +188,11 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Image retention: stuck threshold is 2 hours (`@stuck_threshold_hours 2`).
 
 ## Test Audit
+
+> **⚠️ Scope reminder:** the `n/a (see #18x)` cells below mean "not built *in #121*," not "not built on
+> the branch." On `feat/121-183-184-185-186-187-188-189-gdpr` those features are built + verified by
+> #183–#189 (see the Epic-branch status banner under Feature-Completeness Pre-Check). This green audit
+> covers #121's v1 scope only.
 
 _Test-coverage map for this issue (13 layers × user story, happy/sad columns), first baselined 2026-07-08 and **regenerated post-implementation** on 2026-07-13. This is the shipped state after Phases 1–5: every in-scope test-hardening item landed and GDPR telemetry was instrumented in-scope (Phase 4). The former `❌`/`⚠️` work-queue cells are now either `✅` (a real test landed — cited below) or `n/a` (an unbuilt feature de-scoped to a child issue #183–#189). The audit is green (0 `❌`, 0 `⚠️`); see Definition of Done._
 
