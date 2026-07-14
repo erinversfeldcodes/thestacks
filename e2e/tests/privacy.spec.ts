@@ -103,6 +103,9 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
 
     expect(resp.status()).toBe(200);
     await expect(page.locator(".error")).toHaveCount(0);
+    // Shelf save shows the same feedback as profile save (Privacy.elm viewFeedback
+    // model.savingShelf → "Visibility updated." on success — built in #196).
+    await expect(page.getByText("Visibility updated.")).toBeVisible();
   });
 });
 
@@ -172,13 +175,9 @@ test.describe("Privacy — ViewAs preview (US-10.3.1)", () => {
 
     const banner = page.locator(".view-as-bar");
     await expect(banner).toBeVisible({ timeout: 10000 });
-    // ViewAsBar renders "Viewing as: " ++ perspective (ViewAsBar.elm:14). The
-    // partial match tolerates whichever perspective label the build renders.
-    // SELECTOR FLAG: Issue #122 §1 specifies the copy "Viewing as: Not logged in",
-    // but the current build renders the RAW perspective → "Viewing as:
-    // unauthenticated" (no humanization layer exists). The finalization run
-    // should confirm which copy ships; tighten this to an exact match then.
-    await expect(banner).toContainText("Viewing as:");
+    // ViewAsBar humanizes the perspective: `unauthenticated` → "Not logged in"
+    // (perspectiveLabel, ViewAsBar.elm:30-34 — built in #196). Exact copy per #122 §1.
+    await expect(banner).toContainText("Viewing as: Not logged in");
 
     const exit = banner.getByText("Exit preview");
     await expect(exit).toBeVisible();
@@ -218,15 +217,24 @@ test.describe("Privacy — Search engine privacy (US-10.4.1)", () => {
     );
   });
 
-  // FEATURE-COMPLETENESS GAP (reported to the epic): Issue #122 §1 lists a
-  // "Your profile and content will never appear in search engine results"
-  // informational line on the settings page. No such copy exists anywhere in
-  // `frontend/src/` (verified by grep — Privacy.elm and the whole tree). Per the
-  // testing-coordinator feature-completeness rule we do NOT assert on a string
-  // that isn't built (it would fail forever); this placeholder documents the
-  // gap so the finalization gate either builds the copy in-scope or de-scopes it.
-  test.skip("settings page shows the 'never appear in search engine results' info text", async () => {
-    // Intentionally empty — unblock once the info text ships in Page.Settings.Privacy.
+});
+
+/**
+ * The search-privacy informational line lives on the AUTHED settings page
+ * (Privacy.elm `settings-section__note` — built in #196), so it needs the seeded user.
+ */
+test.describe("Privacy — search-privacy info text (US-10.4.1)", () => {
+  test.use({ storageState: suiteAuthFile("settings") });
+
+  test("settings page shows the 'never appear in search engine results' info text", async ({
+    page,
+  }) => {
+    await page.goto("/settings/privacy");
+    await expect(
+      page.getByText(
+        "Your profile and content will never appear in search engine results."
+      )
+    ).toBeVisible({ timeout: 10000 });
   });
 });
 
