@@ -457,14 +457,14 @@ defmodule Stacks.Blog do
 
   @post_required_fields [:user_id, :title, :body]
   @post_optional_fields [:visibility, :visibility_group_id, :published_at]
-  @post_valid_visibilities ~w(owner group platform)
 
   @doc "Changeset for creating or updating a blog post."
   def post_changeset(post, attrs) do
     post
     |> cast(attrs, @post_required_fields ++ @post_optional_fields)
     |> validate_required(@post_required_fields)
-    |> validate_inclusion(:visibility, @post_valid_visibilities)
+    # Canonical Audience ladder (owner/group/platform) — one source of truth.
+    |> validate_inclusion(:visibility, Visibility.audience_levels())
   end
 
   @assoc_required_fields [:post_id, :book_id, :confidence, :source]

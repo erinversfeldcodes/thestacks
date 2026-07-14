@@ -290,6 +290,22 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
+  describe "canonical Audience level sources" do
+    test "audience_levels/0 is the full stored ladder (owner/group/platform)" do
+      assert Visibility.audience_levels() == ~w(owner group platform)
+    end
+
+    test "profile_audience_levels/0 is narrower (owner/platform — group reserved)" do
+      assert Visibility.profile_audience_levels() == ~w(owner platform)
+    end
+
+    test "valid_audience_level?/1 accepts ladder values and rejects others" do
+      assert Visibility.valid_audience_level?("group")
+      refute Visibility.valid_audience_level?("public")
+      refute Visibility.valid_audience_level?("nonsense")
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # resolve_visibility/2 — group visibility
   # ---------------------------------------------------------------------------
