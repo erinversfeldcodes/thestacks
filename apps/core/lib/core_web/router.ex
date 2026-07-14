@@ -216,7 +216,7 @@ defmodule CoreWeb.Router do
     get "/settings/blocked-users", SocialController, :blocked_users
     get "/settings/audit-log", AuditLogController, :index
 
-    put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
+    put "/bookshelves/:bookshelf_name/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
 
     get "/posts/:post_id/comments", CommentController, :index
