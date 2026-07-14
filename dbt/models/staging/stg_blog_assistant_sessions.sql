@@ -6,7 +6,6 @@ select
     id,
     user_id,
     status,
-    topic,
     model,
     started_at,
     created_at,
