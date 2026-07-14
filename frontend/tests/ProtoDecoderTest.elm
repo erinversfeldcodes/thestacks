@@ -1190,6 +1190,8 @@ responseSuite =
                                 , formats = [ "physical" ]
                                 , personalRating = 5
                                 , notes = "Great"
+                                , visibility = "platform"
+                                , bookshelfVisibility = "platform"
                                 }
                         , myWriting = [ { id = "w-1", title = "Review", publishedAt = "2026-03-20T00:00:00Z" } ]
                         }

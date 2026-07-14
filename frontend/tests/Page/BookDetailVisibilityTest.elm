@@ -57,6 +57,8 @@ suite =
         , ceilingExceededOptionDisabled
         , selectFiresUpdateAndRecordsValue
         , serverErrorShowsFailure
+        , ceilingHelperTextShown
+        , optimisticRollbackOnError
         ]
 
 
@@ -103,7 +105,7 @@ selectFiresUpdateAndRecordsValue =
 
 serverErrorShowsFailure : Test
 serverErrorShowsFailure =
-    test "server_error: a 422 ceiling rejection surfaces a failure message" <|
+    test "server_error: a 422 ceiling rejection surfaces a warm failure message" <|
         \() ->
             start
                 |> loadPlatformPlacement
@@ -119,4 +121,42 @@ serverErrorShowsFailure =
                         "{\"error\":\"placement cannot be more visible than its shelf\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Could not update visibility. Please try again." ]
+                    [ Selector.text "We couldn't save that change. Please try again." ]
+
+
+ceilingHelperTextShown : Test
+ceilingHelperTextShown =
+    test "helper_text: a restricting shelf ceiling shows always-visible helper text" <|
+        \() ->
+            start
+                |> loadPlatformPlacement
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "This shelf is set to Members" ]
+
+
+optimisticRollbackOnError : Test
+optimisticRollbackOnError =
+    test "rollback: a failed save reverts the select to the prior visibility" <|
+        \() ->
+            start
+                |> loadPlatformPlacement
+                |> ProgramTest.selectOption "placement-visibility-select" "Visibility" "owner" "Only me"
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    "/api/placements/placement-vis-001/visibility"
+                    (Http.BadStatus_
+                        { url = "/api/placements/placement-vis-001/visibility"
+                        , statusCode = 422
+                        , statusText = "Unprocessable Entity"
+                        , headers = Dict.empty
+                        }
+                        "{\"error\":\"placement cannot be more visible than its shelf\"}"
+                    )
+                |> ProgramTest.expectView
+                    (\view ->
+                        view
+                            |> Query.find
+                                [ Selector.tag "option"
+                                , Selector.attribute (Html.Attributes.value "platform")
+                                ]
+                            |> Query.has [ Selector.attribute (Html.Attributes.selected True) ]
+                    )

@@ -1,6 +1,7 @@
 module Types.Visibility exposing
     ( PlacementOption
     , Visibility(..)
+    , ceilingHelperText
     , exceedsCeiling
     , fromString
     , placementOptions
@@ -63,7 +64,8 @@ toString v =
             "owner"
 
 
-{-| Human-readable label for the dropdown.
+{-| Human-readable label for the dropdown. The wire value stays `platform`, but
+readers see "Members" — plainer language for "everyone signed in to The Stacks".
 -}
 label : Visibility -> String
 label v =
@@ -72,7 +74,7 @@ label v =
             "Public"
 
         Platform ->
-            "Platform"
+            "Members"
 
         Owner ->
             "Only me"
@@ -102,37 +104,45 @@ exceedsCeiling ceiling option =
     rank option < rank ceiling
 
 
-{-| A single dropdown option, pre-computed against the shelf ceiling.
+{-| A single dropdown option, pre-computed against the shelf ceiling. Disabled
+options carry no per-option tooltip — browsers don't render `title` on a disabled
+`<option>` — so the ceiling is explained once via `ceilingHelperText` below the
+select instead.
 -}
 type alias PlacementOption =
     { visibility : Visibility
     , label : String
     , disabled : Bool
-    , tooltip : Maybe String
     }
 
 
 {-| The three placement-visibility options, ordered most→least permissive, each
-flagged disabled (with an explanatory tooltip) when it exceeds the shelf
-`ceiling`.
+flagged disabled when it exceeds the shelf `ceiling`.
 -}
 placementOptions : Visibility -> List PlacementOption
 placementOptions ceiling =
     List.map
         (\v ->
-            let
-                disabled =
-                    exceedsCeiling ceiling v
-            in
             { visibility = v
             , label = label v
-            , disabled = disabled
-            , tooltip =
-                if disabled then
-                    Just ("Can’t be more visible than its shelf (" ++ label ceiling ++ ")")
-
-                else
-                    Nothing
+            , disabled = exceedsCeiling ceiling v
             }
         )
         [ Public, Platform, Owner ]
+
+
+{-| Always-visible helper text explaining why some options are greyed out. Only
+present when the shelf `ceiling` actually restricts something (i.e. it is more
+restrictive than `public`); a public shelf greys nothing out, so no text is shown.
+-}
+ceilingHelperText : Visibility -> Maybe String
+ceilingHelperText ceiling =
+    if rank ceiling > rank Public then
+        Just
+            ("This shelf is set to "
+                ++ label ceiling
+                ++ " — a book can’t be more visible than its shelf."
+            )
+
+    else
+        Nothing

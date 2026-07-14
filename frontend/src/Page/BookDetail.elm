@@ -18,7 +18,7 @@ import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, title, value)
+import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
 import Html.Events exposing (on, onClick, onInput, targetValue)
 import Http
 import Json.Decode as Decode
@@ -57,6 +57,7 @@ type alias Model =
     , isAuthenticated : Bool
     , availability : RemoteData Http.Error (List AvailabilityItem)
     , placementVisibility : Visibility
+    , previousVisibility : Visibility
     , shelfCeiling : Visibility
     , visibilityState : RemoteData Http.Error ()
     }
@@ -122,6 +123,7 @@ init bookId maybeToken maybePreviousRoute =
       -- ceiling defaults to the most permissive ("public") so nothing is greyed
       -- until the real values arrive with the placement payload.
       , placementVisibility = Visibility.Platform
+      , previousVisibility = Visibility.Platform
       , shelfCeiling = Visibility.Public
       , visibilityState = NotAsked
       }
@@ -234,6 +236,7 @@ update msg model maybeToken =
                         , selectedFormats = formats
                         , selectedEdition = response.book.primaryEdition
                         , placementVisibility = placementVisibility
+                        , previousVisibility = placementVisibility
                         , shelfCeiling = shelfCeiling
                       }
                     , Cmd.none
@@ -411,7 +414,13 @@ update msg model maybeToken =
                         ( model, Cmd.none, NoOut )
 
                     else
-                        ( { model | placementVisibility = vis, visibilityState = Loading }
+                        -- Optimistically show the new value, but remember the
+                        -- prior one so a failed save can roll the select back.
+                        ( { model
+                            | placementVisibility = vis
+                            , previousVisibility = model.placementVisibility
+                            , visibilityState = Loading
+                          }
                         , Api.updatePlacementVisibility placement.id (Visibility.toString vis) token PlacementVisibilityUpdated
                         , NoOut
                         )
@@ -422,11 +431,15 @@ update msg model maybeToken =
         PlacementVisibilityUpdated result ->
             case result of
                 Ok visStr ->
-                    ( { model
-                        | visibilityState = Success ()
-                        , placementVisibility =
+                    let
+                        confirmed =
                             Visibility.fromString visStr
                                 |> Maybe.withDefault model.placementVisibility
+                    in
+                    ( { model
+                        | visibilityState = Success ()
+                        , placementVisibility = confirmed
+                        , previousVisibility = confirmed
                       }
                     , Cmd.none
                     , NoOut
@@ -437,7 +450,15 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | visibilityState = Failure err }, Cmd.none, NoOut )
+                        -- Revert the optimistic change: the server rejected it,
+                        -- so don't leave the rejected value shown in the select.
+                        ( { model
+                            | visibilityState = Failure err
+                            , placementVisibility = model.previousVisibility
+                          }
+                        , Cmd.none
+                        , NoOut
+                        )
 
 
 view : Model -> Html Msg
@@ -680,8 +701,8 @@ viewFormatsOnShelf model =
 
 {-| "Who can see this book" — per-placement visibility override (US-10.2.2).
 Only shown when the user owns a placement. Options that would make the placement
-more visible than its parent shelf are greyed out with a tooltip, mirroring the
-server-side ceiling 422.
+more visible than its parent shelf are greyed out, with an always-visible line of
+helper text explaining the shelf ceiling, mirroring the server-side ceiling 422.
 -}
 viewVisibilityControl : Model -> Html Msg
 viewVisibilityControl model =
@@ -701,12 +722,26 @@ viewVisibilityControl model =
             [ class "book-detail__visibility-select"
             , id "placement-visibility-select"
             , testId "placement-visibility-select"
-            , attribute "aria-label" "Placement visibility"
             , on "change" (Decode.map PlacementVisibilitySelected targetValue)
             ]
             (List.map (viewVisibilityOption model.placementVisibility) (Visibility.placementOptions model.shelfCeiling))
+        , viewCeilingHelperText model.shelfCeiling
         , viewVisibilityState model.visibilityState
         ]
+
+
+{-| Always-visible explanation of why some options are greyed out, shown only
+when the shelf ceiling actually restricts something. Replaces the `title`
+tooltip on disabled options, which browsers don't render.
+-}
+viewCeilingHelperText : Visibility -> Html Msg
+viewCeilingHelperText ceiling =
+    case Visibility.ceilingHelperText ceiling of
+        Just helper ->
+            p [ class "book-detail__visibility-help" ] [ text helper ]
+
+        Nothing ->
+            text ""
 
 
 viewVisibilityOption : Visibility -> Visibility.PlacementOption -> Html Msg
@@ -715,7 +750,6 @@ viewVisibilityOption current opt =
         [ value (Visibility.toString opt.visibility)
         , selected (opt.visibility == current)
         , disabled opt.disabled
-        , title (Maybe.withDefault "" opt.tooltip)
         ]
         [ text opt.label ]
 
@@ -728,7 +762,7 @@ viewVisibilityState state =
 
         Loading ->
             div [ class "book-detail__status book-detail__status--loading" ]
-                [ text "Saving visibility..." ]
+                [ text "Saving visibility…" ]
 
         Success _ ->
             div [ class "book-detail__status book-detail__status--success" ]
@@ -736,7 +770,7 @@ viewVisibilityState state =
 
         Failure _ ->
             div [ class "book-detail__status book-detail__status--error" ]
-                [ text "Could not update visibility. Please try again." ]
+                [ text "We couldn't save that change. Please try again." ]
 
 
 viewAboutSection : Book -> Html Msg

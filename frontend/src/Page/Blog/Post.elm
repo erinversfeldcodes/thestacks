@@ -287,8 +287,17 @@ view model =
             Loading ->
                 p [ class "loading" ] [ text "Loading post..." ]
 
-            Failure _ ->
-                p [ class "error" ] [ text "Could not load post. Please try again." ]
+            Failure err ->
+                if Api.isNotFound err then
+                    -- The post resolved to :hidden (a 404) — e.g. after the
+                    -- reader blocked its author. A gentle dead-end, not an error.
+                    div [ class "blog-post__unavailable" ]
+                        [ p [ class "blog-post__unavailable-text" ]
+                            [ text "This post is no longer available." ]
+                        ]
+
+                else
+                    p [ class "error" ] [ text "Could not load post. Please try again." ]
 
             Success post ->
                 let
