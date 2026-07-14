@@ -52,6 +52,58 @@
 | **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), and accessibility (US-19.x). |
 | **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). |
 
+### Additional Features Under Consideration (per phase)
+
+> Forward-looking product-design directions being weighed for each phase — not yet
+> committed scope. Detailed working notes are maintainer-local (`notes/`, gitignored);
+> committed design docs are linked where they exist. Each should get a short design
+> pass / ADR before it enters a phase's scope.
+
+**Phase 2 (Enrichment).** Semantic retrieval / RAG over the book graph (pgvector — the
+embeddings foundation is landing now) for "similar books / what to read next" and review
+aggregation; an LLM-output **eval + faithfulness** harness (the panel already specced in
+[`data-quality.md`](data-quality.md)) as the gate for every AI-shaped feature downstream;
+the data-engineering **training-corpus** foundation (per-record provenance/lineage,
+versioned + consent-gated dataset snapshots — see [`data-licensing-program.md`](data-licensing-program.md));
+and **anti-scraping** protection for public content. Detail: `notes/product-ideas.md`.
+
+**Phase 3 (Partner Integration).** Proto-generated **client SDKs** (the partner SDK is the
+natural first one — codegen, not hand-written); a **public MCP server** for third-party
+integration layered on the event bus (writes flow through `Events.emit`; events → MCP
+subscriptions); and a partner dashboard as a distinct frontend surface. Detail:
+`notes/product-ideas.md`.
+
+**Phase 4 (Polish).** Distributed-tracing **observability** (OpenTelemetry across
+Elixir ↔ scraper ↔ external) extending the Metrics work; **A/B testing / feature-flag**
+infrastructure (also a safe-rollout mechanism, complementing the deploy rollback work);
+and native integrations with external analytics/sharing tools. Detail: `notes/product-ideas.md`.
+
+**Phase 5 (Marketplace).** Deeper **billing / metering / revenue-reporting** as
+first-class systems (also the spine for the data-licensing revenue-share); **fraud / abuse
+detection** on listings; and the currently-deferred payments, shipping, and seller KYC
+(#054b / #054c / #069). Detail: `notes/product-ideas.md`.
+
+**Phase 6 (Social Graph & Visibility).** **Real-time collaborative editing** for blog
+co-authoring (CRDT/OT over Phoenix Channels — including the editor-vs-co-author role
+distinction); privacy engineered structurally (the visibility ceiling + RLS + the
+`gdpr-review` gate); and an **anti-scraping / consent policy** for public user content
+(per-user, per-visibility — honors opt-in indexing, tarpits bad actors). Detail:
+`notes/product-ideas.md`.
+
+**Phase 7 (Blog & Comments).** The writing assistant's **custom training on a private
+expert corpus** (RAG for content + light LoRA adaptation on derived data, under a hard
+no-leak / revocable-consent constraint — see [`writing-assistant-design.md`](writing-assistant-design.md)
+and `notes/product-ideas.md`); **streaming LLM UX** (token streaming, citations,
+confidence); **LLM guardrails / red-teaming** on generated content and comments; **POSSE**
+cross-post syndication of blog posts; and the **non-ISBN / Readable generalization**
+(papers, articles, video as first-class knowledge sources — warrants its own ADR, as it
+touches the ISBN hard gate). Detail: `notes/product-ideas.md`.
+
+**Cross-cutting (all phases).** A **mobile** story (genuinely responsive web + eventual
+native iOS/Android, anchored on the camera capture loop); reusable SDKs; and continued
+**correctness / deterministic-simulation testing** of the risky lifecycles (auth, events,
+deploy). Detail: `notes/product-ideas.md`.
+
 ---
 
 ## Service Interaction Matrix
