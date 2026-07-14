@@ -629,7 +629,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
   describe "blog_post/1" do
     test "matches BlogController.format_post/1 shape" do
-      user = insert(:user)
+      user = insert(:user, display_name: "Fable Quill")
       post = insert(:post, user: user, visibility: "platform")
 
       result = ProtoJSON.blog_post(post)
@@ -642,7 +642,8 @@ defmodule StacksWeb.ProtoJSONTest do
                visibility: "platform",
                published_at: post.published_at,
                created_at: post.created_at,
-               updated_at: post.updated_at
+               updated_at: post.updated_at,
+               author_display_name: "Fable Quill"
              }
     end
 
@@ -653,6 +654,25 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.blog_post(post)
 
       assert result.published_at == nil
+    end
+
+    test "includes the author's display_name for the block-user confirmation" do
+      user = insert(:user, display_name: "Fable Quill")
+      post = insert(:post, user: user)
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_display_name == "Fable Quill"
+    end
+
+    test "author_display_name is nil when the author association is not loaded" do
+      user = insert(:user, display_name: "Fable Quill")
+      post = insert(:post, user: user)
+      post = %{post | user: %Ecto.Association.NotLoaded{}}
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_display_name == nil
     end
   end
 

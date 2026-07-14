@@ -260,8 +260,9 @@ update msg model maybeToken =
 
 
 {-| A block affordance is only offered to a signed-in reader who is not the
-post's author (you can't block yourself). The post payload carries no author
-display name, so a generic label is used.
+post's author (you can't block yourself). The confirmation names the author
+using the post payload's `authorDisplayName`, falling back to a generic label
+when it is absent (older payloads or an unloaded author association).
 -}
 blockModalFor : Maybe String -> BlogPost -> Maybe BlockModal.Model
 blockModalFor currentUserId post =
@@ -271,10 +272,27 @@ blockModalFor currentUserId post =
                 Nothing
 
             else
-                Just (BlockModal.init { userId = post.userId, displayName = "the author" })
+                Just
+                    (BlockModal.init
+                        { userId = post.userId
+                        , displayName = authorLabel post
+                        }
+                    )
 
         Nothing ->
             Nothing
+
+
+{-| The author's display name for the block confirmation, with a safe generic
+fallback when the payload carries no name.
+-}
+authorLabel : BlogPost -> String
+authorLabel post =
+    if String.trim post.authorDisplayName == "" then
+        "the author"
+
+    else
+        post.authorDisplayName
 
 
 view : Model -> Html Msg

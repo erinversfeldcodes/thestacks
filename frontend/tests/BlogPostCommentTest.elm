@@ -1,5 +1,6 @@
 module BlogPostCommentTest exposing (suite)
 
+import Components.BlockUserModal as BlockModal
 import Expect
 import Http
 import Json.Decode as Decode
@@ -268,6 +269,7 @@ suite =
                             , published = True
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
+                            , authorDisplayName = "Fable Quill"
                             }
 
                         model =
@@ -303,6 +305,7 @@ suite =
                             , published = True
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
+                            , authorDisplayName = "Fable Quill"
                             }
 
                         model =
@@ -315,4 +318,45 @@ suite =
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.class "comment__author-badge" ]
             ]
+        , describe "block-author confirmation names the author"
+            [ test "the block menu names the author from authorDisplayName" <|
+                \_ ->
+                    blockMenuView { authorName = "Fable Quill" }
+                        |> Query.has [ Selector.text "Block Fable Quill" ]
+            , test "falls back to a generic label when authorDisplayName is absent" <|
+                \_ ->
+                    blockMenuView { authorName = "" }
+                        |> Query.has [ Selector.text "Block the author" ]
+            ]
         ]
+
+
+{-| Drive Post through PostLoaded (which populates the block modal for a
+non-owner viewer) then open the block menu, returning the rendered query.
+-}
+blockMenuView : { authorName : String } -> Query.Single Post.Msg
+blockMenuView { authorName } =
+    let
+        post =
+            { id = "post-1"
+            , userId = "post-author-id"
+            , title = "Test Post"
+            , body = "Post body"
+            , visibility = Owner
+            , published = True
+            , insertedAt = "2026-03-29T12:00:00Z"
+            , associations = []
+            , authorDisplayName = authorName
+            }
+
+        viewerModel =
+            { testModel | currentUserId = Just "a-different-viewer" }
+
+        ( loaded, _, _ ) =
+            Post.update (PostLoaded (Ok post)) viewerModel Nothing
+
+        ( menuOpen, _, _ ) =
+            Post.update (BlockModalMsg BlockModal.MenuToggled) loaded Nothing
+    in
+    Post.view menuOpen
+        |> Query.fromHtml

@@ -1460,6 +1460,7 @@ blogSuite =
                         , createdAt = "2026-03-20T00:00:00Z"
                         , updatedAt = "2026-03-21T01:00:00Z"
                         , visibilityGroupId = ""
+                        , authorDisplayName = "Fable Quill"
                         }
 
                     result =
@@ -1747,6 +1748,7 @@ blogResponseSuite =
                             , createdAt = "2026-03-20T00:00:00Z"
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
+                            , authorDisplayName = "Fable Quill"
                             }
                         }
 

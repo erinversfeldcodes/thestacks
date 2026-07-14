@@ -338,6 +338,11 @@ defmodule StacksWeb.ProtoJSON do
   Serializes a blog post struct.
 
   Matches `BlogController.format_post/1`.
+
+  Emits `author_display_name` — a denormalised projection of the author's
+  `op.users.display_name` — so the block-user confirmation can name the person
+  ("Block <name>?"). When the `:user` association is not loaded, the field is
+  `nil` and the frontend falls back to a generic "the author" label.
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
@@ -352,7 +357,12 @@ defmodule StacksWeb.ProtoJSON do
       :created_at,
       :updated_at
     ])
+    |> Map.put(:author_display_name, author_display_name(post))
   end
+
+  @spec author_display_name(map()) :: String.t() | nil
+  defp author_display_name(%{user: %{display_name: name}}), do: name
+  defp author_display_name(_post), do: nil
 
   @doc """
   Serializes a blog post-book association.
