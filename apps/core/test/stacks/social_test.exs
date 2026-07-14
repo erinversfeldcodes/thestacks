@@ -176,6 +176,60 @@ defmodule Stacks.SocialTest do
       assert total == 0
       assert results == []
     end
+
+    test "paginates: >20 blocks returns 20 on page 1 with the correct total" do
+      blocker = insert(:user)
+      for _ <- 1..25, do: insert(:user_block, blocker: blocker, blocked: insert(:user))
+
+      {page1, total} = Social.list_blocked_users(blocker.id, page: 1)
+      assert total == 25
+      assert length(page1) == 20
+
+      {page2, total2} = Social.list_blocked_users(blocker.id, page: 2)
+      assert total2 == 25
+      assert length(page2) == 5
+    end
+
+    test "does not repeat entries across pages" do
+      blocker = insert(:user)
+      for _ <- 1..25, do: insert(:user_block, blocker: blocker, blocked: insert(:user))
+
+      {page1, _} = Social.list_blocked_users(blocker.id, page: 1)
+      {page2, _} = Social.list_blocked_users(blocker.id, page: 2)
+
+      ids1 = MapSet.new(page1, & &1.id)
+      ids2 = MapSet.new(page2, & &1.id)
+      assert MapSet.disjoint?(ids1, ids2)
+      assert MapSet.size(ids1) + MapSet.size(ids2) == 25
+    end
+
+    test "orders blocked users by created_at descending (most recent first)" do
+      blocker = insert(:user)
+      base = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      # Insert 25 blocks with strictly increasing created_at timestamps.
+      for i <- 0..24 do
+        insert(:user_block,
+          blocker: blocker,
+          blocked: insert(:user),
+          created_at: DateTime.add(base, i, :second)
+        )
+      end
+
+      {page1, _total} = Social.list_blocked_users(blocker.id, page: 1)
+      blocked_ats = Enum.map(page1, & &1.blocked_at)
+
+      # Returned in descending created_at order (newest first)…
+      assert blocked_ats == Enum.sort(blocked_ats, {:desc, DateTime})
+      # …and not ascending — proves the ordering is genuinely desc, not incidental.
+      refute blocked_ats == Enum.sort(blocked_ats, {:asc, DateTime})
+
+      # Page 1 holds the 20 most-recent; page 2 the 5 oldest.
+      {page2, _} = Social.list_blocked_users(blocker.id, page: 2)
+      newest_on_page2 = page2 |> Enum.map(& &1.blocked_at) |> Enum.max(DateTime)
+      oldest_on_page1 = Enum.min(blocked_ats, DateTime)
+      assert DateTime.compare(oldest_on_page1, newest_on_page2) == :gt
+    end
   end
 
   describe "blocked_by?/2" do
