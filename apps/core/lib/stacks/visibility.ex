@@ -17,6 +17,11 @@ defmodule Stacks.Visibility do
   # A child resource must be equally or more restrictive than its parent.
   @visibility_rank %{"public" => 0, "platform" => 1, "owner" => 2}
 
+  # Whitelist of resource-type tags for the ceiling-rejection counter. Anything
+  # else is coerced to :other so telemetry cardinality stays bounded and no raw
+  # caller-supplied value leaks into a metric label.
+  @ceiling_resource_types [:bookshelf, :placement, :post]
+
   @doc """
   Resolves whether a resource is visible to a viewer.
 
@@ -313,5 +318,70 @@ defmodule Stacks.Visibility do
       {:error,
        "#{resource_type} visibility '#{child_visibility}' is less restrictive than parent visibility '#{parent_visibility}'"}
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Telemetry (Issue #197 — visibility/privacy observability)
+  #
+  # All metadata tags are whitelisted atoms — never raw user input — so metric
+  # label cardinality stays bounded.
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Classifies a profile-visibility change relative to the visibility ranking
+  (`"public"` < `"platform"` < `"owner"`).
+
+  - `:tighten` — the new value is more restrictive
+  - `:loosen` — the new value is less restrictive
+  - `:same` — no change in restrictiveness
+  """
+  @spec classify_visibility_direction(String.t(), String.t()) :: :tighten | :loosen | :same
+  def classify_visibility_direction(old_visibility, new_visibility) do
+    old_rank = Map.get(@visibility_rank, old_visibility, 0)
+    new_rank = Map.get(@visibility_rank, new_visibility, 0)
+
+    cond do
+      new_rank > old_rank -> :tighten
+      new_rank < old_rank -> :loosen
+      true -> :same
+    end
+  end
+
+  @doc """
+  Emits the `[:stacks, :visibility, :profile_change]` counter, tagged by the
+  change `:direction` (`:tighten` / `:loosen` / `:same`). Returns the direction.
+  """
+  @spec emit_profile_visibility_change(String.t(), String.t()) :: :tighten | :loosen | :same
+  def emit_profile_visibility_change(old_visibility, new_visibility) do
+    direction = classify_visibility_direction(old_visibility, new_visibility)
+
+    :telemetry.execute(
+      [:stacks, :visibility, :profile_change],
+      %{count: 1},
+      %{direction: direction}
+    )
+
+    direction
+  end
+
+  @doc """
+  Emits the `[:stacks, :visibility, :ceiling_rejection]` counter when a
+  mutation is rejected for exceeding its parent's visibility ceiling. The
+  `resource_type` tag is whitelisted (`:bookshelf` / `:placement` / `:post`);
+  any other value is coerced to `:other`.
+
+  Call this from the genuine user-facing rejection sites (shelf/placement/blog
+  mutation error branches) — NOT from the batch-tighten filter path, which
+  expects and caps violations rather than rejecting them.
+  """
+  @spec emit_ceiling_rejection(atom()) :: :ok
+  def emit_ceiling_rejection(resource_type) do
+    tag = if resource_type in @ceiling_resource_types, do: resource_type, else: :other
+
+    :telemetry.execute(
+      [:stacks, :visibility, :ceiling_rejection],
+      %{count: 1},
+      %{resource_type: tag}
+    )
   end
 end

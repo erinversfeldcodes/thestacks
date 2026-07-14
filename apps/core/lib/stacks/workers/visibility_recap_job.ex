@@ -42,6 +42,12 @@ defmodule Stacks.Workers.VisibilityRecapJob do
         "VisibilityRecapJob: no recap needed for user #{user_id} (ceiling: #{new_visibility})"
       )
 
+      :telemetry.execute(
+        [:stacks, :visibility, :recap],
+        %{bookshelves_capped: 0, placements_capped: 0, posts_capped: 0},
+        %{outcome: :noop}
+      )
+
       :ok
     else
       now = DateTime.utc_now()
@@ -65,6 +71,16 @@ defmodule Stacks.Workers.VisibilityRecapJob do
           "for user #{user_id} → #{new_visibility}"
       )
 
+      :telemetry.execute(
+        [:stacks, :visibility, :recap],
+        %{
+          bookshelves_capped: bookshelf_count,
+          placements_capped: placement_count,
+          posts_capped: posts_capped
+        },
+        %{outcome: :capped}
+      )
+
       Events.emit_safe(%{
         event_type: "user.visibility_recap_completed",
         aggregate_type: "user",
@@ -84,6 +100,12 @@ defmodule Stacks.Workers.VisibilityRecapJob do
       Logger.error(
         "VisibilityRecapJob: unhandled exception for user #{user_id}: " <>
           Exception.format(:error, exception, __STACKTRACE__)
+      )
+
+      :telemetry.execute(
+        [:stacks, :visibility, :recap],
+        %{bookshelves_capped: 0, placements_capped: 0, posts_capped: 0},
+        %{outcome: :error}
       )
 
       {:error, exception}

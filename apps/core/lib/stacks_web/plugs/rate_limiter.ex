@@ -96,6 +96,12 @@ defmodule StacksWeb.Plugs.RateLimiter do
         conn
 
       rate_limited?(key, bucket, limit) ->
+        # Generic rate-limit hit counter, tagged by bucket. The event name is
+        # deliberately bucket-agnostic and stable — `:social` (the visibility
+        # epic's `:rate_limit_social` bucket) is just one tag value alongside
+        # `:auth`, `:upload`, etc. (coordinated with the #195 rate-limit tests).
+        :telemetry.execute([:stacks, :rate_limit, :hit], %{count: 1}, %{bucket: bucket})
+
         conn
         |> put_status(429)
         |> put_resp_header("retry-after", "60")

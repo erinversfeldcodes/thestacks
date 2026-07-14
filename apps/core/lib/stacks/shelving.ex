@@ -495,6 +495,11 @@ defmodule Stacks.Shelving do
       Repo.one(from(u in User, where: u.id == ^user_id, select: u.profile_visibility))
 
     if profile_visibility == "owner" and visibility != "owner" do
+      # Count the bookshelf ceiling rejection (§12 telemetry, Issue #197). This
+      # rejection path was added in #195; the counter is wired here so it fires
+      # on the same definitive rule violation the changeset error marks.
+      Stacks.Visibility.emit_ceiling_rejection(:bookshelf)
+
       add_error(
         changeset,
         :visibility,
@@ -542,6 +547,7 @@ defmodule Stacks.Shelving do
             |> Repo.update()
 
           {:error, reason} ->
+            Stacks.Visibility.emit_ceiling_rejection(:placement)
             {:error, reason}
         end
     end

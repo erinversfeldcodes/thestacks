@@ -96,6 +96,8 @@ defmodule Stacks.Social do
 
     case result do
       {:ok, block} ->
+        :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
+
         Events.emit_safe(%{
           event_type: "social.user_blocked",
           aggregate_type: "user",
@@ -106,6 +108,14 @@ defmodule Stacks.Social do
         {:ok, block}
 
       {:error, changeset} ->
+        # The only constraint on the insert is the (blocker, blocked) uniqueness,
+        # so an insert error here is a duplicate/already-blocked attempt.
+        :telemetry.execute(
+          [:stacks, :social, :block_error],
+          %{count: 1},
+          %{reason: :already_blocked}
+        )
+
         {:error, changeset}
     end
   end
@@ -130,6 +140,8 @@ defmodule Stacks.Social do
 
       block ->
         {:ok, _} = Repo.delete(block)
+
+        :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
 
         Events.emit_safe(%{
           event_type: "social.user_unblocked",
