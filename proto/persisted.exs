@@ -1014,7 +1014,9 @@
           null: false
         },
         status: %{default: "active", null: false},
-        started_at: %{ecto_type: :utc_datetime_usec}
+        started_at: %{ecto_type: :utc_datetime_usec},
+        # User free-text topic/prompt — PII-adjacent. Exclude from dbt analytics.
+        topic: %{dbt_exclude: true}
       }
     },
     %{
@@ -1037,7 +1039,9 @@
           null: false
         },
         turn_index: %{null: false},
-        rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]}
+        rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]},
+        # User free-text comment — PII. Exclude from dbt analytics (mirrors retrieval_log.query).
+        comment: %{dbt_exclude: true}
       }
     },
     %{
