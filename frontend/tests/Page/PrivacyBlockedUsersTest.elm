@@ -99,6 +99,25 @@ suite =
                     , \_ -> out |> Expect.equal Privacy.NoOut
                     ]
                     ()
+        , test "GotUnblockResponse non-401 failure surfaces an error and keeps the row" <|
+            \_ ->
+                let
+                    started =
+                        { baseModel | blockedUsers = Success blocked, unblocking = Just "u-2" }
+
+                    ( m, _, out ) =
+                        Privacy.update (GotUnblockResponse "u-2" (Err (Http.BadStatus 500))) started (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.unblocking |> Expect.equal Nothing
+                    , \_ -> m.blockedUsers |> Expect.equal (Success blocked)
+                    , \_ -> out |> Expect.equal Privacy.NoOut
+                    , \_ ->
+                        Privacy.view m
+                            |> Query.fromHtml
+                            |> Query.has [ Selector.text "We couldn't unblock that reader. Please try again." ]
+                    ]
+                    ()
         , test "GotBlockedUsers 401 escalates to SessionExpired" <|
             \_ ->
                 let
@@ -111,4 +130,40 @@ suite =
                 Privacy.view { baseModel | blockedUsers = Success [] }
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "You haven't blocked anyone." ]
+        , test "Load more appears when fewer readers are loaded than the total" <|
+            \_ ->
+                Privacy.view { baseModel | blockedUsers = Success blocked, blockedTotal = 25, blockedPage = 1 }
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "privacy__blocked-load-more" ]
+        , test "Load more is hidden once every blocked reader is loaded" <|
+            \_ ->
+                Privacy.view { baseModel | blockedUsers = Success blocked, blockedTotal = 2, blockedPage = 1 }
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.class "privacy__blocked-load-more" ]
+        , test "LoadMoreBlocked requests the next page and marks loadingMore" <|
+            \_ ->
+                let
+                    started =
+                        { baseModel | blockedUsers = Success blocked, blockedTotal = 25, blockedPage = 1 }
+
+                    ( m, _, _ ) =
+                        Privacy.update LoadMoreBlocked started (Just "tok")
+                in
+                m.loadingMore |> Expect.equal True
+        , test "GotBlockedUsers page 2 appends to the readers already loaded" <|
+            \_ ->
+                let
+                    more =
+                        [ { id = "u-4", displayName = "Katherine Johnson", blockedAt = "2026-07-12T00:00:00Z" } ]
+
+                    started =
+                        { baseModel | blockedUsers = Success blocked, blockedTotal = 3, blockedPage = 1 }
+
+                    ( m, _, _ ) =
+                        Privacy.update
+                            (GotBlockedUsers (Ok { blockedUsers = more, total = 3, page = 2 }))
+                            started
+                            (Just "tok")
+                in
+                m.blockedUsers |> Expect.equal (Success (blocked ++ more))
         ]

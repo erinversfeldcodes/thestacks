@@ -50,6 +50,7 @@ bookDetailInit =
     , isAuthenticated = True
     , availability = NotAsked
     , placementVisibility = Types.Visibility.Platform
+    , previousVisibility = Types.Visibility.Platform
     , shelfCeiling = Types.Visibility.Public
     , visibilityState = NotAsked
     }
