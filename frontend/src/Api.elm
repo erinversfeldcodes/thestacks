@@ -61,6 +61,7 @@ module Api exposing
     , getUserPlacements
     , initUpload
     , inviteToGroup
+    , isNotFound
     , isUnauthorized
     , leaveGroup
     , listBlockedUsers
@@ -364,6 +365,20 @@ isUnauthorized : Http.Error -> Bool
 isUnauthorized err =
     case err of
         Http.BadStatus 401 ->
+            True
+
+        _ ->
+            False
+
+
+{-| True when an `Http.Error` is a 404 — the signal a resource is gone or hidden
+(e.g. a blog post that resolves to `:hidden` after a block), so the caller can
+render a graceful "no longer available" state instead of a technical error.
+-}
+isNotFound : Http.Error -> Bool
+isNotFound err =
+    case err of
+        Http.BadStatus 404 ->
             True
 
         _ ->
@@ -1768,17 +1783,20 @@ unblockUser targetUserId token toMsg =
         }
 
 
-{-| GET /api/settings/blocked-users — the current reader's blocked list.
+{-| GET /api/settings/blocked-users — the current reader's blocked list, one
+page (20 readers) at a time. `page` is 1-based; the response echoes back the
+page and total so the caller can offer a "Load more" affordance.
 -}
 listBlockedUsers :
     String
+    -> Int
     -> (Result Http.Error BlockedUsersResponse -> msg)
     -> Cmd msg
-listBlockedUsers token toMsg =
+listBlockedUsers token page toMsg =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/settings/blocked-users"
+        , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blockedUsersResponseDecoder
         , timeout = Nothing

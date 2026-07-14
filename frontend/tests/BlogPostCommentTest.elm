@@ -130,6 +130,20 @@ suite =
                         _ ->
                             Expect.fail "Expected Failure"
             ]
+        , describe "PostLoaded — hidden after self-block"
+            [ test "a 404 (hidden post) lands on a graceful \"no longer available\" state, not a technical error" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Post.update (PostLoaded (Err (Http.BadStatus 404))) testModel Nothing
+                    in
+                    Post.view model
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "This post is no longer available." ]
+                            , Query.hasNot [ Selector.text "Could not load post. Please try again." ]
+                            ]
+            ]
         , describe "CommentDraftChanged"
             [ test "updates commentDraft" <|
                 \_ ->

@@ -27,7 +27,11 @@ type alias Model =
     , deleteConfirmation : String
     , deleting : RemoteData Http.Error ()
     , blockedUsers : RemoteData Http.Error (List Api.BlockedUser)
+    , blockedTotal : Int
+    , blockedPage : Int
+    , loadingMore : Bool
     , unblocking : Maybe String
+    , unblockError : Bool
     }
 
 
@@ -53,6 +57,7 @@ type Msg
     | UserClicksDeleteAccount
     | GotDeleteResponse (Result Http.Error ())
     | GotBlockedUsers (Result Http.Error Api.BlockedUsersResponse)
+    | LoadMoreBlocked
     | UserClicksUnblock String
     | GotUnblockResponse String (Result Http.Error ())
 
@@ -113,7 +118,11 @@ init =
     , deleteConfirmation = ""
     , deleting = NotAsked
     , blockedUsers = NotAsked
+    , blockedTotal = 0
+    , blockedPage = 1
+    , loadingMore = False
     , unblocking = Nothing
+    , unblockError = False
     }
 
 
@@ -126,7 +135,7 @@ initWithToken maybeToken =
     case maybeToken of
         Just token ->
             ( { init | blockedUsers = Loading }
-            , Api.listBlockedUsers token GotBlockedUsers
+            , Api.listBlockedUsers token 1 GotBlockedUsers
             )
 
         Nothing ->
@@ -292,19 +301,53 @@ update msg model maybeToken =
         GotBlockedUsers result ->
             case result of
                 Ok response ->
-                    ( { model | blockedUsers = Success response.blockedUsers }, Cmd.none, NoOut )
+                    let
+                        -- Page 1 replaces the list; later pages append to the
+                        -- readers already loaded (the "Load more" affordance).
+                        merged =
+                            case model.blockedUsers of
+                                Success existing ->
+                                    if response.page > 1 then
+                                        existing ++ response.blockedUsers
+
+                                    else
+                                        response.blockedUsers
+
+                                _ ->
+                                    response.blockedUsers
+                    in
+                    ( { model
+                        | blockedUsers = Success merged
+                        , blockedTotal = response.total
+                        , blockedPage = response.page
+                        , loadingMore = False
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | blockedUsers = Failure err }, Cmd.none, NoOut )
+                        ( { model | blockedUsers = Failure err, loadingMore = False }, Cmd.none, NoOut )
+
+        LoadMoreBlocked ->
+            case maybeToken of
+                Just token ->
+                    ( { model | loadingMore = True }
+                    , Api.listBlockedUsers token (model.blockedPage + 1) GotBlockedUsers
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
 
         UserClicksUnblock userId ->
             case maybeToken of
                 Just token ->
-                    ( { model | unblocking = Just userId }
+                    ( { model | unblocking = Just userId, unblockError = False }
                     , Api.unblockUser userId token (GotUnblockResponse userId)
                     , NoOut
                     )
@@ -326,15 +369,16 @@ update msg model maybeToken =
                                 other ->
                                     other
                     in
-                    ( { model | blockedUsers = remaining, unblocking = Nothing }, Cmd.none, NoOut )
+                    ( { model | blockedUsers = remaining, unblocking = Nothing, unblockError = False }, Cmd.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Keep the row; just clear the in-flight flag.
-                        ( { model | unblocking = Nothing }, Cmd.none, NoOut )
+                        -- Keep the row, clear the in-flight flag, and surface an
+                        -- error so the failure isn't silent.
+                        ( { model | unblocking = Nothing, unblockError = True }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg
@@ -396,9 +440,44 @@ viewBlockedUsersSection model =
                 p [ class "privacy__blocked-empty" ] [ text "You haven't blocked anyone." ]
 
             Success users ->
-                div [ class "privacy__blocked-list" ]
-                    (List.map (viewBlockedRow model.unblocking) users)
+                div []
+                    [ div [ class "privacy__blocked-list" ]
+                        (List.map (viewBlockedRow model.unblocking) users)
+                    , viewLoadMore model users
+                    ]
+        , if model.unblockError then
+            p [ attribute "aria-live" "assertive", class "error" ]
+                [ text "We couldn't unblock that reader. Please try again." ]
+
+          else
+            text ""
         ]
+
+
+{-| "Load more" affordance for readers who've blocked more than one page (20)
+of others. Shown only while fewer readers are loaded than the server's total.
+-}
+viewLoadMore : Model -> List Api.BlockedUser -> Html Msg
+viewLoadMore model users =
+    if List.length users < model.blockedTotal then
+        div [ class "privacy__blocked-load-more" ]
+            [ button
+                [ class "btn btn--small btn--secondary"
+                , disabled model.loadingMore
+                , onClick LoadMoreBlocked
+                ]
+                [ text
+                    (if model.loadingMore then
+                        "Loading…"
+
+                     else
+                        "Load more"
+                    )
+                ]
+            ]
+
+    else
+        text ""
 
 
 viewBlockedRow : Maybe String -> Api.BlockedUser -> Html Msg
@@ -592,7 +671,7 @@ viewSaveButton saving onClickMsg labelText =
     case saving of
         Loading ->
             button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving..." ]
+                [ text "Saving…" ]
 
         Success _ ->
             button [ class "btn btn--primary" ]

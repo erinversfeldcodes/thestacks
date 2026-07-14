@@ -10,6 +10,7 @@ plus the sad paths the backend returns (already\_blocked, not\_found) and the
 import Api
 import Components.BlockUserModal as BlockModal exposing (Msg(..), OutMsg(..))
 import Expect
+import Html.Attributes
 import Http
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -180,6 +181,23 @@ suite =
                 BlockModal.view initModel
                     |> Query.fromHtml
                     |> Query.has [ Selector.class "block-user__trigger" ]
+        , test "the overflow trigger is labelled and announced as a menu control for assistive tech" <|
+            \_ ->
+                BlockModal.view initModel
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "block-user__trigger" ]
+                    |> Query.has
+                        [ Selector.attribute (Html.Attributes.attribute "aria-label" "Reader actions")
+                        , Selector.attribute (Html.Attributes.attribute "aria-haspopup" "menu")
+                        , Selector.attribute (Html.Attributes.attribute "aria-expanded" "false")
+                        ]
+        , test "opening the menu flips the trigger's aria-expanded to true" <|
+            \_ ->
+                BlockModal.view { initModel | menuOpen = True }
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "block-user__trigger" ]
+                    |> Query.has
+                        [ Selector.attribute (Html.Attributes.attribute "aria-expanded" "true") ]
         , test "an open menu offers a Block action labelled with the target name" <|
             \_ ->
                 BlockModal.view { initModel | menuOpen = True }
