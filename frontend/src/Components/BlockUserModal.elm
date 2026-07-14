@@ -20,7 +20,7 @@ Model-Update-View, `RemoteData` for the request, no ports. Issue #193 (US-10.1.2
 
 import Api exposing (BlockError(..))
 import Html exposing (Html, button, div, p, text)
-import Html.Attributes exposing (class, disabled)
+import Html.Attributes exposing (attribute, class, disabled)
 import Html.Events exposing (onClick)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -137,6 +137,15 @@ view model =
         [ button
             [ class "block-user__trigger"
             , testId "block-user-trigger"
+            , attribute "aria-label" "Reader actions"
+            , attribute "aria-haspopup" "menu"
+            , attribute "aria-expanded"
+                (if model.menuOpen then
+                    "true"
+
+                 else
+                    "false"
+                )
             , onClick MenuToggled
             ]
             [ text "⋯" ]

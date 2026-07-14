@@ -17,6 +17,7 @@ suite =
         , ranking
         , exceedsCeilingRule
         , placementOptionsForCeiling
+        , ceilingHelperTextRule
         ]
 
 
@@ -83,20 +84,17 @@ placementOptionsForCeiling =
                         , ( "platform", False )
                         , ( "owner", False )
                         ]
-        , test "disabled options carry a ceiling tooltip; enabled ones do not" <|
-            \_ ->
-                V.placementOptions Platform
-                    |> List.map (\o -> ( V.toString o.visibility, o.tooltip /= Nothing ))
-                    |> Expect.equal
-                        [ ( "public", True )
-                        , ( "platform", False )
-                        , ( "owner", False )
-                        ]
         , test "public ceiling enables every option" <|
             \_ ->
                 V.placementOptions Public
                     |> List.map .disabled
                     |> Expect.equal [ False, False, False ]
+        , test "the platform option is labelled \"Members\" for readers" <|
+            \_ ->
+                V.placementOptions Public
+                    |> List.filter (\o -> o.visibility == Platform)
+                    |> List.map .label
+                    |> Expect.equal [ "Members" ]
         , test "owner ceiling disables both public and platform" <|
             \_ ->
                 V.placementOptions Owner
@@ -106,4 +104,19 @@ placementOptionsForCeiling =
                         , ( "platform", True )
                         , ( "owner", False )
                         ]
+        ]
+
+
+ceilingHelperTextRule : Test
+ceilingHelperTextRule =
+    describe "ceilingHelperText explains a restricting ceiling, and is silent for public"
+        [ test "a public ceiling restricts nothing, so there is no helper text" <|
+            \_ -> V.ceilingHelperText Public |> Expect.equal Nothing
+        , test "a members (platform) ceiling names itself in the helper text" <|
+            \_ ->
+                V.ceilingHelperText Platform
+                    |> Maybe.map (String.contains "Members")
+                    |> Expect.equal (Just True)
+        , test "an owner ceiling produces helper text" <|
+            \_ -> V.ceilingHelperText Owner |> Expect.notEqual Nothing
         ]
