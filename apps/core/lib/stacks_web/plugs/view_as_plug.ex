@@ -170,12 +170,16 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
-  defp apply_perspective(conn, :platform, user) do
-    assign(conn, :view_as_context, {:platform_user, user.id})
+  defp apply_perspective(conn, :platform, _user) do
+    # Generic platform viewer with NO identity (SEC-1) — never the owner, so a
+    # preview "as a platform user" cannot see owner-only content.
+    assign(conn, :view_as_context, :platform_preview)
   end
 
   defp apply_perspective(conn, {:specific_user, id}, _user) do
-    assign(conn, :view_as_context, {:specific_user, id})
+    # Simulate exactly what that user sees — owner/group/block all resolve for id
+    # (SEC-4: previously dead-ended to hidden-everything via the catch-all).
+    assign(conn, :view_as_context, {:platform_user, id})
   end
 
   # Resource owners may only use unauthenticated and platform.
@@ -183,8 +187,10 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
-  defp apply_limited_perspective(conn, :platform, user) do
-    assign(conn, :view_as_context, {:platform_user, user.id})
+  defp apply_limited_perspective(conn, :platform, _user) do
+    # See SEC-1 above — a resource owner previewing "as platform" must not see
+    # their own owner-only content, so use the identity-less preview viewer.
+    assign(conn, :view_as_context, :platform_preview)
   end
 
   defp apply_limited_perspective(conn, _perspective, _user) do

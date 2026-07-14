@@ -28,6 +28,10 @@ defmodule Stacks.Visibility do
   Viewer types:
   - `:unauthenticated` — not logged in
   - `{:platform_user, user_id}` — logged-in platform user
+  - `:platform_preview` — a generic authenticated platform user with NO identity
+    (never the owner, in no groups, no block relationship). Used by the ViewAs
+    `platform` perspective so a resource owner previewing "as a platform user"
+    does not see their own owner-only content.
 
   Returns `:visible` or `:hidden`. Always returns `:hidden` on nil resource
   or unknown viewer types — never raises.
@@ -39,10 +43,26 @@ defmodule Stacks.Visibility do
     placement = maybe_preload_bookshelf(placement)
 
     if marketplace_exception?(placement) do
-      :visible
+      # Marketplace listings are broadly discoverable, but a block still hides
+      # ALL of the owner's content (SEC-2): honour the bidirectional block even
+      # for an active listing, before granting the marketplace exception.
+      check_block(get_owner_id(placement), viewer_id)
+      |> case do
+        :ok -> :visible
+        :hidden -> :hidden
+      end
     else
       do_resolve(placement, viewer, viewer_id)
     end
+  end
+
+  def resolve_visibility(%Placement{} = placement, :platform_preview) do
+    placement = maybe_preload_bookshelf(placement)
+    # A platform-preview has no viewer identity (never the owner, in no groups,
+    # no block relationship), so an active listing is simply visible.
+    if marketplace_exception?(placement),
+      do: :visible,
+      else: do_resolve(placement, :platform_preview, nil)
   end
 
   def resolve_visibility(%Placement{} = placement, :unauthenticated) do
@@ -52,6 +72,10 @@ defmodule Stacks.Visibility do
 
   def resolve_visibility(resource, {:platform_user, viewer_id} = viewer) do
     do_resolve(resource, viewer, viewer_id)
+  end
+
+  def resolve_visibility(resource, :platform_preview) do
+    do_resolve(resource, :platform_preview, nil)
   end
 
   def resolve_visibility(resource, :unauthenticated) do

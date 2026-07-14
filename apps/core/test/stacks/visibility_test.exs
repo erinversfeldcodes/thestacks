@@ -170,6 +170,47 @@ defmodule Stacks.VisibilityTest do
 
       assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
+
+    test "active looking_for_home listing is :hidden for a viewer the owner has blocked (SEC-2)" do
+      # A block hides ALL of the owner's content — the marketplace exception must
+      # not punch through the bidirectional block.
+      owner = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "owner")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "platform", listing_status: "active")
+
+      viewer = insert(:user)
+      {:ok, _} = Stacks.Social.block_user(owner.id, viewer.id)
+
+      assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — platform preview (ViewAs :platform perspective)
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — platform preview" do
+    test "platform preview does NOT see owner-only content (SEC-1)" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "owner")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "owner", listing_status: nil)
+
+      assert :hidden = Visibility.resolve_visibility(placement, :platform_preview)
+    end
+
+    test "platform preview sees platform-visible content (SEC-1)" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "platform", listing_status: nil)
+
+      assert :visible = Visibility.resolve_visibility(placement, :platform_preview)
+    end
   end
 
   # ---------------------------------------------------------------------------
