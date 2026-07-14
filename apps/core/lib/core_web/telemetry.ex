@@ -190,7 +190,8 @@ defmodule CoreWeb.Telemetry do
       counter("stacks.social.block_error.count",
         event_name: [:stacks, :social, :block_error],
         tags: [:reason],
-        description: "Block errors by reason (cannot_block_self/already_blocked)"
+        description:
+          "Block errors by reason (cannot_block_self/not_found/already_blocked/invalid)"
       ),
 
       # ── Rate limiting (canonical `:rejected` event; #197's `:hit` renamed

@@ -21,6 +21,8 @@ defmodule StacksWeb.ProtoJSON do
   `SCREAMING_SNAKE_CASE`.
   """
 
+  require Logger
+
   alias Stacks.Books
   alias StacksWeb.ProtoJSON.Gen
 
@@ -289,7 +291,21 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @spec loaded_bookshelf(term()) :: map() | nil
-  defp loaded_bookshelf(%Ecto.Association.NotLoaded{}), do: nil
+  defp loaded_bookshelf(%Ecto.Association.NotLoaded{}) do
+    # A placement always belongs to a bookshelf (NOT NULL FK), so an unloaded
+    # association here is a missing-preload BUG at the call site — not a normal
+    # state. Silently returning nil would emit `bookshelf_visibility: nil`, and
+    # the #194 client would then default the ceiling to Public and grey NOTHING,
+    # letting an over-permissive placement slip past the visual ceiling. Fail
+    # loud so the missing preload is caught, rather than degrading quietly.
+    Logger.warning(
+      "ProtoJSON.book_placement/1: placement.bookshelf not preloaded — bookshelf_visibility " <>
+        "will be nil and the client cannot grey ceiling-exceeding options. Preload :bookshelf."
+    )
+
+    nil
+  end
+
   defp loaded_bookshelf(nil), do: nil
   defp loaded_bookshelf(bookshelf), do: bookshelf
 

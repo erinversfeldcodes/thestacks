@@ -327,9 +327,19 @@ defmodule Stacks.Visibility do
   # label cardinality stays bounded.
   # ---------------------------------------------------------------------------
 
+  # Profile-visibility exposure ranking for CHANGE-DIRECTION classification only.
+  # Distinct from @visibility_rank (which drives the shelf/placement ceiling and
+  # deliberately omits "group"): a profile may be stored as "group" (allowed at
+  # registration), and although updates only ever set "platform"/"owner", the
+  # PRIOR value can be "group". A group profile is more restrictive than
+  # "platform" (only group members) but less than "owner" (only self), so it sits
+  # between them. Ranking it explicitly keeps :tighten/:loosen precise instead of
+  # collapsing "group" to 0 (which mislabelled group→platform as a tighten).
+  @profile_visibility_rank %{"public" => 0, "platform" => 1, "group" => 2, "owner" => 3}
+
   @doc """
-  Classifies a profile-visibility change relative to the visibility ranking
-  (`"public"` < `"platform"` < `"owner"`).
+  Classifies a profile-visibility change relative to the profile exposure
+  ranking (`"public"` < `"platform"` < `"group"` < `"owner"`).
 
   - `:tighten` — the new value is more restrictive
   - `:loosen` — the new value is less restrictive
@@ -337,8 +347,8 @@ defmodule Stacks.Visibility do
   """
   @spec classify_visibility_direction(String.t(), String.t()) :: :tighten | :loosen | :same
   def classify_visibility_direction(old_visibility, new_visibility) do
-    old_rank = Map.get(@visibility_rank, old_visibility, 0)
-    new_rank = Map.get(@visibility_rank, new_visibility, 0)
+    old_rank = Map.get(@profile_visibility_rank, old_visibility, 0)
+    new_rank = Map.get(@profile_visibility_rank, new_visibility, 0)
 
     cond do
       new_rank > old_rank -> :tighten

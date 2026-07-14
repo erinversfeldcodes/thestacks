@@ -108,16 +108,28 @@ defmodule Stacks.Social do
         {:ok, block}
 
       {:error, changeset} ->
-        # The only constraint on the insert is the (blocker, blocked) uniqueness,
-        # so an insert error here is a duplicate/already-blocked attempt.
+        # Tag the counter by the ACTUAL failure. A uniqueness violation is the
+        # expected duplicate/already-blocked case; anything else (e.g. a missing
+        # required id) must not be mislabeled as :already_blocked.
         :telemetry.execute(
           [:stacks, :social, :block_error],
           %{count: 1},
-          %{reason: :already_blocked}
+          %{reason: block_error_reason(changeset)}
         )
 
         {:error, changeset}
     end
+  end
+
+  # Classifies a block-insert changeset error for the block_error counter.
+  # The (blocker_id, blocked_id) unique_constraint is the only DB constraint, so
+  # a unique violation is :already_blocked; any other changeset error is :invalid.
+  @spec block_error_reason(Ecto.Changeset.t()) :: :already_blocked | :invalid
+  defp block_error_reason(%Ecto.Changeset{errors: errors}) do
+    unique? =
+      Enum.any?(errors, fn {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique end)
+
+    if unique?, do: :already_blocked, else: :invalid
   end
 
   @doc """
