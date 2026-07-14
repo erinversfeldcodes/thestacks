@@ -90,6 +90,11 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
     const firstShelfRow = page.locator(".privacy__shelf-row").first();
     await expect(firstShelfRow).toBeVisible({ timeout: 10000 });
 
+    // Capture the original value so we can restore it — this shelf is shared with
+    // the parallel privacy-placement spec; leaving it at "owner" would disable
+    // that spec's placement options.
+    const original = await firstShelfRow.locator("select").inputValue();
+
     await firstShelfRow.locator("select").selectOption("owner");
 
     const [resp] = await Promise.all([
@@ -106,6 +111,10 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
     // Shelf save shows the same feedback as profile save (Privacy.elm viewFeedback
     // model.savingShelf → "Visibility updated." on success — built in #196).
     await expect(page.getByText("Visibility updated.")).toBeVisible();
+
+    // Restore the shared shelf to its original visibility.
+    await firstShelfRow.locator("select").selectOption(original);
+    await firstShelfRow.getByRole("button", { name: "Save" }).click();
   });
 });
 

@@ -78,12 +78,22 @@ async function setShelfCeiling(
   return page.evaluate(
     async ({ shelfName, visibility }) => {
       const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      const headers = {
+        Authorization: `Bearer ${auth.token}`,
+        "Content-Type": "application/json",
+      };
+      // A parallel spec may have tightened the shared seeded user's PROFILE to
+      // "owner", which (per the #195 ceiling) forces every shelf to "owner" and
+      // would 422 this shelf update. Loosen the profile to "platform" first so
+      // the target shelf visibility is within the ceiling.
+      await fetch(`/api/settings/profile_visibility`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ profile_visibility: "platform" }),
+      });
       const resp = await fetch(`/api/bookshelves/${shelfName}/visibility`, {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${auth.token}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ visibility }),
       });
       return resp.status;
@@ -169,8 +179,10 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
   test('setting a placement to "Only me" renders the spine faint/hidden on the shelf', async ({
     page,
   }) => {
-    // Shelf is public here, so every option is selectable and no book is
-    // pre-hidden — a clean baseline for the owner-only transition.
+    // Make the shelf public so every placement option is selectable — the
+    // shared seeded shelf may have been left tighter by a concurrent spec, which
+    // would otherwise disable "platform"/"public" and break the restore below.
+    expect(await setShelfCeiling(page, SHELF, "public")).toBe(200);
     const overlay = await openFirstBookOverlay(page, SHELF);
     const title = (await overlay.getByTestId("book-title").textContent())?.trim();
     expect(title, "book-detail overlay should expose a title").toBeTruthy();
