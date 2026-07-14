@@ -14,14 +14,16 @@ test.describe("Settings — Privacy & Consent", () => {
     await page.goto("/settings/consent");
     await expect(page.getByTestId('settings-hub').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".page__title").last()).toContainText("Privacy");
-    await expect(page.locator(".toggle")).toBeVisible();
+    // The consent page renders two toggles (Analytics + Writing assistant, #184);
+    // target the analytics one specifically.
+    await expect(page.getByTestId("analytics-consent-toggle")).toBeVisible();
   });
 
   test("analytics toggle switches between on and off", async ({ page }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
-    const toggle = page.locator("button.toggle");
+    const toggle = page.getByTestId("analytics-consent-toggle");
     const initialText = await toggle.textContent();
     await toggle.click();
     await page.waitForTimeout(300);
@@ -41,7 +43,7 @@ test.describe("Settings — Privacy & Consent", () => {
     await expect(saveBtn).toBeVisible();
 
     // Toggle analytics so there's a change to persist, then save.
-    await page.locator("button.toggle").click();
+    await page.getByTestId("analytics-consent-toggle").click();
     await saveBtn.click();
 
     // On success Consent.elm swaps the button label to "Saved!" (Consent.elm:110-112).
@@ -70,7 +72,7 @@ test.describe("Settings — Privacy & Consent", () => {
     const saveBtn = page.locator(".settings-actions button");
     await expect(saveBtn).toBeVisible();
 
-    await page.locator("button.toggle").click();
+    await page.getByTestId("analytics-consent-toggle").click();
     await saveBtn.click();
 
     // Consent.elm:118-121 renders this exact copy on Failure.
