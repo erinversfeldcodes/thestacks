@@ -48,8 +48,8 @@ init maybeToken =
             ( { entries = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
-update msg model _ =
+update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update msg model =
     case msg of
         AuditLogReceived result ->
             case result of
