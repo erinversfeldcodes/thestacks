@@ -95,15 +95,16 @@ Single-US surface (US-8.3 + the WA chat sliver). Table is 13 layers × {happy, s
 0 ❌. 14 ✅, 0 ⚠️, 12 n/a (each with rationale; L6/L13 n/a mark the deliberately out-of-scope real-AI surface, tracked by US-12.2.1; FF-2 chat-ownership is a correct n/a-with-rationale deferred to US-12.2.1, not a shallow cell). **The audit is GREEN** — every cell is ✅ or n/a-with-rationale. FF-1 (Settings consent seeding) was resolved on feat/e2e-121 and is now built + tested (`SettingsTest.elm` "Consent init seeding (FF-1)"). The consent surface is fully covered; the chat sliver is covered as an honest under-construction gate.
 
 ## Definition of Done
-- [ ] `consent_writing_assistant` + `consent_writing_assistant_at` columns on `op.users` (via proto)
-- [ ] `GDPRController.update_consent/2` handles `type: "writing_assistant"` (grant 200 + timestamp; revoke enqueues purge worker)
-- [ ] `Stacks.Plugs.ConsentCheck` returns 403 on `POST /api/blog/posts/:id/chat` when consent is false
-- [ ] `WritingAssistantDataPurgeWorker` deletes all user AI data, idempotent, preserves `book_content_chunks`
-- [ ] Elm `ToggleWritingAssistant` Msg + save + off-toggle description string
-- [ ] `just verify` passes
-- [ ] E2E / elm-test coverage
+- [x] `consent_writing_assistant` + `consent_writing_assistant_at` columns on `op.users` (migration `20260713201728_...`, `gen/accounts/user.ex`)
+- [x] `GDPRController.update_consent/2` handles `type: "writing_assistant"` — `gdpr_controller_test.exs` "grants writing_assistant consent and returns the flag + timestamp", "revoking writing_assistant consent…enqueues the purge worker"; 422 on unknown type
+- [x] `Stacks.Plugs.ConsentCheck` returns 403 on blog chat when consent is false — `blog_controller_test.exs` "returns 403 when writing_assistant consent is NOT granted", "under_construction response when consent IS granted", "…another user's post (FF-2 ownership)"
+- [x] `WritingAssistantDataPurgeWorker` — `writing_assistant_data_purge_worker_test.exs` "purges the four personal AI data sets, preserves the shared corpus + user row", "is idempotent…", "only purges the target user's data…"
+- [x] Elm `ToggleWritingAssistant` Msg + save + off-toggle description string — `WritingAssistantTest.elm` "ToggleWritingAssistant flips…", "the OFF description is the exact required copy"
+- [x] `just verify` passes
+- [x] E2E / elm-test coverage
 - [x] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`. (US-8.3 ✅ built; the chat AI is named out-of-scope → US-12.2.1, not faked.)
 - [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step. (FF-1 Consent.init seeding resolved on feat/e2e-121: built + tested via `SettingsTest.elm` "Consent init seeding (FF-1)".)
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — consent surface built end-to-end (schema→controller→gate→purge worker→Elm toggle), all layers tested.
 
 ## Dependencies
 #183 (data-model foundation — the tables the purge worker deletes).
