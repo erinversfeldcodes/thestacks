@@ -1,5 +1,6 @@
 module GroupFeedTest exposing (suite)
 
+import Dict
 import Expect
 import Http
 import Page.Groups.Detail as Detail
@@ -193,4 +194,49 @@ suite =
                             |> Query.count (Expect.equal 0)
                     ]
                     ()
+        , test "FeedLoaded builds a block affordance per OTHER member, none for self" <|
+            \_ ->
+                let
+                    ( model, _, _ ) =
+                        Detail.update (Detail.FeedLoaded (Ok fakeFeedResponse)) detailInit
+                in
+                Expect.all
+                    [ \m -> Dict.member "user-2" m.blockModals |> Expect.equal True
+                    , \m -> Dict.member "user-3" m.blockModals |> Expect.equal True
+                    , \m -> Dict.member "user-1" m.blockModals |> Expect.equal False
+                    ]
+                    model
+        , test "feed renders a block trigger for each other member's activity" <|
+            \_ ->
+                let
+                    ( model, _, _ ) =
+                        Detail.update (Detail.FeedLoaded (Ok fakeFeedResponse)) modelOnFeedTab
+                in
+                Detail.view model
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.class "block-user__trigger" ]
+                    |> Query.count (Expect.equal 2)
+        , test "feed renders no block trigger for the viewer's own activity" <|
+            \_ ->
+                let
+                    ownItem =
+                        PlacementCreated
+                            { placementId = "p-own"
+                            , bookId = "b-9"
+                            , bookTitle = "Solaris"
+                            , bookCoverUrl = Nothing
+                            , userId = "user-1"
+                            , userDisplayName = "Me"
+                            , occurredAt = "2026-03-30T00:00:00Z"
+                            }
+
+                    ( model, _, _ ) =
+                        Detail.update
+                            (Detail.FeedLoaded (Ok { data = [ ownItem ], nextCursor = Nothing }))
+                            modelOnFeedTab
+                in
+                Detail.view model
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.class "block-user__trigger" ]
+                    |> Query.count (Expect.equal 0)
         ]
