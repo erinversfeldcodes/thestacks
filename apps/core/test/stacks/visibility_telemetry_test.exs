@@ -194,15 +194,17 @@ defmodule Stacks.VisibilityTelemetryTest do
       :ok
     end
 
-    test "emits rate_limit hit tagged :social when the social bucket is exceeded", %{conn: conn} do
-      attach_telemetry([[:stacks, :rate_limit, :hit]])
+    test "emits rate_limit rejected tagged :social when the social bucket is exceeded", %{
+      conn: conn
+    } do
+      attach_telemetry([[:stacks, :rate_limit, :rejected]])
       user = insert(:user)
       conn = assign(conn, :guardian_default_resource, user)
 
       # Social bucket limit is 20/min; the 21st call within the window trips it.
       Enum.each(1..21, fn _ -> RateLimiter.call(conn, bucket: :social) end)
 
-      assert_receive {:telemetry_event, [:stacks, :rate_limit, :hit], %{count: 1},
+      assert_receive {:telemetry_event, [:stacks, :rate_limit, :rejected], %{count: 1},
                       %{bucket: :social}}
     end
   end

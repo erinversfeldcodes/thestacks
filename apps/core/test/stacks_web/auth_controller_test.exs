@@ -1145,4 +1145,117 @@ defmodule StacksWeb.AuthControllerTest do
       assert response(logout_conn, 204)
     end
   end
+
+  # ── Auth §12 operational-metric emission (Issue #206) ──────────────────────
+  #
+  # Proves the auth counters actually FIRE from the real controller code paths
+  # (not just that PromEx can export them — that is the reporter-tag-set proof
+  # in prom_ex_custom_metrics_test.exs). Each test attaches a real telemetry
+  # handler, drives the endpoint, and asserts the exact event + bounded tag.
+  # Removing any emitter makes the corresponding assert_receive time out.
+  describe "auth §12 telemetry emission" do
+    defp attach_auth_events(events) do
+      test_pid = self()
+      handler_id = "test-auth-206-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        events,
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+    end
+
+    test "register success emits [:stacks, :auth, :registration] result: :ok", %{conn: conn} do
+      attach_auth_events([[:stacks, :auth, :registration]])
+
+      post(conn, "/api/auth/register", %{email: "reg-ok@example.com", password: "password123"})
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :registration], %{count: 1},
+                      %{result: :ok}}
+    end
+
+    test "register failure emits [:stacks, :auth, :registration] result: :error", %{conn: conn} do
+      insert(:user, email: "dupe@example.com")
+      attach_auth_events([[:stacks, :auth, :registration]])
+
+      post(conn, "/api/auth/register", %{email: "dupe@example.com", password: "password123"})
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :registration], %{count: 1},
+                      %{result: :error}}
+    end
+
+    test "login success emits [:stacks, :auth, :jwt_issued] context: :login", %{conn: conn} do
+      insert(:user,
+        email: "jwt@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      attach_auth_events([[:stacks, :auth, :jwt_issued]])
+
+      post(conn, "/api/auth/login", %{email: "jwt@example.com", password: "secret123"})
+      |> json_response(200)
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :jwt_issued], %{count: 1},
+                      %{context: :login}}
+    end
+
+    test "refresh emits [:stacks, :auth, :jwt_issued] context: :refresh", %{conn: conn} do
+      user = insert(:user, email: "refresh@example.com", email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+      attach_auth_events([[:stacks, :auth, :jwt_issued]])
+
+      conn
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> post("/api/auth/refresh", %{})
+      |> json_response(200)
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :jwt_issued], %{count: 1},
+                      %{context: :refresh}}
+    end
+
+    test "401 invalid credentials emits login_failure type: :invalid_credentials", %{conn: conn} do
+      insert(:user,
+        email: "badpw@example.com",
+        password_hash: Argon2.hash_pwd_salt("correct"),
+        email_confirmed: true
+      )
+
+      attach_auth_events([[:stacks, :auth, :login_failure]])
+
+      post(conn, "/api/auth/login", %{email: "badpw@example.com", password: "wrong"})
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :login_failure], %{count: 1},
+                      %{type: :invalid_credentials}}
+    end
+
+    test "403 unconfirmed email emits login_failure type: :email_unconfirmed", %{conn: conn} do
+      insert(:user,
+        email: "unconf@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: false
+      )
+
+      attach_auth_events([[:stacks, :auth, :login_failure]])
+
+      post(conn, "/api/auth/login", %{email: "unconf@example.com", password: "secret123"})
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :login_failure], %{count: 1},
+                      %{type: :email_unconfirmed}}
+    end
+
+    test "422 missing params emits login_failure type: :missing_params", %{conn: conn} do
+      attach_auth_events([[:stacks, :auth, :login_failure]])
+
+      post(conn, "/api/auth/login", %{})
+
+      assert_receive {:telemetry_event, [:stacks, :auth, :login_failure], %{count: 1},
+                      %{type: :missing_params}}
+    end
+  end
 end
