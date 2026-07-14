@@ -4,6 +4,9 @@ module Api exposing
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , BlockError(..)
+    , BlockedUser
+    , BlockedUsersResponse
     , BookDetailResponse
     , CatalogueResponse
     , EnrichmentGaps
@@ -24,6 +27,7 @@ module Api exposing
     , addShelf
     , approveSource
     , auditLogResponseDecoder
+    , blockUser
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
@@ -59,6 +63,7 @@ module Api exposing
     , inviteToGroup
     , isUnauthorized
     , leaveGroup
+    , listBlockedUsers
     , login
     , logout
     , lookupByIsbn
@@ -78,6 +83,7 @@ module Api exposing
     , searchBooks
     , soldListing
     , streamEventDecoder
+    , unblockUser
     , updateAgeVerification
     , updateBlogPost
     , updateLocation
@@ -1586,6 +1592,156 @@ updateShelfVisibility shelfName visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- BLOCKING / SOCIAL
+
+
+{-| A block failure.
+
+The backend distinguishes three domain errors by a `{"error": "..."}` body:
+`already_blocked` and `cannot_block_self` (both HTTP 422) and `not_found`
+(HTTP 404). Every other failure (network, timeout, 401, unparsable body) is a
+`BlockRequestFailed` carrying the raw `Http.Error` so the caller can still
+detect session expiry via `isUnauthorized`.
+
+-}
+type BlockError
+    = AlreadyBlocked
+    | CannotBlockSelf
+    | NotFound
+    | BlockRequestFailed Http.Error
+
+
+{-| A single blocked reader as returned by `GET /api/settings/blocked-users`.
+-}
+type alias BlockedUser =
+    { id : String
+    , displayName : String
+    , blockedAt : String
+    }
+
+
+{-| Paginated response from `GET /api/settings/blocked-users`.
+-}
+type alias BlockedUsersResponse =
+    { blockedUsers : List BlockedUser
+    , total : Int
+    , page : Int
+    }
+
+
+blockedUserDecoder : Decoder BlockedUser
+blockedUserDecoder =
+    Decode.map3 BlockedUser
+        (Decode.field "id" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (Decode.field "blocked_at" Decode.string)
+
+
+blockedUsersResponseDecoder : Decoder BlockedUsersResponse
+blockedUsersResponseDecoder =
+    Decode.map3 BlockedUsersResponse
+        (Decode.field "blocked_users" (Decode.list blockedUserDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+
+
+{-| `Http.expectWhatever` would collapse the backend's `{"error": ...}` body
+into an opaque `BadStatus`, losing the difference between `already_blocked`,
+`cannot_block_self`, and `not_found`. This custom expect keeps that reason so
+the UI can explain what actually happened.
+-}
+expectBlock : (Result BlockError () -> msg) -> Http.Expect msg
+expectBlock toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (BlockRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (BlockRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (BlockRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    case Decode.decodeString (Decode.field "error" Decode.string) bodyText of
+                        Ok "already_blocked" ->
+                            Err AlreadyBlocked
+
+                        Ok "cannot_block_self" ->
+                            Err CannotBlockSelf
+
+                        Ok "not_found" ->
+                            Err NotFound
+
+                        _ ->
+                            Err (BlockRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ _ ->
+                    Ok ()
+
+
+{-| POST /api/users/:id/block — block another reader. On success the backend
+returns `{"blocked": true}`; the resolved-visibility layer then hides that
+reader's content bidirectionally on the next fetch.
+-}
+blockUser :
+    String
+    -> String
+    -> (Result BlockError () -> msg)
+    -> Cmd msg
+blockUser targetUserId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
+        , body = Http.emptyBody
+        , expect = expectBlock toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/users/:id/block — unblock a reader. Returns `{"blocked": false}`
+on success, 404 `not_found` when no block existed.
+-}
+unblockUser :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+unblockUser targetUserId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/settings/blocked-users — the current reader's blocked list.
+-}
+listBlockedUsers :
+    String
+    -> (Result Http.Error BlockedUsersResponse -> msg)
+    -> Cmd msg
+listBlockedUsers token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/blocked-users"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg blockedUsersResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

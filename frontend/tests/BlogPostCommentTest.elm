@@ -36,6 +36,7 @@ testModel =
     , commentDraft = ""
     , replyDraft = Nothing
     , commentSubmitting = False
+    , blockModal = Nothing
     }
 
 
