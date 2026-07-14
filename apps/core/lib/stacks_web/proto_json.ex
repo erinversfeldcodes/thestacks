@@ -247,7 +247,10 @@ defmodule StacksWeb.ProtoJSON do
       :reading_status,
       :current_page,
       :started_at,
-      :finished_at
+      :finished_at,
+      # The placement's own visibility — the shelf spine renders owner-only
+      # placements faint/hidden for the owner (#194 `Components.Spine` `hidden`).
+      :visibility
     ])
     |> Map.put(:book, bookshelf_book(placement.book))
   end
