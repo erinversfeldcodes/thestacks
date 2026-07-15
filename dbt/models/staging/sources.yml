@@ -215,6 +215,8 @@ sources:
             description: Argon2 password hash (sensitive data, never exposed).
           - name: display_name
             description: Public display name.
+          - name: handle
+            description: Public @handle for the profile URL (/u/:handle); user-chosen public identifier, not PII.
           - name: role
             description: User role (user, partner, admin).
           - name: profile_visibility
