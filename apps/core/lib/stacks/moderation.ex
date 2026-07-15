@@ -82,10 +82,12 @@ defmodule Stacks.Moderation do
   defp analyze(payload, context) do
     case AIClient.call_vision("analyze", payload) do
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}} ->
+        emit_classification(:book)
         {:error, :isbn_not_found}
 
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => books} = resp}
       when is_list(books) ->
+        emit_classification(:book)
         Logger.info("Moderation: /analyze returned #{length(books)} candidate(s)")
         # Propagate `model_used` so downstream can tell barcode-sourced
         # (local_ocr) ISBNs apart from VLM-extracted ones. The fast-path
@@ -97,13 +99,26 @@ defmodule Stacks.Moderation do
 
         resolve_and_store_all(books, context_with_source)
 
-      {:ok, %{"classification" => _}} ->
+      {:ok, %{"classification" => classification}} ->
+        emit_classification(classification_outcome(classification))
         {:error, :not_a_book}
 
       error ->
         error
     end
   end
+
+  # Step-1 classification funnel counter. `outcome` is a whitelisted atom
+  # (:book / :not_a_book / :ambiguous / :unknown) — NEVER an ISBN, title,
+  # or other user input (GDPR: telemetry is a warehouse-adjacent sink).
+  defp emit_classification(outcome) do
+    :telemetry.execute([:stacks, :moderation, :classification], %{count: 1}, %{outcome: outcome})
+  end
+
+  defp classification_outcome("CLASSIFICATION_RESULT_BOOK"), do: :book
+  defp classification_outcome("CLASSIFICATION_RESULT_NOT_BOOK"), do: :not_a_book
+  defp classification_outcome("CLASSIFICATION_RESULT_AMBIGUOUS"), do: :ambiguous
+  defp classification_outcome(_), do: :unknown
 
   # Expands compound candidates where the vision model joined multiple book titles
   # with " OR " (e.g. "Things I Don't Want to Know OR The Cost of Living").
@@ -114,6 +129,14 @@ defmodule Stacks.Moderation do
 
       case String.split(title, ~r/\s+OR\s+/, parts: 2) do
         [part1, part2] ->
+          # Compound-expansion frequency counter: one event per split, with
+          # the number of parts as a measurement. No title/PII in metadata.
+          :telemetry.execute(
+            [:stacks, :moderation, :compound_expansion],
+            %{count: 1, parts: 2},
+            %{}
+          )
+
           [
             Map.put(candidate, "title", String.trim(part1)),
             Map.put(candidate, "title", String.trim(part2))
@@ -178,6 +201,8 @@ defmodule Stacks.Moderation do
           {:rejected, "unknown", :task_exit}
       end)
 
+    Enum.each(outcomes, &emit_resolution_outcome/1)
+
     resolved = for {:resolved, book} <- outcomes, do: book
     rejected = for {:rejected, candidate_id, reason} <- outcomes, do: {candidate_id, reason}
 
@@ -186,6 +211,25 @@ defmodule Stacks.Moderation do
       _ -> {:ok, %{resolved: resolved, rejected: rejected}}
     end
   end
+
+  # Step-2 ISBN-resolution funnel counter, one per candidate. `outcome` is a
+  # whitelisted atom: :resolved for a resolved book, or the (bounded)
+  # rejection reason (:isbn_not_found / :low_confidence / :invalid_book /
+  # :store_failed / :task_exit), coerced to :other for anything unexpected.
+  # No ISBN/title/PII ever reaches metadata.
+  @resolution_reasons [:isbn_not_found, :low_confidence, :invalid_book, :store_failed, :task_exit]
+
+  defp emit_resolution_outcome({:resolved, _book}), do: emit_resolution(:resolved)
+
+  defp emit_resolution_outcome({:rejected, _candidate_id, reason}),
+    do: emit_resolution(whitelist_resolution_reason(reason))
+
+  defp emit_resolution(outcome) do
+    :telemetry.execute([:stacks, :moderation, :isbn_resolution], %{count: 1}, %{outcome: outcome})
+  end
+
+  defp whitelist_resolution_reason(reason) when reason in @resolution_reasons, do: reason
+  defp whitelist_resolution_reason(_), do: :other
 
   # Rejection-retry: a candidate whose direct ISBN matches a previously
   # rejected book is dropped before any DB/HTTP work. Without this, the
@@ -403,10 +447,18 @@ defmodule Stacks.Moderation do
     adult_codes = ["FIC005000", "FIC027000", "FIC069000"]
 
     if Enum.any?(bisac_codes, &(&1 in adult_codes)) do
+      emit_tiering(:age_gated)
       "age_gated"
     else
+      emit_tiering(:public)
       "public"
     end
+  end
+
+  # Step-3 age-gate tiering funnel counter. `tier` is a whitelisted atom
+  # (:age_gated / :public) — no BISAC code, ISBN, or title in metadata.
+  defp emit_tiering(tier) do
+    :telemetry.execute([:stacks, :moderation, :tiering], %{count: 1}, %{tier: tier})
   end
 
   # `used_fast_path` tracks whether the synchronous OL/GB lookup was
