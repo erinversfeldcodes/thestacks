@@ -3,6 +3,24 @@
 ## Summary
 Comprehensive E2E test coverage for the three-step content moderation pipeline (US-4.1) and age verification gate (US-4.2).
 
+## Epic decomposition (2026-07-15)
+The Feature-Completeness Pre-Check found this validation issue's audit blocked on **feature/production
+work**, so #118 is run as an **epic** on integration branch `feat/118-e2e`. The feature punches are
+spun out as child issues; #118 itself retains only the test-only remainder + the final audit
+regeneration.
+
+| Child | Owns | Punch(es) |
+|-------|------|-----------|
+| **#227** | `book.created` payload += `visibility_tier` | #1 (L4 code gap) |
+| **#228** | moderation-funnel + age-gate operational telemetry | #3, #5 (L11) |
+| **#229** | hide age-gated from the catalogue for authed-unverified users + reconcile US-4.2 to the hide-from-listings/block-on-detail model | supersedes §1 spine wording (#8) |
+| **#118 core** (this issue, Level 1 — after the three merge) | registry-subscription assertion + US-4.1 §6 doc fix (#2); age-verify neg-emission test (#4); E2E unauth `/settings/age-verification` guard (#7); **regenerate the Test Audit → GREEN + Pre-Check → ✅** | #2, #4, #7 |
+
+Punches #6 (post-verification access E2E) and #8's non-determinism were already resolved by #226's
+`age-gate.spec.ts` rewrite. Design note: age-gated books are **hidden from listings** for unverified
+users and **blocked-with-explanation on direct URL** (owner decision, #229) — this supersedes §1's
+"frosted overlay + lock icon on spines" (which is why that wording is struck below).
+
 ## User Stories
 US-4.1 (Three-Step Content Moderation Pipeline), US-4.2 (Age Verification for Gated Content)
 
@@ -46,7 +64,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - **Upload happy path**: Upload image -> see "Identifying books..." spinner -> book appears on shelf
 - **Not-a-book rejection**: Upload non-book image -> see "This doesn't appear to be a book" rejection message
 - **ISBN not found**: Upload book image where ISBN extraction fails -> see "Could not identify a book ISBN"
-- **Age-gated book display**: Verify frosted overlay and lock icon on age-gated book spines
+- ~~**Age-gated book display**: Verify frosted overlay and lock icon on age-gated book spines~~ **SUPERSEDED by #229** — age-gated books are *hidden from listings* for unverified users (no spine overlay); a direct URL shows the `.age-gate` block. E2E for the hide-from-listings model lives in #229.
 - **Age verification settings page**: Navigate to `/settings/age-verification` -> check "I confirm I am 18+" -> submit -> verify success message
 - **Age-gated content access after verification**: After age verification, age-gated books display normally without overlay
 
