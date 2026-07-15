@@ -254,5 +254,58 @@ defmodule StacksWeb.ProfileControllerTest do
 
       assert count == 1
     end
+
+    test "an age-gated book is hidden from unverified/unauthenticated viewers, shown to verified",
+         %{
+           conn: conn
+         } do
+      owner = insert(:user, handle: "age_owner", profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book, visibility_tier: "age_gated"),
+        visibility: "platform"
+      )
+
+      count_for = fn conn ->
+        conn
+        |> get("/api/u/age_owner/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+      end
+
+      # Verified viewer sees it; unverified and unauthenticated do NOT — the
+      # age-gated book never reaches the payload (no gap on the shelf).
+      assert count_for.(auth_conn(conn, insert(:user, age_verified: true))) == 1
+      assert count_for.(auth_conn(conn, insert(:user, age_verified: false))) == 0
+      assert count_for.(conn) == 0
+    end
+
+    test "the owner sees their own age-gated book even when unverified", %{conn: conn} do
+      owner =
+        insert(:user, handle: "age_self", profile_visibility: "platform", age_verified: false)
+
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book, visibility_tier: "age_gated"),
+        visibility: "platform"
+      )
+
+      count =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/u/age_self/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+
+      assert count == 1
+    end
   end
 end
