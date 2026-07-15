@@ -151,6 +151,10 @@ defmodule Stacks.Visibility do
 
   defp load_profile_visibility(%Placement{} = placement, _owner_id) do
     case placement.bookshelf do
+      # Owner preloaded (bookshelf: :user) — reuse it, no per-placement query.
+      %{user: %{profile_visibility: pv}} when is_binary(pv) ->
+        pv
+
       %{user_id: user_id} when not is_nil(user_id) ->
         owner = Accounts.get_user(user_id)
         if owner, do: owner.profile_visibility, else: "owner"

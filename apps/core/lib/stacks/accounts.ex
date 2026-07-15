@@ -366,7 +366,15 @@ defmodule Stacks.Accounts do
   @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) do
     attrs = maybe_assign_owner_role(attrs)
+    do_register(attrs, 2)
+  end
 
+  # The handle is auto-assigned at registration (maybe_put_handle) and its only
+  # failure mode is the astronomically-rare lower(handle) unique collision. Since
+  # the user never chose it, regenerate (a fresh random suffix) and retry rather
+  # than surfacing an inexplicable "handle has already been taken" for a handle
+  # they cannot see.
+  defp do_register(attrs, retries_left) do
     Multi.new()
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
@@ -403,11 +411,22 @@ defmodule Stacks.Accounts do
         {:ok, user}
 
       {:error, :user, changeset, _} ->
-        {:error, changeset}
+        if retries_left > 0 and handle_collision?(changeset) do
+          do_register(attrs, retries_left - 1)
+        else
+          {:error, changeset}
+        end
 
       {:error, _, reason, _} ->
         {:error, reason}
     end
+  end
+
+  defp handle_collision?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {:handle, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   @doc """

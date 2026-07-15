@@ -53,6 +53,16 @@ defmodule StacksWeb.ProfileControllerTest do
       refute "wishlist" in names
     end
 
+    test "a null display_name is serialized as an empty string, not null", %{conn: conn} do
+      insert(:user, handle: "nameless", display_name: nil, profile_visibility: "platform")
+      viewer = insert(:user)
+
+      body = conn |> auth_conn(viewer) |> get("/api/u/nameless") |> json_response(200)
+      # The redacted profile decoders take a string; the serializer must coalesce
+      # nil -> "" so a real discoverable profile never fails to decode.
+      assert body["display_name"] == ""
+    end
+
     test "a ghost (owner-visibility) profile is 404 to another viewer", %{conn: conn} do
       insert(:user, handle: "ghost_user", profile_visibility: "owner")
       viewer = insert(:user)
