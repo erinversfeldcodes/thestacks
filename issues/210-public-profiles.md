@@ -38,12 +38,12 @@ a people-search — with cross-user leakage impossible at every surface.
 | # | Title | Depends on | Status |
 |---|-------|-----------|--------|
 | **#211** | User handles — schema + backfill + validation + auto-gen | — | ✅ DONE |
-| **#212** | Set/change handle in Settings (backend + Elm input) | #211 | 🟡 backend DONE, Elm input PENDING |
+| **#212** | Set/change handle in Settings (backend + Elm input) | #211 | ✅ DONE (Elm handle field + 422 mapping + controller/`/me` assertions) |
 | **#213** | Profile read endpoints (`GET /api/u/:handle`, `…/bookshelves/:name`) | #211 | ✅ DONE |
-| **#214** | Frontend profile hub (`Page.Profile`, `Route.Profile`) | #213 | 🟡 hub DONE, dedicated Elm test PENDING |
-| **#215** | Read-only shelf browsing (`Page.Bookshelf` read-only + `Route.ProfileShelf`) | #213, #214 | ⬜ PENDING |
-| **#216** | Discovery — blog author → profile link (`author_handle`) | #211, #214 | ⬜ PENDING |
-| **#217** | Discovery — people search (`Accounts.search_users/2` + UI) | #211, #214 | ⬜ PENDING |
+| **#214** | Frontend profile hub (`Page.Profile`, `Route.Profile`) | #213 | ✅ DONE (`ProfileTest.elm`, 7 tests) |
+| **#215** | Read-only shelf browsing (`Page.Bookshelf` read-only + `Route.ProfileShelf`) | #213, #214 | ✅ DONE (`BookshelfReadOnlyTest.elm`, 6 tests) |
+| **#216** | Discovery — blog author → profile link (`author_handle`) | #211, #214 | ✅ DONE |
+| **#217** | Discovery — people search (`Accounts.search_users/2` + UI) | #211, #214 | ✅ DONE |
 
 **Note — no #218.** An earlier plan proposed a trailing `#218 E2E + test matrix` issue.
 Per the completion-bar lesson (a green umbrella audit must not hide a deferred story),
