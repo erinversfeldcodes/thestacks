@@ -36,6 +36,7 @@ type alias BlogPost =
     , insertedAt : String
     , associations : List BookAssociation
     , authorDisplayName : String
+    , authorHandle : String
     }
 
 
@@ -185,6 +186,7 @@ fromProtoBlogPost pb =
             ""
     , associations = List.map fromProtoAssociation pb.associations
     , authorDisplayName = pb.authorDisplayName
+    , authorHandle = pb.authorHandle
     }
 
 

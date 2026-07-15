@@ -7,6 +7,7 @@ simulated user interactions and HTTP responses.
 
 -}
 
+import Html.Attributes
 import Json.Encode as Encode
 import Page.Search as Search exposing (Msg(..))
 import ProgramTest
@@ -30,7 +31,41 @@ suite =
         , searchClear
         , searchEmptyResults
         , searchFilterPanelToggle
+        , readersResults
+        , readersEmptyResults
         ]
+
+
+readersResults : Test
+readersResults =
+    test "readers_results: query -> receive readers -> profile cards link to /u/:handle" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "ada")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search/users?q=ada"
+                    (readersResponseJson [ ( "adal", "Ada Lovelace" ) ])
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Readers" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Ada Lovelace" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.href "/u/adal") ]
+
+
+readersEmptyResults : Test
+readersEmptyResults =
+    test "readers_empty: query -> empty readers list -> empty state" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "zzz")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search/users?q=zzz"
+                    (readersResponseJson [])
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "No readers found matching your search." ]
 
 
 searchDebounce : Test
@@ -108,6 +143,29 @@ searchResponseJson : List Book -> String
 searchResponseJson books =
     Encode.encode 0
         (Encode.list encodeBookForSearch books)
+
+
+{-| Encode a `{ users: [...] }` people-search response. Each tuple is
+`(handle, display_name)`.
+-}
+readersResponseJson : List ( String, String ) -> String
+readersResponseJson people =
+    Encode.encode 0
+        (Encode.object
+            [ ( "users"
+              , Encode.list
+                    (\( handle, displayName ) ->
+                        Encode.object
+                            [ ( "handle", Encode.string handle )
+                            , ( "display_name", Encode.string displayName )
+                            , ( "city", Encode.string "" )
+                            , ( "country_code", Encode.string "" )
+                            ]
+                    )
+                    people
+              )
+            ]
+        )
 
 
 encodeBookForSearch : Book -> Encode.Value

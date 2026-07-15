@@ -22,6 +22,7 @@ module Api exposing
     , ProfileError(..)
     , ProfileShelfSummary
     , PublicProfile
+    , PublicProfileSummary
     , QualityTrends
     , RegisterError(..)
     , ShelfVisibilitySetting
@@ -90,6 +91,7 @@ module Api exposing
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
+    , searchUsers
     , soldListing
     , streamEventDecoder
     , unblockUser
@@ -2003,6 +2005,52 @@ getProfileShelf maybeToken handle bookshelfName toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- PEOPLE SEARCH (/api/search/users) — #217
+
+
+{-| A single people-search result — the redacted `public_profile_summary` shape
+(handle + display\_name + location). Shelf-less; the server excludes ghosts and
+blocked users from the result set in SQL, so every summary here is discoverable.
+-}
+type alias PublicProfileSummary =
+    { handle : String
+    , displayName : String
+    , city : String
+    , countryCode : String
+    }
+
+
+publicProfileSummaryDecoder : Decoder PublicProfileSummary
+publicProfileSummaryDecoder =
+    Decode.map4 PublicProfileSummary
+        (Decode.field "handle" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (optionalString "city")
+        (optionalString "country_code")
+
+
+{-| GET /api/search/users?q=<term>. Optional auth — pass the viewer's token when
+signed in so the server can apply bidirectional block-exclusion; `Nothing` for
+an anonymous viewer (ghosts are still excluded server-side).
+-}
+searchUsers :
+    Maybe String
+    -> String
+    -> (Result Http.Error (List PublicProfileSummary) -> msg)
+    -> Cmd msg
+searchUsers maybeToken query toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
         , timeout = Nothing
         , tracker = Nothing
         }

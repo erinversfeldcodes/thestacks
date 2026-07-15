@@ -809,26 +809,65 @@ searchEffects msg model maybeToken =
 
         Search.DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
-                case maybeToken of
-                    Just token ->
+                let
+                    booksEffect =
+                        case maybeToken of
+                            Just token ->
+                                SimulatedEffect.Http.request
+                                    { method = "GET"
+                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                                    , url = "/api/books/search?q=" ++ model.query
+                                    , body = SimulatedEffect.Http.emptyBody
+                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
+                                    , timeout = Nothing
+                                    , tracker = Nothing
+                                    }
+
+                            Nothing ->
+                                SimulatedEffect.Cmd.none
+
+                    readersEffect =
                         SimulatedEffect.Http.request
                             { method = "GET"
-                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/books/search?q=" ++ model.query
+                            , headers = authHeaderList maybeToken
+                            , url = "/api/search/users?q=" ++ model.query
                             , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
+                            , expect =
+                                SimulatedEffect.Http.expectJson Search.ReadersCompleted
+                                    (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
                             , timeout = Nothing
                             , tracker = Nothing
                             }
-
-                    Nothing ->
-                        SimulatedEffect.Cmd.none
+                in
+                SimulatedEffect.Cmd.batch [ booksEffect, readersEffect ]
 
             else
                 SimulatedEffect.Cmd.none
 
         _ ->
             SimulatedEffect.Cmd.none
+
+
+authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
+authHeaderList maybeToken =
+    case maybeToken of
+        Just token ->
+            [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+
+        Nothing ->
+            []
+
+
+{-| Local copy of the people-search result decoder (Api.publicProfileSummaryDecoder
+is not exposed). Matches `public_profile_summary/1`'s redacted shape.
+-}
+publicProfileSummaryDecoder : Decode.Decoder Api.PublicProfileSummary
+publicProfileSummaryDecoder =
+    Decode.map4 Api.PublicProfileSummary
+        (Decode.field "handle" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (Decode.oneOf [ Decode.field "city" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "country_code" Decode.string, Decode.succeed "" ])
 
 
 {-| Translate BookDetail page Cmds into SimulatedEffects.
