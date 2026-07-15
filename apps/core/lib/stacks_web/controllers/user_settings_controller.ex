@@ -16,9 +16,12 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.update_age_verification(user.id, age_verified) do
       {:ok, updated_user} ->
+        emit_age_verification(:success)
         json(conn, %{age_verified: updated_user.age_verified})
 
       {:error, changeset} ->
+        emit_age_verification(:invalid)
+
         conn
         |> put_status(422)
         |> json(%{errors: format_errors(changeset)})
@@ -26,9 +29,18 @@ defmodule StacksWeb.UserSettingsController do
   end
 
   def update_age_verification(conn, _params) do
+    emit_age_verification(:invalid)
+
     conn
     |> put_status(422)
     |> json(%{error: "age_verified parameter is required and must be a boolean"})
+  end
+
+  # Age-verification request outcome counter (Issue #228). `outcome` is a
+  # whitelisted atom (:success / :invalid) — no user id or email in metadata
+  # (GDPR: telemetry is a warehouse-adjacent sink).
+  defp emit_age_verification(outcome) do
+    :telemetry.execute([:stacks, :age_verification], %{count: 1}, %{outcome: outcome})
   end
 
   @doc "PUT /api/settings/profile — update display_name, website_url, and optionally email (requires current_password)."

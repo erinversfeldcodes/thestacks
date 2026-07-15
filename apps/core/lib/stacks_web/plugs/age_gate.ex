@@ -43,8 +43,11 @@ defmodule StacksWeb.Plugs.AgeGate do
     user = Guardian.Plug.current_resource(conn)
 
     if age_verified?(user) do
+      emit_enforce(:passed)
       conn
     else
+      emit_enforce(:blocked)
+
       conn
       |> put_status(403)
       |> json(%{error: "age_verification_required"})
@@ -52,7 +55,16 @@ defmodule StacksWeb.Plugs.AgeGate do
     end
   end
 
+  # Non-age-gated books are the common case; count only age-gate decisions
+  # so the counter reflects the gate's block/pass ratio, not overall traffic.
   def enforce(conn, _book), do: conn
+
+  # Operational counter for age-gate decisions (Issue #228). `outcome` is a
+  # whitelisted atom (:blocked / :passed) — no user id, email, or book
+  # identifier in metadata (GDPR: telemetry is warehouse-adjacent).
+  defp emit_enforce(outcome) do
+    :telemetry.execute([:stacks, :age_gate, :enforce], %{count: 1}, %{outcome: outcome})
+  end
 
   defp age_verified?(nil), do: false
   defp age_verified?(%{age_verified: true}), do: true
