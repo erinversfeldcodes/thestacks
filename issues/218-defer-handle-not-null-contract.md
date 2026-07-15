@@ -28,14 +28,20 @@ rolling production.
 ## Definition of Done
 - [ ] Rollout confirmed; constraint validated safe; annotation updated.
 
-## Status: BLOCKED — not actionable now (do NOT delegate)
-This is the **contract** half of expand-contract: it can only be actioned *after* this
-release (which introduces + writes `handle`) is fully deployed with no N-1 writer left.
-There is nothing to implement on this branch — the NOT NULL constraint already exists
-(with `@breaking_ok`), and splitting it into a later release is a deploy-sequencing act,
-not a code change. Leave tracked; revisit post-deploy if `op.users` ever runs multi-instance
-rolling production. (If a zero-downtime tighten is ever wanted, the non-blocking path is
-`ADD CONSTRAINT … CHECK (handle IS NOT NULL) NOT VALID` then `VALIDATE CONSTRAINT`.)
+## Status: ACCEPTED risk — not actionable now (do NOT delegate)
+The single-release `NOT NULL` tighten is a **deliberately accepted** decision, not a bug:
+the only writer of new `op.users` rows is registration, which is not expected during the
+deploy window (pre-launch, low/no live signups), so the rolling-deploy race the reviewers
+flagged has no practical trigger. There is nothing to implement on this branch — the
+constraint already exists (with `@breaking_ok` recording this rationale).
+
+This issue is the **contract** half of expand-contract (ship the tighten in a *later*
+release, after release 1 is fully out) — deploy-sequencing, not code. Revisit **only if**
+`op.users` ever runs multi-instance rolling production **with live registration traffic**.
+Two options at that point: (a) make the introducing release ship `handle` NULLABLE and add
+`NOT NULL` in a follow-up release; (b) a zero-downtime add via `ADD CONSTRAINT … CHECK
+(handle IS NOT NULL) NOT VALID` then `VALIDATE CONSTRAINT` (avoids the table lock, though it
+does not itself close the N-1-writer window — deferral is the only thing that does).
 
 ## Source
 Principal-engineer + elixir/database/platform reviewers on the #210 epic review.

@@ -23,9 +23,11 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
   # (registration), and the UPDATE below fills every pre-existing row, so no row is
   # null by the time SET NOT NULL runs. The only residual is the brief rolling-deploy
   # window in which a not-yet-upgraded (pre-handle) instance could INSERT a handle-less
-  # row; this is accepted for a newly-added greenfield column pre-launch. Follow-up
-  # issue #218 tracks splitting the tighten into a later release if op.users ever
-  # reaches multi-instance rolling production.
+  # row — and the only writer of new `op.users` rows is registration, which is NOT
+  # expected to occur during this deploy window (pre-launch, low/no live signups).
+  # The risk is therefore accepted. Follow-up issue #218 tracks splitting the tighten
+  # into a later release ONLY IF op.users ever reaches multi-instance rolling production
+  # WITH live registration traffic.
   @breaking_ok "handle is new this release; app writes it on every insert (Accounts.maybe_put_handle) and the backfill fills all existing rows, so the column is never null when tightened. #218 tracks deferring the tighten if the table reaches rolling prod."
 
   def up do
