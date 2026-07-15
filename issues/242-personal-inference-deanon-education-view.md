@@ -32,7 +32,8 @@ validation paths are the own-only-authz, no-persistence, and rarity-computation 
 ## Technical Requirements
 
 ### 1. Own-only surface
-- An authed route (e.g. `GET /api/me/inferences`, page under `/settings/your-data` or the profile).
+- An authed route (`GET /api/me/inferences`), page **under the profile** (e.g. `/me/insights`, beside
+  the public profile hub) [owner decision 2026-07-16].
   **Every query hard-scoped to `current_user.id`** — no parameter, path, or code path can select
   another user. This is the primary invariant.
 
