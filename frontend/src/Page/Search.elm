@@ -191,7 +191,7 @@ update msg model maybeToken =
 view : Model -> Html Msg
 view model =
     div [ class "page page--search", testId "search-page" ]
-        [ h1 [ class "page__title" ] [ text "Search Books" ]
+        [ h1 [ class "page__title" ] [ text "Search books & readers" ]
         , searchBar
             { query = model.query
             , onInput = QueryChanged

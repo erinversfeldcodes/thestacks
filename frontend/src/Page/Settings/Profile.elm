@@ -161,7 +161,7 @@ view model =
                     ]
                     []
                 , p [ class "form-field__hint" ]
-                    [ text "Your public address: the stacks/u/" ]
+                    [ text (handleHint model.handle) ]
                 , viewHandleError model.savingProfile
                 ]
             , div [ class "form-field" ]
@@ -312,6 +312,18 @@ handleErrorMessage saving =
 
         _ ->
             Nothing
+
+
+{-| The live public-address hint under the handle field. Shows the full address
+once a handle is present, and gentle guidance while the field is empty.
+-}
+handleHint : String -> String
+handleHint handle =
+    if String.trim handle == "" then
+        "Choose a handle — others will find you at thestacks.app/u/your_handle"
+
+    else
+        "Your public profile lives at thestacks.app/u/" ++ handle
 
 
 handleErrorCopy : String -> String

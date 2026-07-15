@@ -106,7 +106,15 @@ viewMeta profile =
 
         websiteEl =
             if profile.websiteUrl /= "" then
-                Just (a [ class "profile__website", href profile.websiteUrl ] [ text profile.websiteUrl ])
+                Just
+                    (a
+                        [ class "profile__website"
+                        , href profile.websiteUrl
+                        , Html.Attributes.target "_blank"
+                        , Html.Attributes.rel "noopener noreferrer nofollow"
+                        ]
+                        [ text profile.websiteUrl ]
+                    )
 
             else
                 Nothing
@@ -117,7 +125,7 @@ viewMeta profile =
 viewShelves : PublicProfile -> Html Msg
 viewShelves profile =
     if List.isEmpty profile.bookshelves then
-        p [ class "profile__empty" ] [ text "No public bookshelves." ]
+        p [ class "profile__empty" ] [ text "This reader hasn’t shared any bookshelves yet." ]
 
     else
         ul [ class "profile__shelf-list" ]

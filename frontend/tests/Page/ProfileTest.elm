@@ -14,6 +14,7 @@ import Api exposing (ProfileShelfSummary, PublicProfile)
 import Expect
 import Html.Attributes as Attr
 import Http
+import Json.Decode as Decode
 import Page.Profile as Profile exposing (Msg(..), OutMsg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -90,7 +91,7 @@ suite =
                 received (Ok { sampleProfile | bookshelves = [] })
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "No public bookshelves." ]
+                    |> Query.has [ Selector.text "This reader hasn’t shared any bookshelves yet." ]
         , test "a 404 renders the neutral not-found (ghost = absent)" <|
             \_ ->
                 received (Err (Http.BadStatus 404))
@@ -108,4 +109,58 @@ suite =
             \_ ->
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
+        , describe "publicProfileDecoder (redaction + null tolerance)"
+            [ test "decodes a full payload" <|
+                \_ ->
+                    """
+                    {"handle":"ada","display_name":"Ada","website_url":"https://a.dev",
+                     "city":"London","country_code":"GB","bookshelves":[{"name":"library"}]}
+                    """
+                        |> Decode.decodeString Api.publicProfileDecoder
+                        |> Expect.equal
+                            (Ok
+                                { handle = "ada"
+                                , displayName = "Ada"
+                                , websiteUrl = "https://a.dev"
+                                , city = "London"
+                                , countryCode = "GB"
+                                , bookshelves = [ ProfileShelfSummary "library" ]
+                                }
+                            )
+            , test "tolerates null/absent optional fields incl. display_name (no false not-found)" <|
+                \_ ->
+                    """
+                    {"handle":"ghosty","display_name":null,"bookshelves":[]}
+                    """
+                        |> Decode.decodeString Api.publicProfileDecoder
+                        |> Expect.equal
+                            (Ok
+                                { handle = "ghosty"
+                                , displayName = ""
+                                , websiteUrl = ""
+                                , city = ""
+                                , countryCode = ""
+                                , bookshelves = []
+                                }
+                            )
+            , test "ignores any leaked account/PII keys (redaction is structural)" <|
+                \_ ->
+                    -- Even if the server erroneously included email/role/consent, the
+                    -- decoder's record type has no such fields, so they cannot surface.
+                    """
+                    {"handle":"ada","display_name":"Ada","email":"a@x.com","role":"admin",
+                     "consent_analytics":true,"bookshelves":[]}
+                    """
+                        |> Decode.decodeString Api.publicProfileDecoder
+                        |> Result.map .handle
+                        |> Expect.equal (Ok "ada")
+            , test "publicProfileSummaryDecoder (search card) tolerates null display_name + location" <|
+                \_ ->
+                    """
+                    {"handle":"x","display_name":null,"city":null,"country_code":null}
+                    """
+                        |> Decode.decodeString Api.publicProfileSummaryDecoder
+                        |> Expect.equal
+                            (Ok { handle = "x", displayName = "", city = "", countryCode = "" })
+            ]
         ]

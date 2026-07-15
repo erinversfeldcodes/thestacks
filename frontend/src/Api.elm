@@ -80,6 +80,8 @@ module Api exposing
     , mergeFormat
     , moveBook
     , placeBook
+    , publicProfileDecoder
+    , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
     , refresh
@@ -1947,7 +1949,7 @@ publicProfileDecoder : Decoder PublicProfile
 publicProfileDecoder =
     Decode.map6 PublicProfile
         (Decode.field "handle" Decode.string)
-        (Decode.field "display_name" Decode.string)
+        (optionalString "display_name")
         (optionalString "website_url")
         (optionalString "city")
         (optionalString "country_code")
@@ -1960,11 +1962,13 @@ profileShelfSummaryDecoder =
 
 
 {-| Decodes a string field that may be absent or JSON null, defaulting to "".
+`Decode.nullable` handles a present-but-null value explicitly; an absent key
+falls through to "".
 -}
 optionalString : String -> Decoder String
 optionalString field =
     Decode.oneOf
-        [ Decode.field field Decode.string
+        [ Decode.field field (Decode.nullable Decode.string) |> Decode.map (Maybe.withDefault "")
         , Decode.succeed ""
         ]
 
@@ -2030,7 +2034,7 @@ publicProfileSummaryDecoder : Decoder PublicProfileSummary
 publicProfileSummaryDecoder =
     Decode.map4 PublicProfileSummary
         (Decode.field "handle" Decode.string)
-        (Decode.field "display_name" Decode.string)
+        (optionalString "display_name")
         (optionalString "city")
         (optionalString "country_code")
 

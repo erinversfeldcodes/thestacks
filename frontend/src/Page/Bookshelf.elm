@@ -18,8 +18,8 @@ import Components.BookList as BookList
 import Components.RSSLink as RSSLink
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, button, div, p, text)
-import Html.Attributes exposing (attribute, class)
+import Html exposing (Html, a, button, div, p, text)
+import Html.Attributes exposing (attribute, class, href)
 import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
@@ -116,6 +116,12 @@ profileConfig handle bookshelfName =
                 "wishlist" ->
                     wishListConfig
 
+                "reading_pile" ->
+                    { libraryConfig | label = "Reading Pile" }
+
+                "looking_for_home" ->
+                    { libraryConfig | label = "Looking for a Home" }
+
                 _ ->
                     { libraryConfig | apiName = bookshelfName, label = bookshelfName }
     in
@@ -123,7 +129,7 @@ profileConfig handle bookshelfName =
         | apiName = bookshelfName
         , readOnly = True
         , profileHandle = Just handle
-        , emptyMessage = "This shelf has no books to show."
+        , emptyMessage = "Nothing on this shelf to show right now."
     }
 
 
@@ -257,7 +263,13 @@ update msg model =
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
         BookClicked bk ->
-            ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+            if model.config.readOnly then
+                -- Read-only browse is look-only (US-10.5.3): a spine click must not
+                -- escape into the viewer's OWN owner-mode BookDetail (Add/move/remove).
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
 
         RSSLinkMsg subMsg ->
             ( { model | rssLink = RSSLink.update subMsg model.rssLink }, Cmd.none, NoOut )
@@ -296,62 +308,64 @@ view model =
         [ div [ class ("wallpaper " ++ cfg.wallpaperClass) ] []
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
-            [ div [ class "shelf-room__header" ]
-                (viewShelfLabel cfg.label
-                    :: ViewModeToggle.view model.viewMode ViewModeChanged
-                    :: (if cfg.readOnly then
-                            -- The RSS feed link is an owner affordance; a viewer
-                            -- browsing another reader's shelf gets no feed control.
-                            []
+            (viewReadOnlyAttribution cfg
+                ++ [ div [ class "shelf-room__header" ]
+                        (viewShelfLabel cfg.label
+                            :: ViewModeToggle.view model.viewMode ViewModeChanged
+                            :: (if cfg.readOnly then
+                                    -- The RSS feed link is an owner affordance; a viewer
+                                    -- browsing another reader's shelf gets no feed control.
+                                    []
 
-                        else
-                            [ Html.map RSSLinkMsg
-                                (RSSLink.view
-                                    { visibility = model.visibility
-                                    , userId = model.userId
-                                    , bookshelfName = cfg.apiName
-                                    }
-                                    model.rssLink
-                                )
+                                else
+                                    [ Html.map RSSLinkMsg
+                                        (RSSLink.view
+                                            { visibility = model.visibility
+                                            , userId = model.userId
+                                            , bookshelfName = cfg.apiName
+                                            }
+                                            model.rssLink
+                                        )
+                                    ]
+                               )
+                        )
+                   , if model.showAgeGate then
+                        ageGate
+                            { onVerify = VerifyAge
+                            , onDismiss = DismissAgeGate
+                            }
+
+                     else
+                        div [ attribute "aria-live" "polite" ]
+                            [ case model.shelves of
+                                NotAsked ->
+                                    viewBookshelfFromShelves model []
+
+                                Loading ->
+                                    viewBookshelfFromShelves model []
+
+                                Failure _ ->
+                                    if cfg.readOnly then
+                                        p [ class "shelf-unavailable", testId "shelf-unavailable" ]
+                                            [ text "Reader not found, or this shelf isn't available." ]
+
+                                    else
+                                        p [ class "error" ]
+                                            [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
+
+                                Success shelves ->
+                                    let
+                                        allPlacements =
+                                            List.concatMap .placements shelves
+                                    in
+                                    if List.isEmpty allPlacements then
+                                        viewEmptyBookshelf model
+
+                                    else
+                                        viewBookshelfFromShelves model shelves
                             ]
-                       )
-                )
-            , if model.showAgeGate then
-                ageGate
-                    { onVerify = VerifyAge
-                    , onDismiss = DismissAgeGate
-                    }
-
-              else
-                div [ attribute "aria-live" "polite" ]
-                    [ case model.shelves of
-                        NotAsked ->
-                            viewBookshelfFromShelves model []
-
-                        Loading ->
-                            viewBookshelfFromShelves model []
-
-                        Failure _ ->
-                            if cfg.readOnly then
-                                p [ class "shelf-unavailable", testId "shelf-unavailable" ]
-                                    [ text "Reader not found, or this shelf isn't available." ]
-
-                            else
-                                p [ class "error" ]
-                                    [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
-
-                        Success shelves ->
-                            let
-                                allPlacements =
-                                    List.concatMap .placements shelves
-                            in
-                            if List.isEmpty allPlacements then
-                                viewEmptyBookshelf model
-
-                            else
-                                viewBookshelfFromShelves model shelves
-                    ]
-            ]
+                   ]
+            )
         ]
 
 
@@ -362,6 +376,26 @@ viewEmptyBookshelf model =
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
             :: viewAddShelfControls model.config
         )
+
+
+{-| In read-only browse, orient the viewer: who owns this shelf and a link back
+to their profile hub. Empty for the owner's own view. Uses the handle (the
+profile-shelf payload carries no display name), matching the hub's @handle style.
+-}
+viewReadOnlyAttribution : Config -> List (Html Msg)
+viewReadOnlyAttribution cfg =
+    case ( cfg.readOnly, cfg.profileHandle ) of
+        ( True, Just handle ) ->
+            [ a
+                [ class "shelf-room__attribution"
+                , testId "shelf-attribution"
+                , href (Navigation.Route.toPath (Profile handle))
+                ]
+                [ text ("← @" ++ handle ++ "’s shelves") ]
+            ]
+
+        _ ->
+            []
 
 
 viewBookshelfFromShelves : Model -> List Shelf -> Html Msg
