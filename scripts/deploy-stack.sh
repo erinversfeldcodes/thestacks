@@ -1019,20 +1019,21 @@ if [[ -n "${machine_id}" ]]; then
         else
             echo ""
             echo "==> Seeding ${CORE_APP} (preview dev fixtures — seeds.exs differs from main)..."
-            # ALLOW_SEEDS gates Stacks.Release.seed/0 — set inline so the env-var
-            # check inside the eval'd code sees it. 180s timeout covers the
-            # ~hundreds of insert_all rows; longer than the 60s migrate timeout
-            # because seeds do far more work.
+            # Seed via `rpc` (run INSIDE the already-running node), NOT `eval`.
+            # `eval 'seed()'` starts a SECOND BEAM next to the serving Phoenix, and
+            # on the 512 MB preview VM that second BEAM plus the ~160-book in-memory
+            # seed set OOMs the machine — the exec drops with a bare
+            # `failed_precondition: exec request failed: EOF` ~11s in (no Elixir
+            # output), deterministically, both retries (Issue #171 / #177). `rpc`
+            # runs `seed_live/0` in the existing node, so no second BEAM is spawned.
             #
-            # Wrapped in deploy_with_retry (like the prod/prober seeds above) so a
-            # transient `fly machine exec … EOF` — the machine's exec endpoint
-            # dropping the connection while it's still busy post-migrate — gets a
-            # second attempt instead of aborting the whole preview deploy. This was
-            # the recurring preview-gate failure (Issue #171 / #177 follow-up): the
-            # preview seed was the ONLY seed invocation missing the retry wrapper.
+            # `seed_live/0` is gate-less by identity (like seed_prod/seed_prober) —
+            # `rpc` cannot inject ALLOW_SEEDS into the running node — and is called
+            # ONLY here in the preview branch, never prod. 180s timeout covers the
+            # hundreds of insert_all rows. Retry wrapper stays for genuine transients.
             deploy_with_retry "preview seed" \
                 fly machine exec "${machine_id}" \
-                "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
+                "/bin/sh -c \"/app/bin/core rpc 'Stacks.Release.seed_live()'\"" \
                 --app "${CORE_APP}" --timeout 180 \
                 || { echo "FAIL deploy: preview seed failed"; exit 1; }
             echo "PASS deploy: preview dev fixtures seeded"

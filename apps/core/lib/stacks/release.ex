@@ -80,6 +80,29 @@ defmodule Stacks.Release do
   end
 
   @doc """
+  Seed the dev/preview fixtures INSIDE the already-running release node.
+
+  Invoke via `bin/core rpc 'Stacks.Release.seed_live()'` (NOT `eval`). Unlike
+  `seed/0` — which is written for the fresh-BEAM `eval` path and therefore
+  `load_app`s and `with_repo`-starts each repo — this assumes the app and its
+  repos are already started (they are, in the serving node), so it evaluates the
+  seeds directly against the live `Core.Repo`.
+
+  Why: `eval 'seed()'` spawns a SECOND BEAM alongside the serving Phoenix, and on
+  the 512 MB preview VM that second BEAM plus the ~160-book in-memory seed set
+  OOMs the machine (the exec drops with a bare `EOF`). Running the seed in the
+  existing node via `rpc` avoids the second BEAM entirely.
+
+  No `ALLOW_SEEDS` gate: `rpc` cannot inject env into the running node, and — like
+  `seed_prod/0` and `seed_prober/0` — the function's identity is the gate.
+  `scripts/deploy-stack.sh` calls this ONLY in its preview branch, never prod.
+  """
+  @spec seed_live() :: term()
+  def seed_live do
+    run_seeds()
+  end
+
+  @doc """
   Creates exactly one owner user from `PROD_OWNER_EMAIL` and
   `PROD_OWNER_PASSWORD` environment variables.
 
