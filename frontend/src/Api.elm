@@ -63,6 +63,7 @@ module Api exposing
     , getPostComments
     , getPrivacySettings
     , getProfile
+    , getProfileShelf
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
@@ -1977,6 +1978,31 @@ getProfile maybeToken handle toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg publicProfileDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Fetch another reader's bookshelf for read-only browsing.
+
+`GET /api/u/:handle/bookshelves/:bookshelfName` (optional auth — the viewer's
+identity is threaded so the backend visibility-filters the placements). The
+payload shape matches the owner's own shelf, so it reuses `shelvesResponseDecoder`.
+
+-}
+getProfileShelf :
+    Maybe String
+    -> String
+    -> String
+    -> (Result Http.Error (List Shelf) -> msg)
+    -> Cmd msg
+getProfileShelf maybeToken handle bookshelfName toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg shelvesResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
