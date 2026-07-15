@@ -15,13 +15,10 @@ defmodule Core.Repo.Migrations.AddDisplayNameTrgmIndex do
   `20260714200520` — requires `@disable_ddl_transaction` /
   `@disable_migration_lock` (a concurrent build cannot run inside a transaction).
 
-  Extension privilege: `CREATE EXTENSION IF NOT EXISTS pg_trgm` needs a role with
-  the CREATE privilege on the database (the same requirement the pgvector
-  migration `20260713181722` already relies on, so the local/CI migration role
-  has it). It is guarded with `IF NOT EXISTS` and is a no-op when `pg_trgm` is
-  already installed. If a deploy environment's app role lacks that privilege, a
-  DBA must `CREATE EXTENSION pg_trgm;` once out-of-band before this migration
-  runs; the index build itself needs no extension privilege.
+  The `pg_trgm` extension is enabled separately in `20260715115900` (which runs
+  first) — kept out of this file so the extracted SQL is a SINGLE concurrent-index
+  statement and the squawk gate recognises it as auto-committing rather than
+  flagging it as a concurrent build inside a transaction.
   """
   use Ecto.Migration
 
@@ -29,8 +26,6 @@ defmodule Core.Repo.Migrations.AddDisplayNameTrgmIndex do
   @disable_migration_lock true
 
   def up do
-    execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-
     create index(:users, ["lower(display_name) gin_trgm_ops"],
              prefix: "op",
              name: :users_display_name_trgm_index,
