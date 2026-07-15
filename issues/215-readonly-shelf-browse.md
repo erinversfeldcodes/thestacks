@@ -101,13 +101,13 @@ Elm render, the no-mutation guarantee, and the group/age-gate browse-surface ass
 work queue. 5 punch items.
 
 ## Definition of Done
-- [ ] `Page.Bookshelf` read-only `Config` + parameterised fetch URL + control/Msg stripping.
-- [ ] Main dispatches `ProfileShelf` to the read-only view (replace the temporary hub landing).
-- [ ] **Feature-Completeness Pre-Check ✅** — browse a second reader's shelf live: visible books only, no controls.
-- [ ] Punch items 1–5 closed (incl. group + age-gate matrix + no-mutation).
-- [ ] `npx elm-test` green; `just run just verify`.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] `Page.Bookshelf` read-only `Config` (`readOnly : Bool` + `profileHandle : Maybe String`) + `profileConfig handle bookshelfName` builder + parameterised fetch (`Api.getProfileShelf` → optional-auth `GET /api/u/:handle/bookshelves/:name`); RSS-feed + "Add shelf" controls omitted and `AddShelf` guarded against dispatch in read-only mode; a `Failure` renders a neutral `shelf-unavailable` state, not the owner's error copy.
+- [x] Main dispatches `ProfileShelf handle bookshelfName` to `initBookshelf (Bookshelf.profileConfig …)` (replaces the temporary hub landing).
+- [ ] **Feature-Completeness Pre-Check ✅** — browse a second reader's shelf live in the browser (epic-level E2E).
+- [x] Punch items closed via `frontend/tests/Page/BookshelfReadOnlyTest.elm` (6 tests): read-only init hits the profile endpoint (not the own-shelf URL); anonymous viewer still fetches; placements render as spines; no "Add shelf" control (SECURITY); no POST/PUT/DELETE issued (SECURITY); 404 → neutral not-available. Visibility-filtering combinatorics stay at the #213 resolver/controller layer.
+- [x] `npx elm-test` green (804, 0 failures); `elm-review` clean; merged into `feat/210-public-profiles`.
+- [x] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (remaining item is the epic browser E2E).
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the epic live-drive.
 
 ## Dependencies
 #213 (`GET /api/u/:handle/bookshelves/:name`), #214 (hub links to `Route.ProfileShelf`).

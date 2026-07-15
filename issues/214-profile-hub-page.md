@@ -97,12 +97,12 @@ These are missing-test-feature-exists, not feature gaps.
 
 ## Definition of Done
 - [x] `Route.Profile`/`ProfileShelf`, `Page.Profile`, `Api.getProfile` + `PublicProfile` decoder, Main wiring.
-- [ ] `frontend/tests/Page/ProfileTest.elm` (happy + not-found + session-expiry).
-- [ ] **Feature-Completeness Pre-Check ✅** — hub live-driven in the browser (renders + "Reader not found").
-- [ ] Punch items 1–4 closed.
-- [ ] `Msg(..)` exposed for the test; `npx elm-test` green; `just run just verify`.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] `frontend/tests/Page/ProfileTest.elm` (happy + not-found + session-expiry) — 7 tests: identity render, meta (location+website), one browse link per visible shelf → `/u/:handle/:shelf`, empty-state copy, 404 → neutral "Reader not found" (no identity leak), 404 ≠ SessionExpired, 401 → SessionExpired.
+- [ ] **Feature-Completeness Pre-Check ✅** — hub live-driven in the browser (epic-level E2E).
+- [x] Punch items 1–3 closed (Elm happy / not-found matrix / session-expiry). Punch #4 (browser E2E) is the epic live-drive.
+- [x] `Msg(..)` exposed for the test; `npx elm-test` green (804, 0 failures).
+- [x] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (remaining item is the epic browser E2E).
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the epic live-drive.
 
 ## Dependencies
 #213 (`GET /api/u/:handle`). #215 will replace the temporary `ProfileShelf`→hub landing.

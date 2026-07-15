@@ -70,12 +70,12 @@ Verdict: **AMBER** — backend context proven; **3 ❌/⚠️ punch items** (the
 
 ## Definition of Done
 - [x] Backend: `profile_changeset` accepts `handle`; `PUT /api/settings/profile` returns it; `/me` exposes it.
-- [ ] Elm: `Page.Settings.Profile` handle field + 422 error rendering (taken/reserved/format).
-- [ ] **Feature-Completeness Pre-Check ✅** — the settings-edit happy path driven live in the browser.
-- [ ] Punch items 1–3 closed.
-- [ ] Tests passing (`accounts_test` + new controller/`/me`/Elm tests); `just run just verify`.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] Elm: `Page.Settings.Profile` handle field + 422 error rendering (taken/reserved/format) — `handle` model field seeded from the user, `SetHandle` Msg, `Api.ProfileError`-aware `updateProfile` (mirrors `expectRegister`), `viewHandleError` mapping raw changeset messages → US-10.5.1 copy, and success reflecting the server-normalised (lowercased) handle from the 200 body.
+- [ ] **Feature-Completeness Pre-Check ✅** — the settings-edit happy path driven live in the browser (epic-level E2E).
+- [x] Punch items 1–3 closed — controller happy+sad (`user_settings_controller_test.exs`: normalised 200, reserved/taken/malformed → 422 `{errors:{handle}}`), `/me` handle exposure (`auth_controller_test.exs`), Elm feature + `frontend/tests/Page/Settings/ProfileTest.elm` (8 tests).
+- [x] Tests passing — `accounts_test` + new controller/`/me` (92 Elixir, 0 failures) + Elm (798, 0 failures); `proto.sync --check` clean.
+- [x] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (the remaining item is the epic browser E2E).
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the epic live-drive.
 
 ## Dependencies
 #211 (handle schema + `validate_handle/1`).
