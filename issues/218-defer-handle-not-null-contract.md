@@ -28,20 +28,16 @@ rolling production.
 ## Definition of Done
 - [ ] Rollout confirmed; constraint validated safe; annotation updated.
 
-## Status: ACCEPTED risk — not actionable now (do NOT delegate)
-The single-release `NOT NULL` tighten is a **deliberately accepted** decision, not a bug:
-the only writer of new `op.users` rows is registration, which is not expected during the
-deploy window (pre-launch, low/no live signups), so the rolling-deploy race the reviewers
-flagged has no practical trigger. There is nothing to implement on this branch — the
-constraint already exists (with `@breaking_ok` recording this rationale).
+## Status: RESOLVED — accepted, rolling forward (closed 2026-07-15)
+**Decision (owner, 2026-07-15):** the risk is acceptable; **roll forward with the
+single-release `NOT NULL` tighten and deploy it as part of this branch.** No separate
+"contract release" and no deferral — the `@breaking_ok` annotation records the rationale
+(only registration writes `op.users`, and no live signups are expected during the deploy
+window). Nothing further to implement; this issue is closed as an accepted decision.
 
-This issue is the **contract** half of expand-contract (ship the tighten in a *later*
-release, after release 1 is fully out) — deploy-sequencing, not code. Revisit **only if**
-`op.users` ever runs multi-instance rolling production **with live registration traffic**.
-Two options at that point: (a) make the introducing release ship `handle` NULLABLE and add
-`NOT NULL` in a follow-up release; (b) a zero-downtime add via `ADD CONSTRAINT … CHECK
-(handle IS NOT NULL) NOT VALID` then `VALIDATE CONSTRAINT` (avoids the table lock, though it
-does not itself close the N-1-writer window — deferral is the only thing that does).
+For the future record, IF `op.users` ever reaches multi-instance rolling production **with
+live registration traffic**, the safe pattern would be: ship the introducing release with
+`handle` NULLABLE, then add `NOT NULL` in a follow-up. Not needed for this deploy.
 
 ## Source
 Principal-engineer + elixir/database/platform reviewers on the #210 epic review.
