@@ -1,8 +1,10 @@
 defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
   @moduledoc """
   Companion to the proto-generated `add :handle` migration (#211). Backfills a
-  handle for every existing user, adds the case-insensitive uniqueness index, and
-  makes the column NOT NULL so every user always has a reachable `/u/:handle`.
+  handle for every existing user and makes the column NOT NULL so every user
+  always has a reachable `/u/:handle`. The case-insensitive uniqueness index is
+  built separately and CONCURRENTLY in `20260714200520` so it never holds a
+  write-blocking lock on `op.users` (the auth hot-path table).
 
   Backfill = slug(display_name, ≤20 chars, non-alnum→'_', trimmed; 'reader' when
   empty) + '_' + 6 hex chars keyed by md5(random || id). The random suffix makes a
@@ -11,6 +13,20 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
   registration.
   """
   use Ecto.Migration
+
+  # NOT NULL tightening is a destructive op (see docs/agents/standards/migrations.md
+  # §Expand-Contract) and must carry @breaking_ok. Written as the `modify … null: false`
+  # DSL (not raw `execute`) so scripts/lint-migrations.sh actually detects and gates it.
+  #
+  # Reason it is safe to tighten in this same release: `handle` is INTRODUCED by this
+  # epic. `Stacks.Accounts.maybe_put_handle/1` assigns a handle on every insert path
+  # (registration), and the UPDATE below fills every pre-existing row, so no row is
+  # null by the time SET NOT NULL runs. The only residual is the brief rolling-deploy
+  # window in which a not-yet-upgraded (pre-handle) instance could INSERT a handle-less
+  # row; this is accepted for a newly-added greenfield column pre-launch. Follow-up
+  # issue #218 tracks splitting the tighten into a later release if op.users ever
+  # reaches multi-instance rolling production.
+  @breaking_ok "handle is new this release; app writes it on every insert (Accounts.maybe_put_handle) and the backfill fills all existing rows, so the column is never null when tightened. #218 tracks deferring the tighten if the table reaches rolling prod."
 
   def up do
     execute("""
@@ -32,20 +48,14 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
     WHERE handle IS NULL
     """)
 
-    create unique_index(:users, ["lower(handle)"],
-             prefix: "op",
-             name: :users_lower_handle_index
-           )
-
-    execute("ALTER TABLE op.users ALTER COLUMN handle SET NOT NULL")
+    alter table(:users, prefix: "op") do
+      modify :handle, :text, null: false
+    end
   end
 
   def down do
-    execute("ALTER TABLE op.users ALTER COLUMN handle DROP NOT NULL")
-
-    drop_if_exists index(:users, ["lower(handle)"],
-                     prefix: "op",
-                     name: :users_lower_handle_index
-                   )
+    alter table(:users, prefix: "op") do
+      modify :handle, :text, null: true
+    end
   end
 end
