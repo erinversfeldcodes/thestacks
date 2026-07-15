@@ -105,9 +105,13 @@ defmodule Stacks.VisibilityPropertyTest do
   # ---------------------------------------------------------------------------
 
   property "owner profile_visibility hides bookshelf from any non-owner platform viewer" do
+    # Each run inserts two Argon2-hashed users, so keep max_runs modest: the input
+    # space here is just 2 values ("platform"/"owner"), so 25 runs covers it many
+    # times over while staying well inside the 60s property timeout under CI load
+    # (200 runs × 2 password hashes was the flake source, not a logic issue).
     check all(
             vis <- StreamData.member_of(["platform", "owner"]),
-            max_runs: 200
+            max_runs: 25
           ) do
       owner = insert(:user, profile_visibility: "owner")
       viewer = insert(:user)
@@ -127,10 +131,13 @@ defmodule Stacks.VisibilityPropertyTest do
   # ---------------------------------------------------------------------------
 
   property "platform visibility and platform profile is visible to any authenticated viewer" do
+    # Two Argon2-hashed inserts per run; the display_name is incidental to the
+    # invariant, so 25 runs is ample and stays inside the property timeout under
+    # CI load (see the note on the previous property).
     check all(
             viewer_display_name <-
               StreamData.string(:alphanumeric, min_length: 1, max_length: 20),
-            max_runs: 200
+            max_runs: 25
           ) do
       owner = insert(:user, profile_visibility: "platform")
       viewer = insert(:user, display_name: viewer_display_name)

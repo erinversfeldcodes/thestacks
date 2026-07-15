@@ -138,7 +138,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
 
     // ── US-10.5.3 — browse the shelf read-only ────────────────────────────
     await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
-    await expect(page).toHaveURL(new RegExp(`/u/${ownerHandle}/library$`));
+    await expect(page).toHaveURL((url) => url.pathname === `/u/${ownerHandle}/library`);
     await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
     // At least one visible spine renders…
     await expect(page.getByTestId("book-spine").first()).toBeVisible();
@@ -217,7 +217,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
 
     // The card links to the profile — follow it and land on the hub.
     await readerCard.click();
-    await expect(page).toHaveURL(new RegExp(`/u/${ownerHandle}$`));
+    await expect(page).toHaveURL((url) => url.pathname === `/u/${ownerHandle}`);
     await expect(page.locator(".profile__name")).toHaveText(ownerName, {
       timeout: 10000,
     });
@@ -322,7 +322,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
 
       // …and the public shelf browses read-only with a visible spine, no controls.
       await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
-      await expect(page).toHaveURL(new RegExp(`/u/${pubHandle}/library$`));
+      await expect(page).toHaveURL((url) => url.pathname === `/u/${pubHandle}/library`);
       await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
       await expect(page.getByTestId("book-spine").first()).toBeVisible();
       await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);

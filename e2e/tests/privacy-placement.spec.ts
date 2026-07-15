@@ -233,15 +233,14 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     // `book--hidden` class) and its aria-label carries the private-book hint.
     const hiddenSpine = page.locator('[data-testid="book-spine"].book--hidden');
     await expect(hiddenSpine.first()).toBeAttached({ timeout: 10000 });
-    await expect(hiddenSpine.first()).toHaveAttribute(
-      "aria-label",
-      new RegExp(escapeRegExp(HIDDEN_ARIA_HINT))
-    );
+    // Assert the aria-label CONTAINS the hint (and, if known, the title). Read the
+    // attribute and use toContain rather than a dynamically-built RegExp (avoids
+    // the non-literal-RegExp scan finding and any ReDoS surface). The spine is
+    // already attached above, so its label is stable for a single read.
+    const hiddenLabel = await hiddenSpine.first().getAttribute("aria-label");
+    expect(hiddenLabel).toContain(HIDDEN_ARIA_HINT);
     if (title) {
-      await expect(hiddenSpine.first()).toHaveAttribute(
-        "aria-label",
-        new RegExp(escapeRegExp(title))
-      );
+      expect(hiddenLabel).toContain(title);
     }
 
     // Restore the placement to Members so the seeded user is left as found.
@@ -256,8 +255,3 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     ).toBeVisible({ timeout: 10000 });
   });
 });
-
-/** Escape a string for safe interpolation into a RegExp. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
