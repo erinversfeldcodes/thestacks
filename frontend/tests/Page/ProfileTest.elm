@@ -109,7 +109,11 @@ suite =
             \_ ->
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
-        , describe "publicProfileDecoder (redaction + null tolerance)"
+        , -- Paired contract (#220): the Elixir serializer key-set assertions live in
+          -- apps/core/test/stacks_web/proto_json_test.exs (public_profile/2 +
+          -- public_profile_summary/1). This decoder and that serializer MUST describe
+          -- the same redacted shape — update both sides together or CI drifts.
+          describe "publicProfileDecoder (redaction + null tolerance)"
             [ test "decodes a full payload" <|
                 \_ ->
                     """

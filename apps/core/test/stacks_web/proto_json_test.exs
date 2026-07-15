@@ -1003,4 +1003,84 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.visible == false
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # public_profile/2 + public_profile_summary/1 — REDACTED-profile contract
+  #
+  # Two-sided drift guard (#220): the paired Elm decoder round-trip lives in
+  # frontend/tests/Page/ProfileTest.elm. These key-set assertions and that
+  # decoder MUST describe the same shape — if you add/remove a key here, update
+  # the Elm side (and vice versa) or the contract has silently drifted.
+  # ---------------------------------------------------------------------------
+  describe "public_profile/2" do
+    test "emits EXACTLY the redacted key set — no account/PII field leaks" do
+      user =
+        insert(:user,
+          handle: "adalovelace",
+          display_name: "Ada",
+          website_url: "https://ada.example.com",
+          city: "London",
+          country_code: "GB"
+        )
+
+      shelves = [
+        insert(:bookshelf, user: user, name: "library"),
+        insert(:bookshelf, user: user, name: "wishlist")
+      ]
+
+      result = ProtoJSON.public_profile(user, shelves)
+
+      # Exact key-set equality (not has_key?/2): fails loud if a key is added or
+      # removed. Guards against a future refactor re-introducing `ProtoJson.user/1`
+      # (which leaks email/consent/role/notification prefs).
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
+
+      # Each bookshelf summary carries ONLY :name — no visibility, id, or counts.
+      for shelf <- result.bookshelves do
+        assert shelf |> Map.keys() |> Enum.sort() == [:name]
+      end
+
+      assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]
+    end
+
+    test "coalesces a nil display_name to \"\" (guards the #210 null-decode bug)" do
+      user = insert(:user, handle: "nameless", display_name: nil)
+
+      result = ProtoJSON.public_profile(user, [])
+
+      assert result.display_name == ""
+      # Key set is unchanged when display_name is nil.
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
+    end
+  end
+
+  describe "public_profile_summary/1" do
+    test "emits EXACTLY the slim redacted key set — no bookshelves, no PII" do
+      user =
+        insert(:user,
+          handle: "reader_x",
+          display_name: "Reader",
+          city: "Cape Town",
+          country_code: "ZA"
+        )
+
+      result = ProtoJSON.public_profile_summary(user)
+
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:city, :country_code, :display_name, :handle]
+    end
+
+    test "coalesces a nil display_name to \"\"" do
+      user = insert(:user, handle: "nameless_summary", display_name: nil)
+
+      result = ProtoJSON.public_profile_summary(user)
+
+      assert result.display_name == ""
+
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:city, :country_code, :display_name, :handle]
+    end
+  end
 end
