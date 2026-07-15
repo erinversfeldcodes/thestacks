@@ -33,10 +33,13 @@ defmodule StacksWeb.CatalogueController do
       per_page: parse_int(params["per_page"], 24)
     ]
 
+    # #229: forward the viewer's age-verified status so age-gated books are hidden
+    # from an authenticated-but-unverified viewer (as they already are anonymously),
+    # while remaining visible to a verified viewer. Normalise nil → false.
     viewer =
       case Guardian.Plug.current_resource(conn) do
         nil -> :unauthenticated
-        user -> {:platform_user, user.id}
+        user -> {:platform_user, user.id, user.age_verified == true}
       end
 
     {books, total} = Books.list_catalogue([{:viewer, viewer} | opts])
