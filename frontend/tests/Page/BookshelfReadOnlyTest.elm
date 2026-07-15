@@ -24,7 +24,7 @@ import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (profileShelfProgram)
+import TestHelpers exposing (profileShelfProgram, testBook)
 
 
 {-| Read-only browse of `alice`'s `library` shelf as an authenticated viewer.
@@ -126,8 +126,46 @@ suite =
         , rendersReceivedPlacements
         , noAddShelfControl
         , noMutatingRequestOnLoad
+        , lookOnlySpineClick
+        , rendersOwnerAttribution
         , notFoundShowsNeutralState
         ]
+
+
+{-| A spine click while browsing another reader's shelf must be look-only: it
+must NOT escape into the viewer's own owner-mode BookDetail (`NavigateTo`) nor
+issue any mutation. The `OutMsg` is swallowed by the ProgramTest harness, so
+this asserts the update contract directly.
+-}
+lookOnlySpineClick : Test
+lookOnlySpineClick =
+    test "look_only_spine_click_SECURITY: a read-only spine click emits no navigation/mutation" <|
+        \() ->
+            let
+                ( model, _ ) =
+                    Bookshelf.init
+                        (Bookshelf.profileConfig "alice" "library")
+                        (Just "viewer-token")
+                        "viewer-user-id"
+
+                ( _, _, outMsg ) =
+                    Bookshelf.update (Bookshelf.BookClicked testBook) model
+            in
+            Expect.equal outMsg Bookshelf.NoOut
+
+
+{-| The read-only view orients the viewer with an attribution back-link to the
+owner's profile hub (`testId "shelf-attribution"` → `/u/:handle`).
+-}
+rendersOwnerAttribution : Test
+rendersOwnerAttribution =
+    test "renders_owner_attribution: read-only view links back to the owner's profile hub" <|
+        \() ->
+            browse
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "shelf-attribution")
+                    , Selector.attribute (Html.Attributes.href "/u/alice")
+                    ]
 
 
 fetchesProfileEndpoint : Test
