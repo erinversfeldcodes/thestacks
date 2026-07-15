@@ -114,28 +114,30 @@ All cells **n/a — SLO gate.**
 #### Layer 13: Cost Tracking
 All cells **n/a — Neon reads only** (US §15); no per-call spend.
 
-### Punch list (feature EXISTS; these are missing assertions on the built surface — NOT `n/a`)
-1. **L2 10.5.3 sad** — unauthenticated viewer at `GET /api/u/:handle/bookshelves/:name` (mirror the hub's `:75`): platform placements shown, group/owner hidden. Suite: `profile_controller_test.exs`.
-2. **Group-visible shelf/placement (both US)** — the matrix rows "group shelf shows to a member, hidden from a non-member" and "group placement shown to member / hidden from non-member" are **not asserted at these endpoints** (only at the resolver unit layer). Add a group + membership fixture and assert the endpoint wires it through. **Do not `n/a` this — it is a named matrix row on a built surface.** Suite: `profile_controller_test.exs`.
-3. **Age-gated placement (US-10.5.3)** — an `age_gated` book hidden from unauthenticated / non-age-verified, shown to an age-verified viewer, at the shelf endpoint. Suite: `profile_controller_test.exs`.
-4. **E2E** — a browser drive of hub + shelf across viewer perspectives. Dissolved from the old #218 into #214 (hub) / #215 (shelf) live-drives + `e2e/tests/public-profile.spec.ts`.
+### Punch list
+1. ✅ **DONE** — L2 10.5.3 unauthenticated shelf: `profile_controller_test.exs` "an unauthenticated viewer sees platform placements but not owner-only ones (shelf)".
+2. ✅ **DONE** — group-visible shelf + placement: "a group-visibility shelf shows to a member and hides from a non-member (hub)" + "…placement…(shelf)".
+3. ✅ **DONE (feature)** — age-gating turned out to be a genuine **feature gap**, not just a missing test: `resolve_visibility(%Placement{})` ran `check_age_gate` on the placement, which has no `visibility_tier`, so an age-gated book's spine was shown when browsing a shelf. Fixed in `visibility.ex` — a placement now inherits its book's age gate (hidden from an unverified non-owner; owner always sees own; book-level age gate unchanged). Tests: "an age-gated book is hidden from unverified/unauthenticated viewers, shown to verified" + "the owner sees their own age-gated book even when unverified".
+4. ⬜ **E2E** — a browser drive of hub + shelf across viewer perspectives. Dissolved from the old #218 into #214 (hub) / #215 (shelf) live-drives + `e2e/tests/public-profile.spec.ts`.
 
 ### Verdict
-**AMBER — core matrix GREEN, 3 matrix-variation punch items (+E2E).** The redaction,
-ghost→404, blocked→404, unknown→404, owner-sees-own-ghost, platform-shown / owner-filtered,
-and bad-name→404 cells are all real ✅ (cited above, verified by read). The **group-visibility**
-and **age-gate** rows of the matrix, plus the shelf-endpoint unauthenticated case, are the
-outstanding ❌ punch items — the resolver proves them in isolation, but this surface does not
-yet assert it wires them through. These are explicit gaps, **not** reclassified `n/a`.
+**GREEN (backend) — the full visibility matrix is now asserted on these endpoints.**
+Redaction, ghost→404, blocked→404, unknown→404, owner-sees-own-ghost, platform-shown /
+owner-filtered, bad-name→404, **group member-vs-non-member (hub + shelf)**, **unauthenticated
+shelf**, and **age-gate (hidden from unverified non-owner; owner sees own)** are all real ✅.
+The age-gate row exposed a genuine feature gap (placements didn't inherit the book's age gate),
+now fixed in `visibility.ex`. The only remaining item is the browser E2E live-drive, owned by
+#214/#215 (a dissolved-#218 line, not a backend gap).
 
 ## Definition of Done
 - [x] `ProfileController.{show,shelf}` + routes + `profile_visible?/2` + `public_profile/2`.
 - [x] 10 controller tests (redaction, ghost/blocked/unknown → 404, owner-sees-own, shelf placement filtering).
-- [ ] Punch items 1–3 closed (unauthenticated-shelf, group-visibility, age-gate assertions).
-- [ ] **Feature-Completeness Pre-Check ✅** — both endpoints live-driven (via #214/#215).
+- [x] Punch items 1–3 closed — unauthenticated-shelf, group-visibility, and age-gate (feature + assertions).
+- [x] `visibility.ex` placement age-gate feature (a placement inherits its book's age gate; owner-exempt; book-level gate unchanged) — verified no regression (`visibility_test`/property/`bookshelf_controller_test` green).
+- [ ] **Feature-Completeness Pre-Check ✅** — both endpoints live-driven (via #214/#215 browser E2E).
 - [ ] `just run just verify` passes.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (currently 3 ❌ + 1 ⚠️).
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] **Test audit (above) is GREEN (backend)** — 0 ❌ on the controller/resolver matrix; the remaining ❌ is the browser E2E, owned by #214/#215.
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the live-drive.
 
 ## Dependencies
 #211 (handle lookup). The visibility resolver + `Social` blocking (pre-existing).
