@@ -1,4 +1,4 @@
-defmodule StacksWeb.UserSettingsControllerTest do
+defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
   @moduledoc """
   Tests for the privacy-settings read endpoint (`GET /api/settings/privacy`),
   which seeds the privacy screen with the user's saved profile visibility and
