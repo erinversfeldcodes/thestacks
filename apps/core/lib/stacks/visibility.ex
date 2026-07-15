@@ -59,47 +59,34 @@ defmodule Stacks.Visibility do
   @spec resolve_visibility(term(), term()) :: :visible | :hidden
   def resolve_visibility(nil, _viewer), do: :hidden
 
-  def resolve_visibility(%Placement{} = placement, {:platform_user, viewer_id} = viewer) do
-    placement = maybe_preload_bookshelf(placement)
-
-    if marketplace_exception?(placement) do
-      # Marketplace listings are broadly discoverable, but a block still hides
-      # ALL of the owner's content (SEC-2): honour the bidirectional block even
-      # for an active listing, before granting the marketplace exception.
-      check_block(get_owner_id(placement), viewer_id)
-      |> case do
-        :ok -> :visible
-        :hidden -> :hidden
-      end
-    else
-      do_resolve(placement, viewer, viewer_id)
-    end
+  def resolve_visibility(%Placement{} = placement, {:platform_user, _} = viewer) do
+    placement
+    |> maybe_preload_bookshelf()
+    |> resolve_placement(viewer, nil)
   end
 
   def resolve_visibility(%Placement{} = placement, :platform_preview) do
-    placement = maybe_preload_bookshelf(placement)
-    # A platform-preview has no viewer identity (never the owner, in no groups,
-    # no block relationship), so an active listing is simply visible.
-    if marketplace_exception?(placement),
-      do: :visible,
-      else: do_resolve(placement, :platform_preview, nil)
+    placement
+    |> maybe_preload_bookshelf()
+    |> resolve_placement(:platform_preview, nil)
   end
 
   def resolve_visibility(%Placement{} = placement, :unauthenticated) do
-    placement = maybe_preload_bookshelf(placement)
-    do_resolve(placement, :unauthenticated, nil)
+    placement
+    |> maybe_preload_bookshelf()
+    |> resolve_placement(:unauthenticated, nil)
   end
 
   def resolve_visibility(resource, {:platform_user, viewer_id} = viewer) do
-    do_resolve(resource, viewer, viewer_id)
+    do_resolve(resource, viewer, viewer_id, nil)
   end
 
   def resolve_visibility(resource, :platform_preview) do
-    do_resolve(resource, :platform_preview, nil)
+    do_resolve(resource, :platform_preview, nil, nil)
   end
 
   def resolve_visibility(resource, :unauthenticated) do
-    do_resolve(resource, :unauthenticated, nil)
+    do_resolve(resource, :unauthenticated, nil, nil)
   end
 
   def resolve_visibility(_resource, _viewer), do: :hidden
@@ -108,12 +95,46 @@ defmodule Stacks.Visibility do
   # Internal resolution logic
   # ---------------------------------------------------------------------------
 
-  defp do_resolve(resource, viewer, viewer_id) do
+  # Placement dispatch shared by the single-resolve public clauses and the batch
+  # entrypoint (`filter_visible_placements/2`). `ctx` is `nil` for a one-off
+  # resolve (the shared block/age gates hit the DB live) or a batch context (the
+  # shared gates are memoized once per request). The DECISION is identical either
+  # way — `ctx` only changes WHERE the shared-gate answers come from, never what
+  # they are.
+  defp resolve_placement(%Placement{} = placement, {:platform_user, viewer_id} = viewer, ctx) do
+    if marketplace_exception?(placement) do
+      # Marketplace listings are broadly discoverable, but a block still hides
+      # ALL of the owner's content (SEC-2): honour the bidirectional block even
+      # for an active listing, before granting the marketplace exception.
+      case check_block(get_owner_id(placement), viewer_id, ctx) do
+        :ok -> :visible
+        :hidden -> :hidden
+      end
+    else
+      do_resolve(placement, viewer, viewer_id, ctx)
+    end
+  end
+
+  defp resolve_placement(%Placement{} = placement, :platform_preview, ctx) do
+    # A platform-preview has no viewer identity (never the owner, in no groups,
+    # no block relationship), so an active listing is simply visible.
+    if marketplace_exception?(placement),
+      do: :visible,
+      else: do_resolve(placement, :platform_preview, nil, ctx)
+  end
+
+  defp resolve_placement(%Placement{} = placement, :unauthenticated, ctx) do
+    do_resolve(placement, :unauthenticated, nil, ctx)
+  end
+
+  defp resolve_placement(_placement, _viewer, _ctx), do: :hidden
+
+  defp do_resolve(resource, viewer, viewer_id, ctx) do
     owner_id = get_owner_id(resource)
 
     with :ok <- check_profile_ceiling(resource, owner_id, viewer, viewer_id),
-         :ok <- check_block(owner_id, viewer_id),
-         :ok <- check_age_gate(resource, viewer_id),
+         :ok <- check_block(owner_id, viewer_id, ctx),
+         :ok <- check_age_gate(resource, viewer_id, ctx),
          :ok <- check_resource_visibility(resource, owner_id, viewer, viewer_id) do
       :visible
     else
@@ -170,14 +191,27 @@ defmodule Stacks.Visibility do
   # Block check (bidirectional)
   # ---------------------------------------------------------------------------
 
-  defp check_block(_owner_id, nil), do: :ok
-  defp check_block(nil, _viewer_id), do: :ok
+  defp check_block(_owner_id, nil, _ctx), do: :ok
+  defp check_block(nil, _viewer_id, _ctx), do: :ok
 
-  defp check_block(owner_id, viewer_id) do
-    if Social.blocked?(viewer_id, owner_id) do
+  defp check_block(owner_id, viewer_id, ctx) do
+    if blocked_pair?(owner_id, viewer_id, ctx) do
       :hidden
     else
       :ok
+    end
+  end
+
+  # The (viewer, owner) block status is identical for every resource of one owner
+  # viewed by one viewer, so the batch context memoizes it per owner_id (one query
+  # per distinct owner, not per placement). A nil context resolves live —
+  # unchanged single-resolve behaviour.
+  defp blocked_pair?(owner_id, viewer_id, nil), do: Social.blocked?(viewer_id, owner_id)
+
+  defp blocked_pair?(owner_id, viewer_id, %{blocks: blocks}) do
+    case Map.fetch(blocks, owner_id) do
+      {:ok, blocked?} -> blocked?
+      :error -> Social.blocked?(viewer_id, owner_id)
     end
   end
 
@@ -190,22 +224,27 @@ defmodule Stacks.Visibility do
   # An age-gated placement is HIDDEN from a viewer who is neither the owner nor
   # age-verified — so it never reaches the frontend to render (the visible books
   # simply pack together, no gaps). The owner always sees their own shelf.
-  defp check_age_gate(%Placement{} = placement, viewer_id) do
+  defp check_age_gate(%Placement{} = placement, viewer_id, ctx) do
     placement = maybe_preload_book(placement)
 
     cond do
       not age_gated_book?(placement.book) -> :ok
       not is_nil(viewer_id) and get_owner_id(placement) == viewer_id -> :ok
-      viewer_age_verified?(viewer_id) -> :ok
+      viewer_age_verified?(viewer_id, ctx) -> :ok
       true -> :hidden
     end
   end
 
-  defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id) do
-    if viewer_age_verified?(viewer_id), do: :ok, else: :hidden
+  defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id, ctx) do
+    if viewer_age_verified?(viewer_id, ctx), do: :ok, else: :hidden
   end
 
-  defp check_age_gate(_resource, _viewer_id), do: :ok
+  defp check_age_gate(_resource, _viewer_id, _ctx), do: :ok
+
+  # The viewer is constant across a batch, so its age-verification is resolved
+  # ONCE into the context; a nil context resolves live (unchanged single path).
+  defp viewer_age_verified?(_viewer_id, %{age_verified: verified?}), do: verified?
+  defp viewer_age_verified?(viewer_id, nil), do: viewer_age_verified?(viewer_id)
 
   defp viewer_age_verified?(nil), do: false
 
@@ -390,6 +429,54 @@ defmodule Stacks.Visibility do
     |> Repo.all()
     |> Enum.filter(&can_view?(&1, viewer))
   end
+
+  @doc """
+  Batch-resolves placement visibility for a list of placements that share ONE
+  viewer — the public shelf-browse surface (`/u/:handle/bookshelves/:name`).
+
+  The (viewer, owner) block status and the viewer's age-verification are
+  identical for every placement of a given owner, so they are resolved ONCE here
+  (one block query per DISTINCT owner + one age-verification lookup for the
+  viewer) instead of once per placement. The per-request shared-gate query count
+  is therefore independent of the placement count. Each placement's decision is
+  identical to `resolve_visibility(placement, viewer)` — only the shared-gate
+  lookups are memoized, never the decision. Returns the visible placements,
+  input order preserved.
+
+  Callers that also need to BOUND the result (e.g. the public browse) should cap
+  the returned list; this function does not itself limit, so it stays reusable
+  for the owner's own full-shelf view.
+  """
+  @spec filter_visible_placements([Placement.t()], term()) :: [Placement.t()]
+  def filter_visible_placements(placements, viewer) when is_list(placements) do
+    placements = Enum.map(placements, &maybe_preload_bookshelf/1)
+    ctx = build_batch_context(placements, viewer)
+    Enum.filter(placements, &(resolve_placement(&1, viewer, ctx) == :visible))
+  end
+
+  # Precomputes the request-scoped shared gates: the viewer's age-verification
+  # (one lookup) and the (viewer, owner) block status per DISTINCT owner (one
+  # query each). Unauthenticated viewers can neither be blocked nor age-verified,
+  # so both collapse to the empty/false case with no queries.
+  defp build_batch_context(placements, viewer) do
+    viewer_id = batch_viewer_id(viewer)
+
+    blocks =
+      if is_nil(viewer_id) do
+        %{}
+      else
+        placements
+        |> Enum.map(&get_owner_id/1)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> Map.new(fn owner_id -> {owner_id, Social.blocked?(viewer_id, owner_id)} end)
+      end
+
+    %{age_verified: viewer_age_verified?(viewer_id), blocks: blocks}
+  end
+
+  defp batch_viewer_id({:platform_user, viewer_id}), do: viewer_id
+  defp batch_viewer_id(_viewer), do: nil
 
   @doc """
   Validates that a child resource visibility is not MORE EXPOSED than its parent
