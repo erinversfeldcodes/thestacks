@@ -34,6 +34,17 @@ kill_timeout = "5s"
   method = "GET"
   path = "/api/health"
 
+# Fly's managed Prometheus scrapes this endpoint directly over the private
+# 6PN network (never via fly-proxy), storing the series independently of the
+# app machines so they survive redeploys (Issue #232). Because the scrape
+# arrives over 6PN with no fly-proxy `fly-client-ip` header,
+# StacksWeb.Plugs.MetricsAuth allows it WITHOUT the METRICS_SCRAPE_TOKEN
+# bearer — while the same path over the public edge still requires the token.
+# Deploy-time scrape/render smoke check: docs/runbooks/metrics-stack.md.
+[metrics]
+  port = 4000
+  path = "/internal/metrics"
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
