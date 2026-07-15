@@ -124,6 +124,15 @@ The Elixir toolchain is pinned by `flake.nix` (**Elixir 1.18.4 / OTP 27**), acti
 - **If `_build` is already poisoned:** `rm -rf _build` then rebuild via `just run just verify` (single, consistent toolchain). Don't interleave a bare `mix …` call in between — that re-poisons it.
 - **DB roles after fresh-DB:** the `test-elixir`/fresh-DB path can leave `stacks_dbt` (and `stacks_app`/`stacks_readonly`) as `NOLOGIN`, breaking `dbt: checkpoint` (`role "stacks_dbt" is not permitted to log in`). Re-apply with `psql -h localhost -U postgres -d postgres -c "ALTER ROLE stacks_dbt WITH LOGIN;"` (also `stacks_app`, `stacks_readonly`). The `fix_db_role_login` migration should make this idempotent — a known follow-up.
 
+## Preview Deploys & E2E
+
+The preview core VM is **512 MB**. Run heavy release tasks (the full `seed/0`) via `/app/bin/core rpc '…'`, **never `eval`** — `eval` spawns a second BEAM that OOMs the VM (`fly machine exec … EOF`, ~11s, no stacktrace). The preview seed uses `Stacks.Release.seed_live/0` (rpc, runs in the live node). Because it runs the full dev-fixture seed inside whatever node it hits, `seed_live/0` **must be prod-guarded** on a persistent preview-only env (e.g. `STACKS_E2E_TEST_HELPERS`) — the `ALLOW_SEEDS` inline gate can't survive `rpc`, and "only called in the preview branch" is not a sufficient guard on its own.
+
+- **Deploy a preview locally (core-only, no Modal):** `SKIP_VISION=1 STACKS_SKIP_RESOLVER_PREFLIGHT=1 bash scripts/deploy-preview.sh` (needs `.env`'s `FLY_API_TOKEN` + `NEON_STAGING_*`; `SKIP_VISION` drops the `modal` CLI dep).
+- **E2E against a preview:** `cd e2e && BASE_URL=https://<preview>.fly.dev npx playwright test --project=setup` then `--project=chromium` (already excludes the Modal-dependent `upload*`/`rate-limit` specs).
+- Preview machines **auto-stop when idle** → a cold hit 502s (`auth.setup` "login failed HTTP 502"); warm `/api/health` or re-run — not a real failure.
+- The preview seed only runs when the PR changes `seeds.exs`; else it inherits staging via Neon copy-on-write. `fly … exec … EOF` is the Issue #171/#177 flake.
+
 ## Do Not
 
 - Skip ISBN verification for any book entering the system
