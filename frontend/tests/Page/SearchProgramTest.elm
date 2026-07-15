@@ -7,7 +7,10 @@ simulated user interactions and HTTP responses.
 
 -}
 
+import Dict
+import Expect
 import Html.Attributes
+import Http
 import Json.Encode as Encode
 import Page.Search as Search exposing (Msg(..))
 import ProgramTest
@@ -33,7 +36,48 @@ suite =
         , searchFilterPanelToggle
         , readersResults
         , readersEmptyResults
+        , readersFailure
+        , readers401RaisesSessionExpired
         ]
+
+
+readersFailure : Test
+readersFailure =
+    test "readers_failure: a failed people-search renders the reader error banner" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "ada")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/search/users?q=ada"
+                    (Http.BadStatus_
+                        { url = "/api/search/users?q=ada"
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        "{\"error\":\"boom\"}"
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Reader search failed. Please try again." ]
+
+
+{-| A 401 from people-search must raise `SessionExpired` (so Main routes to the
+session-expiry flow). The `OutMsg` is swallowed by the ProgramTest harness, so
+this asserts the update contract directly.
+-}
+readers401RaisesSessionExpired : Test
+readers401RaisesSessionExpired =
+    test "readers_401_session_expired: a 401 from people-search raises SessionExpired" <|
+        \() ->
+            let
+                ( _, _, outMsg ) =
+                    Search.update
+                        (ReadersCompleted (Err (Http.BadStatus 401)))
+                        Search.init
+                        (Just "test-token")
+            in
+            Expect.equal outMsg Search.SessionExpired
 
 
 readersResults : Test

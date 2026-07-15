@@ -79,7 +79,11 @@ update msg model maybeToken =
                 | query = query
                 , debounceCount = newCount
                 , results =
-                    if String.isEmpty query then
+                    -- Book search is authenticated-only; with no token it never
+                    -- fires, so stay on the hint rather than a spinner that would
+                    -- never resolve for an anonymous visitor. People search below
+                    -- still runs (optional-auth).
+                    if String.isEmpty query || maybeToken == Nothing then
                         NotAsked
 
                     else

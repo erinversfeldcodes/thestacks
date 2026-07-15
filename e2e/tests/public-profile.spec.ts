@@ -44,6 +44,12 @@ import {
  * `:auth` traffic low.
  */
 
+// Deterministic seed ISBNs (see apps/core/priv/repo/seeds.exs). Pinning the
+// visible spine + the age-gated row to KNOWN books removes the old reliance on
+// "whatever per_page=1 returns first".
+const VISIBLE_ISBN = "9780061120084"; // "The Left Hand of Darkness" — public
+const AGE_GATED_ISBN = "9780140449242"; // "Demons" — age_gated
+
 test.describe("Public profiles — view, browse & discover (live browser journey)", () => {
   test("a discoverable reader's profile shows visible shelves only, browses read-only, and is discoverable by search", async ({
     page,
@@ -80,15 +86,33 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     );
     const ownerHandle = ((await setHandle.json()).handle as string) ?? handle;
 
-    // A platform-visible "library" with one platform-visible placed book, and
-    // an owner-only "wishlist" that must NOT surface to the viewer. Order matters
-    // and mirrors the visibility ceiling: a placement may not exceed its
-    // bookshelf's visibility, so the bookshelf is loosened to "platform" BEFORE
-    // the placement (which itself defaults to "owner"). A platform bookshelf
-    // alone would still hide every spine — visibility is enforced per-placement.
-    const placementId = await placeFirstCatalogueBook(request, ownerAuth, "library");
+    // Resolve deterministic catalogue book ids by ISBN so the visible spine and
+    // the age-gate row are PINNED to known seed books. The catalogue includes
+    // age-gated books for an authenticated browser, so the owner token is used.
+    const [visibleBookId, ageGatedBookId] = await resolveCatalogueIds(
+      request,
+      ownerAuth,
+      [VISIBLE_ISBN, AGE_GATED_ISBN]
+    );
+
+    // A platform-visible "library" with one platform-visible, NON-age-gated
+    // placed book (the deterministic visible spine). Order matters and mirrors
+    // the visibility ceiling: a placement may not exceed its bookshelf's
+    // visibility, so the bookshelf is loosened to "platform" BEFORE the placement
+    // (which itself defaults to "owner"). A platform bookshelf alone would still
+    // hide every spine — visibility is enforced per-placement.
+    const placementId = await placeBook(request, ownerAuth, "library", visibleBookId);
     await setBookshelfVisibility(request, ownerAuth, "library", "platform");
     await setPlacementVisibility(request, ownerAuth, placementId, "platform");
+
+    // A platform-visible "antilibrary" holding ONLY the age-gated "Demons", so
+    // the shelf's viewer-visible `count` is a clean age-gate signal: 0 when the
+    // gated spine is suppressed, 1 once the viewer is age-verified.
+    const gatedPlacementId = await placeBook(request, ownerAuth, "antilibrary", ageGatedBookId);
+    await setBookshelfVisibility(request, ownerAuth, "antilibrary", "platform");
+    await setPlacementVisibility(request, ownerAuth, gatedPlacementId, "platform");
+
+    // An owner-only "wishlist" that must NOT surface to the viewer.
     await setBookshelfVisibility(request, ownerAuth, "wishlist", "owner");
 
     // ── VIEWER (A) — browser ──────────────────────────────────────────────
@@ -117,6 +141,55 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(page.getByTestId("book-spine").first()).toBeVisible();
     // …and NO owner control leaks into the read-only view (SECURITY).
     await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
+
+    // ── Age gate — the age-gated spine is suppressed unless the viewer is verified ──
+    // The "antilibrary" holds exactly one platform-visible but AGE-GATED
+    // placement, so the profile-shelf endpoint's viewer-visible `count` is a
+    // clean age-gate signal — a suppressed spine reads as a shelf with no gap
+    // (count 0), never a leak that a gated book exists.
+    const gatedShelfPath = `/api/u/${ownerHandle}/bookshelves/antilibrary`;
+
+    // Anonymous viewer — never age-verified → the gated spine is suppressed.
+    const anonGated = await expectOk(request.get(gatedShelfPath), "anon gated shelf");
+    expect((await anonGated.json()).count, "anon must not see the age-gated spine").toBe(0);
+
+    // The signed-in viewer is a fresh reader (age_verified defaults false), so the
+    // gated spine is still suppressed. Reuse the browser session's own token
+    // (no extra :auth login) for the viewer-scoped reads.
+    const viewerAuth = (
+      await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("stacks-auth") || "{}")
+      )
+    ).token as string;
+    const unverifiedGated = await expectOk(
+      request.get(gatedShelfPath, {
+        headers: { Authorization: `Bearer ${viewerAuth}` },
+      }),
+      "unverified gated shelf"
+    );
+    expect(
+      (await unverifiedGated.json()).count,
+      "unverified viewer must not see the age-gated spine"
+    ).toBe(0);
+
+    // Once the viewer verifies their age, the same gated placement becomes visible.
+    await expectOk(
+      request.put("/api/settings/age_verification", {
+        headers: { Authorization: `Bearer ${viewerAuth}` },
+        data: { age_verified: true },
+      }),
+      "viewer age-verify"
+    );
+    const verifiedGated = await expectOk(
+      request.get(gatedShelfPath, {
+        headers: { Authorization: `Bearer ${viewerAuth}` },
+      }),
+      "verified gated shelf"
+    );
+    expect(
+      (await verifiedGated.json()).count,
+      "verified viewer sees the age-gated spine"
+    ).toBe(1);
 
     // ── Ghost gate — an unknown handle is "Reader not found" ──────────────
     const unknownHandle = `nobody_${Math.floor(Math.random() * 1_000_000)}`;
@@ -247,23 +320,48 @@ async function loginViaApi(
 }
 
 /**
- * Place the first catalogue book onto the owner's given bookshelf via the API
- * and return the new placement's id, so the caller can loosen its visibility and
- * give the platform-visible shelf a spine to render for the viewer.
+ * Resolve catalogue book ids for the given seed ISBNs, in order. The catalogue
+ * carries `primary_edition.isbn`, so pinning by ISBN keeps the fixtures
+ * deterministic (rather than depending on catalogue ordering). Uses the owner
+ * token so age-gated seed books are included in the listing.
  */
-async function placeFirstCatalogueBook(
+async function resolveCatalogueIds(
   request: APIRequestContext,
   authToken: string,
-  bookshelfName: string
-): Promise<string> {
-  const cat = await expectOk(request.get("/api/catalogue?per_page=1"), "catalogue");
-  const books = (await cat.json()).books ?? [];
-  expect(books.length, "catalogue has at least one book to place").toBeGreaterThan(0);
+  isbns: string[]
+): Promise<string[]> {
+  const cat = await expectOk(
+    request.get("/api/catalogue?per_page=200", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    }),
+    "catalogue"
+  );
+  const books = ((await cat.json()).books ?? []) as Array<{
+    id: string;
+    primary_edition?: { isbn?: string };
+  }>;
+  return isbns.map((isbn) => {
+    const match = books.find((b) => b.primary_edition?.isbn === isbn);
+    expect(match, `catalogue must contain a book with ISBN ${isbn}`).toBeDefined();
+    return (match as { id: string }).id;
+  });
+}
 
+/**
+ * Place a specific book onto the owner's given bookshelf via the API and return
+ * the new placement's id, so the caller can loosen its visibility and give the
+ * platform-visible shelf a spine to render for the viewer.
+ */
+async function placeBook(
+  request: APIRequestContext,
+  authToken: string,
+  bookshelfName: string,
+  bookId: string
+): Promise<string> {
   const placed = await expectOk(
     request.post(`/api/bookshelves/${bookshelfName}/placements`, {
       headers: { Authorization: `Bearer ${authToken}` },
-      data: { book_id: books[0].id },
+      data: { book_id: bookId },
     }),
     `place book on ${bookshelfName}`
   );
