@@ -45,9 +45,37 @@ data *can* be public.
 ### 3. Anonymisation & the de-anonymisation boundary
 - Everything public is an **aggregate** — never a per-user value; all low-cardinality atoms.
 - **Linked-account / cross-integration signals** (future Audible-style integrations) are **excluded by
-  construction** — they enable de-anonymisation by correlation. Those are reserved for a **future
-  owner-only view** (under the profile) whose purpose is to *educate* on how information gets
-  de-anonymised when accounts are linked. (Future scope; not v1.)
+  construction** from the public page — they enable de-anonymisation by correlation.
+
+### 3a. Personal inference & de-anonymisation view (authed, own-only) — #242
+The authed counterpart to the public page: an **own-only** surface (under the profile/settings) that
+shows a signed-in user **only their own** data-derived inferences, to educate on **(a) what can be
+inferred about them** from their behaviour and **(b) how they could be de-anonymised even though the
+platform keeps no PII.** This is the *point* of the feature — behavioural data is powerful and
+re-identifying even without a name or email.
+
+Load-bearing design rules (privacy-critical — a mistake here creates the exact harm the feature warns
+against):
+- **Strict own-only authz.** A user sees ONLY their own inferences; every query is hard-scoped to
+  `current_user.id`. No cross-user path exists. This is the primary security invariant (tested).
+- **Ephemeral — never persist derived inferences.** Compute on-the-fly from the user's *existing*
+  records (shelves/placements, genres/BISAC subjects, reading/abandon timestamps, searches, age-gate
+  interactions, consent) and render; **do not store** an inference profile. Persisting sensitive
+  derived inferences would itself create a new special-category PII store (needing its own
+  erasure/export/consent) — precisely what we must not do. Compute-and-display only.
+- **Grounded + honestly labelled.** Real inferences ("your top genres/subjects") are shown as fact;
+  risk inferences ("a data broker *could* infer interest in [sensitive topic] from this pattern") are
+  clearly labelled *"what could be inferred"* — illustrations of risk, not classifications we assert or keep.
+- **The de-anonymisation demonstration** (the powerful part): compute a real **uniqueness/rarity
+  score** — e.g. "how many other readers share your top-N shelved books? *Zero.* Your combination is
+  unique on this platform" — a concrete k-anonymity-style fingerprint from the user's own shelf vs the
+  aggregate corpus. Explain that this fingerprint could be cross-referenced with public data (a
+  Goodreads profile, a tweet) to re-identify them — **no PII required.**
+- **Placement & consent-to-view.** Under the profile/settings (authed), distinct from public `/metrics`.
+  Gate the sensitive-inference section behind an explicit "show me what could be inferred" action
+  (informed choice), since some illustrations touch special-category topics.
+- **Tone:** educational and empowering, not alarmist or manipulative — "here's what your data reveals,
+  so you can choose". Plain+direct, per §1.
 
 ### 4. Themes (v1 — all backed by metrics we already emit)
 | Theme | Backed by |
