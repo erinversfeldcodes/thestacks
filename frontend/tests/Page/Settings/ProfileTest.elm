@@ -11,6 +11,7 @@ copy under the field (taken / reserved / bad format).
 
 import Api
 import Html.Attributes as Attr
+import Http
 import Page.Settings.Profile as Profile exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -118,4 +119,18 @@ suite =
                     |> Profile.view
                     |> Query.fromHtml
                     |> Query.hasNot [ Selector.text "Could not save profile. Please try again." ]
+        , test "a 503 (server busy) renders the retry-shortly copy, not the generic error" <|
+            \_ ->
+                initialModel
+                    |> apply (SaveProfileCompleted (Err (Api.ProfileRequestFailed (Http.BadStatus 503))))
+                    |> Profile.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "The server is busy right now. Please try again in a moment." ]
+        , test "a non-503 request failure renders the generic save error" <|
+            \_ ->
+                initialModel
+                    |> apply (SaveProfileCompleted (Err (Api.ProfileRequestFailed Http.NetworkError)))
+                    |> Profile.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "Could not save profile. Please try again." ]
         ]

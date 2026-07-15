@@ -265,11 +265,26 @@ viewProfileFeedback saving =
         Failure (Api.ProfileValidationFailed _) ->
             text ""
 
-        Failure _ ->
-            p [ class "error" ] [ text "Could not save profile. Please try again." ]
+        Failure (Api.ProfileRequestFailed err) ->
+            p [ class "error" ] [ text (profileRequestErrorText err) ]
 
         _ ->
             text ""
+
+
+{-| A non-validation profile save failure. The endpoint can return 503 with a
+`retry-after` when Argon2 is under backpressure (an email change hashes the
+current password), so that case gets its own "try again shortly" copy; anything
+else is a generic save error.
+-}
+profileRequestErrorText : Http.Error -> String
+profileRequestErrorText err =
+    case err of
+        Http.BadStatus 503 ->
+            "The server is busy right now. Please try again in a moment."
+
+        _ ->
+            "Could not save profile. Please try again."
 
 
 {-| Surface a handle-specific 422 error under the handle input, mapped to the
