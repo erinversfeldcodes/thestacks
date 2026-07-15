@@ -181,19 +181,46 @@ defmodule Stacks.Visibility do
   # Age gate check
   # ---------------------------------------------------------------------------
 
-  defp check_age_gate(%{visibility_tier: "age_gated"}, nil), do: :hidden
+  # A PLACEMENT inherits its BOOK's age gate (#213): the placement itself has no
+  # `visibility_tier`, so an age-gated book on a shelf must be gated via its book.
+  # An age-gated placement is HIDDEN from a viewer who is neither the owner nor
+  # age-verified — so it never reaches the frontend to render (the visible books
+  # simply pack together, no gaps). The owner always sees their own shelf.
+  defp check_age_gate(%Placement{} = placement, viewer_id) do
+    placement = maybe_preload_book(placement)
 
-  defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id) do
-    viewer = Accounts.get_user(viewer_id)
-
-    if viewer && viewer.age_verified do
-      :ok
-    else
-      :hidden
+    cond do
+      not age_gated_book?(placement.book) -> :ok
+      not is_nil(viewer_id) and get_owner_id(placement) == viewer_id -> :ok
+      viewer_age_verified?(viewer_id) -> :ok
+      true -> :hidden
     end
   end
 
+  defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id) do
+    if viewer_age_verified?(viewer_id), do: :ok, else: :hidden
+  end
+
   defp check_age_gate(_resource, _viewer_id), do: :ok
+
+  defp viewer_age_verified?(nil), do: false
+
+  defp viewer_age_verified?(viewer_id) do
+    case Accounts.get_user(viewer_id) do
+      %{age_verified: true} -> true
+      _ -> false
+    end
+  end
+
+  defp age_gated_book?(%{visibility_tier: "age_gated"}), do: true
+  defp age_gated_book?(_), do: false
+
+  defp maybe_preload_book(%Placement{} = placement) do
+    case placement.book do
+      %Ecto.Association.NotLoaded{} -> Repo.preload(placement, :book)
+      _ -> placement
+    end
+  end
 
   # ---------------------------------------------------------------------------
   # Resource-level visibility check
