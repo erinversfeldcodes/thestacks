@@ -158,9 +158,9 @@ defmodule Stacks.AccountsTest do
   # The discoverability privacy rule (platform-only + bidirectional
   # block-exclusion) is enforced IN THE QUERY, never by serializer redaction.
   describe "search_users/2" do
-    test "returns a discoverable (platform) user matching the term" do
-      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
-      _other = insert(:user, display_name: "Grace Hopper", profile_visibility: "platform")
+    test "returns a discoverable (public) user matching the term to an anon searcher" do
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "public")
+      _other = insert(:user, display_name: "Grace Hopper", profile_visibility: "public")
 
       results = Accounts.search_users("Ada", nil)
 
@@ -168,11 +168,29 @@ defmodule Stacks.AccountsTest do
     end
 
     test "ILIKE-matches case-insensitively and on substrings" do
-      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "public")
 
       assert Accounts.search_users("ada", nil) |> Enum.map(& &1.id) == [match.id]
       assert Accounts.search_users("LOVELACE", nil) |> Enum.map(& &1.id) == [match.id]
       assert Accounts.search_users("da Love", nil) |> Enum.map(& &1.id) == [match.id]
+    end
+
+    test "an anonymous searcher gets public profiles but NOT platform (Members) ones (#225)" do
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
+      _members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
+
+      # A logged-out visitor must not even learn a Members profile exists (they'd
+      # 404 on it); public is the only search-discoverable rung for anon.
+      assert Accounts.search_users("Ada", nil) |> Enum.map(& &1.id) == [public.id]
+    end
+
+    test "a signed-in searcher gets BOTH platform (Members) and public profiles (#225)" do
+      viewer = insert(:user)
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
+      members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
+
+      ids = Accounts.search_users("Ada", viewer.id) |> Enum.map(& &1.id) |> Enum.sort()
+      assert ids == Enum.sort([public.id, members.id])
     end
 
     test "excludes a ghost (profile_visibility = owner) from the result set" do
@@ -183,11 +201,11 @@ defmodule Stacks.AccountsTest do
 
     test "excludes a ghost even when no viewer is signed in" do
       _ghost = insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
-      platform = insert(:user, display_name: "Ada Platform", profile_visibility: "platform")
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
 
       results = Accounts.search_users("Ada", nil)
 
-      assert Enum.map(results, & &1.id) == [platform.id]
+      assert Enum.map(results, & &1.id) == [public.id]
     end
 
     test "excludes a user the viewer has blocked" do

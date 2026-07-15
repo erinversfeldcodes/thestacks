@@ -70,12 +70,18 @@ defmodule StacksWeb.UserSearchControllerTest do
       assert body["users"] == []
     end
 
-    test "unauthenticated request still excludes ghosts but returns platform users", %{conn: conn} do
-      insert(:user, handle: "seen", display_name: "Ada Platform", profile_visibility: "platform")
+    test "an unauthenticated request returns public profiles but NOT platform/ghost ones (#225)",
+         %{
+           conn: conn
+         } do
+      insert(:user, handle: "seen", display_name: "Ada Public", profile_visibility: "public")
+      insert(:user, display_name: "Ada Members", profile_visibility: "platform")
       insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
 
       body = conn |> get("/api/search/users", q: "Ada") |> json_response(200)
 
+      # A logged-out searcher discovers only public profiles — platform (Members)
+      # is signed-in-only, owner is private.
       assert [user] = body["users"]
       assert user["handle"] == "seen"
     end

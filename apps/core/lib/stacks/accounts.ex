@@ -299,10 +299,18 @@ defmodule Stacks.Accounts do
       # matches exactly the same rows.
       pattern = "%#{escape_like(String.downcase(trimmed))}%"
 
+      # Discoverability follows the Audience ladder (#225): a signed-in searcher
+      # discovers "Members" (platform) AND public profiles; an ANONYMOUS searcher
+      # discovers ONLY public profiles — platform is signed-in-only, so a logged-out
+      # visitor must not even learn a Members profile exists (they'd 404 on it).
+      # owner/group profiles are never discoverable via search.
+      discoverable =
+        if is_nil(viewer_id), do: ["public"], else: ["platform", "public"]
+
       query =
         from(u in User,
           as: :candidate,
-          where: u.profile_visibility == "platform",
+          where: u.profile_visibility in ^discoverable,
           where: ilike(fragment("lower(?)", u.display_name), ^pattern),
           order_by: [asc: u.display_name],
           limit: ^@search_limit
@@ -318,7 +326,7 @@ defmodule Stacks.Accounts do
 
   # Anti-join on op.user_blocks in BOTH directions. NOT EXISTS keeps the
   # exclusion in the result set (never a post-filter). No viewer → no block
-  # filter (ghosts are still excluded by the platform filter above).
+  # filter (ghosts are still excluded by the discoverability filter above).
   defp exclude_blocked(query, nil), do: query
 
   defp exclude_blocked(query, viewer_id) do
