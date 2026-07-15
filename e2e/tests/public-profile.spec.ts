@@ -119,10 +119,16 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
 
     // ── Ghost gate — an unknown handle is "Reader not found" ──────────────
-    await page.goto(`/u/nobody_${Math.floor(Math.random() * 1_000_000)}`);
+    const unknownHandle = `nobody_${Math.floor(Math.random() * 1_000_000)}`;
+    await page.goto(`/u/${unknownHandle}`);
     await expect(page.locator(".profile__name")).toHaveText("Reader not found", {
       timeout: 10000,
     });
+    // The rendered "not found" text passes identically for a 403; assert the
+    // WIRE status is 404 so the 404-not-403 ghost-indistinguishability invariant
+    // (the epic's core security property) is actually proven, not just implied.
+    const unknownResp = await request.get(`/api/u/${unknownHandle}`);
+    expect(unknownResp.status(), "unknown handle must be 404, never 403").toBe(404);
 
     // ── US-10.5.4 — people search discovers the reader → profile ──────────
     await page.goto("/search");
@@ -139,6 +145,62 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(page.locator(".profile__name")).toHaveText(ownerName, {
       timeout: 10000,
     });
+  });
+
+  test("a blocked viewer gets 404 at the wire, while others still see the profile", async ({
+    request,
+  }) => {
+    // A discoverable owner.
+    const owner = await registerAndConfirm(request, "e2e-profile-blocktarget");
+    test.skip(
+      owner.token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    await expectOk(
+      request.put("/api/settings/profile_visibility", {
+        headers: { Authorization: `Bearer ${ownerAuth}` },
+        data: { profile_visibility: "platform" },
+      }),
+      "loosen profile"
+    );
+    const handle = `e2e_blocktarget_${Math.floor(Math.random() * 1_000_000)}`;
+    await expectOk(
+      request.put("/api/settings/profile", {
+        headers: { Authorization: `Bearer ${ownerAuth}` },
+        data: { handle },
+      }),
+      "set handle"
+    );
+    const ownerId = (
+      await (
+        await expectOk(
+          request.get("/api/auth/me", { headers: { Authorization: `Bearer ${ownerAuth}` } }),
+          "owner /me"
+        )
+      ).json()
+    ).user.id;
+
+    // A viewer who blocks the owner must no longer resolve them — and the 404 is
+    // indistinguishable from an absent user (never 403). Block is bidirectional.
+    const viewer = await registerAndConfirm(request, "e2e-profile-blocker");
+    const viewerAuth = await loginViaApi(request, viewer.email, E2E_PASSWORD);
+    await expectOk(
+      request.post(`/api/users/${ownerId}/block`, {
+        headers: { Authorization: `Bearer ${viewerAuth}` },
+      }),
+      "block owner"
+    );
+
+    const blocked = await request.get(`/api/u/${handle}`, {
+      headers: { Authorization: `Bearer ${viewerAuth}` },
+    });
+    expect(blocked.status(), "blocked viewer must get 404, never 403").toBe(404);
+
+    // An uninvolved anonymous viewer still sees the platform profile — proving the
+    // 404 is block-specific, not a broken profile.
+    const anon = await request.get(`/api/u/${handle}`);
+    expect(anon.status()).toBe(200);
   });
 });
 
