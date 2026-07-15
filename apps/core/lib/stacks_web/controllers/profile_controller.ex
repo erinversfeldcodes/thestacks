@@ -20,6 +20,13 @@ defmodule StacksWeb.ProfileController do
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
+  # Hard cap on the number of placements a single public shelf-browse request may
+  # return (#221). Bounds an optional-auth surface so one request cannot walk an
+  # unbounded collection; applied ONLY to the public path, never to the owner's
+  # own full-shelf view. Overridable via `:core, :public_shelf_cap` (used by the
+  # bound test to exercise the cap without inserting hundreds of rows).
+  @default_public_shelf_cap 500
+
   @doc "GET /api/u/:handle — a user's public profile + their viewer-visible shelves."
   def show(conn, %{"handle" => handle}) do
     with_visible_profile(conn, handle, fn target, viewer ->
@@ -65,9 +72,36 @@ defmodule StacksWeb.ProfileController do
       json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
     else
       shelves = Shelving.get_bookshelf_shelves(target.id, bookshelf_name)
-      shelf_json = Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer))
-      count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
-      json(conn, %{bookshelf: bookshelf_name, count: count, shelves: shelf_json})
+
+      # Resolve visibility for EVERY placement on the bookshelf in ONE batch: the
+      # (viewer, owner) block status and the viewer's age-verification are shared
+      # across all placements and resolved once per request (not per row —
+      # #221). The public response is then HARD-CAPPED at public_shelf_cap/0 so a
+      # single request cannot walk thousands of placements. The owner's own
+      # full-shelf view (BookshelfController) is unaffected: it does not use this
+      # path and applies no cap.
+      visible_ids =
+        shelves
+        |> Enum.flat_map(& &1.placements)
+        |> Visibility.filter_visible_placements(viewer)
+        |> Enum.take(public_shelf_cap())
+        |> MapSet.new(& &1.id)
+
+      shelf_json =
+        Enum.map(shelves, fn shelf ->
+          placements =
+            shelf.placements
+            |> Enum.filter(&MapSet.member?(visible_ids, &1.id))
+            |> Enum.map(&ProtoJSON.placement_detail/1)
+
+          %{id: shelf.id, position: shelf.position, placements: placements}
+        end)
+
+      json(conn, %{
+        bookshelf: bookshelf_name,
+        count: MapSet.size(visible_ids),
+        shelves: shelf_json
+      })
     end
   end
 
@@ -79,4 +113,7 @@ defmodule StacksWeb.ProfileController do
   end
 
   defp not_found(conn), do: conn |> put_status(404) |> json(%{error: "not_found"})
+
+  defp public_shelf_cap,
+    do: Application.get_env(:core, :public_shelf_cap, @default_public_shelf_cap)
 end
