@@ -1,4 +1,4 @@
-module Page.Profile exposing (Model, Msg, OutMsg(..), init, update, view)
+module Page.Profile exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 {-| A user's public profile hub at `/u/:handle` (#214). Fetches the
 visibility-filtered profile for the current viewer and renders the reader's

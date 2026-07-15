@@ -329,6 +329,19 @@ defmodule StacksWeb.AuthControllerTest do
       assert returned_user["email"] == "me@example.com"
     end
 
+    test "exposes the user's handle so the SPA can link to /u/:handle", %{conn: conn} do
+      user = insert(:user, handle: "ada_me")
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned_user} = json_response(conn, 200)
+      assert returned_user["handle"] == "ada_me"
+    end
+
     test "returns 401 without token", %{conn: conn} do
       conn = get(conn, "/api/auth/me")
       assert json_response(conn, 401)

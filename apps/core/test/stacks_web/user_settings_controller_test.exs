@@ -125,6 +125,52 @@ defmodule StacksWeb.UserSettingsControllerTest do
       assert %{"errors" => %{"website_url" => [_]}} = json_response(conn, 422)
     end
 
+    test "sets a new handle and echoes the normalised (lowercased) value", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{handle: "AdaLovelace"})
+
+      assert %{"handle" => "adalovelace"} = json_response(conn, 200)
+    end
+
+    test "returns a 422 handle field error for a reserved handle", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{handle: "settings"})
+
+      assert %{"errors" => %{"handle" => [_ | _]}} = json_response(conn, 422)
+    end
+
+    test "returns a 422 handle field error for an already-taken handle (case-insensitive)",
+         %{conn: conn} do
+      insert(:user, handle: "already_taken")
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{handle: "ALREADY_TAKEN"})
+
+      assert %{"errors" => %{"handle" => [_ | _]}} = json_response(conn, 422)
+    end
+
+    test "returns a 422 handle field error for a malformed handle", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{handle: "ab"})
+
+      assert %{"errors" => %{"handle" => [_ | _]}} = json_response(conn, 422)
+    end
+
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = put(conn, "/api/settings/profile", %{display_name: "X"})
       assert json_response(conn, 401)

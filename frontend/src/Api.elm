@@ -19,6 +19,7 @@ module Api exposing
     , PollResponse
     , PollStatus(..)
     , PrivacySettings
+    , ProfileError(..)
     , ProfileShelfSummary
     , PublicProfile
     , QualityTrends
@@ -1013,12 +1014,26 @@ getCatalogue params toMsg =
         }
 
 
-{-| PUT /api/settings/profile — update display name, email, and website URL.
+{-| A profile-update failure.
+
+Like registration, a 422 carries per-field validation errors (`handle`,
+`email`, `display_name`) so the settings page can explain the actual problem —
+a taken/reserved/malformed handle surfaces its message under the field rather
+than as a generic "could not save". Every other failure is a
+`ProfileRequestFailed`.
+
+-}
+type ProfileError
+    = ProfileValidationFailed (List ( String, List String ))
+    | ProfileRequestFailed Http.Error
+
+
+{-| PUT /api/settings/profile — update display name, email, website URL, and handle.
 -}
 updateProfile :
-    { displayName : String, email : String, websiteUrl : String }
+    { displayName : String, email : String, websiteUrl : String, handle : String }
     -> String
-    -> (Result Http.Error () -> msg)
+    -> (Result ProfileError String -> msg)
     -> Cmd msg
 updateProfile body token toMsg =
     Http.request
@@ -1032,12 +1047,53 @@ updateProfile body token toMsg =
                     , email = body.email
                     , websiteUrl = body.websiteUrl
                     , currentPassword = ""
+                    , handle = body.handle
                     }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = expectProfile toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| Keep the structured `{"errors": ...}` payload a 422 carries so the caller
+can surface the real reason a profile save was rejected (mirrors
+`expectRegister`). On success it hands back the server-normalised handle (the
+200 body echoes the lowercased value) so the settings page can reflect it.
+-}
+expectProfile : (Result ProfileError String -> msg) -> Http.Expect msg
+expectProfile toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (ProfileRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (ProfileRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (ProfileRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    if metadata.statusCode == 422 then
+                        case Decode.decodeString registerErrorsDecoder bodyText of
+                            Ok errors ->
+                                Err (ProfileValidationFailed errors)
+
+                            Err _ ->
+                                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
+
+                    else
+                        Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ bodyText ->
+                    case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
+                        Ok handle ->
+                            Ok handle
+
+                        Err _ ->
+                            Ok ""
 
 
 {-| PUT /api/settings/location — update the user's location.
