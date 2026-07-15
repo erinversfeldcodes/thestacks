@@ -355,6 +355,67 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
+  # #226 item 6: the marketplace ceiling-punch — an ACTIVE listing on a
+  # `looking_for_home` placement makes that placement visible to a signed-in
+  # (platform) viewer even when the placement's own rung would hide it, but NOT
+  # to an anonymous viewer, and a bidirectional block still wins. Proven at the
+  # resolver unit (visibility_test.exs) — this asserts it survives the profile
+  # shelf ENDPOINT (`filter_visible_placements` batch path), not just the resolver.
+  describe "marketplace exception — looking_for_home shelf endpoint (#226)" do
+    setup %{conn: conn} do
+      # A discoverable owner with a visible looking_for_home shelf holding a single
+      # owner-rung placement (restrictive) that is ACTIVELY listed. The shelf and
+      # profile are public so the shelf itself is reachable; only the placement's
+      # rung is punched through by the active listing.
+      owner = insert(:user, handle: "lfh_owner", profile_visibility: "public")
+
+      bookshelf =
+        insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "public")
+
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book),
+        visibility: "owner",
+        listing_status: "active"
+      )
+
+      count_for = fn c ->
+        c
+        |> get("/api/u/lfh_owner/bookshelves/looking_for_home")
+        |> json_response(200)
+        |> Map.get("count")
+      end
+
+      %{conn: conn, owner: owner, count_for: count_for}
+    end
+
+    test "a signed-in (platform) viewer sees the actively-listed owner-rung placement",
+         %{conn: conn, count_for: count_for} do
+      assert count_for.(auth_conn(conn, insert(:user))) == 1
+    end
+
+    test "an anonymous viewer does NOT get the marketplace punch", %{count_for: count_for} do
+      assert count_for.(build_conn()) == 0
+    end
+
+    test "a blocked viewer does not see it — block beats the marketplace exception (SEC-2)",
+         %{conn: conn, owner: owner} do
+      # A block hides the WHOLE profile at the ghost/block gate (404), which is
+      # strictly stronger than suppressing the single placement — the marketplace
+      # punch never even reaches the shelf resolver.
+      blocked = insert(:user)
+      {:ok, _} = Stacks.Social.block_user(owner.id, blocked.id)
+
+      conn
+      |> auth_conn(blocked)
+      |> get("/api/u/lfh_owner/bookshelves/looking_for_home")
+      |> json_response(404)
+    end
+  end
+
   # #221: the public browse must be BOUNDED and must resolve the shared gates
   # (block status + viewer age-verification) ONCE per request, not per placement.
   describe "public browse bounding + O(1) shared-gate queries (#221)" do

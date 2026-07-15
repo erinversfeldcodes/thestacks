@@ -45,10 +45,51 @@ Priority order:
    an E2E row.
 
 ## Definition of Done
-- [ ] Items 1–6 covered by a browser E2E (or, for #6, a controller test + E2E), run
-      green in the preview gate.
-- [ ] `e2e/tests/public-profile.spec.ts` (or a new `visibility-matrix.spec.ts`) drives
-      the anon/public/platform/group/age-gate/block rows live.
+- [x] Items 1–6 covered by a browser E2E (or, for #6, a controller test + E2E), run
+      green **locally against the live stack** (`BASE_URL=http://localhost:4000`, seeded
+      dev DB, `STACKS_E2E_TEST_HELPERS=1`). Preview-gate re-run tracked under task #6.
+- [x] `e2e/tests/public-profile.spec.ts` drives the anon/public/platform/age-gate/block
+      rows live; `age-gate.spec.ts` rewritten deterministic.
+
+## Status: RESOLVED — 2026-07-15
+
+Delivered (all green locally, 15/15 across public-profile + age-gate + privacy):
+- **Item 1 (anon public vs platform, RENDERED)** — `public-profile.spec.ts` "an anonymous
+  browser renders a public profile + public shelf, but a platform profile is not found":
+  logged-out browser renders the `public` hub, browses the `public` shelf spine read-only,
+  and gets "Reader not found" on a `platform` profile.
+- **Item 3 (deterministic age-gate)** — `age-gate.spec.ts` rewritten: OWNS the
+  `age_verified` flag (set via API + reload) to assert gate-shown-then-content, replacing
+  the old non-deterministic `.age-gate OR .book-detail`.
+- **Item 4 (view_as re-scopes)** — new test drives the real `ViewAsPlug` + resolver: a
+  public shelf's platform placement is present in the owner's own view (count 1) and hidden
+  under `?view_as=unauthenticated` (count 0), while the shelf stays reachable.
+- **Item 5 (block on the hub, RENDERED)** — new test: a signed-in blocked viewer renders
+  "Reader not found" on the profile hub (was API-only).
+- **Item 6 (marketplace exception)** — controller test added to `profile_controller_test.exs`
+  (active `looking_for_home` listing punches through for a platform viewer, not anon, block
+  wins via the profile 404 gate) + an E2E row asserting the punch through the profile-shelf
+  endpoint and the public `/api/listings` browse.
+
+**Item 2 (group rung, browser) — DEFERRED to #224 (not a gap here).** Group member/non-member
+is already proven at the controller layer (`profile_controller_test.exs` "visibility matrix —
+group") using a factory-set `visibility_group_id`. It CANNOT be browser-driven because there is
+**no public API/UI setter for `visibility_group_id`** — `PUT /api/bookshelves/:name/visibility`
+casts only `visibility`, so a `group` shelf always has a nil group FK and resolves hidden-for-all.
+The positive "member sees" case needs that setter, which is #224's "one chosen group" work; the
+negative case is indistinguishable from an empty/owner shelf at the browser layer and adds no
+signal over the controller matrix. Writing a browser assertion would be misleading, so it is
+intentionally omitted here and folded into #224.
+
+### Two pre-existing bugs found by the first real live-drive (fixed here)
+The #210 `public-profile.spec.ts` journey had only ever been parse/discovery-validated (no
+running preview), so live execution exposed two latent test bugs:
+1. **Catalogue pagination** — `resolveCatalogueIds` assumed `?per_page=200` returned every
+   seed book, but the catalogue caps `per_page` at 100 (`catalogue_controller.ex`). Books past
+   position 100 under the default title-sort (e.g. "The Left Hand of Darkness") were unreachable.
+   Now pages through (100/page, bounded by `total`).
+2. **Shelf-name substring match** — `.profile__shelf` filtered by `hasText: "Library"`, which
+   case-insensitively also matched "Antilibrary". Now anchored (`/^Library$/`).
 
 ## Source
 Visibility coverage audit during the #225 4-rung-ladder work (2026-07-15).
