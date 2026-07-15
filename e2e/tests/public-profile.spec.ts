@@ -7,7 +7,9 @@ import {
   fetchConfirmationToken,
   signInViaForm,
   ensureBookOnLibrary,
+  apiCallFromPage,
 } from "./helpers";
+import type { Page } from "@playwright/test";
 
 /**
  * Browser E2E for the public-profile epic (#210) — the reader-facing half of the
@@ -131,11 +133,11 @@ test.describe("Public profiles — view, browse & discover (live browser journey
 
     // The platform "library" is browsable; the owner-only "wishlist" is not.
     const shelfLinks = page.locator(".profile__shelf");
-    await expect(shelfLinks.filter({ hasText: "Library" })).toHaveCount(1);
+    await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
     await expect(shelfLinks.filter({ hasText: "Wish List" })).toHaveCount(0);
 
     // ── US-10.5.3 — browse the shelf read-only ────────────────────────────
-    await shelfLinks.filter({ hasText: "Library" }).getByRole("link").click();
+    await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
     await expect(page).toHaveURL(new RegExp(`/u/${ownerHandle}/library$`));
     await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
     // At least one visible spine renders…
@@ -276,6 +278,211 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     const anon = await request.get(`/api/u/${handle}`);
     expect(anon.status()).toBe(200);
   });
+
+  // ── #226 item 1 — anon RENDERED: public vs platform (Members) ───────────────
+  // The core #225 promise, rendered: a logged-out browser SEES a `public` profile
+  // + browses its `public` shelf spine, but a `platform` (Members) profile reads
+  // as "Reader not found". Previously only wire-level (status codes) — this proves
+  // the shipped Elm actually renders the anon projection.
+  test("an anonymous browser renders a public profile + public shelf, but a platform profile is not found", async ({
+    browser,
+    request,
+  }) => {
+    // Public owner (B) — discoverable, with a PUBLIC library holding one public,
+    // non-age-gated spine so an anon viewer has something to render.
+    const publicName = `E2E Public ${Math.floor(Math.random() * 1_000_000)}`;
+    const pub = await registerAndConfirm(request, "e2e-anon-public", publicName);
+    test.skip(
+      pub.token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    const pubAuth = await loginViaApi(request, pub.email, E2E_PASSWORD);
+    await setProfileVisibility(request, pubAuth, "public");
+    const pubHandle = await claimHandle(request, pubAuth, "e2e_public");
+    const [visibleBookId] = await resolveCatalogueIds(request, pubAuth, [VISIBLE_ISBN]);
+    const pubPlacementId = await placeBook(request, pubAuth, "library", visibleBookId);
+    await setBookshelfVisibility(request, pubAuth, "library", "public");
+    await setPlacementVisibility(request, pubAuth, pubPlacementId, "public");
+
+    // Platform owner (C) — signed-in-only; an anon viewer must NOT resolve it.
+    const plat = await registerAndConfirm(request, "e2e-anon-platform");
+    const platAuth = await loginViaApi(request, plat.email, E2E_PASSWORD);
+    await setProfileVisibility(request, platAuth, "platform");
+    const platHandle = await claimHandle(request, platAuth, "e2e_platform");
+
+    // A pristine ANONYMOUS browser context (no stored auth).
+    const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const page = await anonCtx.newPage();
+    try {
+      // Public profile renders identity + the public shelf link…
+      await page.goto(`/u/${pubHandle}`);
+      await expect(page.locator(".profile__name")).toHaveText(publicName, { timeout: 10000 });
+      const shelfLinks = page.locator(".profile__shelf");
+      await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
+
+      // …and the public shelf browses read-only with a visible spine, no controls.
+      await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
+      await expect(page).toHaveURL(new RegExp(`/u/${pubHandle}/library$`));
+      await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId("book-spine").first()).toBeVisible();
+      await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
+
+      // The platform (Members) profile is "Reader not found" to a logged-out viewer.
+      await page.goto(`/u/${platHandle}`);
+      await expect(page.locator(".profile__name")).toHaveText("Reader not found", {
+        timeout: 10000,
+      });
+    } finally {
+      await anonCtx.close();
+    }
+  });
+
+  // ── #226 item 5 — block on the profile HUB, RENDERED ────────────────────────
+  // The existing block test asserts the wire 404; this asserts the blocked viewer
+  // actually RENDERS "Reader not found" on the hub (browser), not just a status.
+  test("a signed-in blocked viewer renders 'Reader not found' on the profile hub", async ({
+    page,
+    request,
+  }) => {
+    const owner = await registerAndConfirm(request, "e2e-blockhub-owner");
+    test.skip(
+      owner.token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    await setProfileVisibility(request, ownerAuth, "public");
+    const ownerHandle = await claimHandle(request, ownerAuth, "e2e_blockhub");
+    const ownerId = await meId(request, ownerAuth);
+
+    // Viewer blocks the owner, then drives the browser to the owner's hub.
+    const viewer = await registerAndConfirm(request, "e2e-blockhub-viewer");
+    await signInViaForm(page, viewer.email, E2E_PASSWORD);
+    await ensureBookOnLibrary(page);
+    await expectOk(
+      request.post(`/api/users/${ownerId}/block`, {
+        headers: { Authorization: `Bearer ${await pageToken(page)}` },
+      }),
+      "block owner"
+    );
+
+    await page.goto(`/u/${ownerHandle}`);
+    await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
+    await expect(page.locator(".profile__name")).toHaveText("Reader not found", {
+      timeout: 10000,
+    });
+  });
+
+  // ── #226 item 4 — view_as actually RE-SCOPES the owner's own shelf ──────────
+  // privacy.spec.ts only proves the banner renders. This drives the real
+  // ViewAsPlug + resolver on the live stack: the owner's platform placement is
+  // present in their own view, but hidden under `?view_as=unauthenticated`.
+  test("view_as=unauthenticated re-scopes the owner's own shelf (platform placement hidden)", async ({
+    page,
+    request,
+  }) => {
+    const owner = await registerAndConfirm(request, "e2e-viewas-owner");
+    test.skip(
+      owner.token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    await signInViaForm(page, owner.email, E2E_PASSWORD);
+    const ownerAuth = await pageToken(page);
+
+    // A PUBLIC library (reachable by anon) holding a single PLATFORM placement
+    // (signed-in-only). Profile is public so the public shelf is within the
+    // ceiling. This isolates placement-level re-scoping: the shelf stays visible
+    // to anon (200) while the platform spine is what disappears — not the shelf.
+    await setProfileVisibility(request, ownerAuth, "public");
+    const [visibleBookId] = await resolveCatalogueIds(request, ownerAuth, [VISIBLE_ISBN]);
+    const placementId = await placeBook(request, ownerAuth, "library", visibleBookId);
+    await setBookshelfVisibility(request, ownerAuth, "library", "public");
+    await setPlacementVisibility(request, ownerAuth, placementId, "platform");
+
+    // Drive the fetch FROM the authenticated browser so it runs through the real
+    // ViewAsPlug (which requires :authenticated). The owner sees their own
+    // platform placement; the anonymous projection hides it while the (public)
+    // shelf itself stays reachable.
+    const own = await apiCallFromPage(page, "GET", "/api/bookshelves/library");
+    expect(own.status).toBe(200);
+    expect((own.data as { count: number }).count, "owner sees own platform placement").toBe(1);
+
+    const previewed = await apiCallFromPage(
+      page,
+      "GET",
+      "/api/bookshelves/library?view_as=unauthenticated"
+    );
+    expect(previewed.status).toBe(200);
+    expect(
+      (previewed.data as { count: number }).count,
+      "the anonymous projection hides the platform placement"
+    ).toBe(0);
+  });
+
+  // ── #226 item 6 — marketplace ceiling-punch, live E2E ───────────────────────
+  // An ACTIVE looking_for_home listing makes an owner-rung placement visible to a
+  // signed-in viewer (punch), surfaces in the public listings browse, but stays
+  // hidden from an anonymous profile-shelf reader. Complements the resolver unit
+  // (visibility_test.exs) and the new controller test (profile_controller_test).
+  test("an active looking_for_home listing punches through for a signed-in viewer, not for anon", async ({
+    request,
+  }) => {
+    const owner = await registerAndConfirm(request, "e2e-mkt-owner");
+    test.skip(
+      owner.token === null,
+      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    await setProfileVisibility(request, ownerAuth, "public");
+    const ownerHandle = await claimHandle(request, ownerAuth, "e2e_mkt");
+
+    // An owner-rung placement on a PUBLIC looking_for_home shelf (the shelf is
+    // reachable; only the placement's rung is restrictive).
+    const [bookId] = await resolveCatalogueIds(request, ownerAuth, [VISIBLE_ISBN]);
+    const placementId = await placeBook(request, ownerAuth, "looking_for_home", bookId);
+    await setBookshelfVisibility(request, ownerAuth, "looking_for_home", "public");
+    await setPlacementVisibility(request, ownerAuth, placementId, "owner");
+
+    const shelfPath = `/api/u/${ownerHandle}/bookshelves/looking_for_home`;
+
+    // Before listing: owner-rung placement is hidden from a signed-in viewer.
+    const viewer = await registerAndConfirm(request, "e2e-mkt-viewer");
+    const viewerAuth = await loginViaApi(request, viewer.email, E2E_PASSWORD);
+    const beforeAuthed = { Authorization: `Bearer ${viewerAuth}` };
+    const before = await expectOk(request.get(shelfPath, { headers: beforeAuthed }), "pre-listing");
+    expect((await before.json()).count, "owner-rung placement hidden before listing").toBe(0);
+
+    // Create + activate a marketplace listing on that placement's book.
+    const created = await expectOk(
+      request.post("/api/listings", {
+        headers: { Authorization: `Bearer ${ownerAuth}` },
+        data: { book_id: bookId, pricing_mode: "fixed", price_cents: 12_000, condition: "good" },
+      }),
+      "create listing"
+    );
+    const listingId = (await created.json()).listing.id as string;
+    await expectOk(
+      request.put(`/api/listings/${listingId}/activate`, {
+        headers: { Authorization: `Bearer ${ownerAuth}` },
+      }),
+      "activate listing"
+    );
+
+    // Punch-through: the signed-in viewer now sees the placement…
+    const afterAuthed = await expectOk(
+      request.get(shelfPath, { headers: beforeAuthed }),
+      "post-listing authed"
+    );
+    expect((await afterAuthed.json()).count, "active listing punches through for a platform viewer").toBe(1);
+
+    // …an anonymous profile-shelf reader still does NOT (punch is platform-only)…
+    const afterAnon = await expectOk(request.get(shelfPath), "post-listing anon");
+    expect((await afterAnon.json()).count, "no punch-through for an anonymous viewer").toBe(0);
+
+    // …and the active listing is discoverable in the public listings browse.
+    const listings = await expectOk(request.get("/api/listings"), "public listings browse");
+    const ids = ((await listings.json()).listings ?? []).map((l: { id: string }) => l.id);
+    expect(ids, "the active listing surfaces in the public browse").toContain(listingId);
+  });
 });
 
 /**
@@ -325,26 +532,48 @@ async function loginViaApi(
  * carries `primary_edition.isbn`, so pinning by ISBN keeps the fixtures
  * deterministic (rather than depending on catalogue ordering). Uses the owner
  * token so age-gated seed books are included in the listing.
+ *
+ * The catalogue caps `per_page` at 100 (catalogue_controller.ex) while the seed
+ * set is larger, so a single page misses books past position 100. We PAGE THROUGH
+ * (100 at a time, bounded by the reported `total`) until every requested ISBN is
+ * resolved — never assuming a book lands on page 1.
  */
 async function resolveCatalogueIds(
   request: APIRequestContext,
   authToken: string,
   isbns: string[]
 ): Promise<string[]> {
-  const cat = await expectOk(
-    request.get("/api/catalogue?per_page=200", {
-      headers: { Authorization: `Bearer ${authToken}` },
-    }),
-    "catalogue"
-  );
-  const books = ((await cat.json()).books ?? []) as Array<{
-    id: string;
-    primary_edition?: { isbn?: string };
-  }>;
+  type CatBook = { id: string; primary_edition?: { isbn?: string } };
+  const byIsbn = new Map<string, string>();
+  const wanted = new Set(isbns);
+
+  let page = 1;
+  let total = Infinity;
+  let seen = 0;
+  // Bound the loop defensively; 100/page over the seed set is a handful of pages.
+  while (seen < total && wanted.size > byIsbn.size && page <= 50) {
+    const resp = await expectOk(
+      request.get(`/api/catalogue?per_page=100&page=${page}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      }),
+      `catalogue page ${page}`
+    );
+    const body = (await resp.json()) as { books?: CatBook[]; total?: number };
+    const books = body.books ?? [];
+    total = body.total ?? books.length;
+    seen += books.length;
+    for (const b of books) {
+      const isbn = b.primary_edition?.isbn;
+      if (isbn && wanted.has(isbn)) byIsbn.set(isbn, b.id);
+    }
+    if (books.length === 0) break;
+    page += 1;
+  }
+
   return isbns.map((isbn) => {
-    const match = books.find((b) => b.primary_edition?.isbn === isbn);
-    expect(match, `catalogue must contain a book with ISBN ${isbn}`).toBeDefined();
-    return (match as { id: string }).id;
+    const id = byIsbn.get(isbn);
+    expect(id, `catalogue must contain a book with ISBN ${isbn}`).toBeDefined();
+    return id as string;
   });
 }
 
@@ -399,6 +628,57 @@ async function setBookshelfVisibility(
     }),
     `set ${bookshelfName} → ${visibility}`
   );
+}
+
+/** Set a user's profile visibility (owner | group | platform | public) via the API. */
+async function setProfileVisibility(
+  request: APIRequestContext,
+  authToken: string,
+  visibility: string
+): Promise<void> {
+  await expectOk(
+    request.put("/api/settings/profile_visibility", {
+      headers: { Authorization: `Bearer ${authToken}` },
+      data: { profile_visibility: visibility },
+    }),
+    `set profile → ${visibility}`
+  );
+}
+
+/**
+ * Claim a random handle with the given prefix and return the normalised
+ * (lowercased) value the server echoes — exactly what /u/:handle resolves.
+ */
+async function claimHandle(
+  request: APIRequestContext,
+  authToken: string,
+  prefix: string
+): Promise<string> {
+  const handle = `${prefix}_${Math.floor(Math.random() * 1_000_000)}`;
+  const resp = await expectOk(
+    request.put("/api/settings/profile", {
+      headers: { Authorization: `Bearer ${authToken}` },
+      data: { handle },
+    }),
+    "set handle"
+  );
+  return ((await resp.json()).handle as string) ?? handle;
+}
+
+/** Resolve the authenticated user's id via /api/auth/me. */
+async function meId(request: APIRequestContext, authToken: string): Promise<string> {
+  const resp = await expectOk(
+    request.get("/api/auth/me", { headers: { Authorization: `Bearer ${authToken}` } }),
+    "/me"
+  );
+  return (await resp.json()).user.id as string;
+}
+
+/** Read the bearer token the SPA stored in localStorage for the signed-in session. */
+async function pageToken(page: Page): Promise<string> {
+  return (
+    await page.evaluate(() => JSON.parse(localStorage.getItem("stacks-auth") || "{}"))
+  ).token as string;
 }
 
 /** Await a request, assert it succeeded, and return the response. */
