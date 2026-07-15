@@ -290,13 +290,20 @@ defmodule Stacks.Accounts do
     if trimmed == "" do
       []
     else
-      pattern = "%#{escape_like(trimmed)}%"
+      # Compare against `lower(display_name)` (not raw `display_name`) so the
+      # GIN trigram index on `lower(display_name)` (migration
+      # 20260715120000_add_display_name_trgm_index) is usable — a leading-wildcard
+      # ILIKE otherwise forces a sequential scan (Issue #222). Lowercasing both
+      # sides is result-equivalent to the previous `ILIKE display_name`: ILIKE is
+      # already case-insensitive, so `lower(display_name) ILIKE lower(pattern)`
+      # matches exactly the same rows.
+      pattern = "%#{escape_like(String.downcase(trimmed))}%"
 
       query =
         from(u in User,
           as: :candidate,
           where: u.profile_visibility == "platform",
-          where: ilike(u.display_name, ^pattern),
+          where: ilike(fragment("lower(?)", u.display_name), ^pattern),
           order_by: [asc: u.display_name],
           limit: ^@search_limit
         )
