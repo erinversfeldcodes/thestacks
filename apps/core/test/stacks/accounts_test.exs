@@ -9,6 +9,7 @@ defmodule Stacks.AccountsTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Events.EventLog
+  alias Stacks.Social
 
   describe "register/1" do
     test "creates a user with hashed password" do
@@ -150,6 +151,91 @@ defmodule Stacks.AccountsTest do
       user = insert(:user)
       assert {:error, cs} = Accounts.update_profile(user, %{"handle" => "TAKEN_ONE"})
       assert "has already been taken" in errors_on(cs).handle
+    end
+  end
+
+  # search_users/2 — people search for the discovery surface (US-10.5.4, #217).
+  # The discoverability privacy rule (platform-only + bidirectional
+  # block-exclusion) is enforced IN THE QUERY, never by serializer redaction.
+  describe "search_users/2" do
+    test "returns a discoverable (platform) user matching the term" do
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+      _other = insert(:user, display_name: "Grace Hopper", profile_visibility: "platform")
+
+      results = Accounts.search_users("Ada", nil)
+
+      assert Enum.map(results, & &1.id) == [match.id]
+    end
+
+    test "ILIKE-matches case-insensitively and on substrings" do
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+
+      assert Accounts.search_users("ada", nil) |> Enum.map(& &1.id) == [match.id]
+      assert Accounts.search_users("LOVELACE", nil) |> Enum.map(& &1.id) == [match.id]
+      assert Accounts.search_users("da Love", nil) |> Enum.map(& &1.id) == [match.id]
+    end
+
+    test "excludes a ghost (profile_visibility = owner) from the result set" do
+      _ghost = insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
+
+      assert Accounts.search_users("Ada", nil) == []
+    end
+
+    test "excludes a ghost even when no viewer is signed in" do
+      _ghost = insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
+      platform = insert(:user, display_name: "Ada Platform", profile_visibility: "platform")
+
+      results = Accounts.search_users("Ada", nil)
+
+      assert Enum.map(results, & &1.id) == [platform.id]
+    end
+
+    test "excludes a user the viewer has blocked" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocked = insert(:user, display_name: "Ada Blocked", profile_visibility: "platform")
+      {:ok, _} = Social.block_user(viewer.id, blocked.id)
+
+      assert Accounts.search_users("Ada", viewer.id) == []
+    end
+
+    test "excludes a user who has blocked the viewer (other direction)" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocker = insert(:user, display_name: "Ada Blocker", profile_visibility: "platform")
+      {:ok, _} = Social.block_user(blocker.id, viewer.id)
+
+      assert Accounts.search_users("Ada", viewer.id) == []
+    end
+
+    test "still returns a blocked user's match to an unrelated viewer" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocker = insert(:user, profile_visibility: "platform")
+      candidate = insert(:user, display_name: "Ada Seen", profile_visibility: "platform")
+      # candidate is blocked w.r.t. `blocker`, but `viewer` is unrelated.
+      {:ok, _} = Social.block_user(blocker.id, candidate.id)
+
+      results = Accounts.search_users("Ada", viewer.id)
+
+      assert Enum.map(results, & &1.id) == [candidate.id]
+    end
+
+    test "returns [] when nothing matches the term" do
+      insert(:user, display_name: "Grace Hopper", profile_visibility: "platform")
+
+      assert Accounts.search_users("Zzz", nil) == []
+    end
+
+    test "returns [] for a blank or whitespace-only term" do
+      insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+
+      assert Accounts.search_users("", nil) == []
+      assert Accounts.search_users("   ", nil) == []
+    end
+
+    test "treats ILIKE wildcards in the term literally" do
+      insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+
+      # "%" must not act as a wildcard that matches everything.
+      assert Accounts.search_users("%", nil) == []
     end
   end
 

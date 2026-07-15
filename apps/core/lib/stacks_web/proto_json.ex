@@ -377,11 +377,16 @@ defmodule StacksWeb.ProtoJSON do
       :updated_at
     ])
     |> Map.put(:author_display_name, author_display_name(post))
+    |> Map.put(:author_handle, author_handle(post))
   end
 
   @spec author_display_name(map()) :: String.t() | nil
   defp author_display_name(%{user: %{display_name: name}}), do: name
   defp author_display_name(_post), do: nil
+
+  @spec author_handle(map()) :: String.t() | nil
+  defp author_handle(%{user: %{handle: handle}}), do: handle
+  defp author_handle(_post), do: nil
 
   @doc """
   Serializes a blog post-book association.
@@ -582,6 +587,26 @@ defmodule StacksWeb.ProtoJSON do
       city: user.city,
       country_code: user.country_code,
       bookshelves: Enum.map(shelves, &%{name: &1.name})
+    }
+  end
+
+  @doc """
+  Slim, shelf-less variant of `public_profile/2` for people-search result cards
+  (#217). Same REDACTED contract — only handle, display_name, and location; NEVER
+  email, consent, role, or any account/PII field. No bookshelves (search results
+  don't render shelf summaries).
+
+  Exclusion of ghost/blocked users is enforced upstream in
+  `Accounts.search_users/2` (SQL), never here — this serializer only shapes the
+  already-permitted rows.
+  """
+  @spec public_profile_summary(map()) :: map()
+  def public_profile_summary(user) do
+    %{
+      handle: user.handle,
+      display_name: user.display_name,
+      city: user.city,
+      country_code: user.country_code
     }
   end
 

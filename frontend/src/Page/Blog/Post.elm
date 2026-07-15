@@ -345,6 +345,7 @@ viewPost post isOwner =
     div [ class "blog-post" ]
         [ div [ class "blog-post__header" ]
             [ h1 [ class "blog-post__title" ] [ text post.title ]
+            , viewAuthorByline post
             , p [ class "blog-post__date" ] [ text post.insertedAt ]
             , if isOwner then
                 a
@@ -365,6 +366,43 @@ viewPost post isOwner =
             , onDismiss = DismissAssociation
             }
         ]
+
+
+{-| Render the author's name as a link to their public profile (US-10.5.4).
+
+When the author handle is present the display name links to `/u/:handle`;
+following the link to a ghost/blocked author still resolves to the profile
+gate's "Reader not found" (defence in depth). When no handle is present (older
+payloads or an unloaded author association) the name renders as plain text, and
+when neither name nor handle is present the byline is omitted entirely.
+
+-}
+viewAuthorByline : BlogPost -> Html Msg
+viewAuthorByline post =
+    let
+        name =
+            if String.trim post.authorDisplayName == "" then
+                "the author"
+
+            else
+                post.authorDisplayName
+    in
+    if String.trim post.authorHandle /= "" then
+        p [ class "blog-post__byline" ]
+            [ text "by "
+            , a
+                [ href (Route.toPath (Route.Profile post.authorHandle))
+                , class "blog-post__author-link"
+                ]
+                [ text name ]
+            ]
+
+    else if String.trim post.authorDisplayName /= "" then
+        p [ class "blog-post__byline" ]
+            [ text "by ", span [ class "blog-post__author" ] [ text name ] ]
+
+    else
+        text ""
 
 
 viewComments : Model -> Html Msg
