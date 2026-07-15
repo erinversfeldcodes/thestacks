@@ -318,4 +318,138 @@ defmodule StacksWeb.ProfileControllerTest do
       assert count == 1
     end
   end
+
+  # #221: the public browse must be BOUNDED and must resolve the shared gates
+  # (block status + viewer age-verification) ONCE per request, not per placement.
+  describe "public browse bounding + O(1) shared-gate queries (#221)" do
+    test "the public response is hard-capped while the owner's own view is not", %{conn: conn} do
+      # Shrink the public cap so the bound is exercised without inserting hundreds
+      # of rows. Within this module tests run sequentially, so the global override
+      # cannot race other tests; restore it afterwards regardless.
+      prev = Application.get_env(:core, :public_shelf_cap)
+      Application.put_env(:core, :public_shelf_cap, 2)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:core, :public_shelf_cap)
+          value -> Application.put_env(:core, :public_shelf_cap, value)
+        end
+      end)
+
+      owner = insert(:user, handle: "bounded_owner", profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      for _ <- 1..5 do
+        insert(:placement,
+          bookshelf: bookshelf,
+          shelf: shelf,
+          book: insert(:book),
+          visibility: "platform"
+        )
+      end
+
+      viewer = insert(:user)
+
+      body =
+        conn
+        |> auth_conn(viewer)
+        |> get("/api/u/bounded_owner/bookshelves/library")
+        |> json_response(200)
+
+      returned = body["shelves"] |> Enum.flat_map(& &1["placements"]) |> length()
+      # Five visible placements exist, but the public path returns at most the cap.
+      assert body["count"] == 2
+      assert returned == 2
+
+      # The owner's OWN full-shelf view (BookshelfController) is uncapped.
+      owner_body =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/bookshelves/library")
+        |> json_response(200)
+
+      assert owner_body["count"] == 5
+    end
+
+    test "per-request query count is independent of placement count", %{conn: conn} do
+      viewer = insert(:user)
+
+      seed_shelf = fn handle, n ->
+        owner = insert(:user, handle: handle, profile_visibility: "platform")
+        bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+        shelf = insert(:shelf, bookshelf: bookshelf)
+
+        for _ <- 1..n do
+          insert(:placement,
+            bookshelf: bookshelf,
+            shelf: shelf,
+            book: insert(:book),
+            visibility: "platform"
+          )
+        end
+
+        handle
+      end
+
+      small = seed_shelf.("qcount_small", 1)
+      large = seed_shelf.("qcount_large", 20)
+
+      browse = fn handle ->
+        with_query_count(fn ->
+          conn
+          |> auth_conn(viewer)
+          |> get("/api/u/#{handle}/bookshelves/library")
+          |> json_response(200)
+        end)
+      end
+
+      {small_body, small_q} = browse.(small)
+      {large_body, large_q} = browse.(large)
+
+      assert small_body["count"] == 1
+      assert large_body["count"] == 20
+      # The (viewer, owner) block check and the viewer's age-verification are
+      # resolved once per request — not per row — and Ecto batches the placement
+      # preloads, so the query count does not grow with placement count. Before
+      # #221 the 20-placement shelf would have fired ~19 extra block/user queries.
+      assert large_q == small_q
+    end
+  end
+
+  # Counts Repo query telemetry events emitted IN THIS TEST PROCESS while `fun`
+  # runs. Phoenix.ConnTest drives the endpoint synchronously in the test process,
+  # so the request's queries emit here; the `self() == test_pid` guard keeps the
+  # count isolated from other async modules whose queries run in their processes.
+  defp with_query_count(fun) do
+    test_pid = self()
+    ref = make_ref()
+    handler_id = {:qcount, ref}
+
+    :telemetry.attach(
+      handler_id,
+      [:core, :repo, :query],
+      fn _event, _measurements, _meta, _config ->
+        if self() == test_pid, do: send(test_pid, {ref, :query})
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler_id)
+      end
+
+    {result, drain_query_count(ref, 0)}
+  end
+
+  defp drain_query_count(ref, acc) do
+    receive do
+      {^ref, :query} -> drain_query_count(ref, acc + 1)
+    after
+      0 -> acc
+    end
+  end
 end
