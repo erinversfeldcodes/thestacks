@@ -6,24 +6,32 @@
 
 **Single-user phase (self-hosted):** The user sets their age in preferences. The system trusts this self-declaration. **Multi-user phase:** Integration with a KYC provider for proper age verification. The process verifies the user is 18+ without storing identity documents -- only an `age_verified` boolean is retained.
 
-On first access to age-gated content, a verification prompt appears. Single-user: a simple "I confirm I am 18+" checkbox in settings. After verification, age-gated books display normally -- the frosted overlay and lock icon are removed.
+**Display model (owner decision, supersedes the original frosted-overlay spec — #229):** age-gated books are **hidden from all listing surfaces** (catalogue, search, bookshelf/profile shelf) for any viewer who is not age-verified — anonymous **or** authenticated-but-unverified. A **direct URL** to an age-gated book's detail returns a 403 (`age_verification_required`) rendered as a **block-and-explain** UI (the `.age-gate` block). There is no frosted overlay or lock icon on the spine. After verification, age-gated books appear in listings again and their detail pages render normally.
 
 ---
 
 ## 2. UI Interaction Flow
 
 ### Happy Path
-1. User encounters an age-gated book (frosted overlay, lock icon on the spine).
-2. User attempts to view the book detail -- receives a 403 with `"age_verification_required"`.
+1. An unverified user browses listings — age-gated books are **absent** from the catalogue, search results, and bookshelf/profile shelves (they are never rendered, so there is no visible gap to "unlock").
+2. The user reaches an age-gated book via a **direct URL** (e.g. a shared link) -- the book detail returns a 403 with `"age_verification_required"`, shown as the `.age-gate` block-and-explain UI.
 3. User navigates to Settings > Age Verification (`/settings/age-verification`).
 4. User checks the "I confirm I am 18+" checkbox and submits.
 5. `PUT /api/settings/age_verification` sets `age_verified: true` on the user record.
-6. User returns to the book -- age-gated content now displays normally.
+6. Age-gated books now **appear** in the catalogue/search/shelf listings, and the direct-URL detail renders its content normally.
 
 ### Sad Paths
 - **Not authenticated**: The `AgeGate` plug checks `Guardian.Plug.current_resource(conn)` -- returns `false` for nil user, resulting in a 403.
 - **Not yet verified**: User has `age_verified: false` or nil -- 403 response.
 - **Non-age-gated book**: `AgeGate.enforce/2` passes through unchanged for any `visibility_tier` other than `"age_gated"`.
+
+### Acceptance Criteria — listing hiding (#229)
+The hide-from-listings + block-on-detail model must hold on **all four surfaces**:
+- **Catalogue** (`GET /api/catalogue`): omits age-gated books for an unverified viewer (anonymous or authenticated-but-unverified), with `total`/pagination counted off the filtered set at the SQL layer; shows them to a verified viewer. (`Books.list_catalogue/1` → `maybe_exclude_age_gated/2`.)
+- **Search** (`GET /api/search`): age-gated books absent from results for an unverified viewer, present for a verified one (via `Stacks.Visibility`).
+- **Bookshelf / profile shelf** (`GET /api/u/:handle/bookshelves/:name`): age-gated placements never reach the payload for an unverified viewer (no gap), present for a verified one (via `Stacks.Visibility`).
+- **Direct detail URL** (`GET /api/books/:id`): still 403s (`age_verification_required`) with the `.age-gate` block-and-explain UI for an unverified viewer; renders content for a verified one.
+- **Verified reveal**: after `PUT /api/settings/age_verification {age_verified: true}`, the same books appear across all three listing surfaces and the detail renders normally.
 
 ### Elm State Machine
 - **Page module**: `Page.Settings.AgeVerification`

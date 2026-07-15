@@ -83,6 +83,12 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
+  # #229 REGRESSION LOCK — search already hides age-gated books from an
+  # authenticated-but-unverified viewer via `Stacks.Visibility` (the setup conn's
+  # `insert(:user)` defaults `age_verified: false`, i.e. authed-unverified). These
+  # two tests lock that behaviour so a future Visibility change can't silently
+  # re-expose age-gated books on the search surface (see the catalogue gap #229
+  # closed for the SQL-level listing path).
   describe "GET /api/search — visibility filtering" do
     test "excludes age_gated books from results for non-age-verified user", %{conn: conn} do
       insert_book_with_edition(title: "Thornfield Chronicles", isbn: "9781234567897")

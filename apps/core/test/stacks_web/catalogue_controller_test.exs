@@ -175,6 +175,30 @@ defmodule StacksWeb.CatalogueControllerTest do
       assert List.first(books)["title"] == "Age Gated Book"
     end
 
+    test "excludes age_gated books for an authenticated-but-unverified user, total accurate",
+         %{conn: conn} do
+      # #229: an authenticated user who is NOT age-verified must be treated like
+      # an anonymous viewer for age-gated listings — the books are omitted AND
+      # `total` reflects the exclusion (SQL-level filter, not a post-filter that
+      # would break pagination). Mirrors the anon total-correctness test above.
+      user = insert(:user, age_verified: false)
+      insert_book_with_edition(title: "Public A", visibility_tier: "public")
+      insert_book_with_edition(title: "Public B", visibility_tier: "public")
+      insert_book_with_edition(title: "Age Gated 1", visibility_tier: "age_gated")
+      insert_book_with_edition(title: "Age Gated 2", visibility_tier: "age_gated")
+
+      %{"books" => books, "total" => total} =
+        conn |> auth_conn(user) |> get("/api/catalogue") |> json_response(200)
+
+      assert total == 2
+      assert length(books) == 2
+      titles = Enum.map(books, & &1["title"])
+      assert "Public A" in titles
+      assert "Public B" in titles
+      refute "Age Gated 1" in titles
+      refute "Age Gated 2" in titles
+    end
+
     test "returns author data when present", %{conn: conn} do
       user = insert(:user)
       author = insert(:author, name: "Jane Austen")
