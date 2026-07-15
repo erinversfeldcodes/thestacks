@@ -75,6 +75,14 @@ suite =
                 \_ ->
                     fromPath "/catalogue"
                         |> Expect.equal Catalogue
+            , test "Metrics" <|
+                \_ ->
+                    fromPath "/metrics"
+                        |> Expect.equal Metrics
+            , test "About" <|
+                \_ ->
+                    fromPath "/about"
+                        |> Expect.equal About
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -129,5 +137,13 @@ suite =
                 \_ ->
                     Route.toPath Catalogue
                         |> Expect.equal "/catalogue"
+            , test "Metrics path" <|
+                \_ ->
+                    Route.toPath Metrics
+                        |> Expect.equal "/metrics"
+            , test "About path" <|
+                \_ ->
+                    Route.toPath About
+                        |> Expect.equal "/about"
             ]
         ]

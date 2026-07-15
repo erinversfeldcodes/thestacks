@@ -14,6 +14,7 @@ NavigationProgramTest, we test the pure surfaces directly:
 
 import Components.UserMenu as UserMenu
 import Expect
+import Html.Attributes as Attr
 import Json.Encode as Encode
 import Main
 import Navigation.Route exposing (Route(..))
@@ -70,6 +71,15 @@ suite =
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
                             , Query.has [ Selector.text "Marketplace" ]
+                            ]
+            , test "shows a single About entry linking to /about" <|
+                \() ->
+                    Main.viewNav Catalogue Nothing UserMenu.init
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "About" ]
+                            , Query.has
+                                [ Selector.attribute (Attr.href "/about") ]
                             ]
             , test "does not show authenticated-only bookshelves" <|
                 \() ->
