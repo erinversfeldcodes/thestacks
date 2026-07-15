@@ -1,0 +1,192 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["stacks", "moderation", "age-gate", "issue-228", "issue-230"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "The Stacks — Moderation Funnel & Age Gate",
+  "uid": "stacks-moderation-agegate",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Moderation funnel (US-4.1 §13)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Step 1 — Classification outcomes",
+      "description": "WHAT: rate of moderation step-1 image classifications, split by outcome (book / not_a_book / ambiguous / unknown). HOW: rate() over the counter stacks_moderation_classification_count_total, emitted once per upload when the vision service classifies the image. MEANS: the top of the moderation funnel — how many uploads look like books vs get rejected before ISBN resolution is even attempted. WATCH: a spike in not_a_book / ambiguous (and a drop in book) points to a vision-model regression, a prompt change, or an influx of junk uploads; a total drop to zero means uploads have stalled upstream.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_moderation_classification_count_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Step 2 — ISBN resolution outcomes",
+      "description": "WHAT: rate of ISBN-resolution attempts per candidate, split by outcome (resolved / isbn_not_found / low_confidence / invalid_book / store_failed / task_exit / other). HOW: rate() over stacks_moderation_isbn_resolution_count_total, emitted once per book candidate as it is resolved against Open Library / Google Books. MEANS: the hard gate of the funnel — no book enters the system without a verified ISBN, so this is the conversion step from 'looks like a book' to 'is a catalogued book'. WATCH: a climbing isbn_not_found / low_confidence rate signals an OCR/extract regression or an upstream data-source outage (Open Library / Google Books); rising store_failed / task_exit points to a DB or pipeline fault, not a data-quality one.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_moderation_isbn_resolution_count_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Step 3 — Visibility tiering (public vs age_gated)",
+      "description": "WHAT: rate of visibility-tier assignments made at moderation step 3, split by tier (public / age_gated). HOW: rate() over stacks_moderation_tiering_count_total, emitted once per resolved book when its BISAC subjects are mapped to a visibility tier. MEANS: how much of the incoming catalogue is being auto-classified as adult/age-gated content vs freely public — the feed into the age-gate enforcement below. WATCH: a sudden spike in age_gated may mean a BISAC-mapping change is over-flagging benign books (false positives that hide content); a drop to zero age_gated while volume is high may mean the adult-content classifier has silently stopped flagging (under-gating).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (tier) (rate(stacks_moderation_tiering_count_total[$__rate_interval]))",
+          "legendFormat": "{{tier}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Compound-title (' OR ') expansions",
+      "description": "WHAT: rate of compound-title expansions, where one OCR'd candidate title containing ' OR ' is split into multiple resolution candidates. HOW: rate() over stacks_moderation_compound_expansion_count_total, emitted once per split inside expand_compound_candidates/1. MEANS: how often the vision extract produces ambiguous multi-title strings that the pipeline fans out to resolve — a proxy for OCR ambiguity on the incoming images. WATCH: a sustained spike means the vision model is increasingly emitting run-together / ambiguous titles (worth checking the extract prompt or image quality); near-zero is the healthy baseline and needs no action.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(stacks_moderation_compound_expansion_count_total[$__rate_interval]))",
+          "legendFormat": "expansions/s"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Age gate (US-4.2 §13)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Age-gate enforcement (blocked vs passed)",
+      "description": "WHAT: rate of age-gate enforcement decisions on age-gated books, split by outcome (blocked = 403 for an unverified viewer / passed = an age-verified viewer). HOW: rate() over stacks_age_gate_enforce_count_total, emitted by StacksWeb.Plugs.AgeGate.enforce/2 for age-gated books ONLY (public books never emit). MEANS: how often the age wall is actually stopping vs admitting viewers — the enforcement side of the tiering step above. WATCH: an all-blocked / zero-passed pattern can mean age-verification is broken so nobody can pass (a UX/verification-flow bug); an all-passed / zero-blocked pattern on age-gated content can mean the gate is being bypassed and should be treated as a compliance incident.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_age_gate_enforce_count_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Age-verification requests (success vs invalid)",
+      "description": "WHAT: rate of age-verification update requests, split by outcome (success = 200, the user confirmed their age / invalid = 422, a malformed or missing parameter). HOW: rate() over stacks_age_verification_count_total, emitted by UserSettingsController.update_age_verification/2. MEANS: how many viewers are clearing the age wall and whether the verification form itself is healthy. WATCH: a spike in invalid (422) points to a broken client form or a bad payload contract — verification is failing for legitimate users, which will in turn starve the 'passed' series on the enforcement panel; a drop of success to zero means the verification path is dead.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_age_verification_count_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    }
+  ]
+}
