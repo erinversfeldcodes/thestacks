@@ -525,4 +525,45 @@ defmodule Stacks.VisibilityTest do
       assert length(result) == 1
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Audience proto ↔ Elixir vocabulary parity (#209 Phase 1 drift guard)
+  #
+  # The canonical vocabulary is DECLARED in proto/stacks/common/v1/visibility.proto
+  # (enum Audience). The Elixir runtime source (Visibility.audience_levels/0, which
+  # Shelving/Blog/Accounts all consume) must not drift from it. Parsing the .proto
+  # text keeps the proto the authority without depending on generated code.
+  # ---------------------------------------------------------------------------
+  describe "Audience proto ↔ Elixir vocabulary parity" do
+    @proto_path Path.join([
+                  __DIR__,
+                  "..",
+                  "..",
+                  "..",
+                  "..",
+                  "proto",
+                  "stacks",
+                  "common",
+                  "v1",
+                  "visibility.proto"
+                ])
+
+    defp settable_audience_values_from_proto do
+      @proto_path
+      |> File.read!()
+      |> then(&Regex.scan(~r/^\s*AUDIENCE_(\w+)\s*=\s*\d+;/m, &1))
+      |> Enum.map(fn [_, name] -> String.downcase(name) end)
+      |> Enum.reject(&(&1 == "unspecified"))
+    end
+
+    test "audience_levels/0 exactly matches the proto Audience enum's settable values" do
+      assert Enum.sort(Visibility.audience_levels()) ==
+               Enum.sort(settable_audience_values_from_proto())
+    end
+
+    test "public is RESERVED in the proto (not a settable value) — matches the Elixir ladder" do
+      refute "public" in settable_audience_values_from_proto()
+      refute "public" in Visibility.audience_levels()
+    end
+  end
 end

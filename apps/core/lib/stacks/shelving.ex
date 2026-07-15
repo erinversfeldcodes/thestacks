@@ -24,7 +24,11 @@ defmodule Stacks.Shelving do
 
   # ── Bookshelf changeset constants ──────────────────────────────────
   @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
-  @valid_visibilities ~w(owner group platform)
+  # Single-sourced from the canonical Audience ladder (#209). Evaluated at compile
+  # time to the same literal list, so it stays usable in the ceiling GUARD clauses
+  # below (`when visibility in @valid_visibilities`). A drift test asserts this list
+  # equals the `Audience` proto enum's settable values (proto/…/visibility.proto).
+  @valid_visibilities Stacks.Visibility.audience_levels()
 
   # ── Placement changeset constants ──────────────────────────────────
   @valid_reading_statuses ~w(to_read reading completed abandoned)
