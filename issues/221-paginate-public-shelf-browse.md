@@ -27,5 +27,26 @@ The public browse is O(1) shared-gate queries + a bounded page of placements.
 - [ ] Per-request query count is independent of placement count (bar the page).
 - [ ] Response is bounded; owner's own view is unaffected.
 
+## Delegation spec (agent)
+⚠️ This touches the **security-critical** resolver — visibility decisions must NOT change.
+Prove parity: `visibility_test.exs`, `visibility_property_test.exs`, and
+`profile_controller_test.exs` must stay green (run them).
+**Files:** `apps/core/lib/stacks/visibility.ex`, `apps/core/lib/stacks/shelving.ex`,
+`apps/core/lib/stacks_web/controllers/profile_controller.ex`.
+**Acceptance criteria:**
+1. In the public browse (`ProfileController.render_shelf`), the (viewer, owner) block check
+   and the viewer's `age_verified` are resolved **once per request**, not per placement.
+   Approach: a batch entrypoint on `Visibility` that takes a preloaded viewer + a list of
+   placements, OR resolve the shared gates in the controller and only run the per-placement
+   bits (placement ceiling + book age gate) in the loop. (The `bookshelf: :user` preload for
+   the profile ceiling is already done in #210 — build on it.)
+2. Add a page/limit (or a hard cap, e.g. 500) to the public shelf response. Do NOT add the
+   limit to the shared `active_placements_query` (it also backs the owner's own full-shelf
+   view) — cap only the public path.
+3. A test asserts the bound (e.g. a shelf with N+1 placements returns ≤ cap) and, if feasible,
+   asserts no per-row owner/viewer reload (telemetry or a query-count probe). Owner's own
+   `/library` view still returns all placements (existing bookshelf_controller test green).
+**Verify:** `just run mix test` for the three suites above + the new test; `just run just verify`.
+
 ## Source
 elixir-reviewer P2 (+ principal-engineer), #210 epic review. Cheap half done in #210.
