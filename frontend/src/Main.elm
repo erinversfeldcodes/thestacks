@@ -409,6 +409,12 @@ requiresAuth route =
         ProfileShelf _ _ ->
             False
 
+        Search ->
+            -- People-search is optional-auth (US-10.5.4): an anonymous visitor can
+            -- discover readers even though book search still needs a token. Keeping
+            -- /search open exercises the optional-auth backend anonymously.
+            False
+
         ConfirmEmail _ ->
             False
 

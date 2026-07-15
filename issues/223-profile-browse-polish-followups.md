@@ -57,5 +57,25 @@ non-auth route entry (item 4).
 **Verify:** `just run bash` → `npx elm-test` green; `e2e/tests/public-profile.spec.ts` parses
 (`npx playwright test public-profile --list`); `just run just verify`.
 
+## Progress note (agent)
+- Items 1, 2, 4 done. Item 1: age-gate live row added to `public-profile.spec.ts`
+  (Demons `9780140449242` on a platform `antilibrary`; anon + unverified viewer
+  `count == 0`, age-verified viewer `count == 1`; visible spine pinned to public
+  ISBN `9780061120084`). Item 2: `BookshelfReadOnlyTest` gained a look-only
+  spine-click assertion (`BookClicked` → `NoOut`) and an owner-attribution
+  render assertion; `SearchProgramTest` gained a readers-`Failure` error-banner
+  test and a 401 → `SessionExpired` test. Item 4: chose to OPEN `/search` — added
+  `Search -> False` to `requiresAuth` so the optional-auth people-search backend
+  is exercised anonymously, and gated the book-results `Loading` on token
+  presence so an anonymous visitor sees the hint (not a stuck spinner).
+- **Item 3 (BookshelfName type): DECLINED — balloons.** A faithful version
+  (one total label/theme/apiName function shared by the owner *and* profile-shelf
+  routes) means collapsing the five owner route constructors, which are
+  referenced across 10+ src/test files (Api, Main, BookDetail, Bookshelf,
+  Profile, Upload, TestHelpers, ProfileTest, UploadTest, nav/redirects);
+  ReadingPile/LookingForHome are also separate page modules, not Bookshelf
+  configs, so a unified type doesn't map cleanly onto the current route/page
+  structure. That exceeds the small/total bar and the issue-scoping limits.
+
 ## Source
 platform/elm/ux reviewers (P3), #210 epic review.
