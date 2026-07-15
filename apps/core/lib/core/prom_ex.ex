@@ -44,6 +44,14 @@ defmodule Core.PromEx do
 
   @impl true
   def dashboards do
-    []
+    # Dashboards-as-code (Issue #230). Registered with the `{:core, path}`
+    # form so PromEx uploads them to Grafana when an instance is configured
+    # (Issue #232). The JSON lives under `apps/core/priv/grafana/` and is
+    # kept in lock-step with the registered metrics by
+    # `Core.PromEx.DashboardDriftTest`. `datasource_id: "prometheus"` (see
+    # `dashboard_assigns/0`) matches the datasource uid the panels query.
+    [
+      {:core, "grafana/moderation_agegate.json"}
+    ]
   end
 end
