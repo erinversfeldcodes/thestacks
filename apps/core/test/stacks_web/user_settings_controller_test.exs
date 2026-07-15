@@ -4,9 +4,12 @@ defmodule StacksWeb.UserSettingsControllerTest do
   """
 
   use CoreWeb.ConnCase, async: true
+  use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Accounts.Guardian
 
   defp auth_conn(conn, user) do
@@ -64,6 +67,32 @@ defmodule StacksWeb.UserSettingsControllerTest do
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = put(conn, "/api/settings/age_verification", %{age_verified: true})
       assert json_response(conn, 401)
+    end
+
+    # Issue #118, punch #4 (US-4.2 §6 "confirm no side effects"): age verification
+    # is a single op.users UPDATE — it must emit NO domain event and enqueue NO
+    # Oban job. This is a negative-emission characterization test: the feature is
+    # already correct (update_age_verification/2 never calls Events.emit or
+    # Oban.insert), and this would fail the moment an event or job were added.
+    test "emits no domain event and enqueues no job", %{conn: conn} do
+      user = insert(:user, age_verified: false)
+
+      events_before = Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/age_verification", %{age_verified: true})
+
+      assert %{"age_verified" => true} = json_response(conn, 200)
+
+      # No new rows in the immutable event_log …
+      events_after = Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
+      assert events_after == events_before
+
+      # … and no background job of any worker was enqueued.
+      refute_enqueued(worker: Stacks.Workers.DbtRefreshHandler)
+      assert [] = all_enqueued()
     end
   end
 

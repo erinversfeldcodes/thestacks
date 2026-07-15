@@ -91,10 +91,15 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 - **Emission method**: `Events.emit/1`
 
 ### Event Handlers Triggered
+`book.created` subscribes exactly these three handlers, in this order
+(`Stacks.Events.Registry`, `registry.ex:19-23`):
 - **Handler**: `Stacks.Enrichment.Handlers.BookCreatedHandler` — enqueues price scraping
-- **Handler**: `Stacks.Enrichment.Handlers.AuthorDiscoveryHandler` — enqueues author source discovery
+- **Handler**: `Stacks.Enrichment.Handlers.AuthorDiscoveryHandler` — intentional no-op on `book.created` (author discovery is driven elsewhere)
 - **Handler**: `Stacks.Books.Handlers.CacheInvalidationHandler` — invalidates book detail cache
-- **Handler**: `Stacks.Workers.DbtRefreshHandler` — refreshes dbt models
+
+`Stacks.Workers.DbtRefreshHandler` is **not** subscribed to `book.created`; the
+dbt refresh for a newly-shelved book is triggered by the downstream
+`placement.created` event instead.
 
 ---
 

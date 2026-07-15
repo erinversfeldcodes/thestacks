@@ -484,3 +484,26 @@ test.describe("Settings — Age Verification", () => {
     expect(errorCount).toBe(0);
   });
 });
+
+/**
+ * Punch #7 (Issue #118, §2 "Age verification page auth guard") — the
+ * age-verification settings page requires authentication.
+ *
+ * SettingsAgeVerification is an auth-required route (Main.elm requiresAuth
+ * `_ -> True`); initPage returns the Login page when there is no session. This
+ * mirrors the /settings/privacy auth-guard test in privacy.spec.ts.
+ */
+test.describe("Settings — Age Verification auth guard", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("unauthenticated visit to /settings/age-verification renders the login page", async ({
+    page,
+  }) => {
+    await page.goto("/settings/age-verification");
+
+    // The login form's submit control proves the Login page was rendered.
+    await expect(page.getByTestId("login-submit")).toBeVisible({ timeout: 10000 });
+    // And the age-verification form must NOT be reachable while unauthenticated.
+    await expect(page.locator(".toggle")).toHaveCount(0);
+  });
+});
