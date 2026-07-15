@@ -132,6 +132,36 @@ if re.search(r'(^|\s)rename\s*[(\s]', src, re.MULTILINE):
 if re.search(r'\bmodify\b[\s\S]{0,200}?null:\s*false', src):
     ops.append("modify ..., null: false")
 
+# ── Raw execute("...SQL...") destructive ops (#219) ──────────────────────────
+# The DSL patterns above only catch the Ecto sugar. A migration author can
+# express the SAME destructive change as raw SQL inside `execute(...)`, which
+# previously slipped past this gate entirely (the #210/#219 blind spot: a
+# `NOT NULL` tighten written as raw `ALTER … SET NOT NULL` evaded the linter).
+# Extract the SQL text from every non-interpolated execute() block and scan it
+# for the raw equivalents of the destructive DSL ops. execute() strings are
+# parsed directly (not the whole source) so moduledoc / comment prose can never
+# trigger a false positive.
+def _extract_execute_sql(text):
+    blocks = []
+    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"""(.*?)"""', text, re.DOTALL)]
+    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"([^"]+)"', text)]
+    # Skip Elixir string interpolation — the SQL isn't statically knowable.
+    return [b for b in blocks if "#{" not in b]
+
+execute_sql = "\n".join(_extract_execute_sql(src))
+
+# `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL` — raw NOT NULL tighten.
+if re.search(r'\bSET\s+NOT\s+NULL\b', execute_sql, re.IGNORECASE):
+    ops.append("execute SET NOT NULL")
+
+# `ALTER TABLE ... DROP COLUMN ...` — raw column drop.
+if re.search(r'\bDROP\s+COLUMN\b', execute_sql, re.IGNORECASE):
+    ops.append("execute DROP COLUMN")
+
+# `ALTER TABLE ... RENAME COLUMN ...` / `RENAME ... TO ...` — raw rename.
+if re.search(r'\bRENAME\s+(?:COLUMN\b|[^\n;]*?\bTO\b)', execute_sql, re.IGNORECASE):
+    ops.append("execute RENAME")
+
 # Strip comments before re-checking `remove` to avoid false positives where
 # `# remove :col` appears in docs. We approximate by removing full-line
 # comments; inline trailing comments are rare in Ecto migrations.
