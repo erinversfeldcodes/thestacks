@@ -124,6 +124,14 @@ defmodule CoreWeb.Router do
     get "/listings/:id", ListingController, :show
     get "/blog/posts", BlogController, :index
     get "/blog/posts/:id", BlogController, :show
+  end
+
+  # Public profile + people-search reads (#210). Same optional-auth model as the
+  # scope above, but additionally rate-limited (:rate_limit_public): these are the
+  # highest-value unauthenticated enumeration surfaces — /search/users is a
+  # directory-scraper vector and /u/:handle a handle-existence oracle.
+  scope "/api", StacksWeb do
+    pipe_through [:api, :optional_auth, :rate_limit_public]
     get "/search/users", UserSearchController, :index
     get "/u/:handle", ProfileController, :show
     get "/u/:handle/bookshelves/:bookshelf_name", ProfileController, :shelf

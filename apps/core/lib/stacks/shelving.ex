@@ -803,7 +803,10 @@ defmodule Stacks.Shelving do
     from(p in Placement,
       where: is_nil(p.removed_at),
       order_by: [p.position, p.placed_at],
-      preload: [book: [:author, :editions]]
+      # Preload bookshelf + its owner so Visibility.resolve_visibility/2 reuses them
+      # (profile ceiling + bookshelf ceiling) instead of firing a query per placement
+      # — the public /u/:handle/bookshelves/:name browse resolves every row.
+      preload: [book: [:author, :editions], bookshelf: :user]
     )
   end
 

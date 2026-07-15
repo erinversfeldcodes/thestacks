@@ -165,6 +165,9 @@ models:
         description: Consent writing assistant at.
       - name: handle
         description: Handle.
+        tests:
+          - not_null
+          - unique
       - name: created_at
         description: Timestamp when the record was created.
         tests:

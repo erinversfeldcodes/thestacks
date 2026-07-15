@@ -582,7 +582,9 @@ defmodule StacksWeb.ProtoJSON do
   def public_profile(user, shelves) do
     %{
       handle: user.handle,
-      display_name: user.display_name,
+      # display_name is nullable + optional at registration; coalesce so the JSON
+      # never carries `null` (the redacted-profile decoders expect a string).
+      display_name: user.display_name || "",
       website_url: user.website_url,
       city: user.city,
       country_code: user.country_code,
@@ -604,7 +606,7 @@ defmodule StacksWeb.ProtoJSON do
   def public_profile_summary(user) do
     %{
       handle: user.handle,
-      display_name: user.display_name,
+      display_name: user.display_name || "",
       city: user.city,
       country_code: user.country_code
     }

@@ -55,19 +55,19 @@ defmodule StacksWeb.ProfileController do
   end
 
   defp render_shelf(conn, target, bookshelf_name, viewer) do
-    case Shelving.get_bookshelf(target.id, bookshelf_name) do
-      nil ->
-        json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
+    bookshelf = Shelving.get_bookshelf(target.id, bookshelf_name)
 
-      bookshelf ->
-        if Visibility.resolve_visibility(bookshelf, viewer) == :hidden do
-          not_found(conn)
-        else
-          shelves = Shelving.get_bookshelf_shelves(target.id, bookshelf_name)
-          shelf_json = Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer))
-          count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
-          json(conn, %{bookshelf: bookshelf_name, count: count, shelves: shelf_json})
-        end
+    # A hidden bookshelf and an absent one return the SAME 200-empty shape, so a
+    # hidden shelf is indistinguishable from an empty/nonexistent one — the same
+    # indistinguishability principle as the ghost-profile gate (never leak that a
+    # hidden thing exists). The profile-level ghost/block gate has already run.
+    if is_nil(bookshelf) or Visibility.resolve_visibility(bookshelf, viewer) == :hidden do
+      json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
+    else
+      shelves = Shelving.get_bookshelf_shelves(target.id, bookshelf_name)
+      shelf_json = Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer))
+      count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
+      json(conn, %{bookshelf: bookshelf_name, count: count, shelves: shelf_json})
     end
   end
 

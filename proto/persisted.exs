@@ -222,6 +222,12 @@
       field_overrides: %{
         role: %{default: "user"},
         profile_visibility: %{default: "owner"},
+        # handle is a NOT NULL, case-insensitively-unique business key (the /u/:handle
+        # profile URL). NOT NULL + the unique test keep the manifest authoritative and
+        # give the warehouse coverage on the profile key. Uniqueness is enforced in the
+        # DB by the functional index `users_lower_handle_index` (lower(handle)); the dbt
+        # `unique` test guards the raw column.
+        handle: %{null: false, dbt_tests: [:unique]},
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
