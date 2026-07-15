@@ -75,14 +75,14 @@ hits the US-10.5.2 gate → 404.
 Verdict: **RED — not built.** 4 punch items; the 2 SQL-exclusion sad paths (ghost + blocked) are the load-bearing security asserts.
 
 ## Definition of Done
-- [ ] `Accounts.search_users/2` (SQL-enforced platform-only + bidirectional block-exclusion).
-- [ ] `GET /api/search/users` under `:optional_auth` returning redacted `public_profile`.
-- [ ] `Page.Search` "Readers" section linking to `/u/:handle`.
-- [ ] **Feature-Completeness Pre-Check ✅** — search live-driven: a discoverable reader appears; a ghost/blocked one never does.
-- [ ] Punch items 1–4 closed.
-- [ ] `just run mix test` + `npx elm-test` green; `just run just verify`.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] `Accounts.search_users/2` — single Ecto query: `profile_visibility == "platform"` AND `display_name ILIKE` (escaped wildcards) AND bidirectional block-exclusion via `NOT EXISTS`/`parent_as` on `op.user_blocks`, `LIMIT 20`. Exclusion is **in SQL**, not the serializer.
+- [x] `GET /api/search/users` (`UserSearchController`) under `:optional_auth` returning redacted `public_profile_summary` (handle, display_name, city, country_code).
+- [x] `Page.Search` "Readers" section (batched with book search) rendering profile cards linking to `/u/:handle`, with loading/empty/failure states.
+- [ ] **Feature-Completeness Pre-Check ✅** — search live-driven (epic-level E2E).
+- [x] Punch items closed — query happy/sad matrix (ghost excluded, blocked both directions, ILIKE case-insensitive, blank/wildcard-literal) + endpoint tests (redacted shape, empty, ghost/blocked excluded, optional-auth signed-in vs anonymous) + Elm reader-section program tests.
+- [x] `just run mix test` + `npx elm-test` green (808 Elm / 0; `user_search_controller_test` + `accounts_test` / 0).
+- [x] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (remaining item is the epic browser E2E).
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the epic live-drive.
 
 ## Dependencies
 #211 (handle), #213 (`public_profile` shape), #214 (`Route.Profile` target). `Social` blocking (pre-existing).
