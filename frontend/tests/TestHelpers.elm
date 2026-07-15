@@ -2,6 +2,7 @@ module TestHelpers exposing
     ( bookDetailProgram
     , libraryProgram
     , loginProgram
+    , profileShelfProgram
     , searchProgram
     , simulateAuthErrorResponse
     , simulateAuthResponse
@@ -764,6 +765,36 @@ libraryInitEffects maybeToken =
             SimulatedEffect.Cmd.none
 
 
+{-| Translate the read-only profile-shelf init Cmd into a SimulatedEffect.
+
+Mirrors `Api.getProfileShelf`: an optional-auth GET to the profile endpoint
+(`/api/u/:handle/bookshelves/:name`), decoding into `Bookshelf.ShelvesLoaded`.
+
+-}
+profileShelfInitEffects : Maybe String -> String -> String -> SimulatedEffect Bookshelf.Msg
+profileShelfInitEffects maybeToken handle bookshelfName =
+    let
+        headers =
+            case maybeToken of
+                Just token ->
+                    [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+    in
+    SimulatedEffect.Http.request
+        { method = "GET"
+        , headers = headers
+        , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+        , body = SimulatedEffect.Http.emptyBody
+        , expect =
+            SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+                shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 {-| Translate Search page Cmds into SimulatedEffects.
 -}
 searchEffects : Search.Msg -> Search.Model -> Maybe String -> SimulatedEffect Search.Msg
@@ -1012,6 +1043,35 @@ libraryProgram maybeToken =
                         Bookshelf.init Bookshelf.libraryConfig maybeToken "test-user-id"
                 in
                 ( model, libraryInitEffects maybeToken )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        Bookshelf.update msg model
+                in
+                ( newModel, libraryEffects msg model maybeToken )
+        , view = Bookshelf.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Create a ProgramTest harness for the read-only profile-shelf browse view
+(`Page.Bookshelf` in its `profileConfig` — US-10.5.3 / Issue #215).
+-}
+profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+profileShelfProgram maybeToken handle bookshelfName =
+    let
+        config =
+            Bookshelf.profileConfig handle bookshelfName
+    in
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        Bookshelf.init config maybeToken "viewer-user-id"
+                in
+                ( model, profileShelfInitEffects maybeToken handle bookshelfName )
         , update =
             \msg model ->
                 let

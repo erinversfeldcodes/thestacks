@@ -6,6 +6,7 @@ module Page.Bookshelf exposing
     , antiLibraryConfig
     , init
     , libraryConfig
+    , profileConfig
     , update
     , view
     , wishListConfig
@@ -38,6 +39,12 @@ import Util.TestId exposing (testId)
 
 {-| Configuration that differs between bookshelf pages.
 Everything else (model, update, view structure) is identical.
+
+`readOnly` toggles the browse mode used when viewing _another_ reader's shelf at
+`/u/:handle/:bookshelf_name`: the fetch targets the profile endpoint (via
+`profileHandle`) and all mutating affordances (add shelf, RSS feed, the
+per-placement visibility / move / remove controls) are stripped. See US-10.5.3.
+
 -}
 type alias Config =
     { apiName : String
@@ -46,6 +53,8 @@ type alias Config =
     , wallpaperClass : String
     , wearLevel : WearLevel
     , emptyMessage : String
+    , readOnly : Bool
+    , profileHandle : Maybe String
     }
 
 
@@ -57,6 +66,8 @@ libraryConfig =
     , wallpaperClass = "wallpaper--damask"
     , wearLevel = Softened
     , emptyMessage = "Your library is waiting. Move a book here when you've finished reading it."
+    , readOnly = False
+    , profileHandle = Nothing
     }
 
 
@@ -68,6 +79,8 @@ antiLibraryConfig =
     , wallpaperClass = "wallpaper--botanical"
     , wearLevel = Pristine
     , emptyMessage = "Books you own but haven't read yet. Upload a photo to start building your collection."
+    , readOnly = False
+    , profileHandle = Nothing
     }
 
 
@@ -79,6 +92,38 @@ wishListConfig =
     , wallpaperClass = "wallpaper--floral"
     , wearLevel = Pristine
     , emptyMessage = "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN."
+    , readOnly = False
+    , profileHandle = Nothing
+    }
+
+
+{-| Read-only config for browsing another reader's shelf at
+`/u/:handle/:bookshelf_name`. Starts from the matching owner-view config (for
+theme / wallpaper / wear-level) then flips `readOnly` on and records the target
+handle so `init` fetches the profile endpoint instead of the viewer's own shelf.
+-}
+profileConfig : String -> String -> Config
+profileConfig handle bookshelfName =
+    let
+        base =
+            case bookshelfName of
+                "library" ->
+                    libraryConfig
+
+                "antilibrary" ->
+                    antiLibraryConfig
+
+                "wishlist" ->
+                    wishListConfig
+
+                _ ->
+                    { libraryConfig | apiName = bookshelfName, label = bookshelfName }
+    in
+    { base
+        | apiName = bookshelfName
+        , readOnly = True
+        , profileHandle = Just handle
+        , emptyMessage = "This shelf has no books to show."
     }
 
 
@@ -121,12 +166,19 @@ init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
         apiCmd =
-            case maybeToken of
-                Just token ->
-                    Api.getBookshelf config.apiName token ShelvesLoaded
+            case ( config.readOnly, config.profileHandle ) of
+                ( True, Just handle ) ->
+                    -- Browsing another reader's shelf: optional-auth GET so the
+                    -- backend visibility-filters against the viewer (even anon).
+                    Api.getProfileShelf maybeToken handle config.apiName ShelvesLoaded
 
-                Nothing ->
-                    Cmd.none
+                _ ->
+                    case maybeToken of
+                        Just token ->
+                            Api.getBookshelf config.apiName token ShelvesLoaded
+
+                        Nothing ->
+                            Cmd.none
     in
     ( { shelves = Loading
       , showAgeGate = False
@@ -168,16 +220,22 @@ update msg model =
                         ( { model | shelves = Failure err }, Cmd.none, NoOut )
 
         AddShelf ->
-            let
-                cmd =
-                    case model.token of
-                        Just token ->
-                            Api.addShelf model.config.apiName token ShelfAdded
+            -- Defence in depth: no mutation is ever issued in read-only browse
+            -- mode, even if this Msg were somehow constructed.
+            if model.config.readOnly then
+                ( model, Cmd.none, NoOut )
 
-                        Nothing ->
-                            Cmd.none
-            in
-            ( model, cmd, NoOut )
+            else
+                let
+                    cmd =
+                        case model.token of
+                            Just token ->
+                                Api.addShelf model.config.apiName token ShelfAdded
+
+                            Nothing ->
+                                Cmd.none
+                in
+                ( model, cmd, NoOut )
 
         ShelfAdded result ->
             case result of
@@ -239,17 +297,25 @@ view model =
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
             [ div [ class "shelf-room__header" ]
-                [ viewShelfLabel cfg.label
-                , ViewModeToggle.view model.viewMode ViewModeChanged
-                , Html.map RSSLinkMsg
-                    (RSSLink.view
-                        { visibility = model.visibility
-                        , userId = model.userId
-                        , bookshelfName = cfg.apiName
-                        }
-                        model.rssLink
-                    )
-                ]
+                (viewShelfLabel cfg.label
+                    :: ViewModeToggle.view model.viewMode ViewModeChanged
+                    :: (if cfg.readOnly then
+                            -- The RSS feed link is an owner affordance; a viewer
+                            -- browsing another reader's shelf gets no feed control.
+                            []
+
+                        else
+                            [ Html.map RSSLinkMsg
+                                (RSSLink.view
+                                    { visibility = model.visibility
+                                    , userId = model.userId
+                                    , bookshelfName = cfg.apiName
+                                    }
+                                    model.rssLink
+                                )
+                            ]
+                       )
+                )
             , if model.showAgeGate then
                 ageGate
                     { onVerify = VerifyAge
@@ -266,8 +332,13 @@ view model =
                             viewBookshelfFromShelves model []
 
                         Failure _ ->
-                            p [ class "error" ]
-                                [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
+                            if cfg.readOnly then
+                                p [ class "shelf-unavailable", testId "shelf-unavailable" ]
+                                    [ text "Reader not found, or this shelf isn't available." ]
+
+                            else
+                                p [ class "error" ]
+                                    [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
 
                         Success shelves ->
                             let
@@ -287,10 +358,10 @@ view model =
 viewEmptyBookshelf : Model -> Html Msg
 viewEmptyBookshelf model =
     div [ class "bookshelf", testId "bookshelf-empty" ]
-        [ viewBookcase
+        (viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
-        , viewAddShelfButton
-        ]
+            :: viewAddShelfControls model.config
+        )
 
 
 viewBookshelfFromShelves : Model -> List Shelf -> Html Msg
@@ -311,9 +382,21 @@ viewBookshelfFromShelves model shelves =
                     List.map (viewShelf model.config.wearLevel) shelves
             in
             div [ class "bookshelf" ]
-                [ viewBookcase (minShelfRows 4 shelfViews)
-                , viewAddShelfButton
-                ]
+                (viewBookcase (minShelfRows 4 shelfViews)
+                    :: viewAddShelfControls model.config
+                )
+
+
+{-| The "Add shelf" affordance is owner-only — a read-only browse view of another
+reader's shelf renders none of it (and cannot dispatch `AddShelf`).
+-}
+viewAddShelfControls : Config -> List (Html Msg)
+viewAddShelfControls config =
+    if config.readOnly then
+        []
+
+    else
+        [ viewAddShelfButton ]
 
 
 viewShelf : WearLevel -> Shelf -> Html Msg
