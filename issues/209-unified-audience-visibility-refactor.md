@@ -6,7 +6,7 @@ maps with a single canonical **`Audience`** ladder plus orthogonal overlays (Gra
 Discoverability, AgeGate, Block), defined **in protobuf as the source of truth** and
 generated across Elixir, Elm, dbt, Python, and Rust. Implements ADR-018.
 
-## Status (2026-07-14) — core DELIVERED; remainder reframed & de-risked
+## Status — what is DONE vs OUTSTANDING (verified against code 2026-07-15)
 
 Two findings from the implementation pass **substantially reduced this issue's scope**
 and disproved the "proto-first, far-reaching data migration" framing:
@@ -21,29 +21,35 @@ and disproved the "proto-first, far-reaching data migration" framing:
    `visibility_tier_characterization_test.exs`). The "decompose into 3 axes" reduces to
    "the `age_gated` boolean already IS the AgeGate axis."
 
-**DELIVERED (committed on `feat/122-e2e`):**
-- ✅ The correctness core — collapsed the two contradictory rank maps into ONE
-  `@audience_exposure` ladder (`owner<group<platform<public`); one ceiling check + one
-  tighten/loosen classifier. **Fixed a latent bug**: `group` children were wrongly
-  rejected under a platform parent. 178 tests + 6 properties green (parity verified
-  case-by-case for owner/platform/public).
-- ✅ Golden-master characterization test pinning `visibility_tier` resolution.
-- ✅ One canonical source (`Visibility.audience_levels/0` + `profile_audience_levels/0`);
-  Blog + Accounts point at it. **Resolved the profile inconsistency** — registration and
-  settings now agree (`owner`/`platform`; `group` reserved for profiles, per the matrix).
-- ✅ Fixed the stale `sources.yml` visibility docs; corrected the ADR migration table.
+### Per-phase status (the load-bearing table)
 
-**GENUINELY FUTURE (new features, NOT a migration — do NOT treat as almost-done):**
-these need new enum members + new resolver logic and have no existing data:
+| Phase (from the plan below) | Status | Evidence / what's missing |
+|-----------------------------|--------|---------------------------|
+| **2 — Resolver + one rank fn** | ✅ **DONE** | `visibility.ex:25` single `@audience_exposure %{owner:0,group:1,platform:2,public:3}`; the two old maps deleted (no `@visibility_rank`/`@profile_visibility_rank` in `apps/core/lib`). `validate_visibility_ceiling/3` = one `child_exposure <= parent_exposure` (`:405`). **Fixed a latent bug**: `group` children were wrongly rejected under a platform parent. Parity property + characterization suites green. |
+| **3a — Elixir contexts/controllers** | ✅ **DONE** | `Accounts`/`Blog`/`Shelving` point at `Visibility.audience_levels/0` + `profile_audience_levels/0`; profile registration/settings inconsistency resolved. |
+| **4 (docs half) — dbt sources docs** | ✅ **DONE** | Stale `sources.yml` visibility descriptions corrected; ADR migration table fixed. |
+| **1 — Proto `Audience` enum + codegen** | ❌ **OUTSTANDING** | There is **no `proto/stacks/common/v1/visibility.proto`** and no `Audience` enum anywhere in `proto/`. Deferred as low-value (enums are contract docs, not storage) — but the phase is NOT done. |
+| **3b — Elm four-rung ladder** | ❌ **OUTSTANDING** | `frontend/src/Types/Visibility.elm` still declares the **old 3-rung** `Public \| Platform \| Owner` (`:27-30`) with the **opposite numeric direction** (`public(0) < platform(1) < owner(2)`, `:15,83`) and a docstring that references the **deleted** server `@visibility_rank` (`:84`). Elm and server now disagree on rank direction and rung count. Server is authoritative so no live break, but the client model is unmigrated. |
+| **4 (regen half) — dbt proto-regen** | ⚪ **N/A / OUTSTANDING** | Predicated on Phase 1's proto; not applicable until then. Warehouse columns are already correct via the existing enums. |
+| **5 — RLS + data migration** | ⚪ **N/A (no-op, justified)** | Stored enums already ARE the ladder, so there are no rows to rewrite and the March RLS policies (`20260319000008_enable_rls_policies.exs`) need no change. The literal DoD phase is not "implemented" because there is nothing to implement — documented, not deferred work. |
+
+### Other outstanding items (new features, NOT migration — do NOT treat as almost-done)
 - `public` rung as a stored value (unauth/internet-indexable) + the Discoverability axis
   (`unlisted`) — gated on the US-10.4.1 opt-in-indexing story.
 - `private`/owner-only books (`visibility_tier` currently coerced to public at resolve).
-- Enforcing a `group` PROFILE as a real ceiling (SEC-3) — today a group profile behaves
+- Enforcing a `group` PROFILE as a real ceiling (**SEC-3**) — today a group profile behaves
   like platform; making it restrict to group members is a behaviour change to design.
-- Proto contract-enum unification (one `Audience` proto enum) — low value since the
-  enums are contract docs, not storage; deferred unless a wire consumer needs it.
 - `shelving.ex` keeps a literal `@valid_visibilities` (its ceiling GUARD clause needs a
-  compile-time literal); it equals `Visibility.audience_levels/0` by construction.
+  compile-time literal); it equals `Visibility.audience_levels/0` by construction — a
+  documented non-gap.
+
+### Bottom line
+The **correctness core (Phase 2 + Elixir contexts) is DONE and is what the epic actually
+needed** — one ladder, one ceiling, the latent group-ceiling bug fixed, parity proven.
+**Phase 1 (proto Audience enum) and Phase 3b (Elm four-rung) are genuinely NOT done**;
+Phases 4-regen/5 are no-ops given enum storage. This issue should NOT be marked complete —
+it is "core delivered, proto/Elm unification + SEC-3 outstanding." Track the proto/Elm
+unification as its own follow-up if/when a wire consumer or the `public` rung needs it.
 
 ## User Stories
 Cross-cutting — this is a refactor of the machinery behind the entire US-10.x epic
@@ -169,26 +175,29 @@ suite + the codegen drift gate. -->
 | 1–13 app/US layers (new behaviour) | no | n/a — no behaviour change; parity is the bar |
 
 ## Definition of Done
-- [ ] `Audience` enum + overlays defined once in proto; Elixir/Elm/dbt/Python/Rust all
-      generated from it; `proto.sync --check` green.
-- [ ] One exposure-rank function + one ceiling comparison replace both rank maps and
-      `validate_visibility_ceiling/3`; both old maps deleted.
-- [ ] `books.visibility_tier` decomposed into Audience + Discoverability + AgeGate;
-      profile validation inconsistency resolved via the per-entity matrix.
-- [ ] Data migration rewrites all existing rows per the ADR-018 mapping; RLS policies
-      updated in the same change (ADR-006 parity).
-- [ ] **Parity proven:** extended `resolve_visibility/2` property suite green for every
-      (viewer, resource, block, group, ceiling) combination + every old→new mapping row.
-- [ ] **Feature-Completeness Pre-Check (above) ✅** — every named story's audience
-      decisions identical before/after, observed on a live stack; #122 browser E2E
-      re-run green.
-- [ ] Every behaviour has a validation path (property/integration where sufficient;
-      live-stack E2E for the browser flows).
-- [ ] Tests written and passing (`just run mix test` / elm-test / dbt).
-- [ ] Standards compliance verified (`just run just verify` passes).
-- [ ] **Test audit GREEN** — 0 ❌, 0 ⚠️; regenerated as the final step.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
-- [ ] Stale `sources.yml` visibility docs corrected to the new vocabulary.
+See the per-phase status table above for the authoritative done/outstanding split.
+- [x] **One exposure-rank function + one ceiling comparison** replace both rank maps and
+      `validate_visibility_ceiling/3`; both old maps deleted. (Phase 2 — `visibility.ex:25,405`.)
+- [x] **Profile validation inconsistency resolved** via `profile_audience_levels/0`
+      (registration + settings agree). (Phase 3a.)
+- [x] **Parity proven:** `resolve_visibility/2` property + characterization suites green;
+      latent group-under-platform ceiling bug fixed.
+- [x] Tests written and passing (`just run mix test` / elm-test / dbt); `just run just verify` green.
+- [x] Stale `sources.yml` visibility docs corrected. (Phase 4 docs half.)
+- [ ] **OUTSTANDING — Phase 1:** `Audience` enum defined once in proto + generated;
+      `proto.sync --check` green. (No `visibility.proto` exists yet; deferred as low-value.)
+- [ ] **OUTSTANDING — Phase 3b:** `Types/Visibility.elm` migrated to the four-rung ladder
+      (currently 3-rung with the opposite rank direction, referencing the deleted server
+      `@visibility_rank`).
+- [ ] **OUTSTANDING — SEC-3:** a `group` PROFILE enforced as a real ceiling (today behaves
+      like platform).
+- [ ] **N/A (no-op given enum storage):** `books.visibility_tier` 3-axis decomposition;
+      data migration + RLS rewrite — nothing to migrate while the stored enums already are
+      the ladder and `public`/`unlisted`/`private` have zero rows.
+- [ ] **Feature-Completeness / Completion Bar:** deferred with the epic (#122/#210) preview
+      E2E; parity is the bar and is met at the property-suite layer.
+
+**This issue is NOT complete — it is "core delivered; proto/Elm unification + SEC-3 outstanding."**
 
 ## Dependencies
 - ADR-018 (this issue implements it).
