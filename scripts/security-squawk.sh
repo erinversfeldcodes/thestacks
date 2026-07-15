@@ -84,34 +84,13 @@ echo ""
 VIOLATIONS=0
 
 for migration in "${MIGRATION_FILES[@]}"; do
-    # Extract SQL from execute(...) blocks. Handles three forms:
-    #   execute("single line")
-    #   execute("""                execute(
-    #     multi                      "single line"
-    #     line                    )
-    #   """)
-    # Skips blocks containing Elixir string interpolation (#{...}) — the SQL
-    # isn't known until runtime, so squawk can't analyse it.
-    # Also skips anonymous PL/pgSQL (DO $$ ... END $$) — squawk doesn't check
-    # those for migration hazards.
-    sql_block="$(python3 -c '
-import re, sys
-src = open(sys.argv[1]).read()
-blocks = []
-# triple-quoted
-blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL)]
-# single-quoted single-line
-blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src)]
-for b in blocks:
-    if "#{" in b:         # Elixir interpolation — not analysable
-        continue
-    if re.search(r"DO\s*\$\$", b, re.IGNORECASE):  # anonymous procedure
-        continue
-    stmt = b.strip()
-    if not stmt.endswith(";"):
-        stmt += ";"
-    print(stmt)
-' "$migration" 2>/dev/null || true)"
+    # Extract squawk-analysable SQL from the migration. `extract-migration-sql.py`
+    # is the shared source of truth (also used by the test wrapper) so both gates
+    # stay in lockstep. It pulls raw SQL from execute(...) blocks AND synthesises
+    # CREATE INDEX SQL from `create index/unique_index` DSL calls, closing the
+    # DSL/raw-execute blind spot (#219). Interpolated (#{...}) and anonymous
+    # PL/pgSQL (DO $$ ... $$) execute blocks are skipped by the helper.
+    sql_block="$(python3 "$REPO_ROOT/scripts/extract-migration-sql.py" "$migration" 2>/dev/null || true)"
 
     # No raw SQL to lint — skip (Ecto schema DSL migrations are not squawkable).
     if [[ -z "$sql_block" ]]; then
