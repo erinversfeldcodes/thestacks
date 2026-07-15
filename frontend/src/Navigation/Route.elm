@@ -34,6 +34,8 @@ type Route
     | SettingsAgeVerification
     | SettingsAuditLog
     | CostTransparency
+    | Metrics
+    | About
     | Catalogue
     | MarketplaceBrowse
     | MarketplaceCreate
@@ -76,6 +78,8 @@ parser =
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Settings (s "settings")
         , Parser.map CostTransparency (s "costs")
+        , Parser.map Metrics (s "metrics")
+        , Parser.map About (s "about")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
         , Parser.map MarketplaceMyListings (s "marketplace" </> s "mine")
@@ -160,6 +164,12 @@ toPath route =
 
         CostTransparency ->
             "/costs"
+
+        Metrics ->
+            "/metrics"
+
+        About ->
+            "/about"
 
         Catalogue ->
             "/catalogue"

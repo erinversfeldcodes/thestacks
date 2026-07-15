@@ -11,6 +11,7 @@ module Api exposing
     , CatalogueResponse
     , EnrichmentGaps
     , ListingParams
+    , LiveSignals(..)
     , MergeFormatResponse
     , MetricsDashboard
     , NotificationPreferences
@@ -27,6 +28,8 @@ module Api exposing
     , RegisterError(..)
     , ShelfVisibilitySetting
     , SourceHealth
+    , TransparencyEntry
+    , TransparencyMetrics
     , UploadInit
     , acceptInvitation
     , activateListing
@@ -67,6 +70,7 @@ module Api exposing
     , getProfileShelf
     , getQualityTrends
     , getSourceHealth
+    , getTransparencyMetrics
     , getUserPlacements
     , initUpload
     , inviteToGroup
@@ -96,6 +100,7 @@ module Api exposing
     , searchUsers
     , soldListing
     , streamEventDecoder
+    , transparencyMetricsDecoder
     , unblockUser
     , updateAgeVerification
     , updateBlogPost
@@ -439,6 +444,93 @@ logout token toMsg =
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
+        }
+
+
+
+-- TRANSPARENCY (#241 → #235)
+
+
+{-| A single curated transparency signal, carrying the teaching metadata the
+public `/metrics` page renders as a "why we measure this" tooltip. Shared by both
+the live signals and the durable aggregates. `value` is a plain number (a rate, a
+count, a ratio, or a boolean-as-0/1) interpreted per `unit`.
+-}
+type alias TransparencyEntry =
+    { key : String
+    , label : String
+    , what : String
+    , how : String
+    , why : String
+    , unit : String
+    , value : Float
+    }
+
+
+{-| The live-signals section of the transparency payload. The backend degrades to
+`"unavailable"` (rather than an error) when Prometheus is unconfigured or every
+whitelisted query fails, so the page can render the durable section regardless.
+-}
+type LiveSignals
+    = LiveSignals (List TransparencyEntry)
+    | LiveUnavailable
+
+
+{-| The full public transparency payload (`GET /api/transparency/metrics`):
+`{live, durable, generated_at, cache_ttl}` from `Stacks.Transparency.metrics/0`.
+-}
+type alias TransparencyMetrics =
+    { live : LiveSignals
+    , durable : List TransparencyEntry
+    , generatedAt : String
+    , cacheTtl : Int
+    }
+
+
+transparencyEntryDecoder : Decoder TransparencyEntry
+transparencyEntryDecoder =
+    Decode.map7 TransparencyEntry
+        (Decode.field "key" Decode.string)
+        (Decode.field "label" Decode.string)
+        (Decode.field "what" Decode.string)
+        (Decode.field "how" Decode.string)
+        (Decode.field "why" Decode.string)
+        (Decode.field "unit" Decode.string)
+        (Decode.field "value" Decode.float)
+
+
+{-| Decode the `live` field, which is EITHER a list of entries OR the JSON string
+`"unavailable"` (the graceful-degradation sentinel). Any non-list is treated as
+unavailable so a token-absent backend never surfaces as a decode error.
+-}
+liveSignalsDecoder : Decoder LiveSignals
+liveSignalsDecoder =
+    Decode.oneOf
+        [ Decode.map LiveSignals (Decode.list transparencyEntryDecoder)
+        , Decode.succeed LiveUnavailable
+        ]
+
+
+transparencyMetricsDecoder : Decoder TransparencyMetrics
+transparencyMetricsDecoder =
+    Decode.map4 TransparencyMetrics
+        (Decode.field "live" liveSignalsDecoder)
+        (Decode.field "durable" (Decode.list transparencyEntryDecoder))
+        (Decode.field "generated_at" Decode.string)
+        (Decode.field "cache_ttl" Decode.int)
+
+
+{-| `GET /api/transparency/metrics` — the public, unauthenticated transparency
+payload (#241). No auth header: the endpoint is public and returns only curated,
+anonymised aggregates.
+-}
+getTransparencyMetrics :
+    (Result Http.Error TransparencyMetrics -> msg)
+    -> Cmd msg
+getTransparencyMetrics toMsg =
+    Http.get
+        { url = baseUrl ++ "/api/transparency/metrics"
+        , expect = Http.expectJson toMsg transparencyMetricsDecoder
         }
 
 

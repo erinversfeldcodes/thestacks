@@ -32,6 +32,7 @@ import Json.Decode as Decode
 import Json.Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
+import Page.About as AboutPage
 import Page.Admin.Metrics as AdminMetrics
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.SourceApproval as AdminSourceApproval
@@ -51,6 +52,7 @@ import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
 import Page.Marketplace.ListingDetail as ListingDetail
 import Page.Marketplace.MyListings as MyListings
+import Page.Metrics as MetricsPage
 import Page.Profile as ProfilePage
 import Page.Search as Search
 import Page.Settings as Settings
@@ -166,6 +168,8 @@ type Page
     | PageSettingsPassword Password.Model
     | PageSettingsNotifications Notifications.Model
     | PageCostTransparency CostTransparency.Model
+    | PageMetrics MetricsPage.Model
+    | PageAbout
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
     | PageMarketplaceCreate CreateListing.Model
@@ -385,6 +389,12 @@ requiresAuth route =
         CostTransparency ->
             False
 
+        Metrics ->
+            False
+
+        About ->
+            False
+
         Catalogue ->
             False
 
@@ -528,6 +538,16 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                     CostTransparency.init
             in
             ( PageCostTransparency model, Cmd.map CostTransparencyMsg cmd )
+
+        Metrics ->
+            let
+                ( model, cmd ) =
+                    MetricsPage.init
+            in
+            ( PageMetrics model, Cmd.map MetricsMsg cmd )
+
+        About ->
+            ( PageAbout, Cmd.none )
 
         Catalogue ->
             let
@@ -1035,6 +1055,7 @@ type Msg
     | PasswordMsg Password.Msg
     | NotificationsMsg Notifications.Msg
     | CostTransparencyMsg CostTransparency.Msg
+    | MetricsMsg MetricsPage.Msg
     | CatalogueMsg Catalogue.Msg
     | MarketplaceBrowseMsg MarketplaceBrowse.Msg
     | CreateListingMsg CreateListing.Msg
@@ -1580,6 +1601,20 @@ update msg model =
                     in
                     ( { model | page = PageCostTransparency newSubModel }
                     , Cmd.map CostTransparencyMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        MetricsMsg subMsg ->
+            case model.page of
+                PageMetrics subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            MetricsPage.update subMsg subModel
+                    in
+                    ( { model | page = PageMetrics newSubModel }
+                    , Cmd.map MetricsMsg subCmd
                     )
 
                 _ ->
@@ -2369,6 +2404,12 @@ pageTitle route =
         CostTransparency ->
             "Cost Transparency — The Stacks"
 
+        Metrics ->
+            "What We Measure — The Stacks"
+
+        About ->
+            "About — The Stacks"
+
         Catalogue ->
             "Catalogue — The Stacks"
 
@@ -2437,8 +2478,8 @@ viewNav route maybeAuth userMenu =
             [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
             , ul [ class "app-nav__dropdown-menu" ]
                 [ li []
-                    [ a [ href (Route.toPath CostTransparency), class "app-nav__dropdown-link" ]
-                        [ text "Costs" ]
+                    [ a [ href (Route.toPath About), class "app-nav__dropdown-link" ]
+                        [ text "About" ]
                     ]
                 ]
             ]
@@ -2599,6 +2640,12 @@ viewPage model =
 
         PageCostTransparency subModel ->
             Html.map CostTransparencyMsg (CostTransparency.view subModel)
+
+        PageMetrics subModel ->
+            Html.map MetricsMsg (MetricsPage.view subModel)
+
+        PageAbout ->
+            AboutPage.view
 
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)
