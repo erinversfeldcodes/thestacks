@@ -82,11 +82,20 @@ defmodule StacksWeb.ProfileControllerTest do
       conn |> auth_conn(viewer) |> get("/api/u/nobody_here") |> json_response(404)
     end
 
-    test "an unauthenticated viewer can see a discoverable profile", %{conn: conn} do
-      insert(:user, handle: "public_ada", profile_visibility: "platform")
+    test "an unauthenticated viewer can see a PUBLIC profile", %{conn: conn} do
+      insert(:user, handle: "public_ada", profile_visibility: "public")
 
       body = conn |> get("/api/u/public_ada") |> json_response(200)
       assert body["handle"] == "public_ada"
+    end
+
+    test "an unauthenticated viewer gets 404 for a platform (Members) profile (#225)", %{
+      conn: conn
+    } do
+      insert(:user, handle: "members_ada", profile_visibility: "platform")
+
+      # "Members" is signed-in-only — a logged-out visitor cannot tell it exists.
+      conn |> get("/api/u/members_ada") |> json_response(404)
     end
 
     test "a blocked viewer gets 404 (indistinguishable from absent)", %{conn: conn} do
@@ -235,18 +244,19 @@ defmodule StacksWeb.ProfileControllerTest do
       assert nonmember_count == 0
     end
 
-    test "an unauthenticated viewer sees platform placements but not owner-only ones (shelf)", %{
-      conn: conn
-    } do
-      owner = insert(:user, handle: "unauth_shelf_owner", profile_visibility: "platform")
-      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+    test "an unauthenticated viewer sees public placements but not owner-only ones (shelf, #225)",
+         %{
+           conn: conn
+         } do
+      owner = insert(:user, handle: "unauth_shelf_owner", profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
       shelf = insert(:shelf, bookshelf: bookshelf)
 
       insert(:placement,
         bookshelf: bookshelf,
         shelf: shelf,
         book: insert(:book),
-        visibility: "platform"
+        visibility: "public"
       )
 
       insert(:placement,
@@ -262,22 +272,48 @@ defmodule StacksWeb.ProfileControllerTest do
         |> json_response(200)
         |> Map.get("count")
 
+      # The public placement is visible to anon; the owner-only one is filtered out.
       assert count == 1
+    end
+
+    test "a signed-in non-member sees platform (Members) placements but an anon viewer does not (#225)",
+         %{conn: conn} do
+      owner = insert(:user, handle: "members_shelf_owner", profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book),
+        visibility: "platform"
+      )
+
+      count_for = fn conn ->
+        conn
+        |> get("/api/u/members_shelf_owner/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+      end
+
+      # A signed-in viewer sees the platform placement; a logged-out one does not.
+      assert count_for.(auth_conn(conn, insert(:user))) == 1
+      assert count_for.(conn) == 0
     end
 
     test "an age-gated book is hidden from unverified/unauthenticated viewers, shown to verified",
          %{
            conn: conn
          } do
-      owner = insert(:user, handle: "age_owner", profile_visibility: "platform")
-      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      owner = insert(:user, handle: "age_owner", profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
       shelf = insert(:shelf, bookshelf: bookshelf)
 
       insert(:placement,
         bookshelf: bookshelf,
         shelf: shelf,
         book: insert(:book, visibility_tier: "age_gated"),
-        visibility: "platform"
+        visibility: "public"
       )
 
       count_for = fn conn ->

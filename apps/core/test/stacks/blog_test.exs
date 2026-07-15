@@ -284,12 +284,12 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
 
-    test "unauthenticated viewer sees only published posts" do
-      user = insert(:user, profile_visibility: "platform")
-      _draft = insert(:post, user: user, visibility: "platform", published_at: nil)
+    test "unauthenticated viewer sees only published public posts (#225)" do
+      user = insert(:user, profile_visibility: "public")
+      _draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
       _published =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
       posts = Blog.list_user_posts(user.id, :unauthenticated)
       assert length(posts) == 1
@@ -311,17 +311,21 @@ defmodule Stacks.BlogTest do
   # list_published — via list_user_posts with unauthenticated viewer
   # ---------------------------------------------------------------------------
 
-  describe "list_user_posts/2 platform visibility" do
-    test "unauthenticated sees only published + platform-visible posts" do
-      user = insert(:user, profile_visibility: "platform")
+  describe "list_user_posts/2 public visibility" do
+    test "unauthenticated sees only published + public-visible posts (#225)" do
+      user = insert(:user, profile_visibility: "public")
 
-      _platform_published =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+      _public_published =
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
       _owner_only_published =
         insert(:post, user: user, visibility: "owner", published_at: DateTime.utc_now())
 
-      _platform_draft = insert(:post, user: user, visibility: "platform", published_at: nil)
+      _public_draft = insert(:post, user: user, visibility: "public", published_at: nil)
+
+      # Platform (Members) posts are NOT visible to a logged-out viewer.
+      _platform_published =
+        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
 
       posts = Blog.list_user_posts(user.id, :unauthenticated)
       assert length(posts) == 1

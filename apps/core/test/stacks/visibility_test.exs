@@ -17,11 +17,26 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
     end
 
-    test "unauthenticated viewer + public bookshelf (profile_visibility: platform) → :visible" do
+    test "unauthenticated viewer + platform (Members) bookshelf → :hidden (signed-in only, #225)" do
       owner = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
+      assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "unauthenticated viewer + public bookshelf + public profile → :visible (#225)" do
+      owner = insert(:user, profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: owner, visibility: "public")
+
       assert :visible = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "signed-in viewer + platform (Members) bookshelf → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end
 
     test "platform user viewer + profile_visibility owner (not owner of resource) → :hidden" do
@@ -291,17 +306,17 @@ defmodule Stacks.VisibilityTest do
   end
 
   describe "canonical Audience level sources" do
-    test "audience_levels/0 is the full stored ladder (owner/group/platform)" do
-      assert Visibility.audience_levels() == ~w(owner group platform)
+    test "audience_levels/0 is the full stored ladder (owner/group/platform/public)" do
+      assert Visibility.audience_levels() == ~w(owner group platform public)
     end
 
-    test "profile_audience_levels/0 is narrower (owner/platform — group reserved)" do
-      assert Visibility.profile_audience_levels() == ~w(owner platform)
+    test "profile_audience_levels/0 is owner/platform/public (group deferred to #224)" do
+      assert Visibility.profile_audience_levels() == ~w(owner platform public)
     end
 
-    test "valid_audience_level?/1 accepts ladder values and rejects others" do
+    test "valid_audience_level?/1 accepts ladder values (incl. public) and rejects others" do
       assert Visibility.valid_audience_level?("group")
-      refute Visibility.valid_audience_level?("public")
+      assert Visibility.valid_audience_level?("public")
       refute Visibility.valid_audience_level?("nonsense")
     end
   end
@@ -515,13 +530,15 @@ defmodule Stacks.VisibilityTest do
       assert length(result) == 2
     end
 
-    test "unauthenticated viewer sees only platform-visible bookshelves" do
-      owner = insert(:user, profile_visibility: "platform")
-      _platform_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+    test "unauthenticated viewer sees only PUBLIC bookshelves (platform is Members-only, #225)" do
+      owner = insert(:user, profile_visibility: "public")
+      _public_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
+      _platform_shelf = insert(:bookshelf, user: owner, name: "wishlist", visibility: "platform")
       _owner_shelf = insert(:bookshelf, user: owner, name: "antilibrary", visibility: "owner")
 
       result = Visibility.viewable_shelves(owner.id, :unauthenticated)
 
+      # Only the public shelf — platform (Members) and owner are hidden from anon.
       assert length(result) == 1
     end
   end
@@ -561,9 +578,9 @@ defmodule Stacks.VisibilityTest do
                Enum.sort(settable_audience_values_from_proto())
     end
 
-    test "public is RESERVED in the proto (not a settable value) — matches the Elixir ladder" do
-      refute "public" in settable_audience_values_from_proto()
-      refute "public" in Visibility.audience_levels()
+    test "public is a settable value in BOTH the proto and the Elixir ladder (#225)" do
+      assert "public" in settable_audience_values_from_proto()
+      assert "public" in Visibility.audience_levels()
     end
   end
 end

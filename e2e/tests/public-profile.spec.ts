@@ -25,7 +25,7 @@ import {
  *
  * WHY throwaway users (not the shared seeded suite users): this test MUTATES
  * profile/bookshelf visibility and handle. It owns two single-purpose fixtures:
- *   - OWNER (B): registered via API, loosened to a discoverable "platform"
+ *   - OWNER (B): registered via API, loosened to a discoverable "public"
  *     profile with a claimed handle, a platform-visible "library" (one placed
  *     book) and an owner-only "wishlist". B never touches the browser — API only.
  *   - VIEWER (A): registered + confirmed, then drives the browser as a second
@@ -69,7 +69,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expectOk(
       request.put("/api/settings/profile_visibility", {
         headers: { Authorization: `Bearer ${ownerAuth}` },
-        data: { profile_visibility: "platform" },
+        data: { profile_visibility: "public" },
       }),
       "loosen profile"
     );
@@ -105,12 +105,13 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setBookshelfVisibility(request, ownerAuth, "library", "platform");
     await setPlacementVisibility(request, ownerAuth, placementId, "platform");
 
-    // A platform-visible "antilibrary" holding ONLY the age-gated "Demons", so
-    // the shelf's viewer-visible `count` is a clean age-gate signal: 0 when the
-    // gated spine is suppressed, 1 once the viewer is age-verified.
+    // A PUBLIC "antilibrary" holding ONLY the age-gated "Demons", so the shelf's
+    // viewer-visible `count` is a clean age-gate signal: 0 when the gated spine is
+    // suppressed, 1 once the viewer is age-verified. Public (not platform) so the
+    // anonymous age-gate check below can reach the shelf at all (#225).
     const gatedPlacementId = await placeBook(request, ownerAuth, "antilibrary", ageGatedBookId);
-    await setBookshelfVisibility(request, ownerAuth, "antilibrary", "platform");
-    await setPlacementVisibility(request, ownerAuth, gatedPlacementId, "platform");
+    await setBookshelfVisibility(request, ownerAuth, "antilibrary", "public");
+    await setPlacementVisibility(request, ownerAuth, gatedPlacementId, "public");
 
     // An owner-only "wishlist" that must NOT surface to the viewer.
     await setBookshelfVisibility(request, ownerAuth, "wishlist", "owner");
@@ -143,7 +144,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
 
     // ── Age gate — the age-gated spine is suppressed unless the viewer is verified ──
-    // The "antilibrary" holds exactly one platform-visible but AGE-GATED
+    // The "antilibrary" holds exactly one PUBLIC but AGE-GATED
     // placement, so the profile-shelf endpoint's viewer-visible `count` is a
     // clean age-gate signal — a suppressed spine reads as a shelf with no gap
     // (count 0), never a leak that a gated book exists.
@@ -233,7 +234,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expectOk(
       request.put("/api/settings/profile_visibility", {
         headers: { Authorization: `Bearer ${ownerAuth}` },
-        data: { profile_visibility: "platform" },
+        data: { profile_visibility: "public" },
       }),
       "loosen profile"
     );
@@ -270,7 +271,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     });
     expect(blocked.status(), "blocked viewer must get 404, never 403").toBe(404);
 
-    // An uninvolved anonymous viewer still sees the platform profile — proving the
+    // An uninvolved anonymous viewer still sees the public profile — proving the
     // 404 is block-specific, not a broken profile.
     const anon = await request.get(`/api/u/${handle}`);
     expect(anon.status()).toBe(200);

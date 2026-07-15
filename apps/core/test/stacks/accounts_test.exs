@@ -773,7 +773,7 @@ defmodule Stacks.AccountsTest do
 
     test "returns changeset error for invalid visibility value" do
       user = insert(:user)
-      assert {:error, changeset} = Accounts.update_profile_visibility(user.id, "public")
+      assert {:error, changeset} = Accounts.update_profile_visibility(user.id, "nonsense")
       assert %{profile_visibility: [_]} = errors_on(changeset)
     end
   end

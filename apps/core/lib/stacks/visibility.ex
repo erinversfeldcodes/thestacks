@@ -24,18 +24,17 @@ defmodule Stacks.Visibility do
   # exposed) — fail-safe: an unrecognised value is never treated as over-exposed.
   @audience_exposure %{"owner" => 0, "group" => 1, "platform" => 2, "public" => 3}
 
-  # The stored, user-settable Audience levels (owner < group < platform). The
-  # "public" rung is RESERVED (ADR-018) and not yet a stored value, so it is not
-  # offered here. Single source of truth for the per-context validate_inclusion
-  # lists (Shelving / Blog / Accounts), replacing their duplicated `~w(...)`.
-  @audience_levels ~w(owner group platform)
+  # The stored, user-settable Audience levels (owner < group < platform < public).
+  # `public` = "anyone with the link, signed in or not" (#225); still `noindex`.
+  # Single source of truth for the per-context validate_inclusion lists (Shelving /
+  # Blog / Accounts), replacing their duplicated `~w(...)`.
+  @audience_levels ~w(owner group platform public)
 
-  # Audience levels settable on a USER PROFILE — narrower than @audience_levels:
-  # a "group" profile ceiling is not yet enforced (a group profile currently
-  # behaves like platform), so it is RESERVED and not offered (ADR-018 per-entity
-  # matrix). Used by BOTH profile registration and settings-update, resolving the
-  # prior inconsistency where registration accepted "group" but settings did not.
-  @profile_audience_levels ~w(owner platform)
+  # Audience levels settable on a USER PROFILE — owner / platform / public. `group`
+  # ("friends-only") profiles are deferred to #224 (need a chosen-group FK), so the
+  # rung is not offered here yet. Used by BOTH profile registration and
+  # settings-update, keeping them consistent.
+  @profile_audience_levels ~w(owner platform public)
 
   # Whitelist of resource-type tags for the ceiling-rejection counter. Anything
   # else is coerced to :other so telemetry cardinality stays bounded and no raw
@@ -160,7 +159,12 @@ defmodule Stacks.Visibility do
     profile_visibility = load_profile_visibility(resource, owner_id)
 
     case {profile_visibility, viewer} do
+      # An owner profile hides all content from non-owners.
       {"owner", _} -> :hidden
+      # A "platform" (Members) profile is signed-in-only: it caps everything away
+      # from logged-out visitors, so a `public` shelf under a Members profile is
+      # NOT leaked to anon (the profile is the ceiling). (#225)
+      {"platform", :unauthenticated} -> :hidden
       _ -> :ok
     end
   end
@@ -282,11 +286,13 @@ defmodule Stacks.Visibility do
     visibility = get_resource_visibility(resource)
 
     case {visibility, viewer} do
+      # public = anyone with the link, signed in or not (#225).
       {"public", _} ->
         :ok
 
-      {"platform", _} ->
-        :ok
+      # platform = "Members" = any SIGNED-IN user; hidden from logged-out visitors.
+      {"platform", v} ->
+        check_platform_audience(v)
 
       {"owner", {:platform_user, vid}} when vid == owner_id ->
         :ok
@@ -307,6 +313,12 @@ defmodule Stacks.Visibility do
         check_default_visibility(owner_id, viewer_id)
     end
   end
+
+  # "platform" (Members) is visible to any authenticated viewer (incl. the
+  # identity-less platform-preview) but NOT to a logged-out visitor. (#225)
+  defp check_platform_audience({:platform_user, _}), do: :ok
+  defp check_platform_audience(:platform_preview), do: :ok
+  defp check_platform_audience(_), do: :hidden
 
   defp check_default_visibility(owner_id, viewer_id) when owner_id == viewer_id, do: :ok
   defp check_default_visibility(_owner_id, _viewer_id), do: :hidden
@@ -401,11 +413,16 @@ defmodule Stacks.Visibility do
       viewer_id == owner_id -> true
       pv == "owner" -> false
       Social.blocked?(viewer_id, owner_id) -> false
-      true -> true
+      # A signed-in viewer sees "Members" (platform) and public profiles. (group
+      # profiles are #224; not a settable value yet.)
+      pv in ["platform", "public"] -> true
+      true -> false
     end
   end
 
-  def profile_visible?(%{profile_visibility: pv}, :unauthenticated), do: pv != "owner"
+  # A logged-out visitor sees ONLY public profiles — "Members" (platform) is
+  # signed-in-only, owner is private. (#225)
+  def profile_visible?(%{profile_visibility: pv}, :unauthenticated), do: pv == "public"
   def profile_visible?(_, _), do: false
 
   @doc """
