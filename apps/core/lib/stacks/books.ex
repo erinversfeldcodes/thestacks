@@ -179,7 +179,11 @@ defmodule Stacks.Books do
         event_type: "book.created",
         aggregate_type: "book",
         aggregate_id: book.id,
-        payload: %{isbn: edition.isbn, title: book.title}
+        payload: %{
+          isbn: edition.isbn,
+          title: book.title,
+          visibility_tier: book.visibility_tier
+        }
       })
 
       {:ok, book}
