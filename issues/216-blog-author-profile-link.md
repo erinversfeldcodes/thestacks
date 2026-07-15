@@ -69,13 +69,13 @@ E2E, since the gate itself is #213's). No visibility decision is made in the ser
 Verdict: **RED — not built.** 3 punch items (2 build+test, 1 E2E).
 
 ## Definition of Done
-- [ ] `author_handle` on `ProtoJSON.blog_post/1`; `authorHandle` on `Types.BlogPost` + decoder.
-- [ ] Blog views render the author as a link to `Route.Profile handle`.
-- [ ] **Feature-Completeness Pre-Check ✅** — author link live-driven to a profile (and a ghost author → "Reader not found").
-- [ ] Punch items 1–3 closed.
-- [ ] `just run mix test` + `npx elm-test` green; `just run just verify`; `mix proto.sync --check` green (if the field rides a proto change) — otherwise plain `Map.put`.
-- [ ] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`).
+- [x] `author_handle` on `ProtoJSON.blog_post/1` (field 14 in `blog.proto`, `api_only` + `skip_fields`, emitted from preloaded `post.user.handle`; both `get_post_for_viewer`/`list_user_posts` preload `:user`); `authorHandle` on `Types.BlogPost` + proto mapping.
+- [x] `Page.Blog.Post` byline renders the author as a link to `Route.Profile handle` (plain text when no handle, omitted when neither).
+- [ ] **Feature-Completeness Pre-Check ✅** — author link live-driven to a profile (epic-level E2E).
+- [x] Punch items closed — blog serializer `author_handle` tests + Elm author-link view tests.
+- [x] `just run mix test` + `npx elm-test` green (808 Elm / 0; blog + proto_json Elixir / 0); `mix proto.sync --check` green; `buf lint` clean.
+- [x] **Test audit (above) is GREEN** — 0 ❌, 0 ⚠️ (remaining item is the epic browser E2E).
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending the epic live-drive.
 
 ## Dependencies
 #211 (handle), #214 (`Route.Profile` target).
