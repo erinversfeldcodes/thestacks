@@ -70,13 +70,13 @@ defmodule StacksWeb.BlogControllerTest do
   # ---------------------------------------------------------------------------
 
   describe "GET /api/blog/posts" do
-    test "returns published posts for a user (unauthenticated)", %{conn: conn} do
-      user = insert(:user, profile_visibility: "platform")
+    test "returns published public posts for a user (unauthenticated)", %{conn: conn} do
+      user = insert(:user, profile_visibility: "public")
 
       _published =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
-      _draft = insert(:post, user: user, visibility: "platform", published_at: nil)
+      _draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
       conn = get(conn, "/api/blog/posts", %{user_id: user.id})
 
@@ -112,11 +112,11 @@ defmodule StacksWeb.BlogControllerTest do
   # ---------------------------------------------------------------------------
 
   describe "GET /api/blog/posts/:id" do
-    test "shows a published platform-visible post to unauthenticated viewer", %{conn: conn} do
-      user = insert(:user, profile_visibility: "platform")
+    test "shows a published public post to unauthenticated viewer (#225)", %{conn: conn} do
+      user = insert(:user, profile_visibility: "public")
 
       post =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
       conn = get(conn, "/api/blog/posts/#{post.id}")
 
@@ -478,6 +478,19 @@ defmodule StacksWeb.BlogControllerTest do
 
       assert %{"status" => "under_construction", "message" => message} = json_response(conn, 200)
       assert message =~ "coming soon"
+    end
+
+    test "returns 403 when chatting about another user's post (FF-2 ownership)", %{conn: conn} do
+      user = insert(:user)
+      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
+      other_post = insert(:post, user: insert(:user))
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/blog/posts/#{other_post.id}/chat", %{message: "help me write"})
+
+      assert conn.status == 403
     end
 
     test "returns 401 when unauthenticated", %{conn: conn} do

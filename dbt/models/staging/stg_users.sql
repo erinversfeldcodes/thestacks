@@ -25,6 +25,7 @@ select
     onboarding_steps,
     consent_writing_assistant,
     consent_writing_assistant_at,
+    handle,
     created_at,
     updated_at
 from {{ source('op', 'users') }}

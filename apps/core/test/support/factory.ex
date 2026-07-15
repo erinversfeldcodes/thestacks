@@ -41,6 +41,7 @@ defmodule Stacks.Factory do
       email: sequence(:email, &"user#{&1}@example.com"),
       password_hash: Argon2.hash_pwd_salt("password123"),
       display_name: sequence(:display_name, &"User #{&1}"),
+      handle: sequence(:handle, &"reader_#{&1}"),
       role: "user",
       profile_visibility: "owner",
       age_verified: false,

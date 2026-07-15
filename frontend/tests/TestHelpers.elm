@@ -2,15 +2,18 @@ module TestHelpers exposing
     ( bookDetailProgram
     , libraryProgram
     , loginProgram
+    , profileShelfProgram
     , searchProgram
     , simulateAuthErrorResponse
     , simulateAuthResponse
     , simulateBookDetailResponse
     , simulateBookDetailResponseWithPlacement
+    , simulateBookDetailResponseWithVisibility
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulateMergeFormatResponse
+    , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
     , testBook
@@ -45,6 +48,7 @@ import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData
 import Types.Shelf exposing (shelvesResponseDecoder)
+import Types.Visibility
 
 
 
@@ -98,6 +102,7 @@ testPlacement =
     , currentPage = Nothing
     , startedAt = Nothing
     , finishedAt = Nothing
+    , visibility = Nothing
     }
 
 
@@ -496,6 +501,58 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         json
 
 
+{-| A book-detail response carrying a placement with an explicit visibility and
+a denormalised parent-shelf ceiling (`bookshelf_visibility`). Drives the
+placement-visibility dropdown and its ceiling-greying.
+-}
+simulateBookDetailResponseWithVisibility : String -> Book -> String -> String -> Http.Response String
+simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibility =
+    let
+        placementJson =
+            Encode.object
+                [ ( "id", Encode.string "placement-vis-001" )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "bookshelf_name", Encode.string "library" )
+                , ( "visibility", Encode.string visibility )
+                , ( "bookshelf_visibility", Encode.string bookshelfVisibility )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", placementJson )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A successful `PUT /api/placements/:id/visibility` response: `{id, visibility}`.
+-}
+simulatePlacementVisibilityResponse : String -> String -> Http.Response String
+simulatePlacementVisibilityResponse placementId visibility =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/visibility"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "id", Encode.string placementId )
+                , ( "visibility", Encode.string visibility )
+                ]
+            )
+        )
+
+
 
 -- DECODERS (not exposed from Api, rebuilt here for simulated effects)
 -- SIMULATED EFFECT TRANSLATORS
@@ -708,6 +765,36 @@ libraryInitEffects maybeToken =
             SimulatedEffect.Cmd.none
 
 
+{-| Translate the read-only profile-shelf init Cmd into a SimulatedEffect.
+
+Mirrors `Api.getProfileShelf`: an optional-auth GET to the profile endpoint
+(`/api/u/:handle/bookshelves/:name`), decoding into `Bookshelf.ShelvesLoaded`.
+
+-}
+profileShelfInitEffects : Maybe String -> String -> String -> SimulatedEffect Bookshelf.Msg
+profileShelfInitEffects maybeToken handle bookshelfName =
+    let
+        headers =
+            case maybeToken of
+                Just token ->
+                    [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+    in
+    SimulatedEffect.Http.request
+        { method = "GET"
+        , headers = headers
+        , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+        , body = SimulatedEffect.Http.emptyBody
+        , expect =
+            SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+                shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 {-| Translate Search page Cmds into SimulatedEffects.
 -}
 searchEffects : Search.Msg -> Search.Model -> Maybe String -> SimulatedEffect Search.Msg
@@ -722,26 +809,65 @@ searchEffects msg model maybeToken =
 
         Search.DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
-                case maybeToken of
-                    Just token ->
+                let
+                    booksEffect =
+                        case maybeToken of
+                            Just token ->
+                                SimulatedEffect.Http.request
+                                    { method = "GET"
+                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                                    , url = "/api/books/search?q=" ++ model.query
+                                    , body = SimulatedEffect.Http.emptyBody
+                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
+                                    , timeout = Nothing
+                                    , tracker = Nothing
+                                    }
+
+                            Nothing ->
+                                SimulatedEffect.Cmd.none
+
+                    readersEffect =
                         SimulatedEffect.Http.request
                             { method = "GET"
-                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/books/search?q=" ++ model.query
+                            , headers = authHeaderList maybeToken
+                            , url = "/api/search/users?q=" ++ model.query
                             , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
+                            , expect =
+                                SimulatedEffect.Http.expectJson Search.ReadersCompleted
+                                    (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
                             , timeout = Nothing
                             , tracker = Nothing
                             }
-
-                    Nothing ->
-                        SimulatedEffect.Cmd.none
+                in
+                SimulatedEffect.Cmd.batch [ booksEffect, readersEffect ]
 
             else
                 SimulatedEffect.Cmd.none
 
         _ ->
             SimulatedEffect.Cmd.none
+
+
+authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
+authHeaderList maybeToken =
+    case maybeToken of
+        Just token ->
+            [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+
+        Nothing ->
+            []
+
+
+{-| Local copy of the people-search result decoder (Api.publicProfileSummaryDecoder
+is not exposed). Matches `public_profile_summary/1`'s redacted shape.
+-}
+publicProfileSummaryDecoder : Decode.Decoder Api.PublicProfileSummary
+publicProfileSummaryDecoder =
+    Decode.map4 Api.PublicProfileSummary
+        (Decode.field "handle" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (Decode.oneOf [ Decode.field "city" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "country_code" Decode.string, Decode.succeed "" ])
 
 
 {-| Translate BookDetail page Cmds into SimulatedEffects.
@@ -801,6 +927,32 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
+        BookDetail.PlacementVisibilitySelected _ ->
+            -- `model` here is the post-update model (bookDetailProgram passes
+            -- newModel). A Loading visibilityState means the client-side ceiling
+            -- guard passed and a PUT should be issued.
+            case ( model.placement, maybeToken, model.visibilityState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/visibility"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object
+                                    [ ( "visibility"
+                                      , Encode.string (Types.Visibility.toString model.placementVisibility)
+                                      )
+                                    ]
+                                )
+                        , expect = SimulatedEffect.Http.expectJson BookDetail.PlacementVisibilityUpdated (Decode.field "visibility" Decode.string)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -809,9 +961,14 @@ bookDetailEffects msg model maybeToken =
 -}
 decodeBookDetailResponse : Decode.Decoder BookDetailResponse
 decodeBookDetailResponse =
-    Decode.map2 BookDetailResponse
+    Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
         (Decode.maybe (Decode.field "placement" placementDecoder))
+        (Decode.oneOf
+            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 {-| Decode a MergeFormatResponse. Mirrors Api.mergeFormatResponseDecoder which is not exposed.
@@ -937,6 +1094,35 @@ libraryProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
+{-| Create a ProgramTest harness for the read-only profile-shelf browse view
+(`Page.Bookshelf` in its `profileConfig` — US-10.5.3 / Issue #215).
+-}
+profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+profileShelfProgram maybeToken handle bookshelfName =
+    let
+        config =
+            Bookshelf.profileConfig handle bookshelfName
+    in
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        Bookshelf.init config maybeToken "viewer-user-id"
+                in
+                ( model, profileShelfInitEffects maybeToken handle bookshelfName )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        Bookshelf.update msg model
+                in
+                ( newModel, libraryEffects msg model maybeToken )
+        , view = Bookshelf.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
 {-| Create a ProgramTest harness for the Search page.
 -}
 searchProgram : Maybe String -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
@@ -959,11 +1145,16 @@ searchProgram maybeToken =
 -}
 decodeAuthResponse : Decode.Decoder AuthResponse
 decodeAuthResponse =
-    Decode.map7 AuthResponse
+    Decode.map8 AuthResponse
         (Decode.field "token" Decode.string)
         (Decode.at [ "user", "id" ] Decode.string)
         (Decode.at [ "user", "email" ] Decode.string)
         (Decode.at [ "user", "display_name" ] Decode.string)
+        (Decode.oneOf
+            [ Decode.at [ "user", "handle" ] Decode.string
+            , Decode.succeed ""
+            ]
+        )
         (Decode.oneOf
             [ Decode.at [ "user", "role" ] Decode.string
             , Decode.succeed "user"

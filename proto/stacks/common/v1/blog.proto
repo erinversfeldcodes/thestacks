@@ -112,6 +112,19 @@ message BlogPost {
 
   // UUID of the group that can see this post (when visibility is "group").
   string visibility_group_id = 12 [json_name = "visibility_group_id"];
+
+  // Display name of the post's author, denormalised from op.users for display
+  // in the block-user confirmation ("Block <name>?"). API-only projection — not
+  // a stored column; sourced from the author's users.display_name at serialize
+  // time. Empty when the author association is not loaded (frontend falls back
+  // to a generic "the author" label).
+  string author_display_name = 13 [json_name = "author_display_name"];
+
+  // Public handle of the post's author, denormalised from op.users for linking
+  // the author name to their public profile (/u/:handle). API-only projection —
+  // not a stored column; sourced from the author's users.handle at serialize
+  // time. Empty when the author association is not loaded.
+  string author_handle = 14 [json_name = "author_handle"];
 }
 
 // PostComment represents a user comment on a blog post.

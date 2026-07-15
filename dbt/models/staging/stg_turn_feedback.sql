@@ -7,6 +7,5 @@ select
     session_id,
     turn_index,
     rating,
-    comment,
     created_at
 from {{ source('op', 'turn_feedback') }}

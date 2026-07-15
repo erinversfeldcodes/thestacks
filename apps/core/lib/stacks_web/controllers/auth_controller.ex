@@ -25,11 +25,19 @@ defmodule StacksWeb.AuthController do
           ip: get_ip(conn)
         )
 
+        # Registration outcome counter (Issue #206 / auth §12). `result` is a
+        # bounded label (:ok | :error) — never derived from user input — so the
+        # `stacks_auth_registration_count_total{result=…}` series stays
+        # low-cardinality and alertable for a registration-failure spike.
+        :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :ok})
+
         conn
         |> put_status(201)
         |> json(%{message: "confirmation_email_sent"})
 
       {:error, changeset} ->
+        :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :error})
+
         conn
         |> put_status(422)
         |> json(%{errors: format_errors(changeset)})
@@ -63,6 +71,12 @@ defmodule StacksWeb.AuthController do
 
         case Accounts.open_token_family(family_attrs) do
           {:ok, _family} ->
+            # JWT issuance counter (Issue #206 / auth §12). Counted only once the
+            # token is actually handed to the client (family persisted); the
+            # fail-closed branch below revokes an un-issued token and must NOT
+            # count. `context` is a bounded label (:login | :refresh).
+            :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :login})
+
             json(conn, %{token: token, user: ProtoJSON.user(user)})
 
           {:error, reason} ->
@@ -79,11 +93,15 @@ defmodule StacksWeb.AuthController do
         end
 
       {:error, :email_unconfirmed} ->
+        emit_login_failure(:email_unconfirmed)
+
         conn
         |> put_status(403)
         |> json(%{error: "email_unconfirmed"})
 
       {:error, :invalid_credentials} ->
+        emit_login_failure(:invalid_credentials)
+
         conn
         |> put_status(401)
         |> json(%{error: "invalid_credentials"})
@@ -94,12 +112,16 @@ defmodule StacksWeb.AuthController do
         # due to lock state. We surface retry_after_seconds in BOTH the
         # standard Retry-After header (for HTTP-compliant clients) and in
         # the JSON body (for SPA UIs that need to render a countdown).
+        emit_login_failure(:account_locked)
+
         conn
         |> put_resp_header("retry-after", Integer.to_string(retry_after_seconds))
         |> put_status(423)
         |> json(%{error: "account_locked", retry_after_seconds: retry_after_seconds})
 
       {:error, :argon2_busy} ->
+        emit_login_failure(:service_busy)
+
         conn
         |> put_status(503)
         |> put_resp_header("retry-after", "5")
@@ -108,9 +130,30 @@ defmodule StacksWeb.AuthController do
   end
 
   def login(conn, _params) do
+    emit_login_failure(:missing_params)
+
     conn
     |> put_status(422)
     |> json(%{error: "email and password are required"})
+  end
+
+  # Login-failure-by-type counter (Issue #206 / auth §12). `type` is a bounded,
+  # whitelisted atom drawn from the fixed set of login-error branches
+  # (never raw user input), so `stacks_auth_login_failure_count_total{type=…}`
+  # stays low-cardinality and gives operators a per-reason breakdown
+  # (401 invalid_credentials, 403 email_unconfirmed, 422 missing_params,
+  # 423 account_locked, 503 service_busy). 429 rate-limit rejections are
+  # counted upstream in StacksWeb.Plugs.RateLimiter (the request never reaches
+  # this action once the :auth bucket trips).
+  defp emit_login_failure(type)
+       when type in [
+              :invalid_credentials,
+              :email_unconfirmed,
+              :missing_params,
+              :account_locked,
+              :service_busy
+            ] do
+    :telemetry.execute([:stacks, :auth, :login_failure], %{count: 1}, %{type: type})
   end
 
   @doc "DELETE /api/auth/logout — revoke the current JWT."
@@ -269,6 +312,11 @@ defmodule StacksWeb.AuthController do
         rotated_at: DateTime.utc_now(),
         session_started_at: DateTime.from_unix!(session_start)
       })
+
+      # JWT issuance counter (Issue #206 / auth §12) — a rotation mints a fresh
+      # access token, so it is a real issuance. Tagged `context: :refresh` to
+      # distinguish silent-renewal issuance from interactive login issuance.
+      :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :refresh})
 
       json(conn, %{token: token, user: ProtoJSON.user(user)})
     end

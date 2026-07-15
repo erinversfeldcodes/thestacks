@@ -86,15 +86,16 @@ None. 0 ❌, 0 ⚠️. All applicable cells (L1, L10) are ✅ against real, veri
 **GREEN.** The exact-`"DELETE"` type-to-confirm guard, the single-flight invariant, the queued-success message, and the `AccountDeleted` farewell OutMsg are all covered by real program tests. No invented test names. Browser live-drive of the Main-side session teardown → `/login` farewell is deferred to the #121 epic preview run (noted in the Feature-Completeness Pre-Check).
 
 ## Definition of Done
-- [ ] "Delete My Data" → confirmation dialog
-- [ ] `UserTypesDeleteConfirmation` enables submit only when text is exactly `"DELETE"`
-- [ ] `UserClicksDeleteAccount` → Loading → Success ("Account deletion has been queued")
-- [ ] Logout/farewell OutMsg on success
-- [ ] Wired to `DELETE /api/gdpr/account` via `RemoteData`
-- [ ] `just verify` passes
-- [ ] E2E / elm-test coverage
+- [x] "Delete My Data" → confirmation dialog — `Privacy.elm`
+- [x] `UserTypesDeleteConfirmation` enables submit only when text is exactly `"DELETE"` — `GdprDeleteProgramTest.elm` guard tests (exact/lowercase/partial/trailing-space)
+- [x] `UserClicksDeleteAccount` → Loading → Success — `GdprDeleteProgramTest.elm` "success_state" (202), "single_flight"
+- [x] Logout/farewell OutMsg on success — `AccountDeleted` OutMsg → `Main.handleAccountDeleted`; "farewell_outmsg"
+- [x] Wired to `DELETE /api/gdpr/account` via `RemoteData`
+- [x] `just verify` passes
+- [x] E2E / elm-test coverage (`GdprDeleteProgramTest.elm` — 14 tests)
 - [x] Feature-Completeness Pre-Check (above) is ✅ for every named user story — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is either built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`. (US-8.2 ✅; browser live-drive of the Main-side farewell deferred to the #121 epic preview run.)
 - [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — type-to-confirm delete UI + farewell, 14-test program suite; browser farewell to be re-driven at the epic preview gate.
 
 ## Dependencies
 None — the delete backend endpoint already exists (returns 202).

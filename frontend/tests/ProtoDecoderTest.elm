@@ -725,6 +725,7 @@ userSuite =
                         { id = "u-2"
                         , email = "owner@stacks.local"
                         , displayName = "Librarian"
+                        , handle = "librarian"
                         , role = "owner"
                         , countryCode = "GB"
                         , city = "London"
@@ -1190,6 +1191,8 @@ responseSuite =
                                 , formats = [ "physical" ]
                                 , personalRating = 5
                                 , notes = "Great"
+                                , visibility = "platform"
+                                , bookshelfVisibility = "platform"
                                 }
                         , myWriting = [ { id = "w-1", title = "Review", publishedAt = "2026-03-20T00:00:00Z" } ]
                         }
@@ -1256,6 +1259,7 @@ responseSuite =
                             { id = "u-2"
                             , email = "owner@stacks.local"
                             , displayName = "Librarian"
+                            , handle = "librarian"
                             , role = "owner"
                             , countryCode = "GB"
                             , city = "London"
@@ -1458,6 +1462,8 @@ blogSuite =
                         , createdAt = "2026-03-20T00:00:00Z"
                         , updatedAt = "2026-03-21T01:00:00Z"
                         , visibilityGroupId = ""
+                        , authorDisplayName = "Fable Quill"
+                        , authorHandle = "fable_quill"
                         }
 
                     result =
@@ -1745,6 +1751,8 @@ blogResponseSuite =
                             , createdAt = "2026-03-20T00:00:00Z"
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
+                            , authorDisplayName = "Fable Quill"
+                            , authorHandle = "fable_quill"
                             }
                         }
 

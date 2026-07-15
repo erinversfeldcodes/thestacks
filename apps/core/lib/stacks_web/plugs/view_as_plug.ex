@@ -74,18 +74,24 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   # ---------------------------------------------------------------------------
 
   defp parse_perspective(conn, "unauthenticated") do
+    emit_usage(:unauthenticated)
     assign(conn, :requested_perspective, :unauthenticated)
   end
 
   defp parse_perspective(conn, "platform") do
+    emit_usage(:platform)
     assign(conn, :requested_perspective, :platform)
   end
 
   defp parse_perspective(conn, "user:" <> id) when byte_size(id) > 0 do
+    # Tag only the perspective KIND — never the raw uuid — to bound cardinality.
+    emit_usage(:specific_user)
     assign(conn, :requested_perspective, {:specific_user, id})
   end
 
   defp parse_perspective(conn, "user:") do
+    emit_error(:invalid_perspective, :parse)
+
     conn
     |> put_status(422)
     |> json(%{error: "invalid_perspective", detail: "user id is required"})
@@ -93,6 +99,8 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   defp parse_perspective(conn, "group:" <> id) when byte_size(id) > 0 do
+    emit_error(:not_implemented, :parse)
+
     conn
     |> put_status(422)
     |> json(%{error: "not_implemented", detail: "group perspective is not yet supported"})
@@ -100,6 +108,8 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   defp parse_perspective(conn, "group:") do
+    emit_error(:invalid_perspective, :parse)
+
     conn
     |> put_status(422)
     |> json(%{error: "invalid_perspective", detail: "group id is required"})
@@ -107,10 +117,22 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   defp parse_perspective(conn, _unknown) do
+    emit_error(:invalid_perspective, :parse)
+
     conn
     |> put_status(422)
     |> json(%{error: "invalid_perspective"})
     |> halt()
+  end
+
+  # ── Telemetry (Issue #197) — whitelisted atoms only, never raw input ──
+
+  defp emit_usage(perspective) do
+    :telemetry.execute([:stacks, :view_as, :usage], %{count: 1}, %{perspective: perspective})
+  end
+
+  defp emit_error(reason, phase) do
+    :telemetry.execute([:stacks, :view_as, :error], %{count: 1}, %{reason: reason, phase: phase})
   end
 
   # ---------------------------------------------------------------------------
@@ -128,6 +150,8 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
         apply_limited_perspective(conn, perspective, user)
 
       true ->
+        emit_error(:forbidden, :authorize)
+
         conn
         |> put_status(403)
         |> json(%{error: "forbidden"})
@@ -146,12 +170,16 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
-  defp apply_perspective(conn, :platform, user) do
-    assign(conn, :view_as_context, {:platform_user, user.id})
+  defp apply_perspective(conn, :platform, _user) do
+    # Generic platform viewer with NO identity (SEC-1) — never the owner, so a
+    # preview "as a platform user" cannot see owner-only content.
+    assign(conn, :view_as_context, :platform_preview)
   end
 
   defp apply_perspective(conn, {:specific_user, id}, _user) do
-    assign(conn, :view_as_context, {:specific_user, id})
+    # Simulate exactly what that user sees — owner/group/block all resolve for id
+    # (SEC-4: previously dead-ended to hidden-everything via the catch-all).
+    assign(conn, :view_as_context, {:platform_user, id})
   end
 
   # Resource owners may only use unauthenticated and platform.
@@ -159,11 +187,15 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
-  defp apply_limited_perspective(conn, :platform, user) do
-    assign(conn, :view_as_context, {:platform_user, user.id})
+  defp apply_limited_perspective(conn, :platform, _user) do
+    # See SEC-1 above — a resource owner previewing "as platform" must not see
+    # their own owner-only content, so use the identity-less preview viewer.
+    assign(conn, :view_as_context, :platform_preview)
   end
 
   defp apply_limited_perspective(conn, _perspective, _user) do
+    emit_error(:forbidden, :authorize)
+
     conn
     |> put_status(403)
     |> json(%{error: "forbidden", detail: "only platform owners may use this perspective"})

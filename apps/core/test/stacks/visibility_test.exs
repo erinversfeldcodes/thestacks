@@ -17,11 +17,26 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
     end
 
-    test "unauthenticated viewer + public bookshelf (profile_visibility: platform) → :visible" do
+    test "unauthenticated viewer + platform (Members) bookshelf → :hidden (signed-in only, #225)" do
       owner = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
+      assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "unauthenticated viewer + public bookshelf + public profile → :visible (#225)" do
+      owner = insert(:user, profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: owner, visibility: "public")
+
       assert :visible = Visibility.resolve_visibility(bookshelf, :unauthenticated)
+    end
+
+    test "signed-in viewer + platform (Members) bookshelf → :visible" do
+      owner = insert(:user, profile_visibility: "platform")
+      viewer = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
+
+      assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end
 
     test "platform user viewer + profile_visibility owner (not owner of resource) → :hidden" do
@@ -170,6 +185,47 @@ defmodule Stacks.VisibilityTest do
 
       assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
+
+    test "active looking_for_home listing is :hidden for a viewer the owner has blocked (SEC-2)" do
+      # A block hides ALL of the owner's content — the marketplace exception must
+      # not punch through the bidirectional block.
+      owner = insert(:user, profile_visibility: "owner")
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "owner")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "platform", listing_status: "active")
+
+      viewer = insert(:user)
+      {:ok, _} = Stacks.Social.block_user(owner.id, viewer.id)
+
+      assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # resolve_visibility/2 — platform preview (ViewAs :platform perspective)
+  # ---------------------------------------------------------------------------
+
+  describe "resolve_visibility/2 — platform preview" do
+    test "platform preview does NOT see owner-only content (SEC-1)" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "owner")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "owner", listing_status: nil)
+
+      assert :hidden = Visibility.resolve_visibility(placement, :platform_preview)
+    end
+
+    test "platform preview sees platform-visible content (SEC-1)" do
+      owner = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+
+      placement =
+        insert(:placement, bookshelf: bookshelf, visibility: "platform", listing_status: nil)
+
+      assert :visible = Visibility.resolve_visibility(placement, :platform_preview)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -204,6 +260,64 @@ defmodule Stacks.VisibilityTest do
 
     test "same visibility → ok" do
       assert :ok = Visibility.validate_visibility_ceiling("platform", "platform", :bookshelf)
+    end
+
+    # Unified Audience ladder (owner < group < platform < public), #209 Phase 2.
+    # These are the cells the former two-rank-map implementation got WRONG:
+    # `@visibility_rank` omitted "group" (defaulting it to 0 = most permissive),
+    # so a group child was wrongly rejected under a platform/owner parent.
+    test "child group under platform parent → ok (group is more restrictive than platform)" do
+      assert :ok = Visibility.validate_visibility_ceiling("group", "platform", :bookshelf)
+    end
+
+    test "child platform under group parent → error (platform is more exposed than group)" do
+      assert {:error, _} = Visibility.validate_visibility_ceiling("platform", "group", :bookshelf)
+    end
+
+    test "child group under owner parent → error (owner ghost-mode caps everything to owner)" do
+      assert {:error, _} = Visibility.validate_visibility_ceiling("group", "owner", :bookshelf)
+    end
+
+    test "child owner under group parent → ok" do
+      assert :ok = Visibility.validate_visibility_ceiling("owner", "group", :bookshelf)
+    end
+  end
+
+  describe "classify_visibility_direction/2 (single ladder)" do
+    test "platform → owner is a tighten (less exposed)" do
+      assert :tighten = Visibility.classify_visibility_direction("platform", "owner")
+    end
+
+    test "owner → platform is a loosen (more exposed)" do
+      assert :loosen = Visibility.classify_visibility_direction("owner", "platform")
+    end
+
+    test "group sits between platform and owner: group → platform is a loosen" do
+      assert :loosen = Visibility.classify_visibility_direction("group", "platform")
+    end
+
+    test "platform → group is a tighten" do
+      assert :tighten = Visibility.classify_visibility_direction("platform", "group")
+    end
+
+    test "no change → same" do
+      assert :same = Visibility.classify_visibility_direction("platform", "platform")
+    end
+  end
+
+  describe "canonical Audience level sources" do
+    test "audience_levels/0 is the full stored ladder (owner/group/platform/public)" do
+      assert Visibility.audience_levels() == ~w(owner group platform public)
+    end
+
+    test "profile_audience_levels/0 is owner/platform/public (group deferred to #224)" do
+      assert Visibility.profile_audience_levels() == ~w(owner platform public)
+    end
+
+    test "valid_audience_level?/1 accepts ladder values (incl. public) and rejects others" do
+      assert Visibility.valid_audience_level?("group")
+      assert Visibility.valid_audience_level?("public")
+      refute Visibility.valid_audience_level?("nonsense")
     end
   end
 
@@ -416,14 +530,57 @@ defmodule Stacks.VisibilityTest do
       assert length(result) == 2
     end
 
-    test "unauthenticated viewer sees only platform-visible bookshelves" do
-      owner = insert(:user, profile_visibility: "platform")
-      _platform_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+    test "unauthenticated viewer sees only PUBLIC bookshelves (platform is Members-only, #225)" do
+      owner = insert(:user, profile_visibility: "public")
+      _public_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
+      _platform_shelf = insert(:bookshelf, user: owner, name: "wishlist", visibility: "platform")
       _owner_shelf = insert(:bookshelf, user: owner, name: "antilibrary", visibility: "owner")
 
       result = Visibility.viewable_shelves(owner.id, :unauthenticated)
 
+      # Only the public shelf — platform (Members) and owner are hidden from anon.
       assert length(result) == 1
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Audience proto ↔ Elixir vocabulary parity (#209 Phase 1 drift guard)
+  #
+  # The canonical vocabulary is DECLARED in proto/stacks/common/v1/visibility.proto
+  # (enum Audience). The Elixir runtime source (Visibility.audience_levels/0, which
+  # Shelving/Blog/Accounts all consume) must not drift from it. Parsing the .proto
+  # text keeps the proto the authority without depending on generated code.
+  # ---------------------------------------------------------------------------
+  describe "Audience proto ↔ Elixir vocabulary parity" do
+    @proto_path Path.join([
+                  __DIR__,
+                  "..",
+                  "..",
+                  "..",
+                  "..",
+                  "proto",
+                  "stacks",
+                  "common",
+                  "v1",
+                  "visibility.proto"
+                ])
+
+    defp settable_audience_values_from_proto do
+      @proto_path
+      |> File.read!()
+      |> then(&Regex.scan(~r/^\s*AUDIENCE_(\w+)\s*=\s*\d+;/m, &1))
+      |> Enum.map(fn [_, name] -> String.downcase(name) end)
+      |> Enum.reject(&(&1 == "unspecified"))
+    end
+
+    test "audience_levels/0 exactly matches the proto Audience enum's settable values" do
+      assert Enum.sort(Visibility.audience_levels()) ==
+               Enum.sort(settable_audience_values_from_proto())
+    end
+
+    test "public is a settable value in BOTH the proto and the Elixir ladder (#225)" do
+      assert "public" in settable_audience_values_from_proto()
+      assert "public" in Visibility.audience_levels()
     end
   end
 end

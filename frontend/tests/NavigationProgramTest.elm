@@ -125,7 +125,7 @@ navigateToSearch =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Search Books" ]
+                            [ Selector.text "Search books & readers" ]
                 ]
                 ()
 

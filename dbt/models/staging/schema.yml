@@ -163,6 +163,11 @@ models:
         description: Consent writing assistant.
       - name: consent_writing_assistant_at
         description: Consent writing assistant at.
+      - name: handle
+        description: Handle.
+        tests:
+          - not_null
+          - unique
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -1167,8 +1172,6 @@ models:
         description: Status.
         tests:
           - not_null
-      - name: topic
-        description: Topic.
       - name: model
         description: Model.
       - name: started_at
@@ -1228,8 +1231,6 @@ models:
         tests:
           - accepted_values:
               values: ['up', 'down']
-      - name: comment
-        description: Comment.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

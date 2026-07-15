@@ -161,6 +161,9 @@ defmodule Stacks.Blog do
         nil
 
       post ->
+        # Preload the author so the serializer can emit author_display_name
+        # (the block-user confirmation label).
+        post = Repo.preload(post, :user)
         if Visibility.can_view?(post, viewer), do: post, else: nil
     end
   end
@@ -192,6 +195,8 @@ defmodule Stacks.Blog do
 
     query
     |> Repo.all()
+    # Preload authors so the serializer can emit author_display_name.
+    |> Repo.preload(:user)
     |> Enum.filter(&Visibility.can_view?(&1, viewer))
   end
 
@@ -452,14 +457,14 @@ defmodule Stacks.Blog do
 
   @post_required_fields [:user_id, :title, :body]
   @post_optional_fields [:visibility, :visibility_group_id, :published_at]
-  @post_valid_visibilities ~w(owner group platform)
 
   @doc "Changeset for creating or updating a blog post."
   def post_changeset(post, attrs) do
     post
     |> cast(attrs, @post_required_fields ++ @post_optional_fields)
     |> validate_required(@post_required_fields)
-    |> validate_inclusion(:visibility, @post_valid_visibilities)
+    # Canonical Audience ladder (owner/group/platform) — one source of truth.
+    |> validate_inclusion(:visibility, Visibility.audience_levels())
   end
 
   @assoc_required_fields [:post_id, :book_id, :confidence, :source]
@@ -486,8 +491,12 @@ defmodule Stacks.Blog do
 
   defp validate_ceiling(child_visibility, parent_visibility) do
     case Visibility.validate_visibility_ceiling(child_visibility, parent_visibility, :post) do
-      :ok -> :ok
-      {:error, _reason} -> {:error, :visibility_ceiling}
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        Visibility.emit_ceiling_rejection(:post)
+        {:error, :visibility_ceiling}
     end
   end
 

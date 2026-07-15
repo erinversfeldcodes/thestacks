@@ -41,15 +41,16 @@ _Compact — SPA UX/state. Green when a mid-compose expiry preserves (or acknowl
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 10 Elm state machine | yes | ❌ expiry mid-compose stashes the draft (or the ack note) and restores on return. Validation: elm program/unit test that a `SessionExpired` from CreateListing persists the form state and re-init restores it (or shows the ack). |
-| 7 Storage | maybe | ❌ localStorage draft round-trip test (if option 1) |
+| 10 Elm state machine | yes | ✅ `CreateListingDraftTest.elm` — "matching userId hydrates all six fields", "mismatched userId does NOT hydrate and clears the draft", "network error → NoOut (stays local, no SessionExpiredWithDraft)". |
+| 7 Storage | yes | ✅ `CreateListingDraftTest.elm` — "encoded value round-trips to the six fields + current userId" (localStorage draft round-trip, option 1 chosen). |
 | others | no | n/a |
 
 ## Definition of Done
-- [ ] A session expiry while composing a listing does not silently discard the input (draft restored, or a clear acknowledgment)
-- [ ] Validation path: elm test for the stash-on-expiry + restore-on-return (or the ack) behaviour
-- [ ] `elm-test` + `just verify` pass
-- [ ] Test audit (embedded) is GREEN
+- [x] A session expiry while composing a listing does not discard the input — draft stashed to localStorage on `SessionExpiredWithDraft` and restored (userId-scoped) on re-init (option 1)
+- [x] Validation path: `CreateListingDraftTest.elm` — round-trip, userId-scoped hydrate/clear, non-401 stays local
+- [x] `elm-test` + `just verify` pass
+- [x] Test audit (embedded) is GREEN
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — draft preserved across expiry, round-trip + guard tested.
 
 ## Dependencies
 - #173 (the interceptor / redirect on expiry).

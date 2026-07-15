@@ -96,6 +96,8 @@ defmodule Stacks.Social do
 
     case result do
       {:ok, block} ->
+        :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
+
         Events.emit_safe(%{
           event_type: "social.user_blocked",
           aggregate_type: "user",
@@ -106,8 +108,28 @@ defmodule Stacks.Social do
         {:ok, block}
 
       {:error, changeset} ->
+        # Tag the counter by the ACTUAL failure. A uniqueness violation is the
+        # expected duplicate/already-blocked case; anything else (e.g. a missing
+        # required id) must not be mislabeled as :already_blocked.
+        :telemetry.execute(
+          [:stacks, :social, :block_error],
+          %{count: 1},
+          %{reason: block_error_reason(changeset)}
+        )
+
         {:error, changeset}
     end
+  end
+
+  # Classifies a block-insert changeset error for the block_error counter.
+  # The (blocker_id, blocked_id) unique_constraint is the only DB constraint, so
+  # a unique violation is :already_blocked; any other changeset error is :invalid.
+  @spec block_error_reason(Ecto.Changeset.t()) :: :already_blocked | :invalid
+  defp block_error_reason(%Ecto.Changeset{errors: errors}) do
+    unique? =
+      Enum.any?(errors, fn {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique end)
+
+    if unique?, do: :already_blocked, else: :invalid
   end
 
   @doc """
@@ -130,6 +152,8 @@ defmodule Stacks.Social do
 
       block ->
         {:ok, _} = Repo.delete(block)
+
+        :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
 
         Events.emit_safe(%{
           event_type: "social.user_unblocked",

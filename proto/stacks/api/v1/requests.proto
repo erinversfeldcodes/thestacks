@@ -56,6 +56,9 @@ message UpdateProfileRequest {
   string website_url = 3 [json_name = "website_url"];
   // Current password, required when changing email.
   string current_password = 4 [json_name = "current_password"];
+  // Updated public handle (the /u/:handle slug). Validated + normalised
+  // server-side; a taken/reserved/malformed value returns a 422 field error.
+  string handle = 5 [json_name = "handle"];
 }
 
 // PUT /api/settings/location

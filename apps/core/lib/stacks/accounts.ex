@@ -21,8 +21,10 @@ defmodule Stacks.Accounts do
   alias Guardian.DB.Token, as: GuardianDbToken
   alias Stacks.Accounts.ArgonPool
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
   alias Stacks.Events
+  alias Stacks.Social.UserBlock
   alias Stacks.Workers.VisibilityRecapJob
 
   # ---------------------------------------------------------------------------
@@ -43,7 +45,9 @@ defmodule Stacks.Accounts do
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
     |> validate_length(:password, min: 8, message: "must be at least 8 characters")
     |> validate_inclusion(:role, ["owner", "user"])
-    |> validate_inclusion(:profile_visibility, ["owner", "group", "platform"])
+    |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
+    |> maybe_put_handle()
+    |> validate_handle()
     |> unique_constraint(:email)
     |> hash_password()
   end
@@ -68,8 +72,10 @@ defmodule Stacks.Accounts do
   @doc "Changeset for profile update (display_name, website_url)."
   def profile_changeset(user, attrs) do
     user
-    |> cast(attrs, [:display_name, :website_url])
+    |> cast(attrs, [:display_name, :website_url, :handle])
     |> validate_length(:website_url, max: 500)
+    # No-op unless :handle is being changed — keeps other profile updates unaffected.
+    |> validate_handle()
   end
 
   @doc "Changeset for email update. Requires current_password to be verified externally."
@@ -113,7 +119,7 @@ defmodule Stacks.Accounts do
   def profile_visibility_changeset(user, attrs) do
     user
     |> cast(attrs, [:profile_visibility])
-    |> validate_inclusion(:profile_visibility, ["platform", "owner"])
+    |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
   end
 
   @doc "Changeset for updating onboarding_steps JSONB map."
@@ -151,6 +157,82 @@ defmodule Stacks.Accounts do
 
   defp hash_password(changeset), do: changeset
 
+  # ---------------------------------------------------------------------------
+  # Public URL handle (/u/:handle) — #211
+  # ---------------------------------------------------------------------------
+
+  @handle_format ~r/^[a-z0-9_]{3,30}$/
+
+  @doc """
+  Validates/normalises the `:handle` field: force-lowercase, format
+  (`[a-z0-9_]{3,30}`), not reserved, and case-insensitively unique. Shared by
+  registration and the settings profile update.
+  """
+  def validate_handle(changeset) do
+    changeset
+    |> update_change(:handle, &normalise_handle/1)
+    |> validate_format(:handle, @handle_format,
+      message: "must be 3-30 characters: lowercase letters, numbers, underscores"
+    )
+    |> validate_reserved_handle()
+    |> unique_constraint(:handle, name: :users_lower_handle_index)
+  end
+
+  defp normalise_handle(value) when is_binary(value),
+    do: value |> String.trim() |> String.downcase()
+
+  defp normalise_handle(value), do: value
+
+  defp validate_reserved_handle(changeset) do
+    case get_change(changeset, :handle) do
+      handle when is_binary(handle) ->
+        if ReservedHandles.reserved?(handle),
+          do: add_error(changeset, :handle, "is reserved"),
+          else: changeset
+
+      _ ->
+        changeset
+    end
+  end
+
+  # Auto-assign a handle at registration when none is present, so every user has
+  # a reachable /u/:handle. Users can change it later in settings (#212).
+  defp maybe_put_handle(changeset) do
+    case get_field(changeset, :handle) do
+      nil -> put_change(changeset, :handle, generate_handle(get_field(changeset, :display_name)))
+      _ -> changeset
+    end
+  end
+
+  @doc """
+  Generates a likely-unique handle from a display name: a slug of the name
+  (≤20 chars, non-alphanumerics collapsed to `_`, `reader` when empty) plus a
+  6-char random suffix. The random suffix makes a collision astronomically
+  unlikely; `unique_constraint(:handle)` is the backstop. Mirrors the SQL backfill
+  in `20260714200500_backfill_and_constrain_user_handles`.
+  """
+  @spec generate_handle(String.t() | nil) :: String.t()
+  def generate_handle(display_name) do
+    slugify_handle_base(display_name) <> "_" <> handle_random_suffix()
+  end
+
+  defp slugify_handle_base(name) when is_binary(name) do
+    slug =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "_")
+      |> String.trim("_")
+      |> String.slice(0, 20)
+
+    if slug == "", do: "reader", else: slug
+  end
+
+  defp slugify_handle_base(_), do: "reader"
+
+  defp handle_random_suffix do
+    :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower) |> String.slice(0, 6)
+  end
+
   @doc """
   Returns a user by ID, or nil if not found.
   """
@@ -169,6 +251,104 @@ defmodule Stacks.Accounts do
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) do
     Repo.get_by(User, email: String.downcase(email))
+  end
+
+  @doc """
+  Returns a user by public handle (case-insensitive), or nil if not found.
+  Keys the public profile at `/u/:handle`.
+  """
+  @spec get_user_by_handle(String.t()) :: User.t() | nil
+  def get_user_by_handle(handle) when is_binary(handle) do
+    normalised = String.downcase(String.trim(handle))
+    Repo.one(from u in User, where: fragment("lower(?)", u.handle) == ^normalised, limit: 1)
+  end
+
+  def get_user_by_handle(_), do: nil
+
+  @doc """
+  People search for the discovery surface (US-10.5.4).
+
+  Returns up to #{20} users whose `display_name` matches `term` (case-insensitive
+  `ILIKE`), restricted to **discoverable** profiles (`profile_visibility =
+  "platform"`) and excluding any user blocked in **either** direction relative to
+  `viewer_id`.
+
+  The discoverability privacy rule is enforced **in SQL**, never by serializer
+  redaction: a ghost (`profile_visibility = "owner"`) or a blocked user never
+  enters the result set. When `viewer_id` is `nil` (unauthenticated) there is no
+  viewer to block against, so only the `platform` filter applies.
+
+  A blank/whitespace-only term returns `[]` (no query).
+  """
+  @search_limit 20
+  @spec search_users(String.t(), binary() | nil) :: [User.t()]
+  def search_users(term, viewer_id \\ nil)
+
+  def search_users(term, viewer_id) when is_binary(term) do
+    trimmed = String.trim(term)
+
+    if trimmed == "" do
+      []
+    else
+      # Compare against `lower(display_name)` (not raw `display_name`) so the
+      # GIN trigram index on `lower(display_name)` (migration
+      # 20260715120000_add_display_name_trgm_index) is usable — a leading-wildcard
+      # ILIKE otherwise forces a sequential scan (Issue #222). Lowercasing both
+      # sides is result-equivalent to the previous `ILIKE display_name`: ILIKE is
+      # already case-insensitive, so `lower(display_name) ILIKE lower(pattern)`
+      # matches exactly the same rows.
+      pattern = "%#{escape_like(String.downcase(trimmed))}%"
+
+      # Discoverability follows the Audience ladder (#225): a signed-in searcher
+      # discovers "Members" (platform) AND public profiles; an ANONYMOUS searcher
+      # discovers ONLY public profiles — platform is signed-in-only, so a logged-out
+      # visitor must not even learn a Members profile exists (they'd 404 on it).
+      # owner/group profiles are never discoverable via search.
+      discoverable =
+        if is_nil(viewer_id), do: ["public"], else: ["platform", "public"]
+
+      query =
+        from(u in User,
+          as: :candidate,
+          where: u.profile_visibility in ^discoverable,
+          where: ilike(fragment("lower(?)", u.display_name), ^pattern),
+          order_by: [asc: u.display_name],
+          limit: ^@search_limit
+        )
+
+      query
+      |> exclude_blocked(viewer_id)
+      |> Repo.all()
+    end
+  end
+
+  def search_users(_term, _viewer_id), do: []
+
+  # Anti-join on op.user_blocks in BOTH directions. NOT EXISTS keeps the
+  # exclusion in the result set (never a post-filter). No viewer → no block
+  # filter (ghosts are still excluded by the discoverability filter above).
+  defp exclude_blocked(query, nil), do: query
+
+  defp exclude_blocked(query, viewer_id) do
+    from(u in query,
+      where:
+        not exists(
+          from(b in UserBlock,
+            where:
+              (b.blocker_id == ^viewer_id and b.blocked_id == parent_as(:candidate).id) or
+                (b.blocker_id == parent_as(:candidate).id and b.blocked_id == ^viewer_id)
+          )
+        )
+    )
+  end
+
+  # Escape ILIKE metacharacters so a literal % or _ in the term is not treated
+  # as a wildcard.
+  defp escape_like(term) do
+    term
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
   end
 
   @doc """
@@ -201,7 +381,15 @@ defmodule Stacks.Accounts do
   @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) do
     attrs = maybe_assign_owner_role(attrs)
+    do_register(attrs, 2)
+  end
 
+  # The handle is auto-assigned at registration (maybe_put_handle) and its only
+  # failure mode is the astronomically-rare lower(handle) unique collision. Since
+  # the user never chose it, regenerate (a fresh random suffix) and retry rather
+  # than surfacing an inexplicable "handle has already been taken" for a handle
+  # they cannot see.
+  defp do_register(attrs, retries_left) do
     Multi.new()
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
@@ -238,11 +426,22 @@ defmodule Stacks.Accounts do
         {:ok, user}
 
       {:error, :user, changeset, _} ->
-        {:error, changeset}
+        if retries_left > 0 and handle_collision?(changeset) do
+          do_register(attrs, retries_left - 1)
+        else
+          {:error, changeset}
+        end
 
       {:error, _, reason, _} ->
         {:error, reason}
     end
+  end
+
+  defp handle_collision?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {:handle, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   @doc """
@@ -496,14 +695,18 @@ defmodule Stacks.Accounts do
   @spec update_profile_visibility(binary(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_profile_visibility(user_id, visibility) do
+    existing = get_user!(user_id)
+    old_visibility = existing.profile_visibility
+
     result =
-      user_id
-      |> get_user!()
+      existing
       |> profile_visibility_changeset(%{profile_visibility: visibility})
       |> Repo.update()
 
     case result do
       {:ok, user} ->
+        Stacks.Visibility.emit_profile_visibility_change(old_visibility, visibility)
+
         Events.emit_safe(%{
           event_type: "user.profile_visibility_changed",
           aggregate_type: "user",

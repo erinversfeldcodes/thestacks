@@ -21,6 +21,8 @@ defmodule StacksWeb.ProtoJSON do
   `SCREAMING_SNAKE_CASE`.
   """
 
+  require Logger
+
   alias Stacks.Books
   alias StacksWeb.ProtoJSON.Gen
 
@@ -34,7 +36,7 @@ defmodule StacksWeb.ProtoJSON do
     :age_verified,
     :consent_analytics
   ]
-  @user_auth_fields @user_core_fields ++ [:country_code, :city, :onboarding_completed]
+  @user_auth_fields @user_core_fields ++ [:handle, :country_code, :city, :onboarding_completed]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   # ---------------------------------------------------------------------------
@@ -245,7 +247,10 @@ defmodule StacksWeb.ProtoJSON do
       :reading_status,
       :current_page,
       :started_at,
-      :finished_at
+      :finished_at,
+      # The placement's own visibility — the shelf spine renders owner-only
+      # placements faint/hidden for the owner (#194 `Components.Spine` `hidden`).
+      :visibility
     ])
     |> Map.put(:book, bookshelf_book(placement.book))
   end
@@ -266,18 +271,46 @@ defmodule StacksWeb.ProtoJSON do
 
   Matches `BookController.format_placement_or_nil/1`. Returns `nil` when
   the placement is nil.
+
+  Emits `visibility` (the placement's own visibility) and `bookshelf_visibility`
+  (the parent bookshelf's visibility — the ceiling the #194 frontend greys
+  options against). When the bookshelf association is not loaded, both the
+  name and the ceiling default to `nil` rather than crashing.
   """
   @spec book_placement(map() | nil) :: map() | nil
   def book_placement(nil), do: nil
 
   def book_placement(placement) do
+    bookshelf = loaded_bookshelf(placement.bookshelf)
+
     Gen.placement(placement)
     |> Map.take([:id, :book_id, :personal_rating, :notes])
     |> Map.merge(%{
-      bookshelf_name: placement.bookshelf.name,
-      formats: placement.formats || []
+      bookshelf_name: bookshelf && bookshelf.name,
+      formats: placement.formats || [],
+      visibility: placement.visibility,
+      bookshelf_visibility: bookshelf && bookshelf.visibility
     })
   end
+
+  @spec loaded_bookshelf(term()) :: map() | nil
+  defp loaded_bookshelf(%Ecto.Association.NotLoaded{}) do
+    # A placement always belongs to a bookshelf (NOT NULL FK), so an unloaded
+    # association here is a missing-preload BUG at the call site — not a normal
+    # state. Silently returning nil would emit `bookshelf_visibility: nil`, and
+    # the #194 client would then default the ceiling to Public and grey NOTHING,
+    # letting an over-permissive placement slip past the visual ceiling. Fail
+    # loud so the missing preload is caught, rather than degrading quietly.
+    Logger.warning(
+      "ProtoJSON.book_placement/1: placement.bookshelf not preloaded — bookshelf_visibility " <>
+        "will be nil and the client cannot grey ceiling-exceeding options. Preload :bookshelf."
+    )
+
+    nil
+  end
+
+  defp loaded_bookshelf(nil), do: nil
+  defp loaded_bookshelf(bookshelf), do: bookshelf
 
   # ---------------------------------------------------------------------------
   # User
@@ -324,6 +357,11 @@ defmodule StacksWeb.ProtoJSON do
   Serializes a blog post struct.
 
   Matches `BlogController.format_post/1`.
+
+  Emits `author_display_name` — a denormalised projection of the author's
+  `op.users.display_name` — so the block-user confirmation can name the person
+  ("Block <name>?"). When the `:user` association is not loaded, the field is
+  `nil` and the frontend falls back to a generic "the author" label.
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
@@ -338,7 +376,17 @@ defmodule StacksWeb.ProtoJSON do
       :created_at,
       :updated_at
     ])
+    |> Map.put(:author_display_name, author_display_name(post))
+    |> Map.put(:author_handle, author_handle(post))
   end
+
+  @spec author_display_name(map()) :: String.t() | nil
+  defp author_display_name(%{user: %{display_name: name}}), do: name
+  defp author_display_name(_post), do: nil
+
+  @spec author_handle(map()) :: String.t() | nil
+  defp author_handle(%{user: %{handle: handle}}), do: handle
+  defp author_handle(_post), do: nil
 
   @doc """
   Serializes a blog post-book association.
@@ -518,6 +566,50 @@ defmodule StacksWeb.ProtoJSON do
       |> Enum.map(&placement_detail/1)
 
     %{id: shelf.id, position: shelf.position, placements: visible_placements}
+  end
+
+  @doc """
+  Serializes a user's PUBLIC profile for `/u/:handle` (#213). Deliberately
+  REDACTED — only the fields a stranger may see (handle, display_name, website,
+  location) plus the viewer-visible bookshelf summaries. NEVER emit email,
+  consent flags, notification prefs, role, or any other account/PII field
+  (`ProtoJson.user/1` leaks all of those and MUST NOT be used here).
+
+  `shelves` is the already visibility-filtered list from
+  `Stacks.Visibility.viewable_shelves/2`.
+  """
+  @spec public_profile(map(), [map()]) :: map()
+  def public_profile(user, shelves) do
+    %{
+      handle: user.handle,
+      # display_name is nullable + optional at registration; coalesce so the JSON
+      # never carries `null` (the redacted-profile decoders expect a string).
+      display_name: user.display_name || "",
+      website_url: user.website_url,
+      city: user.city,
+      country_code: user.country_code,
+      bookshelves: Enum.map(shelves, &%{name: &1.name})
+    }
+  end
+
+  @doc """
+  Slim, shelf-less variant of `public_profile/2` for people-search result cards
+  (#217). Same REDACTED contract — only handle, display_name, and location; NEVER
+  email, consent, role, or any account/PII field. No bookshelves (search results
+  don't render shelf summaries).
+
+  Exclusion of ghost/blocked users is enforced upstream in
+  `Accounts.search_users/2` (SQL), never here — this serializer only shapes the
+  already-permitted rows.
+  """
+  @spec public_profile_summary(map()) :: map()
+  def public_profile_summary(user) do
+    %{
+      handle: user.handle,
+      display_name: user.display_name || "",
+      city: user.city,
+      country_code: user.country_code
+    }
   end
 
   @doc """

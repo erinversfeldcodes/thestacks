@@ -126,6 +126,17 @@ defmodule CoreWeb.Router do
     get "/blog/posts/:id", BlogController, :show
   end
 
+  # Public profile + people-search reads (#210). Same optional-auth model as the
+  # scope above, but additionally rate-limited (:rate_limit_public): these are the
+  # highest-value unauthenticated enumeration surfaces — /search/users is a
+  # directory-scraper vector and /u/:handle a handle-existence oracle.
+  scope "/api", StacksWeb do
+    pipe_through [:api, :optional_auth, :rate_limit_public]
+    get "/search/users", UserSearchController, :index
+    get "/u/:handle", ProfileController, :show
+    get "/u/:handle/bookshelves/:bookshelf_name", ProfileController, :shelf
+  end
+
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_auth]
     post "/auth/register", AuthController, :register
@@ -208,6 +219,7 @@ defmodule CoreWeb.Router do
     put "/onboarding/step/:step", OnboardingController, :complete_step
     post "/onboarding/reset", OnboardingController, :reset
 
+    get "/settings/privacy", UserSettingsController, :show_privacy
     put "/settings/age_verification", UserSettingsController, :update_age_verification
     put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility
     put "/settings/profile", UserSettingsController, :update_profile
@@ -216,7 +228,7 @@ defmodule CoreWeb.Router do
     get "/settings/blocked-users", SocialController, :blocked_users
     get "/settings/audit-log", AuditLogController, :index
 
-    put "/bookshelves/:id/visibility", BookshelfController, :update_visibility
+    put "/bookshelves/:bookshelf_name/visibility", BookshelfController, :update_visibility
     put "/placements/:id/visibility", BookshelfPlacementController, :update_visibility
 
     get "/posts/:post_id/comments", CommentController, :index

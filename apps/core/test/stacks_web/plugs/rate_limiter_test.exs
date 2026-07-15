@@ -118,6 +118,36 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
       body = Jason.decode!(result.resp_body)
       assert body["error"] == "rate_limit_exceeded"
     end
+
+    # Issue #206: a 429 rejection emits [:stacks, :rate_limit, :rejected] tagged
+    # by the bounded bucket atom. For the :auth bucket this is the 429
+    # login-failure-by-type operational signal (exported as
+    # stacks_rate_limit_rejected_count_total{bucket="auth"} — see the
+    # reporter-tag-set proof in prom_ex_custom_metrics_test.exs).
+    test "a 429 rejection emits [:stacks, :rate_limit, :rejected] with the bucket tag",
+         %{conn: conn} do
+      conn = %{conn | remote_ip: {10, 1, 0, 5}}
+
+      test_pid = self()
+      handler_id = "test-ratelimit-206-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :rate_limit, :rejected],
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      for _ <- 1..5, do: RateLimiter.call(conn, bucket: :auth)
+      RateLimiter.call(conn, bucket: :auth)
+
+      assert_receive {:telemetry_event, [:stacks, :rate_limit, :rejected], %{count: 1},
+                      %{bucket: :auth}}
+    end
   end
 
   # ── Upload bucket ─────────────────────────────────────────────────────────────

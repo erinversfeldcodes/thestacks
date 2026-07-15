@@ -67,6 +67,10 @@ e2e_users =
       id: Seeds.uuid(idx),
       email: "e2e-#{slug}@thestacks.test",
       display_name: display,
+      # handle is NOT NULL (#211); hyphens aren't valid in the handle format,
+      # and the `e2e_` prefix keeps otherwise-reserved slugs (search, settings)
+      # out of the reserved list.
+      handle: "e2e_" <> String.replace(slug, "-", "_"),
       password_hash: Argon2.hash_pwd_salt("e2e-password"),
       role: "user",
       profile_visibility: "owner",
@@ -89,6 +93,7 @@ Repo.insert_all(
       id: Seeds.uuid(1),
       email: "owner@thestacks.app",
       display_name: "Platform Owner",
+      handle: "platform_owner",
       password_hash: Argon2.hash_pwd_salt("dev-password-123"),
       role: "owner",
       profile_visibility: "owner",
@@ -106,6 +111,7 @@ Repo.insert_all(
       id: Seeds.uuid(2),
       email: "user@thestacks.app",
       display_name: "Test User",
+      handle: "test_user",
       password_hash: Argon2.hash_pwd_salt("dev-password-456"),
       role: "user",
       profile_visibility: "owner",

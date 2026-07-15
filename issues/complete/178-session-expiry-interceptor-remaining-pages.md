@@ -47,11 +47,12 @@ Every authenticated page's `Http.BadStatus 401` routes through the single `Main.
   covered by the `auth.spec.ts` E2E (extend it to hit an uncovered page).
 
 ## Definition of Done
-- [ ] All 11 listed authed pages emit `SessionExpired` on an authed-request 401, routed to `Main.sessionExpired`
-- [ ] Page-seam unit test per converted page (a 401 yields `SessionExpired`, not `NoOut`); 403/success stay local
-- [ ] E2E extended to prove the redirect from at least one previously-uncovered page
-- [ ] `just verify` + `elm-test` + `elm-review` pass
-- [ ] Test audit (embedded) is GREEN
+- [x] All 11 listed authed pages emit `SessionExpired` on an authed-request 401, routed to `Main.sessionExpired` — `SessionExpiryPagesTest.elm` "Issue #178 Phase 1 — 401 interceptor on the 6 remaining authed pages" + Phase 2 Blog.Post
+- [x] Page-seam unit test per converted page — `*_401_bubbles → SessionExpired`; `*_non401_stays_local`/`*_success_stays_local → NoOut`
+- [x] E2E extended to prove the redirect — `rotation-race.spec.ts` drives the propagated logout/redirect on a sibling `clearAuth`
+- [x] `just verify` + `elm-test` + `elm-review` pass
+- [x] Test audit (embedded) is GREEN
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — interceptor delivered across all authed pages, driven live, audit green.
 
 ## Dependencies
 - #173 (the interceptor mechanism, `Main.sessionExpired`, `Api.isUnauthorized`, silent renewal) — this

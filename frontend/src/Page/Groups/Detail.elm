@@ -1,13 +1,15 @@
 module Page.Groups.Detail exposing (InviteState(..), Model, Msg(..), OutMsg(..), Tab(..), init, update, view)
 
 import Api
+import Components.BlockUserModal as BlockModal
 import Components.FeedItem
+import Dict exposing (Dict)
 import Html exposing (Html, button, div, h1, input, p, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Navigation.Route exposing (Route(..))
-import Types.FeedItem exposing (FeedResponse)
+import Types.FeedItem exposing (FeedItem, FeedResponse, feedItemUserDisplayName, feedItemUserId)
 import Types.Group exposing (Group, GroupInvitation)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -34,6 +36,9 @@ type alias Model =
     , activeTab : Tab
     , feed : RemoteData Http.Error FeedResponse
     , loadingMoreFeed : Bool
+
+    -- One block affordance per other member seen in the feed, keyed by user id.
+    , blockModals : Dict String BlockModal.Model
     }
 
 
@@ -48,6 +53,7 @@ type Msg
     | FeedLoaded (Result Http.Error FeedResponse)
     | LoadMoreFeed
     | MoreFeedLoaded (Result Http.Error FeedResponse)
+    | BlockModalMsg String BlockModal.Msg
 
 
 type OutMsg
@@ -67,9 +73,34 @@ init groupId userId token =
       , activeTab = MembersTab
       , feed = NotAsked
       , loadingMoreFeed = False
+      , blockModals = Dict.empty
       }
     , Api.getGroup groupId token GroupLoaded
     )
+
+
+{-| Ensure a block affordance exists for every OTHER member seen in the feed.
+Own activity is never blockable, and existing modals are preserved so an
+in-flight confirmation survives a "load more".
+-}
+mergeBlockModals : String -> List FeedItem -> Dict String BlockModal.Model -> Dict String BlockModal.Model
+mergeBlockModals currentUserId items dict =
+    List.foldl
+        (\item acc ->
+            let
+                uid =
+                    feedItemUserId item
+            in
+            if uid == currentUserId || Dict.member uid acc then
+                acc
+
+            else
+                Dict.insert uid
+                    (BlockModal.init { userId = uid, displayName = feedItemUserDisplayName item })
+                    acc
+        )
+        dict
+        items
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -138,7 +169,13 @@ update msg model =
             ( { model | activeTab = MembersTab }, Cmd.none, NoOut )
 
         FeedLoaded (Ok resp) ->
-            ( { model | feed = Success resp }, Cmd.none, NoOut )
+            ( { model
+                | feed = Success resp
+                , blockModals = mergeBlockModals model.currentUserId resp.data model.blockModals
+              }
+            , Cmd.none
+            , NoOut
+            )
 
         FeedLoaded (Err e) ->
             if Api.isUnauthorized e then
@@ -173,6 +210,7 @@ update msg model =
                                 , nextCursor = newResp.nextCursor
                                 }
                         , loadingMoreFeed = False
+                        , blockModals = mergeBlockModals model.currentUserId newResp.data model.blockModals
                       }
                     , Cmd.none
                     , NoOut
@@ -187,6 +225,40 @@ update msg model =
 
             else
                 ( { model | loadingMoreFeed = False }, Cmd.none, NoOut )
+
+        BlockModalMsg uid subMsg ->
+            case Dict.get uid model.blockModals of
+                Just blockModal ->
+                    let
+                        ( newBlockModal, subCmd, outMsg ) =
+                            BlockModal.update subMsg blockModal (Just model.token)
+
+                        modelWith bm =
+                            { model | blockModals = Dict.insert uid bm model.blockModals }
+                    in
+                    case outMsg of
+                        BlockModal.NoOut ->
+                            ( modelWith newBlockModal, Cmd.map (BlockModalMsg uid) subCmd, NoOut )
+
+                        BlockModal.UserBlocked ->
+                            -- The blocked member's activity resolves to :hidden
+                            -- server-side (bidirectional block), so refetch the feed.
+                            ( { model
+                                | blockModals = Dict.insert uid newBlockModal model.blockModals
+                                , feed = Loading
+                              }
+                            , Cmd.batch
+                                [ Cmd.map (BlockModalMsg uid) subCmd
+                                , Api.getGroupFeed model.groupId model.token Nothing FeedLoaded
+                                ]
+                            , NoOut
+                            )
+
+                        BlockModal.SessionExpired ->
+                            ( model, Cmd.none, SessionExpired )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg
@@ -257,6 +329,30 @@ viewMembers group =
         ]
 
 
+{-| A feed row: the activity plus, for ANOTHER member's activity, a reusable
+block affordance (⋯ → "Block name"). Own activity carries no affordance.
+-}
+viewFeedRow : Model -> FeedItem -> Html Msg
+viewFeedRow model item =
+    let
+        uid =
+            feedItemUserId item
+    in
+    div [ class "feed-item-row" ]
+        [ Components.FeedItem.view item
+        , if uid == model.currentUserId then
+            text ""
+
+          else
+            case Dict.get uid model.blockModals of
+                Just blockModal ->
+                    Html.map (BlockModalMsg uid) (BlockModal.view blockModal)
+
+                Nothing ->
+                    text ""
+        ]
+
+
 viewInviteForm : Model -> Html Msg
 viewInviteForm model =
     Html.form [ class "groups-detail__invite-form", onSubmit SubmitInvite ]
@@ -303,7 +399,7 @@ viewFeed model =
                     [ p [ class "groups-detail__feed-empty" ] [ text "No activity yet." ] ]
 
                 else
-                    List.map Components.FeedItem.view resp.data
+                    List.map (viewFeedRow model) resp.data
                         ++ [ if resp.nextCursor /= Nothing then
                                 button
                                     [ class "groups-detail__load-more"

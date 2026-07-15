@@ -74,6 +74,7 @@ aReader =
     { id = "user-1"
     , email = "reader@stacks.dev"
     , displayName = "A Reader"
+    , handle = "a_reader"
     , role = "user"
     , countryCode = Nothing
     , city = Nothing
@@ -100,6 +101,7 @@ storedAuthValue token =
                 , ( "userId", Encode.string aReader.id )
                 , ( "email", Encode.string aReader.email )
                 , ( "displayName", Encode.string aReader.displayName )
+                , ( "handle", Encode.string aReader.handle )
                 , ( "role", Encode.string aReader.role )
                 ]
             )

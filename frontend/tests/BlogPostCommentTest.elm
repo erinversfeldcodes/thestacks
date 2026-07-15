@@ -1,6 +1,8 @@
 module BlogPostCommentTest exposing (suite)
 
+import Components.BlockUserModal as BlockModal
 import Expect
+import Html.Attributes
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -36,6 +38,7 @@ testModel =
     , commentDraft = ""
     , replyDraft = Nothing
     , commentSubmitting = False
+    , blockModal = Nothing
     }
 
 
@@ -128,6 +131,20 @@ suite =
 
                         _ ->
                             Expect.fail "Expected Failure"
+            ]
+        , describe "PostLoaded — hidden after self-block"
+            [ test "a 404 (hidden post) lands on a graceful \"no longer available\" state, not a technical error" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Post.update (PostLoaded (Err (Http.BadStatus 404))) testModel Nothing
+                    in
+                    Post.view model
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "This post is no longer available." ]
+                            , Query.hasNot [ Selector.text "Could not load post. Please try again." ]
+                            ]
             ]
         , describe "CommentDraftChanged"
             [ test "updates commentDraft" <|
@@ -253,6 +270,8 @@ suite =
                             , published = True
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
+                            , authorDisplayName = "Fable Quill"
+                            , authorHandle = "fable_quill"
                             }
 
                         model =
@@ -288,6 +307,8 @@ suite =
                             , published = True
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
+                            , authorDisplayName = "Fable Quill"
+                            , authorHandle = "fable_quill"
                             }
 
                         model =
@@ -300,4 +321,85 @@ suite =
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.class "comment__author-badge" ]
             ]
+        , describe "block-author confirmation names the author"
+            [ test "the block menu names the author from authorDisplayName" <|
+                \_ ->
+                    blockMenuView { authorName = "Fable Quill" }
+                        |> Query.has [ Selector.text "Block Fable Quill" ]
+            , test "falls back to a generic label when authorDisplayName is absent" <|
+                \_ ->
+                    blockMenuView { authorName = "" }
+                        |> Query.has [ Selector.text "Block the author" ]
+            ]
+        , describe "author byline links to the profile (US-10.5.4)"
+            [ test "renders the author name as a link to /u/:handle when a handle is present" <|
+                \_ ->
+                    postView { displayName = "Fable Quill", handle = "fable_quill" }
+                        |> Query.find [ Selector.class "blog-post__author-link" ]
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.href "/u/fable_quill")
+                            , Selector.text "Fable Quill"
+                            ]
+            , test "renders the author name as plain text when no handle is present" <|
+                \_ ->
+                    postView { displayName = "Fable Quill", handle = "" }
+                        |> Query.hasNot [ Selector.class "blog-post__author-link" ]
+            ]
         ]
+
+
+{-| Render Post.view for a Success post with the given author byline fields.
+-}
+postView : { displayName : String, handle : String } -> Query.Single Post.Msg
+postView { displayName, handle } =
+    let
+        post =
+            { id = "post-1"
+            , userId = "post-author-id"
+            , title = "Test Post"
+            , body = "Post body"
+            , visibility = Owner
+            , published = True
+            , insertedAt = "2026-03-29T12:00:00Z"
+            , associations = []
+            , authorDisplayName = displayName
+            , authorHandle = handle
+            }
+
+        model =
+            { testModel | post = Success post }
+    in
+    Post.view model
+        |> Query.fromHtml
+
+
+{-| Drive Post through PostLoaded (which populates the block modal for a
+non-owner viewer) then open the block menu, returning the rendered query.
+-}
+blockMenuView : { authorName : String } -> Query.Single Post.Msg
+blockMenuView { authorName } =
+    let
+        post =
+            { id = "post-1"
+            , userId = "post-author-id"
+            , title = "Test Post"
+            , body = "Post body"
+            , visibility = Owner
+            , published = True
+            , insertedAt = "2026-03-29T12:00:00Z"
+            , associations = []
+            , authorDisplayName = authorName
+            , authorHandle = "fable_quill"
+            }
+
+        viewerModel =
+            { testModel | currentUserId = Just "a-different-viewer" }
+
+        ( loaded, _, _ ) =
+            Post.update (PostLoaded (Ok post)) viewerModel Nothing
+
+        ( menuOpen, _, _ ) =
+            Post.update (BlockModalMsg BlockModal.MenuToggled) loaded Nothing
+    in
+    Post.view menuOpen
+        |> Query.fromHtml

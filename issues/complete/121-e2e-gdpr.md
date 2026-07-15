@@ -567,12 +567,13 @@ GDPR tests); dbt 6 generic column tests on `stg_audit_log`. **Punch list: 16/16
 closed** — 10 resolved in-scope (Phases 1–5, incl. the 401 half of #14) and 6
 routed to child issues #184–#188.
 ## Definition of Done
-- [ ] All 11 test categories implemented with specific test cases listed above
-- [ ] Tests pass with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] `just verify` passes
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
+- [x] All 11 test categories implemented with specific test cases listed above
+- [x] Tests pass with `TEST_TARGET=local` (124/0 GDPR Elixir, 665/0 elm-test on the epic branch)
+- [x] No flaky tests
+- [x] `just verify` passes
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — US-8.4 built in-scope (✅); US-8.1/8.2/8.3/8.5 were de-scoped at #121 scope-lock (option b) to child issues #184–#189, which are **now built, verified, and DoD-reconciled** on this epic branch (see the 2026-07-14 banner + each child's audit). No story reaches GREEN via `n/a (see #NNN)`.
+- [x] **Test audit (embedded above) is GREEN** — #121's v1 tally is 0 `❌`; the 🟡 Pre-Check cells are explicit de-scopes to complete children, not audit gaps. Regenerated to the epic-branch state (2026-07-14 banner).
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — v1 erasure/export/consent/retention/audit-write built + tested here; the v2 UI/cascade surface delivered + reconciled via #183–#189; live-driven through `gdpr.spec.ts` + the preview E2E gate.
 
 ## Dependencies
 Requires GDPR module (Export, Deletion, Consent, ImageRetention), Audit module, GDPRController.

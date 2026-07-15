@@ -21,6 +21,19 @@ defmodule Stacks.BlogTest do
     )
   end
 
+  # Fetch the payload of the most recent event of the given type for an aggregate.
+  defp latest_event_payload(event_type, aggregate_id) do
+    Repo.one(
+      from(e in "event_log",
+        prefix: "op",
+        where: e.event_type == ^event_type and e.aggregate_id == ^aggregate_id,
+        order_by: [desc: e.occurred_at],
+        limit: 1,
+        select: e.payload
+      )
+    )
+  end
+
   # ---------------------------------------------------------------------------
   # create_post/2
   # ---------------------------------------------------------------------------
@@ -85,6 +98,23 @@ defmodule Stacks.BlogTest do
 
       assert event_count("blog.post_created") == before_count + 1
     end
+
+    test "blog.post_created event payload includes user_id, title, and visibility" do
+      user = insert(:user, profile_visibility: "platform")
+
+      {:ok, post} =
+        Blog.create_post(user, %{
+          title: "Payload Post",
+          body: "Body.",
+          visibility: "platform"
+        })
+
+      payload = latest_event_payload("blog.post_created", post.id)
+
+      assert payload["user_id"] == user.id
+      assert payload["title"] == "Payload Post"
+      assert payload["visibility"] == "platform"
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -124,6 +154,20 @@ defmodule Stacks.BlogTest do
       Blog.update_post(post, user, %{title: "New Title"})
 
       assert event_count("blog.post_updated") == before_count + 1
+    end
+
+    test "blog.post_updated event payload includes user_id, title, and visibility" do
+      user = insert(:user, profile_visibility: "platform")
+      post = insert(:post, user: user, visibility: "platform", title: "Original")
+
+      {:ok, _updated} =
+        Blog.update_post(post, user, %{title: "Updated Title", visibility: "owner"})
+
+      payload = latest_event_payload("blog.post_updated", post.id)
+
+      assert payload["user_id"] == user.id
+      assert payload["title"] == "Updated Title"
+      assert payload["visibility"] == "owner"
     end
   end
 
@@ -240,12 +284,12 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
 
-    test "unauthenticated viewer sees only published posts" do
-      user = insert(:user, profile_visibility: "platform")
-      _draft = insert(:post, user: user, visibility: "platform", published_at: nil)
+    test "unauthenticated viewer sees only published public posts (#225)" do
+      user = insert(:user, profile_visibility: "public")
+      _draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
       _published =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
       posts = Blog.list_user_posts(user.id, :unauthenticated)
       assert length(posts) == 1
@@ -267,17 +311,21 @@ defmodule Stacks.BlogTest do
   # list_published — via list_user_posts with unauthenticated viewer
   # ---------------------------------------------------------------------------
 
-  describe "list_user_posts/2 platform visibility" do
-    test "unauthenticated sees only published + platform-visible posts" do
-      user = insert(:user, profile_visibility: "platform")
+  describe "list_user_posts/2 public visibility" do
+    test "unauthenticated sees only published + public-visible posts (#225)" do
+      user = insert(:user, profile_visibility: "public")
 
-      _platform_published =
-        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
+      _public_published =
+        insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
 
       _owner_only_published =
         insert(:post, user: user, visibility: "owner", published_at: DateTime.utc_now())
 
-      _platform_draft = insert(:post, user: user, visibility: "platform", published_at: nil)
+      _public_draft = insert(:post, user: user, visibility: "public", published_at: nil)
+
+      # Platform (Members) posts are NOT visible to a logged-out viewer.
+      _platform_published =
+        insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
 
       posts = Blog.list_user_posts(user.id, :unauthenticated)
       assert length(posts) == 1

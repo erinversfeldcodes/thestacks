@@ -84,4 +84,171 @@ defmodule Core.PromExCustomMetricsTest do
     assert output =~ "stacks_auth_refresh_revoke_failed_count_total",
            "expected stacks_auth_refresh_revoke_failed_count_total in PromEx output, got:\n#{output}"
   end
+
+  # ── Issue #206: reporter/tag-set assertions ─────────────────────────────
+  #
+  # The family-name-only assertions above prove a series *exists*; these prove
+  # the series is exported with the *correct label set*. A counter whose tags
+  # were silently dropped in the plugin (the Phase-4 GDPR tag-drop this issue
+  # was filed for) still passes a family-name check but fails a tag-set check.
+  #
+  # PromEx renders `Telemetry.Metrics` tags as Prometheus labels in the form
+  # `metric_family_name{key="value",…} <value>`. `assert_label/4` matches the
+  # family name followed (in the same `{…}` label block) by `key="value"`,
+  # tolerant of label ordering and of other labels being present.
+
+  defp scrape do
+    Process.sleep(50)
+    output = PromEx.get_metrics(Core.PromEx)
+    refute output == :prom_ex_down, "Core.PromEx must be running for this test"
+    output
+  end
+
+  defp assert_label(output, family, key, value) do
+    re =
+      ~r/#{Regex.escape(family)}\{[^}\n]*#{Regex.escape(key)}="#{Regex.escape(value)}"[^}\n]*\}/
+
+    assert output =~ re,
+           "expected #{family} exported with #{key}=\"#{value}\", got:\n#{output}"
+  end
+
+  describe "auth §12 operational counters fire + export with the right tag-set (Issue #206)" do
+    test "registration success/failure counter exports result label" do
+      :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :ok})
+      :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :error})
+
+      output = scrape()
+
+      assert_label(output, "stacks_auth_registration_count_total", "result", "ok")
+      assert_label(output, "stacks_auth_registration_count_total", "result", "error")
+    end
+
+    test "JWT issuance counter exports context label (login + refresh)" do
+      :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :login})
+      :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :refresh})
+
+      output = scrape()
+
+      assert_label(output, "stacks_auth_jwt_issued_count_total", "context", "login")
+      assert_label(output, "stacks_auth_jwt_issued_count_total", "context", "refresh")
+    end
+
+    test "login-failure-by-type counter exports type label for each status class" do
+      # 401 / 403 / 422 / 423 / 503 login failures are counted in the
+      # controller tagged by reason; 429 (rate-limit) is counted in the
+      # RateLimiter plug tagged by bucket (asserted below).
+      for type <- [
+            :invalid_credentials,
+            :email_unconfirmed,
+            :missing_params,
+            :account_locked,
+            :service_busy
+          ] do
+        :telemetry.execute([:stacks, :auth, :login_failure], %{count: 1}, %{type: type})
+      end
+
+      output = scrape()
+
+      assert_label(output, "stacks_auth_login_failure_count_total", "type", "invalid_credentials")
+      assert_label(output, "stacks_auth_login_failure_count_total", "type", "email_unconfirmed")
+      assert_label(output, "stacks_auth_login_failure_count_total", "type", "missing_params")
+      assert_label(output, "stacks_auth_login_failure_count_total", "type", "account_locked")
+      assert_label(output, "stacks_auth_login_failure_count_total", "type", "service_busy")
+    end
+
+    test "429 login-failure-by-type: rate-limit rejection counter exports bucket label" do
+      :telemetry.execute([:stacks, :rate_limit, :rejected], %{count: 1}, %{bucket: :auth})
+
+      output = scrape()
+
+      assert_label(output, "stacks_rate_limit_rejected_count_total", "bucket", "auth")
+    end
+  end
+
+  describe "GDPR counters export with the right tag-set at the reporter level (Issue #206 / #121)" do
+    # gdpr_telemetry_test.exs asserts these signals at the :telemetry handler
+    # level (event name + measurements + metadata). These assertions close the
+    # gap the Phase-4 tag-drop slipped through: that each of the 8 GDPR signals
+    # is exported by PromEx *with its label set intact*.
+
+    test "export outcome exports result label" do
+      :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :ok})
+      :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :error})
+
+      output = scrape()
+
+      assert_label(output, "stacks_gdpr_export_count_total", "result", "ok")
+      assert_label(output, "stacks_gdpr_export_count_total", "result", "error")
+    end
+
+    test "deletion outcome exports both result and failed_step labels" do
+      :telemetry.execute([:stacks, :gdpr, :deletion], %{count: 1}, %{
+        result: :ok,
+        failed_step: :none
+      })
+
+      :telemetry.execute([:stacks, :gdpr, :deletion], %{count: 1}, %{
+        result: :error,
+        failed_step: :delete_user
+      })
+
+      output = scrape()
+
+      # Assert BOTH labels co-exist on the failure series — the diagnostic
+      # failed_step tag is exactly the kind of tag a drop would silently lose.
+      assert output =~
+               ~r/stacks_gdpr_deletion_count_total\{[^}\n]*result="error"[^}\n]*failed_step="delete_user"[^}\n]*\}|stacks_gdpr_deletion_count_total\{[^}\n]*failed_step="delete_user"[^}\n]*result="error"[^}\n]*\}/,
+             "expected stacks_gdpr_deletion_count_total with result=\"error\" AND failed_step=\"delete_user\", got:\n#{output}"
+
+      assert_label(output, "stacks_gdpr_deletion_count_total", "result", "ok")
+      assert_label(output, "stacks_gdpr_deletion_count_total", "failed_step", "none")
+    end
+
+    test "consent grant/revoke export the feature label" do
+      :telemetry.execute([:stacks, :gdpr, :consent, :grant], %{count: 1}, %{feature: "analytics"})
+
+      :telemetry.execute([:stacks, :gdpr, :consent, :revoke], %{count: 1}, %{
+        feature: "analytics"
+      })
+
+      output = scrape()
+
+      assert_label(output, "stacks_gdpr_consent_grant_count_total", "feature", "analytics")
+      assert_label(output, "stacks_gdpr_consent_revoke_count_total", "feature", "analytics")
+    end
+
+    test "image expired/stuck export the reason label; orphan exports the untagged family" do
+      :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: 1}, %{reason: "expired"})
+      :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: 1}, %{reason: "stuck"})
+      :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: 1}, %{reason: "stuck"})
+      :telemetry.execute([:stacks, :gdpr, :image, :orphan], %{count: 3}, %{})
+
+      output = scrape()
+
+      assert_label(output, "stacks_gdpr_image_expired_count_total", "reason", "expired")
+      assert_label(output, "stacks_gdpr_image_expired_count_total", "reason", "stuck")
+      assert_label(output, "stacks_gdpr_image_stuck_count_total", "reason", "stuck")
+
+      assert output =~ "stacks_gdpr_image_orphan_count_total",
+             "expected stacks_gdpr_image_orphan_count_total in PromEx output, got:\n#{output}"
+    end
+
+    test "audit write exports both action and resource_type labels" do
+      :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
+        action: "test.telemetry_action",
+        resource_type: "test"
+      })
+
+      output = scrape()
+
+      assert_label(
+        output,
+        "stacks_gdpr_audit_write_count_total",
+        "action",
+        "test.telemetry_action"
+      )
+
+      assert_label(output, "stacks_gdpr_audit_write_count_total", "resource_type", "test")
+    end
+  end
 end

@@ -1,6 +1,6 @@
 module Page.Settings.Profile exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , update
     , view
@@ -17,23 +17,25 @@ import Types.User exposing (User)
 
 type alias Model =
     { displayName : String
+    , handle : String
     , email : String
     , websiteUrl : String
     , countryCode : String
     , city : String
-    , savingProfile : RemoteData Http.Error ()
+    , savingProfile : RemoteData Api.ProfileError ()
     , savingLocation : RemoteData Http.Error ()
     }
 
 
 type Msg
     = SetDisplayName String
+    | SetHandle String
     | SetEmail String
     | SetWebsiteUrl String
     | SetCountryCode String
     | SetCity String
     | SaveProfile
-    | SaveProfileCompleted (Result Http.Error ())
+    | SaveProfileCompleted (Result Api.ProfileError String)
     | SaveLocation
     | SaveLocationCompleted (Result Http.Error ())
 
@@ -41,6 +43,7 @@ type Msg
 init : User -> Model
 init user =
     { displayName = user.displayName
+    , handle = user.handle
     , email = user.email
     , websiteUrl = ""
     , countryCode = Maybe.withDefault "" user.countryCode
@@ -55,6 +58,9 @@ update msg model maybeToken =
     case msg of
         SetDisplayName val ->
             ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none )
+
+        SetHandle val ->
+            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none )
 
         SetEmail val ->
             ( { model | email = val, savingProfile = NotAsked }, Cmd.none )
@@ -76,6 +82,7 @@ update msg model maybeToken =
                         { displayName = model.displayName
                         , email = model.email
                         , websiteUrl = model.websiteUrl
+                        , handle = model.handle
                         }
                         token
                         SaveProfileCompleted
@@ -86,8 +93,20 @@ update msg model maybeToken =
 
         SaveProfileCompleted result ->
             case result of
-                Ok _ ->
-                    ( { model | savingProfile = Success () }, Cmd.none )
+                Ok normalisedHandle ->
+                    -- The 200 body echoes the server-normalised (lowercased) handle;
+                    -- reflect it so the field shows exactly what was stored.
+                    ( { model
+                        | savingProfile = Success ()
+                        , handle =
+                            if normalisedHandle == "" then
+                                model.handle
+
+                            else
+                                normalisedHandle
+                      }
+                    , Cmd.none
+                    )
 
                 Err err ->
                     ( { model | savingProfile = Failure err }, Cmd.none )
@@ -132,6 +151,20 @@ view model =
                     []
                 ]
             , div [ class "form-field" ]
+                [ label [ class "form-field__label" ] [ text "Handle" ]
+                , input
+                    [ type_ "text"
+                    , class "form-field__input"
+                    , value model.handle
+                    , onInput SetHandle
+                    , placeholder "your_handle"
+                    ]
+                    []
+                , p [ class "form-field__hint" ]
+                    [ text (handleHint model.handle) ]
+                , viewHandleError model.savingProfile
+                ]
+            , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Email" ]
                 , input
                     [ type_ "text"
@@ -156,7 +189,7 @@ view model =
             , div [ class "settings-actions" ]
                 [ viewSaveButton model.savingProfile SaveProfile "Save Profile"
                 ]
-            , viewFeedback model.savingProfile "Profile saved." "Could not save profile. Please try again."
+            , viewProfileFeedback model.savingProfile
             ]
         , div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Location" ]
@@ -190,7 +223,7 @@ view model =
         ]
 
 
-viewSaveButton : RemoteData Http.Error () -> Msg -> String -> Html Msg
+viewSaveButton : RemoteData e () -> Msg -> String -> Html Msg
 viewSaveButton saving onClickMsg label =
     case saving of
         Loading ->
@@ -217,3 +250,89 @@ viewFeedback saving successText errorText =
 
         _ ->
             text ""
+
+
+{-| Profile-save feedback. A validation failure renders inline under the
+offending field (see `viewHandleError`), so the section-level banner stays
+quiet for those — it only speaks up for success or a non-validation error.
+-}
+viewProfileFeedback : RemoteData Api.ProfileError () -> Html Msg
+viewProfileFeedback saving =
+    case saving of
+        Success _ ->
+            p [ class "success" ] [ text "Profile saved." ]
+
+        Failure (Api.ProfileValidationFailed _) ->
+            text ""
+
+        Failure (Api.ProfileRequestFailed err) ->
+            p [ class "error" ] [ text (profileRequestErrorText err) ]
+
+        _ ->
+            text ""
+
+
+{-| A non-validation profile save failure. The endpoint can return 503 with a
+`retry-after` when Argon2 is under backpressure (an email change hashes the
+current password), so that case gets its own "try again shortly" copy; anything
+else is a generic save error.
+-}
+profileRequestErrorText : Http.Error -> String
+profileRequestErrorText err =
+    case err of
+        Http.BadStatus 503 ->
+            "The server is busy right now. Please try again in a moment."
+
+        _ ->
+            "Could not save profile. Please try again."
+
+
+{-| Surface a handle-specific 422 error under the handle input, mapped to the
+user-facing copy from US-10.5.1.
+-}
+viewHandleError : RemoteData Api.ProfileError () -> Html Msg
+viewHandleError saving =
+    case handleErrorMessage saving of
+        Just message ->
+            p [ class "form-field__error" ] [ text message ]
+
+        Nothing ->
+            text ""
+
+
+handleErrorMessage : RemoteData Api.ProfileError () -> Maybe String
+handleErrorMessage saving =
+    case saving of
+        Failure (Api.ProfileValidationFailed errors) ->
+            errors
+                |> List.filter (\( field, _ ) -> field == "handle")
+                |> List.head
+                |> Maybe.andThen (\( _, messages ) -> List.head messages)
+                |> Maybe.map handleErrorCopy
+
+        _ ->
+            Nothing
+
+
+{-| The live public-address hint under the handle field. Shows the full address
+once a handle is present, and gentle guidance while the field is empty.
+-}
+handleHint : String -> String
+handleHint handle =
+    if String.trim handle == "" then
+        "Choose a handle — others will find you at thestacks.app/u/your_handle"
+
+    else
+        "Your public profile lives at thestacks.app/u/" ++ handle
+
+
+handleErrorCopy : String -> String
+handleErrorCopy raw =
+    if String.contains "taken" raw then
+        "That handle is already taken."
+
+    else if String.contains "reserved" raw then
+        "That handle is reserved."
+
+    else
+        "Handle must be 3–30 characters: lowercase letters, numbers, underscores."

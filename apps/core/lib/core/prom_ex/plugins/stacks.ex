@@ -173,6 +173,49 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Failures to revoke the old JWT during token refresh rotation."
         ),
 
+        # ── Auth §12 operational counters (Issue #206, #124 gap) ──────
+        # Registration outcomes — `result` is a bounded label (ok|error).
+        # Exported as `stacks_auth_registration_count_total{result=…}`.
+        counter(
+          [:stacks, :auth, :registration, :count, :total],
+          event_name: [:stacks, :auth, :registration],
+          description: "User registration outcomes (right-to-account creation).",
+          tags: [:result]
+        ),
+
+        # JWT issuance — one per token actually handed to a client. `context`
+        # is a bounded label (login|refresh) distinguishing interactive login
+        # issuance from silent-renewal rotation issuance. Exported as
+        # `stacks_auth_jwt_issued_count_total{context=…}`.
+        counter(
+          [:stacks, :auth, :jwt_issued, :count, :total],
+          event_name: [:stacks, :auth, :jwt_issued],
+          description: "Guardian JWTs issued, by issuance context (login vs refresh).",
+          tags: [:context]
+        ),
+
+        # Login-failure-by-type — `type` is a bounded, whitelisted atom
+        # (invalid_credentials|email_unconfirmed|missing_params|
+        # account_locked|service_busy), NOT raw input. Exported as
+        # `stacks_auth_login_failure_count_total{type=…}`.
+        counter(
+          [:stacks, :auth, :login_failure, :count, :total],
+          event_name: [:stacks, :auth, :login_failure],
+          description: "Failed login attempts, broken down by failure type.",
+          tags: [:type]
+        ),
+
+        # Rate-limit rejections (Issue #206) — `bucket` is a bounded,
+        # whitelisted atom set at the plug call site. The `bucket="auth"`
+        # series is the 429 login-failure-by-type signal. Exported as
+        # `stacks_rate_limit_rejected_count_total{bucket=…}`.
+        counter(
+          [:stacks, :rate_limit, :rejected, :count, :total],
+          event_name: [:stacks, :rate_limit, :rejected],
+          description: "Requests rejected with 429 by the RateLimiter plug, by bucket.",
+          tags: [:bucket]
+        ),
+
         # ── Fuse state gauge ──────────────────────────────────────────
         # `last_value` maps to Prometheus gauge type. Path ends in
         # `[:state, :state]` so the exported name is
