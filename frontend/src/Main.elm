@@ -698,14 +698,11 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
             in
             ( PageProfile m, Cmd.map PublicProfileMsg cmd )
 
-        ProfileShelf handle _ ->
-            -- #215 will render the read-only shelf browse here; until then, land
-            -- on the profile hub so the shelf links never dead-end.
-            let
-                ( m, cmd ) =
-                    ProfilePage.init maybeToken handle
-            in
-            ( PageProfile m, Cmd.map PublicProfileMsg cmd )
+        ProfileShelf handle bookshelfName ->
+            -- Browse another reader's shelf read-only (#215 / US-10.5.3): the
+            -- Bookshelf module in its profile config fetches the profile endpoint
+            -- and strips every mutating affordance.
+            initBookshelf (Bookshelf.profileConfig handle bookshelfName) maybeAuth
 
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
