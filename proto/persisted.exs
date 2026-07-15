@@ -507,7 +507,10 @@
         associations: %{api_only: true},
         # Denormalised projection of the author's users.display_name (block-user
         # confirmation label). Serialized from post.user, never stored on blog_posts.
-        author_display_name: %{api_only: true}
+        author_display_name: %{api_only: true},
+        # Denormalised projection of the author's users.handle (link the author
+        # name to their public profile). Serialized from post.user, never stored.
+        author_handle: %{api_only: true}
       }
     },
     %{
@@ -1212,9 +1215,9 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
       function_name: :blog_post,
-      # author_display_name is projected from post.user by ProtoJSON.blog_post/1,
-      # not a struct field (api_only) — skip it in the base Gen serializer.
-      skip_fields: [:associations, :author_display_name],
+      # author_display_name and author_handle are projected from post.user by
+      # ProtoJSON.blog_post/1, not struct fields (api_only) — skip in base Gen.
+      skip_fields: [:associations, :author_display_name, :author_handle],
       field_overrides: %{}
     },
     %{

@@ -21,8 +21,10 @@ defmodule Stacks.Accounts do
   alias Guardian.DB.Token, as: GuardianDbToken
   alias Stacks.Accounts.ArgonPool
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
   alias Stacks.Events
+  alias Stacks.Social.UserBlock
   alias Stacks.Workers.VisibilityRecapJob
 
   # ---------------------------------------------------------------------------
@@ -184,7 +186,7 @@ defmodule Stacks.Accounts do
   defp validate_reserved_handle(changeset) do
     case get_change(changeset, :handle) do
       handle when is_binary(handle) ->
-        if Stacks.Accounts.ReservedHandles.reserved?(handle),
+        if ReservedHandles.reserved?(handle),
           do: add_error(changeset, :handle, "is reserved"),
           else: changeset
 
@@ -262,6 +264,77 @@ defmodule Stacks.Accounts do
   end
 
   def get_user_by_handle(_), do: nil
+
+  @doc """
+  People search for the discovery surface (US-10.5.4).
+
+  Returns up to #{20} users whose `display_name` matches `term` (case-insensitive
+  `ILIKE`), restricted to **discoverable** profiles (`profile_visibility =
+  "platform"`) and excluding any user blocked in **either** direction relative to
+  `viewer_id`.
+
+  The discoverability privacy rule is enforced **in SQL**, never by serializer
+  redaction: a ghost (`profile_visibility = "owner"`) or a blocked user never
+  enters the result set. When `viewer_id` is `nil` (unauthenticated) there is no
+  viewer to block against, so only the `platform` filter applies.
+
+  A blank/whitespace-only term returns `[]` (no query).
+  """
+  @search_limit 20
+  @spec search_users(String.t(), binary() | nil) :: [User.t()]
+  def search_users(term, viewer_id \\ nil)
+
+  def search_users(term, viewer_id) when is_binary(term) do
+    trimmed = String.trim(term)
+
+    if trimmed == "" do
+      []
+    else
+      pattern = "%#{escape_like(trimmed)}%"
+
+      query =
+        from(u in User,
+          as: :candidate,
+          where: u.profile_visibility == "platform",
+          where: ilike(u.display_name, ^pattern),
+          order_by: [asc: u.display_name],
+          limit: ^@search_limit
+        )
+
+      query
+      |> exclude_blocked(viewer_id)
+      |> Repo.all()
+    end
+  end
+
+  def search_users(_term, _viewer_id), do: []
+
+  # Anti-join on op.user_blocks in BOTH directions. NOT EXISTS keeps the
+  # exclusion in the result set (never a post-filter). No viewer → no block
+  # filter (ghosts are still excluded by the platform filter above).
+  defp exclude_blocked(query, nil), do: query
+
+  defp exclude_blocked(query, viewer_id) do
+    from(u in query,
+      where:
+        not exists(
+          from(b in UserBlock,
+            where:
+              (b.blocker_id == ^viewer_id and b.blocked_id == parent_as(:candidate).id) or
+                (b.blocker_id == parent_as(:candidate).id and b.blocked_id == ^viewer_id)
+          )
+        )
+    )
+  end
+
+  # Escape ILIKE metacharacters so a literal % or _ in the term is not treated
+  # as a wildcard.
+  defp escape_like(term) do
+    term
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
 
   @doc """
   Marks a user's email as confirmed, clearing any pending confirmation token.

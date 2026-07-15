@@ -2,6 +2,7 @@ module BlogPostCommentTest exposing (suite)
 
 import Components.BlockUserModal as BlockModal
 import Expect
+import Html.Attributes
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -270,6 +271,7 @@ suite =
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
                             , authorDisplayName = "Fable Quill"
+                            , authorHandle = "fable_quill"
                             }
 
                         model =
@@ -306,6 +308,7 @@ suite =
                             , insertedAt = "2026-03-29T12:00:00Z"
                             , associations = []
                             , authorDisplayName = "Fable Quill"
+                            , authorHandle = "fable_quill"
                             }
 
                         model =
@@ -328,7 +331,46 @@ suite =
                     blockMenuView { authorName = "" }
                         |> Query.has [ Selector.text "Block the author" ]
             ]
+        , describe "author byline links to the profile (US-10.5.4)"
+            [ test "renders the author name as a link to /u/:handle when a handle is present" <|
+                \_ ->
+                    postView { displayName = "Fable Quill", handle = "fable_quill" }
+                        |> Query.find [ Selector.class "blog-post__author-link" ]
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.href "/u/fable_quill")
+                            , Selector.text "Fable Quill"
+                            ]
+            , test "renders the author name as plain text when no handle is present" <|
+                \_ ->
+                    postView { displayName = "Fable Quill", handle = "" }
+                        |> Query.hasNot [ Selector.class "blog-post__author-link" ]
+            ]
         ]
+
+
+{-| Render Post.view for a Success post with the given author byline fields.
+-}
+postView : { displayName : String, handle : String } -> Query.Single Post.Msg
+postView { displayName, handle } =
+    let
+        post =
+            { id = "post-1"
+            , userId = "post-author-id"
+            , title = "Test Post"
+            , body = "Post body"
+            , visibility = Owner
+            , published = True
+            , insertedAt = "2026-03-29T12:00:00Z"
+            , associations = []
+            , authorDisplayName = displayName
+            , authorHandle = handle
+            }
+
+        model =
+            { testModel | post = Success post }
+    in
+    Post.view model
+        |> Query.fromHtml
 
 
 {-| Drive Post through PostLoaded (which populates the block modal for a
@@ -347,6 +389,7 @@ blockMenuView { authorName } =
             , insertedAt = "2026-03-29T12:00:00Z"
             , associations = []
             , authorDisplayName = authorName
+            , authorHandle = "fable_quill"
             }
 
         viewerModel =

@@ -119,6 +119,12 @@ message BlogPost {
   // time. Empty when the author association is not loaded (frontend falls back
   // to a generic "the author" label).
   string author_display_name = 13 [json_name = "author_display_name"];
+
+  // Public handle of the post's author, denormalised from op.users for linking
+  // the author name to their public profile (/u/:handle). API-only projection —
+  // not a stored column; sourced from the author's users.handle at serialize
+  // time. Empty when the author association is not loaded.
+  string author_handle = 14 [json_name = "author_handle"];
 }
 
 // PostComment represents a user comment on a blog post.
