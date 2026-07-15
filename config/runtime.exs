@@ -87,10 +87,31 @@ else
   end
 
   # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
-  # is bearer-only (no IP allowlist) — every caller must present a matching
-  # `Authorization: Bearer <token>` header. Unset = no one can scrape, not
-  # even the SLO gate. Required in prod; CI sets it via `fly secrets`.
+  # requires a matching `Authorization: Bearer <token>` from public callers.
+  # The one exception is Fly's managed-Prometheus scrape arriving directly
+  # over 6PN (Issue #232) — see the plug's @moduledoc. Unset = no public
+  # caller (e.g. the SLO gate) can scrape. Required in prod; CI sets it via
+  # `fly secrets`.
   config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
+
+  # Optional Grafana dashboard upload (Issue #232). When both GRAFANA_HOST
+  # and GRAFANA_AUTH_TOKEN are set (as Fly secrets pointing at the org's
+  # fly-metrics.net Grafana), PromEx uploads the dashboards-as-code from
+  # `Core.PromEx.dashboards/0` at boot. When either is unset, PromEx defaults
+  # to `grafana: :disabled` — a no-op that must NOT break boot (mirrors the
+  # log-shipper guard). Dashboards can also be imported once by hand; see
+  # docs/runbooks/metrics-stack.md.
+  grafana_host = System.get_env("GRAFANA_HOST")
+  grafana_token = System.get_env("GRAFANA_AUTH_TOKEN")
+
+  if grafana_host && grafana_token && grafana_host != "" && grafana_token != "" do
+    config :core, Core.PromEx,
+      grafana: [
+        host: grafana_host,
+        auth_token: grafana_token,
+        upload_dashboards_on_start: true
+      ]
+  end
 end
 
 # ── Prod-only (release) ───────────────────────────────────────────────────────

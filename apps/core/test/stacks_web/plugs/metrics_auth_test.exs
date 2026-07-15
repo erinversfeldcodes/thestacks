@@ -2,16 +2,18 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   @moduledoc """
   Tests for the /internal/metrics auth plug (Issue #136 Phase 1, DoD #4).
 
-  Requests to /internal/metrics are rejected with 401 unless the request
-  carries `authorization: Bearer <METRICS_SCRAPE_TOKEN>` matching the
+  Public requests to /internal/metrics are rejected with 401 unless the
+  request carries `authorization: Bearer <METRICS_SCRAPE_TOKEN>` matching the
   configured token.
 
-  The plug deliberately does NOT allowlist Fly's private 6PN block: on Fly
-  `[http_service]` without `proxy_protocol` re-originates every public
-  request over 6PN after fly-proxy termination, so `conn.remote_ip` for
-  external callers is always `fdaa::/16`. Allowlisting that range would
-  bypass the bearer check for every public caller. See the plug's
-  `@moduledoc` for the full rationale.
+  The one exception (Issue #232) is Fly's managed-Prometheus scrape, which
+  hits the machine directly over 6PN and cannot present the bearer. That
+  path is allowed WITHOUT a token — but only when it is provably internal:
+  a `fdaa::/16` remote_ip AND the absence of the `fly-client-ip` header that
+  fly-proxy stamps on every public-edge request. A bare 6PN remote_ip is NOT
+  enough on its own (public HTTPS re-originates over 6PN too), so we assert
+  that a 6PN request *with* `fly-client-ip` (a proxied public caller) still
+  gets 401. See the plug's `@moduledoc` for the full rationale.
 
   We exercise the plug in two ways:
 
@@ -62,14 +64,54 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   # Unit tests — the plug itself
   # ---------------------------------------------------------------------------
 
-  describe "MetricsAuth.call/2 — bearer-only (no IP allowlist)" do
-    test "rejects a 6PN-sourced request with no bearer token" do
-      # On Fly, public HTTPS callers terminate at fly-proxy and re-originate
-      # over 6PN, so `remote_ip` inside fdaa::/16 is NOT a trust signal.
-      # The plug must demand a bearer from every caller.
+  describe "MetricsAuth.call/2 — Fly managed-Prometheus 6PN bypass (Issue #232)" do
+    test "allows a direct 6PN scrape of /internal/metrics with NO bearer token" do
+      # Fly's managed Prometheus scrapes the machine directly over 6PN: a
+      # fdaa::/16 remote_ip AND no fly-proxy `fly-client-ip` header. This is
+      # the one path allowed without the bearer.
       result =
         base_conn()
         |> Map.put(:remote_ip, @fly_6pn_ip)
+        |> call_plug()
+
+      refute result.halted,
+             "expected a direct 6PN metrics scrape (no fly-client-ip) to be allowed without a token"
+    end
+
+    test "still 401s a 6PN request that carries a fly-client-ip header (proxied public caller)" do
+      # Public HTTPS terminates at fly-proxy and re-originates over 6PN, so
+      # remote_ip is fdaa::/16 for public callers too — but fly-proxy stamps
+      # an unspoofable `fly-client-ip`. Its presence proves the request came
+      # via the public edge, so the bearer is still required.
+      result =
+        base_conn()
+        |> Map.put(:remote_ip, @fly_6pn_ip)
+        |> put_req_header("fly-client-ip", "203.0.113.7")
+        |> call_plug()
+
+      assert result.halted, "a proxied public caller (fly-client-ip present) must not be bypassed"
+      assert result.status == 401
+    end
+
+    test "does NOT bypass a non-metrics /internal/* path even from a bare 6PN source" do
+      # The bypass is scoped to /internal/metrics only; /internal/deps-check
+      # (and any other internal route) still demands the bearer.
+      result =
+        Phoenix.ConnTest.build_conn(:get, "/internal/deps-check")
+        |> Map.put(:remote_ip, @fly_6pn_ip)
+        |> call_plug()
+
+      assert result.halted, "the bypass must not extend beyond /internal/metrics"
+      assert result.status == 401
+    end
+
+    test "does NOT bypass a public-IP source even without a fly-client-ip header" do
+      # Defence in depth: remote_ip must be inside fdaa::/16 for the bypass.
+      # A public source with no fly-client-ip (e.g. a misrouted direct hit)
+      # is still rejected.
+      result =
+        base_conn()
+        |> Map.put(:remote_ip, @public_ipv4)
         |> call_plug()
 
       assert result.halted
