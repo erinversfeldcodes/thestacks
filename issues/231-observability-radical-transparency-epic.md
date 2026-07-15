@@ -39,6 +39,27 @@ epic-level PE gate.
 | **#234** | design ⭐ | **Transparency & platform-honesty design pass** (`docs/decisions/`). The content/UX for the user-facing education: (a) *what we observe about you* (honest inventory tied to real telemetry + the GDPR audience model); (b) *how we investigate outages* (demystify ops using the real moderation-funnel metrics as the worked example); (c) *why platforms cost money → why free platforms sell your data → why The Stacks doesn't.* Tone, surfaces, and the data source behind every claim. Design-first because it is content-heavy and values-laden. **[owner decision 2026-07-15: PUBLIC / unauthenticated for now** — a manifesto anyone can read, fitting the anti-surveillance ethos; the *general* "what we observe" (not personalised). Personalised "what we hold about **you**" defers to a future authenticated surface.] | #230 (uses its panels as the ops example) |
 | **#235+** | feat | **User-facing transparency surface(s)** — Elm page(s) built from #234's design, backed by dbt marts / a transparency API. Own US + feature-completeness + test-audit. Scoped after #234. | #234 |
 
+## Wave 2 — metrics/dashboard retrofit across the completed platform (DEFERRED)
+A cross-domain inventory (2026-07-15) of ~50 completed issues found metrics in four states: dashboarded
+(moderation/age-gate, #230), **wired-but-undashboarded** (GDPR, rate-limit), **emitted-but-not-exported**
+(visibility/social — #197 dropped the PromEx registration), and **never instrumented** (profiles/search,
+auth-security, trusted-IP). These tickets close those gaps, each following the #230 pattern
+(wire-if-missing → dashboard with teaching panels → drift test → **live-exposure test proving interaction
+makes the metric appear**). **They are DEFERRED: authored now, but not started until the current
+#118 + #231 epic ships its PR** (they are a follow-on wave, not part of the current PR).
+
+| # | Domain | Wires | State found |
+|---|--------|-------|-------------|
+| **#236** | Visibility/social/ViewAs | register the 8 emitted-but-unexported families in PromEx + dashboard | emitted (#197), not exported |
+| **#237** ⭐ | Auth & session **security** | refresh-reuse-detected, session-cap, MFA-verify + dashboard | security signals never instrumented |
+| **#238** | GDPR data-rights | dashboard existing + export/deletion latency + audit-read | wired, undashboarded |
+| **#239** | Profiles/discovery/search | search zero-result, profile-404, shelf-cap, handle claims + dashboard | never instrumented |
+| **#240** | Platform/ops | dashboard existing + trusted-client-IP (#176) | wired, undashboarded |
+
+Priority when Wave 2 starts: #237 (security) + #236 & #238 (both feed #234's transparency page) first,
+then #239, #240. Already-delivered (NOT re-cut): #181 (refresh-revoke counter), #197 (emit+tests), #206
+(auth §12 + rate-limit assertions).
+
 ## Approach options (for the ops-stack half)
 - **A (chosen for #230):** dashboards-as-code, validated without a live Grafana — the dashboard JSON
   + a drift test asserting it references the exact registered metric names + a live `/internal/metrics`
