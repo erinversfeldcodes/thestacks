@@ -30,5 +30,32 @@ self-contained polish.
 ## Definition of Done
 - [ ] Items addressed or explicitly declined with a note.
 
+## Delegation spec (agent)
+Do items 1, 2, 4 (concrete + low-risk). For item 3 (BookshelfName type), implement it if it
+stays small/total; otherwise leave a short note in this issue declining it with the reason.
+**Files:** `e2e/tests/public-profile.spec.ts` (item 1); `frontend/tests/Page/BookshelfReadOnlyTest.elm`
++ `frontend/tests/Page/SearchProgramTest.elm` (item 2); `frontend/src/Navigation/Route.elm` +
+`frontend/src/Page/Bookshelf.elm` (item 3, optional); `frontend/src/Main.elm` routing + a
+non-auth route entry (item 4).
+**Acceptance criteria:**
+1. **Age-gate live E2E row:** place a known age-gated seed book (ISBN `9780140449242` "Demons")
+   on a platform shelf; assert unverified + anonymous viewers get `count == 0` (no shelf gap)
+   and a verified viewer gets `count == 1`. Pin the *visible* book to a known NON-age-gated
+   seed ISBN so the existing spine assertion is deterministic (stop trusting the first
+   `per_page=1` catalogue result).
+2. **Read-only test hardening:** in `BookshelfReadOnlyTest.elm` assert (a) a spine click in
+   read-only mode dispatches NO navigation/mutation (look-only), (b) the owner-attribution
+   back-link (`testId "shelf-attribution"` → `Route.Profile handle`) renders. In a Search test
+   assert a readers-search `Failure` renders the error banner and a 401 raises `SessionExpired`.
+3. **(optional) `BookshelfName` custom type** parsed at the Route boundary, reused by owner +
+   profile-shelf routes, so label/theme/apiName live in one total function (removes the
+   `profileConfig` snake_case fallback + duplicated `shelfLabel`). Decline with a note if it
+   balloons.
+4. **Anon people-search:** decide + act — either add `/search` to the non-auth routes so the
+   optional-auth backend is exercised anonymously, OR document in this issue why anonymous
+   people-search is out of scope. State which you chose.
+**Verify:** `just run bash` → `npx elm-test` green; `e2e/tests/public-profile.spec.ts` parses
+(`npx playwright test public-profile --list`); `just run just verify`.
+
 ## Source
 platform/elm/ux reviewers (P3), #210 epic review.

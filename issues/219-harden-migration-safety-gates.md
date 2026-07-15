@@ -27,5 +27,13 @@ Neither gate can be bypassed by choice of syntax.
 - [ ] Both gates catch destructive ops regardless of DSL-vs-execute syntax.
 - [ ] Regression fixtures added; a deliberately-unannotated tighten fails CI.
 
+## Delegation spec (agent)
+**Files:** `scripts/lint-migrations.sh` (primary), `scripts/security-squawk.sh` (or its wrapper), a test fixture dir (e.g. `test/fixtures/migrations/` or inline in a bats/shell test).
+**Acceptance criteria:**
+1. A migration containing raw `execute("ALTER TABLE … SET NOT NULL")` (or `DROP COLUMN` / `RENAME COLUMN`) **without** a `@breaking_ok` moduledoc line **fails** `lint-migrations.sh` (exit ≠ 0). The same op **with** `@breaking_ok` passes.
+2. A migration using the DSL `create unique_index(..., concurrently: false)` / `alter table … modify … null: false` is covered by at least one gate (squawk parsing the DSL, or squawk run against `mix ecto.migrate --log-migrations-sql` dry-run output).
+3. Two regression fixtures (one raw-execute, one DSL) committed; a script/test asserts each is caught. `20260714200500_*.exs` (the real handle tighten, which HAS `@breaking_ok`) must still pass.
+**Verify:** run the two gate scripts against the fixtures; confirm `just run just verify` is unaffected on the real tree. Do not weaken any existing check.
+
 ## Source
 Principal-engineer process note, #210 epic review.
