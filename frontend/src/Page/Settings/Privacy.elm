@@ -3,16 +3,19 @@ module Page.Settings.Privacy exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithToken
     , update
     , view
     )
 
 import Api
-import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, text)
+import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Visibility as Visibility
+import Util.TestId exposing (testId)
 
 
 type alias Model =
@@ -24,6 +27,12 @@ type alias Model =
     , deleteRequested : Bool
     , deleteConfirmation : String
     , deleting : RemoteData Http.Error ()
+    , blockedUsers : RemoteData Http.Error (List Api.BlockedUser)
+    , blockedTotal : Int
+    , blockedPage : Int
+    , loadingMore : Bool
+    , unblocking : Maybe String
+    , unblockError : Bool
     }
 
 
@@ -48,6 +57,11 @@ type Msg
     | UserTypesDeleteConfirmation String
     | UserClicksDeleteAccount
     | GotDeleteResponse (Result Http.Error ())
+    | GotPrivacySettings (Result Http.Error Api.PrivacySettings)
+    | GotBlockedUsers (Result Http.Error Api.BlockedUsersResponse)
+    | LoadMoreBlocked
+    | UserClicksUnblock String
+    | GotUnblockResponse String (Result Http.Error ())
 
 
 type OutMsg
@@ -95,6 +109,24 @@ defaultShelves =
     ]
 
 
+{-| Overlay the persisted per-shelf visibilities from the server onto the fixed
+set of named shelves, preserving each shelf's human label and full ordering. A
+shelf the user has never customised keeps its default visibility.
+-}
+seedShelves : List Api.ShelfVisibilitySetting -> List ShelfVisibility
+seedShelves saved =
+    List.map
+        (\sv ->
+            case List.filter (\s -> s.name == sv.name) saved of
+                match :: _ ->
+                    { sv | visibility = match.visibility }
+
+                [] ->
+                    sv
+        )
+        defaultShelves
+
+
 init : Model
 init =
     { profileVisibility = "owner"
@@ -105,7 +137,32 @@ init =
     , deleteRequested = False
     , deleteConfirmation = ""
     , deleting = NotAsked
+    , blockedUsers = NotAsked
+    , blockedTotal = 0
+    , blockedPage = 1
+    , loadingMore = False
+    , unblocking = Nothing
+    , unblockError = False
     }
+
+
+{-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
+when authenticated, kicks off the blocked-users fetch. The bare `init` is kept
+for tests and flows that don't need the network.
+-}
+initWithToken : Maybe String -> ( Model, Cmd Msg )
+initWithToken maybeToken =
+    case maybeToken of
+        Just token ->
+            ( { init | blockedUsers = Loading }
+            , Cmd.batch
+                [ Api.getPrivacySettings token GotPrivacySettings
+                , Api.listBlockedUsers token 1 GotBlockedUsers
+                ]
+            )
+
+        Nothing ->
+            ( init, Cmd.none )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -264,6 +321,107 @@ update msg model maybeToken =
                     else
                         ( { model | deleting = Failure err }, Cmd.none, NoOut )
 
+        GotPrivacySettings result ->
+            case result of
+                Ok settings ->
+                    ( { model
+                        | profileVisibility = settings.profileVisibility
+                        , shelfVisibilities = seedShelves settings.shelves
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        -- Keep the defaults on failure; the user can still save.
+                        ( model, Cmd.none, NoOut )
+
+        GotBlockedUsers result ->
+            case result of
+                Ok response ->
+                    let
+                        -- Page 1 replaces the list; later pages append to the
+                        -- readers already loaded (the "Load more" affordance).
+                        merged =
+                            case model.blockedUsers of
+                                Success existing ->
+                                    if response.page > 1 then
+                                        existing ++ response.blockedUsers
+
+                                    else
+                                        response.blockedUsers
+
+                                _ ->
+                                    response.blockedUsers
+                    in
+                    ( { model
+                        | blockedUsers = Success merged
+                        , blockedTotal = response.total
+                        , blockedPage = response.page
+                        , loadingMore = False
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | blockedUsers = Failure err, loadingMore = False }, Cmd.none, NoOut )
+
+        LoadMoreBlocked ->
+            case maybeToken of
+                Just token ->
+                    ( { model | loadingMore = True }
+                    , Api.listBlockedUsers token (model.blockedPage + 1) GotBlockedUsers
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        UserClicksUnblock userId ->
+            case maybeToken of
+                Just token ->
+                    ( { model | unblocking = Just userId, unblockError = False }
+                    , Api.unblockUser userId token (GotUnblockResponse userId)
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        GotUnblockResponse userId result ->
+            case result of
+                Ok _ ->
+                    -- Drop the row locally; the reader's content reappears
+                    -- server-side on the next visibility-resolved fetch.
+                    let
+                        remaining =
+                            case model.blockedUsers of
+                                Success users ->
+                                    Success (List.filter (\u -> u.id /= userId) users)
+
+                                other ->
+                                    other
+                    in
+                    ( { model | blockedUsers = remaining, unblocking = Nothing, unblockError = False }, Cmd.none, NoOut )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        -- Keep the row, clear the in-flight flag, and surface an
+                        -- error so the failure isn't silent.
+                        ( { model | unblocking = Nothing, unblockError = True }, Cmd.none, NoOut )
+
 
 view : Model -> Html Msg
 view model =
@@ -273,6 +431,8 @@ view model =
             [ h2 [ class "settings-section__title" ] [ text "Profile Visibility" ]
             , p [ class "settings-section__desc" ]
                 [ text "Control who can discover your profile." ]
+            , p [ class "settings-section__note" ]
+                [ text "Your profile and content will never appear in search engine results." ]
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Profile" ]
                 , select
@@ -280,7 +440,8 @@ view model =
                     , onInput SetProfileVisibility
                     ]
                     [ option [ value "owner", selected (model.profileVisibility == "owner") ] [ text "Only me" ]
-                    , option [ value "platform", selected (model.profileVisibility == "platform") ] [ text "Discoverable" ]
+                    , option [ value "platform", selected (model.profileVisibility == "platform") ] [ text "Members (signed-in users)" ]
+                    , option [ value "public", selected (model.profileVisibility == "public") ] [ text "Anyone with the link" ]
                     ]
                 ]
             , div [ class "settings-actions" ]
@@ -293,10 +454,96 @@ view model =
             , p [ class "settings-section__desc" ]
                 [ text "Override visibility per shelf. Each shelf's visibility is capped by your profile visibility (the ceiling rule)." ]
             , div [ class "privacy__shelves" ]
-                (List.map viewShelfRow model.shelfVisibilities)
+                (List.map (viewShelfRow model.profileVisibility) model.shelfVisibilities)
+            , viewFeedback model.savingShelf
             ]
         , viewExportSection model.exporting
+        , viewBlockedUsersSection model
         , viewDangerZone model
+        ]
+
+
+viewBlockedUsersSection : Model -> Html Msg
+viewBlockedUsersSection model =
+    div [ class "settings-section", testId "blocked-users-section" ]
+        [ h2 [ class "settings-section__title" ] [ text "Blocked Users" ]
+        , p [ class "settings-section__desc" ]
+            [ text "Readers you've blocked can't see your content, and you won't see theirs. Unblock anyone to restore that." ]
+        , case model.blockedUsers of
+            NotAsked ->
+                text ""
+
+            Loading ->
+                p [ class "loading" ] [ text "Loading your blocked list…" ]
+
+            Failure _ ->
+                p [ class "error" ] [ text "We couldn't load your blocked list. Please try again." ]
+
+            Success [] ->
+                p [ class "privacy__blocked-empty" ] [ text "You haven't blocked anyone." ]
+
+            Success users ->
+                div []
+                    [ div [ class "privacy__blocked-list" ]
+                        (List.map (viewBlockedRow model.unblocking) users)
+                    , viewLoadMore model users
+                    ]
+        , if model.unblockError then
+            p [ attribute "aria-live" "assertive", class "error" ]
+                [ text "We couldn't unblock that reader. Please try again." ]
+
+          else
+            text ""
+        ]
+
+
+{-| "Load more" affordance for readers who've blocked more than one page (20)
+of others. Shown only while fewer readers are loaded than the server's total.
+-}
+viewLoadMore : Model -> List Api.BlockedUser -> Html Msg
+viewLoadMore model users =
+    if List.length users < model.blockedTotal then
+        div [ class "privacy__blocked-load-more" ]
+            [ button
+                [ class "btn btn--small btn--secondary"
+                , disabled model.loadingMore
+                , onClick LoadMoreBlocked
+                ]
+                [ text
+                    (if model.loadingMore then
+                        "Loading…"
+
+                     else
+                        "Load more"
+                    )
+                ]
+            ]
+
+    else
+        text ""
+
+
+viewBlockedRow : Maybe String -> Api.BlockedUser -> Html Msg
+viewBlockedRow unblocking user =
+    let
+        inFlight =
+            unblocking == Just user.id
+    in
+    div [ class "blocked-user privacy__blocked-row" ]
+        [ span [ class "blocked-user__name" ] [ text user.displayName ]
+        , button
+            [ class "btn btn--small btn--secondary blocked-user__unblock"
+            , disabled inFlight
+            , onClick (UserClicksUnblock user.id)
+            ]
+            [ text
+                (if inFlight then
+                    "Unblocking…"
+
+                 else
+                    "Unblock"
+                )
+            ]
         ]
 
 
@@ -440,8 +687,35 @@ viewDeleteFeedback deleting =
             text ""
 
 
-viewShelfRow : ShelfVisibility -> Html Msg
-viewShelfRow sv =
+{-| A shelf may not be _more exposed_ than the profile ceiling (the server returns
+422 otherwise). Exposure ladder: owner < group < platform < public. A shelf option
+is greyed when its exposure exceeds the profile's — so an `owner` profile greys
+everything but owner, a `platform` (Members) profile greys `public`, and a `public`
+profile greys nothing. Single-sourced from `Types.Visibility.rank`.
+-}
+shelfOptionExceedsCeiling : String -> String -> Bool
+shelfOptionExceedsCeiling profileVisibility optionValue =
+    visibilityExposure optionValue > visibilityExposure profileVisibility
+
+
+visibilityExposure : String -> Int
+visibilityExposure v =
+    Visibility.fromString v
+        |> Maybe.map Visibility.rank
+        |> Maybe.withDefault 0
+
+
+viewShelfRow : String -> ShelfVisibility -> Html Msg
+viewShelfRow profileVisibility sv =
+    let
+        shelfOption optionValue optionLabel =
+            option
+                [ value optionValue
+                , selected (sv.visibility == optionValue)
+                , disabled (shelfOptionExceedsCeiling profileVisibility optionValue)
+                ]
+                [ text optionLabel ]
+    in
     div [ class "privacy__shelf-row" ]
         [ div [ class "form-field" ]
             [ label [ class "form-field__label" ] [ text sv.label ]
@@ -449,9 +723,10 @@ viewShelfRow sv =
                 [ class "form-field__select"
                 , onInput (SetShelfVisibility sv.name)
                 ]
-                [ option [ value "owner", selected (sv.visibility == "owner") ] [ text "Only me" ]
-                , option [ value "group", selected (sv.visibility == "group") ] [ text "Group" ]
-                , option [ value "platform", selected (sv.visibility == "platform") ] [ text "Platform" ]
+                [ shelfOption "owner" "Only me"
+                , shelfOption "group" "Group"
+                , shelfOption "platform" "Members"
+                , shelfOption "public" "Anyone with the link"
                 ]
             ]
         , button
@@ -467,7 +742,7 @@ viewSaveButton saving onClickMsg labelText =
     case saving of
         Loading ->
             button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving..." ]
+                [ text "Saving…" ]
 
         Success _ ->
             button [ class "btn btn--primary" ]

@@ -7,6 +7,10 @@ simulated user interactions and HTTP responses.
 
 -}
 
+import Dict
+import Expect
+import Html.Attributes
+import Http
 import Json.Encode as Encode
 import Page.Search as Search exposing (Msg(..))
 import ProgramTest
@@ -30,7 +34,82 @@ suite =
         , searchClear
         , searchEmptyResults
         , searchFilterPanelToggle
+        , readersResults
+        , readersEmptyResults
+        , readersFailure
+        , readers401RaisesSessionExpired
         ]
+
+
+readersFailure : Test
+readersFailure =
+    test "readers_failure: a failed people-search renders the reader error banner" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "ada")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/search/users?q=ada"
+                    (Http.BadStatus_
+                        { url = "/api/search/users?q=ada"
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        "{\"error\":\"boom\"}"
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Reader search failed. Please try again." ]
+
+
+{-| A 401 from people-search must raise `SessionExpired` (so Main routes to the
+session-expiry flow). The `OutMsg` is swallowed by the ProgramTest harness, so
+this asserts the update contract directly.
+-}
+readers401RaisesSessionExpired : Test
+readers401RaisesSessionExpired =
+    test "readers_401_session_expired: a 401 from people-search raises SessionExpired" <|
+        \() ->
+            let
+                ( _, _, outMsg ) =
+                    Search.update
+                        (ReadersCompleted (Err (Http.BadStatus 401)))
+                        Search.init
+                        (Just "test-token")
+            in
+            Expect.equal outMsg Search.SessionExpired
+
+
+readersResults : Test
+readersResults =
+    test "readers_results: query -> receive readers -> profile cards link to /u/:handle" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "ada")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search/users?q=ada"
+                    (readersResponseJson [ ( "adal", "Ada Lovelace" ) ])
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Readers" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Ada Lovelace" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.href "/u/adal") ]
+
+
+readersEmptyResults : Test
+readersEmptyResults =
+    test "readers_empty: query -> empty readers list -> empty state" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "zzz")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search/users?q=zzz"
+                    (readersResponseJson [])
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "No readers found matching your search." ]
 
 
 searchDebounce : Test
@@ -108,6 +187,29 @@ searchResponseJson : List Book -> String
 searchResponseJson books =
     Encode.encode 0
         (Encode.list encodeBookForSearch books)
+
+
+{-| Encode a `{ users: [...] }` people-search response. Each tuple is
+`(handle, display_name)`.
+-}
+readersResponseJson : List ( String, String ) -> String
+readersResponseJson people =
+    Encode.encode 0
+        (Encode.object
+            [ ( "users"
+              , Encode.list
+                    (\( handle, displayName ) ->
+                        Encode.object
+                            [ ( "handle", Encode.string handle )
+                            , ( "display_name", Encode.string displayName )
+                            , ( "city", Encode.string "" )
+                            , ( "country_code", Encode.string "" )
+                            ]
+                    )
+                    people
+              )
+            ]
+        )
 
 
 encodeBookForSearch : Book -> Encode.Value

@@ -121,6 +121,7 @@ sampleBook =
         , title = "Moby Dick"
         , author = "Herman Melville"
         , coverImageUrl = Nothing
+        , hidden = False
         }
 
 
@@ -133,6 +134,7 @@ sampleClothBook =
         , title = "Jane Eyre"
         , author = "Charlotte Bronte"
         , coverImageUrl = Nothing
+        , hidden = False
         }
 
 

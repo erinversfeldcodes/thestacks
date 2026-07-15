@@ -24,7 +24,11 @@ defmodule Stacks.Shelving do
 
   # ── Bookshelf changeset constants ──────────────────────────────────
   @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
-  @valid_visibilities ~w(owner group platform)
+  # Single-sourced from the canonical Audience ladder (#209). Evaluated at compile
+  # time to the same literal list, so it stays usable in the ceiling GUARD clauses
+  # below (`when visibility in @valid_visibilities`). A drift test asserts this list
+  # equals the `Audience` proto enum's settable values (proto/…/visibility.proto).
+  @valid_visibilities Stacks.Visibility.audience_levels()
 
   # ── Placement changeset constants ──────────────────────────────────
   @valid_reading_statuses ~w(to_read reading completed abandoned)
@@ -133,6 +137,20 @@ defmodule Stacks.Shelving do
     |> where([b], b.user_id == ^user_id and b.name == ^bookshelf_name)
     |> preload(:user)
     |> Repo.one()
+  end
+
+  @doc """
+  Returns all of a user's bookshelves ordered by name, each as a `%{name, visibility}`
+  map. Used by the privacy settings screen to seed the current per-shelf visibility
+  so a returning user sees their saved values rather than defaults.
+  """
+  @spec list_user_bookshelves(binary()) :: [%{name: String.t(), visibility: String.t()}]
+  def list_user_bookshelves(user_id) do
+    Bookshelf
+    |> where([b], b.user_id == ^user_id)
+    |> order_by([b], b.name)
+    |> select([b], %{name: b.name, visibility: b.visibility})
+    |> Repo.all()
   end
 
   @doc """
@@ -476,9 +494,66 @@ defmodule Stacks.Shelving do
       bookshelf ->
         bookshelf
         |> bookshelf_changeset(%{visibility: visibility})
+        |> validate_bookshelf_profile_ceiling(user_id, visibility)
         |> Repo.update()
     end
   end
+
+  @doc """
+  Sets the visibility of a user's named bookshelf, resolving (and lazily
+  creating) it by name. This is the UI/API path: the Elm settings page and the
+  `PUT /api/bookshelves/:bookshelf_name/visibility` route identify shelves by
+  their canonical name, never by UUID. Enforces the profile-visibility ceiling
+  (#195) exactly as `update_bookshelf_visibility/3` does.
+  """
+  @spec set_bookshelf_visibility(binary(), String.t(), String.t()) ::
+          {:ok, Bookshelf.t()} | {:error, Ecto.Changeset.t()}
+  def set_bookshelf_visibility(user_id, bookshelf_name, visibility) do
+    if visibility in @valid_visibilities do
+      get_or_create_bookshelf(user_id, bookshelf_name)
+      |> bookshelf_changeset(%{visibility: visibility})
+      |> validate_bookshelf_profile_ceiling(user_id, visibility)
+      |> Repo.update()
+    else
+      # SEC-5: reject an invalid visibility value BEFORE lazily creating the
+      # shelf, so a 422 does not leave a stray empty bookshelf behind.
+      {:error,
+       %Bookshelf{user_id: user_id, name: bookshelf_name}
+       |> cast(%{visibility: visibility}, [:visibility])
+       |> validate_inclusion(:visibility, @valid_visibilities)}
+    end
+  end
+
+  # A bookshelf may not be made more visible than the owner's profile ceiling
+  # (US-10.2.1). Per Stacks.Visibility, only a "owner" profile acts as a hard
+  # ceiling — it hides all content — so when the profile is "owner" the bookshelf
+  # visibility must also be "owner". A "platform" profile imposes no additional
+  # restriction beyond the bookshelf's own value. The error is added to the
+  # changeset so callers get an Ecto.Changeset (HTTP 422 with visibility errors),
+  # consistent with the other visibility validations. Only applied to otherwise-
+  # valid visibility values so invalid-inclusion errors are surfaced normally.
+  defp validate_bookshelf_profile_ceiling(changeset, user_id, visibility)
+       when visibility in @valid_visibilities do
+    profile_visibility =
+      Repo.one(from(u in User, where: u.id == ^user_id, select: u.profile_visibility))
+
+    if profile_visibility == "owner" and visibility != "owner" do
+      # Count the bookshelf ceiling rejection (§12 telemetry, Issue #197). This
+      # rejection path was added in #195; the counter is wired here so it fires
+      # on the same definitive rule violation the changeset error marks.
+      Stacks.Visibility.emit_ceiling_rejection(:bookshelf)
+
+      add_error(
+        changeset,
+        :visibility,
+        "is less restrictive than the profile visibility ceiling"
+      )
+    else
+      changeset
+    end
+  end
+
+  defp validate_bookshelf_profile_ceiling(changeset, _user_id, _visibility), do: changeset
 
   @doc """
   Updates the visibility of a placement. Verifies ownership and enforces that
@@ -515,6 +590,7 @@ defmodule Stacks.Shelving do
             |> Repo.update()
 
           {:error, reason} ->
+            Stacks.Visibility.emit_ceiling_rejection(:placement)
             {:error, reason}
         end
     end
@@ -731,7 +807,10 @@ defmodule Stacks.Shelving do
     from(p in Placement,
       where: is_nil(p.removed_at),
       order_by: [p.position, p.placed_at],
-      preload: [book: [:author, :editions]]
+      # Preload bookshelf + its owner so Visibility.resolve_visibility/2 reuses them
+      # (profile ceiling + bookshelf ceiling) instead of firing a query per placement
+      # — the public /u/:handle/bookshelves/:name browse resolves every row.
+      preload: [book: [:author, :editions], bookshelf: :user]
     )
   end
 

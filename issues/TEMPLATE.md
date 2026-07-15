@@ -107,6 +107,11 @@ Rules (from the test-audit skill — non-negotiable):
 - [ ] Standards compliance verified (`just verify` passes)
 - [ ] **Test audit (embedded above) is GREEN** — every applicable cell `✅` or `n/a`-with-rationale;
       0 `❌`, 0 `⚠️`. Regenerate as the final step.
+- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — all 7 items: every named
+      story driven live (local stack, not just unit/code-read); all 13 layers validated (events + metrics
+      **asserted**, not assumed); no dangling reviewer findings (P2/P3 fixed or de-scoped to a tracked
+      issue); logs clean under the live drive; tracking regenerated to reality; live-driven locally
+      before spending on a preview.
 
 ## Dependencies
 [Other issues or infrastructure that must exist first.]

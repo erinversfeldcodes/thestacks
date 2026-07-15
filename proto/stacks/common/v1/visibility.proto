@@ -1,0 +1,40 @@
+// visibility.proto — the canonical Audience ladder (ADR-018 / #209).
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "VisibilityProto";
+option java_multiple_files = true;
+
+// The canonical Audience ladder (ADR-018 / Issue #209). This is the SINGLE
+// source of truth for the shelf / placement / profile visibility vocabulary —
+// the values are ordered by EXPOSURE (ascending = more exposed):
+//
+//   AUDIENCE_OWNER    only the owner
+//   AUDIENCE_GROUP    members of a named group ("friends-only")
+//   AUDIENCE_PLATFORM any authenticated platform user
+//   (AUDIENCE_PUBLIC  reserved — anyone incl. unauthenticated / indexable;
+//                     modelled but not yet a stored value, gated on US-10.4.1)
+//
+// Storage is Postgres ENUMs whose lowercase values (`owner`/`group`/`platform`)
+// are the wire + DB representation; this enum is the contract declaration that
+// `Stacks.Visibility` (Elixir) and `Types.Visibility` (Elm) are validated against
+// (see the drift test in visibility_test.exs). Field/value numbers are forever.
+enum Audience {
+  // Default unspecified value; never a valid stored visibility.
+  AUDIENCE_UNSPECIFIED = 0;
+  // Only the owner can see the resource.
+  AUDIENCE_OWNER = 1;
+  // Members of a named group ("friends-only"). See #224 for the group-profile story.
+  AUDIENCE_GROUP = 2;
+  // Any authenticated platform user ("Members"). NOT visible to logged-out
+  // visitors — the settable "signed-in only" rung.
+  AUDIENCE_PLATFORM = 3;
+
+  // Anyone with the link, signed in OR NOT. Read-access only — the app stays
+  // globally `noindex` (public is anon-readable, not search-engine crawlable;
+  // indexing is a separate future opt-in). (#225)
+  AUDIENCE_PUBLIC = 4;
+}

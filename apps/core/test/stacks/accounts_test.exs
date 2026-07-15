@@ -9,6 +9,7 @@ defmodule Stacks.AccountsTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Events.EventLog
+  alias Stacks.Social
 
   describe "register/1" do
     test "creates a user with hashed password" do
@@ -71,6 +72,188 @@ defmodule Stacks.AccountsTest do
       assert is_binary(user.role)
       # Email must not be part of the event payload (it's stripped in the Multi.run block)
       # The source of truth is the code: payload: %{role: user.role} — no :email key
+    end
+  end
+
+  describe "handles (/u/:handle) — #211" do
+    test "register/1 auto-generates a valid, slugified handle from the display name" do
+      {:ok, user} =
+        Accounts.register(%{
+          "email" => "handle_gen@example.com",
+          "password" => "secret123",
+          "display_name" => "Ada Lovelace"
+        })
+
+      assert user.handle =~ ~r/^[a-z0-9_]{3,30}$/
+      assert String.starts_with?(user.handle, "ada_lovelace_")
+    end
+
+    test "register/1 falls back to a 'reader' base when the display name is blank" do
+      {:ok, user} =
+        Accounts.register(%{"email" => "no_name@example.com", "password" => "secret123"})
+
+      assert user.handle =~ ~r/^reader_[a-z0-9]{6}$/
+    end
+
+    test "generate_handle/1 slugifies the name and appends a random suffix" do
+      assert Accounts.generate_handle("Ada Lovelace!!") =~ ~r/^ada_lovelace_[a-z0-9]{6}$/
+      assert Accounts.generate_handle(nil) =~ ~r/^reader_[a-z0-9]{6}$/
+      assert Accounts.generate_handle("💥") =~ ~r/^reader_[a-z0-9]{6}$/
+    end
+
+    test "get_user_by_handle/1 is case-insensitive and trims" do
+      user = insert(:user, handle: "adalovelace")
+      assert Accounts.get_user_by_handle("AdaLovelace").id == user.id
+      assert Accounts.get_user_by_handle("  adalovelace  ").id == user.id
+      assert Accounts.get_user_by_handle("nobody") == nil
+    end
+
+    test "validate_handle/1 rejects bad format, reserved words, and too-short handles" do
+      import Ecto.Changeset, only: [cast: 3]
+
+      bad =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "No Spaces!"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute bad.valid?
+
+      reserved =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "Admin"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute reserved.valid?
+      assert "is reserved" in errors_on(reserved).handle
+
+      short =
+        %Stacks.Accounts.User{}
+        |> cast(%{handle: "ab"}, [:handle])
+        |> Accounts.validate_handle()
+
+      refute short.valid?
+    end
+
+    test "update_profile/2 sets a valid new handle (normalised to lowercase)" do
+      user = insert(:user, handle: "old_handle")
+      {:ok, updated} = Accounts.update_profile(user, %{"handle" => "New_Handle"})
+      assert updated.handle == "new_handle"
+    end
+
+    test "update_profile/2 rejects a reserved handle" do
+      user = insert(:user)
+      assert {:error, cs} = Accounts.update_profile(user, %{"handle" => "admin"})
+      assert "is reserved" in errors_on(cs).handle
+    end
+
+    test "update_profile/2 rejects a handle already taken (case-insensitive)" do
+      insert(:user, handle: "taken_one")
+      user = insert(:user)
+      assert {:error, cs} = Accounts.update_profile(user, %{"handle" => "TAKEN_ONE"})
+      assert "has already been taken" in errors_on(cs).handle
+    end
+  end
+
+  # search_users/2 — people search for the discovery surface (US-10.5.4, #217).
+  # The discoverability privacy rule (platform-only + bidirectional
+  # block-exclusion) is enforced IN THE QUERY, never by serializer redaction.
+  describe "search_users/2" do
+    test "returns a discoverable (public) user matching the term to an anon searcher" do
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "public")
+      _other = insert(:user, display_name: "Grace Hopper", profile_visibility: "public")
+
+      results = Accounts.search_users("Ada", nil)
+
+      assert Enum.map(results, & &1.id) == [match.id]
+    end
+
+    test "ILIKE-matches case-insensitively and on substrings" do
+      match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "public")
+
+      assert Accounts.search_users("ada", nil) |> Enum.map(& &1.id) == [match.id]
+      assert Accounts.search_users("LOVELACE", nil) |> Enum.map(& &1.id) == [match.id]
+      assert Accounts.search_users("da Love", nil) |> Enum.map(& &1.id) == [match.id]
+    end
+
+    test "an anonymous searcher gets public profiles but NOT platform (Members) ones (#225)" do
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
+      _members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
+
+      # A logged-out visitor must not even learn a Members profile exists (they'd
+      # 404 on it); public is the only search-discoverable rung for anon.
+      assert Accounts.search_users("Ada", nil) |> Enum.map(& &1.id) == [public.id]
+    end
+
+    test "a signed-in searcher gets BOTH platform (Members) and public profiles (#225)" do
+      viewer = insert(:user)
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
+      members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
+
+      ids = Accounts.search_users("Ada", viewer.id) |> Enum.map(& &1.id) |> Enum.sort()
+      assert ids == Enum.sort([public.id, members.id])
+    end
+
+    test "excludes a ghost (profile_visibility = owner) from the result set" do
+      _ghost = insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
+
+      assert Accounts.search_users("Ada", nil) == []
+    end
+
+    test "excludes a ghost even when no viewer is signed in" do
+      _ghost = insert(:user, display_name: "Ada Ghost", profile_visibility: "owner")
+      public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
+
+      results = Accounts.search_users("Ada", nil)
+
+      assert Enum.map(results, & &1.id) == [public.id]
+    end
+
+    test "excludes a user the viewer has blocked" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocked = insert(:user, display_name: "Ada Blocked", profile_visibility: "platform")
+      {:ok, _} = Social.block_user(viewer.id, blocked.id)
+
+      assert Accounts.search_users("Ada", viewer.id) == []
+    end
+
+    test "excludes a user who has blocked the viewer (other direction)" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocker = insert(:user, display_name: "Ada Blocker", profile_visibility: "platform")
+      {:ok, _} = Social.block_user(blocker.id, viewer.id)
+
+      assert Accounts.search_users("Ada", viewer.id) == []
+    end
+
+    test "still returns a blocked user's match to an unrelated viewer" do
+      viewer = insert(:user, profile_visibility: "platform")
+      blocker = insert(:user, profile_visibility: "platform")
+      candidate = insert(:user, display_name: "Ada Seen", profile_visibility: "platform")
+      # candidate is blocked w.r.t. `blocker`, but `viewer` is unrelated.
+      {:ok, _} = Social.block_user(blocker.id, candidate.id)
+
+      results = Accounts.search_users("Ada", viewer.id)
+
+      assert Enum.map(results, & &1.id) == [candidate.id]
+    end
+
+    test "returns [] when nothing matches the term" do
+      insert(:user, display_name: "Grace Hopper", profile_visibility: "platform")
+
+      assert Accounts.search_users("Zzz", nil) == []
+    end
+
+    test "returns [] for a blank or whitespace-only term" do
+      insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+
+      assert Accounts.search_users("", nil) == []
+      assert Accounts.search_users("   ", nil) == []
+    end
+
+    test "treats ILIKE wildcards in the term literally" do
+      insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
+
+      # "%" must not act as a wildcard that matches everything.
+      assert Accounts.search_users("%", nil) == []
     end
   end
 
@@ -608,7 +791,7 @@ defmodule Stacks.AccountsTest do
 
     test "returns changeset error for invalid visibility value" do
       user = insert(:user)
-      assert {:error, changeset} = Accounts.update_profile_visibility(user.id, "public")
+      assert {:error, changeset} = Accounts.update_profile_visibility(user.id, "nonsense")
       assert %{profile_visibility: [_]} = errors_on(changeset)
     end
   end

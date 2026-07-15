@@ -3,6 +3,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
   use Core.DataCase, async: true
 
+  import ExUnit.CaptureLog
   import Stacks.Factory
 
   alias StacksWeb.ProtoJSON
@@ -406,6 +407,8 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.formats == ["physical"]
       assert result.personal_rating == 5
       assert result.notes == placement.notes
+      # Placement visibility feeds the faint hidden-spine on the shelf (#194).
+      assert result.visibility == placement.visibility
       assert result.book != nil
       assert result.book.id == book.id
       assert result.book.author == %{id: author.id, name: author.name, bio: nil}
@@ -484,7 +487,7 @@ defmodule StacksWeb.ProtoJSONTest do
   describe "book_placement/1" do
     test "matches BookController.format_placement_or_nil/1 shape" do
       user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "antilibrary")
+      bookshelf = insert(:bookshelf, user: user, name: "antilibrary", visibility: "owner")
       book = insert(:book)
 
       placement =
@@ -492,7 +495,8 @@ defmodule StacksWeb.ProtoJSONTest do
           bookshelf: bookshelf,
           book: book,
           formats: ["physical", "ebook"],
-          personal_rating: 4
+          personal_rating: 4,
+          visibility: "owner"
         )
 
       # Preload bookshelf so .bookshelf.name is available
@@ -506,8 +510,31 @@ defmodule StacksWeb.ProtoJSONTest do
                bookshelf_name: "antilibrary",
                formats: ["physical", "ebook"],
                personal_rating: 4,
-               notes: placement.notes
+               notes: placement.notes,
+               visibility: "owner",
+               bookshelf_visibility: "owner"
              }
+    end
+
+    test "emits placement visibility and parent bookshelf visibility independently (US-10.2.2)" do
+      user = insert(:user)
+      # Parent bookshelf is the ceiling (group); the placement overrides down to owner.
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          visibility: "owner"
+        )
+
+      placement = Core.Repo.preload(placement, :bookshelf)
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert result.visibility == "owner"
+      assert result.bookshelf_visibility == "group"
     end
 
     test "returns nil for nil" do
@@ -531,6 +558,30 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.book_placement(placement)
 
       assert result.formats == []
+    end
+
+    test "fails loud (logs) but does not crash when the bookshelf association is absent" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          visibility: "owner"
+        )
+
+      # Simulate an unpreloaded bookshelf association — a missing-preload BUG.
+      # The serializer must not crash, but must NOT degrade silently: it logs a
+      # warning so the missing preload is caught rather than quietly ungreying.
+      placement = %{placement | bookshelf: %Ecto.Association.NotLoaded{}}
+
+      {result, log} = with_log(fn -> ProtoJSON.book_placement(placement) end)
+
+      assert result.visibility == "owner"
+      assert result.bookshelf_visibility == nil
+      assert log =~ "not preloaded"
     end
   end
 
@@ -556,6 +607,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result == %{
                id: u.id,
                email: u.email,
+               handle: u.handle,
                display_name: "Alice",
                role: "user",
                profile_visibility: "platform",
@@ -584,7 +636,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
   describe "blog_post/1" do
     test "matches BlogController.format_post/1 shape" do
-      user = insert(:user)
+      user = insert(:user, display_name: "Fable Quill")
       post = insert(:post, user: user, visibility: "platform")
 
       result = ProtoJSON.blog_post(post)
@@ -597,7 +649,9 @@ defmodule StacksWeb.ProtoJSONTest do
                visibility: "platform",
                published_at: post.published_at,
                created_at: post.created_at,
-               updated_at: post.updated_at
+               updated_at: post.updated_at,
+               author_display_name: "Fable Quill",
+               author_handle: user.handle
              }
     end
 
@@ -608,6 +662,44 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.blog_post(post)
 
       assert result.published_at == nil
+    end
+
+    test "includes the author's display_name for the block-user confirmation" do
+      user = insert(:user, display_name: "Fable Quill")
+      post = insert(:post, user: user)
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_display_name == "Fable Quill"
+    end
+
+    test "author_display_name is nil when the author association is not loaded" do
+      user = insert(:user, display_name: "Fable Quill")
+      post = insert(:post, user: user)
+      post = %{post | user: %Ecto.Association.NotLoaded{}}
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_display_name == nil
+    end
+
+    test "includes the author's handle for the profile link (US-10.5.4)" do
+      user = insert(:user, handle: "fable_quill")
+      post = insert(:post, user: user)
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_handle == "fable_quill"
+    end
+
+    test "author_handle is nil when the author association is not loaded" do
+      user = insert(:user, handle: "fable_quill")
+      post = insert(:post, user: user)
+      post = %{post | user: %Ecto.Association.NotLoaded{}}
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_handle == nil
     end
   end
 
@@ -909,6 +1001,86 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.association_action(assoc)
 
       assert result.visible == false
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # public_profile/2 + public_profile_summary/1 — REDACTED-profile contract
+  #
+  # Two-sided drift guard (#220): the paired Elm decoder round-trip lives in
+  # frontend/tests/Page/ProfileTest.elm. These key-set assertions and that
+  # decoder MUST describe the same shape — if you add/remove a key here, update
+  # the Elm side (and vice versa) or the contract has silently drifted.
+  # ---------------------------------------------------------------------------
+  describe "public_profile/2" do
+    test "emits EXACTLY the redacted key set — no account/PII field leaks" do
+      user =
+        insert(:user,
+          handle: "adalovelace",
+          display_name: "Ada",
+          website_url: "https://ada.example.com",
+          city: "London",
+          country_code: "GB"
+        )
+
+      shelves = [
+        insert(:bookshelf, user: user, name: "library"),
+        insert(:bookshelf, user: user, name: "wishlist")
+      ]
+
+      result = ProtoJSON.public_profile(user, shelves)
+
+      # Exact key-set equality (not has_key?/2): fails loud if a key is added or
+      # removed. Guards against a future refactor re-introducing `ProtoJson.user/1`
+      # (which leaks email/consent/role/notification prefs).
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
+
+      # Each bookshelf summary carries ONLY :name — no visibility, id, or counts.
+      for shelf <- result.bookshelves do
+        assert shelf |> Map.keys() |> Enum.sort() == [:name]
+      end
+
+      assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]
+    end
+
+    test "coalesces a nil display_name to \"\" (guards the #210 null-decode bug)" do
+      user = insert(:user, handle: "nameless", display_name: nil)
+
+      result = ProtoJSON.public_profile(user, [])
+
+      assert result.display_name == ""
+      # Key set is unchanged when display_name is nil.
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
+    end
+  end
+
+  describe "public_profile_summary/1" do
+    test "emits EXACTLY the slim redacted key set — no bookshelves, no PII" do
+      user =
+        insert(:user,
+          handle: "reader_x",
+          display_name: "Reader",
+          city: "Cape Town",
+          country_code: "ZA"
+        )
+
+      result = ProtoJSON.public_profile_summary(user)
+
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:city, :country_code, :display_name, :handle]
+    end
+
+    test "coalesces a nil display_name to \"\"" do
+      user = insert(:user, handle: "nameless_summary", display_name: nil)
+
+      result = ProtoJSON.public_profile_summary(user)
+
+      assert result.display_name == ""
+
+      assert result |> Map.keys() |> Enum.sort() ==
+               [:city, :country_code, :display_name, :handle]
     end
   end
 end

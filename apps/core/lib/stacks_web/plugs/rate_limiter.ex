@@ -96,6 +96,16 @@ defmodule StacksWeb.Plugs.RateLimiter do
         conn
 
       rate_limited?(key, bucket, limit) ->
+        # Rate-limit rejection counter (canonical event, Issue #206; supersedes
+        # the earlier `:hit` name from #197 — one event, not two). `bucket` is a
+        # bounded, whitelisted atom (:auth, :upload, :password_change, :social,
+        # :e2e_helper, :global) set at the plug call site — never derived from
+        # request input — so `stacks_rate_limit_rejected_count_total{bucket=…}`
+        # stays low-cardinality. For the `:auth` bucket this is the 429
+        # login-failure-by-type signal (the request is halted here before it ever
+        # reaches AuthController.login/2); `:social` is the visibility epic bucket.
+        :telemetry.execute([:stacks, :rate_limit, :rejected], %{count: 1}, %{bucket: bucket})
+
         conn
         |> put_status(429)
         |> put_resp_header("retry-after", "60")

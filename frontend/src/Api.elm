@@ -4,6 +4,9 @@ module Api exposing
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , BlockError(..)
+    , BlockedUser
+    , BlockedUsersResponse
     , BookDetailResponse
     , CatalogueResponse
     , EnrichmentGaps
@@ -15,8 +18,14 @@ module Api exposing
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
+    , PrivacySettings
+    , ProfileError(..)
+    , ProfileShelfSummary
+    , PublicProfile
+    , PublicProfileSummary
     , QualityTrends
     , RegisterError(..)
+    , ShelfVisibilitySetting
     , SourceHealth
     , UploadInit
     , acceptInvitation
@@ -24,6 +33,7 @@ module Api exposing
     , addShelf
     , approveSource
     , auditLogResponseDecoder
+    , blockUser
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
@@ -52,19 +62,26 @@ module Api exposing
     , getMyPlacements
     , getOnboardingStatus
     , getPostComments
+    , getPrivacySettings
+    , getProfile
+    , getProfileShelf
     , getQualityTrends
     , getSourceHealth
     , getUserPlacements
     , initUpload
     , inviteToGroup
+    , isNotFound
     , isUnauthorized
     , leaveGroup
+    , listBlockedUsers
     , login
     , logout
     , lookupByIsbn
     , mergeFormat
     , moveBook
     , placeBook
+    , publicProfileDecoder
+    , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
     , refresh
@@ -76,13 +93,16 @@ module Api exposing
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
+    , searchUsers
     , soldListing
     , streamEventDecoder
+    , unblockUser
     , updateAgeVerification
     , updateBlogPost
     , updateLocation
     , updateNotifications
     , updatePassword
+    , updatePlacementVisibility
     , updateProfile
     , updateProfileVisibility
     , updateShelfVisibility
@@ -121,6 +141,7 @@ type alias AuthResponse =
     , userId : String
     , email : String
     , displayName : String
+    , handle : String
     , role : String
     , consentAnalytics : Bool
     , consentWritingAssistant : Bool
@@ -135,6 +156,7 @@ fromProtoAuthResponse proto =
     , userId = proto.user.id
     , email = proto.user.email
     , displayName = proto.user.displayName
+    , handle = proto.user.handle
     , role =
         if proto.user.role == "" then
             "user"
@@ -363,6 +385,20 @@ isUnauthorized err =
             False
 
 
+{-| True when an `Http.Error` is a 404 — the signal a resource is gone or hidden
+(e.g. a blog post that resolves to `:hidden` after a block), so the caller can
+render a graceful "no longer available" state instead of a technical error.
+-}
+isNotFound : Http.Error -> Bool
+isNotFound err =
+    case err of
+        Http.BadStatus 404 ->
+            True
+
+        _ ->
+            False
+
+
 {-| POST /api/auth/refresh — exchange the current (still-valid) access token for
 a fresh one before it expires (Issue #173 proactive silent renewal). The 200
 body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
@@ -522,6 +558,7 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
 type alias BookDetailResponse =
     { book : Book
     , placement : Maybe Placement
+    , bookshelfVisibility : Maybe String
     }
 
 
@@ -533,7 +570,7 @@ decoded through the existing app-level decoders which already delegate to proto.
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
-    Decode.map2 BookDetailResponse
+    Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
         -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
         -- decodes JSON null as a default struct (all fields empty/zero) because each
@@ -542,6 +579,13 @@ bookDetailResponseDecoder =
         -- Decode.oneOf handles the case where the field is absent entirely.
         (Decode.oneOf
             [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
+        -- The parent bookshelf's visibility (the placement ceiling), denormalised
+        -- onto the placement payload. Absent → Nothing (no client-side greying).
+        (Decode.oneOf
+            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
             ]
         )
@@ -975,12 +1019,26 @@ getCatalogue params toMsg =
         }
 
 
-{-| PUT /api/settings/profile — update display name, email, and website URL.
+{-| A profile-update failure.
+
+Like registration, a 422 carries per-field validation errors (`handle`,
+`email`, `display_name`) so the settings page can explain the actual problem —
+a taken/reserved/malformed handle surfaces its message under the field rather
+than as a generic "could not save". Every other failure is a
+`ProfileRequestFailed`.
+
+-}
+type ProfileError
+    = ProfileValidationFailed (List ( String, List String ))
+    | ProfileRequestFailed Http.Error
+
+
+{-| PUT /api/settings/profile — update display name, email, website URL, and handle.
 -}
 updateProfile :
-    { displayName : String, email : String, websiteUrl : String }
+    { displayName : String, email : String, websiteUrl : String, handle : String }
     -> String
-    -> (Result Http.Error () -> msg)
+    -> (Result ProfileError String -> msg)
     -> Cmd msg
 updateProfile body token toMsg =
     Http.request
@@ -994,12 +1052,53 @@ updateProfile body token toMsg =
                     , email = body.email
                     , websiteUrl = body.websiteUrl
                     , currentPassword = ""
+                    , handle = body.handle
                     }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = expectProfile toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| Keep the structured `{"errors": ...}` payload a 422 carries so the caller
+can surface the real reason a profile save was rejected (mirrors
+`expectRegister`). On success it hands back the server-normalised handle (the
+200 body echoes the lowercased value) so the settings page can reflect it.
+-}
+expectProfile : (Result ProfileError String -> msg) -> Http.Expect msg
+expectProfile toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (ProfileRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (ProfileRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (ProfileRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    if metadata.statusCode == 422 then
+                        case Decode.decodeString registerErrorsDecoder bodyText of
+                            Ok errors ->
+                                Err (ProfileValidationFailed errors)
+
+                            Err _ ->
+                                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
+
+                    else
+                        Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ bodyText ->
+                    case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
+                        Ok handle ->
+                            Ok handle
+
+                        Err _ ->
+                            Ok ""
 
 
 {-| PUT /api/settings/location — update the user's location.
@@ -1589,6 +1688,386 @@ updateShelfVisibility shelfName visibility token toMsg =
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| PUT /api/placements/:id/visibility — update a single placement's visibility.
+
+The server enforces the ceiling rule (a placement may not be more visible than
+its parent bookshelf) and returns 422 if violated. The 200 body is `{id,
+visibility}`; we decode the confirmed visibility string back so the caller can
+reconcile local state with what the server actually stored.
+
+-}
+updatePlacementVisibility :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error String -> msg)
+    -> Cmd msg
+updatePlacementVisibility placementId visibility token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/visibility"
+        , body =
+            Http.jsonBody
+                (Requests.encodeUpdateShelfVisibilityRequest
+                    { visibility = visibility }
+                )
+        , expect = Http.expectJson toMsg (Decode.field "visibility" Decode.string)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- BLOCKING / SOCIAL
+
+
+{-| A block failure.
+
+The backend distinguishes three domain errors by a `{"error": "..."}` body:
+`already_blocked` and `cannot_block_self` (both HTTP 422) and `not_found`
+(HTTP 404). Every other failure (network, timeout, 401, unparsable body) is a
+`BlockRequestFailed` carrying the raw `Http.Error` so the caller can still
+detect session expiry via `isUnauthorized`.
+
+-}
+type BlockError
+    = AlreadyBlocked
+    | CannotBlockSelf
+    | NotFound
+    | BlockRequestFailed Http.Error
+
+
+{-| A single blocked reader as returned by `GET /api/settings/blocked-users`.
+-}
+type alias BlockedUser =
+    { id : String
+    , displayName : String
+    , blockedAt : String
+    }
+
+
+{-| Paginated response from `GET /api/settings/blocked-users`.
+-}
+type alias BlockedUsersResponse =
+    { blockedUsers : List BlockedUser
+    , total : Int
+    , page : Int
+    }
+
+
+blockedUserDecoder : Decoder BlockedUser
+blockedUserDecoder =
+    Decode.map3 BlockedUser
+        (Decode.field "id" Decode.string)
+        (Decode.field "display_name" Decode.string)
+        (Decode.field "blocked_at" Decode.string)
+
+
+blockedUsersResponseDecoder : Decoder BlockedUsersResponse
+blockedUsersResponseDecoder =
+    Decode.map3 BlockedUsersResponse
+        (Decode.field "blocked_users" (Decode.list blockedUserDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+
+
+{-| `Http.expectWhatever` would collapse the backend's `{"error": ...}` body
+into an opaque `BadStatus`, losing the difference between `already_blocked`,
+`cannot_block_self`, and `not_found`. This custom expect keeps that reason so
+the UI can explain what actually happened.
+-}
+expectBlock : (Result BlockError () -> msg) -> Http.Expect msg
+expectBlock toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (BlockRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (BlockRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (BlockRequestFailed Http.NetworkError)
+
+                Http.BadStatus_ metadata bodyText ->
+                    case Decode.decodeString (Decode.field "error" Decode.string) bodyText of
+                        Ok "already_blocked" ->
+                            Err AlreadyBlocked
+
+                        Ok "cannot_block_self" ->
+                            Err CannotBlockSelf
+
+                        Ok "not_found" ->
+                            Err NotFound
+
+                        _ ->
+                            Err (BlockRequestFailed (Http.BadStatus metadata.statusCode))
+
+                Http.GoodStatus_ _ _ ->
+                    Ok ()
+
+
+{-| POST /api/users/:id/block — block another reader. On success the backend
+returns `{"blocked": true}`; the resolved-visibility layer then hides that
+reader's content bidirectionally on the next fetch.
+-}
+blockUser :
+    String
+    -> String
+    -> (Result BlockError () -> msg)
+    -> Cmd msg
+blockUser targetUserId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
+        , body = Http.emptyBody
+        , expect = expectBlock toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| DELETE /api/users/:id/block — unblock a reader. Returns `{"blocked": false}`
+on success, 404 `not_found` when no block existed.
+-}
+unblockUser :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+unblockUser targetUserId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| GET /api/settings/blocked-users — the current reader's blocked list, one
+page (20 readers) at a time. `page` is 1-based; the response echoes back the
+page and total so the caller can offer a "Load more" affordance.
+-}
+listBlockedUsers :
+    String
+    -> Int
+    -> (Result Http.Error BlockedUsersResponse -> msg)
+    -> Cmd msg
+listBlockedUsers token page toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg blockedUsersResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| A single shelf's saved visibility as returned by `GET /api/settings/privacy`.
+-}
+type alias ShelfVisibilitySetting =
+    { name : String
+    , visibility : String
+    }
+
+
+{-| The current user's saved privacy settings: their profile visibility plus the
+per-shelf visibility overrides. Used to seed the privacy screen so a returning
+user sees their stored values rather than hardcoded defaults.
+-}
+type alias PrivacySettings =
+    { profileVisibility : String
+    , shelves : List ShelfVisibilitySetting
+    }
+
+
+shelfVisibilitySettingDecoder : Decoder ShelfVisibilitySetting
+shelfVisibilitySettingDecoder =
+    Decode.map2 ShelfVisibilitySetting
+        (Decode.field "name" Decode.string)
+        (Decode.field "visibility" Decode.string)
+
+
+privacySettingsDecoder : Decoder PrivacySettings
+privacySettingsDecoder =
+    Decode.map2 PrivacySettings
+        (Decode.field "profile_visibility" Decode.string)
+        (Decode.field "shelves" (Decode.list shelfVisibilitySettingDecoder))
+
+
+{-| GET /api/settings/privacy — the current user's saved profile visibility and
+per-shelf visibility overrides, used to seed the privacy settings screen.
+-}
+getPrivacySettings :
+    String
+    -> (Result Http.Error PrivacySettings -> msg)
+    -> Cmd msg
+getPrivacySettings token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/privacy"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg privacySettingsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- PUBLIC PROFILE (/u/:handle) — #214
+
+
+{-| A user's public profile as seen by a viewer: redacted identity fields plus
+the bookshelves the viewer is allowed to see (visibility-filtered server-side).
+-}
+type alias PublicProfile =
+    { handle : String
+    , displayName : String
+    , websiteUrl : String
+    , city : String
+    , countryCode : String
+    , bookshelves : List ProfileShelfSummary
+    }
+
+
+type alias ProfileShelfSummary =
+    { name : String }
+
+
+publicProfileDecoder : Decoder PublicProfile
+publicProfileDecoder =
+    Decode.map6 PublicProfile
+        (Decode.field "handle" Decode.string)
+        (optionalString "display_name")
+        (optionalString "website_url")
+        (optionalString "city")
+        (optionalString "country_code")
+        (Decode.field "bookshelves" (Decode.list profileShelfSummaryDecoder))
+
+
+profileShelfSummaryDecoder : Decoder ProfileShelfSummary
+profileShelfSummaryDecoder =
+    Decode.map ProfileShelfSummary (Decode.field "name" Decode.string)
+
+
+{-| Decodes a string field that may be absent or JSON null, defaulting to "".
+`Decode.nullable` handles a present-but-null value explicitly; an absent key
+falls through to "".
+-}
+optionalString : String -> Decoder String
+optionalString field =
+    Decode.oneOf
+        [ Decode.field field (Decode.nullable Decode.string) |> Decode.map (Maybe.withDefault "")
+        , Decode.succeed ""
+        ]
+
+
+{-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
+the server resolves what THIS viewer may see; `Nothing` for an anonymous viewer.
+-}
+getProfile : Maybe String -> String -> (Result Http.Error PublicProfile -> msg) -> Cmd msg
+getProfile maybeToken handle toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = baseUrl ++ "/api/u/" ++ handle
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg publicProfileDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Fetch another reader's bookshelf for read-only browsing.
+
+`GET /api/u/:handle/bookshelves/:bookshelfName` (optional auth — the viewer's
+identity is threaded so the backend visibility-filters the placements). The
+payload shape matches the owner's own shelf, so it reuses `shelvesResponseDecoder`.
+
+-}
+getProfileShelf :
+    Maybe String
+    -> String
+    -> String
+    -> (Result Http.Error (List Shelf) -> msg)
+    -> Cmd msg
+getProfileShelf maybeToken handle bookshelfName toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- PEOPLE SEARCH (/api/search/users) — #217
+
+
+{-| A single people-search result — the redacted `public_profile_summary` shape
+(handle + display\_name + location). Shelf-less; the server excludes ghosts and
+blocked users from the result set in SQL, so every summary here is discoverable.
+-}
+type alias PublicProfileSummary =
+    { handle : String
+    , displayName : String
+    , city : String
+    , countryCode : String
+    }
+
+
+publicProfileSummaryDecoder : Decoder PublicProfileSummary
+publicProfileSummaryDecoder =
+    Decode.map4 PublicProfileSummary
+        (Decode.field "handle" Decode.string)
+        (optionalString "display_name")
+        (optionalString "city")
+        (optionalString "country_code")
+
+
+{-| GET /api/search/users?q=<term>. Optional auth — pass the viewer's token when
+signed in so the server can apply bidirectional block-exclusion; `Nothing` for
+an anonymous viewer (ghosts are still excluded server-side).
+-}
+searchUsers :
+    Maybe String
+    -> String
+    -> (Result Http.Error (List PublicProfileSummary) -> msg)
+    -> Cmd msg
+searchUsers maybeToken query toMsg =
+    Http.request
+        { method = "GET"
+        , headers = authHeaders maybeToken
+        , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+authHeaders : Maybe String -> List Http.Header
+authHeaders maybeToken =
+    case maybeToken of
+        Just token ->
+            [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+        Nothing ->
+            []
 
 
 

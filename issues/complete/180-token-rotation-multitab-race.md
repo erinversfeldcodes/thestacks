@@ -43,16 +43,17 @@ _Compact — SPA auth-state robustness. Green when a rotation no longer logs pee
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 10 Elm state machine | yes | ❌ a 401 with a newer stored token adopts it (no logout); renewal propagates across tabs. Validation: elm program test (401 + newer stored token → not logged out) + (if feasible) a Playwright two-context test that a renewal in one context doesn't log out the other. |
-| 2 Auth / grace window (if chosen) | maybe | ❌ backend grace-window verify test |
+| 10 Elm state machine | yes | ✅ `RotationRaceTest.elm` — "recheck_newer_stored_token_adopts: on a 401, a newer stored token is adopted instead of logging out", "different_token_while_authed_adopts", "cleared_while_authed_logs_out"; E2E `rotation-race.spec.ts` two-page cross-tab (adopt-on-rotate, logout-on-clear). |
+| 2 Auth / grace window | yes | ✅ grace window implemented (option 3) — auth_controller_test `describe "rotation grace window (Issue #180, Phase 1)"`: "the just-rotated old token is honoured by the family gate within grace (no false burn)". |
 | others | no | n/a |
 
 ## Definition of Done
-- [ ] A 401 caused by a just-rotated token does NOT log the user out when a newer valid token is available
-- [ ] A renewal in one tab does not log out other tabs / wipe the renewed token
-- [ ] Validation path: elm program test for the re-check-before-logout path; a browser test for the multi-tab case where feasible (else documented n/a)
-- [ ] `elm-test` + `just verify` pass
-- [ ] Test audit (embedded) is GREEN
+- [x] A 401 caused by a just-rotated token does NOT log the user out — `RotationRaceTest` "recheck_newer_stored_token_adopts" + the 20s server grace window ("honoured by the family gate within grace")
+- [x] A renewal in one tab does not log out other tabs — `RotationRaceTest` "different_token_while_authed_adopts" / "cleared_while_authed_logs_out"; cross-tab `storage` propagation
+- [x] Validation path: elm unit (`RotationRaceTest`) + browser `rotation-race.spec.ts` two-page context
+- [x] `elm-test` + `just verify` pass
+- [x] Test audit (embedded) is GREEN
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — rotation race resolved (client adoption + backend grace), unit + browser tested.
 
 ## Dependencies
 - #173 (renewal + interceptor). Coordinates with #179 (grace window vs immediate rotation).

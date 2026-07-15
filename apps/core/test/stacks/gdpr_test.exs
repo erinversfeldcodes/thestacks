@@ -17,6 +17,10 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert export.user.id == user.id
       assert export.user.email == user.email
+      # Both consent flags are portable (writing-assistant added alongside analytics).
+      assert Map.has_key?(export.user, :consent_analytics)
+      assert Map.has_key?(export.user, :consent_writing_assistant)
+      assert Map.has_key?(export.user, :consent_writing_assistant_at)
       assert is_list(export.bookshelves)
       assert is_list(export.placements)
     end

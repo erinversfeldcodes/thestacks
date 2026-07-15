@@ -1,4 +1,10 @@
-module Types.FeedItem exposing (FeedItem(..), FeedResponse, feedResponseDecoder)
+module Types.FeedItem exposing
+    ( FeedItem(..)
+    , FeedResponse
+    , feedItemUserDisplayName
+    , feedItemUserId
+    , feedResponseDecoder
+    )
 
 import Json.Decode as Decode exposing (Decoder)
 
@@ -27,6 +33,31 @@ type alias FeedResponse =
     { data : List FeedItem
     , nextCursor : Maybe String
     }
+
+
+{-| The id of the user a feed item is attributed to — used to offer a block
+affordance on another member's activity.
+-}
+feedItemUserId : FeedItem -> String
+feedItemUserId item =
+    case item of
+        PlacementCreated i ->
+            i.userId
+
+        BlogPost i ->
+            i.userId
+
+
+{-| The display name of the user a feed item is attributed to (block label).
+-}
+feedItemUserDisplayName : FeedItem -> String
+feedItemUserDisplayName item =
+    case item of
+        PlacementCreated i ->
+            i.userDisplayName
+
+        BlogPost i ->
+            i.userDisplayName
 
 
 feedItemDecoder : Decoder FeedItem

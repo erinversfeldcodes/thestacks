@@ -222,6 +222,12 @@
       field_overrides: %{
         role: %{default: "user"},
         profile_visibility: %{default: "owner"},
+        # handle is a NOT NULL, case-insensitively-unique business key (the /u/:handle
+        # profile URL). NOT NULL + the unique test keep the manifest authoritative and
+        # give the warehouse coverage on the profile key. Uniqueness is enforced in the
+        # DB by the functional index `users_lower_handle_index` (lower(handle)); the dbt
+        # `unique` test guards the raw column.
+        handle: %{null: false, dbt_tests: [:unique]},
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
@@ -504,7 +510,13 @@
         visibility_group_id: %{belongs_to: Stacks.Social.Group},
         published_at: %{ecto_type: :utc_datetime_usec},
         # API-only fields — no DB column, excluded from Ecto schema and dbt
-        associations: %{api_only: true}
+        associations: %{api_only: true},
+        # Denormalised projection of the author's users.display_name (block-user
+        # confirmation label). Serialized from post.user, never stored on blog_posts.
+        author_display_name: %{api_only: true},
+        # Denormalised projection of the author's users.handle (link the author
+        # name to their public profile). Serialized from post.user, never stored.
+        author_handle: %{api_only: true}
       }
     },
     %{
@@ -1011,7 +1023,9 @@
           null: false
         },
         status: %{default: "active", null: false},
-        started_at: %{ecto_type: :utc_datetime_usec}
+        started_at: %{ecto_type: :utc_datetime_usec},
+        # User free-text topic/prompt — PII-adjacent. Exclude from dbt analytics.
+        topic: %{dbt_exclude: true}
       }
     },
     %{
@@ -1034,7 +1048,9 @@
           null: false
         },
         turn_index: %{null: false},
-        rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]}
+        rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]},
+        # User free-text comment — PII. Exclude from dbt analytics (mirrors retrieval_log.query).
+        comment: %{dbt_exclude: true}
       }
     },
     %{
@@ -1205,7 +1221,9 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
       function_name: :blog_post,
-      skip_fields: [:associations],
+      # author_display_name and author_handle are projected from post.user by
+      # ProtoJSON.blog_post/1, not struct fields (api_only) — skip in base Gen.
+      skip_fields: [:associations, :author_display_name, :author_handle],
       field_overrides: %{}
     },
     %{

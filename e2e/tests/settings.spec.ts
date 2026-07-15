@@ -80,6 +80,66 @@ test.describe("Settings — Privacy & Consent", () => {
       "Could not save preferences. Please try again."
     );
   });
+
+  // US-8.3 (writing-assistant half). The analytics half is driven above; the WA
+  // toggle is a DISTINCT test-id (`writing-assistant-consent-toggle`) and, unlike
+  // analytics, is NOT staged behind the Save button — each click persists
+  // immediately via POST /api/gdpr/consent {type:"writing_assistant"} because
+  // revoking triggers a server-side purge (Consent.elm:66-82).
+  test("writing-assistant consent grants, flips the off-copy, and persists server-side", async ({
+    page,
+  }) => {
+    await page.goto("/settings/consent");
+    await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
+
+    const toggle = page.getByTestId("writing-assistant-consent-toggle");
+    await expect(toggle).toBeVisible();
+
+    // The off-copy is a named constant in Consent.elm
+    // (writingAssistantOffDescription). Its "Disabling this…" clause appears
+    // ONLY in the OFF state, so it is a safe substring to key off (the ON copy
+    // is a strict prefix of the OFF copy).
+    const offCopy = page.getByText(
+      "Disabling this turns off the writing assistant and deletes your session history and embeddings."
+    );
+
+    // The write echoes the persisted DB flag (gdpr_controller consent_payload),
+    // so we wait on the POST to both settle the click and read the durable value.
+    const waConsentPost = () =>
+      page.waitForResponse(
+        (r) =>
+          r.url().includes("/api/gdpr/consent") &&
+          r.request().method() === "POST"
+      );
+
+    // Normalise to OFF so "grant" is a deterministic OFF→ON transition,
+    // regardless of the seeded settings user's starting consent.
+    if ((await toggle.textContent())?.trim() === "On") {
+      const settled = waConsentPost();
+      await toggle.click();
+      await settled;
+      await expect(toggle).toHaveText("Off");
+    }
+    await expect(offCopy).toBeVisible();
+
+    // Grant: OFF → ON.
+    const granted = waConsentPost();
+    await toggle.click();
+    const grantResp = await granted;
+    expect(grantResp.status()).toBe(200);
+
+    // The toggle flips to On and the off-copy flips to the shorter on-copy.
+    await expect(toggle).toHaveText("On");
+    await expect(offCopy).toHaveCount(0);
+
+    // Persistence proof against the REAL backend: the write response echoes the
+    // persisted `consent_writing_assistant` flag, so the grant is durable
+    // server-side — not just an optimistic client flip. (A page reload can't
+    // prove this here: Main.elm re-seeds the toggle from the stored auth in
+    // localStorage, which the consent write deliberately does not mutate.)
+    const body = await grantResp.json();
+    expect(body.consent_writing_assistant).toBe(true);
+  });
 });
 
 /**

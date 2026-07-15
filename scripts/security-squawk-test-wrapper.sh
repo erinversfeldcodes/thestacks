@@ -15,29 +15,17 @@
 set -uo pipefail
 
 migration="${1:?usage: $0 <migration.exs>}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v squawk &>/dev/null; then
     echo "SKIP: squawk not installed" >&2
     exit 0
 fi
 
-# Extract SQL from execute() blocks — same logic as security-squawk.sh.
-sql_block="$(python3 -c '
-import re, sys
-src = open(sys.argv[1]).read()
-blocks = []
-blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"\"\"(.*?)\"\"\"", src, re.DOTALL)]
-blocks += [m.group(1) for m in re.finditer(r"execute\s*\(\s*\"([^\"]+)\"\s*\)", src)]
-for b in blocks:
-    if "#{" in b:
-        continue
-    if re.search(r"DO\s*\$\$", b, re.IGNORECASE):
-        continue
-    stmt = b.strip()
-    if not stmt.endswith(";"):
-        stmt += ";"
-    print(stmt)
-' "$migration" 2>/dev/null || true)"
+# Extract SQL via the shared helper — identical extraction to security-squawk.sh
+# (execute() SQL + create index/unique_index DSL translation), so this wrapper
+# and the real gate can never disagree about what a migration means (#219).
+sql_block="$(python3 "$HERE/extract-migration-sql.py" "$migration" 2>/dev/null || true)"
 
 if [[ -z "$sql_block" ]]; then
     echo "no raw SQL in fixture — skipping"

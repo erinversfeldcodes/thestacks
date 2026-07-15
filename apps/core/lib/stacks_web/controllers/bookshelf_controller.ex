@@ -32,22 +32,20 @@ defmodule StacksWeb.BookshelfController do
     end
   end
 
-  @doc "PUT /api/bookshelves/:id/visibility — update the visibility of a bookshelf."
-  def update_visibility(conn, %{"id" => bookshelf_id, "visibility" => visibility}) do
-    user = Guardian.Plug.current_resource(conn)
+  @doc "PUT /api/bookshelves/:bookshelf_name/visibility — update a bookshelf's visibility."
+  def update_visibility(conn, %{"bookshelf_name" => bookshelf_name, "visibility" => visibility}) do
+    if bookshelf_name in @valid_bookshelves do
+      user = Guardian.Plug.current_resource(conn)
 
-    case Shelving.update_bookshelf_visibility(bookshelf_id, user.id, visibility) do
-      {:ok, bookshelf} ->
-        json(conn, ProtoJSON.visibility_update(bookshelf))
+      case Shelving.set_bookshelf_visibility(user.id, bookshelf_name, visibility) do
+        {:ok, bookshelf} ->
+          json(conn, ProtoJSON.visibility_update(bookshelf))
 
-      {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: "not_found"})
-
-      {:error, :unauthorized} ->
-        conn |> put_status(403) |> json(%{error: "forbidden"})
-
-      {:error, changeset} ->
-        conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
+        {:error, changeset} ->
+          conn |> put_status(422) |> json(%{errors: format_errors(changeset)})
+      end
+    else
+      conn |> put_status(404) |> json(%{error: "invalid bookshelf name"})
     end
   end
 

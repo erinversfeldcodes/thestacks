@@ -98,7 +98,8 @@ None. 0 ❌ / 0 ⚠️. Every applicable cell has real, verified coverage; every
 - [x] Schema-level guard TIGHTENED: every `op.*` FK referencing `op.users` (any column name) must CASCADE, OR be an allowlisted SET NULL. `SET NULL` is no longer blanket-accepted (that is what let the `post_comments.body` leak pass GREEN). Allowlist (`@nilify_user_fk_allowlist` in `deletion_test.exs`) with justifications: `transactions` (financial-audit/legal retention; no user free-text), `partners` (business entity; approver de-linked), `post_comments` (free-text body erased by `:erase_comments`; nilify preserves thread). Any other nilify user-FK or un-allowlisted table FAILS the guard — a future bare-nilify personal table is caught. `deletion_test.exs` "every op.* FK that references op.users cascades, or nullifies only on the allowlist"
 - [x] Feature-Completeness Pre-Check (above) is ✅ for US-8.2 — the erasure happy path is built end-to-end (router → controller → `AccountDeletionJob` → `delete_user_data/1` WA cascade + event_log scrub + audit row) and proven live via the passing `deletion_test.exs` + `gdpr_data_model_test.exs` acceptance suites; no named story reaches GREEN via `n/a (see #NNN)`.
 - [x] Test audit (embedded above) is GREEN — every cell ✅ or n/a-with-rationale; 0 ❌, 0 ⚠️; regenerate as the final step.
-- [ ] `just verify` passes
+- [x] `just verify` passes
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — right-to-erasure cascade + event_log scrub + comment-body tombstone + tightened schema guard, all test-first.
 
 ## Dependencies
 #183 (data-model foundation — the tables this cascade deletes).

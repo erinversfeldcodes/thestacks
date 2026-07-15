@@ -14,6 +14,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Blog.Post
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Workers.VisibilityRecapJob
 
@@ -21,6 +22,20 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
       :count
+    )
+  end
+
+  defp recap_payload(user_id) do
+    Repo.one(
+      from(e in "event_log",
+        prefix: "op",
+        where:
+          e.event_type == "user.visibility_recap_completed" and
+            e.aggregate_id == ^user_id,
+        order_by: [desc: e.occurred_at],
+        limit: 1,
+        select: e.payload
+      )
     )
   end
 
@@ -146,6 +161,36 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "platform"})
 
       assert event_count("user.visibility_recap_completed") == before_count
+    end
+  end
+
+  describe "perform/1 — posts capped via tighten_posts_to_ceiling" do
+    test "caps posts more visible than the ceiling and reports posts_capped in payload" do
+      user = insert(:user, profile_visibility: "platform")
+      platform_post = insert(:post, user: user, visibility: "platform")
+      owner_post = insert(:post, user: user, visibility: "owner")
+
+      perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
+
+      # The platform post is tightened down to the owner ceiling…
+      assert Repo.get!(Post, platform_post.id).visibility == "owner"
+      # …while the already-at-ceiling owner post is untouched.
+      assert Repo.get!(Post, owner_post.id).visibility == "owner"
+
+      payload = recap_payload(user.id)
+      assert payload["posts_capped"] == 1
+    end
+
+    test "reports posts_capped: 0 when no posts violate the ceiling" do
+      user = insert(:user, profile_visibility: "platform")
+      _owner_post = insert(:post, user: user, visibility: "owner")
+      # A bookshelf is capped so the recap event is still emitted for ceiling "owner".
+      _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
+
+      payload = recap_payload(user.id)
+      assert payload["posts_capped"] == 0
     end
   end
 

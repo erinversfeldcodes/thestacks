@@ -48,16 +48,17 @@ _Compact — auth/DB security hardening. Green when the cap + reuse-detection ar
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 2 Auth guards / 3 DB **(SECURITY)** | yes | ❌ refresh past the cap → 401; reused rotated token → whole family revoked; logout revokes the family. Validation: ExUnit against the real guardian_tokens (unit) + a `:deployed_only` check that a capped/reused token is rejected on a live preview. |
+| 2 Auth guards / 3 DB **(SECURITY)** | yes | ✅ auth_controller_test — "refresh past the absolute cap returns 401 session_expired and revokes the old token", "replaying an older (2-rotations-back) token 401s AND revokes the whole family", "logout revokes the family so an attacker's rotated chain dies too"; live-stack `guardian_jwt_deployed_test.exs` on the real Fly+Neon stack. |
 | 1,4–13 | no | n/a — no app-data/US/frontend surface (the forced re-login reuses #173's interceptor) |
 
 ## Definition of Done
-- [ ] Refresh past the absolute cap → 401 (bounded total session lifetime, cap survives rotation)
-- [ ] Reuse of an already-rotated token revokes the whole family
-- [ ] Logout / password change revokes every token in the family, not just the current jti
-- [ ] Every behaviour has a validation path — ExUnit (unit) + a `:deployed_only` live-stack check that a capped/reused token is rejected on a real preview
-- [ ] `just verify` passes
-- [ ] Test audit (embedded) is GREEN
+- [x] Refresh past the absolute cap → 401 — "refresh past the absolute cap returns 401 session_expired and revokes the old token"; cap survives rotation ("an in-cap refresh preserves the original sst anchor")
+- [x] Reuse of an already-rotated token revokes the whole family — "replaying an older (2-rotations-back) token 401s AND revokes the whole family"
+- [x] Logout / password change revokes every token in the family — "logout revokes the family so an attacker's rotated chain dies too"
+- [x] Validation path — ExUnit (`refresh-token families` + `reuse detection & family revocation` describes) + `:deployed_only` live-stack check (`guardian_jwt_deployed_test.exs`)
+- [x] `just verify` passes
+- [x] Test audit (embedded) is GREEN
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — cap + reuse-detection enforced, unit + live-stack tested.
 
 ## Dependencies
 - #173 (silent renewal / refresh), #124 A2 (revocation), #174 (guardian_tokens.jwt trigger). Same epic
