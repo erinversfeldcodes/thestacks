@@ -96,7 +96,7 @@ sources:
           - name: name
             description: Bookshelf category name (library, antilibrary, wishlist, reading_pile, looking_for_home).
           - name: visibility
-            description: Who can see this bookshelf (owner, group, platform).
+            description: Who can see this bookshelf (owner, group, platform, public).
           - name: visibility_group_id
             description: FK to groups; non-null when visibility is "group".
           - name: created_at
@@ -220,7 +220,7 @@ sources:
           - name: role
             description: User role (user, partner, admin).
           - name: profile_visibility
-            description: Profile visibility level (owner, group, platform).
+            description: Profile visibility level (owner, platform, public).
           - name: website_url
             description: User personal website URL.
           - name: age_verified
@@ -582,7 +582,7 @@ sources:
           - name: body
             description: Post body content (Markdown).
           - name: visibility
-            description: Post visibility (owner, group, platform).
+            description: Post visibility (owner, group, platform, public).
           - name: visibility_group_id
             description: FK to groups; non-null when visibility is "group".
           - name: published_at

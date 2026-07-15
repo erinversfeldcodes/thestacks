@@ -29,12 +29,12 @@ enum Audience {
   AUDIENCE_OWNER = 1;
   // Members of a named group ("friends-only"). See #224 for the group-profile story.
   AUDIENCE_GROUP = 2;
-  // Any authenticated platform user (NOT the open internet).
+  // Any authenticated platform user ("Members"). NOT visible to logged-out
+  // visitors — the settable "signed-in only" rung.
   AUDIENCE_PLATFORM = 3;
 
-  // AUDIENCE_PUBLIC (= 4) is RESERVED: the open-internet / indexable rung is
-  // modelled in the ladder but not yet a stored value. Reserve the number and
-  // name so a future release can add it without reuse.
-  reserved 4;
-  reserved "AUDIENCE_PUBLIC";
+  // Anyone with the link, signed in OR NOT. Read-access only — the app stays
+  // globally `noindex` (public is anon-readable, not search-engine crawlable;
+  // indexing is a separate future opt-in). (#225)
+  AUDIENCE_PUBLIC = 4;
 }

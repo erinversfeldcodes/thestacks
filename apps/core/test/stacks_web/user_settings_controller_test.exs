@@ -371,7 +371,7 @@ defmodule StacksWeb.UserSettingsControllerTest do
       conn =
         conn
         |> auth_conn(user)
-        |> put("/api/settings/profile_visibility", %{profile_visibility: "public"})
+        |> put("/api/settings/profile_visibility", %{profile_visibility: "nonsense"})
 
       assert %{"errors" => _} = json_response(conn, 422)
     end

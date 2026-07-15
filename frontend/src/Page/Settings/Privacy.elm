@@ -14,6 +14,7 @@ import Html.Attributes exposing (attribute, class, disabled, for, id, placeholde
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Visibility as Visibility
 import Util.TestId exposing (testId)
 
 
@@ -439,7 +440,8 @@ view model =
                     , onInput SetProfileVisibility
                     ]
                     [ option [ value "owner", selected (model.profileVisibility == "owner") ] [ text "Only me" ]
-                    , option [ value "platform", selected (model.profileVisibility == "platform") ] [ text "Discoverable" ]
+                    , option [ value "platform", selected (model.profileVisibility == "platform") ] [ text "Members (signed-in users)" ]
+                    , option [ value "public", selected (model.profileVisibility == "public") ] [ text "Anyone with the link" ]
                     ]
                 ]
             , div [ class "settings-actions" ]
@@ -685,15 +687,22 @@ viewDeleteFeedback deleting =
             text ""
 
 
-{-| A shelf may not be _more visible_ than the profile ceiling. Mirrors the
-server rule in `Stacks.Shelving.validate_bookshelf_profile_ceiling/3`: only an
-`owner` profile acts as a hard ceiling — it hides all content — so when the
-profile is `owner` every shelf option other than `owner` is greyed out. A
-`platform` profile imposes no additional restriction, so nothing is greyed.
+{-| A shelf may not be _more exposed_ than the profile ceiling (the server returns
+422 otherwise). Exposure ladder: owner < group < platform < public. A shelf option
+is greyed when its exposure exceeds the profile's — so an `owner` profile greys
+everything but owner, a `platform` (Members) profile greys `public`, and a `public`
+profile greys nothing. Single-sourced from `Types.Visibility.rank`.
 -}
 shelfOptionExceedsCeiling : String -> String -> Bool
 shelfOptionExceedsCeiling profileVisibility optionValue =
-    profileVisibility == "owner" && optionValue /= "owner"
+    visibilityExposure optionValue > visibilityExposure profileVisibility
+
+
+visibilityExposure : String -> Int
+visibilityExposure v =
+    Visibility.fromString v
+        |> Maybe.map Visibility.rank
+        |> Maybe.withDefault 0
 
 
 viewShelfRow : String -> ShelfVisibility -> Html Msg
@@ -716,7 +725,8 @@ viewShelfRow profileVisibility sv =
                 ]
                 [ shelfOption "owner" "Only me"
                 , shelfOption "group" "Group"
-                , shelfOption "platform" "Platform"
+                , shelfOption "platform" "Members"
+                , shelfOption "public" "Anyone with the link"
                 ]
             ]
         , button

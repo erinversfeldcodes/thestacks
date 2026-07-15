@@ -316,10 +316,10 @@ defmodule StacksWeb.BookshelfControllerTest do
   end
 
   describe "GET /api/bookshelves/:bookshelf_name — view_as content filtering" do
-    test "owner viewing own bookshelf as unauthenticated sees only platform-visible placements",
+    test "owner viewing own bookshelf as unauthenticated sees only public placements (#225)",
          %{conn: conn} do
-      user = insert(:user, profile_visibility: "platform")
-      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      user = insert(:user, profile_visibility: "public")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       shelf = insert(:shelf, bookshelf: bookshelf)
       visible_book = insert(:book)
       hidden_book = insert(:book)
@@ -328,7 +328,7 @@ defmodule StacksWeb.BookshelfControllerTest do
         bookshelf: bookshelf,
         shelf: shelf,
         book: visible_book,
-        visibility: "platform"
+        visibility: "public"
       )
 
       insert(:placement,
@@ -348,7 +348,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert baseline["count"] == 2
 
       # With ?view_as=unauthenticated the payload is FILTERED to the simulated
-      # audience: the owner-only placement is dropped, the platform one remains.
+      # audience: the owner-only placement is dropped, the public one remains.
       filtered =
         build_conn()
         |> auth_conn(user)

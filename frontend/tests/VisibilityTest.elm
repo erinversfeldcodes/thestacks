@@ -41,13 +41,15 @@ roundTrip =
 
 ranking : Test
 ranking =
-    describe "rank orders public < platform < owner"
-        [ test "public is least restrictive" <|
-            \_ -> V.rank Public |> Expect.equal 0
-        , test "platform is in the middle" <|
-            \_ -> V.rank Platform |> Expect.equal 1
-        , test "owner is most restrictive" <|
-            \_ -> V.rank Owner |> Expect.equal 2
+    describe "rank orders by exposure: owner < group < platform < public (#225)"
+        [ test "owner is least exposed" <|
+            \_ -> V.rank Owner |> Expect.equal 0
+        , test "group sits above owner" <|
+            \_ -> V.rank Group |> Expect.equal 1
+        , test "platform (Members) is above group" <|
+            \_ -> V.rank Platform |> Expect.equal 2
+        , test "public is most exposed" <|
+            \_ -> V.rank Public |> Expect.equal 3
         ]
 
 
