@@ -141,4 +141,118 @@ defmodule StacksWeb.ProfileControllerTest do
       |> json_response(404)
     end
   end
+
+  # #213 punch items: the group-visibility and unauthenticated rows of the
+  # visibility matrix, asserted on the endpoints (not just the resolver unit).
+  describe "visibility matrix — group + unauthenticated" do
+    test "a group-visibility shelf shows to a member and hides from a non-member (hub)", %{
+      conn: conn
+    } do
+      owner = insert(:user, handle: "group_owner", profile_visibility: "platform")
+      group = insert(:group, owner: owner)
+      member = insert(:user)
+      insert(:group_member, group: group, user: member)
+      nonmember = insert(:user)
+
+      insert(:bookshelf,
+        user: owner,
+        name: "library",
+        visibility: "group",
+        visibility_group_id: group.id
+      )
+
+      member_names =
+        conn
+        |> auth_conn(member)
+        |> get("/api/u/group_owner")
+        |> json_response(200)
+        |> Map.get("bookshelves")
+        |> Enum.map(& &1["name"])
+
+      nonmember_names =
+        conn
+        |> auth_conn(nonmember)
+        |> get("/api/u/group_owner")
+        |> json_response(200)
+        |> Map.get("bookshelves")
+        |> Enum.map(& &1["name"])
+
+      assert "library" in member_names
+      refute "library" in nonmember_names
+    end
+
+    test "a group-visibility placement shows to a member and hides from a non-member (shelf)", %{
+      conn: conn
+    } do
+      owner = insert(:user, handle: "group_shelf_owner", profile_visibility: "platform")
+      group = insert(:group, owner: owner)
+      member = insert(:user)
+      insert(:group_member, group: group, user: member)
+      nonmember = insert(:user)
+
+      bookshelf =
+        insert(:bookshelf,
+          user: owner,
+          name: "library",
+          visibility: "platform",
+          visibility_group_id: group.id
+        )
+
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book),
+        visibility: "group"
+      )
+
+      member_count =
+        conn
+        |> auth_conn(member)
+        |> get("/api/u/group_shelf_owner/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+
+      nonmember_count =
+        conn
+        |> auth_conn(nonmember)
+        |> get("/api/u/group_shelf_owner/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+
+      assert member_count == 1
+      assert nonmember_count == 0
+    end
+
+    test "an unauthenticated viewer sees platform placements but not owner-only ones (shelf)", %{
+      conn: conn
+    } do
+      owner = insert(:user, handle: "unauth_shelf_owner", profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "platform")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book),
+        visibility: "platform"
+      )
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: insert(:book),
+        visibility: "owner"
+      )
+
+      count =
+        conn
+        |> get("/api/u/unauth_shelf_owner/bookshelves/library")
+        |> json_response(200)
+        |> Map.get("count")
+
+      assert count == 1
+    end
+  end
 end
