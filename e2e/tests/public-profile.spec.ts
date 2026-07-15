@@ -80,10 +80,15 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     );
     const ownerHandle = ((await setHandle.json()).handle as string) ?? handle;
 
-    // A platform-visible "library" with one placed book, and an owner-only
-    // "wishlist" that must NOT surface to the viewer.
-    await placeFirstCatalogueBook(request, ownerAuth, "library");
+    // A platform-visible "library" with one platform-visible placed book, and
+    // an owner-only "wishlist" that must NOT surface to the viewer. Order matters
+    // and mirrors the visibility ceiling: a placement may not exceed its
+    // bookshelf's visibility, so the bookshelf is loosened to "platform" BEFORE
+    // the placement (which itself defaults to "owner"). A platform bookshelf
+    // alone would still hide every spine — visibility is enforced per-placement.
+    const placementId = await placeFirstCatalogueBook(request, ownerAuth, "library");
     await setBookshelfVisibility(request, ownerAuth, "library", "platform");
+    await setPlacementVisibility(request, ownerAuth, placementId, "platform");
     await setBookshelfVisibility(request, ownerAuth, "wishlist", "owner");
 
     // ── VIEWER (A) — browser ──────────────────────────────────────────────
@@ -180,24 +185,42 @@ async function loginViaApi(
 }
 
 /**
- * Place the first catalogue book onto the owner's given bookshelf via the API,
- * so their platform-visible shelf has a spine to render for the viewer.
+ * Place the first catalogue book onto the owner's given bookshelf via the API
+ * and return the new placement's id, so the caller can loosen its visibility and
+ * give the platform-visible shelf a spine to render for the viewer.
  */
 async function placeFirstCatalogueBook(
   request: APIRequestContext,
   authToken: string,
   bookshelfName: string
-): Promise<void> {
+): Promise<string> {
   const cat = await expectOk(request.get("/api/catalogue?per_page=1"), "catalogue");
   const books = (await cat.json()).books ?? [];
   expect(books.length, "catalogue has at least one book to place").toBeGreaterThan(0);
 
-  await expectOk(
+  const placed = await expectOk(
     request.post(`/api/bookshelves/${bookshelfName}/placements`, {
       headers: { Authorization: `Bearer ${authToken}` },
       data: { book_id: books[0].id },
     }),
     `place book on ${bookshelfName}`
+  );
+  return (await placed.json()).placement.id as string;
+}
+
+/** Set a placement's visibility (owner | group | platform) via the API. */
+async function setPlacementVisibility(
+  request: APIRequestContext,
+  authToken: string,
+  placementId: string,
+  visibility: string
+): Promise<void> {
+  await expectOk(
+    request.put(`/api/placements/${placementId}/visibility`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      data: { visibility },
+    }),
+    `set placement → ${visibility}`
   );
 }
 
