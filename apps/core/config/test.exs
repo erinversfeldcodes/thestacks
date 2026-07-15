@@ -77,6 +77,7 @@ config :core, :together_client, Stacks.AI.MockTogetherClient
 config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
 config :core, :storage, Stacks.Storage.Mock
 config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
+config :core, :transparency_prometheus_client, Stacks.Transparency.MockPrometheusClient
 
 config :core, Stacks.Vault,
   ciphers: [

@@ -139,6 +139,11 @@ config :core, :together_client, Stacks.AI.TogetherClient
 config :core, :searxng_client, Stacks.Discovery.SearxngClient
 config :core, :searxng_url, "http://localhost:8888"
 config :core, :dbt_runner, Stacks.Workers.DbtRunner
+# Public transparency (#241 / ADR-019) — read-only Fly-Prometheus client for
+# the curated live-signal whitelist. The Fly read token + org are runtime
+# secrets (see config/runtime.exs); absent ⇒ live section degrades to
+# `:unavailable`.
+config :core, :transparency_prometheus_client, Stacks.Transparency.Prometheus
 # review_fetcher defaults to mock in all environments — no real review API
 # integration exists yet. FetchReviewsJob uses this mock to return sample data.
 # Replace with a real implementation when a review source API is integrated.

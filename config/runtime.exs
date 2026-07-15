@@ -47,6 +47,19 @@ else
     config :core, :vision_together_api_key, together_key
   end
 
+  # Public transparency live signals (#241 / ADR-019). The read-only Fly
+  # managed-Prometheus token + org slug are Fly secrets, guarded like the
+  # Grafana / log-shipper config above: when either is unset the live section
+  # of /api/transparency/metrics degrades to `:unavailable` — it must NOT break
+  # boot. Never the write/scrape token; this is a curated read of a whitelist.
+  if prom_token = System.get_env("FLY_PROMETHEUS_READ_TOKEN") do
+    config :core, :fly_prometheus_token, prom_token
+  end
+
+  if prom_org = System.get_env("FLY_PROMETHEUS_ORG") do
+    config :core, :fly_prometheus_org, prom_org
+  end
+
   if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
     config :core, :rate_limit_auth, String.to_integer(auth_limit)
   end

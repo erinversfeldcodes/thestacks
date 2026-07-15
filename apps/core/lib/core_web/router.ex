@@ -97,6 +97,10 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_public]
     get "/costs", CostController, :index
+    # Public transparency metrics (#241 / ADR-019) — curated, anonymised subset
+    # of observability. No auth; the whitelist + mart columns ARE the privacy
+    # boundary. Rate-limited via :rate_limit_public.
+    get "/transparency/metrics", TransparencyController, :index
     post "/opt-out", OptOutController, :create
     post "/partners/register", PartnerRegistrationController, :create
   end

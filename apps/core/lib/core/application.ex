@@ -35,6 +35,9 @@ defmodule Core.Application do
           Stacks.Books.BookDetailCache,
           Stacks.Books.ISBNResolverCache,
           Stacks.Books.TitleSearchCache,
+          # Short-TTL cache for the public transparency live signals (#241) so
+          # page-loads don't each fan out to Fly's Prometheus.
+          Stacks.Transparency.Cache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
           Core.PromEx
