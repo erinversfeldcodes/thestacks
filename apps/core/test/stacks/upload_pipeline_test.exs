@@ -1176,6 +1176,28 @@ defmodule Stacks.UploadPipelineTest do
       latest = List.last(events)
       assert latest.payload["isbn"] == "9780306406157"
       assert latest.payload["title"] == "Event Test Book"
+      assert latest.payload["visibility_tier"] == "public"
+      assert latest.aggregate_type == "book"
+    end
+
+    @tag stories: ["US-4.1"], suite: :events
+    test "book.created event carries age_gated visibility_tier" do
+      before_count = event_count("book.created")
+
+      {:ok, _book} =
+        Books.create(%{
+          "title" => "Age Gated Event Book",
+          "isbn" => "9780385490818",
+          "visibility_tier" => "age_gated"
+        })
+
+      assert event_count("book.created") == before_count + 1
+
+      events = events_of_type("book.created")
+      latest = List.last(events)
+      assert latest.payload["isbn"] == "9780385490818"
+      assert latest.payload["title"] == "Age Gated Event Book"
+      assert latest.payload["visibility_tier"] == "age_gated"
       assert latest.aggregate_type == "book"
     end
 
