@@ -1023,9 +1023,17 @@ if [[ -n "${machine_id}" ]]; then
             # check inside the eval'd code sees it. 180s timeout covers the
             # ~hundreds of insert_all rows; longer than the 60s migrate timeout
             # because seeds do far more work.
-            fly machine exec "${machine_id}" \
+            #
+            # Wrapped in deploy_with_retry (like the prod/prober seeds above) so a
+            # transient `fly machine exec … EOF` — the machine's exec endpoint
+            # dropping the connection while it's still busy post-migrate — gets a
+            # second attempt instead of aborting the whole preview deploy. This was
+            # the recurring preview-gate failure (Issue #171 / #177 follow-up): the
+            # preview seed was the ONLY seed invocation missing the retry wrapper.
+            deploy_with_retry "preview seed" \
+                fly machine exec "${machine_id}" \
                 "/bin/sh -c \"ALLOW_SEEDS=true /app/bin/core eval 'Stacks.Release.seed()'\"" \
-                --app "${CORE_APP}" --timeout 180 2>&1 \
+                --app "${CORE_APP}" --timeout 180 \
                 || { echo "FAIL deploy: preview seed failed"; exit 1; }
             echo "PASS deploy: preview dev fixtures seeded"
         fi
