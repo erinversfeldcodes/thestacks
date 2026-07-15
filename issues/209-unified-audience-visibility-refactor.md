@@ -189,8 +189,9 @@ See the per-phase status table above for the authoritative done/outstanding spli
 - [ ] **OUTSTANDING — Phase 3b:** `Types/Visibility.elm` migrated to the four-rung ladder
       (currently 3-rung with the opposite rank direction, referencing the deleted server
       `@visibility_rank`).
-- [ ] **OUTSTANDING — SEC-3:** a `group` PROFILE enforced as a real ceiling (today behaves
-      like platform).
+- [ ] **SPUN OUT — SEC-3 → #224:** a `group` ("friends-only") PROFILE ceiling. Not a live
+      hole (group isn't a settable profile value today); now a scoped design note (#224,
+      one-chosen-group FK) pending its user story. Not part of #209 anymore.
 - [ ] **N/A (no-op given enum storage):** `books.visibility_tier` 3-axis decomposition;
       data migration + RLS rewrite — nothing to migrate while the stored enums already are
       the ladder and `public`/`unlisted`/`private` have zero rows.
