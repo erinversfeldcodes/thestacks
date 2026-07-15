@@ -607,6 +607,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result == %{
                id: u.id,
                email: u.email,
+               handle: u.handle,
                display_name: "Alice",
                role: "user",
                profile_visibility: "platform",
@@ -649,7 +650,8 @@ defmodule StacksWeb.ProtoJSONTest do
                published_at: post.published_at,
                created_at: post.created_at,
                updated_at: post.updated_at,
-               author_display_name: "Fable Quill"
+               author_display_name: "Fable Quill",
+               author_handle: user.handle
              }
     end
 
@@ -679,6 +681,25 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.blog_post(post)
 
       assert result.author_display_name == nil
+    end
+
+    test "includes the author's handle for the profile link (US-10.5.4)" do
+      user = insert(:user, handle: "fable_quill")
+      post = insert(:post, user: user)
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_handle == "fable_quill"
+    end
+
+    test "author_handle is nil when the author association is not loaded" do
+      user = insert(:user, handle: "fable_quill")
+      post = insert(:post, user: user)
+      post = %{post | user: %Ecto.Association.NotLoaded{}}
+
+      result = ProtoJSON.blog_post(post)
+
+      assert result.author_handle == nil
     end
   end
 
