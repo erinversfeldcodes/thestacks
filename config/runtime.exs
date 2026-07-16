@@ -68,6 +68,13 @@ else
     config :core, :rate_limit_public, String.to_integer(public_limit)
   end
 
+  # Test-helper bucket (Issue #124) — prod default is a tight 10/60s/IP; preview
+  # raises it so the parallel E2E suite isn't throttled. Never set in prod (the
+  # helpers themselves are prod-disabled).
+  if e2e_helper_limit = System.get_env("RATE_LIMIT_E2E_HELPER") do
+    config :core, :rate_limit_e2e_helper, String.to_integer(e2e_helper_limit)
+  end
+
   if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
     config :core, :storage, Stacks.Storage.R2
 
