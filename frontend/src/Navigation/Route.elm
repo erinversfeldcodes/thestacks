@@ -33,6 +33,7 @@ type Route
     | SettingsConsent
     | SettingsAgeVerification
     | SettingsAuditLog
+    | Insights
     | CostTransparency
     | Metrics
     | About
@@ -76,6 +77,7 @@ parser =
         , Parser.map SettingsConsent (s "settings" </> s "consent")
         , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
+        , Parser.map Insights (s "me" </> s "insights")
         , Parser.map Settings (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
@@ -161,6 +163,9 @@ toPath route =
 
         SettingsAuditLog ->
             "/settings/audit-log"
+
+        Insights ->
+            "/me/insights"
 
         CostTransparency ->
             "/costs"
@@ -254,6 +259,9 @@ isSettingsRoute route =
             True
 
         SettingsAuditLog ->
+            True
+
+        Insights ->
             True
 
         SettingsPrivacy ->

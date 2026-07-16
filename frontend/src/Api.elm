@@ -4,18 +4,23 @@ module Api exposing
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , Behaviour
+    , BisacCount
     , BlockError(..)
     , BlockedUser
     , BlockedUsersResponse
     , BookDetailResponse
     , CatalogueResponse
+    , Deanonymisation
     , EnrichmentGaps
+    , InterestProfile
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
     , MetricsDashboard
     , NotificationPreferences
     , OnboardingStatus
+    , PersonalInferences
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
@@ -26,8 +31,10 @@ module Api exposing
     , PublicProfileSummary
     , QualityTrends
     , RegisterError(..)
+    , RiskInference
     , ShelfVisibilitySetting
     , SourceHealth
+    , SubjectCount
     , TransparencyEntry
     , TransparencyMetrics
     , UploadInit
@@ -59,6 +66,7 @@ module Api exposing
     , getEnrichmentGaps
     , getGroup
     , getGroupFeed
+    , getInferences
     , getListings
     , getMetrics
     , getMyListings
@@ -83,6 +91,7 @@ module Api exposing
     , lookupByIsbn
     , mergeFormat
     , moveBook
+    , personalInferencesDecoder
     , placeBook
     , publicProfileDecoder
     , publicProfileSummaryDecoder
@@ -1010,6 +1019,174 @@ getAuditLog token toMsg =
         , url = baseUrl ++ "/api/settings/audit-log?page=1"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg auditLogResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| A single subject with the number of the user's own books that carry it.
+-}
+type alias SubjectCount =
+    { subject : String
+    , count : Int
+    }
+
+
+{-| A single BISAC code with the number of the user's own books that carry it.
+-}
+type alias BisacCount =
+    { code : String
+    , count : Int
+    }
+
+
+{-| The user's real interest profile — top subjects and BISAC codes, derived
+from their own shelved books. Shown as fact.
+-}
+type alias InterestProfile =
+    { topSubjects : List SubjectCount
+    , topBisac : List BisacCount
+    }
+
+
+{-| The user's real behavioural profile from their own placement history.
+`medianDaysToFinish` and `mostActiveHour` are absent (null) when there is not
+enough data to compute them.
+-}
+type alias Behaviour =
+    { booksShelved : Int
+    , booksFinished : Int
+    , booksAbandoned : Int
+    , abandonmentRate : Float
+    , medianDaysToFinish : Maybe Int
+    , mostActiveHour : Maybe Int
+    }
+
+
+{-| The de-anonymisation demonstration: how unique the user's shelf is against
+the corpus. `othersSharingAll` is null when it could not be computed;
+`uniqueness` is one of "unique" | "rare" | "common" | "insufficient\_data" |
+"unknown".
+-}
+type alias Deanonymisation =
+    { sampleSize : Int
+    , othersSharingAll : Maybe Int
+    , uniqueness : String
+    , explanation : String
+    }
+
+
+{-| A single labelled risk inference — an illustration of what a third party
+_could_ infer. Never asserted as fact, never stored. Only present after the
+user explicitly asks to reveal them.
+-}
+type alias RiskInference =
+    { label : String
+    , couldInfer : String
+    , basis : String
+    }
+
+
+{-| The full ephemeral inference payload from GET /api/me/inferences. Computed
+per-request from the user's own data and never persisted. `riskInferences` is
+`Nothing` unless the request was made with `?reveal_risk=true`.
+-}
+type alias PersonalInferences =
+    { interestProfile : InterestProfile
+    , behaviour : Behaviour
+    , deanonymisation : Deanonymisation
+    , riskInferences : Maybe (List RiskInference)
+    , generatedAt : String
+    }
+
+
+subjectCountDecoder : Decoder SubjectCount
+subjectCountDecoder =
+    Decode.map2 SubjectCount
+        (Decode.field "subject" Decode.string)
+        (Decode.field "count" Decode.int)
+
+
+bisacCountDecoder : Decoder BisacCount
+bisacCountDecoder =
+    Decode.map2 BisacCount
+        (Decode.field "code" Decode.string)
+        (Decode.field "count" Decode.int)
+
+
+interestProfileDecoder : Decoder InterestProfile
+interestProfileDecoder =
+    Decode.map2 InterestProfile
+        (Decode.field "top_subjects" (Decode.list subjectCountDecoder))
+        (Decode.field "top_bisac" (Decode.list bisacCountDecoder))
+
+
+behaviourDecoder : Decoder Behaviour
+behaviourDecoder =
+    Decode.map6 Behaviour
+        (Decode.field "books_shelved" Decode.int)
+        (Decode.field "books_finished" Decode.int)
+        (Decode.field "books_abandoned" Decode.int)
+        (Decode.field "abandonment_rate" Decode.float)
+        (Decode.field "median_days_to_finish" (Decode.nullable Decode.int))
+        (Decode.field "most_active_hour" (Decode.nullable Decode.int))
+
+
+deanonymisationDecoder : Decoder Deanonymisation
+deanonymisationDecoder =
+    Decode.map4 Deanonymisation
+        (Decode.field "sample_size" Decode.int)
+        (Decode.field "others_sharing_all" (Decode.nullable Decode.int))
+        (Decode.field "uniqueness" Decode.string)
+        (Decode.field "explanation" Decode.string)
+
+
+riskInferenceDecoder : Decoder RiskInference
+riskInferenceDecoder =
+    Decode.map3 RiskInference
+        (Decode.field "label" Decode.string)
+        (Decode.field "could_infer" Decode.string)
+        (Decode.field "basis" Decode.string)
+
+
+{-| Decode the personal-inferences payload. `risk_inferences` is decoded with
+`Decode.maybe` so an absent key (the default, un-revealed response) yields
+`Nothing` rather than failing.
+-}
+personalInferencesDecoder : Decoder PersonalInferences
+personalInferencesDecoder =
+    Decode.map5 PersonalInferences
+        (Decode.field "interest_profile" interestProfileDecoder)
+        (Decode.field "behaviour" behaviourDecoder)
+        (Decode.field "deanonymisation" deanonymisationDecoder)
+        (Decode.maybe (Decode.field "risk_inferences" (Decode.list riskInferenceDecoder)))
+        (Decode.field "generated_at" Decode.string)
+
+
+{-| GET /api/me/inferences — fetch the current user's own ephemeral inference
+profile. When `revealRisk` is `True`, appends `?reveal_risk=true` so the
+response includes the labelled risk-inference illustrations.
+-}
+getInferences :
+    Bool
+    -> String
+    -> (Result Http.Error PersonalInferences -> msg)
+    -> Cmd msg
+getInferences revealRisk token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url =
+            baseUrl
+                ++ "/api/me/inferences"
+                ++ (if revealRisk then
+                        "?reveal_risk=true"
+
+                    else
+                        ""
+                   )
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg personalInferencesDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
