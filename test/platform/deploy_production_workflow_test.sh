@@ -635,6 +635,56 @@ else
     _record_fail "step id 'rollback' missing — Phase 4 must rename + restructure the inline rollback step"
 fi
 
+# ── Regression guard: verify-rollback must survive the implicit-success() trap ──
+# A gate-triggered rollback runs while the job is already in a `failure` state.
+# GitHub implicitly wraps any `if:` WITHOUT a status-check function in success(),
+# so a bare `if: steps.rollback.outcome == 'success'` is silently SKIPPED on every
+# auto-rollback — which once left the rolled-back system unverified. The settle,
+# verify-rollback, and failure-annotation steps MUST each carry a status function
+# (!cancelled()/always()/success()/failure()) so they run in the failed job.
+test_case "verify_rollback_status_function" "post-rollback verify steps use a status-check function (avoid implicit success() skip)"
+
+_has_status_fn() {
+    [[ "$1" == *"cancelled()"* || "$1" == *"always()"* \
+       || "$1" == *"success()"* || "$1" == *"failure()"* ]]
+}
+
+VERIFY_IDX="$(step_idx_by_id verify-rollback)"
+if [[ "$VERIFY_IDX" -ge 0 ]]; then
+    VERIFY_IF="$(wfq "$JOB_STEPS_JQ | .[$VERIFY_IDX].if // \"\"")"
+    if _has_status_fn "$VERIFY_IF"; then
+        _record_pass "verify-rollback if: carries a status-check function (got: '$VERIFY_IF')"
+    else
+        _record_fail "verify-rollback if: lacks a status-check function → implicit success() skips it on every gate-triggered rollback (got: '$VERIFY_IF')"
+    fi
+else
+    _record_fail "step id 'verify-rollback' missing"
+fi
+
+SETTLE_IDX="$(step_idx_by_name_substr_ci "wait for rolled-back machines to settle")"
+if [[ "$SETTLE_IDX" -ge 0 ]]; then
+    SETTLE_IF="$(wfq "$JOB_STEPS_JQ | .[$SETTLE_IDX].if // \"\"")"
+    if _has_status_fn "$SETTLE_IF"; then
+        _record_pass "wait-for-settle if: carries a status-check function"
+    else
+        _record_fail "wait-for-settle if: lacks a status-check function (got: '$SETTLE_IF')"
+    fi
+else
+    _record_fail "wait-for-settle step missing"
+fi
+
+ANNOT_IDX="$(step_idx_by_name_substr_ci "verify-rollback failure annotation")"
+if [[ "$ANNOT_IDX" -ge 0 ]]; then
+    ANNOT_IF="$(wfq "$JOB_STEPS_JQ | .[$ANNOT_IDX].if // \"\"")"
+    if _has_status_fn "$ANNOT_IF"; then
+        _record_pass "verify-rollback failure-annotation if: carries a status-check function"
+    else
+        _record_fail "verify-rollback failure-annotation if: lacks a status-check function (got: '$ANNOT_IF')"
+    fi
+else
+    _record_fail "verify-rollback failure annotation step missing"
+fi
+
 # Old inline `bash scripts/rollback-production.sh` step must be GONE.
 INLINE_ROLLBACK_RUN_IDX="$(step_idx_by_run_substr "scripts/rollback-production.sh")"
 if [[ "$INLINE_ROLLBACK_RUN_IDX" -lt 0 ]]; then
