@@ -38,8 +38,14 @@ fail-closed; the core app keeps scale-to-zero and only one tiny VM machine is al
    registry as the public/operator boundary. (Scoped to `transparency.ex` + its 2 consumers +
    tests; do NOT touch the unrelated "bounded whitelisted atom" comments elsewhere.)
 
-3. **#252 VictoriaMetrics deploy.** `deploy/fly.victoriametrics.toml` (always-on tiny VM +
-   persistent volume, 6PN-only, remote-write auth). Preview parity in `deploy-stack.sh`. Infra.
+3. **#252 VictoriaMetrics deploy.** `deploy/fly.victoriametrics.toml` (tiny VM + volume, 6PN-only,
+   remote-write auth). **Two lifecycles, one config:**
+   - **Preview = EPHEMERAL.** A per-PR VM app created by `deploy-stack.sh` and **destroyed on
+     teardown** with the rest of the preview (wire BOTH create and destroy — don't leak VMs). No
+     always-on cost. Preview needs **no Grafana** — validation is `dashboard-smoke` querying the
+     VM's Prometheus API directly (real-emission fidelity); no human views a preview dashboard.
+   - **Prod = ALWAYS-ON.** `min_machines_running = 1`, provisioned once at prod cutover (the only
+     standing cost). Core app stays scale-to-zero regardless.
 
 4. **#253 Push ingestion (`remote_write`).** App remote_writes to VM over 6PN while alive;
    retire the Fly `[metrics]` scrape reliance + `MetricsAuth` scrape bypass for ingestion.
