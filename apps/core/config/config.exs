@@ -72,7 +72,17 @@ config :core, Oban,
        {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob}
      ]}
   ],
-  queues: [default: 10, events: 20, vision: 60, scraper: 5, notifications: 3, dbt_refresh: 1]
+  # Queue concurrency is sized against the ObanRepo pool + each queue's real
+  # bottleneck, NOT independently. `vision` was 60, but IdentifyBookJob is
+  # Modal-bound (the GPU inference is an external HTTP call — upload_p95 ≈ 15s
+  # is dominated by Modal, not local slots), so 60 local slots bought ~no
+  # throughput while inflating peak ObanRepo ack contention (up to 60 job
+  # completions hammering the pool at once → oban_repo_queue_p95 pressure) and
+  # BEAM memory on the 512MB machine. 20 is well above realistic concurrent
+  # upload load; scale Modal, not local slots, if throughput ever needs more.
+  # Total concurrency now 59 (was 99), letting OBAN_POOL_SIZE come down (see
+  # runtime.exs) instead of climbing toward Neon's connection ceiling.
+  queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
   # Bandit instead of Cowboy: drops the cowboy/cowlib/ranch chain, which

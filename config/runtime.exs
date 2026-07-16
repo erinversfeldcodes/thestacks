@@ -172,9 +172,10 @@ if config_env() == :prod do
   #     after the split. The fix: bigger Core.Repo pool + smaller
   #     Oban pool (25 is still well above the infra-queries need).
   #
-  # Total connections per machine: 40 (Core.Repo) + 25 (Core.ObanRepo)
-  # = 65. With 2 machines: 130. Neon ceiling: 200. Leaves ~35% head-
-  # room for a third machine later.
+  # Total connections per machine: 40 (Core.Repo) + 50 (Core.ObanRepo)
+  # = 90. With 2 machines: 180 — under Neon's 200 ceiling. (The prior
+  # ObanRepo=80 put 2 machines at 240, OVER the ceiling; see the
+  # OBAN_POOL_SIZE note below.)
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
@@ -190,23 +191,25 @@ if config_env() == :prod do
   # user-facing traffic; Oban workers compete only among themselves
   # on their own pool.
   #
-  # OBAN_POOL_SIZE default: 80. Evolution:
+  # OBAN_POOL_SIZE default: 50. Evolution:
   #   15: initial pool-split default (too low — Oban's own GROUP BY
   #     poll waited ~800ms for a connection)
-  #   50: over-corrected — allowed 44 workers to run concurrently,
-  #     each of which then contended on Core.Repo for business-logic
-  #     queries, so Core.Repo's queue time got worse
-  #   25: balance point for the old `:vision` queue concurrency=5 era.
-  #     Oban's infrastructure queries (enqueue, state updates, pruner,
-  #     PromEx's periodic poll) need ~10 simultaneous connections;
-  #     workers need one each.
-  #   80: scaled for `:vision` concurrency=60. Each worker holds a
-  #     connection during its DB reads/writes (pipeline context fetch,
-  #     mark_resolved/rejected, event emission). Pool of 80 covers:
-  #     60 vision workers + 10 default queue + 3 notifications +
-  #     5 scraper + ~15 infrastructure overhead. Below 70 the Oban
-  #     pruner/poll contend with workers; above ~100 risks exhausting
-  #     Neon's connection limit combined with Core.Repo's pool.
+  #   50→25→80: earlier attempts sized the pool as "one connection per
+  #     concurrent worker" — but that conflates the two repos. A worker's
+  #     BUSINESS-LOGIC queries go through Core.Repo; Core.ObanRepo only
+  #     serves Oban's INFRASTRUCTURE (job fetch, state-transition acks,
+  #     pruner, Stager poll, PromEx poll). A worker does NOT hold an
+  #     ObanRepo connection for its run — only briefly at fetch and ack.
+  #     So the pool needs to cover peak concurrent acks + infra polls, not
+  #     one-per-worker. The `80` was over-sized to feed `:vision`=60 under
+  #     that misconception, which pushed 2-machine totals (40+80)×2 = 240
+  #     OVER Neon's 200 ceiling.
+  #   50: `:vision` right-sized to 20 (Modal-bound; see config.exs). Peak
+  #     ObanRepo demand ≈ concurrent acks across all queues (≤ the new total
+  #     concurrency of 59, realistically far fewer at any instant) + ~15
+  #     infra connections. 50 gives comfortable headroom while dropping the
+  #     per-machine total to 40+50 = 90 → 180 at 2 machines, back UNDER
+  #     Neon's 200 ceiling. Can likely go to ~40 once validated at the gate.
   #
   # Both repos point at the same Postgres database, so Oban still
   # sees the same event_log, same op.* tables, same job state — just
