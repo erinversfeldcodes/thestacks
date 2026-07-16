@@ -21,11 +21,58 @@ Punches #6 (post-verification access E2E) and #8's non-determinism were already 
 users and **blocked-with-explanation on direct URL** (owner decision, #229) — this supersedes §1's
 "frosted overlay + lock icon on spines" (which is why that wording is struck below).
 
+### Design change (2026-07-16): US-4.1 Step 3 automatic classifier REMOVED
+While validating US-4.1 on this branch, the pipeline's Step-3 automatic subject/BISAC age-gate
+classifier (`Moderation.subjects_to_bisac/1` + `determine_visibility_tier/1`) was found to be a
+**broken oracle**: it only ever gated romance titles (matching `FIC027000`) while letting genuinely
+sensitive content — anatomy, nudity, sex-ed — through as `public`. It was **removed** and replaced
+with a **human-set** model, with the code changes owned on `feat/118-e2e`:
+
+- Every added book is created `public`; the pipeline no longer classifies for age-gating (Step 3 is
+  now metadata lookup only).
+- The person adding a book marks it **"adults only"** at the verify step:
+  `PUT /api/books/:id/age-gate` → `Books.set_visibility_tier/3` (`source: :user, raise_only: true`).
+  A user may only **raise** the gate (`public → age_gated`); lowering it returns 403.
+- The **platform owner** can override any book's gate in either direction (`source: :owner,
+  raise_only: false`) via an owner-only admin surface (follow-up).
+- Enforcement is unchanged (hide-from-listings + 403-on-detail, unlocked by age verification).
+- The `[:stacks, :moderation, :tiering]` counter is **repointed** to `set_visibility_tier/3`, now
+  tagged `tier` (`:public`/`:age_gated`) + `source` (`:user`/`:owner`) — the human-decision signal
+  that replaces the old classifier age-gate rate.
+
+Docs reconciled: `docs/technical-architecture.md` (Content Moderation Pipeline + design decision +
+US-1.1.4 test example), `docs/user_stories/US-4.1-moderation-pipeline.md`,
+`docs/user_stories/US-1.1.4-age-gated-flagging.md`.
+
+### Design change (2026-07-16): age-gating SHIPPED DARK (ADR-020)
+
+`docs/decisions/020-age-gating-shipped-dark.md` supersedes the self-declared verification model that
+several checkboxes/API-endpoint items below still describe. Net effect on this issue:
+
+- **Self-declaration removed.** The `PUT /api/settings/age_verification` endpoint and the
+  `/settings/age-verification` page (+ `Page.Settings.AgeVerification` / its route) are **gone**. The
+  "Age verification settings page" happy-path and the "/settings/age-verification auth guard" (punch
+  #7) below are therefore **obsolete** — the route no longer exists; `settings.spec.ts` deletes those
+  blocks rather than repointing them.
+- **Provider-sourced verification.** `age_verified` is written only by
+  `Stacks.AgeVerification.record_verification/3` (future KYC — Smile ID / Yoti / Sumsub). Tests/E2E
+  flip it via the `STACKS_E2E_TEST_HELPERS`-gated helper `PUT /api/test/age-verification {email,
+  verified}` — `age-gate.spec.ts` + `public-profile.spec.ts` are repointed to it.
+- **Flag-gated enforcement + UI.** All enforcement (`AgeGate.enforce/2`,
+  `maybe_exclude_age_gated/2`, `Visibility.check_age_gate/3`) and all age UI are behind
+  `age_gating_enabled` (env `AGE_GATING_ENABLED`; **default OFF in production, ON in `:test`**). The
+  age-gate E2E specs exercise ENFORCEMENT, so **E2E runs with `AGE_GATING_ENABLED=true`** — set on the
+  preview stack (`scripts/deploy-stack.sh`, preview branch only, alongside `STACKS_E2E_TEST_HELPERS`)
+  and on the local/CI Phoenix (`scripts/test-e2e.sh`). Production stays off by design.
+- **Honesty caveat:** in production this feature is **inert** (flag off, no provider, zero verified
+  users). It is built + validated + shipped dark, not "live" — do not mark US-4.2 as a shipped
+  user-facing capability.
+
 ## User Stories
 US-4.1 (Three-Step Content Moderation Pipeline), US-4.2 (Age Verification for Gated Content)
 
 ## Goal
-Validate the full moderation lifecycle: image classification, ISBN extraction, BISAC-based age gating, and the age verification flow that unlocks gated content.
+Validate the full moderation lifecycle: image classification, ISBN extraction, human-set age gating (the adder's "adults only" flag + owner override), and the age verification flow that unlocks gated content.
 
 ## Scope Check
 - Does this issue touch more than 3 controllers? No (UploadController, UserSettingsController, BookController).
@@ -53,7 +100,7 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-4.1 — Three-Step Content Moderation Pipeline | upload → IdentifyBookJob → Moderation.run_pipeline → analyze → determine_visibility_tier → Books.create (books.ex:154) | ✅ pipeline + funnel telemetry driven; E2E via upload-pipeline.spec.ts | ✅ | built in-scope (epic #227/#228 + #118-core) |
+| US-4.1 — Content Moderation Pipeline (metadata lookup → `public`; age-gate is human-set) | upload → IdentifyBookJob → Moderation.run_pipeline → analyze → metadata lookup → Books.create (visibility_tier: "public"); then human raise via PUT /api/books/:id/age-gate → Books.set_visibility_tier/3 (books.ex:240) | ✅ pipeline + funnel telemetry driven; human age-gate raise-only path built + tested; E2E via upload-pipeline.spec.ts + age-gate.spec.ts | ✅ | built in-scope; Step-3 auto-classifier REMOVED & replaced with human-set model (see Design change above) |
 | US-4.2 — Age Verification for Gated Content | PUT /api/settings/age_verification → AgeGate.enforce/2 403 → hide-from-listings (catalogue/search/shelf) + block-on-detail | ✅ deterministic age-gate.spec.ts + catalogue hiding + unauth guard | ✅ | built in-scope (epic #229 + #118-core; §1 spine superseded by #229) |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
@@ -86,11 +133,11 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - `GET /api/books/:id` — 200 passthrough for non-age-gated books
 
 ### 4. Database Assertion Tests
-- Verify `op.books` record created with correct `visibility_tier` ("public" or "age_gated")
+- Verify `op.books` record created with `visibility_tier: "public"` (the default; the pipeline no longer assigns `age_gated`)
 - Verify `op.book_editions` record created with resolved ISBN
 - Verify `op.uploaded_images` record created with `expires_at` set to 30 days from upload
 - Verify `op.users.age_verified` set to `true` after age verification
-- Verify `op.books.visibility_tier` correctly maps adult BISAC codes (FIC005000, FIC027000, FIC069000) to "age_gated"
+- Verify `PUT /api/books/:id/age-gate` sets `op.books.visibility_tier` to `age_gated` (raise-only: a user lowering it gets 403; owner may lower)
 - Verify existing book lookup via `Books.find_existing/1` returns existing record instead of duplicate
 
 ### 5. Event Flow Tests
@@ -105,7 +152,8 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - `IdentifyBookJob` enqueued on upload with correct args (`image_id`, `user_id`)
 - Pipeline step 1: `call_vision("is_book", ...)` invoked with correct image URL
 - Pipeline step 2: `call_vision("extract_isbn", ...)` invoked when step 1 returns "book"
-- Pipeline step 3: BISAC code mapping via `subjects_to_bisac/1`
+- Pipeline step 3: metadata lookup only — book created `public`, no age-gate classification
+- Human age-gate: `Books.set_visibility_tier/3` raises the gate (user path raise-only; owner either-way) and emits `[:stacks, :moderation, :tiering]` (`tier`, `source`)
 - Compound title expansion: " OR "-joined titles split and resolved independently
 - Job success sets upload status to "complete", failure sets to "failed" with reason
 
@@ -143,13 +191,13 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 ### 12. Metrics & Telemetry Tests
 - Oban telemetry for `IdentifyBookJob`: enqueued, completed, failed counts
 - Vision sidecar call latency tracked per endpoint
-- Pipeline step pass/fail rates: step 1 rejection, step 2 failure, step 3 age-gate rates
+- Pipeline step pass/fail rates: step 1 rejection, step 2 failure, step 3 metadata-lookup success; plus the human age-gate `[:stacks, :moderation, :tiering]` counter by `tier`/`source`
 - AgeGate enforcement counts: 403 blocked vs pass-through
 - Age verification request counts: success vs failure
 
 ## Reviewer Context
 - Vision sidecar endpoint mapping: `"is_book"` -> `/classify`, `"extract_isbn"` -> `/extract` (defined in `Stacks.AI.Client.endpoint_path/1`). Python sidecar paths must NOT change.
-- BISAC codes for age gating: FIC005000, FIC027000, FIC069000.
+- Age-gating is human-set, not BISAC-derived: `PUT /api/books/:id/age-gate` → `Books.set_visibility_tier/3` (user path raise-only; owner either-way). The old automatic subject/BISAC classifier was removed (see Design change above).
 - `AgeGate.enforce/2` is an inline plug call, not a router-level plug.
 
 ## Test Audit
@@ -162,7 +210,7 @@ Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not a
 
 **Scope note:** Issue #118 covers two tightly-coupled user stories — US-4.1 (Three-Step Content Moderation Pipeline) and US-4.2 (Age Verification for Gated Content) — so the matrix is 13 layers × 2 US, happy/sad per cell (52 cells).
 
-**Feature status:** both features are fully implemented and, as of the epic merge, fully instrumented. The moderation pipeline now (a) carries `visibility_tier` on the `book.created` event, (b) emits per-step funnel telemetry (`[:stacks, :moderation, :classification | :isbn_resolution | :tiering | :compound_expansion]`), and the age-gate path (c) emits `[:stacks, :age_gate, :enforce]` (`:passed`/`:blocked`) and age-verification request telemetry (`:success`/`:invalid`). Age-gated books are **hidden from listings** for unverified viewers (authenticated-but-unverified and anonymous alike) and **blocked-with-explanation on direct URL** (#229) — this supersedes the original §1 "frosted overlay + lock icon on spines" model, which is n/a-by-design.
+**Feature status:** both features are fully implemented and, as of the epic merge, fully instrumented. The moderation pipeline now (a) carries `visibility_tier` on the `book.created` event (always `public` at creation), (b) emits per-step funnel telemetry (`[:stacks, :moderation, :classification | :isbn_resolution | :compound_expansion]`), and the age-gate path (c) emits `[:stacks, :age_gate, :enforce]` (`:passed`/`:blocked`) and age-verification request telemetry (`:success`/`:invalid`). **Design change (2026-07-16, this branch):** the pipeline's automatic Step-3 subject/BISAC age-gate classifier was found broken and REMOVED (see "Design change" above); age-gating is now human-set via `Books.set_visibility_tier/3`, and the `[:stacks, :moderation, :tiering]` counter is **repointed** off the pipeline onto that human set-path (tagged `tier`/`source`). Age-gated books are **hidden from listings** for unverified viewers (authenticated-but-unverified and anonymous alike) and **blocked-with-explanation on direct URL** (#229) — this supersedes the original §1 "frosted overlay + lock icon on spines" model, which is n/a-by-design.
 
 ### Framework-layer summary
 
@@ -193,7 +241,7 @@ Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not a
 - US-4.2 sad: ✅ **RESOLVED (#118-core)** — user_settings_controller_test.exs:77 "emits no domain event and enqueues no job" (event_log count unchanged + `all_enqueued() == []`).
 
 **Layer 11 — Operational Metrics**
-- US-4.1: ✅ **RESOLVED (#228)** — moderation_telemetry_test.exs: classification (:62/:72/:83), isbn_resolution (:98/:108), tiering (:123/:134), compound_expansion (:157). Dashboard *visualization* tracked in #231.
+- US-4.1: ✅ **RESOLVED (#228)** — moderation_telemetry_test.exs: classification (:62/:72/:83), isbn_resolution (:98/:108), compound_expansion (:157). Tiering telemetry is now **repointed** to the human set-path (pipeline no longer emits it — moderation_telemetry_test.exs:130 asserts the pipeline keeps books `public`; the set-path emission is covered at :140 and in books_age_gate_test.exs). Dashboard *visualization* tracked in #231.
 - US-4.2: ✅ **RESOLVED (#228)** — age_gate_telemetry_test.exs: enforce `:passed`/`:blocked` (:50/:64, no-emit :75/:84) + verification `:success`/`:invalid` (:97/:112/:127).
 
 **E2E framework rows**
