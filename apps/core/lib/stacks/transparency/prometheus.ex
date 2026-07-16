@@ -15,7 +15,7 @@ defmodule Stacks.Transparency.Prometheus do
   `{:error, :not_configured}` and `Stacks.Transparency` degrades the live
   section to `:unavailable`. It must never break boot or raise.
 
-  Only queries drawn from `Stacks.Transparency`'s fixed whitelist ever reach
+  Only queries drawn from `Stacks.Transparency`'s fixed allowlist ever reach
   this client — there is no code path that forwards a user-supplied query.
   """
 

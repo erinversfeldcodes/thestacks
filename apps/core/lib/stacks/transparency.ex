@@ -4,17 +4,17 @@ defmodule Stacks.Transparency do
 
   Serves the subset of platform observability the public `/metrics` page (#235)
   renders — combining **live ops signals** (windowed rates / current values
-  queried from Fly's managed Prometheus via a fixed whitelist) with **durable
+  queried from Fly's managed Prometheus via a fixed allowlist) with **durable
   aggregates** (public-safe corpus/cost totals). Everything is an aggregate,
   never a per-user value.
 
-  ## The privacy boundary is the whitelist + the durable column set
+  ## The privacy boundary is the allowlist + the durable column set
 
-  Nothing is public by default. Live signals come ONLY from `@whitelist` — a
+  Nothing is public by default. Live signals come ONLY from `@allowlist` — a
   fixed, code-defined list of safe PromQL queries built from the registered
   `stacks_*` metric families (see `Core.PromEx.Plugins.Stacks`). There is NO
   function that accepts a caller-supplied PromQL string; `run_signal/1` accepts
-  only a whitelist KEY. Durable aggregates come from `durable_stats/0`, a fixed
+  only a allowlist KEY. Durable aggregates come from `durable_stats/0`, a fixed
   set of anonymised corpus/cost counts. Adding a signal to either is an
   explicit, reviewed code change — so nothing leaks by construction.
 
@@ -58,14 +58,14 @@ defmodule Stacks.Transparency do
   # ── App scoping (Fly org-wide Prometheus) ───────────────────────────────────
   # Fly's managed Prometheus is ORG-WIDE: every scraped series carries an `app`
   # label (`thestacks-core` for prod, `stacks-core-pr-…` for previews). The
-  # PUBLIC page must show prod-only data, so every whitelist query is scoped to
+  # PUBLIC page must show prod-only data, so every allowlist query is scoped to
   # the app this node serves. The app name is derived from `FLY_APP_NAME` (set
   # automatically on every Fly machine) with a config/default fallback, and the
   # `app="…"` matcher is injected as a code-defined literal (NOT user input) —
-  # the whitelist remains the privacy boundary.
+  # the allowlist remains the privacy boundary.
   @default_app "thestacks-core"
 
-  # ── Live PromQL whitelist ───────────────────────────────────────────────────
+  # ── Live PromQL allowlist ───────────────────────────────────────────────────
   # Fixed, code-defined queries built ONLY from metric families registered in
   # `Core.PromEx.Plugins.Stacks`. Each entry is an aggregate (sum/min across
   # series) — no per-series/per-user label is projected. This list IS the live
@@ -74,7 +74,7 @@ defmodule Stacks.Transparency do
   # Each query carries an `app="$app"` placeholder in its metric selector; the
   # placeholder is substituted with the concrete serving-app literal at query
   # time (see `scoped_query/1` / `app_label/0`), never with caller input.
-  @whitelist [
+  @allowlist [
     %{
       key: :isbn_not_found_rate,
       query:
@@ -176,21 +176,21 @@ defmodule Stacks.Transparency do
     }
   end
 
-  @doc "The fixed set of whitelist signal keys (atoms) — the only runnable live signals."
-  @spec whitelist_keys() :: [atom()]
-  def whitelist_keys, do: Enum.map(@whitelist, & &1.key)
+  @doc "The fixed set of allowlist signal keys (atoms) — the only runnable live signals."
+  @spec allowlist_keys() :: [atom()]
+  def allowlist_keys, do: Enum.map(@allowlist, & &1.key)
 
   @doc """
-  Runs a single whitelisted live signal by KEY.
+  Runs a single allowlisted live signal by KEY.
 
-  Accepts only a whitelist key (atom) — never a raw/user-supplied PromQL string.
-  Returns `{:error, :not_whitelisted}` for any key not in the fixed whitelist,
+  Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
+  Returns `{:error, :not_allowlisted}` for any key not in the fixed allowlist,
   so there is no path to run an arbitrary or injected query.
   """
   @spec run_signal(atom()) :: {:ok, number()} | {:error, term()}
   def run_signal(key) when is_atom(key) do
-    case Enum.find(@whitelist, &(&1.key == key)) do
-      nil -> {:error, :not_whitelisted}
+    case Enum.find(@allowlist, &(&1.key == key)) do
+      nil -> {:error, :not_allowlisted}
       entry -> prometheus_client().query(scoped_query(entry.query))
     end
   end
@@ -267,14 +267,14 @@ defmodule Stacks.Transparency do
     end
   end
 
-  # Runs every whitelisted query through the configured client. If EVERY query
+  # Runs every allowlisted query through the configured client. If EVERY query
   # errors (e.g. token absent), the whole section is `:unavailable`. Otherwise
   # returns the entries that resolved to a number.
   defp compute_live_signals do
     client = prometheus_client()
 
     results =
-      Enum.map(@whitelist, fn entry ->
+      Enum.map(@allowlist, fn entry ->
         case client.query(scoped_query(entry.query)) do
           {:ok, value} when is_number(value) -> {:ok, live_entry(entry, value)}
           _ -> :error
@@ -338,10 +338,10 @@ defmodule Stacks.Transparency do
 
   # ── App scoping ─────────────────────────────────────────────────────────────
 
-  # Substitutes the `$app` placeholder in a code-defined whitelist query with the
+  # Substitutes the `$app` placeholder in a code-defined allowlist query with the
   # concrete serving-app literal. The replacement value is `app_label/0` — a
   # config/env-derived constant, NEVER caller input — so this cannot widen the
-  # fixed whitelist into a query-injection surface.
+  # fixed allowlist into a query-injection surface.
   defp scoped_query(query) when is_binary(query) do
     String.replace(query, "$app", app_label())
   end
