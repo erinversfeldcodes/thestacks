@@ -561,7 +561,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
                 ( model, cmd ) =
                     BookDetail.init bookId maybeToken maybePreviousRoute
             in
-            ( PageBookDetail { model | ageGatingEnabled = config.ageGatingEnabled }
+            ( PageBookDetail model
             , Cmd.map BookDetailMsg cmd
             )
 
@@ -2341,7 +2341,7 @@ openOverlay model bookId =
 
         overlay =
             { bookId = bookId
-            , detail = { detailModel | ageGatingEnabled = model.config.ageGatingEnabled }
+            , detail = detailModel
             , triggerSpineId = Just ("spine-" ++ bookId)
             }
     in

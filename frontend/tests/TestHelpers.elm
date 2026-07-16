@@ -1345,11 +1345,8 @@ bookDetailProgram bookId maybeToken =
         { init =
             \() ->
                 let
-                    ( baseModel, _ ) =
+                    ( model, _ ) =
                         BookDetail.init bookId maybeToken Nothing
-
-                    model =
-                        { baseModel | ageGatingEnabled = True }
                 in
                 ( model, bookDetailInitEffects bookId maybeToken )
         , update =
