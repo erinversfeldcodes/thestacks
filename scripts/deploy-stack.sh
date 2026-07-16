@@ -284,6 +284,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # so the RATE_LIMIT_PUBLIC secret isn't staged; preview raises it below so the
     # parallel E2E suite (many public reads from one runner IP) isn't 429'd.
     RATE_LIMIT_PUBLIC=""
+    RATE_LIMIT_E2E_HELPER=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -315,6 +316,11 @@ else
     # hitting per-IP public endpoints (catalogue/search/profile/config), which
     # otherwise 429s. Preview-only; prod keeps the in-code default.
     RATE_LIMIT_PUBLIC="5000"
+    # Same reasoning for the E2E test-helper bucket (confirmation-token /
+    # age-verification): its prod default is a deliberately tight 10/60s/IP, but
+    # the parallel suite registers/confirms many users from one runner IP and
+    # 429s. Raise it for preview only; prod never enables the helpers at all.
+    RATE_LIMIT_E2E_HELPER="5000"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -700,6 +706,7 @@ fly secrets set \
     ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
     ${AGE_GATING_ENABLED:+AGE_GATING_ENABLED="${AGE_GATING_ENABLED}"} \
     ${RATE_LIMIT_PUBLIC:+RATE_LIMIT_PUBLIC="${RATE_LIMIT_PUBLIC}"} \
+    ${RATE_LIMIT_E2E_HELPER:+RATE_LIMIT_E2E_HELPER="${RATE_LIMIT_E2E_HELPER}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 
