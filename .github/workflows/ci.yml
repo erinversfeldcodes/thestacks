@@ -953,19 +953,10 @@ jobs:
       # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
-      # Metrics-stack smoke (Wave 2, Issue #232 follow-up). Read-only creds for
-      # the "Dashboard render + connectivity smoke" step below: the org Grafana
-      # (fly-metrics.net) service-account token + host, and the Fly managed-
-      # Prometheus read token + org slug (the same pair config/runtime.exs reads
-      # for PromEx upload and Stacks.Transparency.Prometheus #241). Secret names
-      # mirror the env-var names runtime.exs already consumes. All empty-safe:
-      # scripts/dashboard-smoke.sh only hard-fails when it is actually invoked
-      # (the smoke step is skipped when any is blank), so ordinary CI is never
-      # broken by an unset secret.
-      GRAFANA_HOST: ${{ secrets.GRAFANA_HOST }}
-      GRAFANA_AUTH_TOKEN: ${{ secrets.GRAFANA_AUTH_TOKEN }}
-      FLY_PROMETHEUS_READ_TOKEN: ${{ secrets.FLY_PROMETHEUS_READ_TOKEN }}
-      FLY_PROMETHEUS_ORG: ${{ secrets.FLY_PROMETHEUS_ORG }}
+      # (Retired ADR-021: the Fly managed-Prometheus + fly-metrics.net Grafana
+      # creds are gone. The preview VM emission smoke reaches the self-hosted
+      # VictoriaMetrics via `fly proxy` using FLY_API_TOKEN; the deterministic
+      # render-gate job needs no creds at all.)
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
       - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)

@@ -426,7 +426,7 @@ observe-down:
 # Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
 # EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
 # synthesized well-formed data) and fails on any blank panel or malformed query.
-# Deterministic; complements the E2E-driven dashboard-smoke (real emission fidelity).
+# Deterministic; complements the CI preview VM emission smoke (real emission fidelity).
 render-gate:
     docker compose -f infra/local-observability/docker-compose.yml up -d
     scripts/dashboard-render-gate.sh
