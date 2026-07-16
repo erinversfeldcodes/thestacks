@@ -20,7 +20,27 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["stacks", "auth", "security", "session", "issue-237", "issue-231"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(app)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": "label_values(app)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
@@ -55,7 +75,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_auth_refresh_reuse_detected_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_auth_refresh_reuse_detected_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "reuse detected/s"
         }
       ]
@@ -79,7 +99,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (reason) (rate(stacks_auth_session_expired_count_total[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(stacks_auth_session_expired_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}"
         }
       ]
@@ -111,7 +131,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (type) (rate(stacks_auth_login_failure_count_total[$__rate_interval]))",
+          "expr": "sum by (type) (rate(stacks_auth_login_failure_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{type}}"
         }
       ]
@@ -135,7 +155,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (result) (rate(stacks_auth_registration_count_total[$__rate_interval]))",
+          "expr": "sum by (result) (rate(stacks_auth_registration_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{result}}"
         }
       ]
@@ -159,7 +179,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (context) (rate(stacks_auth_jwt_issued_count_total[$__rate_interval]))",
+          "expr": "sum by (context) (rate(stacks_auth_jwt_issued_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{context}}"
         }
       ]
@@ -183,7 +203,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_auth_refresh_revoke_failed_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_auth_refresh_revoke_failed_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "revoke failures/s"
         }
       ]
@@ -207,7 +227,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_auth_mfa_verify_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_auth_mfa_verify_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ]

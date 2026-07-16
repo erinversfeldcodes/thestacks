@@ -20,7 +20,27 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["stacks", "visibility", "social", "view-as", "issue-236", "issue-231"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(app)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": "label_values(app)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
@@ -55,7 +75,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (direction) (rate(stacks_visibility_profile_change_count_total[$__rate_interval]))",
+          "expr": "sum by (direction) (rate(stacks_visibility_profile_change_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{direction}}"
         }
       ]
@@ -79,19 +99,19 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_social_block_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_social_block_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "blocks/s"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_social_unblock_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_social_unblock_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "unblocks/s"
         },
         {
           "refId": "C",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (reason) (rate(stacks_social_block_error_count_total[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(stacks_social_block_error_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "error: {{reason}}"
         }
       ]
@@ -115,13 +135,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (perspective) (rate(stacks_view_as_usage_count_total[$__rate_interval]))",
+          "expr": "sum by (perspective) (rate(stacks_view_as_usage_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "usage: {{perspective}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (reason, phase) (rate(stacks_view_as_error_count_total[$__rate_interval]))",
+          "expr": "sum by (reason, phase) (rate(stacks_view_as_error_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "error: {{reason}}/{{phase}}"
         }
       ]
@@ -145,7 +165,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (resource_type) (rate(stacks_visibility_ceiling_rejection_count_total[$__rate_interval]))",
+          "expr": "sum by (resource_type) (rate(stacks_visibility_ceiling_rejection_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{resource_type}}"
         }
       ]
@@ -169,25 +189,25 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_visibility_recap_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_visibility_recap_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "runs: {{outcome}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_visibility_recap_bookshelves_capped_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_visibility_recap_bookshelves_capped_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "bookshelves capped/s"
         },
         {
           "refId": "C",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_visibility_recap_placements_capped_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_visibility_recap_placements_capped_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "placements capped/s"
         },
         {
           "refId": "D",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_visibility_recap_posts_capped_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_visibility_recap_posts_capped_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "posts capped/s"
         }
       ]

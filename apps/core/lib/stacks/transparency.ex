@@ -55,16 +55,30 @@ defmodule Stacks.Transparency do
   @cache_ttl_ms @cache_ttl_seconds * 1_000
   @live_cache_key :live_signals
 
+  # ── App scoping (Fly org-wide Prometheus) ───────────────────────────────────
+  # Fly's managed Prometheus is ORG-WIDE: every scraped series carries an `app`
+  # label (`thestacks-core` for prod, `stacks-core-pr-…` for previews). The
+  # PUBLIC page must show prod-only data, so every whitelist query is scoped to
+  # the app this node serves. The app name is derived from `FLY_APP_NAME` (set
+  # automatically on every Fly machine) with a config/default fallback, and the
+  # `app="…"` matcher is injected as a code-defined literal (NOT user input) —
+  # the whitelist remains the privacy boundary.
+  @default_app "thestacks-core"
+
   # ── Live PromQL whitelist ───────────────────────────────────────────────────
   # Fixed, code-defined queries built ONLY from metric families registered in
   # `Core.PromEx.Plugins.Stacks`. Each entry is an aggregate (sum/min across
   # series) — no per-series/per-user label is projected. This list IS the live
   # privacy boundary; a query not here can never run.
+  #
+  # Each query carries an `app="$app"` placeholder in its metric selector; the
+  # placeholder is substituted with the concrete serving-app literal at query
+  # time (see `scoped_query/1` / `app_label/0`), never with caller input.
   @whitelist [
     %{
       key: :isbn_not_found_rate,
       query:
-        ~s|sum(rate(stacks_moderation_isbn_resolution_count_total{outcome="isbn_not_found"}[1h]))|,
+        ~s|sum(rate(stacks_moderation_isbn_resolution_count_total{app="$app",outcome="isbn_not_found"}[1h]))|,
       label: "ISBN-not-found rate",
       what:
         "How often, per second over the last hour, a scanned book could not be matched to a verified ISBN.",
@@ -76,7 +90,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :moderation_throughput,
-      query: ~s|sum(rate(stacks_moderation_classification_count_total[1h]))|,
+      query: ~s|sum(rate(stacks_moderation_classification_count_total{app="$app"}[1h]))|,
       label: "Moderation throughput",
       what:
         "How many uploads per second are being classified by the moderation pipeline this hour.",
@@ -87,7 +101,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :age_gate_block_rate,
-      query: ~s|sum(rate(stacks_age_gate_enforce_count_total{outcome="blocked"}[1h]))|,
+      query: ~s|sum(rate(stacks_age_gate_enforce_count_total{app="$app",outcome="blocked"}[1h]))|,
       label: "Age-gate blocks",
       what:
         "How often per second the age gate blocked access to an age-restricted book this hour.",
@@ -98,7 +112,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :breakers_healthy,
-      query: ~s|min(stacks_fuse_state_state)|,
+      query: ~s|min(stacks_fuse_state_state{app="$app"})|,
       label: "Circuit breakers healthy",
       what:
         "Whether every dependency circuit breaker is currently closed (1 = all healthy, 0 = one blown).",
@@ -109,7 +123,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :gdpr_export_rate_24h,
-      query: ~s|sum(rate(stacks_gdpr_export_count_total[24h]))|,
+      query: ~s|sum(rate(stacks_gdpr_export_count_total{app="$app"}[24h]))|,
       label: "Data exports in progress",
       what: "The rate of GDPR data-export jobs over the last 24 hours.",
       how:
@@ -120,7 +134,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :handler_error_rate,
-      query: ~s|sum(rate(stacks_events_handler_error_count_total[1h]))|,
+      query: ~s|sum(rate(stacks_events_handler_error_count_total{app="$app"}[1h]))|,
       label: "Background error rate",
       what: "How often per second a background event handler failed this hour.",
       how:
@@ -177,7 +191,7 @@ defmodule Stacks.Transparency do
   def run_signal(key) when is_atom(key) do
     case Enum.find(@whitelist, &(&1.key == key)) do
       nil -> {:error, :not_whitelisted}
-      entry -> prometheus_client().query(entry.query)
+      entry -> prometheus_client().query(scoped_query(entry.query))
     end
   end
 
@@ -261,7 +275,7 @@ defmodule Stacks.Transparency do
 
     results =
       Enum.map(@whitelist, fn entry ->
-        case client.query(entry.query) do
+        case client.query(scoped_query(entry.query)) do
           {:ok, value} when is_number(value) -> {:ok, live_entry(entry, value)}
           _ -> :error
         end
@@ -320,5 +334,28 @@ defmodule Stacks.Transparency do
 
   defp prometheus_client do
     Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
+  end
+
+  # ── App scoping ─────────────────────────────────────────────────────────────
+
+  # Substitutes the `$app` placeholder in a code-defined whitelist query with the
+  # concrete serving-app literal. The replacement value is `app_label/0` — a
+  # config/env-derived constant, NEVER caller input — so this cannot widen the
+  # fixed whitelist into a query-injection surface.
+  defp scoped_query(query) when is_binary(query) do
+    String.replace(query, "$app", app_label())
+  end
+
+  # The Fly app whose metrics this node should expose publicly. Fly sets
+  # `FLY_APP_NAME` on every machine (`thestacks-core` in prod, `stacks-core-pr-…`
+  # on previews); a config override wins for tests/staging, and the prod app name
+  # is the final fallback so a mis-set env never blends preview traffic into the
+  # public prod page.
+  defp app_label do
+    Application.get_env(
+      :core,
+      :fly_metrics_app,
+      System.get_env("FLY_APP_NAME") || @default_app
+    )
   end
 end
