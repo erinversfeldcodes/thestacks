@@ -411,6 +411,119 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :audit, :write],
           description: "Audit-log write throughput (one per successful insert).",
           tags: [:action, :resource_type]
+        ),
+
+        # ── Visibility / Social / ViewAs counters (Issue #236) ────────
+        # These families are EMITTED by #197 (profile-visibility changes,
+        # ceiling rejections, the recap job, user block/unblock, and the ViewAs
+        # owner-preview plug) but were never registered here, so they were absent
+        # from `/internal/metrics` until #236. No new instrumentation is added —
+        # this is registration only. Every tag below is a bounded, whitelisted
+        # atom set at the emit site (never a handle/email/user-id — GDPR:
+        # telemetry is warehouse-adjacent).
+        #
+        # Profile-visibility changes — `direction` ∈ tighten|loosen|same, from
+        # Stacks.Visibility.emit_profile_visibility_change/2. Exported as
+        # `stacks_visibility_profile_change_count_total{direction=…}`.
+        counter(
+          [:stacks, :visibility, :profile_change, :count, :total],
+          event_name: [:stacks, :visibility, :profile_change],
+          description: "Profile-visibility changes, by direction (tighten vs loosen vs same).",
+          tags: [:direction]
+        ),
+
+        # Ceiling rejections — a mutation refused for exceeding its parent's
+        # visibility ceiling. `resource_type` ∈ bookshelf|placement|post|other,
+        # from Stacks.Visibility.emit_ceiling_rejection/1. Exported as
+        # `stacks_visibility_ceiling_rejection_count_total{resource_type=…}`.
+        counter(
+          [:stacks, :visibility, :ceiling_rejection, :count, :total],
+          event_name: [:stacks, :visibility, :ceiling_rejection],
+          description: "Mutations rejected for exceeding their parent's visibility ceiling.",
+          tags: [:resource_type]
+        ),
+
+        # Visibility-recap outcomes — one event per VisibilityRecapJob run.
+        # `outcome` ∈ noop|capped|error. Telemetry.Metrics is one-metric-per-
+        # measurement, so the occurrence counter (tagged by outcome) is declared
+        # here and the three capped batch-sizes as `sum`s below. The recap emit
+        # maps carry bookshelves_capped/placements_capped/posts_capped (NOT a
+        # `count` key) — the Counter reporter increments per-event regardless of
+        # measurement, so the outcome-tagged occurrence count is exact. Exported
+        # as `stacks_visibility_recap_count_total{outcome=…}`.
+        counter(
+          [:stacks, :visibility, :recap, :count, :total],
+          event_name: [:stacks, :visibility, :recap],
+          description: "Visibility-recap job runs, by outcome (noop vs capped vs error).",
+          tags: [:outcome]
+        ),
+
+        # Recap batch sizes — each recap event carries how many bookshelves /
+        # placements / posts were capped down to the new profile ceiling. `sum`
+        # over the respective measurement so the totals are observable. Exported
+        # as `stacks_visibility_recap_{bookshelves,placements,posts}_capped_total`.
+        sum(
+          [:stacks, :visibility, :recap, :bookshelves_capped, :total],
+          event_name: [:stacks, :visibility, :recap],
+          measurement: :bookshelves_capped,
+          description: "Bookshelves capped down by the visibility-recap job."
+        ),
+        sum(
+          [:stacks, :visibility, :recap, :placements_capped, :total],
+          event_name: [:stacks, :visibility, :recap],
+          measurement: :placements_capped,
+          description: "Placements capped down by the visibility-recap job."
+        ),
+        sum(
+          [:stacks, :visibility, :recap, :posts_capped, :total],
+          event_name: [:stacks, :visibility, :recap],
+          measurement: :posts_capped,
+          description: "Blog posts capped down by the visibility-recap job."
+        ),
+
+        # User block / unblock — untagged occurrence counters from
+        # Stacks.Social.block_user/2 and unblock_user/2. Exported as
+        # `stacks_social_block_count_total` and `stacks_social_unblock_count_total`.
+        counter(
+          [:stacks, :social, :block, :count, :total],
+          event_name: [:stacks, :social, :block],
+          description: "Users blocked (op.user_blocks inserts)."
+        ),
+        counter(
+          [:stacks, :social, :unblock, :count, :total],
+          event_name: [:stacks, :social, :unblock],
+          description: "Users unblocked (op.user_blocks deletes)."
+        ),
+
+        # Block errors — a block insert that failed. `reason` ∈
+        # already_blocked|invalid (bounded atom from block_error_reason/1).
+        # Exported as `stacks_social_block_error_count_total{reason=…}`.
+        counter(
+          [:stacks, :social, :block_error, :count, :total],
+          event_name: [:stacks, :social, :block_error],
+          description: "Failed block attempts, by reason (already_blocked vs invalid).",
+          tags: [:reason]
+        ),
+
+        # ViewAs usage — one per accepted `?view_as=` perspective in
+        # StacksWeb.Plugs.ViewAsPlug. `perspective` ∈
+        # unauthenticated|platform|specific_user (KIND only, never the raw uuid).
+        # Exported as `stacks_view_as_usage_count_total{perspective=…}`.
+        counter(
+          [:stacks, :view_as, :usage, :count, :total],
+          event_name: [:stacks, :view_as, :usage],
+          description: "ViewAs owner-preview usage, by perspective kind.",
+          tags: [:perspective]
+        ),
+
+        # ViewAs errors — a rejected ViewAs request. `reason` ∈
+        # invalid_perspective|not_implemented|forbidden; `phase` ∈ parse|authorize.
+        # Exported as `stacks_view_as_error_count_total{reason=…,phase=…}`.
+        counter(
+          [:stacks, :view_as, :error, :count, :total],
+          event_name: [:stacks, :view_as, :error],
+          description: "Rejected ViewAs requests, by reason and phase (parse vs authorize).",
+          tags: [:reason, :phase]
         )
       ])
     ]

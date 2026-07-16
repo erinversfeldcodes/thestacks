@@ -22,7 +22,11 @@ defmodule CoreWeb.MetricsEndpointTest do
   alias Stacks.AgeVerification
   alias Stacks.MFA
   alias Stacks.Moderation
+  alias Stacks.Shelving
+  alias Stacks.Social
+  alias Stacks.Workers.VisibilityRecapJob
   alias StacksWeb.Plugs.AgeGate
+  alias StacksWeb.Plugs.ViewAsPlug
 
   @token "test-metrics-scrape-token"
   @test_image_b64 Base.encode64("fake image bytes")
@@ -226,6 +230,89 @@ defmodule CoreWeb.MetricsEndpointTest do
       assert body =~
                ~r/stacks_auth_mfa_verify_count_total\{[^}\n]*outcome="failure"[^}\n]*\}\s+\d/,
              "expected a non-zero MFA-verify sample tagged outcome=\"failure\""
+    end
+  end
+
+  describe "live exposure: #236 visibility/social/ViewAs families are scrapeable after exercising" do
+    test "profile-change / recap / ceiling / block+unblock / ViewAs families appear with samples",
+         %{conn: conn} do
+      user = insert(:user)
+
+      # 1. Profile-visibility change through the real Accounts path (default
+      # profile is "owner"; owner→platform fires profile_change with a direction
+      # tag and enqueues — but does not run — a recap job).
+      assert {:ok, _} = Accounts.update_profile_visibility(user.id, "platform")
+
+      # 2. Ceiling rejection through the real Shelving path: a placement whose
+      # bookshelf is "owner" cannot be set more exposed ("platform").
+      owner_shelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+      owner_placement = insert(:placement, bookshelf: owner_shelf, visibility: "owner")
+
+      assert {:error, _} =
+               Shelving.update_placement_visibility(owner_placement.id, user.id, "platform")
+
+      # 3. Visibility-recap CAPPED outcome with non-zero bookshelves/placements/
+      # posts: set up sub-owner resources, then run the real worker with an
+      # "owner" ceiling so all three batch sizes are > 0.
+      capped_shelf = insert(:bookshelf, user: user, name: "antilibrary", visibility: "platform")
+      insert(:placement, bookshelf: capped_shelf, visibility: "platform")
+      insert(:post, user: user, visibility: "platform")
+
+      assert :ok =
+               VisibilityRecapJob.perform(%Oban.Job{
+                 args: %{"user_id" => user.id, "new_visibility" => "owner"}
+               })
+
+      # 4. Block + duplicate-block (block_error) + unblock through Stacks.Social.
+      blocked = insert(:user)
+      assert {:ok, _} = Social.block_user(user.id, blocked.id)
+      assert {:error, _} = Social.block_user(user.id, blocked.id)
+      assert {:ok, :unblocked} = Social.unblock_user(user.id, blocked.id)
+
+      # 5. ViewAs usage + error through the real plug (perspective KIND only).
+      ViewAsPlug.call(%{conn | query_params: %{"view_as" => "platform"}}, [])
+      ViewAsPlug.call(%{conn | query_params: %{"view_as" => "user:"}}, [])
+
+      body = scrape(conn)
+
+      for family <- [
+            "stacks_visibility_profile_change_count_total",
+            "stacks_visibility_ceiling_rejection_count_total",
+            "stacks_visibility_recap_count_total",
+            "stacks_visibility_recap_bookshelves_capped_total",
+            "stacks_visibility_recap_placements_capped_total",
+            "stacks_visibility_recap_posts_capped_total",
+            "stacks_social_block_count_total",
+            "stacks_social_unblock_count_total",
+            "stacks_social_block_error_count_total",
+            "stacks_view_as_usage_count_total",
+            "stacks_view_as_error_count_total"
+          ] do
+        assert body =~ family,
+               "expected #{family} exposed at /internal/metrics after the visibility/social " <>
+                 "paths ran, got:\n#{body}"
+      end
+
+      # Prove real tagged samples, not just HELP/TYPE stubs.
+      assert body =~
+               ~r/stacks_visibility_profile_change_count_total\{[^}\n]*direction="[a-z]+"[^}\n]*\}\s+\d/,
+             "expected a non-zero profile-change sample carrying a direction tag"
+
+      assert body =~
+               ~r/stacks_visibility_recap_count_total\{[^}\n]*outcome="capped"[^}\n]*\}\s+\d/,
+             "expected a non-zero recap sample tagged outcome=\"capped\""
+
+      assert body =~
+               ~r/stacks_visibility_recap_bookshelves_capped_total(\{\})?\s+[1-9]/,
+             "expected a non-zero bookshelves-capped sum after the recap ran"
+
+      assert body =~
+               ~r/stacks_social_block_error_count_total\{[^}\n]*reason="already_blocked"[^}\n]*\}\s+\d/,
+             "expected a block_error sample tagged reason=\"already_blocked\""
+
+      assert body =~
+               ~r/stacks_view_as_usage_count_total\{[^}\n]*perspective="platform"[^}\n]*\}\s+\d/,
+             "expected a non-zero ViewAs-usage sample tagged perspective=\"platform\""
     end
   end
 
