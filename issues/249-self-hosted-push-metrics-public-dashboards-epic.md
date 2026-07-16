@@ -101,6 +101,16 @@ adapted: the PromEx Grafana-**upload** path (`prom_ex.ex` grafana assign + `runt
 the Fly `[metrics]` scrape reliance for ingestion. KEEP: telemetry emission + emission tests
 (real data), `dashboard-smoke.sh` (re-pointed at VM), the dashboard JSONs (upgraded per above).
 
+## Validated on Fly (standalone VM probe, 2026-07-16)
+A throwaway `fly deploy` of `deploy/fly.victoriametrics.toml` proved the config **deploys and
+VM boots/runs stably** on Fly (image + `[processes]` command + volume + `[[services]]`). Fixes
+found and folded into the config: `processes = ["vm"]` is REQUIRED on the service when a named
+process group exists; 256mb → 512mb. **Known lifecycle nuance for #252:** a 6PN-only app (no
+public IP) is NOT managed by Fly's proxy, so `min_machines_running`/auto-start don't keep it up
+on their own. Resolve in deploy-stack.sh by either allocating a **Flycast private IP**
+(`fly ips allocate-v6 --private`) so the proxy enforces `min_machines_running`, or explicitly
+`fly machine start` after deploy (as the core block already does for its machines).
+
 ## Top risks
 - **remote_write auth over 6PN** — VM's write endpoint must reject public callers but accept the
   app; don't recreate the MetricsAuth ambiguity (test it).
