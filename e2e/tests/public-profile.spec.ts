@@ -88,9 +88,23 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     );
     const ownerHandle = ((await setHandle.json()).handle as string) ?? handle;
 
+    // Age-verify the OWNER first (ADR-020: provider-sourced, set via the
+    // STACKS_E2E_TEST_HELPERS helper). With AGE_GATING_ENABLED=true in E2E, the
+    // catalogue includes age-gated books ONLY for an age-verified browser; a
+    // freshly-registered owner defaults `age_verified` false, so the age-gated
+    // "Demons" (AGE_GATED_ISBN) would be hidden and resolveCatalogueIds would
+    // throw. The owner is verified here so it can resolve BOTH pinned books.
+    await expectOk(
+      request.put("/api/test/age-verification", {
+        data: { email: owner.email, verified: true },
+      }),
+      "owner age-verify"
+    );
+
     // Resolve deterministic catalogue book ids by ISBN so the visible spine and
     // the age-gate row are PINNED to known seed books. The catalogue includes
-    // age-gated books for an authenticated browser, so the owner token is used.
+    // age-gated books only for an age-verified browser, which is why the owner
+    // is age-verified first (above); the owner token is used for the read.
     const [visibleBookId, ageGatedBookId] = await resolveCatalogueIds(
       request,
       ownerAuth,

@@ -139,6 +139,16 @@ port requestStoredAuth : () -> Cmd msg
 port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
 
 
+{-| Server-config channel (ADR-020). Elm boots immediately with age-gating OFF
+(the fail-safe production default); `GET /api/config` is fetched in the
+background by `app.js` and its result is delivered here a beat after boot, so a
+network round-trip never blocks first paint. The payload is the resolved
+`ageGatingEnabled` boolean; on fetch failure JS sends nothing and the default
+(`False`) stands.
+-}
+port ageGatingConfig : (Bool -> msg) -> Sub msg
+
+
 main : Program Decode.Value Model Msg
 main =
     Browser.application
@@ -1163,6 +1173,7 @@ type Msg
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
     | AuthChangedExternally Decode.Value
     | GotStoredAuth Decode.Value
+    | AgeGatingConfigReceived Bool
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -2187,6 +2198,16 @@ update msg model =
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
 
+        AgeGatingConfigReceived enabled ->
+            -- The background `GET /api/config` fetch resolved (ADR-020). Adopt the
+            -- server-provided flag; in production it is `False` (no-op vs. the
+            -- boot default), and only flips age UI on where the flag is set.
+            let
+                config =
+                    model.config
+            in
+            ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
+
         FocusResult ->
             -- Focus attempt completed (success or failure); nothing to do.
             ( model, Cmd.none )
@@ -2357,6 +2378,7 @@ subscriptions model =
         , onOnboardingStatus OnboardingStatusReceived
         , authChanged AuthChangedExternally
         , gotStoredAuth GotStoredAuth
+        , ageGatingConfig AgeGatingConfigReceived
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
