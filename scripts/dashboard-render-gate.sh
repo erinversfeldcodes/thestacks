@@ -13,7 +13,7 @@
 # imports them to VM, then runs every panel query. This proves the PromQL is valid
 # and renders given data shaped the way the panel asks for. (Emission FIDELITY —
 # that the app emits those exact label values — is covered by the *_telemetry_test
-# suites + label-validation, and by the preview dashboard-smoke against the real VM.)
+# suites + label-validation, and by the CI preview VM emission smoke against the real VM.)
 #
 # Usage:
 #   just observe                 # bring up the local VM+Grafana stack first
