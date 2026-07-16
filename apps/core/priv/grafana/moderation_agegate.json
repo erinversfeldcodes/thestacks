@@ -87,8 +87,8 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Step 3 — Visibility tiering (public vs age_gated)",
-      "description": "WHAT: rate of visibility-tier assignments made at moderation step 3, split by tier (public / age_gated). HOW: rate() over stacks_moderation_tiering_count_total, emitted once per resolved book when its BISAC subjects are mapped to a visibility tier. MEANS: how much of the incoming catalogue is being auto-classified as adult/age-gated content vs freely public — the feed into the age-gate enforcement below. WATCH: a sudden spike in age_gated may mean a BISAC-mapping change is over-flagging benign books (false positives that hide content); a drop to zero age_gated while volume is high may mean the adult-content classifier has silently stopped flagging (under-gating).",
+      "title": "Visibility tiering (public vs age_gated), by who set it",
+      "description": "WHAT: rate of visibility-tier CHANGES, split by tier (public / age_gated) and source (user / owner). HOW: rate() over stacks_moderation_tiering_count_total, emitted by Stacks.Books.set_visibility_tier/3 whenever a PERSON changes a book's tier. The automatic subject→BISAC classifier was removed (Issue #118) — books default to public and are age-gated only when someone marks them, never by a code guess. MEANS: how often books are being marked adults-only (and by whom: the person who added it vs an owner override) — the feed into the age-gate enforcement below. WATCH: a spike in source=owner age_gated changes means the owner is doing a lot of manual moderation (a backlog signal); source=user age_gated is the healthy self-marking path; a persistent zero while uploads climb may mean the age-gate control is not reaching users.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
@@ -167,8 +167,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Age-verification requests (success vs invalid)",
-      "description": "WHAT: rate of age-verification update requests, split by outcome (success = 200, the user confirmed their age / invalid = 422, a malformed or missing parameter). HOW: rate() over stacks_age_verification_count_total, emitted by UserSettingsController.update_age_verification/2. MEANS: how many viewers are clearing the age wall and whether the verification form itself is healthy. WATCH: a spike in invalid (422) points to a broken client form or a bad payload contract — verification is failing for legitimate users, which will in turn starve the 'passed' series on the enforcement panel; a drop of success to zero means the verification path is dead.",
+      "title": "Age verifications recorded (provider-sourced)",
+      "description": "WHAT: rate of provider-sourced age verifications recorded, split by outcome (success = a verification was written, error = the changeset write failed). HOW: rate() over stacks_age_verification_count_total, emitted by Stacks.AgeVerification.record_verification/3 (ADR-020 — repointed from the removed self-declared settings endpoint; self-declaration is gone, so this now counts provider-sourced verifications, not user self-confirmations). MEANS: how many viewers a real KYC provider (Smile ID / Yoti / Sumsub) has verified as 18+. WATCH: this is flat at zero until a provider is integrated (age-gating is shipped dark); once live, an error spike means the write path is broken and legitimate users cannot clear the age wall, which will in turn starve the 'passed' series on the enforcement panel.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
       "fieldConfig": {

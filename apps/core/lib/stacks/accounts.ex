@@ -32,10 +32,17 @@ defmodule Stacks.Accounts do
   # ---------------------------------------------------------------------------
 
   @registration_required_fields [:email, :password]
-  @registration_optional_fields [:display_name, :role, :profile_visibility, :age_verified]
+  # `:age_verified` is intentionally NOT castable from user input (ADR-020):
+  # self-declaration is gone; it is set only by Stacks.AgeVerification.
+  @registration_optional_fields [:display_name, :role, :profile_visibility]
 
-  @valid_onboarding_steps ~w(profile age_verification privacy)
-  @onboarding_step_order ~w(profile age_verification privacy)
+  # The self-declared "verify your age" onboarding step was dropped (ADR-020).
+  @valid_onboarding_steps ~w(profile privacy)
+  @onboarding_step_order ~w(profile privacy)
+
+  @doc "The ordered list of onboarding steps — single source for callers/serializers."
+  @spec onboarding_step_order() :: [String.t()]
+  def onboarding_step_order, do: @onboarding_step_order
 
   @doc "Changeset for registration."
   def registration_changeset(user, attrs) do
@@ -63,10 +70,14 @@ defmodule Stacks.Accounts do
     ])
   end
 
-  @doc "Changeset for user settings (age verification)."
-  def settings_changeset(user, attrs) do
+  @doc """
+  Changeset for provider-sourced age verification (ADR-020). Writes all three
+  age-verification fields together — the ONLY path that may set `:age_verified`.
+  Never fed by direct user input; called by `Stacks.AgeVerification`.
+  """
+  def verification_changeset(user, attrs) do
     user
-    |> cast(attrs, [:age_verified])
+    |> cast(attrs, [:age_verified, :age_verified_at, :age_verification_provider])
   end
 
   @doc "Changeset for profile update (display_name, website_url)."
@@ -677,18 +688,6 @@ defmodule Stacks.Accounts do
   defp check_email_confirmed(%User{}), do: {:error, :email_unconfirmed}
 
   @doc """
-  Updates the age_verified flag for a user.
-  """
-  @spec update_age_verification(binary(), boolean()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def update_age_verification(user_id, age_verified) when is_boolean(age_verified) do
-    user_id
-    |> get_user!()
-    |> settings_changeset(%{age_verified: age_verified})
-    |> Repo.update()
-  end
-
-  @doc """
   Updates the profile_visibility setting for a user.
   Accepts "platform" or "owner". Returns {:error, changeset} for invalid values.
   """
@@ -887,7 +886,7 @@ defmodule Stacks.Accounts do
   @doc """
   Returns the current onboarding status for a user.
 
-  Returns `%{steps: %{profile: bool, age_verification: bool, privacy: bool},
+  Returns `%{steps: %{profile: bool, privacy: bool},
               completed: bool, next_step: step_name | nil}`.
   """
   @spec onboarding_status(binary()) :: map()

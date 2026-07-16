@@ -40,18 +40,25 @@ defmodule StacksWeb.Plugs.AgeGate do
   """
   @spec enforce(Plug.Conn.t(), map() | nil) :: Plug.Conn.t()
   def enforce(conn, %{visibility_tier: "age_gated"}) do
-    user = Guardian.Plug.current_resource(conn)
+    # Shipped dark (ADR-020): when age-gating is disabled the gate is a pure
+    # passthrough — the conn is returned unhalted (no 403), and NO enforce
+    # telemetry is emitted (the counter must only reflect real gate decisions).
+    if Stacks.FeatureFlags.age_gating_enabled?() do
+      user = Guardian.Plug.current_resource(conn)
 
-    if age_verified?(user) do
-      emit_enforce(:passed)
-      conn
+      if age_verified?(user) do
+        emit_enforce(:passed)
+        conn
+      else
+        emit_enforce(:blocked)
+
+        conn
+        |> put_status(403)
+        |> json(%{error: "age_verification_required"})
+        |> halt()
+      end
     else
-      emit_enforce(:blocked)
-
       conn
-      |> put_status(403)
-      |> json(%{error: "age_verification_required"})
-      |> halt()
     end
   end
 

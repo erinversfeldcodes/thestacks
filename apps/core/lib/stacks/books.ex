@@ -205,6 +205,86 @@ defmodule Stacks.Books do
   end
 
   @doc """
+  Sets a book's `visibility_tier` to `"public"` or `"age_gated"`.
+
+  This replaced the removed automatic subject→BISAC age-gate classifier: a
+  book is age-gated because a PERSON marked it, not because code guessed.
+
+  `opts`:
+    * `:source` — `:user` (default) | `:owner`. Only recorded on the
+      `[:stacks, :moderation, :tiering]` telemetry, never persisted.
+    * `:raise_only` — `true` (default). The safety rule for the USER path:
+      permit only `public → age_gated` (raising the gate). Attempting to
+      LOWER (`age_gated → public`) returns `{:error, :forbidden}` — only the
+      owner may un-gate, and the owner path passes `raise_only: false`.
+
+  Emits the `[:stacks, :moderation, :tiering]` counter (measurement
+  `%{count: 1}`, metadata `%{tier: :public | :age_gated, source: :user |
+  :owner}`) only on a successful CHANGE — a no-op (tier already matches) is
+  silent. Metadata is low-cardinality whitelisted atoms only (no ids/PII).
+
+  Accepts a `%Book{}` or a book id. Returns `{:ok, book}` or
+  `{:error, :not_found | :forbidden | Ecto.Changeset.t()}`.
+  """
+  @spec set_visibility_tier(Book.t() | binary(), String.t(), keyword()) ::
+          {:ok, Book.t()} | {:error, :not_found | :forbidden | Ecto.Changeset.t()}
+  def set_visibility_tier(book_or_id, tier, opts \\ [])
+
+  def set_visibility_tier(book_id, tier, opts) when is_binary(book_id) do
+    case Repo.get(Book, book_id) do
+      nil -> {:error, :not_found}
+      book -> set_visibility_tier(book, tier, opts)
+    end
+  end
+
+  def set_visibility_tier(%Book{} = book, tier, opts) when tier in ["public", "age_gated"] do
+    source = Keyword.get(opts, :source, :user)
+    raise_only = Keyword.get(opts, :raise_only, true)
+
+    cond do
+      book.visibility_tier == tier ->
+        # No-op: the tier already matches. Succeed without emitting telemetry.
+        {:ok, book}
+
+      raise_only and not raising_gate?(book.visibility_tier, tier) ->
+        {:error, :forbidden}
+
+      true ->
+        book
+        |> book_changeset(%{"visibility_tier" => tier})
+        |> Repo.update()
+        |> case do
+          {:ok, updated} ->
+            emit_tiering(updated.visibility_tier, source)
+            {:ok, updated}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
+  # Raising the gate is only public → age_gated. Everything else (already
+  # age_gated, or a lower) is not a raise.
+  defp raising_gate?("public", "age_gated"), do: true
+  defp raising_gate?(_from, _to), do: false
+
+  # Repointed age-gate tiering counter (formerly emitted by the removed
+  # pipeline classifier). `tier` is a whitelisted atom (:public /
+  # :age_gated) and `source` is :user / :owner — no BISAC code, ISBN,
+  # title, or id in metadata (GDPR: telemetry is a warehouse-adjacent sink).
+  defp emit_tiering(tier, source) when source in [:user, :owner] do
+    :telemetry.execute(
+      [:stacks, :moderation, :tiering],
+      %{count: 1},
+      %{tier: tier_atom(tier), source: source}
+    )
+  end
+
+  defp tier_atom("age_gated"), do: :age_gated
+  defp tier_atom("public"), do: :public
+
+  @doc """
   Resolves book metadata from an ISBN via Open Library / Google Books,
   then creates the book (work) and edition records.
   """
@@ -478,6 +558,57 @@ defmodule Stacks.Books do
     {books, total}
   end
 
+  @doc """
+  Lists books for the owner moderation surface (#118 owner age-gate override).
+
+  Unlike `list_catalogue/1`, this NEVER hides age-gated books — the platform
+  owner must see and act on every book regardless of tier. There is no viewer
+  filter here; the route is gated by the MFA-verified admin pipeline.
+
+  `opts`:
+    * `:search` — free-text search against `title_tsv` (optional)
+    * `:tier` — `"public"` | `"age_gated"` filter (optional)
+    * `:page` — 1-based page number (default 1)
+    * `:per_page` — items per page (default 50, max 100)
+
+  Returns `{books, total_count}`, each book preloaded with `:author` and
+  `:editions` so the caller can surface title/author/cover/isbn.
+  """
+  @spec list_for_moderation(keyword()) :: {[Book.t()], non_neg_integer()}
+  def list_for_moderation(opts \\ []) do
+    search = Keyword.get(opts, :search)
+    tier = Keyword.get(opts, :tier)
+    page = max(Keyword.get(opts, :page, 1), 1)
+    per_page = min(max(Keyword.get(opts, :per_page, 50), 1), 100)
+    offset = (page - 1) * per_page
+
+    filtered =
+      Book
+      |> preload([:author, :editions])
+      |> maybe_search(search)
+      |> maybe_filter_tier(tier)
+
+    total = Repo.aggregate(filtered, :count)
+
+    books =
+      filtered
+      |> order_by([b], asc: b.title)
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+
+    {books, total}
+  end
+
+  defp maybe_filter_tier(query, nil), do: query
+  defp maybe_filter_tier(query, ""), do: query
+
+  defp maybe_filter_tier(query, tier) when tier in ["public", "age_gated"] do
+    where(query, [b], b.visibility_tier == ^tier)
+  end
+
+  defp maybe_filter_tier(query, _tier), do: query
+
   defp maybe_search(query, nil), do: query
   defp maybe_search(query, ""), do: query
 
@@ -510,7 +641,14 @@ defmodule Stacks.Books do
   defp maybe_exclude_age_gated(query, {:platform_user, _id, true}), do: query
 
   defp maybe_exclude_age_gated(query, _viewer) do
-    where(query, [b], b.visibility_tier != "age_gated")
+    # Shipped dark (ADR-020): when age-gating is disabled the listing filter is a
+    # no-op for EVERY viewer — age-gated books are shown like public ones. Only
+    # `list_for_moderation`/`maybe_filter_tier` (owner-only) stays tier-aware.
+    if Stacks.FeatureFlags.age_gating_enabled?() do
+      where(query, [b], b.visibility_tier != "age_gated")
+    else
+      query
+    end
   end
 
   defp apply_sort(query, "author") do

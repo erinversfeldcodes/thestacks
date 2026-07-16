@@ -18,6 +18,7 @@ defmodule CoreWeb.MetricsEndpointTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.AgeVerification
   alias Stacks.Moderation
   alias StacksWeb.Plugs.AgeGate
 
@@ -78,13 +79,19 @@ defmodule CoreWeb.MetricsEndpointTest do
 
   describe "live exposure: #228 moderation + age-gate families are scrapeable after exercising (Issue #230)" do
     test "moderation funnel families appear with samples after run_pipeline", %{conn: conn} do
-      # Happy path: classification :book → isbn_resolution :resolved →
-      # tiering :public, all through the real moderation pipeline code.
-      assert {:ok, %{resolved: [_book]}} =
+      # Happy path: classification :book → isbn_resolution :resolved through the
+      # real moderation pipeline code.
+      assert {:ok, %{resolved: [book]}} =
                Moderation.run_pipeline(%{
                  image_b64: @test_image_b64,
                  book_attrs: %{"title" => "The Great Gatsby"}
                })
+
+      # Tiering is no longer auto-assigned by the pipeline (the automatic
+      # subject→BISAC classifier was removed): the `[:stacks, :moderation,
+      # :tiering]` counter now fires only when a PERSON marks a book, via
+      # Books.set_visibility_tier/3. Drive it here to exercise the family.
+      assert {:ok, _} = Stacks.Books.set_visibility_tier(book, "age_gated", source: :user)
 
       # Compound-title ("… OR …") expansion through the real pipeline.
       original = Application.get_env(:core, :vision_client)
@@ -128,18 +135,10 @@ defmodule CoreWeb.MetricsEndpointTest do
 
       refute passed.halted
 
-      # age_verification — success (200) + invalid (422), real controller.
+      # age_verification — :success outcome, emitted by the provider-sourced
+      # recorder (repointed from the removed self-declared endpoint, ADR-020).
       unverified = insert(:user, age_verified: false)
-
-      conn
-      |> put_req_header("authorization", bearer(unverified))
-      |> put("/api/settings/age_verification", %{age_verified: true})
-      |> json_response(200)
-
-      conn
-      |> put_req_header("authorization", bearer(insert(:user)))
-      |> put("/api/settings/age_verification", %{})
-      |> json_response(422)
+      {:ok, _} = AgeVerification.record_verification(unverified, "test", nil)
 
       body = scrape(conn)
 
@@ -159,11 +158,6 @@ defmodule CoreWeb.MetricsEndpointTest do
                ~r/stacks_age_verification_count_total\{[^}\n]*outcome="success"[^}\n]*\}\s+\d/,
              "expected a non-zero age-verification sample tagged outcome=\"success\""
     end
-  end
-
-  defp bearer(user) do
-    {:ok, token, _} = Guardian.encode_and_sign(user)
-    "Bearer #{token}"
   end
 
   # Vision client returning a single candidate whose title is two titles

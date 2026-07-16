@@ -1,5 +1,7 @@
 module Api exposing
-    ( AdminSource
+    ( AdminBook
+    , AdminBooksResponse
+    , AdminSource
     , AdminSourcesResponse
     , AuditLogEntry
     , AuditLogResponse
@@ -41,6 +43,10 @@ module Api exposing
     , acceptInvitation
     , activateListing
     , addShelf
+    , adminBookDecoder
+    , adminBooksResponseDecoder
+    , adminListBooks
+    , adminSetBookAgeGate
     , approveSource
     , auditLogResponseDecoder
     , blockUser
@@ -107,11 +113,11 @@ module Api exposing
     , saveWritingAssistantConsent
     , searchBooks
     , searchUsers
+    , setBookAgeGate
     , soldListing
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
-    , updateAgeVerification
     , updateBlogPost
     , updateLocation
     , updateNotifications
@@ -917,25 +923,6 @@ saveWritingAssistantConsent consent token toMsg =
         }
 
 
-{-| PUT /api/settings/age\_verification — save the user's age verification status.
--}
-updateAgeVerification :
-    Bool
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-updateAgeVerification verified token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/settings/age_verification"
-        , body = Http.jsonBody (Requests.encodeAgeVerificationRequest { ageVerified = verified })
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
 {-| Response from GET /api/catalogue — paginated book list.
 -}
 type alias CatalogueResponse =
@@ -1211,6 +1198,27 @@ placeBook bookshelfName bookId token toMsg =
                     { bookId = bookId }
                 )
         , expect = Http.expectJson toMsg (Decode.field "placement" placementDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/books/:id/age-gate — the user who added a book marks it
+"adults only" (raise-only). Body `{"adults_only": true}`. The backend
+permits only raising the gate for the user path; lowering is owner-only.
+-}
+setBookAgeGate :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+setBookAgeGate bookId token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
+        , body = Http.jsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2461,6 +2469,101 @@ rejectSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- ADMIN: BOOK MODERATION (age gate)
+
+
+{-| A book as returned by the owner moderation API (#118).
+-}
+type alias AdminBook =
+    { id : String
+    , title : String
+    , author : String
+    , visibilityTier : String
+    , isbn : Maybe String
+    , coverImageUrl : Maybe String
+    }
+
+
+adminBookDecoder : Decoder AdminBook
+adminBookDecoder =
+    Decode.map6 AdminBook
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.oneOf [ Decode.field "author" Decode.string, Decode.succeed "" ])
+        (Decode.field "visibility_tier" Decode.string)
+        (Decode.maybe (Decode.field "isbn" Decode.string))
+        (Decode.maybe (Decode.field "cover_image_url" Decode.string))
+
+
+{-| Paginated admin books response.
+-}
+type alias AdminBooksResponse =
+    { books : List AdminBook
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+adminBooksResponseDecoder : Decoder AdminBooksResponse
+adminBooksResponseDecoder =
+    Decode.map4 AdminBooksResponse
+        (Decode.field "books" (Decode.list adminBookDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.oneOf [ Decode.field "per_page" Decode.int, Decode.succeed 50 ])
+
+
+{-| GET /api/admin/books — fetch paginated books for moderation, optionally
+filtered by tier (`public` | `age_gated`) and/or a title search.
+-}
+adminListBooks :
+    { tier : Maybe String, search : Maybe String, page : Int }
+    -> String
+    -> (Result Http.Error AdminBooksResponse -> msg)
+    -> Cmd msg
+adminListBooks params token toMsg =
+    let
+        queryParams =
+            [ Just (Url.Builder.int "page" params.page)
+            , params.tier |> Maybe.map (Url.Builder.string "tier")
+            , params.search |> Maybe.map (Url.Builder.string "search")
+            ]
+                |> List.filterMap identity
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = Url.Builder.absolute [ "api", "admin", "books" ] queryParams
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg adminBooksResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/books/:id/age-gate — owner sets a book's age gate in either
+direction. Body `{"age_gated": Bool}`. Returns the updated book.
+-}
+adminSetBookAgeGate :
+    String
+    -> Bool
+    -> String
+    -> (Result Http.Error AdminBook -> msg)
+    -> Cmd msg
+adminSetBookAgeGate bookId ageGated token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
+        , body = Http.jsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
+        , expect = Http.expectJson toMsg (Decode.field "book" adminBookDecoder)
         , timeout = Nothing
         , tracker = Nothing
         }

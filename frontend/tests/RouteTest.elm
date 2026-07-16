@@ -67,10 +67,6 @@ suite =
                 \_ ->
                     fromPath "/settings/consent"
                         |> Expect.equal SettingsConsent
-            , test "SettingsAgeVerification" <|
-                \_ ->
-                    fromPath "/settings/age-verification"
-                        |> Expect.equal SettingsAgeVerification
             , test "Catalogue" <|
                 \_ ->
                     fromPath "/catalogue"
@@ -87,6 +83,10 @@ suite =
                 \_ ->
                     fromPath "/me/insights"
                         |> Expect.equal Insights
+            , test "AdminBookModeration" <|
+                \_ ->
+                    fromPath "/admin/book-moderation"
+                        |> Expect.equal AdminBookModeration
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -133,10 +133,6 @@ suite =
                 \_ ->
                     Route.toPath SettingsConsent
                         |> Expect.equal "/settings/consent"
-            , test "SettingsAgeVerification path" <|
-                \_ ->
-                    Route.toPath SettingsAgeVerification
-                        |> Expect.equal "/settings/age-verification"
             , test "Catalogue path" <|
                 \_ ->
                     Route.toPath Catalogue
@@ -153,5 +149,9 @@ suite =
                 \_ ->
                     Route.toPath Insights
                         |> Expect.equal "/me/insights"
+            , test "AdminBookModeration path" <|
+                \_ ->
+                    Route.toPath AdminBookModeration
+                        |> Expect.equal "/admin/book-moderation"
             ]
         ]

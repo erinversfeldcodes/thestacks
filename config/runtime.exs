@@ -99,6 +99,14 @@ else
     config :core, :smoke_tests_enabled, true
   end
 
+  # Age-gating kill-switch (ADR-020). Shipped dark: default OFF in production, so
+  # all three enforcement points (AgeGate.enforce/2, Books.maybe_exclude_age_gated/2,
+  # Visibility.check_age_gate/3) are no-ops and age-gated books behave as public.
+  # Flip AGE_GATING_ENABLED=true — once a real verification provider is integrated —
+  # to activate the already-validated behaviour with no code change. Read only
+  # through Stacks.FeatureFlags.age_gating_enabled?/0.
+  config :core, :age_gating_enabled, System.get_env("AGE_GATING_ENABLED") == "true"
+
   # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
   # requires a matching `Authorization: Bearer <token>` from public callers.
   # The one exception is Fly's managed-Prometheus scrape arriving directly

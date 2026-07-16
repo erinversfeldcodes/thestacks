@@ -39,7 +39,6 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Shelf))
-    | VerifyAge
     | DismissAgeGate
     | BookHovered String
     | BookClicked Book
@@ -78,9 +77,6 @@ update msg model =
                     else
                         ( { model | books = Failure err }, Cmd.none, NoOut )
 
-        VerifyAge ->
-            ( model, Cmd.none, NavigateTo SettingsAgeVerification )
-
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
@@ -111,9 +107,7 @@ view model =
             [ div [ class "reading-pile__label" ] [ text "Reading Pile" ]
             , if model.showAgeGate then
                 ageGate
-                    { onVerify = VerifyAge
-                    , onDismiss = DismissAgeGate
-                    }
+                    { onDismiss = DismissAgeGate }
 
               else
                 div [ class "reading-pile__scene" ]

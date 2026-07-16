@@ -96,6 +96,9 @@ defmodule CoreWeb.Router do
   # Public endpoints — no authentication required
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_public]
+    # Frontend runtime feature-flag config (ADR-020). Unauthenticated; the
+    # payload is a flat map of booleans only (no user/partner data).
+    get "/config", ConfigController, :show
     get "/costs", CostController, :index
     # Public transparency metrics (#241 / ADR-019) — curated, anonymised subset
     # of observability. No auth; the whitelist + mart columns ARE the privacy
@@ -197,6 +200,9 @@ defmodule CoreWeb.Router do
     get "/books/isbn/:isbn", BookController, :show_by_isbn
     post "/books/confirm", BookController, :confirm
     post "/books/:id/merge-format", BookController, :merge_format
+    # User-side age gate: the person who added a book marks it "adults only".
+    # Raise-only (public → age_gated); lowering is owner-only (403). #118.
+    put "/books/:id/age-gate", BookController, :set_age_gate
     resources "/books", BookController, only: [:create]
 
     get "/search", SearchController, :index
@@ -226,7 +232,6 @@ defmodule CoreWeb.Router do
     get "/me/inferences", MeInferenceController, :index
 
     get "/settings/privacy", UserSettingsController, :show_privacy
-    put "/settings/age_verification", UserSettingsController, :update_age_verification
     put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility
     put "/settings/profile", UserSettingsController, :update_profile
     put "/settings/location", UserSettingsController, :update_location
@@ -310,6 +315,11 @@ defmodule CoreWeb.Router do
     put "/sources/:id/approve", SourceAdminController, :approve
     put "/sources/:id/reject", SourceAdminController, :reject
 
+    # Owner age-gate moderation (#118): list all books (incl. age-gated) and
+    # override a book's visibility tier in EITHER direction.
+    get "/books", BookModerationController, :index
+    put "/books/:id/age-gate", BookModerationController, :set_age_gate
+
     get "/partners", PartnerController, :index
     put "/partners/:id/approve", PartnerController, :approve
     put "/partners/:id/reject", PartnerController, :reject
@@ -381,6 +391,7 @@ defmodule CoreWeb.Router do
   scope "/api/test", StacksWeb do
     pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
+    put "/age-verification", TestHelperController, :set_age_verification
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)

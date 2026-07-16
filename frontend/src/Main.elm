@@ -1,10 +1,12 @@
 port module Main exposing
-    ( Auth
+    ( AppConfig
+    , Auth
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , PendingLogout
     , StoredAuthResolution(..)
     , adoptExternalAuth
+    , decodeConfig
     , decodeFlags
     , loginEffects
     , main
@@ -33,6 +35,7 @@ import Json.Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSettingsRoute)
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
+import Page.Admin.BookModeration as AdminBookModeration
 import Page.Admin.Metrics as AdminMetrics
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.SourceApproval as AdminSourceApproval
@@ -57,7 +60,6 @@ import Page.Metrics as MetricsPage
 import Page.Profile as ProfilePage
 import Page.Search as Search
 import Page.Settings as Settings
-import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.AuditLog as AuditLog
 import Page.Settings.Consent as Consent
 import Page.Settings.Notifications as Notifications
@@ -163,7 +165,6 @@ type Page
     | PageUpload Upload.Model
     | PageSearch Search.Model
     | PageSettingsConsent Consent.Model
-    | PageSettingsAgeVerification AgeVerification.Model
     | PageSettingsAuditLog AuditLog.Model
     | PageInsights Insights.Model
     | PageSettingsProfile Profile.Model
@@ -184,6 +185,7 @@ type Page
     | PageAdminSourceApproval AdminSourceApproval.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminMetrics AdminMetrics.Model
+    | PageAdminBookModeration AdminBookModeration.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
@@ -266,7 +268,50 @@ type alias Model =
     -- re-check-before-logout port round-trip is in flight, cleared when it
     -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
     , pendingLogout : Maybe PendingLogout
+
+    -- Server-provided runtime config (ADR-020), fetched via `GET /api/config`
+    -- and merged into the boot flags. The app's first global config channel;
+    -- keep it minimal and extensible. Currently just the age-gating flag.
+    , config : AppConfig
     }
+
+
+{-| Server-provided runtime configuration, delivered in the boot flags from
+`GET /api/config` (ADR-020). The frontend's first global config channel —
+extend this record as new server-driven flags land.
+-}
+type alias AppConfig =
+    { ageGatingEnabled : Bool }
+
+
+{-| The fail-safe default config: age-gating OFF (all age UI hidden). Used when
+`GET /api/config` fails, times out, or returns a malformed/absent field.
+-}
+defaultConfig : AppConfig
+defaultConfig =
+    { ageGatingEnabled = False }
+
+
+{-| Decode the runtime config out of the boot flags. A missing or malformed
+`ageGatingEnabled` never crashes boot — it defaults to `False` (fail safe).
+-}
+configDecoder : Decode.Decoder AppConfig
+configDecoder =
+    Decode.map AppConfig
+        (Decode.oneOf
+            [ Decode.field "ageGatingEnabled" Decode.bool
+            , Decode.succeed False
+            ]
+        )
+
+
+{-| Read the runtime config from the boot flags, falling back to
+`defaultConfig` (age-gating off) on any decode failure. Exposed for tests.
+-}
+decodeConfig : Decode.Value -> AppConfig
+decodeConfig flags =
+    Decode.decodeValue configDecoder flags
+        |> Result.withDefault defaultConfig
 
 
 init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -275,11 +320,14 @@ init flags url key =
         maybeAuth =
             decodeFlags flags
 
+        config =
+            decodeConfig flags
+
         route =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage route maybeAuth Nothing
+            initPage config route maybeAuth Nothing
     in
     ( { key = key
       , url = url
@@ -298,6 +346,7 @@ init flags url key =
       , draftSavedNotice = False
       , accountDeletedNotice = False
       , pendingLogout = Nothing
+      , config = config
       }
     , Cmd.batch
         [ cmd
@@ -437,13 +486,13 @@ requiresAuth route =
             True
 
 
-initPage : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPage route maybeAuth maybePreviousRoute =
+initPage : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
+initPage config route maybeAuth maybePreviousRoute =
     if requiresAuth route && maybeAuth == Nothing then
         ( PageLogin Login.init, Cmd.none )
 
     else
-        initPageAuthenticated route maybeAuth maybePreviousRoute
+        initPageAuthenticated config route maybeAuth maybePreviousRoute
 
 
 initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
@@ -461,8 +510,8 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPageAuthenticated route maybeAuth maybePreviousRoute =
+initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
+initPageAuthenticated config route maybeAuth maybePreviousRoute =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -502,10 +551,16 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                 ( model, cmd ) =
                     BookDetail.init bookId maybeToken maybePreviousRoute
             in
-            ( PageBookDetail model, Cmd.map BookDetailMsg cmd )
+            ( PageBookDetail { model | ageGatingEnabled = config.ageGatingEnabled }
+            , Cmd.map BookDetailMsg cmd
+            )
 
         Upload ->
-            ( PageUpload Upload.init, Cmd.none )
+            let
+                uploadModel =
+                    Upload.init
+            in
+            ( PageUpload { uploadModel | ageGatingEnabled = config.ageGatingEnabled }, Cmd.none )
 
         Search ->
             ( PageSearch Search.init, Cmd.none )
@@ -523,9 +578,6 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                             { analytics = False, writingAssistant = False }
             in
             ( PageSettingsConsent (Consent.init consentSeed), Cmd.none )
-
-        SettingsAgeVerification ->
-            ( PageSettingsAgeVerification AgeVerification.init, Cmd.none )
 
         SettingsAuditLog ->
             let
@@ -702,6 +754,21 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                         AdminMetrics.init maybeToken
                 in
                 ( PageAdminMetrics subModel, Cmd.map AdminMetricsMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminBookModeration ->
+            -- Owner-only AND gated behind the age-gating flag (ADR-020). While
+            -- age-gating ships dark the moderation surface is unavailable — a
+            -- flag-off route resolves to NotFound, exactly like an unauthorised
+            -- owner-guarded route.
+            if isOwner maybeAuth && config.ageGatingEnabled then
+                let
+                    ( subModel, subCmd ) =
+                        AdminBookModeration.init maybeToken
+                in
+                ( PageAdminBookModeration subModel, Cmd.map AdminBookModerationMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -1058,7 +1125,6 @@ type Msg
     | UploadMsg Upload.Msg
     | SearchMsg Search.Msg
     | ConsentMsg Consent.Msg
-    | AgeVerificationMsg AgeVerification.Msg
     | AuditLogMsg AuditLog.Msg
     | InsightsMsg Insights.Msg
     | ProfileMsg Profile.Msg
@@ -1078,6 +1144,7 @@ type Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminMetricsMsg AdminMetrics.Msg
+    | AdminBookModerationMsg AdminBookModeration.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
@@ -1127,7 +1194,7 @@ update msg model =
                     Just (transitionClass model.route newRoute)
 
                 ( initialisedPage, cmd ) =
-                    initPage newRoute model.auth (Just model.route)
+                    initPage model.config newRoute model.auth (Just model.route)
 
                 -- Consume a pending session-expiry notice: when the redirect lands
                 -- on /login, build the Login page in its expired-notice state so the
@@ -1373,17 +1440,6 @@ update msg model =
                         LookingForHome.SessionExpired ->
                             handleSessionExpiry model
 
-                        LookingForHome.NavigateTo (Route.BookDetail bookId) ->
-                            openOverlay baseModel bookId
-
-                        LookingForHome.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
-                            )
-
                 _ ->
                     ( model, Cmd.none )
 
@@ -1543,28 +1599,6 @@ update msg model =
                             )
 
                         Insights.SessionExpired ->
-                            handleSessionExpiry model
-
-                _ ->
-                    ( model, Cmd.none )
-
-        AgeVerificationMsg subMsg ->
-            case model.page of
-                PageSettingsAgeVerification subModel ->
-                    let
-                        maybeToken =
-                            Maybe.map .token model.auth
-
-                        ( newSubModel, subCmd, outMsg ) =
-                            AgeVerification.update subMsg subModel maybeToken
-                    in
-                    case outMsg of
-                        AgeVerification.NoOut ->
-                            ( { model | page = PageSettingsAgeVerification newSubModel }
-                            , Cmd.map AgeVerificationMsg subCmd
-                            )
-
-                        AgeVerification.SessionExpired ->
                             handleSessionExpiry model
 
                 _ ->
@@ -1911,6 +1945,28 @@ update msg model =
                             )
 
                         AdminMetrics.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminBookModerationMsg subMsg ->
+            case model.page of
+                PageAdminBookModeration subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminBookModeration.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        AdminBookModeration.NoOut ->
+                            ( { model | page = PageAdminBookModeration newSubModel }
+                            , Cmd.map AdminBookModerationMsg subCmd
+                            )
+
+                        AdminBookModeration.SessionExpired ->
                             handleSessionExpiry model
 
                 _ ->
@@ -2264,7 +2320,7 @@ openOverlay model bookId =
 
         overlay =
             { bookId = bookId
-            , detail = detailModel
+            , detail = { detailModel | ageGatingEnabled = model.config.ageGatingEnabled }
             , triggerSpineId = Just ("spine-" ++ bookId)
             }
     in
@@ -2424,9 +2480,6 @@ pageTitle route =
         SettingsConsent ->
             "Privacy Settings — The Stacks"
 
-        SettingsAgeVerification ->
-            "Age Verification — The Stacks"
-
         SettingsAuditLog ->
             "Audit Log — The Stacks"
 
@@ -2480,6 +2533,9 @@ pageTitle route =
 
         Route.AdminMetrics ->
             "Metrics — The Stacks"
+
+        Route.AdminBookModeration ->
+            "Book Moderation — The Stacks"
 
         Groups ->
             "My Groups — The Stacks"
@@ -2548,6 +2604,7 @@ viewNav route maybeAuth userMenu =
                                 "Admin"
                                 [ ( Route.AdminSourceApproval, "Sources" )
                                 , ( Route.AdminScraperConfig, "Scrapers" )
+                                , ( Route.AdminBookModeration, "Book Moderation" )
                                 ]
 
                           else
@@ -2650,10 +2707,6 @@ viewPage model =
             viewSettingsHub model.route
                 (Html.map ConsentMsg (Consent.view subModel))
 
-        PageSettingsAgeVerification subModel ->
-            viewSettingsHub model.route
-                (Html.map AgeVerificationMsg (AgeVerification.view subModel))
-
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route
                 (Html.map AuditLogMsg (AuditLog.view subModel))
@@ -2719,6 +2772,9 @@ viewPage model =
 
         PageAdminMetrics subModel ->
             Html.map AdminMetricsMsg (AdminMetrics.view subModel)
+
+        PageAdminBookModeration subModel ->
+            Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)
 
         PageGroups subModel ->
             Html.map GroupsMsg (Groups.view subModel)

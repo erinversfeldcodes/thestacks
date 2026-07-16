@@ -24,7 +24,9 @@ defmodule Stacks.ModerationTelemetryTest do
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
-  alias Stacks.Books.MockHttpClient
+  import Stacks.Factory
+
+  alias Stacks.Books
   alias Stacks.Moderation
 
   @test_image_b64 Base.encode64("fake image bytes")
@@ -117,37 +119,33 @@ defmodule Stacks.ModerationTelemetryTest do
     end
   end
 
-  # ── Step 3: age-gate tiering ───────────────────────────────────────────
+  # ── Age-gate tiering (repointed to the user/owner set path) ────────────
+  #
+  # The automatic subject→BISAC classifier was removed (Issue #118), so the
+  # pipeline no longer emits [:stacks, :moderation, :tiering]. The metric is
+  # repointed onto Books.set_visibility_tier/3, which fires it when a PERSON
+  # sets the tier. These tests keep the metric covered on both sides.
 
   describe "tiering telemetry" do
-    test "emits :public for a book with no adult BISAC codes (happy)" do
+    test "the pipeline no longer emits tiering — books default to public (happy)" do
       attach_telemetry([[:stacks, :moderation, :tiering]])
 
       context = %{image_b64: @test_image_b64, book_attrs: %{"title" => "A Peaceful Novel"}}
       assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
       assert book.visibility_tier == "public"
 
-      assert_receive {:telemetry_event, [:stacks, :moderation, :tiering], %{count: 1},
-                      %{tier: :public}}
+      refute_receive {:telemetry_event, [:stacks, :moderation, :tiering], _, _}, 100
     end
 
-    test "emits :age_gated when an adult BISAC code is present (sad)" do
+    test "Books.set_visibility_tier emits :age_gated with source :user when a user raises the gate" do
       attach_telemetry([[:stacks, :moderation, :tiering]])
 
-      # Default MockClient resolves the direct ISBN 9780743273565; register an
-      # Open Library response whose subjects map to an adult BISAC code
-      # (romance → FIC027000), forcing the age_gated branch.
-      MockHttpClient.put_response(
-        "openlibrary.org/api/books",
-        {:ok,
-         %{"ISBN:9780743273565" => %{"title" => "An Adult Romance", "subjects" => ["romance"]}}}
-      )
-
-      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
-      assert book.visibility_tier == "age_gated"
+      book = insert(:book, visibility_tier: "public")
+      assert {:ok, updated} = Books.set_visibility_tier(book, "age_gated", source: :user)
+      assert updated.visibility_tier == "age_gated"
 
       assert_receive {:telemetry_event, [:stacks, :moderation, :tiering], %{count: 1},
-                      %{tier: :age_gated}}
+                      %{tier: :age_gated, source: :user}}
     end
   end
 

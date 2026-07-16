@@ -143,6 +143,30 @@ suite =
                     Main.decodeFlags (Encode.object [])
                         |> Expect.equal Nothing
             ]
+        , describe "decodeConfig (server-config channel — ADR-020)"
+            [ test "decodes ageGatingEnabled: true" <|
+                \() ->
+                    Main.decodeConfig
+                        (Encode.object [ ( "ageGatingEnabled", Encode.bool True ) ])
+                        |> .ageGatingEnabled
+                        |> Expect.equal True
+            , test "decodes ageGatingEnabled: false" <|
+                \() ->
+                    Main.decodeConfig
+                        (Encode.object [ ( "ageGatingEnabled", Encode.bool False ) ])
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
+            , test "defaults to False when ageGatingEnabled is absent (fail safe)" <|
+                \() ->
+                    Main.decodeConfig (Encode.object [])
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
+            , test "defaults to False when flags are malformed (fail safe)" <|
+                \() ->
+                    Main.decodeConfig (Encode.string "not-an-object")
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
+            ]
         , describe "loginEffects (fresh login mirrors init)"
             [ test "fetches placements so onboarding can trigger for a placement-free user" <|
                 \() ->

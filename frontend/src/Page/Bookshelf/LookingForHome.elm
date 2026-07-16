@@ -13,7 +13,6 @@ import Components.EmptyBookshelf exposing (emptyBookshelf)
 import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
 import Http
-import Navigation.Route exposing (Route(..))
 import Types.Book exposing (authorName)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
@@ -29,13 +28,11 @@ type alias Model =
 
 type OutMsg
     = NoOut
-    | NavigateTo Route
     | SessionExpired
 
 
 type Msg
     = BooksLoaded (Result Http.Error (List Shelf))
-    | VerifyAge
     | DismissAgeGate
 
 
@@ -71,9 +68,6 @@ update msg model =
                     else
                         ( { model | books = Failure err }, Cmd.none, NoOut )
 
-        VerifyAge ->
-            ( model, Cmd.none, NavigateTo SettingsAgeVerification )
-
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
@@ -84,9 +78,7 @@ view model =
         [ h1 [ class "page__title" ] [ text "Looking for a Home" ]
         , if model.showAgeGate then
             ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+                { onDismiss = DismissAgeGate }
 
           else
             case model.books of
