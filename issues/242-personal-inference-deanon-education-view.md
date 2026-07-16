@@ -87,13 +87,13 @@ Punch: (1) own-only endpoint + strict authz; (2) ephemeral derivations (no persi
 Verdict: baseline — 6 punch items; own-only-authz + no-persistence are the highest-risk.
 
 ## Definition of Done
-- [ ] Authed own-only view shows the user's own interest/behaviour profile + labelled risk inferences + a de-anon uniqueness demo.
-- [ ] **Strict own-only authz** — test proves no cross-user access by any route/param; unauth → 401.
-- [ ] **No persisted inferences** — test proves no derived-inference row is written (op/warehouse) after a view.
-- [ ] Sensitive-inference section gated behind an explicit consent-to-view action.
-- [ ] Derivation + rarity-score tests (seeded data → expected outputs); Elm view tests.
-- [ ] `just verify` passes; test audit GREEN; platform + gdpr reviewed.
-- [ ] Meets the Completion Bar — the own-only + no-persistence invariants are real tests, driven live.
+- [x] Authed own-only view shows the user's own interest/behaviour profile + labelled risk inferences + a de-anon uniqueness demo.
+- [x] **Strict own-only authz** — test proves no cross-user access by any route/param; unauth → 401.
+- [x] **No persisted inferences** — test proves no derived-inference row is written (op/warehouse) after a view.
+- [x] Sensitive-inference section gated behind an explicit consent-to-view action (server-enforced `?reveal_risk=true`).
+- [x] Derivation + rarity-score tests (seeded data → expected outputs); Elm view tests. (15 backend, decoder + program elm tests.)
+- [ ] `just verify` passes; test audit GREEN; platform + gdpr reviewed. ← epic PE gate
+- [ ] Meets the Completion Bar — the own-only + no-persistence invariants are real tests, driven live. ← epic E2E gate
 
 ## Dependencies
 User data model (shelves/placements/subjects — merged); ADR-019 §3a (design). Corpus aggregate for the
