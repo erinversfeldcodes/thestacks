@@ -71,11 +71,13 @@ CORE_APP="${PREVIEW_CORE_APP}"
 SCRAPER_APP="${PREVIEW_SCRAPER_APP}"
 SEARXNG_APP="${PREVIEW_SEARXNG_APP}"
 MODAL_APP="${PREVIEW_MODAL_APP}"
+VM_APP="${PREVIEW_VM_APP}"
 
 echo "==> Cleaning up preview resources for branch: ${BRANCH}"
 echo "    Core app:    ${CORE_APP}"
 echo "    Scraper app: ${SCRAPER_APP}"
 echo "    SearXNG app: ${SEARXNG_APP}"
+echo "    Metrics app: ${VM_APP}"
 echo "    Modal app:   ${MODAL_APP}"
 
 # ── Fly apps ─────────────────────────────────────────────────────────────────
@@ -113,6 +115,9 @@ for m in json.load(sys.stdin):
 
     fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
     fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
+    # Ephemeral metrics store (Epic #249). Destroying the app removes its data
+    # volume too — preview metrics are throwaway.
+    fly apps destroy "${VM_APP}" --yes 2>/dev/null && echo "    Destroyed ${VM_APP}." || echo "    ${VM_APP} not found (already gone)."
 else
     echo "    SKIP: flyctl not available or FLY_API_TOKEN not set — skipping Fly cleanup."
 fi
