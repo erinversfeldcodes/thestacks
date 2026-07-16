@@ -937,6 +937,19 @@ jobs:
       # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+      # Metrics-stack smoke (Wave 2, Issue #232 follow-up). Read-only creds for
+      # the "Dashboard render + connectivity smoke" step below: the org Grafana
+      # (fly-metrics.net) service-account token + host, and the Fly managed-
+      # Prometheus read token + org slug (the same pair config/runtime.exs reads
+      # for PromEx upload and Stacks.Transparency.Prometheus #241). Secret names
+      # mirror the env-var names runtime.exs already consumes. All empty-safe:
+      # scripts/dashboard-smoke.sh only hard-fails when it is actually invoked
+      # (the smoke step is skipped when any is blank), so ordinary CI is never
+      # broken by an unset secret.
+      GRAFANA_HOST: ${{ secrets.GRAFANA_HOST }}
+      GRAFANA_AUTH_TOKEN: ${{ secrets.GRAFANA_AUTH_TOKEN }}
+      FLY_PROMETHEUS_READ_TOKEN: ${{ secrets.FLY_PROMETHEUS_READ_TOKEN }}
+      FLY_PROMETHEUS_ORG: ${{ secrets.FLY_PROMETHEUS_ORG }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
       - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
@@ -1075,6 +1088,35 @@ jobs:
         run: bash scripts/preflight-resolver-health.sh
       - name: Run E2E against deployed stack
         run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+      - name: Dashboard render + connectivity smoke
+        # Runs AFTER E2E so every metric family has been emitted and Fly's
+        # managed Prometheus has had a scrape cycle to ingest it. Proves two
+        # things before anyone opens Grafana (owner's ask — "avoid finding
+        # Grafana's connectivity to Prometheus is down when I go and find an
+        # empty dashboard"): (1) Grafana↔Prometheus datasource is healthy, and
+        # (2) every dashboard panel's real PromQL, scoped to THIS preview app,
+        # returns non-empty data — i.e. the panels would render, not blank.
+        #
+        # Gate policy: HARD gate WHEN the read-only metrics creds are present
+        # (owner wants a dead datasource / blank panel to FAIL the PR), but the
+        # step self-skips when any cred is unset so it never blocks PRs before
+        # the operator has provisioned them in repo secrets. dashboard-smoke.sh
+        # itself hard-fails on connectivity-down or an empty panel after retries.
+        run: |
+          if [[ -z "${GRAFANA_HOST:-}" || -z "${GRAFANA_AUTH_TOKEN:-}" \
+                || -z "${FLY_PROMETHEUS_READ_TOKEN:-}" || -z "${FLY_PROMETHEUS_ORG:-}" ]]; then
+            echo "::notice::Dashboard smoke skipped — metrics-stack creds not set" \
+                 "(GRAFANA_HOST / GRAFANA_AUTH_TOKEN / FLY_PROMETHEUS_READ_TOKEN /" \
+                 "FLY_PROMETHEUS_ORG). Provision them to enable the render gate."
+            exit 0
+          fi
+          # Re-derive the preview app name from (branch, PREVIEW_SUFFIX) exactly
+          # like the Pin-Fly-hostname step above — PREVIEW_CORE_APP is not in
+          # GITHUB_ENV. The Fly managed-Prometheus `app` label equals this name,
+          # so the smoke's {app="…"} scoping targets this preview only.
+          source scripts/lib/preview-names.sh
+          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
+          bash scripts/dashboard-smoke.sh "${PREVIEW_CORE_APP}"
       - name: Smoke — circuit breakers
         if: always()
         run: |
