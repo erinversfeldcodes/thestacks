@@ -37,7 +37,9 @@ epic-level PE gate.
 | **#232** | infra | **Live metrics stack — Fly managed Prometheus + Grafana (`fly-metrics`)** [owner decision 2026-07-15: lowest cost + persists across deploys]. $0, bundled with Fly, time series stored independently of app machines. Add a `[metrics]` block to `fly.core.toml` pointing at the metrics endpoint (handle the `MetricsAuth` token wrinkle — e.g. an internal unauthenticated metrics port on the private network for Fly's scraper). Grafana at fly-metrics.net; smoke-test the panels resolve. NOT decided previously in docs (observability was a Phase-4-polish future item). | #230 |
 | **#233** | standard | **Self-explanatory-dashboard standard** in `docs/agents/standards/` — every panel must teach (what/how/why/what-a-change-means). Retro-applied to #230. | — |
 | **#234** | design ⭐ | **Transparency & platform-honesty design pass** (`docs/decisions/`). The content/UX for the user-facing education: (a) *what we observe about you* (honest inventory tied to real telemetry + the GDPR audience model); (b) *how we investigate outages* (demystify ops using the real moderation-funnel metrics as the worked example); (c) *why platforms cost money → why free platforms sell your data → why The Stacks doesn't.* Tone, surfaces, and the data source behind every claim. Design-first because it is content-heavy and values-laden. **[owner decision 2026-07-15: PUBLIC / unauthenticated for now** — a manifesto anyone can read, fitting the anti-surveillance ethos; the *general* "what we observe" (not personalised). Personalised "what we hold about **you**" defers to a future authenticated surface.] | #230 (uses its panels as the ops example) |
-| **#235+** | feat | **User-facing transparency surface(s)** — Elm page(s) built from #234's design, backed by dbt marts / a transparency API. Own US + feature-completeness + test-audit. Scoped after #234. | #234 |
+| **#241** | feat (data) | **Public transparency metrics API** — `GET /api/transparency/metrics`; whitelisted-PromQL proxy against Fly Prometheus (live, cached, token-guarded, degrade-on-absent) + public-safe dbt-mart aggregates. The whitelist/mart columns ARE the privacy boundary; anonymised only, linked-account excluded. ✅ built. | #232, #234 |
+| **#235** | feat (page) | **Public `/metrics` transparency page** — Elm render of #241: live + durable panels each with a what/how/why teaching tooltip, a featured costs widget, one-hop GDPR data-rights links; reachable via navbar → About → `/metrics`. ✅ built. | #241 |
+| **#242** | feat (page) | **Personal inference & de-anon education view** (authed, own-only, `/me/insights`) — a signed-in user sees ONLY their own derived inferences + a real k-anonymity fingerprint, to teach re-identification without PII. Strict own-only + ephemeral (never persisted), both tested. ✅ built. | #234, user data model |
 
 ## Wave 2 — metrics/dashboard retrofit across the completed platform (DEFERRED)
 A cross-domain inventory (2026-07-15) of ~50 completed issues found metrics in four states: dashboarded
@@ -71,14 +73,14 @@ then #239, #240. Already-delivered (NOT re-cut): #181 (refresh-revoke counter), 
   does not let a human *observe/diagnose* over time, which is the whole point.
 
 ## Definition of Done (epic)
-- [ ] #230, #232, #233, #234, #235+ each complete their full flow (research → test-first → gates → PE),
-      merged into `feat/118-e2e`.
-- [ ] The moderation/age-gate metrics render on a Grafana dashboard whose panels are self-explanatory
-      (#233 standard satisfied), validated (drift test + live smoke test).
-- [ ] The user-facing transparency surface educates on observation / outage-diagnosis / platform
-      economics, grounded in real telemetry + the GDPR model, with its own tests.
+- [x] #230, #232, #233, #234, #241, #235, #242 each built + test-first, on `feat/118-e2e`.
+- [x] The moderation/age-gate metrics render on a Grafana dashboard whose panels are self-explanatory
+      (#233 standard satisfied), validated (drift test + live smoke test) — #230/#233.
+- [x] The user-facing transparency surfaces educate on observation / outage-diagnosis / platform
+      economics, grounded in real telemetry + the GDPR model, with their own tests — public `/metrics`
+      (#241/#235) + authed own-only `/me/insights` (#242).
 - [ ] Integration branch green under `just verify`; epic-level PE gate passes on the **combined
-      #118 + #231** diff.
+      #118 + #231** diff. ← NEXT
 - [ ] Single PR (`feat/118-e2e` → `main`) covering #118 **and** #231 opens ONLY when all the above hold.
 
 ## Dependencies
