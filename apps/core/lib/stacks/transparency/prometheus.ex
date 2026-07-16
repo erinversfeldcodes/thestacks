@@ -41,7 +41,7 @@ defmodule Stacks.Transparency.Prometheus do
 
     req =
       Finch.build(:get, url, [
-        {"Authorization", "Bearer #{token}"},
+        {"Authorization", authorization(token)},
         {"Accept", "application/json"}
       ])
 
@@ -88,6 +88,13 @@ defmodule Stacks.Transparency.Prometheus do
       :error -> {:error, :non_numeric}
     end
   end
+
+  # Fly's managed-Prometheus proxy expects the macaroon read token as the whole
+  # Authorization value: `fly tokens create readonly` mints `FlyV1 fm2_…`, where
+  # `FlyV1` is itself the auth scheme. Wrapping it in `Bearer ` returns 401.
+  # A non-macaroon PAT still takes the `Bearer ` scheme.
+  defp authorization("FlyV1" <> _ = token), do: token
+  defp authorization(token), do: "Bearer #{token}"
 
   defp fetch_token do
     case Application.get_env(:core, :fly_prometheus_token) do
