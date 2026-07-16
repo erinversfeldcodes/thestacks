@@ -1097,17 +1097,21 @@ jobs:
         # (2) every dashboard panel's real PromQL, scoped to THIS preview app,
         # returns non-empty data — i.e. the panels would render, not blank.
         #
-        # Gate policy: HARD gate WHEN the read-only metrics creds are present
-        # (owner wants a dead datasource / blank panel to FAIL the PR), but the
-        # step self-skips when any cred is unset so it never blocks PRs before
-        # the operator has provisioned them in repo secrets. dashboard-smoke.sh
+        # Gate policy: HARD gate WHEN the read-only Fly-Prometheus creds are
+        # present (owner wants a blank/empty panel to FAIL the PR). Only the two
+        # Fly reads are REQUIRED — they validate every panel query against the
+        # same store Grafana renders from. GRAFANA_HOST + GRAFANA_AUTH_TOKEN are
+        # OPTIONAL (they add the Grafana datasource-health probe); fly-metrics.net
+        # is SSO-only and exposes no service-account tokens, so a Grafana token is
+        # usually un-mintable — the smoke degrades to Fly-Prometheus-direct rather
+        # than skipping. The step self-skips only when the Fly reads are unset, so
+        # it never blocks PRs before those secrets are provisioned. dashboard-smoke.sh
         # itself hard-fails on connectivity-down or an empty panel after retries.
         run: |
-          if [[ -z "${GRAFANA_HOST:-}" || -z "${GRAFANA_AUTH_TOKEN:-}" \
-                || -z "${FLY_PROMETHEUS_READ_TOKEN:-}" || -z "${FLY_PROMETHEUS_ORG:-}" ]]; then
-            echo "::notice::Dashboard smoke skipped — metrics-stack creds not set" \
-                 "(GRAFANA_HOST / GRAFANA_AUTH_TOKEN / FLY_PROMETHEUS_READ_TOKEN /" \
-                 "FLY_PROMETHEUS_ORG). Provision them to enable the render gate."
+          if [[ -z "${FLY_PROMETHEUS_READ_TOKEN:-}" || -z "${FLY_PROMETHEUS_ORG:-}" ]]; then
+            echo "::notice::Dashboard smoke skipped — Fly-Prometheus read creds not set" \
+                 "(FLY_PROMETHEUS_READ_TOKEN / FLY_PROMETHEUS_ORG)." \
+                 "Provision them to enable the render gate."
             exit 0
           fi
           # Re-derive the preview app name from (branch, PREVIEW_SUFFIX) exactly
