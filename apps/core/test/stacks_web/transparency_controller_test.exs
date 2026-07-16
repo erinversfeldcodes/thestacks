@@ -42,7 +42,7 @@ defmodule StacksWeb.TransparencyControllerTest do
 
       entries = List.wrap(response["live"]) ++ response["durable"]
       entries = Enum.filter(entries, &is_map/1)
-      assert length(entries) > 0
+      refute Enum.empty?(entries)
 
       Enum.each(entries, fn entry ->
         assert is_binary(entry["what"])
@@ -82,7 +82,7 @@ defmodule StacksWeb.TransparencyControllerTest do
 
       assert response["live"] == "unavailable"
       assert is_list(response["durable"])
-      assert length(response["durable"]) > 0
+      refute Enum.empty?(response["durable"])
     end
   end
 end
