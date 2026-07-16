@@ -16,8 +16,9 @@ defmodule Stacks.Transparency.MockPrometheusClient do
   @behaviour Stacks.Transparency.PrometheusClient
 
   @impl true
-  def query(_promql) do
+  def query(promql) do
     increment_count()
+    Process.put({__MODULE__, :last_query}, promql)
 
     case Process.get({__MODULE__, :response}) do
       nil -> {:ok, 0.0}
@@ -31,9 +32,13 @@ defmodule Stacks.Transparency.MockPrometheusClient do
   @doc "How many times `query/1` has been called in this process."
   def call_count, do: Process.get({__MODULE__, :count}, 0)
 
+  @doc "The exact PromQL string of the most recent `query/1` call (nil if none)."
+  def last_query, do: Process.get({__MODULE__, :last_query})
+
   @doc "Reset the registered response and the call counter for this process."
   def reset do
     Process.delete({__MODULE__, :response})
+    Process.delete({__MODULE__, :last_query})
     Process.put({__MODULE__, :count}, 0)
     :ok
   end

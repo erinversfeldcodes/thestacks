@@ -20,7 +20,27 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["stacks", "gdpr", "data-rights", "privacy", "issue-238", "issue-231"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(app)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": "label_values(app)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
@@ -55,7 +75,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (result) (rate(stacks_gdpr_export_count_total[$__rate_interval]))",
+          "expr": "sum by (result) (rate(stacks_gdpr_export_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{result}}"
         }
       ]
@@ -79,13 +99,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_gdpr_export_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_gdpr_export_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
           "legendFormat": "export p95"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_gdpr_deletion_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_gdpr_deletion_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
           "legendFormat": "deletion p95"
         }
       ]
@@ -109,13 +129,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (result) (rate(stacks_gdpr_deletion_count_total[$__rate_interval]))",
+          "expr": "sum by (result) (rate(stacks_gdpr_deletion_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "result: {{result}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (failed_step) (rate(stacks_gdpr_deletion_count_total{failed_step!=\"none\"}[$__rate_interval]))",
+          "expr": "sum by (failed_step) (rate(stacks_gdpr_deletion_count_total{app=\"$app\",failed_step!=\"none\"}[$__rate_interval]))",
           "legendFormat": "failed_step: {{failed_step}}"
         }
       ]
@@ -139,13 +159,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (feature) (rate(stacks_gdpr_consent_grant_count_total[$__rate_interval]))",
+          "expr": "sum by (feature) (rate(stacks_gdpr_consent_grant_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "grant: {{feature}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (feature) (rate(stacks_gdpr_consent_revoke_count_total[$__rate_interval]))",
+          "expr": "sum by (feature) (rate(stacks_gdpr_consent_revoke_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "revoke: {{feature}}"
         }
       ]
@@ -169,19 +189,19 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (reason) (rate(stacks_gdpr_image_expired_count_total[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(stacks_gdpr_image_expired_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "expired: {{reason}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_gdpr_image_stuck_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_gdpr_image_stuck_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "stuck/s"
         },
         {
           "refId": "C",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_gdpr_image_orphan_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_gdpr_image_orphan_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "orphan/s (retention-gap alarm)"
         }
       ]
@@ -205,13 +225,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (action, resource_type) (rate(stacks_gdpr_audit_write_count_total[$__rate_interval]))",
+          "expr": "sum by (action, resource_type) (rate(stacks_gdpr_audit_write_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "write: {{action}}/{{resource_type}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_gdpr_audit_read_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_gdpr_audit_read_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "reads/s"
         }
       ]

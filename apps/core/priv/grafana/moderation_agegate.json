@@ -20,7 +20,27 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["stacks", "moderation", "age-gate", "issue-228", "issue-230"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(app)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": "label_values(app)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
@@ -55,7 +75,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_moderation_classification_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_moderation_classification_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ]
@@ -79,7 +99,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_moderation_isbn_resolution_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_moderation_isbn_resolution_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ]
@@ -103,7 +123,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (tier) (rate(stacks_moderation_tiering_count_total[$__rate_interval]))",
+          "expr": "sum by (tier) (rate(stacks_moderation_tiering_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{tier}}"
         }
       ]
@@ -127,7 +147,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(stacks_moderation_compound_expansion_count_total[$__rate_interval]))",
+          "expr": "sum(rate(stacks_moderation_compound_expansion_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "expansions/s"
         }
       ]
@@ -159,7 +179,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_age_gate_enforce_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_age_gate_enforce_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ]
@@ -183,7 +203,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (outcome) (rate(stacks_age_verification_count_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(stacks_age_verification_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
         }
       ]

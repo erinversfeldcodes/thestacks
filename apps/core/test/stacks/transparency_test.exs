@@ -55,6 +55,50 @@ defmodule Stacks.TransparencyTest do
     end
   end
 
+  describe "app scoping (Fly org-wide Prometheus)" do
+    # Fly's managed Prometheus is org-wide and adds an `app` label to every
+    # series; the PUBLIC page must show prod-only data, not blended preview
+    # traffic. Every whitelist query must therefore be app-scoped, and the
+    # scoping must be a code-defined literal (no user input can reach it).
+    setup do
+      # Pin a deterministic app label for the assertions below, then restore.
+      prev = Application.get_env(:core, :fly_metrics_app)
+      Application.put_env(:core, :fly_metrics_app, "thestacks-core")
+      on_exit(fn -> restore_env(:fly_metrics_app, prev) end)
+      :ok
+    end
+
+    test "the query sent to the client is scoped to the serving app" do
+      MockPrometheusClient.put_response({:ok, 1.0})
+
+      key = hd(Transparency.whitelist_keys())
+      assert {:ok, _} = Transparency.run_signal(key)
+
+      # The client receives the substituted, app-scoped query — never the raw
+      # `$app` placeholder and never an unscoped selector.
+      sent = MockPrometheusClient.last_query()
+      assert sent =~ ~s|app="thestacks-core"|
+      refute sent =~ "$app"
+    end
+
+    test "every whitelisted query carries an app-scope matcher, so none can regress unscoped" do
+      MockPrometheusClient.put_response({:ok, 1.0})
+
+      # Run each signal; assert the query the client actually saw is app-scoped
+      # on its stacks_* selector.
+      for key <- Transparency.whitelist_keys() do
+        assert {:ok, _} = Transparency.run_signal(key)
+        sent = MockPrometheusClient.last_query()
+
+        assert sent =~ ~r/stacks_[a-zA-Z0-9_]+\{[^}]*app="thestacks-core"/,
+               "whitelist query for #{inspect(key)} is not app-scoped: #{sent}"
+      end
+    end
+  end
+
+  defp restore_env(_key, nil), do: :ok
+  defp restore_env(key, value), do: Application.put_env(:core, key, value)
+
   describe "metrics/0 — shape + teaching metadata" do
     test "returns live, durable, generated_at, cache_ttl" do
       MockPrometheusClient.put_response({:ok, 1.0})
