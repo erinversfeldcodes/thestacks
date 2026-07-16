@@ -181,6 +181,13 @@ defmodule Stacks.Transparency do
   def allowlist_keys, do: Enum.map(@allowlist, & &1.key)
 
   @doc """
+  The raw PromQL of every allowlisted live signal. For introspection/tests only —
+  e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
+  """
+  @spec allowlist_queries() :: [String.t()]
+  def allowlist_queries, do: Enum.map(@allowlist, & &1.query)
+
+  @doc """
   Runs a single allowlisted live signal by KEY.
 
   Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.

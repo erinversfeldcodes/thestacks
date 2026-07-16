@@ -49,16 +49,15 @@ else
 
   # Public transparency live signals (#241 / ADR-019). The read-only Fly
   # managed-Prometheus token + org slug are Fly secrets, guarded like the
-  # Grafana / log-shipper config above: when either is unset the live section
-  # of /api/transparency/metrics degrades to `:unavailable` — it must NOT break
-  # boot. Never the write/scrape token; this is a curated read of a whitelist.
-  if prom_token = System.get_env("FLY_PROMETHEUS_READ_TOKEN") do
-    config :core, :fly_prometheus_token, prom_token
-  end
+  # Live section of /api/transparency/metrics reads the self-hosted VictoriaMetrics
+  # (ADR-021 / #255) at `<base>/api/v1/query` — same 6PN VM the metrics pusher
+  # writes to, so no token/org (unlike the retired Fly managed-Prometheus client).
+  # Defaults to the push target; when neither is set the live section degrades to
+  # `:unavailable` — it must NOT break boot. Curated allowlist reads only.
+  metrics_query_url =
+    System.get_env("STACKS_METRICS_QUERY_URL") || System.get_env("STACKS_METRICS_PUSH_URL")
 
-  if prom_org = System.get_env("FLY_PROMETHEUS_ORG") do
-    config :core, :fly_prometheus_org, prom_org
-  end
+  config :core, :metrics_query_url, metrics_query_url
 
   if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
     config :core, :rate_limit_auth, String.to_integer(auth_limit)
