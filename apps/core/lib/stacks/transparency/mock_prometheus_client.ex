@@ -10,7 +10,7 @@ defmodule Stacks.Transparency.MockPrometheusClient do
 
       MockPrometheusClient.put_response({:ok, 0.42})
       # ... exercise Stacks.Transparency ...
-      assert MockPrometheusClient.call_count() == length(Transparency.whitelist_keys())
+      assert MockPrometheusClient.call_count() == length(Transparency.allowlist_keys())
   """
 
   @behaviour Stacks.Transparency.PrometheusClient
