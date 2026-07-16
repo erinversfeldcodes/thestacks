@@ -8,9 +8,9 @@ The moderation pipeline runs automatically on every upload:
 
 1. **Step 1 -- Image Classification**: The vision model checks whether the image is a photo of or about a book. If not, the image is rejected immediately. Nudes, pets, food, and other non-book images are caught here.
 2. **Step 2 -- Text Extraction & ISBN Resolution**: The vision model extracts text and the system attempts to resolve an ISBN. If no ISBN is found, the book is rejected.
-3. **Step 3 -- Subject Moderation**: The book's metadata subjects and categories are checked against a sensitive content list (BISAC codes, Open Library subjects). If flagged, the book is marked as age-gated.
+3. **Step 3 -- Metadata Lookup**: The book's work metadata (subjects, BISAC codes, cover, page count) is fetched from the ISBN resolver and stored. The pipeline does **not** classify content for age-gating; every book is created `public`.
 
-For rejected images: a clear, specific rejection message. For age-gated books: the book is added but with a frosted overlay on the spine and a lock icon. The pipeline is invisible when everything passes.
+For rejected images: a clear, specific rejection message. Age-gating is not decided here — it is set later by a human: the person adding a book can mark it **"adults only"** (raise-only), and the platform owner can moderate any book's gate in either direction. Age-gated books are then hidden from listing surfaces (catalogue/search/shelf) for unverified and anonymous viewers and return 403 on a direct URL (#229) — enforcement is unchanged. The pipeline is invisible when everything passes.
 
 ---
 
@@ -21,8 +21,8 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 2. Image is stored (R2/local), and an `IdentifyBookJob` is enqueued.
 3. The pipeline runs `Stacks.Moderation.run_pipeline/1` via a single `call_vision("analyze", ...)` to `POST /analyze` (the sidecar fuses classify + extract in one Modal invocation):
    - Returns `classification` (`CLASSIFICATION_RESULT_BOOK` | `CLASSIFICATION_RESULT_NOT_BOOK` | `CLASSIFICATION_RESULT_AMBIGUOUS`) plus, when `BOOK`, a `books` list of candidates with `potential_isbns`, `title`, `author`, `raw_text`, `confidence`.
-   - Pipeline then: compound title expansion (split on " OR "), ISBN resolution (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`), BISAC subject classification, visibility tier assignment.
-4. Book is created with `visibility_tier: "public"` or `"age_gated"`.
+   - Pipeline then: compound title expansion (split on " OR "), ISBN resolution (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`), and work metadata lookup. No BISAC classification or visibility-tier decision happens here.
+4. Book is created with `visibility_tier: "public"` (the default for every added book; age-gating is human-set afterward).
 5. User sees the book appear on their shelf.
 
 ### Sad Paths
@@ -60,7 +60,7 @@ For rejected images: a clear, specific rejection message. For age-gated books: t
 
 - **Plugs fired**: `SecurityHeaders` -> `AuthPipeline` -> `RateLimiter(bucket: :upload)`
 - **Visibility checks**: N/A — upload endpoint, not content display
-- **Age gate**: Determined by the pipeline; books with adult BISAC codes get `visibility_tier: "age_gated"`
+- **Age gate**: NOT determined by the pipeline — books are created `public`. Age-gating is set afterward by a human via `PUT /api/books/:id/age-gate` (the adder marks "adults only", raise-only) or by the platform owner (either direction)
 - **Ownership checks**: Upload associated with the authenticated user
 
 ---
@@ -114,11 +114,8 @@ dbt refresh for a newly-shelved book is triggered by the downstream
   1. Calls `AIClient.call_vision("analyze", %{image_url: url})` — maps to `POST /analyze` on the sidecar (one request that returns both classification and book candidates)
   2. On `CLASSIFICATION_RESULT_BOOK` with a non-empty `books` list, expands compound candidates (titles joined with " OR ")
   3. For each candidate: resolves ISBN (direct from `potential_isbns` or via `ISBNResolver.search_by_title/3`)
-  4. Maps subjects to BISAC codes via `subjects_to_bisac/1`
-  5. Determines visibility tier via `determine_visibility_tier/1`:
-     - Adult BISAC codes (FIC005000, FIC027000, FIC069000) -> `"age_gated"`
-     - All others -> `"public"`
-  6. Creates or finds the book via `Books.create/1` or `Books.find_existing/1`
+  4. Looks up work metadata (subjects, BISAC codes, cover, page count) and stores it — no age-gate classification step
+  5. Creates or finds the book via `Books.create/1` or `Books.find_existing/1` with `visibility_tier: "public"`
 - **On success**: Book(s) created, events emitted, upload status set to "complete"
 - **On failure**: Upload status set to "failed" with reason
 
@@ -214,7 +211,8 @@ dbt refresh for a newly-shelved book is triggered by the downstream
 - **Vision sidecar call counts and latencies**: `POST /analyze` duration, success/failure rates. One call per upload (the sidecar internally short-circuits the extract step when classification is not BOOK).
 - **Circuit breaker state**: vision client fuse events — open/closed transitions when sidecar is unavailable or slow
 - **ISBN resolution call counts**: Open Library and Google Books API hit rates, latencies, and fallback rates (one fails, other succeeds)
-- **Pipeline step pass/fail rates**: Step 1 (is_book) rejection rate, Step 2 (ISBN extraction) failure rate, Step 3 (BISAC classification) age-gate rate
+- **Pipeline step pass/fail rates**: Step 1 (is_book) rejection rate, Step 2 (ISBN extraction) failure rate, Step 3 (metadata lookup) success rate
+- **Human age-gate signal**: `[:stacks, :moderation, :tiering]` counter (repointed from the removed classifier), tagged `tier` (`:public` / `:age_gated`) and `source` (`:user` / `:owner`) — i.e. how many books were marked adults-only by the adder vs the owner
 - **Event handler execution times**: `BookCreatedHandler`, `AuthorDiscoveryHandler`, `CacheInvalidationHandler`, `DbtRefreshHandler` latencies on `book.created` events
 - **Compound title expansion rate**: percentage of vision extractions that return " OR "-joined titles requiring splitting
 
@@ -225,7 +223,7 @@ dbt refresh for a newly-shelved book is triggered by the downstream
 - **Upload-to-result latency**: elapsed time from `POST /api/upload` (202 Accepted) to upload status transitioning to `complete` or `failed` — measures full pipeline duration
 - **Classification accuracy**: percentage of uploads correctly classified as book vs not_book — derived from user feedback/re-uploads after rejection
 - **ISBN resolution success rate**: percentage of identified books that successfully resolve to a verified ISBN via Open Library or Google Books
-- **Age-gate precision**: percentage of books correctly flagged as age-gated by BISAC code matching (FIC005000, FIC027000, FIC069000)
+- **Age-gate volume by source**: count of books marked `age_gated` split by who set it — the adder ("adults only", `source: :user`) vs the platform owner (`source: :owner`) — from the `[:stacks, :moderation, :tiering]` counter. (There is no automated-precision metric anymore; the gate is a human decision, not a prediction to score.)
 - **Review summary quality** (downstream): LLM response parse success rate for summaries generated from vision-extracted book data
 - **User retry rate**: percentage of users who re-upload after a rejection — indicates unclear rejection messages or false positives
 

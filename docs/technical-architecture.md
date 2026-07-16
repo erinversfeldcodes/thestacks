@@ -840,15 +840,15 @@ Ecto schema: `Stacks.Books.Book`, table: `op.books`.
 | `author_id` | `UUID` | Foreign key to `authors` |
 | `description` | `TEXT` | |
 | `subjects` | `TEXT[]` | Open Library subject classifications (work-level, shared across editions) |
-| `bisac_codes` | `TEXT[]` | `NULL` — BISAC codes for age-gating, derived from subjects |
-| `visibility_tier` | `ENUM('public', 'age_gated')` | Content moderation result (work-level — if any edition triggers age-gating, the work is gated) |
+| `bisac_codes` | `TEXT[]` | `NULL` — BISAC codes stored as resolver metadata (not used for age-gating) |
+| `visibility_tier` | `ENUM('public', 'age_gated')` | Work-level gate. Defaults to `public`; set to `age_gated` only by a human ("adults only" at add-time, raise-only) or the platform owner (either direction) — never inferred from metadata |
 | `open_library_work_id` | `TEXT` | `NULL` — Open Library work key (e.g., `/works/OL27448W`) |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
 
 **Notes:**
 - `read_count` is intentionally NOT stored — it's derived from `bookshelf_placement_history`. No denormalised counter.
-- `bisac_codes` are derived from `subjects` during the content moderation pipeline, stored for fast age-gate checks.
+- `bisac_codes` are stored metadata from the ISBN resolver (Open Library / Google Books). They are NOT used to derive age-gating — age-gating is human-set (see the Content Moderation Pipeline).
 - `description` and `subjects` are work-level — they describe the book regardless of format.
 - Shelf placements, review snapshots, blog post associations, and reading journey history all reference the work (`books.id`), not individual editions.
 - A work must always have at least one edition. Deleting the last edition of a work is not permitted.
@@ -1667,17 +1667,27 @@ Image Upload
 │       │   or reject if single-image flow (US-1.1.2)
 │       └── ISBN found → continue
 │
-├── Step 3: Metadata Lookup + Content Classification
-│   └── ISBN lookup → get metadata including subjects and BISAC codes
-│       └── Check against sensitive category list
-│           ├── Match → flag as `age_gated`
-│           └── No match → mark as `public`
+├── Step 3: Metadata Lookup
+│   └── ISBN lookup → get work metadata (subjects, BISAC codes, cover, page count)
+│       The pipeline does NOT classify content for age-gating. Subjects and
+│       BISAC codes are stored as metadata only; they no longer drive a
+│       visibility decision.
 │
 └── Step 4: Store Book
-    └── Create book record with appropriate `visibility_tier`
+    └── Create book record with `visibility_tier: "public"` (the default for
+        every added book)
 ```
 
-**Design decision:** Uses Open Library subject classifications and BISAC codes for age-gating rather than an AI classifier. A curated keyword list is more auditable, more predictable, and easier to defend in a compliance review.
+### Age-gating: human-set, not guessed
+
+Age-gating is applied by a **person**, not inferred from metadata:
+
+- Every uploaded/added book is created `public`. The moderation pipeline never assigns `age_gated`.
+- The person **adding** a book can mark it **"adults only"** at the verify step: `PUT /api/books/:id/age-gate` → `Books.set_visibility_tier/3` with `source: :user, raise_only: true`. A normal user may only **raise** the gate (`public → age_gated`); an attempt to lower it (`age_gated → public`) returns 403 — only the owner can un-gate.
+- The **platform owner** can moderate and override any book's gate in either direction, and can change it later (`source: :owner, raise_only: false`), via an owner-only admin surface (follow-up).
+- **Enforcement + verification ship dark behind a flag (ADR-020).** When `age_gating_enabled` is on (env `AGE_GATING_ENABLED`; default **off in production**, **on in `:test`**; read via `Stacks.FeatureFlags.age_gating_enabled?/0`), age-gated books are hidden from listing surfaces (catalogue/search/shelf) for unverified and anonymous viewers (`Books.maybe_exclude_age_gated/2`) and return 403 on a direct URL (`AgeGate.enforce/2`). When the flag is **off**, all three enforcement points are no-ops and all age UI is hidden — age-gated books behave exactly like public ones. **Age-verification is provider-sourced** (future KYC — Smile ID / Yoti / Sumsub), written only by `Stacks.AgeVerification.record_verification/3`; the self-declared toggle and `PUT /api/settings/age_verification` endpoint were removed. The frontend reads `GET /api/config → {ageGatingEnabled}` to hide age UI when off.
+
+**Design decision:** Age-gating is set by the person adding the book (an explicit "adults only" flag) and moderated by the platform owner — there is no automated content classifier. The previous automatic subject/BISAC classifier was removed because it was an unreliable oracle: in practice it only ever gated romance titles while letting genuinely sensitive content (anatomy, nudity, sex-ed) through as `public`. Explicit human judgment plus owner moderation is simpler, more predictable, and far more auditable and defensible in a compliance review than a keyword/BISAC heuristic that guesses wrong.
 
 **Design decision:** Classification accepts screenshots and non-physical-book images as valid inputs provided a book can be identified from them. The rejection criterion is "no book-identifiable content" not "not a physical book photo." This is enforced via the classification prompt, not post-hoc filtering.
 
@@ -2482,28 +2492,29 @@ end
 #### US-1.1.4: Age-Gated Content
 
 ```elixir
-describe "age-gated content" do
-  test "book with sensitive subjects is flagged as age_gated" do
-    expect(MockVision, :identify_book, fn _img ->
-      {:ok, %{title: "The Body Book", author: "Author", isbn: "9781234567890"}}
-    end)
-    expect(MockISBNResolver, :resolve, fn "9781234567890" ->
-      {:ok, %{title: "The Body Book", author: "Author", isbn: "9781234567890",
-              subjects: ["Human anatomy", "Human body", "Nudity in art"],
-              page_count: 200, cover_url: nil}}
-    end)
-    expect(MockObjectStorage, :upload, fn _p, _b -> {:ok, "uploads/x.jpg"} end)
+describe "age-gated content (human-set)" do
+  test "a book is public by default; marking it adults-only gates it" do
+    # Books are created public — the pipeline never classifies for age-gating.
+    book = insert(:book, visibility_tier: "public")
 
-    conn = post(authed_conn(), "/api/books", %{
-      images: [upload_fixture("body_book.jpg")],
-      target_shelf: "antilibrary"
-    })
+    # The person who added it marks it "adults only" at the verify step.
+    conn =
+      put(authed_conn(), "/api/books/#{book.id}/age-gate", %{"adults_only" => true})
 
-    assert %{"id" => book_id, "visibility_tier" => "age_gated"} = json_response(conn, 201)
+    assert %{"book" => %{"visibility_tier" => "age_gated"}} = json_response(conn, 200)
+    assert Repo.get!(Book, book.id).visibility_tier == "age_gated"
 
-    # Non-age-verified user cannot view this book's detail
+    # A normal user may only RAISE the gate — lowering it is 403 (owner-only).
+    lower = put(authed_conn(), "/api/books/#{book.id}/age-gate", %{"adults_only" => false})
+    assert json_response(lower, 403)["error"] == "forbidden"
+
+    # Enforcement (flag-gated, ADR-020): the `:test` env sets age_gating_enabled
+    # true, so an unverified user cannot view the detail. In production the flag
+    # is off and the gate is a no-op. `age_verified` is provider-sourced —
+    # written only by Stacks.AgeVerification.record_verification/3, never a
+    # self-declared settings endpoint.
     unverified_conn = authed_conn(age_verified: false)
-    conn2 = get(unverified_conn, "/api/books/#{book_id}")
+    conn2 = get(unverified_conn, "/api/books/#{book.id}")
     assert json_response(conn2, 403)["error"] == "age_verification_required"
   end
 end
@@ -2813,14 +2824,22 @@ defmodule TheStacks.ISBN.ValidatorTest do
   end
 end
 
-# Content classification for age-gating
-defmodule TheStacks.Moderation.SubjectClassifierTest do
-  test "flags sensitive subjects" do
-    assert SubjectClassifier.age_gated?(["Human anatomy", "Fiction"])
-    assert SubjectClassifier.age_gated?(["Nudity in art"])
-    assert SubjectClassifier.age_gated?(["Sex education"])
-    refute SubjectClassifier.age_gated?(["Science fiction", "Space exploration"])
-    refute SubjectClassifier.age_gated?(["Cooking", "French cuisine"])
+# Human-set age gate (raise-only for users, either-way for owner)
+defmodule TheStacks.Books.AgeGateTest do
+  test "a user may raise the gate but not lower it" do
+    book = insert(:book, visibility_tier: "public")
+
+    # Raise: public → age_gated is allowed.
+    assert {:ok, %{visibility_tier: "age_gated"}} =
+             Books.set_visibility_tier(book, "age_gated", source: :user)
+
+    # Lower: age_gated → public is forbidden on the user path.
+    assert {:error, :forbidden} =
+             Books.set_visibility_tier(book.id, "public", source: :user)
+
+    # The owner may un-gate (raise_only: false).
+    assert {:ok, %{visibility_tier: "public"}} =
+             Books.set_visibility_tier(book.id, "public", source: :owner, raise_only: false)
   end
 end
 
@@ -5618,7 +5637,7 @@ end
 
 1. **Profile ceiling** — if the owner's profile is `'owner'` visibility, return `:hidden` for all resources unless viewer is the owner.
 2. **Block check** — if either party has blocked the other, return `:hidden`.
-3. **Age gate** — if `books.visibility_tier = 'age_gated'` and viewer is not age-verified, return `:hidden`. This is independent of ownership visibility — it always applies.
+3. **Age gate** (flag-gated, ADR-020) — when `age_gating_enabled` is on and `books.visibility_tier = 'age_gated'` and the viewer is not age-verified, return `:hidden`. Independent of ownership visibility. When the flag is off (production default) this clause is a no-op. Age-verification is provider-sourced (`Stacks.AgeVerification.record_verification/3`), never self-declared.
 4. **Resource visibility** — evaluate the resource's own `visibility` field against the viewer's relationship (group membership, individual grant, or platform user status).
 
 Returns `:hidden` in all ambiguous or error cases. On `:hidden`, controllers return **404, not 403** — revealing that a resource exists is itself an information leak.
@@ -5823,5 +5842,5 @@ The following components are designed to be extractable as standalone open-sourc
 2. **Rust configurable bookshop price scraper** — Standalone CLI + microservice, TOML-driven
 3. **Elixir Open Library client library** — Typed Elixir client for the Open Library API
 4. **Vision-to-ISBN pipeline** — Standalone tool: photo in, ISBN out
-5. **BISAC/subject-based content age classifier** — Rule-based, auditable, no ML
+5. **Human-set + owner-moderated content age gate** — Raise-only user flag, owner override, enforcement-layer visibility filtering; no ML, no metadata guessing
 6. **Elm "aged paper effects" CSS/SVG library** — Visual effects for book-themed UIs
