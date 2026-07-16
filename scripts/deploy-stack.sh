@@ -280,6 +280,10 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # shell/.env export can promote it onto the prod app — production must launch with
     # age-gating invisible and inert.
     AGE_GATING_ENABLED=""
+    # Prod uses the in-code default public rate limit (200/60s/IP). Leave empty
+    # so the RATE_LIMIT_PUBLIC secret isn't staged; preview raises it below so the
+    # parallel E2E suite (many public reads from one runner IP) isn't 429'd.
+    RATE_LIMIT_PUBLIC=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -306,6 +310,11 @@ else
     # on here (preview branch only) alongside the test-helper flag — the --production
     # branch above forces it empty so it can never reach the prod app.
     AGE_GATING_ENABLED="true"
+    # Raise the public rate limit well above the 200/60s default for the preview
+    # stack: the E2E suite runs many specs in parallel from one runner IP, all
+    # hitting per-IP public endpoints (catalogue/search/profile/config), which
+    # otherwise 429s. Preview-only; prod keeps the in-code default.
+    RATE_LIMIT_PUBLIC="5000"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -690,6 +699,7 @@ fly secrets set \
     ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
     ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
     ${AGE_GATING_ENABLED:+AGE_GATING_ENABLED="${AGE_GATING_ENABLED}"} \
+    ${RATE_LIMIT_PUBLIC:+RATE_LIMIT_PUBLIC="${RATE_LIMIT_PUBLIC}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 

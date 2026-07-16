@@ -64,6 +64,10 @@ else
     config :core, :rate_limit_auth, String.to_integer(auth_limit)
   end
 
+  if public_limit = System.get_env("RATE_LIMIT_PUBLIC") do
+    config :core, :rate_limit_public, String.to_integer(public_limit)
+  end
+
   if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
     config :core, :storage, Stacks.Storage.R2
 
