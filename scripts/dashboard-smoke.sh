@@ -46,7 +46,9 @@
 # ── Env ──────────────────────────────────────────────────────────────────────
 #   GRAFANA_HOST              Base URL of the org Grafana (fly-metrics.net).
 #   GRAFANA_AUTH_TOKEN        Grafana service-account token (Bearer).
-#   FLY_PROMETHEUS_READ_TOKEN Fly managed-Prometheus read token (Bearer).
+#   FLY_PROMETHEUS_READ_TOKEN Fly managed-Prometheus read token (raw `FlyV1 …`
+#                             macaroon from `fly tokens create readonly`; sent
+#                             as the whole Authorization value, not `Bearer`).
 #   FLY_PROMETHEUS_ORG        Fly org slug (path component of the query URL).
 #   GRAFANA_DATASOURCE_UID    Datasource uid the panels query. Default
 #                             "prometheus" — MUST match the `uid` the dashboard
@@ -342,7 +344,12 @@ def query_via_fly(query):
     """Fallback: evaluate the instant query against Fly's managed-Prometheus
     HTTP API directly (the #241 Stacks.Transparency.Prometheus endpoint)."""
     url = f"{FLY_BASE}/{FLY_ORG}/api/v1/query?" + urllib.parse.urlencode({"query": query})
-    headers = {"Authorization": f"Bearer {FLY_TOKEN}", "Accept": "application/json"}
+    # Fly's managed-Prometheus proxy expects the macaroon token as the whole
+    # Authorization value — `fly tokens create readonly` mints `FlyV1 fm2_…`,
+    # where `FlyV1` is itself the auth scheme. Wrapping it in `Bearer ` is
+    # rejected with 401. Only fall back to `Bearer ` for a non-macaroon PAT.
+    auth = FLY_TOKEN if FLY_TOKEN.startswith("FlyV1") else f"Bearer {FLY_TOKEN}"
+    headers = {"Authorization": auth, "Accept": "application/json"}
     try:
         _, raw = _request(url, headers=headers)
     except urllib.error.HTTPError as exc:
