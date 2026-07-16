@@ -712,6 +712,48 @@ uploadEffects msg model maybeToken =
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
+        Upload.ConfirmPlacement ->
+            -- Mirrors Upload.update: place the book, and (when the user ticked
+            -- "adults only") ALSO fire the raise-only user age-gate PUT.
+            case ( model.step, maybeToken ) of
+                ( Upload.ChoosingShelf book, Just token ) ->
+                    let
+                        placementEffect =
+                            SimulatedEffect.Http.request
+                                { method = "POST"
+                                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                                , url = "/api/bookshelves/" ++ model.selectedShelf ++ "/placements"
+                                , body =
+                                    SimulatedEffect.Http.jsonBody
+                                        (Encode.object [ ( "book_id", Encode.string book.id ) ])
+                                , expect = SimulatedEffect.Http.expectJson Upload.PlacementCompleted (Decode.field "placement" placementDecoder)
+                                , timeout = Nothing
+                                , tracker = Nothing
+                                }
+
+                        ageGateEffect =
+                            if model.ageGatingEnabled && model.markAdultsOnly then
+                                [ SimulatedEffect.Http.request
+                                    { method = "PUT"
+                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                                    , url = "/api/books/" ++ book.id ++ "/age-gate"
+                                    , body =
+                                        SimulatedEffect.Http.jsonBody
+                                            (Encode.object [ ( "adults_only", Encode.bool True ) ])
+                                    , expect = SimulatedEffect.Http.expectWhatever Upload.AgeGateSet
+                                    , timeout = Nothing
+                                    , tracker = Nothing
+                                    }
+                                ]
+
+                            else
+                                []
+                    in
+                    SimulatedEffect.Cmd.batch (placementEffect :: ageGateEffect)
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -1052,12 +1094,21 @@ decodeAvailabilityResponse =
 -- PROGRAM TEST HARNESSES
 
 
-{-| Create a ProgramTest harness for the Upload page.
+{-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`
+seeds the server-config flag (ADR-020) so tests can drive both the
+flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
-uploadProgram : Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
-uploadProgram maybeToken =
+uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgram ageGatingEnabled maybeToken =
+    let
+        baseModel =
+            Upload.init
+
+        initModel =
+            { baseModel | ageGatingEnabled = ageGatingEnabled }
+    in
     ProgramTest.createElement
-        { init = \() -> ( Upload.init, SimulatedEffect.Cmd.none )
+        { init = \() -> ( initModel, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let
@@ -1284,7 +1335,9 @@ loginProgram =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Create a ProgramTest harness for the BookDetail page.
+{-| Create a ProgramTest harness for the BookDetail page. Age-gating is
+enabled (ADR-020) so the 403-driven age-gate block renders under test; the
+production default is off, which hides it (covered by the flag guard).
 -}
 bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgram bookId maybeToken =

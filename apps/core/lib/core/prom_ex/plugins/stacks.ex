@@ -216,6 +216,75 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:bucket]
         ),
 
+        # ── Moderation funnel step counters (Issue #228, US-4.1 §13) ──
+        # Per-step observability of the moderation pipeline so the funnel
+        # can be broken down by outcome rather than collapsed into the
+        # coarse `stacks_upload_terminal_count_total`. Every tag below is a
+        # whitelisted atom set at the emit site — no ISBN/title/PII.
+        #
+        # Step 1 — classification. `outcome` ∈ book|not_a_book|ambiguous|
+        # unknown. Exported as `stacks_moderation_classification_count_total`.
+        counter(
+          [:stacks, :moderation, :classification, :count, :total],
+          event_name: [:stacks, :moderation, :classification],
+          description: "Moderation step-1 classification outcomes.",
+          tags: [:outcome]
+        ),
+
+        # Step 2 — ISBN resolution, one per candidate. `outcome` ∈
+        # resolved|isbn_not_found|low_confidence|invalid_book|store_failed|
+        # task_exit|other. Exported as
+        # `stacks_moderation_isbn_resolution_count_total`.
+        counter(
+          [:stacks, :moderation, :isbn_resolution, :count, :total],
+          event_name: [:stacks, :moderation, :isbn_resolution],
+          description: "Moderation step-2 ISBN-resolution outcomes, per candidate.",
+          tags: [:outcome]
+        ),
+
+        # Age-gate tiering. Repointed (Issue #118): the automatic
+        # subject→BISAC classifier was removed, so this now fires from
+        # `Stacks.Books.set_visibility_tier/3` when a PERSON sets the tier.
+        # `tier` ∈ public|age_gated, `source` ∈ user|owner. Exported as
+        # `stacks_moderation_tiering_count_total`.
+        counter(
+          [:stacks, :moderation, :tiering, :count, :total],
+          event_name: [:stacks, :moderation, :tiering],
+          description:
+            "Visibility-tier changes (public vs age_gated) set by a user or the owner.",
+          tags: [:tier, :source]
+        ),
+
+        # Compound-title expansion — one per `" OR "` split. Exported as
+        # `stacks_moderation_compound_expansion_count_total`.
+        counter(
+          [:stacks, :moderation, :compound_expansion, :count, :total],
+          event_name: [:stacks, :moderation, :compound_expansion],
+          description: "Compound-title (' OR ') candidate expansions."
+        ),
+
+        # ── Age-gate operational counters (Issue #228, US-4.2 §13) ────
+        # Age-gate enforcement decisions for age-gated books only.
+        # `outcome` ∈ blocked|passed. Exported as
+        # `stacks_age_gate_enforce_count_total`.
+        counter(
+          [:stacks, :age_gate, :enforce, :count, :total],
+          event_name: [:stacks, :age_gate, :enforce],
+          description: "Age-gate enforcement decisions on age-gated books (blocked vs passed).",
+          tags: [:outcome]
+        ),
+
+        # Provider-sourced age verifications recorded (ADR-020). `outcome` ∈
+        # success|error. Repointed from the removed self-declared endpoint to
+        # Stacks.AgeVerification.record_verification/3. Exported as
+        # `stacks_age_verification_count_total`.
+        counter(
+          [:stacks, :age_verification, :count, :total],
+          event_name: [:stacks, :age_verification],
+          description: "Provider-sourced age verifications recorded (success vs error).",
+          tags: [:outcome]
+        ),
+
         # ── Fuse state gauge ──────────────────────────────────────────
         # `last_value` maps to Prometheus gauge type. Path ends in
         # `[:state, :state]` so the exported name is

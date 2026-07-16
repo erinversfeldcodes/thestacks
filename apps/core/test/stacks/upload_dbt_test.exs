@@ -484,11 +484,23 @@ defmodule Stacks.UploadDbtTest do
     end
 
     @tag stories: ["US-1.1.4"], suite: :dbt
-    test "age_gated book is included in authenticated catalogue listing" do
+    test "age_gated book is included for an age-verified authenticated viewer" do
       {user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      {books, _total} = Books.list_catalogue(viewer: user)
+      # #229: age-gated books are visible only to an age-VERIFIED viewer — the
+      # `{:platform_user, id, true}` shape the catalogue controller builds.
+      {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, true})
       assert Enum.any?(books, fn b -> b.id == book.id end)
+    end
+
+    @tag stories: ["US-1.1.4"], suite: :dbt
+    test "age_gated book is excluded for an authenticated-but-unverified viewer" do
+      {user, _book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
+
+      # #229: an authenticated viewer who is NOT age-verified must not see
+      # age-gated books in listings — same as anonymous (the fail-closed rule).
+      {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, false})
+      refute Enum.any?(books, fn b -> b.visibility_tier == "age_gated" end)
     end
 
     @tag stories: ["US-1.1.4"], suite: :dbt

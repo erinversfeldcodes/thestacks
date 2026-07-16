@@ -94,6 +94,7 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - Security: docs/agents/standards/security.md
 - Protobuf: docs/agents/standards/protobuf.md
 - Migrations: docs/agents/standards/migrations.md
+- Dashboards (ops Grafana): docs/agents/standards/dashboards.md
 
 ## Canonical References
 - Architecture: docs/technical-architecture.md

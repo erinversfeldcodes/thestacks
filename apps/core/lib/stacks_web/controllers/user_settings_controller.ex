@@ -1,5 +1,11 @@
 defmodule StacksWeb.UserSettingsController do
-  @moduledoc "Handles user settings: age verification."
+  @moduledoc """
+  Handles user settings: profile, location, password, notifications, privacy.
+
+  Age verification is NO LONGER a user-facing setting (ADR-020): self-declaration
+  was removed as an unacceptable assurance mechanism. Verification is now
+  provider-sourced via `Stacks.AgeVerification.record_verification/3`.
+  """
 
   use CoreWeb, :controller
 
@@ -8,28 +14,6 @@ defmodule StacksWeb.UserSettingsController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
-
-  @doc "PUT /api/settings/age_verification — set the age_verified flag for the current user."
-  def update_age_verification(conn, %{"age_verified" => age_verified})
-      when is_boolean(age_verified) do
-    user = Guardian.Plug.current_resource(conn)
-
-    case Accounts.update_age_verification(user.id, age_verified) do
-      {:ok, updated_user} ->
-        json(conn, %{age_verified: updated_user.age_verified})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(422)
-        |> json(%{errors: format_errors(changeset)})
-    end
-  end
-
-  def update_age_verification(conn, _params) do
-    conn
-    |> put_status(422)
-    |> json(%{error: "age_verified parameter is required and must be a boolean"})
-  end
 
   @doc "PUT /api/settings/profile — update display_name, website_url, and optionally email (requires current_password)."
   def update_profile(conn, params) do

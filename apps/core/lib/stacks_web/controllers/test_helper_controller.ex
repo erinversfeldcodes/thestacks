@@ -13,6 +13,7 @@ defmodule StacksWeb.TestHelperController do
   use CoreWeb, :controller
 
   alias Stacks.Accounts
+  alias Stacks.AgeVerification
 
   # Reserved test TLD (RFC 6761) used for ALL E2E/test accounts:
   #   - suite users:       e2e-<slug>@thestacks.test   (seeds.exs / helpers.ts suiteEmail)
@@ -48,6 +49,39 @@ defmodule StacksWeb.TestHelperController do
   end
 
   def confirmation_token(conn, _params), do: not_found(conn)
+
+  @doc """
+  PUT /api/test/age-verification  body: {"email": <email>, "verified": <bool>}
+
+  Sets (or clears) a user's age verification so the E2E suite can create a
+  verified user without a real KYC provider (ADR-020 — production has no provider
+  and no verified users). `verified: true` records a verification via
+  `Stacks.AgeVerification.record_verification/3` with provider `"e2e_test_helper"`;
+  `verified: false` revokes it.
+
+  Scoped to `@thestacks.test` emails ONLY — a real user can never be in the
+  reserved test TLD, so this can never flip a real account's age status even when
+  the flag is on for a public preview. Responds `200 {"ok": true}` for an
+  existing test-domain user, and a plain `404` for any out-of-scope email or
+  unknown user (deliberately indistinguishable — not an enumeration oracle).
+  """
+  def set_age_verification(conn, %{"email" => email, "verified" => verified})
+      when is_binary(email) and is_boolean(verified) do
+    with true <- e2e_test_email?(email),
+         %{} = user <- Accounts.get_user_by_email(email),
+         {:ok, _user} <- apply_verification(user, verified) do
+      json(conn, %{ok: true})
+    else
+      _ -> not_found(conn)
+    end
+  end
+
+  def set_age_verification(conn, _params), do: not_found(conn)
+
+  defp apply_verification(user, true),
+    do: AgeVerification.record_verification(user, "e2e_test_helper", nil)
+
+  defp apply_verification(user, false), do: AgeVerification.revoke(user)
 
   # Scope the endpoint to E2E/test-domain emails only. Case-insensitive to match
   # `Accounts.get_user_by_email/1`. Uses a strict domain-suffix match so

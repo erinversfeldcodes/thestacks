@@ -2,11 +2,13 @@ defmodule Stacks.Moderation do
   @moduledoc """
   Moderation pipeline for uploaded book images.
 
-  Runs a 4-step pipeline:
+  Runs a 3-step pipeline:
   1. is_book? — vision model checks if image contains a book
   2. extract_all — vision model extracts all books from the image
-  3. classify_subject — BISAC subject classification from book subjects
-  4. store_with_tier — stores books with appropriate visibility_tier
+  3. store — resolves ISBNs/metadata and stores each book as `public`.
+     Age-gating is NOT decided here. A book becomes age-gated only when a
+     person marks it "adults only" (`Stacks.Books.set_visibility_tier/3`) or
+     the platform owner moderates it — never from automated classification.
 
   Sidecar API contract:
   - POST /classify  → %{"classification" => "CLASSIFICATION_RESULT_BOOK"|"CLASSIFICATION_RESULT_NOT_BOOK"|"CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => float, "model_used" => str}
@@ -82,10 +84,12 @@ defmodule Stacks.Moderation do
   defp analyze(payload, context) do
     case AIClient.call_vision("analyze", payload) do
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}} ->
+        emit_classification(:book)
         {:error, :isbn_not_found}
 
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => books} = resp}
       when is_list(books) ->
+        emit_classification(:book)
         Logger.info("Moderation: /analyze returned #{length(books)} candidate(s)")
         # Propagate `model_used` so downstream can tell barcode-sourced
         # (local_ocr) ISBNs apart from VLM-extracted ones. The fast-path
@@ -97,13 +101,26 @@ defmodule Stacks.Moderation do
 
         resolve_and_store_all(books, context_with_source)
 
-      {:ok, %{"classification" => _}} ->
+      {:ok, %{"classification" => classification}} ->
+        emit_classification(classification_outcome(classification))
         {:error, :not_a_book}
 
       error ->
         error
     end
   end
+
+  # Step-1 classification funnel counter. `outcome` is a whitelisted atom
+  # (:book / :not_a_book / :ambiguous / :unknown) — NEVER an ISBN, title,
+  # or other user input (GDPR: telemetry is a warehouse-adjacent sink).
+  defp emit_classification(outcome) do
+    :telemetry.execute([:stacks, :moderation, :classification], %{count: 1}, %{outcome: outcome})
+  end
+
+  defp classification_outcome("CLASSIFICATION_RESULT_BOOK"), do: :book
+  defp classification_outcome("CLASSIFICATION_RESULT_NOT_BOOK"), do: :not_a_book
+  defp classification_outcome("CLASSIFICATION_RESULT_AMBIGUOUS"), do: :ambiguous
+  defp classification_outcome(_), do: :unknown
 
   # Expands compound candidates where the vision model joined multiple book titles
   # with " OR " (e.g. "Things I Don't Want to Know OR The Cost of Living").
@@ -114,6 +131,14 @@ defmodule Stacks.Moderation do
 
       case String.split(title, ~r/\s+OR\s+/, parts: 2) do
         [part1, part2] ->
+          # Compound-expansion frequency counter: one event per split, with
+          # the number of parts as a measurement. No title/PII in metadata.
+          :telemetry.execute(
+            [:stacks, :moderation, :compound_expansion],
+            %{count: 1, parts: 2},
+            %{}
+          )
+
           [
             Map.put(candidate, "title", String.trim(part1)),
             Map.put(candidate, "title", String.trim(part2))
@@ -178,6 +203,8 @@ defmodule Stacks.Moderation do
           {:rejected, "unknown", :task_exit}
       end)
 
+    Enum.each(outcomes, &emit_resolution_outcome/1)
+
     resolved = for {:resolved, book} <- outcomes, do: book
     rejected = for {:rejected, candidate_id, reason} <- outcomes, do: {candidate_id, reason}
 
@@ -186,6 +213,25 @@ defmodule Stacks.Moderation do
       _ -> {:ok, %{resolved: resolved, rejected: rejected}}
     end
   end
+
+  # Step-2 ISBN-resolution funnel counter, one per candidate. `outcome` is a
+  # whitelisted atom: :resolved for a resolved book, or the (bounded)
+  # rejection reason (:isbn_not_found / :low_confidence / :invalid_book /
+  # :store_failed / :task_exit), coerced to :other for anything unexpected.
+  # No ISBN/title/PII ever reaches metadata.
+  @resolution_reasons [:isbn_not_found, :low_confidence, :invalid_book, :store_failed, :task_exit]
+
+  defp emit_resolution_outcome({:resolved, _book}), do: emit_resolution(:resolved)
+
+  defp emit_resolution_outcome({:rejected, _candidate_id, reason}),
+    do: emit_resolution(whitelist_resolution_reason(reason))
+
+  defp emit_resolution(outcome) do
+    :telemetry.execute([:stacks, :moderation, :isbn_resolution], %{count: 1}, %{outcome: outcome})
+  end
+
+  defp whitelist_resolution_reason(reason) when reason in @resolution_reasons, do: reason
+  defp whitelist_resolution_reason(_), do: :other
 
   # Rejection-retry: a candidate whose direct ISBN matches a previously
   # rejected book is dropped before any DB/HTTP work. Without this, the
@@ -399,16 +445,6 @@ defmodule Stacks.Moderation do
     )
   end
 
-  defp determine_visibility_tier(bisac_codes) do
-    adult_codes = ["FIC005000", "FIC027000", "FIC069000"]
-
-    if Enum.any?(bisac_codes, &(&1 in adult_codes)) do
-      "age_gated"
-    else
-      "public"
-    end
-  end
-
   # `used_fast_path` tracks whether the synchronous OL/GB lookup was
   # skipped because the ISBN checksum was valid. Without this flag we
   # can't distinguish two `metadata == %{}` cases that must be handled
@@ -449,16 +485,19 @@ defmodule Stacks.Moderation do
     context[:vision_model_used] == "local_ocr" and Books.valid_isbn_checksum?(isbn)
   end
 
+  # Books enter the system `public` by default (the schema default on
+  # `op.books.visibility_tier`). We deliberately do NOT set a
+  # `"visibility_tier"` key here: the automatic subject→BISAC age-gate
+  # classifier was removed — a book becomes age-gated only when a PERSON
+  # marks it (see `Stacks.Books.set_visibility_tier/3`), never because
+  # code guessed from metadata. `bisac_codes` carries only real codes the
+  # resolver supplied; it is no longer derived from a fake genre map.
   defp build_book_attrs(isbn, metadata, used_fast_path, context) do
-    subjects = metadata[:subjects] || []
-    bisac_codes = subjects_to_bisac(subjects)
-
     base_attrs = %{
       "isbn" => isbn,
       "title" => derive_title(isbn, metadata, used_fast_path),
-      "subjects" => subjects,
-      "bisac_codes" => bisac_codes,
-      "visibility_tier" => determine_visibility_tier(bisac_codes),
+      "subjects" => metadata[:subjects] || [],
+      "bisac_codes" => metadata[:bisac_codes] || [],
       "description" => metadata[:description],
       "cover_image_url" => metadata[:cover_image_url],
       "publisher" => metadata[:publisher],
@@ -499,24 +538,5 @@ defmodule Stacks.Moderation do
       )
 
       :ok
-  end
-
-  defp subjects_to_bisac(subjects) do
-    subject_to_bisac_map = %{
-      "fiction" => "FIC000000",
-      "mystery" => "FIC022000",
-      "science fiction" => "FIC028000",
-      "fantasy" => "FIC009000",
-      "romance" => "FIC027000",
-      "biography" => "BIO000000",
-      "history" => "HIS000000",
-      "self-help" => "SEL000000",
-      "children" => "JUV000000"
-    }
-
-    subjects
-    |> Enum.map(fn s -> Map.get(subject_to_bisac_map, String.downcase(s)) end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
   end
 end

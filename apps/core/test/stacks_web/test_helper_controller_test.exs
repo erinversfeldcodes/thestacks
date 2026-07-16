@@ -165,6 +165,92 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
+  # ── PUT /api/test/age-verification (ADR-020) ─────────────────────────────────
+  #
+  # E2E/tests use this to create an age-verified user without a real KYC
+  # provider. Scoped to `@thestacks.test` emails ONLY — the same guard as the
+  # confirmation-token endpoint — so it can never flip a real account.
+  describe "PUT /api/test/age-verification with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "verified: true records provider verification and returns ok", %{conn: conn} do
+      user = insert(:user, email: "e2e-av@thestacks.test", age_verified: false)
+
+      conn =
+        put(conn, "/api/test/age-verification", %{email: user.email, verified: true})
+
+      assert json_response(conn, 200) == %{"ok" => true}
+
+      updated = Stacks.Accounts.get_user!(user.id)
+      assert updated.age_verified == true
+      assert updated.age_verification_provider == "e2e_test_helper"
+      assert updated.age_verified_at != nil
+    end
+
+    test "verified: false revokes verification", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "e2e-av-off@thestacks.test",
+          age_verified: true,
+          age_verification_provider: "e2e_test_helper"
+        )
+
+      conn =
+        put(conn, "/api/test/age-verification", %{email: user.email, verified: false})
+
+      assert json_response(conn, 200) == %{"ok" => true}
+
+      updated = Stacks.Accounts.get_user!(user.id)
+      assert updated.age_verified == false
+      assert updated.age_verification_provider == nil
+    end
+
+    test "returns 404 for a NON-e2e-domain email even if the user exists", %{conn: conn} do
+      user = insert(:user, email: "real-av@gmail.com", age_verified: false)
+
+      conn =
+        put(conn, "/api/test/age-verification", %{email: user.email, verified: true})
+
+      assert conn.status == 404
+      assert Stacks.Accounts.get_user!(user.id).age_verified == false
+    end
+
+    test "returns 404 for an unknown (but e2e-domain) email", %{conn: conn} do
+      conn =
+        put(conn, "/api/test/age-verification", %{
+          email: "e2e-nobody@thestacks.test",
+          verified: true
+        })
+
+      assert conn.status == 404
+    end
+
+    test "returns 404 when params are missing/malformed", %{conn: conn} do
+      conn = put(conn, "/api/test/age-verification", %{email: "e2e-x@thestacks.test"})
+      assert conn.status == 404
+    end
+  end
+
+  describe "PUT /api/test/age-verification with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404 and does not flip verification", %{conn: conn} do
+      user = insert(:user, email: "e2e-av-flagoff@thestacks.test", age_verified: false)
+
+      conn =
+        put(conn, "/api/test/age-verification", %{email: user.email, verified: true})
+
+      assert conn.status == 404
+      assert Stacks.Accounts.get_user!(user.id).age_verified == false
+    end
+  end
+
   # ── Rate limiting (flag ON) ─────────────────────────────────────────────────
   #
   # On a public preview the endpoint is reachable, so it must be rate-limited

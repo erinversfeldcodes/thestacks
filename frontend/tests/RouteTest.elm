@@ -67,14 +67,26 @@ suite =
                 \_ ->
                     fromPath "/settings/consent"
                         |> Expect.equal SettingsConsent
-            , test "SettingsAgeVerification" <|
-                \_ ->
-                    fromPath "/settings/age-verification"
-                        |> Expect.equal SettingsAgeVerification
             , test "Catalogue" <|
                 \_ ->
                     fromPath "/catalogue"
                         |> Expect.equal Catalogue
+            , test "Metrics" <|
+                \_ ->
+                    fromPath "/metrics"
+                        |> Expect.equal Metrics
+            , test "About" <|
+                \_ ->
+                    fromPath "/about"
+                        |> Expect.equal About
+            , test "Insights" <|
+                \_ ->
+                    fromPath "/me/insights"
+                        |> Expect.equal Insights
+            , test "AdminBookModeration" <|
+                \_ ->
+                    fromPath "/admin/book-moderation"
+                        |> Expect.equal AdminBookModeration
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -121,13 +133,25 @@ suite =
                 \_ ->
                     Route.toPath SettingsConsent
                         |> Expect.equal "/settings/consent"
-            , test "SettingsAgeVerification path" <|
-                \_ ->
-                    Route.toPath SettingsAgeVerification
-                        |> Expect.equal "/settings/age-verification"
             , test "Catalogue path" <|
                 \_ ->
                     Route.toPath Catalogue
                         |> Expect.equal "/catalogue"
+            , test "Metrics path" <|
+                \_ ->
+                    Route.toPath Metrics
+                        |> Expect.equal "/metrics"
+            , test "About path" <|
+                \_ ->
+                    Route.toPath About
+                        |> Expect.equal "/about"
+            , test "Insights path" <|
+                \_ ->
+                    Route.toPath Insights
+                        |> Expect.equal "/me/insights"
+            , test "AdminBookModeration path" <|
+                \_ ->
+                    Route.toPath AdminBookModeration
+                        |> Expect.equal "/admin/book-moderation"
             ]
         ]

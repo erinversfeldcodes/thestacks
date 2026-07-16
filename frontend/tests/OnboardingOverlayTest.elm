@@ -19,13 +19,6 @@ statusAtProfile =
     }
 
 
-statusAtAgeVerification : OnboardingStatus
-statusAtAgeVerification =
-    { completed = False
-    , nextStep = Just "age_verification"
-    }
-
-
 statusAtPrivacy : OnboardingStatus
 statusAtPrivacy =
     { completed = False
@@ -56,18 +49,6 @@ suite =
                             Overlay.update (Overlay.StatusLoaded (Ok statusAtProfile)) initialModel
                     in
                     Expect.equal True model.visible
-            , test "resumes from age_verification step when next_step is age_verification" <|
-                \_ ->
-                    let
-                        ( model, _, outMsg ) =
-                            Overlay.update (Overlay.StatusLoaded (Ok statusAtAgeVerification)) initialModel
-                    in
-                    Expect.all
-                        [ \m -> Expect.equal True m.visible
-                        , \m -> Expect.equal Overlay.AgeVerification m.step
-                        , \_ -> Expect.equal Overlay.NoOut outMsg
-                        ]
-                        model
             , test "resumes from privacy step when next_step is privacy" <|
                 \_ ->
                     let
@@ -100,11 +81,11 @@ suite =
                 \_ ->
                     let
                         ( model, _, outMsg ) =
-                            Overlay.update (Overlay.StepCompleted (Ok statusAtAgeVerification)) initialModel
+                            Overlay.update (Overlay.StepCompleted (Ok statusAtPrivacy)) initialModel
                     in
                     Expect.all
                         [ \m -> Expect.equal True m.visible
-                        , \m -> Expect.equal Overlay.AgeVerification m.step
+                        , \m -> Expect.equal Overlay.Privacy m.step
                         , \_ -> Expect.equal Overlay.NoOut outMsg
                         ]
                         model
@@ -128,7 +109,7 @@ suite =
                     in
                     Expect.all
                         [ \m -> Expect.equal True m.visible
-                        , \m -> Expect.equal Overlay.AgeVerification m.step
+                        , \m -> Expect.equal Overlay.Privacy m.step
                         ]
                         model
             ]

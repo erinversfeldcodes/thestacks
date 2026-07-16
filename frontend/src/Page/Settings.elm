@@ -59,9 +59,9 @@ sidebarItems =
     , { route = SettingsPassword, label = "Password", path = Route.toPath SettingsPassword }
     , { route = SettingsNotifications, label = "Notifications", path = Route.toPath SettingsNotifications }
     , { route = SettingsConsent, label = "Consent", path = Route.toPath SettingsConsent }
-    , { route = SettingsAgeVerification, label = "Age Verification", path = Route.toPath SettingsAgeVerification }
     , { route = SettingsPrivacy, label = "Privacy", path = Route.toPath SettingsPrivacy }
     , { route = SettingsAuditLog, label = "Audit Log", path = Route.toPath SettingsAuditLog }
+    , { route = Insights, label = "Your Data Insights", path = Route.toPath Insights }
     ]
 
 

@@ -146,6 +146,51 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
+  describe "PUT /api/books/:id/age-gate" do
+    test "authed user marks a public book adults_only → 200 age_gated", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => true})
+
+      assert %{"book" => returned} = json_response(conn, 200)
+      assert returned["id"] == book.id
+      assert returned["visibility_tier"] == "age_gated"
+    end
+
+    test "attempting to LOWER an age_gated book → 403 (raise-only, owner-gated)", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => false})
+
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+
+    test "returns 401 without an auth token", %{conn: conn} do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      conn = put(conn, "/api/books/#{book.id}/age-gate", %{"adults_only" => true})
+      assert json_response(conn, 401)
+    end
+
+    test "returns 404 for a missing book", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/books/#{Ecto.UUID.generate()}/age-gate", %{"adults_only" => true})
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
   describe "POST /api/books" do
     test "returns 201 with book when ISBN resolves (mocked)", %{conn: conn} do
       user = insert(:user)

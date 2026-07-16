@@ -232,6 +232,8 @@ defmodule Stacks.Visibility do
     placement = maybe_preload_book(placement)
 
     cond do
+      # Shipped dark (ADR-020): flag off → age-gating is inert, gate is :ok.
+      not Stacks.FeatureFlags.age_gating_enabled?() -> :ok
       not age_gated_book?(placement.book) -> :ok
       not is_nil(viewer_id) and get_owner_id(placement) == viewer_id -> :ok
       viewer_age_verified?(viewer_id, ctx) -> :ok
@@ -240,7 +242,12 @@ defmodule Stacks.Visibility do
   end
 
   defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id, ctx) do
-    if viewer_age_verified?(viewer_id, ctx), do: :ok, else: :hidden
+    # Shipped dark (ADR-020): flag off → age-gating is inert, gate is :ok.
+    cond do
+      not Stacks.FeatureFlags.age_gating_enabled?() -> :ok
+      viewer_age_verified?(viewer_id, ctx) -> :ok
+      true -> :hidden
+    end
   end
 
   defp check_age_gate(_resource, _viewer_id, _ctx), do: :ok

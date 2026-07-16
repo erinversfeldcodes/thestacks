@@ -28,7 +28,6 @@ import Page.Blog.Post as Post
 import Page.Catalogue as Catalogue
 import Page.Marketplace.MyListings as MyListings
 import Page.Search as Search
-import Page.Settings.AgeVerification as AgeVerification
 import Page.Settings.Consent as Consent
 import Page.Settings.Privacy as Privacy
 import Test exposing (Test, describe, test)
@@ -47,39 +46,7 @@ nonAuth =
 suite : Test
 suite =
     describe "Issue #178 Phase 1 — 401 interceptor on the 6 remaining authed pages"
-        [ describe "Settings.AgeVerification"
-            [ test "age_verification_401_bubbles: SaveCompleted 401 → SessionExpired" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            AgeVerification.update
-                                (AgeVerification.SaveCompleted (Err unauthorized))
-                                AgeVerification.init
-                                (Just "tok")
-                    in
-                    outMsg |> Expect.equal AgeVerification.SessionExpired
-            , test "age_verification_non401_stays_local: SaveCompleted network error → NoOut" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            AgeVerification.update
-                                (AgeVerification.SaveCompleted (Err nonAuth))
-                                AgeVerification.init
-                                (Just "tok")
-                    in
-                    outMsg |> Expect.equal AgeVerification.NoOut
-            , test "age_verification_success_stays_local: SaveCompleted Ok → NoOut" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            AgeVerification.update
-                                (AgeVerification.SaveCompleted (Ok ()))
-                                AgeVerification.init
-                                (Just "tok")
-                    in
-                    outMsg |> Expect.equal AgeVerification.NoOut
-            ]
-        , describe "Settings.Consent"
+        [ describe "Settings.Consent"
             [ test "consent_401_bubbles: SaveCompleted 401 → SessionExpired" <|
                 \() ->
                     let

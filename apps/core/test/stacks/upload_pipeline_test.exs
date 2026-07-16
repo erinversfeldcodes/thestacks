@@ -1041,9 +1041,22 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.4"], suite: :db
-    test "Moderation pipeline sets age_gated for adult BISAC subjects", %{user: user} do
-      romance_book = insert(:book, title: "Romance Novel", visibility_tier: "age_gated")
-      insert(:book_edition, book: romance_book, isbn: "9780451524935")
+    test "Moderation pipeline creates a public book even for subjects that used to gate", %{
+      user: user
+    } do
+      # The automatic subject→BISAC age-gate classifier was removed (#118): a
+      # romance book — which the old genre map force-gated — now enters
+      # `public`. Age-gating is a person's action (Books.set_visibility_tier/3).
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780451524935" => %{
+             "title" => "Romance Novel",
+             "subjects" => ["romance"]
+           }
+         }}
+      )
 
       with_client(__MODULE__.RomanceBookClient, fn ->
         image = insert(:uploaded_image, status: "pending")
@@ -1055,7 +1068,8 @@ defmodule Stacks.UploadPipelineTest do
         })
 
         book = Repo.get_by(Book, title: "Romance Novel")
-        assert book.visibility_tier == "age_gated"
+        assert book != nil
+        assert book.visibility_tier == "public"
       end)
     end
   end
@@ -1176,6 +1190,28 @@ defmodule Stacks.UploadPipelineTest do
       latest = List.last(events)
       assert latest.payload["isbn"] == "9780306406157"
       assert latest.payload["title"] == "Event Test Book"
+      assert latest.payload["visibility_tier"] == "public"
+      assert latest.aggregate_type == "book"
+    end
+
+    @tag stories: ["US-4.1"], suite: :events
+    test "book.created event carries age_gated visibility_tier" do
+      before_count = event_count("book.created")
+
+      {:ok, _book} =
+        Books.create(%{
+          "title" => "Age Gated Event Book",
+          "isbn" => "9780385490818",
+          "visibility_tier" => "age_gated"
+        })
+
+      assert event_count("book.created") == before_count + 1
+
+      events = events_of_type("book.created")
+      latest = List.last(events)
+      assert latest.payload["isbn"] == "9780385490818"
+      assert latest.payload["title"] == "Age Gated Event Book"
+      assert latest.payload["visibility_tier"] == "age_gated"
       assert latest.aggregate_type == "book"
     end
 

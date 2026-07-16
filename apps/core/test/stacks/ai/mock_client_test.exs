@@ -21,11 +21,6 @@ defmodule Stacks.AI.MockClientTest do
       assert "9780306406157" in book["potential_isbns"]
     end
 
-    test "classify_subjects returns subject list" do
-      assert {:ok, result} = MockClient.call_vision("classify_subjects", %{})
-      assert "fiction" in result["subjects"]
-    end
-
     test "unknown endpoint returns empty map" do
       assert {:ok, result} = MockClient.call_vision("unknown_endpoint", %{})
       assert result == %{}

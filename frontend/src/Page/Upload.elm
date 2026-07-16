@@ -13,9 +13,9 @@ import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, Poll
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, a, button, div, h1, h2, img, li, p, span, text, ul)
-import Html.Attributes exposing (alt, attribute, class, href, src)
-import Html.Events exposing (onClick, preventDefaultOn)
+import Html exposing (Html, a, button, div, h1, h2, img, input, label, li, p, span, text, ul)
+import Html.Attributes exposing (alt, attribute, checked, class, href, src, type_)
+import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
@@ -69,6 +69,19 @@ type alias Model =
     , selectedShelf : String
     , placementState : RemoteData Http.Error Placement
 
+    -- User "adults only" (age-gate raise) toggle for the book being placed.
+    -- When True, ConfirmPlacement also fires the raise-only user age-gate
+    -- endpoint. `ageGateError` surfaces a soft failure that must NOT block
+    -- the placement itself.
+    , markAdultsOnly : Bool
+    , ageGateError : Maybe String
+
+    -- Server-provided runtime flag (ADR-020). When `False` (production
+    -- default) every age-gating affordance in the upload flow is hidden —
+    -- the "adults only" checkbox, the age-gate notice — and confirming a
+    -- placement never fires the raise-only age-gate call.
+    , ageGatingEnabled : Bool
+
     -- ISBN lookup state
     , isbnLookupState : RemoteData Http.Error ()
 
@@ -120,8 +133,10 @@ type Msg
     | RejectIdentification
     | RejectIdentificationCompleted (Result Http.Error ())
     | ShelfSelected String
+    | ToggleAdultsOnly
     | ConfirmPlacement
     | PlacementCompleted (Result Http.Error Placement)
+    | AgeGateSet (Result Http.Error ())
     | IsbnLookupResult (Result Http.Error BookDetailResponse)
     | GoToShelf String
 
@@ -142,6 +157,9 @@ init =
     , step = Uploading
     , selectedShelf = "wishlist"
     , placementState = NotAsked
+    , markAdultsOnly = False
+    , ageGateError = Nothing
+    , ageGatingEnabled = False
     , isbnLookupState = NotAsked
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
@@ -586,16 +604,48 @@ update msg model maybeToken =
         ShelfSelected shelf ->
             ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
 
+        ToggleAdultsOnly ->
+            ( { model | markAdultsOnly = not model.markAdultsOnly }, Cmd.none, NoOut )
+
         ConfirmPlacement ->
             case ( model.step, maybeToken ) of
                 ( ChoosingShelf book, Just token ) ->
-                    ( { model | placementState = Loading }
-                    , Api.placeBook model.selectedShelf book.id token PlacementCompleted
+                    -- Place the book, and (if the user marked it "adults only")
+                    -- fire the raise-only user age-gate endpoint alongside. A
+                    -- failure of the age-gate call must not block placement, so
+                    -- both run together and the age-gate result is handled
+                    -- softly in AgeGateSet.
+                    let
+                        ageGateCmd =
+                            if model.ageGatingEnabled && model.markAdultsOnly then
+                                [ Api.setBookAgeGate book.id token AgeGateSet ]
+
+                            else
+                                []
+                    in
+                    ( { model | placementState = Loading, ageGateError = Nothing }
+                    , Cmd.batch
+                        (Api.placeBook model.selectedShelf book.id token PlacementCompleted
+                            :: ageGateCmd
+                        )
                     , NoOut
                     )
 
                 _ ->
                     ( model, Cmd.none, NoOut )
+
+        AgeGateSet result ->
+            case result of
+                Ok () ->
+                    ( model, Cmd.none, NoOut )
+
+                Err _ ->
+                    -- Soft failure: the book was still placed. Surface a gentle
+                    -- notice rather than failing the whole flow.
+                    ( { model | ageGateError = Just "We couldn't mark this book as adults only. You can change it later from the book's page." }
+                    , Cmd.none
+                    , NoOut
+                    )
 
         PlacementCompleted result ->
             case ( result, model.step ) of
@@ -655,13 +705,13 @@ view model maybeToken =
                 Just _ ->
                     case model.step of
                         Verifying book ->
-                            viewVerifying book
+                            viewVerifying model.ageGatingEnabled book
 
                         ChoosingShelf book ->
                             viewChoosingShelf model book
 
                         Complete book shelfName ->
-                            viewComplete book shelfName
+                            viewComplete model.ageGateError book shelfName
 
                         Uploading ->
                             case model.result of
@@ -887,38 +937,25 @@ viewManualEntry model =
         ]
 
 
-{-| Path to the in-app age-verification settings page. Used as the
-`age_verify_url` for age-gate notices that surface during the upload
-flow when a resolved book carries `visibility_tier = "age_gated"`.
--}
-ageVerifyUrl : String
-ageVerifyUrl =
-    Route.toPath Route.SettingsAgeVerification
-
-
 {-| Render an in-flow age-gate notice when the resolved book is
-age-gated. Per US-1.1.4 the upload flow proceeds normally for the
-identification step, but the user is informed that age verification
-is required to view the book detail and is given a primary CTA that
-links to the age-verification settings page.
+age-gated AND age-gating is enabled (ADR-020). Per US-1.1.4 the upload
+flow proceeds normally for the identification step, but the user is
+informed that the book is age-restricted. There is no self-serve
+"verify age" action anymore (verification is provider-sourced, shipped
+in a later issue), so the notice is informational only. When age-gating
+is disabled — the production default — nothing is rendered.
 -}
-viewAgeGateNoticeIfNeeded : Book -> Html Msg
-viewAgeGateNoticeIfNeeded book =
-    case book.visibilityTier of
-        AgeGated ->
+viewAgeGateNoticeIfNeeded : Bool -> Book -> Html Msg
+viewAgeGateNoticeIfNeeded ageGatingEnabled book =
+    case ( ageGatingEnabled, book.visibilityTier ) of
+        ( True, AgeGated ) ->
             div
                 [ class "upload-verify__age-gate-notice"
                 , testId "upload-age-gate-notice"
                 , attribute "role" "status"
                 ]
                 [ p [ class "upload-verify__age-gate-message" ]
-                    [ text "This book has been marked as age-gated based on its subject matter. Age verification is required to view its details." ]
-                , a
-                    [ href ageVerifyUrl
-                    , class "btn btn--primary"
-                    , testId "upload-age-gate-cta"
-                    ]
-                    [ text "Verify Age" ]
+                    [ text "This book has been marked as age-gated. Age verification is required to view its details." ]
                 ]
 
         _ ->
@@ -927,11 +964,11 @@ viewAgeGateNoticeIfNeeded book =
 
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
-viewVerifying : Book -> Html Msg
-viewVerifying book =
+viewVerifying : Bool -> Book -> Html Msg
+viewVerifying ageGatingEnabled book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
-        , viewAgeGateNoticeIfNeeded book
+        , viewAgeGateNoticeIfNeeded ageGatingEnabled book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
                 [ case bookCoverImageUrl book of
@@ -1003,6 +1040,11 @@ viewChoosingShelf model book =
                 )
                 allShelves
             )
+        , if model.ageGatingEnabled then
+            viewAdultsOnlyToggle model.markAdultsOnly
+
+          else
+            text ""
         , case model.placementState of
             Loading ->
                 div [ class "upload-shelf-picker__loading" ]
@@ -1030,10 +1072,32 @@ viewChoosingShelf model book =
         ]
 
 
+{-| "Adults only" (age-gate raise) opt-in checkbox shown on the shelf
+picker. When ticked, ConfirmPlacement additionally fires the raise-only
+user age-gate endpoint for the book being placed.
+-}
+viewAdultsOnlyToggle : Bool -> Html Msg
+viewAdultsOnlyToggle isChecked =
+    div [ class "upload-adults-only" ]
+        [ label [ class "upload-adults-only__label" ]
+            [ input
+                [ type_ "checkbox"
+                , checked isChecked
+                , onCheck (\_ -> ToggleAdultsOnly)
+                , testId "upload-adults-only"
+                ]
+                []
+            , span [] [ text "Mark as adults only (18+)" ]
+            ]
+        , p [ class "upload-adults-only__hint" ]
+            [ text "Hides this book from readers who haven't confirmed they're 18+." ]
+        ]
+
+
 {-| Success step: book placed on shelf.
 -}
-viewComplete : Book -> String -> Html Msg
-viewComplete book shelfName =
+viewComplete : Maybe String -> Book -> String -> Html Msg
+viewComplete ageGateError book shelfName =
     div [ class "upload-complete", testId "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
             [ text
@@ -1043,6 +1107,13 @@ viewComplete book shelfName =
                     ++ shelfLabel shelfName
                 )
             ]
+        , case ageGateError of
+            Just err ->
+                p [ class "upload-complete__age-gate-error", testId "upload-adults-only-error" ]
+                    [ text err ]
+
+            Nothing ->
+                text ""
         , div [ class "upload-complete__actions" ]
             [ button
                 [ class "btn btn--primary"

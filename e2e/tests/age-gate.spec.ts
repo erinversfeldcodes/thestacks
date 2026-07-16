@@ -1,72 +1,115 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile, apiCallFromPage } from "./helpers";
+import { suiteAuthFile, suiteEmail, apiCallFromPage } from "./helpers";
 
 /**
- * Age-gated content — DETERMINISTIC browser drive (#226 item 3).
+ * Age-gated content — DETERMINISTIC browser drive (#226 item 3, extended #229).
  *
  * The old single assertion (`.age-gate` OR `.book-detail`) proved nothing: it
  * passed whatever the seeded user's `age_verified` state happened to be. This
  * spec instead OWNS that state — it drives the age-gate suite user through both
- * sides of the gate by setting `age_verified` via the API and reloading:
+ * sides of the gate by setting `age_verified` via the test helper and reloading:
  *
- *   unverified → the age gate is shown and the book content is suppressed;
- *   verified   → the same book renders its content and the gate is gone.
+ *   unverified → the book is HIDDEN from the catalogue listing (#229) AND a
+ *                direct URL shows the `.age-gate` block with content suppressed;
+ *   verified   → the book APPEARS in the catalogue listing AND the same direct
+ *                URL renders its content with the gate gone.
  *
- * A single serial test toggles the flag so the two phases can't race under
- * `fullyParallel`, and it restores `age_verified: false` at the end so the
- * suite user is left in a known state. Pinned to a KNOWN age-gated seed book
- * (by ISBN) so the gate trigger is deterministic, not "whatever sorts first".
+ * ADR-020: age-verification is now PROVIDER-sourced, not self-declared — the old
+ * `PUT /api/settings/age_verification` endpoint is gone. The suite instead flips
+ * the suite user's `age_verified` via the STACKS_E2E_TEST_HELPERS-gated helper
+ * `PUT /api/test/age-verification {email, verified}` (→ record_verification/3,
+ * provider "e2e_test_helper"). Enforcement itself is flag-gated and ships dark in
+ * prod: this suite only passes with AGE_GATING_ENABLED=true (set on the preview
+ * stack + local test-e2e.sh).
+ *
+ * A single serial test toggles the flag so the phases can't race under
+ * `fullyParallel`, and it restores `verified: false` at the end so the suite
+ * user is left in a known state. Pinned to a KNOWN age-gated seed book (by ISBN)
+ * so the gate trigger is deterministic, not "whatever sorts first".
  */
 
 // "Demons" (Dostoevsky) — seeded as age_gated (apps/core/priv/repo/seeds.exs).
 const AGE_GATED_ISBN = "9780140449242";
 
+// The age-gate suite user (seeds.exs / helpers.ts suiteEmail) — the `@thestacks.test`
+// account the test helper is scoped to.
+const SUITE_EMAIL = suiteEmail("age-gate");
+
+type CatalogueBook = { id: string; primary_edition?: { isbn?: string } };
+
 test.describe("Age-gated content (deterministic gate ↔ content)", () => {
   test.use({ storageState: suiteAuthFile("age-gate") });
 
-  test("the age gate hides content until the viewer is age-verified", async ({
+  test("the age gate hides the book from the catalogue and detail until verified", async ({
     page,
   }) => {
     // Land in-app so localStorage (the bearer token) is available to the helpers.
     await page.goto("/library");
 
-    // Resolve the pinned age-gated book id. The catalogue includes age-gated
-    // books for an authenticated browser, so this find is stable.
-    const { data } = await apiCallFromPage(
-      page,
-      "GET",
-      "/api/catalogue?per_page=200"
-    );
-    const ageGatedBook = ((data as { books?: Array<{ id: string; primary_edition?: { isbn?: string } }> }).books ?? []).find(
-      (b) => b.primary_edition?.isbn === AGE_GATED_ISBN
-    );
+    const findInCatalogue = async (): Promise<CatalogueBook | undefined> => {
+      const { data } = await apiCallFromPage(
+        page,
+        "GET",
+        "/api/catalogue?per_page=200"
+      );
+      return ((data as { books?: CatalogueBook[] }).books ?? []).find(
+        (b) => b.primary_edition?.isbn === AGE_GATED_ISBN
+      );
+    };
+
+    // ADR-020: flip the suite user's provider-sourced age_verified via the
+    // STACKS_E2E_TEST_HELPERS-gated helper (no self-declared endpoint any more).
+    // Returns 200 {ok:true} for the `@thestacks.test` suite user; the helper is
+    // unauthenticated by design so no bearer token is needed.
+    const setAgeVerified = (verified: boolean) =>
+      apiCallFromPage(page, "PUT", "/api/test/age-verification", {
+        email: SUITE_EMAIL,
+        verified,
+      });
+
+    // #229: the catalogue now HIDES age-gated books from an unverified viewer, so
+    // we resolve the pinned book id WHILE verified — the id-lookup can no longer
+    // rely on the (now-closed) leak that exposed age-gated books to any authed user.
+    const setVerified = await setAgeVerified(true);
+    expect(setVerified.status).toBe(200);
+
+    const ageGatedBook = await findInCatalogue();
     expect(
       ageGatedBook,
-      `catalogue must contain the age-gated seed book ISBN ${AGE_GATED_ISBN}`
+      `a verified viewer's catalogue must contain the age-gated seed book ISBN ${AGE_GATED_ISBN}`
     ).toBeDefined();
-    const bookId = (ageGatedBook as { id: string }).id;
+    const bookId = (ageGatedBook as CatalogueBook).id;
 
     const ageGate = page.locator(".age-gate");
     const bookTitle = page.getByTestId("book-title");
 
-    // ── UNVERIFIED — the gate is shown, the content is suppressed ─────────────
-    const unset = await apiCallFromPage(page, "PUT", "/api/settings/age_verification", {
-      age_verified: false,
-    });
+    // ── UNVERIFIED — hidden from the listing, gated on the detail ─────────────
+    const unset = await setAgeVerified(false);
     expect(unset.status).toBe(200);
 
-    // Direct navigation renders PageBookDetail; an age-gated book to an
+    // #229: the age-gated book is OMITTED from the catalogue listing for an
+    // authenticated-but-unverified viewer (as it already is anonymously).
+    expect(
+      await findInCatalogue(),
+      "unverified viewer's catalogue must NOT contain the age-gated book"
+    ).toBeUndefined();
+
+    // Direct navigation still renders PageBookDetail; an age-gated book to an
     // unverified viewer 403s → showAgeGate, so `.age-gate` is shown and the
     // book title (only in the content branch) is absent.
     await page.goto(`/books/${bookId}`);
     await expect(ageGate).toBeVisible({ timeout: 15000 });
     await expect(bookTitle).toHaveCount(0);
 
-    // ── VERIFIED — the same book now renders its content, gate gone ───────────
-    const set = await apiCallFromPage(page, "PUT", "/api/settings/age_verification", {
-      age_verified: true,
-    });
+    // ── VERIFIED — revealed in the listing, content on the detail ────────────
+    const set = await setAgeVerified(true);
     expect(set.status).toBe(200);
+
+    // #229: after verification the book re-appears in the catalogue listing.
+    expect(
+      await findInCatalogue(),
+      "verified viewer's catalogue must contain the age-gated book again"
+    ).toBeDefined();
 
     // Reload so the SPA re-inits with the now-verified session and the
     // book-detail fetch returns 200 (content branch).
@@ -75,8 +118,6 @@ test.describe("Age-gated content (deterministic gate ↔ content)", () => {
     await expect(ageGate).toHaveCount(0);
 
     // ── Restore the suite user to a known (unverified) state ──────────────────
-    await apiCallFromPage(page, "PUT", "/api/settings/age_verification", {
-      age_verified: false,
-    });
+    await setAgeVerified(false);
   });
 });

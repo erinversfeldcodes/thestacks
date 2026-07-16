@@ -32,7 +32,7 @@ defmodule StacksWeb.OnboardingController do
       {:error, :invalid_step} ->
         conn
         |> put_status(422)
-        |> json(%{error: "invalid_step", valid_steps: ~w(profile age_verification privacy)})
+        |> json(%{error: "invalid_step", valid_steps: Accounts.onboarding_step_order()})
     end
   end
 

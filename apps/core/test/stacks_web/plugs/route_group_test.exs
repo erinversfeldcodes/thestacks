@@ -118,11 +118,6 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
       assert read_group(conn) == :gdpr
     end
 
-    test "tags /api/settings/age_verification as :settings" do
-      conn = run_plug("/api/settings/age_verification")
-      assert read_group(conn) == :settings
-    end
-
     test "tags /api/settings/profile as :settings" do
       conn = run_plug("/api/settings/profile")
       assert read_group(conn) == :settings
