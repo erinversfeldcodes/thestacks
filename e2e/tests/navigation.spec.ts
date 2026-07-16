@@ -99,7 +99,7 @@ test.describe("Navbar navigation — authenticated", () => {
 });
 
 test.describe("Navbar navigation — unauthenticated", () => {
-  test("only Catalogue and Sign In are visible in nav, Costs under brand dropdown", async ({ page }) => {
+  test("only Catalogue and Sign In are visible in nav, About under brand dropdown", async ({ page }) => {
     await page.goto("/login");
 
     // Elm now boots without awaiting GET /api/config, but first paint is still
@@ -116,9 +116,10 @@ test.describe("Navbar navigation — unauthenticated", () => {
     expect(texts).not.toContain("Add Book");
     expect(texts).not.toContain("Search");
 
-    // Costs is under the brand dropdown
+    // Costs is no longer a nav item (#235): it lives under About, which sits in
+    // the brand dropdown (About → /costs + /metrics). Assert the About link.
     const brand = page.locator(".app-header__brand");
     await brand.hover();
-    await expect(page.locator('a.app-nav__dropdown-link[href="/costs"]')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('a.app-nav__dropdown-link[href="/about"]')).toBeVisible({ timeout: 3000 });
   });
 });
