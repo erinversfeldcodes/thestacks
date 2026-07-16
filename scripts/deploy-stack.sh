@@ -274,6 +274,12 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # "Purge test-helper flag" block below also unsets any lingering Fly
     # secret as defense-in-depth.
     STACKS_E2E_TEST_HELPERS=""
+    # Age-gating ships DARK in production (ADR-020): the enforcement + verification
+    # machinery is built and tested but inert until a real age-verification provider
+    # (Smile ID / Yoti / Sumsub) is integrated. Force the flag empty here so no stale
+    # shell/.env export can promote it onto the prod app — production must launch with
+    # age-gating invisible and inert.
+    AGE_GATING_ENABLED=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -295,6 +301,11 @@ else
     # conditional — the --production branch above forces it empty so it can
     # never reach the prod app.
     STACKS_E2E_TEST_HELPERS="1"
+    # Age-gating ships dark in prod (ADR-020) but its ENFORCEMENT is what the
+    # age-gate E2E specs exercise, so it must be ON for the preview stack. Turn it
+    # on here (preview branch only) alongside the test-helper flag — the --production
+    # branch above forces it empty so it can never reach the prod app.
+    AGE_GATING_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -678,6 +689,7 @@ fly secrets set \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
     ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
     ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
+    ${AGE_GATING_ENABLED:+AGE_GATING_ENABLED="${AGE_GATING_ENABLED}"} \
     SMOKE_TESTS_ENABLED="true" \
     --app "${CORE_APP}" --stage
 

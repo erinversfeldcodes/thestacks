@@ -176,10 +176,12 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     ).toBe(0);
 
     // Once the viewer verifies their age, the same gated placement becomes visible.
+    // ADR-020: verification is provider-sourced — set via the STACKS_E2E_TEST_HELPERS
+    // helper (scoped to the viewer's `@thestacks.test` email), not the removed
+    // self-declared `PUT /api/settings/age_verification` endpoint.
     await expectOk(
-      request.put("/api/settings/age_verification", {
-        headers: { Authorization: `Bearer ${viewerAuth}` },
-        data: { age_verified: true },
+      request.put("/api/test/age-verification", {
+        data: { email: viewer.email, verified: true },
       }),
       "viewer age-verify"
     );

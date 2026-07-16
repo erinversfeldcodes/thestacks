@@ -128,7 +128,11 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
         echo "==> Starting Phoenix on :4000..."
         (
             cd "$REPO_ROOT"
-            MIX_ENV=dev mix phx.server
+            # Age-gating ships dark (ADR-020) — default OFF outside :test. The
+            # age-gate E2E specs exercise ENFORCEMENT, which reads
+            # Stacks.FeatureFlags.age_gating_enabled? (env AGE_GATING_ENABLED).
+            # Turn it on for this local/CI Phoenix so the age-gate suite is live.
+            AGE_GATING_ENABLED=true MIX_ENV=dev mix phx.server
         ) &>/tmp/stacks-phoenix.log &
         STARTED_PIDS+=($!)
         SERVICES_STARTED+=(phoenix)

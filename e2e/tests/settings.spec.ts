@@ -434,76 +434,10 @@ test.describe("Settings — Password change (isolated)", () => {
   });
 });
 
-test.describe("Settings — Age Verification", () => {
-  test("age verification page loads with toggle", async ({ page }) => {
-    await page.goto("/settings/age-verification");
-    await expect(page.getByTestId('settings-hub').first()).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".page__title").last()).toContainText("Age Verification");
-    await expect(page.locator(".toggle")).toBeVisible();
-  });
-
-  test("clicking toggle opens confirmation modal", async ({ page }) => {
-    await page.goto("/settings/age-verification");
-    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
-
-    await page.locator(".toggle").click();
-    await expect(page.locator(".modal-overlay")).toBeVisible({ timeout: 3000 });
-    await expect(page.locator(".modal__title")).toContainText("Confirm Age");
-  });
-
-  test("cancel closes modal without changing state", async ({ page }) => {
-    await page.goto("/settings/age-verification");
-    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
-
-    const toggleTextBefore = await page.locator(".toggle").textContent();
-
-    await page.locator(".toggle").click();
-    await expect(page.locator(".modal-overlay")).toBeVisible();
-
-    await page.click('button:has-text("Cancel")');
-    await expect(page.locator(".modal-overlay")).not.toBeVisible();
-
-    const toggleTextAfter = await page.locator(".toggle").textContent();
-    expect(toggleTextAfter).toEqual(toggleTextBefore);
-  });
-
-  test("confirm saves age verification", async ({ page }) => {
-    await page.goto("/settings/age-verification");
-    await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
-
-    await page.locator(".toggle").click();
-    await expect(page.locator(".modal-overlay")).toBeVisible();
-
-    await page.click('.modal__actions button:has-text("Confirm")');
-    await page.waitForTimeout(1000);
-
-    // Modal should close
-    await expect(page.locator(".modal-overlay")).not.toBeVisible();
-    // No error should appear
-    const errorCount = await page.locator(".error").count();
-    expect(errorCount).toBe(0);
-  });
-});
-
-/**
- * Punch #7 (Issue #118, §2 "Age verification page auth guard") — the
- * age-verification settings page requires authentication.
- *
- * SettingsAgeVerification is an auth-required route (Main.elm requiresAuth
- * `_ -> True`); initPage returns the Login page when there is no session. This
- * mirrors the /settings/privacy auth-guard test in privacy.spec.ts.
- */
-test.describe("Settings — Age Verification auth guard", () => {
-  test.use({ storageState: { cookies: [], origins: [] } });
-
-  test("unauthenticated visit to /settings/age-verification renders the login page", async ({
-    page,
-  }) => {
-    await page.goto("/settings/age-verification");
-
-    // The login form's submit control proves the Login page was rendered.
-    await expect(page.getByTestId("login-submit")).toBeVisible({ timeout: 10000 });
-    // And the age-verification form must NOT be reachable while unauthenticated.
-    await expect(page.locator(".toggle")).toHaveCount(0);
-  });
-});
+// ADR-020: the self-declared age-verification settings page + its
+// `PUT /api/settings/age_verification` endpoint have been REMOVED. Verification is
+// now provider-sourced (future KYC) and set in tests via the STACKS_E2E_TEST_HELPERS
+// helper `PUT /api/test/age-verification` (see age-gate.spec.ts). There is no
+// `/settings/age-verification` route to load or auth-guard any more, so the former
+// "Settings — Age Verification" + "Age Verification auth guard" describe blocks are
+// deleted rather than repointed.
