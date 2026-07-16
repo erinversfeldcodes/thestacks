@@ -216,6 +216,40 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:bucket]
         ),
 
+        # ── Auth/session security counters (Issue #237, epic #231) ────
+        # Refresh-token REUSE detected — fires from Accounts.check_token_family/3
+        # on the family-burn branch when a rotated/superseded refresh token is
+        # replayed (token theft). No tags: any non-zero value is alert-worthy.
+        # Exported as `stacks_auth_refresh_reuse_detected_count_total`.
+        counter(
+          [:stacks, :auth, :refresh, :reuse_detected, :count, :total],
+          event_name: [:stacks, :auth, :refresh, :reuse_detected],
+          description:
+            "Replayed/rotated refresh tokens caught by the reuse gate (token-theft signal, alert-worthy)."
+        ),
+
+        # Session absolute-cap expiry — fires from AuthController.refresh/2 when a
+        # session exceeds its 7-day window and is force-expired. `reason` is a
+        # bounded whitelisted atom (:lifetime_cap). Exported as
+        # `stacks_auth_session_expired_count_total{reason=…}`.
+        counter(
+          [:stacks, :auth, :session, :expired, :count, :total],
+          event_name: [:stacks, :auth, :session, :expired],
+          description: "Sessions force-expired by the absolute lifetime cap.",
+          tags: [:reason]
+        ),
+
+        # MFA verification outcomes — fires from Stacks.MFA.verify_totp/2 and
+        # verify_recovery_code/2. `outcome` is a bounded whitelisted atom
+        # (:success | :failure). Exported as
+        # `stacks_auth_mfa_verify_count_total{outcome=…}`.
+        counter(
+          [:stacks, :auth, :mfa, :verify, :count, :total],
+          event_name: [:stacks, :auth, :mfa, :verify],
+          description: "MFA verification attempts (TOTP + recovery code), by outcome.",
+          tags: [:outcome]
+        ),
+
         # ── Moderation funnel step counters (Issue #228, US-4.1 §13) ──
         # Per-step observability of the moderation pipeline so the funnel
         # can be broken down by outcome rather than collapsed into the

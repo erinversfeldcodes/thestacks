@@ -17,8 +17,10 @@ defmodule CoreWeb.MetricsEndpointTest do
 
   import Stacks.Factory
 
+  alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
+  alias Stacks.MFA
   alias Stacks.Moderation
   alias StacksWeb.Plugs.AgeGate
 
@@ -157,6 +159,73 @@ defmodule CoreWeb.MetricsEndpointTest do
       assert body =~
                ~r/stacks_age_verification_count_total\{[^}\n]*outcome="success"[^}\n]*\}\s+\d/,
              "expected a non-zero age-verification sample tagged outcome=\"success\""
+    end
+  end
+
+  describe "live exposure: #237 auth/session-security families are scrapeable after exercising" do
+    test "reuse + session-cap + MFA-failure families appear with samples after their real paths",
+         %{conn: conn} do
+      # 1. Refresh-token REUSE — open a family, then replay a superseded jti so
+      # check_token_family/3 burns the family and emits reuse_detected.
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-current",
+          session_started_at: DateTime.utc_now()
+        })
+
+      assert {:error, :token_reuse_detected} =
+               Accounts.check_token_family(fid, "jti-superseded", to_string(user.id))
+
+      # 2. Session absolute-cap expiry — a real refresh POST with an 8-day-old
+      # sst anchor is refused with 401 session_expired (reason: :lifetime_cap).
+      capped_user =
+        insert(:user, email: "metrics-cap@example.com", email_confirmed: true)
+
+      old_sst = System.system_time(:second) - 8 * 24 * 3600
+      {:ok, capped_token, _} = Guardian.encode_and_sign(capped_user, %{"sst" => old_sst})
+
+      cap_conn =
+        conn
+        |> Plug.Conn.put_req_header("authorization", "Bearer #{capped_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"error" => "session_expired"} = json_response(cap_conn, 401)
+
+      # 3. MFA verify FAILURE — enroll a user, then verify a wrong TOTP code.
+      mfa_user = insert(:user)
+      {:ok, %{secret: secret, recovery_codes: codes}} = MFA.begin_enrollment(mfa_user)
+      valid_code = NimbleTOTP.verification_code(secret)
+      {:ok, _} = MFA.confirm_enrollment(mfa_user, valid_code, secret, codes)
+      assert {:error, :invalid_code} = MFA.verify_totp(mfa_user, "000000")
+
+      body = scrape(conn)
+
+      for family <- [
+            "stacks_auth_refresh_reuse_detected_count_total",
+            "stacks_auth_session_expired_count_total",
+            "stacks_auth_mfa_verify_count_total"
+          ] do
+        assert body =~ family,
+               "expected #{family} exposed at /internal/metrics after the auth paths ran, got:\n#{body}"
+      end
+
+      # Prove real samples, not just HELP/TYPE stubs: the reuse counter is
+      # untagged; the cap and MFA counters carry their whitelisted tags.
+      assert body =~ ~r/stacks_auth_refresh_reuse_detected_count_total(\{\})?\s+\d/,
+             "expected a non-zero refresh-reuse-detected sample"
+
+      assert body =~
+               ~r/stacks_auth_session_expired_count_total\{[^}\n]*reason="lifetime_cap"[^}\n]*\}\s+\d/,
+             "expected a non-zero session-expired sample tagged reason=\"lifetime_cap\""
+
+      assert body =~
+               ~r/stacks_auth_mfa_verify_count_total\{[^}\n]*outcome="failure"[^}\n]*\}\s+\d/,
+             "expected a non-zero MFA-verify sample tagged outcome=\"failure\""
     end
   end
 

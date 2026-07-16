@@ -1067,6 +1067,15 @@ defmodule Stacks.Accounts do
 
       true ->
         revoke_family_and_burn(family)
+
+        # Refresh-token REUSE detected (Issue #237). A presented jti that is
+        # neither the family's current token nor a within-grace predecessor
+        # means a rotated/superseded refresh token was replayed — the
+        # token-theft signal. We burned the whole family above; count it so any
+        # non-zero value is alertable. NO PII in the metadata: no token, jti,
+        # user-id, or IP (telemetry is warehouse-adjacent, GDPR).
+        :telemetry.execute([:stacks, :auth, :refresh, :reuse_detected], %{count: 1}, %{})
+
         {:error, :token_reuse_detected}
     end
   end
