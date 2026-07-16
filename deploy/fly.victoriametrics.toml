@@ -32,6 +32,7 @@ kill_timeout = "30s"                 # allow VM to flush its in-memory buffer on
 [[services]]
   internal_port = 8428
   protocol = "tcp"
+  processes = ["vm"]                 # bind the service to the named process group
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
@@ -39,11 +40,20 @@ kill_timeout = "30s"                 # allow VM to flush its in-memory buffer on
   [[services.ports]]
     port = 8428
 
+  # Liveness: VM serves /health on 8428. A passing check in `fly status` is the
+  # deploy-time proof that the store is up (and gates the preview smoke).
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "30s"             # VM reopens its data store on boot
+    method = "get"
+    path = "/health"
+
 [[mounts]]
   source = "vm_data"
   destination = "/victoria-metrics-data"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "256mb"                   # VM single-node is light; bump only if it OOMs
+  memory = "512mb"                   # 256mb crash-loops on data-store reopen; 512 is safe
   cpus = 1
