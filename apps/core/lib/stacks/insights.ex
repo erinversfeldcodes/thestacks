@@ -26,7 +26,6 @@ defmodule Stacks.Insights do
 
   alias Core.Repo
   alias Stacks.Accounts.User
-  alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
@@ -200,7 +199,10 @@ defmodule Stacks.Insights do
     if rem(n, 2) == 1 do
       Enum.at(sorted, mid)
     else
-      (Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2
+      # Round to a whole day: median_days_to_finish is an integer count on the
+      # wire (the Elm decoder is `Decode.int`); an even-count float would fail
+      # the whole payload decode.
+      round((Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2)
     end
   end
 
@@ -250,11 +252,32 @@ defmodule Stacks.Insights do
   # The N rarest books by community read-count. Ties (and the all-zero case in a
   # fresh DB) break deterministically by book_id.
   defp rarest_books(distinct_books) do
+    counts = community_read_counts(distinct_books)
+
     distinct_books
-    |> Enum.map(fn id -> {id, Books.community_read_count(id)} end)
-    |> Enum.sort_by(fn {id, count} -> {count, id} end)
+    |> Enum.sort_by(fn id -> {Map.get(counts, id, 0), id} end)
     |> Enum.take(@fingerprint_size)
-    |> Enum.map(&elem(&1, 0))
+  end
+
+  # Community read-counts for the whole book set in ONE query (avoids an N+1 of
+  # `Books.community_read_count/1` per shelved book — shelf size is unbounded).
+  # `book_id::text` so the map keys match the Ecto.UUID string ids from the
+  # shelf query. Degrades to an empty map (→ all-zero, deterministic by-id
+  # ordering) if the mart is absent, mirroring `Books.community_read_count/1`.
+  defp community_read_counts([]), do: %{}
+
+  defp community_read_counts(book_ids) do
+    sql =
+      "SELECT book_id::text, read_count FROM wh.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
+
+    case Repo.query(sql, [book_ids]) do
+      {:ok, %{rows: rows}} -> Map.new(rows, fn [id, count] -> {id, count} end)
+      _ -> %{}
+    end
+  rescue
+    e ->
+      Logger.warning("Insights.community_read_counts failed: #{inspect(e)}")
+      %{}
   end
 
   # One live SQL query: how many OTHER users have ALL of the fingerprint books on
