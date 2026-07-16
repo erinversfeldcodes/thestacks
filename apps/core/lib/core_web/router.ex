@@ -223,6 +223,8 @@ defmodule CoreWeb.Router do
     put "/onboarding/step/:step", OnboardingController, :complete_step
     post "/onboarding/reset", OnboardingController, :reset
 
+    get "/me/inferences", MeInferenceController, :index
+
     get "/settings/privacy", UserSettingsController, :show_privacy
     put "/settings/age_verification", UserSettingsController, :update_age_verification
     put "/settings/profile_visibility", UserSettingsController, :update_profile_visibility

@@ -47,6 +47,7 @@ import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
+import Page.Insights as Insights
 import Page.Login as Login
 import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
@@ -164,6 +165,7 @@ type Page
     | PageSettingsConsent Consent.Model
     | PageSettingsAgeVerification AgeVerification.Model
     | PageSettingsAuditLog AuditLog.Model
+    | PageInsights Insights.Model
     | PageSettingsProfile Profile.Model
     | PageSettingsPassword Password.Model
     | PageSettingsNotifications Notifications.Model
@@ -531,6 +533,13 @@ initPageAuthenticated route maybeAuth maybePreviousRoute =
                     AuditLog.init maybeToken
             in
             ( PageSettingsAuditLog model, Cmd.map AuditLogMsg cmd )
+
+        Insights ->
+            let
+                ( model, cmd ) =
+                    Insights.init maybeToken
+            in
+            ( PageInsights model, Cmd.map InsightsMsg cmd )
 
         CostTransparency ->
             let
@@ -1051,6 +1060,7 @@ type Msg
     | ConsentMsg Consent.Msg
     | AgeVerificationMsg AgeVerification.Msg
     | AuditLogMsg AuditLog.Msg
+    | InsightsMsg Insights.Msg
     | ProfileMsg Profile.Msg
     | PasswordMsg Password.Msg
     | NotificationsMsg Notifications.Msg
@@ -1514,6 +1524,25 @@ update msg model =
                             )
 
                         AuditLog.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        InsightsMsg subMsg ->
+            case model.page of
+                PageInsights subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Insights.update subMsg subModel
+                    in
+                    case outMsg of
+                        Insights.NoOut ->
+                            ( { model | page = PageInsights newSubModel }
+                            , Cmd.map InsightsMsg subCmd
+                            )
+
+                        Insights.SessionExpired ->
                             handleSessionExpiry model
 
                 _ ->
@@ -2401,6 +2430,9 @@ pageTitle route =
         SettingsAuditLog ->
             "Audit Log — The Stacks"
 
+        Insights ->
+            "What Your Data Reveals — The Stacks"
+
         CostTransparency ->
             "Cost Transparency — The Stacks"
 
@@ -2625,6 +2657,10 @@ viewPage model =
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route
                 (Html.map AuditLogMsg (AuditLog.view subModel))
+
+        PageInsights subModel ->
+            viewSettingsHub model.route
+                (Html.map InsightsMsg (Insights.view subModel))
 
         PageSettingsProfile subModel ->
             viewSettingsHub model.route

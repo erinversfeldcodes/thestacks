@@ -83,6 +83,10 @@ suite =
                 \_ ->
                     fromPath "/about"
                         |> Expect.equal About
+            , test "Insights" <|
+                \_ ->
+                    fromPath "/me/insights"
+                        |> Expect.equal Insights
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -145,5 +149,9 @@ suite =
                 \_ ->
                     Route.toPath About
                         |> Expect.equal "/about"
+            , test "Insights path" <|
+                \_ ->
+                    Route.toPath Insights
+                        |> Expect.equal "/me/insights"
             ]
         ]
