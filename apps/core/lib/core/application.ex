@@ -40,7 +40,11 @@ defmodule Core.Application do
           Stacks.Transparency.Cache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
-          Core.PromEx
+          Core.PromEx,
+          # Pushes PromEx metrics to self-hosted VictoriaMetrics (#253). No-op
+          # (init → :ignore) unless STACKS_METRICS_PUSH_URL is set. Must start
+          # after Core.PromEx (reads its metrics) and Stacks.Finch (posts them).
+          Core.PromEx.MetricsPusher
         ] ++ endpoint_children() ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]

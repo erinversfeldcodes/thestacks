@@ -126,6 +126,12 @@ else
   # `fly secrets`.
   config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
 
+  # Push PromEx metrics to self-hosted VictoriaMetrics (ADR-021 / #253). When set
+  # (e.g. `http://thestacks-victoriametrics.internal:8428`), Core.PromEx.MetricsPusher
+  # POSTs the exposition to VM's import endpoint over 6PN. Unset → pusher stays a
+  # no-op (init → :ignore). Replaces Fly's managed-Prometheus scrape (#248).
+  config :core, :metrics_push_url, System.get_env("STACKS_METRICS_PUSH_URL")
+
   # Optional Grafana dashboard upload (Issue #232). When both GRAFANA_HOST
   # and GRAFANA_AUTH_TOKEN are set (as Fly secrets pointing at the org's
   # fly-metrics.net Grafana), PromEx uploads the dashboards-as-code from
