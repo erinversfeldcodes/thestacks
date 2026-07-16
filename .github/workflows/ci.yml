@@ -1094,7 +1094,11 @@ jobs:
       - name: Preflight — external resolver health
         run: bash scripts/preflight-resolver-health.sh
       - name: Run E2E against deployed stack
-        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+        # E2E_EXPECT_LIVE_METRICS=1: the preview has the self-hosted VictoriaMetrics
+        # wired and the core pusher delivering samples, so the transparency page's
+        # LIVE section must render real panels (ADR-021 / #255) — transparency.spec
+        # enforces it with a retry budget for push/flush/cache lag.
+        run: CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Metrics emission smoke (preview VictoriaMetrics)
         # Emission-fidelity layer (ADR-021 / #253). After E2E, the core app has
         # pushed its PromEx metrics to the ephemeral preview VictoriaMetrics

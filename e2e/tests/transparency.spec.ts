@@ -64,4 +64,37 @@ test.describe("Public transparency page (/metrics)", () => {
       timeout: 15_000,
     });
   });
+
+  // Browser-level counterpart to the CI preview VM emission smoke (ADR-021 / #255):
+  // proves the LIVE section actually renders real metric panels, not just the
+  // graceful "unavailable" fallback. Gated on E2E_EXPECT_LIVE_METRICS because live
+  // data only exists on a stack with the self-hosted VictoriaMetrics wired and the
+  // core pusher having delivered samples (preview/prod) — set on the preview E2E
+  // step in ci.yml. Off local/offline (no VM), where "unavailable" is correct and
+  // the graceful-degradation test above covers it.
+  test("live section renders real metric panels (preview: VM wired + data pushed)", async ({
+    page,
+  }) => {
+    test.skip(
+      !process.env.E2E_EXPECT_LIVE_METRICS,
+      "Live metrics require the self-hosted VictoriaMetrics + pushed data (preview/prod). " +
+        "Set E2E_EXPECT_LIVE_METRICS=1 to enforce the frontend-render guarantee.",
+    );
+
+    // First data can take >60s to surface and the server-side cache (45s TTL) to
+    // refresh past an early "unavailable": push interval (15s) + VM flush (~10s) +
+    // cache TTL (45s). Reload on a generous budget until real live panels render.
+    await expect(async () => {
+      await page.goto("/metrics", { waitUntil: "networkidle" });
+      await expect(page.getByTestId("metrics-live-section")).toBeVisible();
+      await expect(page.getByTestId("metrics-error")).toHaveCount(0);
+      // Must be real panels — never the "unavailable" notice.
+      await expect(page.getByTestId("metrics-live-unavailable")).toHaveCount(0);
+      const livePanels = await page
+        .getByTestId("metrics-live-section")
+        .getByTestId("metrics-panel")
+        .count();
+      expect(livePanels).toBeGreaterThan(0);
+    }).toPass({ timeout: 150_000, intervals: [5_000, 10_000, 15_000] });
+  });
 });
