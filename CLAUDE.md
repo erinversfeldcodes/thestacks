@@ -132,6 +132,7 @@ The preview core VM is **512 MB**. Run heavy release tasks (the full `seed/0`) v
 - **E2E against a preview:** `cd e2e && BASE_URL=https://<preview>.fly.dev npx playwright test --project=setup` then `--project=chromium` (already excludes the Modal-dependent `upload*`/`rate-limit` specs).
 - Preview machines **auto-stop when idle** → a cold hit 502s (`auth.setup` "login failed HTTP 502"); warm `/api/health` or re-run — not a real failure.
 - The preview seed only runs when the PR changes `seeds.exs`; else it inherits staging via Neon copy-on-write. `fly … exec … EOF` is the Issue #171/#177 flake.
+- **Age-gate E2E needs `AGE_GATING_ENABLED=true` (ADR-020).** Age-gating ships dark — default OFF outside `:test` — so `age-gate.spec.ts` (and the age-gate slice of `public-profile.spec.ts`) only passes with the flag on. It is set automatically on the **preview stack** (`scripts/deploy-stack.sh`, preview branch only, alongside `STACKS_E2E_TEST_HELPERS`) and on the **local/CI Phoenix** (`scripts/test-e2e.sh`). Running Phoenix by hand for a local age-gate E2E? export `AGE_GATING_ENABLED=true` before `mix phx.server`. Prod stays off by design. The specs flip `age_verified` via the `STACKS_E2E_TEST_HELPERS`-gated helper `PUT /api/test/age-verification {email, verified}` (self-declared endpoint removed).
 
 ## Do Not
 
