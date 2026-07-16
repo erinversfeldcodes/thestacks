@@ -88,6 +88,35 @@ defmodule Stacks.InsightsTest do
       assert b.median_days_to_finish == 10
     end
 
+    test "median_days_to_finish is a whole integer for an even number of finished books" do
+      user = insert(:user)
+      bs = insert(:bookshelf, user: user)
+
+      now = DateTime.utc_now()
+
+      # Two finished books spanning 10 and 3 days → median (10+3)/2 = 6.5, which
+      # must be emitted as an integer (7), not a float — the Elm decoder is
+      # Decode.int and a float would fail the whole payload decode.
+      shelve(user,
+        bookshelf: bs,
+        reading_status: "completed",
+        started_at: DateTime.add(now, -10, :day),
+        finished_at: now
+      )
+
+      shelve(user,
+        bookshelf: bs,
+        reading_status: "completed",
+        started_at: DateTime.add(now, -3, :day),
+        finished_at: now
+      )
+
+      %{behaviour: b} = Insights.personal_inferences(user)
+
+      assert b.median_days_to_finish == 7
+      assert is_integer(b.median_days_to_finish)
+    end
+
     test "zero shelved books gives a zero abandonment rate, no crash" do
       user = insert(:user)
       %{behaviour: b} = Insights.personal_inferences(user)

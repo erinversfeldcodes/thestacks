@@ -501,17 +501,17 @@ defmodule Stacks.Books do
   # #229: age-gated books are hidden from listing surfaces for any viewer who is
   # not age-verified — anonymous OR authenticated-but-unverified. This must stay a
   # SQL-level predicate so `total`/pagination (see list_catalogue/1) counts stay
-  # correct; an in-memory post-filter would break paging. A verified platform user
-  # (`{:platform_user, _id, true}`) is left unfiltered.
-  defp maybe_exclude_age_gated(query, :unauthenticated) do
+  # correct; an in-memory post-filter would break paging.
+  #
+  # Fail closed: ONLY a verified platform user (`{:platform_user, _id, true}`) is
+  # left unfiltered. Every other viewer shape — anonymous, unverified, or any
+  # unexpected/legacy tuple — has age-gated books excluded by default, so a future
+  # caller passing a stale 2-tuple can never silently leak age-gated content.
+  defp maybe_exclude_age_gated(query, {:platform_user, _id, true}), do: query
+
+  defp maybe_exclude_age_gated(query, _viewer) do
     where(query, [b], b.visibility_tier != "age_gated")
   end
-
-  defp maybe_exclude_age_gated(query, {:platform_user, _id, false}) do
-    where(query, [b], b.visibility_tier != "age_gated")
-  end
-
-  defp maybe_exclude_age_gated(query, _viewer), do: query
 
   defp apply_sort(query, "author") do
     query
