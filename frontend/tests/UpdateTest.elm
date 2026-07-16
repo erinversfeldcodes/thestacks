@@ -45,7 +45,6 @@ bookDetailInit =
     , selectedEdition = Nothing
     , previousRoute = Nothing
     , showAgeGate = False
-    , ageGatingEnabled = True
     , entryAnimationActive = False
     , isAuthenticated = True
     , availability = NotAsked
