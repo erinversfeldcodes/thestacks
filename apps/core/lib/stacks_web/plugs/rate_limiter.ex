@@ -6,6 +6,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   - Auth endpoints (`:auth` bucket): 60 requests / 60 seconds per IP
   - Upload endpoints (`:upload` bucket): 120 requests / 60 seconds per authenticated user
   - Social endpoints (`:social` bucket): 20 requests / 60 seconds per authenticated user
+  - Public read endpoints (`:public` bucket): 200 requests / 60 seconds per IP (env-tunable via `RATE_LIMIT_PUBLIC`)
   - Password change (`:password_change` bucket): 20 requests / 60 seconds per IP
 
   ## Sizing rationale (auth + password_change)
@@ -62,7 +63,17 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @upload_limit 120
   @password_change_limit 20
   @social_limit 20
-  @public_limit 30
+  # Public read endpoints (:public bucket — catalogue, search, public profiles,
+  # transparency, /api/config), keyed per-IP. 30 was too tight: a single engaged
+  # browse fires several public calls per interaction (config + catalogue +
+  # pagination + search + profile), and per-IP keying means a shared NAT/CGNAT
+  # (offices, mobile carriers, campuses) exhausts one bucket across many real
+  # users — the same false-429 hazard the auth sizing note above calls out. It
+  # was also inverted: lower than :auth (60) despite being cheaper, lower-risk
+  # read traffic. 200/60s bounds scraping/DoS (well under the 1000 global) while
+  # not throttling normal browsing or NAT-shared users. Env-tunable so preview/
+  # E2E can raise it further and ops can adjust prod without a deploy.
+  @public_limit 200
   # Admin endpoints — tighter than auth; break-glass access is not high-throughput.
   @admin_limit 30
   # E2E test-helper endpoints (Issue #124). These leak account-activation
@@ -124,7 +135,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
     do: Application.get_env(:core, :rate_limit_password_change, @password_change_limit)
 
   defp get_limit(:social), do: @social_limit
-  defp get_limit(:public), do: @public_limit
+  defp get_limit(:public), do: Application.get_env(:core, :rate_limit_public, @public_limit)
   defp get_limit(:admin), do: Application.get_env(:core, :rate_limit_admin, @admin_limit)
 
   defp get_limit(:e2e_helper),
