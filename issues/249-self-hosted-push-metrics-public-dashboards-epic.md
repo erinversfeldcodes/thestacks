@@ -47,9 +47,15 @@ fail-closed; the core app keeps scale-to-zero and only one tiny VM machine is al
    - **Prod = ALWAYS-ON.** `min_machines_running = 1`, provisioned once at prod cutover (the only
      standing cost). Core app stays scale-to-zero regardless.
 
-4. **#253 Push ingestion (`remote_write`).** App remote_writes to VM over 6PN while alive;
-   retire the Fly `[metrics]` scrape reliance + `MetricsAuth` scrape bypass for ingestion.
-   Verify samples land in VM after a deploy+drive.
+4. **#253 Push ingestion — in-BEAM pusher (no vmagent/sidecar).** A
+   `Core.PromEx.MetricsPusher` GenServer periodically POSTs PromEx's own text
+   exposition (the same bytes `/internal/metrics` serves) to the VM's
+   `/api/v1/import/prometheus` over 6PN (`http://<vm-app>.internal:8428`). VM accepts
+   the Prometheus text format directly — no `remote_write` protobuf/snappy, no vmagent,
+   no Dockerfile change. Runs inside the app, so it pushes while the app is alive and
+   simply stops when it scales to zero (the scale-to-zero-friendly model that dissolves
+   #248). Retire the Fly `[metrics]` scrape reliance + the `MetricsAuth` 6PN scrape
+   bypass for ingestion. Verify samples land in VM after a deploy+drive.
 
 5. **#254 Self-hosted public Grafana.** Fly app (or co-located), anonymous viewer,
    file-provisioned datasource (→ VM, `uid: prometheus`) + curated dashboards-as-code. Public
