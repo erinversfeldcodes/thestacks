@@ -30,6 +30,7 @@ defmodule CoreWeb.MetricsEndpointTest do
   alias Stacks.Workers.DataExportJob
   alias Stacks.Workers.VisibilityRecapJob
   alias StacksWeb.Plugs.AgeGate
+  alias StacksWeb.Plugs.RateLimiter
   alias StacksWeb.Plugs.ViewAsPlug
 
   @token "test-metrics-scrape-token"
@@ -438,6 +439,68 @@ defmodule CoreWeb.MetricsEndpointTest do
       # The handle-claimed counter is untagged — a bare non-zero sample.
       assert body =~ ~r/stacks_handle_claimed_count_total(\{\})?\s+[1-9]/,
              "expected a non-zero handle-claimed sample"
+    end
+  end
+
+  describe "live exposure: #240 platform/ops rate-limit families are scrapeable after exercising" do
+    setup do
+      # Drive the real RateLimiter plug: enable limiting and pin a tight :auth
+      # limit so a small loop can trip a 429 without a 60-iteration loop.
+      original_enabled = Application.get_env(:core, :rate_limiting_enabled)
+      original_auth = Application.get_env(:core, :rate_limit_auth)
+      Application.put_env(:core, :rate_limiting_enabled, true)
+      Application.put_env(:core, :rate_limit_auth, 3)
+
+      on_exit(fn ->
+        Application.put_env(:core, :rate_limiting_enabled, original_enabled)
+
+        if original_auth do
+          Application.put_env(:core, :rate_limit_auth, original_auth)
+        else
+          Application.delete_env(:core, :rate_limit_auth)
+        end
+
+        if :ets.whereis(:rate_limiter) != :undefined do
+          :ets.delete_all_objects(:rate_limiter)
+        end
+      end)
+
+      :ok
+    end
+
+    test "rate-limit rejected + client-IP-source families appear with samples after tripping a bucket",
+         %{conn: conn} do
+      # 1. A normal (allowed) request resolves the client IP from remote_ip →
+      # fires stacks_rate_limit_client_ip_count_total{source="remote_ip"}.
+      normal = %{conn | remote_ip: {10, 8, 0, 1}}
+      refute RateLimiter.call(normal, bucket: :auth).halted
+
+      # 2. Trip the :auth bucket → HTTP 429 →
+      # stacks_rate_limit_rejected_count_total{bucket="auth"} (each call also
+      # resolves the client IP, so client_ip is doubly exercised).
+      trip = %{conn | remote_ip: {10, 8, 0, 2}}
+      for _ <- 1..3, do: RateLimiter.call(trip, bucket: :auth)
+      result = RateLimiter.call(trip, bucket: :auth)
+      assert result.halted and result.status == 429
+
+      body = scrape(conn)
+
+      for family <- [
+            "stacks_rate_limit_rejected_count_total",
+            "stacks_rate_limit_client_ip_count_total"
+          ] do
+        assert body =~ family,
+               "expected #{family} exposed at /internal/metrics after tripping the limiter, got:\n#{body}"
+      end
+
+      # Prove real tagged samples, not just HELP/TYPE stubs.
+      assert body =~
+               ~r/stacks_rate_limit_rejected_count_total\{[^}\n]*bucket="auth"[^}\n]*\}\s+[1-9]/,
+             "expected a non-zero rate-limit-rejected sample tagged bucket=\"auth\""
+
+      assert body =~
+               ~r/stacks_rate_limit_client_ip_count_total\{[^}\n]*source="remote_ip"[^}\n]*\}\s+[1-9]/,
+             "expected a non-zero client-IP sample tagged source=\"remote_ip\""
     end
   end
 

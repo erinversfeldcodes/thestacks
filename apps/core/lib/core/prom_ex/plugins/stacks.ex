@@ -235,6 +235,23 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:bucket]
         ),
 
+        # Trusted-client-IP resolution source (Issue #240, closes #176 gap) —
+        # which path produced the per-IP rate-limit key. `source` is a bounded,
+        # whitelisted atom (:trusted_proxy = Fly edge `fly-client-ip` header |
+        # :remote_ip = socket peer fallback | :fallback = neither resolvable) set
+        # in RateLimiter.get_ip/1. NEVER the IP value itself (GDPR: an IP is
+        # personal data + would explode cardinality — only the source-kind is
+        # tagged). A rise in :fallback, or :remote_ip on a Fly deploy, means the
+        # proxy/IP chain is misconfigured (rate-limit bypass/mis-attribution
+        # risk). Exported as `stacks_rate_limit_client_ip_count_total{source=…}`.
+        counter(
+          [:stacks, :rate_limit, :client_ip, :count, :total],
+          event_name: [:stacks, :rate_limit, :client_ip],
+          description:
+            "Trusted-client-IP resolution source for rate-limit keying (trusted_proxy|remote_ip|fallback); no IP value tagged.",
+          tags: [:source]
+        ),
+
         # ── Auth/session security counters (Issue #237, epic #231) ────
         # Refresh-token REUSE detected — fires from Accounts.check_token_family/3
         # on the family-burn branch when a rotated/superseded refresh token is
