@@ -20,10 +20,14 @@ defmodule CoreWeb.MetricsEndpointTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
+  alias Stacks.Audit
+  alias Stacks.GDPR.Consent
   alias Stacks.MFA
   alias Stacks.Moderation
   alias Stacks.Shelving
   alias Stacks.Social
+  alias Stacks.Workers.AccountDeletionJob
+  alias Stacks.Workers.DataExportJob
   alias Stacks.Workers.VisibilityRecapJob
   alias StacksWeb.Plugs.AgeGate
   alias StacksWeb.Plugs.ViewAsPlug
@@ -313,6 +317,76 @@ defmodule CoreWeb.MetricsEndpointTest do
       assert body =~
                ~r/stacks_view_as_usage_count_total\{[^}\n]*perspective="platform"[^}\n]*\}\s+\d/,
              "expected a non-zero ViewAs-usage sample tagged perspective=\"platform\""
+    end
+  end
+
+  describe "live exposure: #238 GDPR data-rights families are scrapeable after exercising" do
+    test "export/deletion (incl. latency) + consent + audit read/write families appear with samples",
+         %{conn: conn} do
+      # 1. Data export (right-to-portability) through the real worker — fires
+      # stacks_gdpr_export_count_total{result="ok"} AND the new latency
+      # distribution stacks_gdpr_export_duration_milliseconds_{bucket,sum,count}.
+      export_user = insert(:user)
+
+      assert :ok =
+               DataExportJob.perform(%Oban.Job{args: %{"user_id" => export_user.id}})
+
+      # 2. Account deletion (right-to-erasure) through the real worker — fires
+      # stacks_gdpr_deletion_count_total{result="ok",failed_step="none"} AND the
+      # new stacks_gdpr_deletion_duration_milliseconds_{bucket,sum,count}.
+      delete_user = insert(:user)
+
+      assert :ok =
+               AccountDeletionJob.perform(%Oban.Job{args: %{"user_id" => delete_user.id}})
+
+      # 3. Consent grant + revoke through the real GDPR path (feature-tagged).
+      consent_user = insert(:user)
+      assert {:ok, _} = Consent.grant_consent(consent_user.id)
+      assert {:ok, _} = Consent.revoke_consent(consent_user.id)
+
+      # 4. Audit write + the new audit READ counter through the real context.
+      audit_user = insert(:user)
+      assert {:ok, _} = Audit.log(audit_user.id, "test.metrics_read", resource_type: "test")
+      assert {[_ | _], _total, 1, _pp} = Audit.list_for_user(audit_user.id)
+
+      body = scrape(conn)
+
+      for family <- [
+            "stacks_gdpr_export_count_total",
+            "stacks_gdpr_export_duration_milliseconds_bucket",
+            "stacks_gdpr_export_duration_milliseconds_sum",
+            "stacks_gdpr_export_duration_milliseconds_count",
+            "stacks_gdpr_deletion_count_total",
+            "stacks_gdpr_deletion_duration_milliseconds_bucket",
+            "stacks_gdpr_deletion_duration_milliseconds_sum",
+            "stacks_gdpr_deletion_duration_milliseconds_count",
+            "stacks_gdpr_consent_grant_count_total",
+            "stacks_gdpr_consent_revoke_count_total",
+            "stacks_gdpr_audit_write_count_total",
+            "stacks_gdpr_audit_read_count_total"
+          ] do
+        assert body =~ family,
+               "expected #{family} exposed at /internal/metrics after the GDPR paths ran, got:\n#{body}"
+      end
+
+      # Prove real samples, not just HELP/TYPE stubs.
+      assert body =~
+               ~r/stacks_gdpr_export_count_total\{[^}\n]*result="ok"[^}\n]*\}\s+\d/,
+             "expected a non-zero export sample tagged result=\"ok\""
+
+      # The latency distribution exposes a +Inf bucket count and a sum after the
+      # job ran — proves the new duration measurement reaches Prometheus.
+      assert body =~
+               ~r/stacks_gdpr_export_duration_milliseconds_bucket\{[^}\n]*le="\+Inf"[^}\n]*\}\s+[1-9]/,
+             "expected a non-zero export latency +Inf bucket"
+
+      assert body =~
+               ~r/stacks_gdpr_deletion_duration_milliseconds_bucket\{[^}\n]*le="\+Inf"[^}\n]*\}\s+[1-9]/,
+             "expected a non-zero deletion latency +Inf bucket"
+
+      # The new audit-read counter is untagged — a bare non-zero sample.
+      assert body =~ ~r/stacks_gdpr_audit_read_count_total(\{\})?\s+[1-9]/,
+             "expected a non-zero audit-read sample"
     end
   end
 
