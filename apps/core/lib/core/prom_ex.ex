@@ -51,7 +51,8 @@ defmodule Core.PromEx do
     # `Core.PromEx.DashboardDriftTest`. `datasource_id: "prometheus"` (see
     # `dashboard_assigns/0`) matches the datasource uid the panels query.
     [
-      {:core, "grafana/moderation_agegate.json"}
+      {:core, "grafana/moderation_agegate.json"},
+      {:core, "grafana/auth_security.json"}
     ]
   end
 end

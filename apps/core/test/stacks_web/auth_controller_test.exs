@@ -604,6 +604,40 @@ defmodule StacksWeb.AuthControllerTest do
       assert json_response(stale_conn, 401)
     end
 
+    test "emits [:stacks, :auth, :session, :expired] with reason :lifetime_cap past the cap (Issue #237)",
+         %{conn: conn} do
+      user = insert(:user, email: "refresh-cap-telemetry@example.com", email_confirmed: true)
+      now = System.system_time(:second)
+      # 8 days ago — beyond the 7-day cap.
+      old_sst = now - 8 * 24 * 3600
+      {:ok, old_token, _claims} = Guardian.encode_and_sign(user, %{"sst" => old_sst})
+
+      test_pid = self()
+      handler_id = "test-session-expired-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :auth, :session, :expired],
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {:telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      refresh_conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{old_token}")
+        |> post("/api/auth/refresh")
+
+      assert %{"error" => "session_expired"} = json_response(refresh_conn, 401)
+
+      # Whitelisted-atom tag only — no token/user-id/IP in the metadata.
+      assert_receive {:telemetry, [:stacks, :auth, :session, :expired], %{count: 1},
+                      %{reason: :lifetime_cap}}
+    end
+
     test "minting a token stamps a session-start anchor (sst) approximately now",
          %{conn: _conn} do
       user = insert(:user, email: "sst-stamp@example.com", email_confirmed: true)
