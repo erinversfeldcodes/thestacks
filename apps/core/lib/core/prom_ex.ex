@@ -54,7 +54,8 @@ defmodule Core.PromEx do
       {:core, "grafana/moderation_agegate.json"},
       {:core, "grafana/auth_security.json"},
       {:core, "grafana/visibility_social.json"},
-      {:core, "grafana/gdpr_data_rights.json"}
+      {:core, "grafana/gdpr_data_rights.json"},
+      {:core, "grafana/discovery.json"}
     ]
   end
 end

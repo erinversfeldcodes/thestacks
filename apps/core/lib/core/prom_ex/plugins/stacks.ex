@@ -587,6 +587,55 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :view_as, :error],
           description: "Rejected ViewAs requests, by reason and phase (parse vs authorize).",
           tags: [:reason, :phase]
+        ),
+
+        # ── Discovery / profiles / people-search counters (Issue #239) ────
+        # Instrumentation of the public discovery surfaces (#210–#217, #221).
+        # Every tag below is a bounded, whitelisted atom set at the emit site —
+        # NEVER the search query string, a handle, a user-id, or an IP (those are
+        # unbounded cardinality + PII; telemetry is warehouse-adjacent).
+        #
+        # People-search outcomes — one per `GET /api/search/users`. `outcome` ∈
+        # hit|zero_result (zero_result = empty result list). The zero_result rate
+        # is the search-quality signal. Exported as
+        # `stacks_search_people_count_total{outcome=…}`.
+        # (The emit also carries a `:results` numeric measurement — total matches
+        # served — which a future `sum` family can consume; kept out of the
+        # registered families for now to keep the panel↔family lock-step simple.)
+        counter(
+          [:stacks, :search, :people, :count, :total],
+          event_name: [:stacks, :search, :people],
+          description: "People-search requests, by outcome (hit vs zero_result).",
+          tags: [:outcome]
+        ),
+
+        # Public-profile resolution outcomes — one per `/u/:handle` read.
+        # `outcome` ∈ ok|not_found (not_found covers absent handle AND ghost/block
+        # 404). The not_found rate is the broken-link / enumeration-probe signal.
+        # Exported as `stacks_profile_view_count_total{outcome=…}`.
+        counter(
+          [:stacks, :profile, :view, :count, :total],
+          event_name: [:stacks, :profile, :view],
+          description: "Public-profile resolutions, by outcome (ok vs not_found/404).",
+          tags: [:outcome]
+        ),
+
+        # Public-shelf pagination-cap hits — one per shelf-browse response the
+        # #221 public_shelf_cap actually truncated. Untagged. Exported as
+        # `stacks_shelf_browse_capped_count_total`.
+        counter(
+          [:stacks, :shelf, :browse_capped, :count, :total],
+          event_name: [:stacks, :shelf, :browse_capped],
+          description: "Public shelf-browse responses truncated by the public_shelf_cap (#221)."
+        ),
+
+        # Handle claims — one per successful profile update that set or changed
+        # `:handle`. Untagged (the handle value never becomes a label). Exported
+        # as `stacks_handle_claimed_count_total`.
+        counter(
+          [:stacks, :handle, :claimed, :count, :total],
+          event_name: [:stacks, :handle, :claimed],
+          description: "Public `/u/:handle` claims (handle set or changed on a profile update)."
         )
       ])
     ]
