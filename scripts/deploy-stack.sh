@@ -653,6 +653,58 @@ else
     SEARXNG_INTERNAL_URL=""
 fi
 
+# ── Deploy metrics store (VictoriaMetrics) ──────────────────────────────────
+# Self-hosted metrics store (ADR-021 / Epic #249). The core app PUSHES its
+# PromEx metrics here (Core.PromEx.MetricsPusher → /api/v1/import/prometheus over
+# 6PN), replacing Fly's managed-Prometheus scrape that never ingested a sample
+# (#248). Preview: ephemeral per-PR app, torn down by cleanup-preview.sh. Prod:
+# always-on (min_machines_running=1). Non-fatal: a metrics-store hiccup must not
+# break a PR's E2E — if it fails we simply don't set the push URL on core.
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    VM_APP="${VM_APP:-thestacks-victoriametrics}"
+else
+    VM_APP="${PREVIEW_VM_APP}"
+fi
+VM_INTERNAL_URL="http://${VM_APP}.internal:8428"
+METRICS_PUSH_URL=""
+
+echo ""
+echo "==> Deploying metrics store (app: ${VM_APP})..."
+if [[ "$PROD_MODE" -eq 0 ]]; then
+    fly apps destroy "${VM_APP}" --yes 2>&1 | grep -v "^Error" || true
+fi
+ensure_fly_app "${VM_APP}"
+
+# VM needs a data volume at /victoria-metrics-data. Preview recreated it fresh
+# with the app; prod creates it once. Match fly.core.toml's primary_region.
+if ! fly volumes list --app "${VM_APP}" --json 2>/dev/null | grep -q '"name"[: ]*"vm_data"'; then
+    fly volumes create vm_data --app "${VM_APP}" --region iad --size 1 --yes 2>&1 \
+        | grep -v "^Error" || true
+fi
+
+_vm_deploy_once() {
+    (cd "$REPO_ROOT" && fly deploy \
+        --app "${VM_APP}" \
+        --config "${REPO_ROOT}/deploy/fly.victoriametrics.toml" \
+        --ha=false --depot=false)
+}
+if deploy_with_retry "victoriametrics" _vm_deploy_once; then
+    # 6PN-only app (no public IP): Fly's proxy does not enforce
+    # min_machines_running, so explicitly start the machine after deploy — the
+    # same idiom the core block uses below. Without this the VM can sit stopped
+    # and the core push silently no-ops.
+    fly machines list --app "${VM_APP}" --json 2>/dev/null \
+        | python3 -c "import json,sys; [print(m['id']) for m in json.load(sys.stdin)]" 2>/dev/null \
+        | while read -r mid; do
+            [[ -z "$mid" ]] && continue
+            fly machine start "$mid" --app "${VM_APP}" 2>/dev/null || true
+        done
+    METRICS_PUSH_URL="${VM_INTERNAL_URL}"
+    echo "PASS deploy: metrics store at ${VM_INTERNAL_URL}"
+else
+    echo "WARN: VictoriaMetrics deploy failed — core runs without metrics push (non-fatal)."
+fi
+
 # ── Create core app ───────────────────────────────────────────────────────────
 # Do NOT destroy the app between deployments. fly deploy replaces machines
 # in-place, so destroy+create is redundant and causes a NXDOMAIN DNS cache
@@ -699,6 +751,7 @@ fly secrets set \
     ${STACKS_APP_DB_PASSWORD:+STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD}"} \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
+    ${METRICS_PUSH_URL:+STACKS_METRICS_PUSH_URL="${METRICS_PUSH_URL}"} \
     ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
