@@ -47,8 +47,32 @@ else
     config :core, :vision_together_api_key, together_key
   end
 
+  # Public transparency live signals (#241 / ADR-019). The read-only Fly
+  # managed-Prometheus token + org slug are Fly secrets, guarded like the
+  # Grafana / log-shipper config above: when either is unset the live section
+  # of /api/transparency/metrics degrades to `:unavailable` — it must NOT break
+  # boot. Never the write/scrape token; this is a curated read of a whitelist.
+  if prom_token = System.get_env("FLY_PROMETHEUS_READ_TOKEN") do
+    config :core, :fly_prometheus_token, prom_token
+  end
+
+  if prom_org = System.get_env("FLY_PROMETHEUS_ORG") do
+    config :core, :fly_prometheus_org, prom_org
+  end
+
   if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
     config :core, :rate_limit_auth, String.to_integer(auth_limit)
+  end
+
+  if public_limit = System.get_env("RATE_LIMIT_PUBLIC") do
+    config :core, :rate_limit_public, String.to_integer(public_limit)
+  end
+
+  # Test-helper bucket (Issue #124) — prod default is a tight 10/60s/IP; preview
+  # raises it so the parallel E2E suite isn't throttled. Never set in prod (the
+  # helpers themselves are prod-disabled).
+  if e2e_helper_limit = System.get_env("RATE_LIMIT_E2E_HELPER") do
+    config :core, :rate_limit_e2e_helper, String.to_integer(e2e_helper_limit)
   end
 
   if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
@@ -86,11 +110,40 @@ else
     config :core, :smoke_tests_enabled, true
   end
 
+  # Age-gating kill-switch (ADR-020). Shipped dark: default OFF in production, so
+  # all three enforcement points (AgeGate.enforce/2, Books.maybe_exclude_age_gated/2,
+  # Visibility.check_age_gate/3) are no-ops and age-gated books behave as public.
+  # Flip AGE_GATING_ENABLED=true — once a real verification provider is integrated —
+  # to activate the already-validated behaviour with no code change. Read only
+  # through Stacks.FeatureFlags.age_gating_enabled?/0.
+  config :core, :age_gating_enabled, System.get_env("AGE_GATING_ENABLED") == "true"
+
   # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
-  # is bearer-only (no IP allowlist) — every caller must present a matching
-  # `Authorization: Bearer <token>` header. Unset = no one can scrape, not
-  # even the SLO gate. Required in prod; CI sets it via `fly secrets`.
+  # requires a matching `Authorization: Bearer <token>` from public callers.
+  # The one exception is Fly's managed-Prometheus scrape arriving directly
+  # over 6PN (Issue #232) — see the plug's @moduledoc. Unset = no public
+  # caller (e.g. the SLO gate) can scrape. Required in prod; CI sets it via
+  # `fly secrets`.
   config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
+
+  # Optional Grafana dashboard upload (Issue #232). When both GRAFANA_HOST
+  # and GRAFANA_AUTH_TOKEN are set (as Fly secrets pointing at the org's
+  # fly-metrics.net Grafana), PromEx uploads the dashboards-as-code from
+  # `Core.PromEx.dashboards/0` at boot. When either is unset, PromEx defaults
+  # to `grafana: :disabled` — a no-op that must NOT break boot (mirrors the
+  # log-shipper guard). Dashboards can also be imported once by hand; see
+  # docs/runbooks/metrics-stack.md.
+  grafana_host = System.get_env("GRAFANA_HOST")
+  grafana_token = System.get_env("GRAFANA_AUTH_TOKEN")
+
+  if grafana_host && grafana_token && grafana_host != "" && grafana_token != "" do
+    config :core, Core.PromEx,
+      grafana: [
+        host: grafana_host,
+        auth_token: grafana_token,
+        upload_dashboards_on_start: true
+      ]
+  end
 end
 
 # ── Prod-only (release) ───────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ NavigationProgramTest, we test the pure surfaces directly:
 
 import Components.UserMenu as UserMenu
 import Expect
+import Html.Attributes as Attr
 import Json.Encode as Encode
 import Main
 import Navigation.Route exposing (Route(..))
@@ -70,6 +71,15 @@ suite =
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
                             , Query.has [ Selector.text "Marketplace" ]
+                            ]
+            , test "shows a single About entry linking to /about" <|
+                \() ->
+                    Main.viewNav Catalogue Nothing UserMenu.init
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "About" ]
+                            , Query.has
+                                [ Selector.attribute (Attr.href "/about") ]
                             ]
             , test "does not show authenticated-only bookshelves" <|
                 \() ->
@@ -132,6 +142,30 @@ suite =
                 \() ->
                     Main.decodeFlags (Encode.object [])
                         |> Expect.equal Nothing
+            ]
+        , describe "decodeConfig (server-config channel — ADR-020)"
+            [ test "decodes ageGatingEnabled: true" <|
+                \() ->
+                    Main.decodeConfig
+                        (Encode.object [ ( "ageGatingEnabled", Encode.bool True ) ])
+                        |> .ageGatingEnabled
+                        |> Expect.equal True
+            , test "decodes ageGatingEnabled: false" <|
+                \() ->
+                    Main.decodeConfig
+                        (Encode.object [ ( "ageGatingEnabled", Encode.bool False ) ])
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
+            , test "defaults to False when ageGatingEnabled is absent (fail safe)" <|
+                \() ->
+                    Main.decodeConfig (Encode.object [])
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
+            , test "defaults to False when flags are malformed (fail safe)" <|
+                \() ->
+                    Main.decodeConfig (Encode.string "not-an-object")
+                        |> .ageGatingEnabled
+                        |> Expect.equal False
             ]
         , describe "loginEffects (fresh login mirrors init)"
             [ test "fetches placements so onboarding can trigger for a placement-free user" <|

@@ -8,6 +8,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Books.MockHttpClient
   alias Stacks.Books.UploadedImage
   alias Stacks.Workers.IdentifyBookJob
 
@@ -205,11 +206,27 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
-  describe "perform/1 — age_gated path" do
+  describe "perform/1 — default public tier (classifier removed)" do
     @tag stories: ["US-1.1.4"], suite: :jobs
-    test "book has age_gated visibility_tier when adult BISAC subject is returned", %{user: user} do
-      age_gated_book = insert(:book, title: "Adult Fiction", visibility_tier: "age_gated")
-      insert(:book_edition, book: age_gated_book, isbn: "9780385490818")
+    test "pipeline creates a public book even for subjects that previously gated", %{user: user} do
+      # The automatic subject→BISAC age-gate classifier was removed: a freshly
+      # identified book enters `public` regardless of its subjects. Age-gating
+      # now happens only when a PERSON marks the book (Books.set_visibility_tier/3).
+      # "romance" used to force the age_gated branch.
+      :fuse.reset(:open_library_fuse)
+      :fuse.reset(:google_books_fuse)
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780385490818" => %{
+             "title" => "Formerly Gated Romance",
+             "subjects" => ["romance"]
+           }
+         }}
+      )
+
       image = insert(:uploaded_image)
 
       original = Application.get_env(:core, :vision_client)
@@ -230,7 +247,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       updated_image = Repo.get!(UploadedImage, image.id)
       assert updated_image.status == "resolved"
       book = Repo.get!(Stacks.Books.Book, hd(updated_image.book_ids))
-      assert book.visibility_tier == "age_gated"
+      assert book.visibility_tier == "public"
     end
   end
 

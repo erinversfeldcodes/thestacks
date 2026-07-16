@@ -50,9 +50,10 @@ test.describe("First-run onboarding overlay", () => {
     await expect(overlay).toBeVisible({ timeout: 15000 });
     await expect(overlay).toContainText("Welcome to The Stacks");
 
-    // Progress dots: four steps, first one active.
+    // Progress dots: three steps (profile → privacy → complete; the age step
+    // was removed in ADR-020), first one active.
     const dots = overlay.locator(".onboarding-overlay__dot");
-    await expect(dots).toHaveCount(4);
+    await expect(dots).toHaveCount(3);
     await expect(
       overlay.locator(".onboarding-overlay__dot--active")
     ).toHaveCount(1);

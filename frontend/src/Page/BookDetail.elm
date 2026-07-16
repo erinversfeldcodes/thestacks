@@ -52,6 +52,11 @@ type alias Model =
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
+
+    -- Set True only on a backend 403 (age_verification_required). The server
+    -- issues that 403 ONLY when age-gating is enforced (ADR-020: dark in prod →
+    -- no 403 → the gate never shows), so this flag alone is the correct signal;
+    -- no separate client-side age-gating flag is needed here.
     , showAgeGate : Bool
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
@@ -85,7 +90,6 @@ type Msg
     | RemoveCompleted (Result Http.Error ())
     | ToggleFormat Format
     | EditionSelected String
-    | VerifyAge
     | DismissAgeGate
     | CloseOverlay
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
@@ -252,9 +256,6 @@ update msg model maybeToken =
 
                     else
                         ( { model | book = Failure err }, Cmd.none, NoOut )
-
-        VerifyAge ->
-            ( model, Cmd.none, NavigateTo Route.SettingsAgeVerification )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
@@ -481,9 +482,7 @@ view model =
     div [ class ("page page--book-detail" ++ animationClass) ]
         [ if model.showAgeGate then
             ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+                { onDismiss = DismissAgeGate }
 
           else
             div [ class "book-detail__parchment" ]
@@ -1106,9 +1105,7 @@ overlayContent : Model -> Html Msg
 overlayContent model =
     if model.showAgeGate then
         ageGate
-            { onVerify = VerifyAge
-            , onDismiss = DismissAgeGate
-            }
+            { onDismiss = DismissAgeGate }
 
     else
         div [ class "book-detail__parchment" ]

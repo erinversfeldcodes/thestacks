@@ -1,20 +1,28 @@
 module Api exposing
-    ( AdminSource
+    ( AdminBook
+    , AdminBooksResponse
+    , AdminSource
     , AdminSourcesResponse
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , Behaviour
+    , BisacCount
     , BlockError(..)
     , BlockedUser
     , BlockedUsersResponse
     , BookDetailResponse
     , CatalogueResponse
+    , Deanonymisation
     , EnrichmentGaps
+    , InterestProfile
     , ListingParams
+    , LiveSignals(..)
     , MergeFormatResponse
     , MetricsDashboard
     , NotificationPreferences
     , OnboardingStatus
+    , PersonalInferences
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
@@ -25,12 +33,20 @@ module Api exposing
     , PublicProfileSummary
     , QualityTrends
     , RegisterError(..)
+    , RiskInference
     , ShelfVisibilitySetting
     , SourceHealth
+    , SubjectCount
+    , TransparencyEntry
+    , TransparencyMetrics
     , UploadInit
     , acceptInvitation
     , activateListing
     , addShelf
+    , adminBookDecoder
+    , adminBooksResponseDecoder
+    , adminListBooks
+    , adminSetBookAgeGate
     , approveSource
     , auditLogResponseDecoder
     , blockUser
@@ -56,6 +72,7 @@ module Api exposing
     , getEnrichmentGaps
     , getGroup
     , getGroupFeed
+    , getInferences
     , getListings
     , getMetrics
     , getMyListings
@@ -67,6 +84,7 @@ module Api exposing
     , getProfileShelf
     , getQualityTrends
     , getSourceHealth
+    , getTransparencyMetrics
     , getUserPlacements
     , initUpload
     , inviteToGroup
@@ -79,6 +97,7 @@ module Api exposing
     , lookupByIsbn
     , mergeFormat
     , moveBook
+    , personalInferencesDecoder
     , placeBook
     , publicProfileDecoder
     , publicProfileSummaryDecoder
@@ -94,10 +113,11 @@ module Api exposing
     , saveWritingAssistantConsent
     , searchBooks
     , searchUsers
+    , setBookAgeGate
     , soldListing
     , streamEventDecoder
+    , transparencyMetricsDecoder
     , unblockUser
-    , updateAgeVerification
     , updateBlogPost
     , updateLocation
     , updateNotifications
@@ -439,6 +459,93 @@ logout token toMsg =
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
+        }
+
+
+
+-- TRANSPARENCY (#241 → #235)
+
+
+{-| A single curated transparency signal, carrying the teaching metadata the
+public `/metrics` page renders as a "why we measure this" tooltip. Shared by both
+the live signals and the durable aggregates. `value` is a plain number (a rate, a
+count, a ratio, or a boolean-as-0/1) interpreted per `unit`.
+-}
+type alias TransparencyEntry =
+    { key : String
+    , label : String
+    , what : String
+    , how : String
+    , why : String
+    , unit : String
+    , value : Float
+    }
+
+
+{-| The live-signals section of the transparency payload. The backend degrades to
+`"unavailable"` (rather than an error) when Prometheus is unconfigured or every
+whitelisted query fails, so the page can render the durable section regardless.
+-}
+type LiveSignals
+    = LiveSignals (List TransparencyEntry)
+    | LiveUnavailable
+
+
+{-| The full public transparency payload (`GET /api/transparency/metrics`):
+`{live, durable, generated_at, cache_ttl}` from `Stacks.Transparency.metrics/0`.
+-}
+type alias TransparencyMetrics =
+    { live : LiveSignals
+    , durable : List TransparencyEntry
+    , generatedAt : String
+    , cacheTtl : Int
+    }
+
+
+transparencyEntryDecoder : Decoder TransparencyEntry
+transparencyEntryDecoder =
+    Decode.map7 TransparencyEntry
+        (Decode.field "key" Decode.string)
+        (Decode.field "label" Decode.string)
+        (Decode.field "what" Decode.string)
+        (Decode.field "how" Decode.string)
+        (Decode.field "why" Decode.string)
+        (Decode.field "unit" Decode.string)
+        (Decode.field "value" Decode.float)
+
+
+{-| Decode the `live` field, which is EITHER a list of entries OR the JSON string
+`"unavailable"` (the graceful-degradation sentinel). Any non-list is treated as
+unavailable so a token-absent backend never surfaces as a decode error.
+-}
+liveSignalsDecoder : Decoder LiveSignals
+liveSignalsDecoder =
+    Decode.oneOf
+        [ Decode.map LiveSignals (Decode.list transparencyEntryDecoder)
+        , Decode.succeed LiveUnavailable
+        ]
+
+
+transparencyMetricsDecoder : Decoder TransparencyMetrics
+transparencyMetricsDecoder =
+    Decode.map4 TransparencyMetrics
+        (Decode.field "live" liveSignalsDecoder)
+        (Decode.field "durable" (Decode.list transparencyEntryDecoder))
+        (Decode.field "generated_at" Decode.string)
+        (Decode.field "cache_ttl" Decode.int)
+
+
+{-| `GET /api/transparency/metrics` — the public, unauthenticated transparency
+payload (#241). No auth header: the endpoint is public and returns only curated,
+anonymised aggregates.
+-}
+getTransparencyMetrics :
+    (Result Http.Error TransparencyMetrics -> msg)
+    -> Cmd msg
+getTransparencyMetrics toMsg =
+    Http.get
+        { url = baseUrl ++ "/api/transparency/metrics"
+        , expect = Http.expectJson toMsg transparencyMetricsDecoder
         }
 
 
@@ -816,25 +923,6 @@ saveWritingAssistantConsent consent token toMsg =
         }
 
 
-{-| PUT /api/settings/age\_verification — save the user's age verification status.
--}
-updateAgeVerification :
-    Bool
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-updateAgeVerification verified token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/settings/age_verification"
-        , body = Http.jsonBody (Requests.encodeAgeVerificationRequest { ageVerified = verified })
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
 {-| Response from GET /api/catalogue — paginated book list.
 -}
 type alias CatalogueResponse =
@@ -923,6 +1011,174 @@ getAuditLog token toMsg =
         }
 
 
+{-| A single subject with the number of the user's own books that carry it.
+-}
+type alias SubjectCount =
+    { subject : String
+    , count : Int
+    }
+
+
+{-| A single BISAC code with the number of the user's own books that carry it.
+-}
+type alias BisacCount =
+    { code : String
+    , count : Int
+    }
+
+
+{-| The user's real interest profile — top subjects and BISAC codes, derived
+from their own shelved books. Shown as fact.
+-}
+type alias InterestProfile =
+    { topSubjects : List SubjectCount
+    , topBisac : List BisacCount
+    }
+
+
+{-| The user's real behavioural profile from their own placement history.
+`medianDaysToFinish` and `mostActiveHour` are absent (null) when there is not
+enough data to compute them.
+-}
+type alias Behaviour =
+    { booksShelved : Int
+    , booksFinished : Int
+    , booksAbandoned : Int
+    , abandonmentRate : Float
+    , medianDaysToFinish : Maybe Int
+    , mostActiveHour : Maybe Int
+    }
+
+
+{-| The de-anonymisation demonstration: how unique the user's shelf is against
+the corpus. `othersSharingAll` is null when it could not be computed;
+`uniqueness` is one of "unique" | "rare" | "common" | "insufficient\_data" |
+"unknown".
+-}
+type alias Deanonymisation =
+    { sampleSize : Int
+    , othersSharingAll : Maybe Int
+    , uniqueness : String
+    , explanation : String
+    }
+
+
+{-| A single labelled risk inference — an illustration of what a third party
+_could_ infer. Never asserted as fact, never stored. Only present after the
+user explicitly asks to reveal them.
+-}
+type alias RiskInference =
+    { label : String
+    , couldInfer : String
+    , basis : String
+    }
+
+
+{-| The full ephemeral inference payload from GET /api/me/inferences. Computed
+per-request from the user's own data and never persisted. `riskInferences` is
+`Nothing` unless the request was made with `?reveal_risk=true`.
+-}
+type alias PersonalInferences =
+    { interestProfile : InterestProfile
+    , behaviour : Behaviour
+    , deanonymisation : Deanonymisation
+    , riskInferences : Maybe (List RiskInference)
+    , generatedAt : String
+    }
+
+
+subjectCountDecoder : Decoder SubjectCount
+subjectCountDecoder =
+    Decode.map2 SubjectCount
+        (Decode.field "subject" Decode.string)
+        (Decode.field "count" Decode.int)
+
+
+bisacCountDecoder : Decoder BisacCount
+bisacCountDecoder =
+    Decode.map2 BisacCount
+        (Decode.field "code" Decode.string)
+        (Decode.field "count" Decode.int)
+
+
+interestProfileDecoder : Decoder InterestProfile
+interestProfileDecoder =
+    Decode.map2 InterestProfile
+        (Decode.field "top_subjects" (Decode.list subjectCountDecoder))
+        (Decode.field "top_bisac" (Decode.list bisacCountDecoder))
+
+
+behaviourDecoder : Decoder Behaviour
+behaviourDecoder =
+    Decode.map6 Behaviour
+        (Decode.field "books_shelved" Decode.int)
+        (Decode.field "books_finished" Decode.int)
+        (Decode.field "books_abandoned" Decode.int)
+        (Decode.field "abandonment_rate" Decode.float)
+        (Decode.field "median_days_to_finish" (Decode.nullable Decode.int))
+        (Decode.field "most_active_hour" (Decode.nullable Decode.int))
+
+
+deanonymisationDecoder : Decoder Deanonymisation
+deanonymisationDecoder =
+    Decode.map4 Deanonymisation
+        (Decode.field "sample_size" Decode.int)
+        (Decode.field "others_sharing_all" (Decode.nullable Decode.int))
+        (Decode.field "uniqueness" Decode.string)
+        (Decode.field "explanation" Decode.string)
+
+
+riskInferenceDecoder : Decoder RiskInference
+riskInferenceDecoder =
+    Decode.map3 RiskInference
+        (Decode.field "label" Decode.string)
+        (Decode.field "could_infer" Decode.string)
+        (Decode.field "basis" Decode.string)
+
+
+{-| Decode the personal-inferences payload. `risk_inferences` is decoded with
+`Decode.maybe` so an absent key (the default, un-revealed response) yields
+`Nothing` rather than failing.
+-}
+personalInferencesDecoder : Decoder PersonalInferences
+personalInferencesDecoder =
+    Decode.map5 PersonalInferences
+        (Decode.field "interest_profile" interestProfileDecoder)
+        (Decode.field "behaviour" behaviourDecoder)
+        (Decode.field "deanonymisation" deanonymisationDecoder)
+        (Decode.maybe (Decode.field "risk_inferences" (Decode.list riskInferenceDecoder)))
+        (Decode.field "generated_at" Decode.string)
+
+
+{-| GET /api/me/inferences — fetch the current user's own ephemeral inference
+profile. When `revealRisk` is `True`, appends `?reveal_risk=true` so the
+response includes the labelled risk-inference illustrations.
+-}
+getInferences :
+    Bool
+    -> String
+    -> (Result Http.Error PersonalInferences -> msg)
+    -> Cmd msg
+getInferences revealRisk token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url =
+            baseUrl
+                ++ "/api/me/inferences"
+                ++ (if revealRisk then
+                        "?reveal_risk=true"
+
+                    else
+                        ""
+                   )
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg personalInferencesDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 {-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
 -}
 placeBook :
@@ -942,6 +1198,27 @@ placeBook bookshelfName bookId token toMsg =
                     { bookId = bookId }
                 )
         , expect = Http.expectJson toMsg (Decode.field "placement" placementDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/books/:id/age-gate — the user who added a book marks it
+"adults only" (raise-only). Body `{"adults_only": true}`. The backend
+permits only raising the gate for the user path; lowering is owner-only.
+-}
+setBookAgeGate :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+setBookAgeGate bookId token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
+        , body = Http.jsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2192,6 +2469,101 @@ rejectSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+
+-- ADMIN: BOOK MODERATION (age gate)
+
+
+{-| A book as returned by the owner moderation API (#118).
+-}
+type alias AdminBook =
+    { id : String
+    , title : String
+    , author : String
+    , visibilityTier : String
+    , isbn : Maybe String
+    , coverImageUrl : Maybe String
+    }
+
+
+adminBookDecoder : Decoder AdminBook
+adminBookDecoder =
+    Decode.map6 AdminBook
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.oneOf [ Decode.field "author" Decode.string, Decode.succeed "" ])
+        (Decode.field "visibility_tier" Decode.string)
+        (Decode.maybe (Decode.field "isbn" Decode.string))
+        (Decode.maybe (Decode.field "cover_image_url" Decode.string))
+
+
+{-| Paginated admin books response.
+-}
+type alias AdminBooksResponse =
+    { books : List AdminBook
+    , total : Int
+    , page : Int
+    , perPage : Int
+    }
+
+
+adminBooksResponseDecoder : Decoder AdminBooksResponse
+adminBooksResponseDecoder =
+    Decode.map4 AdminBooksResponse
+        (Decode.field "books" (Decode.list adminBookDecoder))
+        (Decode.field "total" Decode.int)
+        (Decode.field "page" Decode.int)
+        (Decode.oneOf [ Decode.field "per_page" Decode.int, Decode.succeed 50 ])
+
+
+{-| GET /api/admin/books — fetch paginated books for moderation, optionally
+filtered by tier (`public` | `age_gated`) and/or a title search.
+-}
+adminListBooks :
+    { tier : Maybe String, search : Maybe String, page : Int }
+    -> String
+    -> (Result Http.Error AdminBooksResponse -> msg)
+    -> Cmd msg
+adminListBooks params token toMsg =
+    let
+        queryParams =
+            [ Just (Url.Builder.int "page" params.page)
+            , params.tier |> Maybe.map (Url.Builder.string "tier")
+            , params.search |> Maybe.map (Url.Builder.string "search")
+            ]
+                |> List.filterMap identity
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = Url.Builder.absolute [ "api", "admin", "books" ] queryParams
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg adminBooksResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/books/:id/age-gate — owner sets a book's age gate in either
+direction. Body `{"age_gated": Bool}`. Returns the updated book.
+-}
+adminSetBookAgeGate :
+    String
+    -> Bool
+    -> String
+    -> (Result Http.Error AdminBook -> msg)
+    -> Cmd msg
+adminSetBookAgeGate bookId ageGated token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
+        , body = Http.jsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
+        , expect = Http.expectJson toMsg (Decode.field "book" adminBookDecoder)
         , timeout = Nothing
         , tracker = Nothing
         }

@@ -301,6 +301,12 @@ defmodule StacksWeb.ProfileControllerTest do
       assert count_for.(conn) == 0
     end
 
+    # #229 REGRESSION LOCK — the public-profile shelf already hides age-gated books
+    # from an authenticated-but-unverified viewer via `Stacks.Visibility`
+    # (`filter_visible_placements`). This test asserts all three viewer classes
+    # explicitly (verified: 1, authed-unverified: 0, anon: 0) so a future Visibility
+    # change can't silently re-expose age-gated books on the shelf surface — the
+    # sibling of the catalogue gap #229 closed.
     test "an age-gated book is hidden from unverified/unauthenticated viewers, shown to verified",
          %{
            conn: conn

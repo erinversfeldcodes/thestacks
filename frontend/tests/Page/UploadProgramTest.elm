@@ -19,11 +19,21 @@ import Test.Html.Selector as Selector
 import TestHelpers exposing (simulateBookResponse, simulateMergeFormatResponse, uploadProgram)
 
 
-{-| Helper to start an upload program with an auth token.
+{-| Helper to start an upload program with an auth token and age-gating ON
+(ADR-020). Most flows are age-gating-agnostic; the flag-off behaviour is
+covered explicitly by `uploadAdultsOnlyHiddenWhenFlagOff`.
 -}
 startUpload : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUpload =
-    ProgramTest.start () (uploadProgram (Just "test-token"))
+    ProgramTest.start () (uploadProgram True (Just "test-token"))
+
+
+{-| Helper to start an upload program with age-gating OFF (the production
+default), used to prove age UI is hidden.
+-}
+startUploadAgeGatingOff : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
+startUploadAgeGatingOff =
+    ProgramTest.start () (uploadProgram False (Just "test-token"))
 
 
 {-| Build an SSE stream event JSON string for a given status.
@@ -190,6 +200,8 @@ suite =
         , uploadReset
         , uploadDragOver
         , uploadRejectIdentificationRetries
+        , uploadAdultsOnly
+        , uploadAdultsOnlyHiddenWhenFlagOff
         ]
 
 
@@ -424,7 +436,7 @@ settings page, and a primary CTA that links to it.
 -}
 uploadAgeGated : Test
 uploadAgeGated =
-    test "upload_age_gated: resolved age-gated book renders age-gate notice with verify-age CTA linking to settings" <|
+    test "upload_age_gated: resolved age-gated book renders informational age-gate notice (flag on)" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
@@ -435,19 +447,12 @@ uploadAgeGated =
                 -- We are in the verifying step for the identified book.
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "We think this is…" ]
-                -- Age-gate notice is rendered.
+                -- Age-gate notice is rendered (informational only — there is no
+                -- self-serve "verify age" CTA anymore; ADR-020).
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-notice") ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "Age verification is required to view its details." ]
-                -- Primary CTA exists, points at the age-verification settings page,
-                -- and is rendered as a link (i.e. anchor with href = age_verify_url).
                 |> ProgramTest.expectViewHas
-                    [ Selector.tag "a"
-                    , Selector.attribute (Html.Attributes.href "/settings/age-verification")
-                    , Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-cta")
-                    , Selector.text "Verify Age"
-                    ]
+                    [ Selector.text "Age verification is required to view its details." ]
 
 
 {-| US-1.1.7 sad — multi-book partial-failure UX.
@@ -536,3 +541,66 @@ uploadRejectIdentificationRetries =
                 -- while we wait for the re-run vision pipeline to emit SSE events.
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Processing image..." ]
+
+
+{-| #118 — user "adults only" opt-in. On the shelf picker the checkbox is
+present; ticking it and confirming placement must fire the raise-only user
+age-gate PUT (`/api/books/:id/age-gate` `{adults_only: true}`) alongside the
+placement. Simulating the PUT response proves the request was dispatched.
+-}
+uploadAdultsOnly : Test
+uploadAdultsOnly =
+    test "upload_adults_only: tick 'adults only' on shelf picker -> ConfirmPlacement fires the raise-only age-gate PUT" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") False))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Adult Title" "Adult Author")
+                -- Move from Verifying to the shelf picker.
+                |> ProgramTest.clickButton "Yes, that's it"
+                -- The adults-only checkbox is present on the shelf picker.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-adults-only") ]
+                -- Tick it, then confirm placement.
+                |> ProgramTest.update ToggleAdultsOnly
+                |> ProgramTest.update ConfirmPlacement
+                -- The age-gate PUT was dispatched (fails here if it was not).
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    "/api/books/book-1/age-gate"
+                    (Http.GoodStatus_
+                        { url = "/api/books/book-1/age-gate"
+                        , statusCode = 200
+                        , statusText = "OK"
+                        , headers = Dict.empty
+                        }
+                        "{}"
+                    )
+                -- Placement is still in flight; the spinner is showing.
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Adding to shelf..." ]
+
+
+{-| ADR-020 — age-gating shipped dark. With the server config flag OFF (the
+production default) the "adults only" checkbox must NOT render on the shelf
+picker, even though every other step of the flow is identical.
+-}
+uploadAdultsOnlyHiddenWhenFlagOff : Test
+uploadAdultsOnlyHiddenWhenFlagOff =
+    test "upload_adults_only_hidden_when_flag_off: shelf picker omits the adults-only checkbox when age-gating is disabled" <|
+        \() ->
+            startUploadAgeGatingOff
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") False))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Adult Title" "Adult Author")
+                -- Move from Verifying to the shelf picker.
+                |> ProgramTest.clickButton "Yes, that's it"
+                -- The shelf picker is shown...
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-shelf-picker") ]
+                -- ...but the adults-only checkbox is absent (flag off).
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-adults-only") ]

@@ -4,7 +4,6 @@ import Components.BookList as BookList
 import Components.ViewModeToggle exposing (ShelfViewMode(..))
 import Expect
 import Http
-import Navigation.Route exposing (Route(..))
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Test exposing (Test, describe, test)
@@ -126,13 +125,6 @@ suite =
                         , \m -> Expect.equal (Success []) m.shelves
                         ]
                         model
-            , test "VerifyAge produces NavigateTo SettingsAgeVerification" <|
-                \_ ->
-                    let
-                        ( _, _, outMsg ) =
-                            Bookshelf.update Bookshelf.VerifyAge libraryInit
-                    in
-                    Expect.equal (Bookshelf.NavigateTo SettingsAgeVerification) outMsg
             , test "DismissAgeGate sets showAgeGate = False" <|
                 \_ ->
                     let
@@ -197,12 +189,5 @@ suite =
                             BookDetail.update BookDetail.DismissAgeGate modelWithGate Nothing
                     in
                     Expect.equal False model.showAgeGate
-            , test "VerifyAge produces NavigateTo SettingsAgeVerification" <|
-                \_ ->
-                    let
-                        ( _, _, outMsg ) =
-                            BookDetail.update BookDetail.VerifyAge bookDetailInit Nothing
-                    in
-                    Expect.equal (BookDetail.NavigateTo SettingsAgeVerification) outMsg
             ]
         ]

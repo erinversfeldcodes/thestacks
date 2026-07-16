@@ -325,7 +325,7 @@ defmodule StacksWeb.ProtoJSON do
   def user(user_struct) do
     base = Gen.user(user_struct) |> Map.take(@user_auth_fields)
     steps = user_struct.onboarding_steps || %{}
-    step_order = ~w(profile age_verification privacy)
+    step_order = Stacks.Accounts.onboarding_step_order()
 
     next_step =
       Enum.find(step_order, fn step ->

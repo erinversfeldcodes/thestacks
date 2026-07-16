@@ -71,6 +71,8 @@ defmodule Stacks.GDPR.Export do
         role: user.role,
         profile_visibility: user.profile_visibility,
         age_verified: user.age_verified,
+        age_verified_at: user.age_verified_at,
+        age_verification_provider: user.age_verification_provider,
         consent_analytics: user.consent_analytics,
         consent_analytics_at: user.consent_analytics_at,
         consent_writing_assistant: user.consent_writing_assistant,

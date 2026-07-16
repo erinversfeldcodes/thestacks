@@ -29,7 +29,6 @@ defmodule StacksWeb.OnboardingControllerTest do
       assert %{
                "steps" => %{
                  "profile" => false,
-                 "age_verification" => false,
                  "privacy" => false
                },
                "completed" => false,
@@ -42,9 +41,9 @@ defmodule StacksWeb.OnboardingControllerTest do
       conn = conn |> auth_conn(user) |> get("/api/onboarding/status")
       body = json_response(conn, 200)
 
-      assert body["next_step"] == "age_verification"
+      assert body["next_step"] == "privacy"
       assert body["steps"]["profile"] == true
-      assert body["steps"]["age_verification"] == false
+      assert body["steps"]["privacy"] == false
     end
 
     test "returns completed true when all steps done", %{conn: conn} do
@@ -52,7 +51,6 @@ defmodule StacksWeb.OnboardingControllerTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
@@ -81,24 +79,23 @@ defmodule StacksWeb.OnboardingControllerTest do
       body = json_response(conn, 200)
 
       assert body["steps"]["profile"] == true
-      assert body["next_step"] == "age_verification"
+      assert body["next_step"] == "privacy"
     end
 
-    test "marks age_verification step as complete", %{conn: conn} do
+    # The self-declared age step was removed (ADR-020) — it is now rejected.
+    test "age_verification step is rejected as invalid", %{conn: conn} do
       user = insert(:user, onboarding_steps: %{"profile" => true})
       conn = conn |> auth_conn(user) |> put("/api/onboarding/step/age_verification")
-      body = json_response(conn, 200)
+      body = json_response(conn, 422)
 
-      assert body["steps"]["age_verification"] == true
-      assert body["next_step"] == "privacy"
+      assert body["error"] == "invalid_step"
     end
 
     test "completing final step returns completed true", %{conn: conn} do
       user =
         insert(:user,
           onboarding_steps: %{
-            "profile" => true,
-            "age_verification" => true
+            "profile" => true
           }
         )
 
@@ -142,7 +139,6 @@ defmodule StacksWeb.OnboardingControllerTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
@@ -151,7 +147,6 @@ defmodule StacksWeb.OnboardingControllerTest do
       body = json_response(conn, 200)
 
       assert body["steps"]["profile"] == false
-      assert body["steps"]["age_verification"] == false
       assert body["steps"]["privacy"] == false
       assert body["completed"] == false
       assert body["next_step"] == "profile"
@@ -191,7 +186,6 @@ defmodule StacksWeb.OnboardingControllerTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
@@ -207,7 +201,6 @@ defmodule StacksWeb.OnboardingControllerTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )

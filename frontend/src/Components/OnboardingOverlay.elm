@@ -16,11 +16,12 @@ On init (when a token is available) it calls GET /api/onboarding/status to
 resume from the correct step rather than always starting at step 1.
 
 Completing each step calls PUT /api/onboarding/step/:step and advances to
-the next step on success. The three backend steps map to the three UI steps:
+the next step on success. The two backend steps map to the two UI steps
+(the self-declared age step was removed with ADR-020 — age assurance is now
+provider-sourced, shipped in a later issue):
 
-    profile           → Welcome (set up your profile)
-    age_verification  → AgeVerification (verify your age)
-    privacy           → Privacy (privacy settings)
+    profile  → Welcome (set up your profile)
+    privacy  → Privacy (privacy settings)
 
 -}
 
@@ -36,7 +37,6 @@ import Util.TestId exposing (testId)
 
 type OnboardingStep
     = Welcome
-    | AgeVerification
     | Privacy
     | Complete
 
@@ -137,9 +137,6 @@ nextStep : OnboardingStep -> OnboardingStep
 nextStep step =
     case step of
         Welcome ->
-            AgeVerification
-
-        AgeVerification ->
             Privacy
 
         Privacy ->
@@ -158,9 +155,6 @@ stepFromNextStep maybeNext =
         Just "profile" ->
             Welcome
 
-        Just "age_verification" ->
-            AgeVerification
-
         Just "privacy" ->
             Privacy
 
@@ -175,9 +169,6 @@ backendStepName step =
     case step of
         Welcome ->
             "profile"
-
-        AgeVerification ->
-            "age_verification"
 
         Privacy ->
             "privacy"
@@ -250,28 +241,6 @@ viewStep loading step =
                     ]
                 ]
 
-        AgeVerification ->
-            div [ class "onboarding-overlay__step" ]
-                [ h2 [ class "onboarding-overlay__title" ]
-                    [ text "Verify your age" ]
-                , p [ class "onboarding-overlay__tagline" ]
-                    [ text "Some content on The Stacks is age-restricted. Verify your age to access it." ]
-                , div [ class "onboarding-overlay__actions" ]
-                    [ button
-                        [ class "btn btn--primary"
-                        , onClick NextStep
-                        , disabled loading
-                        , testId "onboarding-continue-btn"
-                        ]
-                        [ text "Continue" ]
-                    , button
-                        [ class "btn btn--ghost"
-                        , onClick SkipOnboarding
-                        ]
-                        [ text "Skip" ]
-                    ]
-                ]
-
         Privacy ->
             div [ class "onboarding-overlay__step" ]
                 [ h2 [ class "onboarding-overlay__title" ]
@@ -319,14 +288,11 @@ viewProgressDots step =
                 Welcome ->
                     0
 
-                AgeVerification ->
+                Privacy ->
                     1
 
-                Privacy ->
-                    2
-
                 Complete ->
-                    3
+                    2
 
         dot idx =
             span
@@ -344,5 +310,4 @@ viewProgressDots step =
         [ dot 0
         , dot 1
         , dot 2
-        , dot 3
         ]

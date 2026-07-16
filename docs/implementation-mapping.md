@@ -474,17 +474,17 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Books with sensitive subjects (via BISAC codes) are flagged; only 18+ verified users can view them. |
+| **Summary** | The person adding a book can mark it "adults only" (raise-only); the platform owner can override either way. Only 18+ verified users can view gated books. No automatic subject/BISAC classification — that classifier was removed as unreliable. |
 | **Phase** | Phase 1 (late) / Cross-cutting |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.AgeGate` -- interstitial overlay. `Page.BookDetail` checks `visibility_tier` before rendering. Blurred placeholder for gated books in shelf views. |
-| **Backend (Phoenix)** | `Stacks.Moderation` context -- `Moderation.classify_subject/1` using BISAC code lookup. `Stacks.Accounts` -- `age_verified?/1` check. Plug `StacksWeb.Plugs.AgeGate` on relevant routes. |
-| **Database** | **Read:** `op.books` (BISAC codes, visibility_tier). **Write:** `op.books` (set visibility_tier on classification). `op.audit_log`. |
-| **Jobs (Oban)** | Part of moderation pipeline job (US-4.1.1). |
-| **External Services** | None (BISAC lookup is local data). |
-| **dbt Models** | `int_content_classification`. |
+| **Frontend (Elm)** | "Adults only" checkbox at the verify step (raises the gate). `Page.BookDetail` checks `visibility_tier` before rendering; owner override on an owner-only admin surface (follow-up). |
+| **Backend (Phoenix)** | `Stacks.Books.set_visibility_tier/3` (human-set; user path raise-only, owner either-way) called by `BookController.set_age_gate/2` (`PUT /api/books/:id/age-gate`). `Stacks.Accounts` -- `age_verified?/1` check. Plug `StacksWeb.Plugs.AgeGate` on relevant routes. |
+| **Database** | **Read:** `op.books` (visibility_tier). **Write:** `op.books` (set visibility_tier when a human raises/overrides the gate). |
+| **Jobs (Oban)** | None — age-gating is a synchronous human action, not a pipeline step. |
+| **External Services** | None. |
+| **dbt Models** | `stg_books` (`visibility_tier`). |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-4.1.1, US-4.1.2. |
 
@@ -1066,14 +1066,14 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | 4-step pipeline: (1) book check via vision, (2) ISBN resolution, (3) BISAC subject classification, (4) store with visibility tier. |
+| **Summary** | 4-step pipeline: (1) book check via vision, (2) ISBN resolution, (3) metadata lookup, (4) store book as `public`. Age-gating is NOT decided here — it is human-set afterward (see US-1.1.4). |
 | **Phase** | Phase 1 (MVP) / Cross-cutting |
 
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Status indicators on upload flow -- progress through pipeline steps. Error states per step. |
-| **Backend (Phoenix)** | `Stacks.Moderation` context. `Moderation.Pipeline` -- orchestrates 4 steps as a state machine. Steps: `classify_image/1` -> `resolve_isbn/1` -> `classify_subject/1` -> `store_with_tier/1`. |
-| **Database** | **Write:** `op.books` (visibility_tier), `op.audit_log` (each step logged). **Read:** `op.books` (dedup). |
+| **Backend (Phoenix)** | `Stacks.Moderation` context. `Moderation.run_pipeline/1` -- orchestrates the steps: classify image -> resolve ISBN -> metadata lookup -> `Books.create/1` with `visibility_tier: "public"`. No subject-classification/tiering step. |
+| **Database** | **Write:** `op.books` (created `public`). **Read:** `op.books` (dedup). |
 | **Jobs (Oban)** | Integrated into `IdentifyBookJob` as sub-steps, or `Stacks.Workers.ModerationPipelineJob` as separate orchestrator. |
 | **External Services** | Modal vision service (step 1), Open Library / Google Books (step 2). |
 | **dbt Models** | `int_moderation_outcomes`. |
@@ -2165,7 +2165,6 @@ Which user stories touch each database table:
 | `int_book_detail_view` | Intermediate | Multiple | US-1.3.2 |
 | `int_upload_rejection_rate` | Intermediate | US-1.1.2, US-1.1.3 | US-5.1.1 |
 | `int_rejection_categories` | Intermediate | US-1.1.3 | US-5.1.1 |
-| `int_content_classification` | Intermediate | US-1.1.4 | US-5.1.1 |
 | `int_shelf_composition` | Intermediate | US-1.2.1--4 | US-5.1.1 |
 | `int_book_journey` | Intermediate | US-1.5.1 | US-5.1.1 |
 | `int_abandonment_rate` | Intermediate | US-1.5.2 | US-5.1.1 |
