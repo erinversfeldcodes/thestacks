@@ -517,7 +517,13 @@ jobs:
         # update and Modal's revision cycle. Without this the SLI scrape
         # samples in-progress traffic that's hitting machines mid-cycle
         # and gets a misleadingly bad picture.
-        if: ${{ steps.rollback.outcome == 'success' }}
+        # `!cancelled() &&` is load-bearing: the deploy/gate step that triggers
+        # a rollback leaves the job in a `failure` state, and an `if:` with no
+        # status-check function is implicitly wrapped in `success()` — which is
+        # false here — so this step would be silently SKIPPED on every
+        # gate-triggered rollback (the exact case it exists for). `!cancelled()`
+        # disables that implicit gate while still skipping on run cancellation.
+        if: ${{ !cancelled() && steps.rollback.outcome == 'success' }}
         run: |
           echo "Waiting 60s for rolled-back machines to settle..."
           sleep 60
@@ -529,13 +535,22 @@ jobs:
 
       - name: verify-rollback — re-run SLO gate against the rolled-back system
         id: verify-rollback
-        if: ${{ steps.rollback.outcome == 'success' }}
+        # `!cancelled() &&` is load-bearing: the deploy/gate step that triggers
+        # a rollback leaves the job in a `failure` state, and an `if:` with no
+        # status-check function is implicitly wrapped in `success()` — which is
+        # false here — so this step would be silently SKIPPED on every
+        # gate-triggered rollback (the exact case it exists for). `!cancelled()`
+        # disables that implicit gate while still skipping on run cancellation.
+        if: ${{ !cancelled() && steps.rollback.outcome == 'success' }}
         uses: ./.github/actions/check-slo-gate
         with:
           out-path: gate-observations-post-rollback.json
 
       - name: verify-rollback failure annotation
-        if: ${{ steps.verify-rollback.outcome == 'failure' }}
+        # Same implicit-success() trap as the verify-rollback step above: without
+        # a status-check function this annotation would never fire in the failed
+        # job it needs to fire in.
+        if: ${{ !cancelled() && steps.verify-rollback.outcome == 'failure' }}
         run: |
           echo "::error::MANUAL INTERVENTION REQUIRED: rollback completed but the rolled-back system breached SLO."
           echo "Audit row was already written (action: 'system.rollback'). The pre-rollback Neon branch is preserved if you need to inspect / promote it back."
