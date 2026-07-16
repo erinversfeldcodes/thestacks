@@ -55,6 +55,25 @@ defmodule Core.PromEx.Plugins.Stacks do
   # Top bucket of 5000ms catches genuinely pathological queries.
   @query_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
 
+  # Buckets for the GDPR export/deletion job wall-time (Issue #238). These
+  # jobs must finish well under the 30-day erasure/portability SLA; in
+  # practice they complete in sub-second to low-minutes, so the buckets
+  # span 100ms → 5min and a p95 over the distribution is the SLA-health
+  # SLI. The measurement is already in milliseconds (the worker computes
+  # elapsed via `System.monotonic_time`), so no unit conversion is applied.
+  @gdpr_job_duration_buckets [
+    100,
+    250,
+    500,
+    1_000,
+    5_000,
+    10_000,
+    30_000,
+    60_000,
+    120_000,
+    300_000
+  ]
+
   @impl true
   def event_metrics(_opts) do
     [
@@ -341,6 +360,22 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:result]
         ),
 
+        # Export job wall-time (Issue #238). Same event as the outcome counter,
+        # reading the `:duration` measurement (job wall-time in ms the worker
+        # computes via `System.monotonic_time`). p95 over this distribution is
+        # the SLA-health SLI: exports must land well under the 30-day
+        # portability promise. Exported as
+        # `stacks_gdpr_export_duration_milliseconds_{bucket,sum,count}`.
+        distribution(
+          [:stacks, :gdpr, :export, :duration, :milliseconds],
+          event_name: [:stacks, :gdpr, :export],
+          measurement: :duration,
+          description:
+            "GDPR data-export job wall-time (ms), by result — p95 watches the 30-day SLA.",
+          tags: [:result],
+          reporter_options: [buckets: @gdpr_job_duration_buckets]
+        ),
+
         # ── GDPR: account-deletion job outcomes + failed step ─────────
         # One event per AccountDeletionJob. On failure, `failed_step` carries
         # the Ecto.Multi step id where the erasure broke (e.g. `:delete_user`),
@@ -351,6 +386,22 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :deletion],
           description: "GDPR account-deletion job outcomes (right to erasure).",
           tags: [:result, :failed_step]
+        ),
+
+        # Deletion job wall-time (Issue #238). Same event as the outcome
+        # counter, reading the `:duration` measurement (ms via
+        # `System.monotonic_time`). Tagged by `:result` only (NOT `:failed_step`
+        # — a per-step histogram would explode cardinality). p95 watches the
+        # 30-day erasure SLA. Exported as
+        # `stacks_gdpr_deletion_duration_milliseconds_{bucket,sum,count}`.
+        distribution(
+          [:stacks, :gdpr, :deletion, :duration, :milliseconds],
+          event_name: [:stacks, :gdpr, :deletion],
+          measurement: :duration,
+          description:
+            "GDPR account-deletion job wall-time (ms), by result — p95 watches the 30-day SLA.",
+          tags: [:result],
+          reporter_options: [buckets: @gdpr_job_duration_buckets]
         ),
 
         # ── GDPR: consent grant / revoke counters ─────────────────────
@@ -411,6 +462,18 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :audit, :write],
           description: "Audit-log write throughput (one per successful insert).",
           tags: [:action, :resource_type]
+        ),
+
+        # ── GDPR: audit-log READ counter (Issue #238) ─────────────────
+        # One event per user audit-log listing (`Stacks.Audit.list_for_user/2`)
+        # so the "who looked at the audit log" side is observable, not just
+        # writes. Deliberately UNTAGGED — no user-id/handle/IP reaches the
+        # sink (GDPR: telemetry is warehouse-adjacent). Exported as
+        # `stacks_gdpr_audit_read_count_total`.
+        counter(
+          [:stacks, :gdpr, :audit, :read, :count, :total],
+          event_name: [:stacks, :gdpr, :audit, :read],
+          description: "Audit-log read throughput (one per user audit-log listing; no PII tag)."
         ),
 
         # ── Visibility / Social / ViewAs counters (Issue #236) ────────
