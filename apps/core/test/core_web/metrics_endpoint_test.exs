@@ -390,6 +390,62 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
+  describe "live exposure: #239 discovery/profiles/search families are scrapeable after exercising" do
+    test "people-search / profile-404 / handle-claim families appear with samples", %{conn: conn} do
+      # 1. Zero-result people-search through the real endpoint → fires
+      # stacks_search_people_count_total{outcome="zero_result"}.
+      searcher = insert(:user)
+
+      assert %{"users" => []} =
+               conn
+               |> put_req_header_authorization(searcher)
+               |> get("/api/search/users", q: "nobodymatchesthisxyzzy")
+               |> json_response(200)
+
+      # 2. Ghost / nonexistent public profile (404) through the real controller →
+      # fires stacks_profile_view_count_total{outcome="not_found"}.
+      assert %{"error" => "not_found"} =
+               conn
+               |> put_req_header_authorization(searcher)
+               |> get("/api/u/no_such_handle_xyzzy")
+               |> json_response(404)
+
+      # 3. Handle claim through the real Accounts path (changing :handle) → fires
+      # stacks_handle_claimed_count_total. handle is NOT NULL, so a claim is a change.
+      claimer = insert(:user, handle: "preclaimhandle")
+      assert {:ok, _} = Accounts.update_profile(claimer, %{"handle" => "claimedhandle"})
+
+      body = scrape(conn)
+
+      for family <- [
+            "stacks_search_people_count_total",
+            "stacks_profile_view_count_total",
+            "stacks_handle_claimed_count_total"
+          ] do
+        assert body =~ family,
+               "expected #{family} exposed at /internal/metrics after the discovery paths ran, got:\n#{body}"
+      end
+
+      # Prove real tagged samples, not just HELP/TYPE stubs.
+      assert body =~
+               ~r/stacks_search_people_count_total\{[^}\n]*outcome="zero_result"[^}\n]*\}\s+\d/,
+             "expected a non-zero people-search sample tagged outcome=\"zero_result\""
+
+      assert body =~
+               ~r/stacks_profile_view_count_total\{[^}\n]*outcome="not_found"[^}\n]*\}\s+\d/,
+             "expected a non-zero profile-view sample tagged outcome=\"not_found\""
+
+      # The handle-claimed counter is untagged — a bare non-zero sample.
+      assert body =~ ~r/stacks_handle_claimed_count_total(\{\})?\s+[1-9]/,
+             "expected a non-zero handle-claimed sample"
+    end
+  end
+
+  defp put_req_header_authorization(conn, user) do
+    {:ok, token, _} = Guardian.encode_and_sign(user)
+    Plug.Conn.put_req_header(conn, "authorization", "Bearer #{token}")
+  end
+
   # Vision client returning a single candidate whose title is two titles
   # joined by " OR " — drives expand_compound_candidates/1 (compound
   # expansion counter) without resolving.

@@ -22,10 +22,20 @@ defmodule StacksWeb.UserSearchController do
     term = Map.get(params, "q", "")
     viewer_id = viewer_id(conn)
 
-    results =
-      term
-      |> Accounts.search_users(viewer_id)
-      |> Enum.map(&ProtoJSON.public_profile_summary/1)
+    matches = Accounts.search_users(term, viewer_id)
+
+    # NO-PII: tag only the bounded `outcome` atom (hit|zero_result). NEVER the
+    # query string (unbounded cardinality) or any handle/user-id (PII) —
+    # telemetry is warehouse-adjacent. `results` is a plain numeric measurement.
+    outcome = if matches == [], do: :zero_result, else: :hit
+
+    :telemetry.execute(
+      [:stacks, :search, :people],
+      %{count: 1, results: length(matches)},
+      %{outcome: outcome}
+    )
+
+    results = Enum.map(matches, &ProtoJSON.public_profile_summary/1)
 
     json(conn, %{users: results})
   end

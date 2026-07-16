@@ -735,17 +735,34 @@ defmodule Stacks.Accounts do
     if Map.has_key?(attrs, "email") do
       update_profile_with_email(user, attrs)
     else
-      user
-      |> profile_changeset(attrs)
+      changeset = profile_changeset(user, attrs)
+
+      changeset
       |> Repo.update()
       |> tap_emit_profile_updated()
+      |> tap_emit_handle_claimed(changeset)
     end
   end
 
+  # NO-PII: emit ONLY the fact that a handle was set/changed — never the handle
+  # value (public but unbounded cardinality; telemetry is warehouse-adjacent).
+  # Fires only on a successful update whose changeset actually changed `:handle`.
+  defp tap_emit_handle_claimed({:ok, _user} = result, changeset) do
+    if Ecto.Changeset.get_change(changeset, :handle) do
+      :telemetry.execute([:stacks, :handle, :claimed], %{count: 1}, %{})
+    end
+
+    result
+  end
+
+  defp tap_emit_handle_claimed(error, _changeset), do: error
+
   defp update_profile_with_email(user, attrs) do
     with :ok <- verify_password(user, Map.get(attrs, "current_password")) do
+      changeset = profile_changeset(user, attrs)
+
       Multi.new()
-      |> Multi.update(:profile, profile_changeset(user, attrs))
+      |> Multi.update(:profile, changeset)
       |> Multi.update(:email, fn %{profile: u} ->
         email_changeset(u, %{"email" => attrs["email"]})
       end)
@@ -764,7 +781,7 @@ defmodule Stacks.Accounts do
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{email: u}} -> {:ok, u}
+        {:ok, %{email: u}} -> tap_emit_handle_claimed({:ok, u}, changeset)
         {:error, _, reason, _} -> {:error, reason}
       end
     end
