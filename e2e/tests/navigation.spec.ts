@@ -102,7 +102,11 @@ test.describe("Navbar navigation — unauthenticated", () => {
   test("only Catalogue and Sign In are visible in nav, Costs under brand dropdown", async ({ page }) => {
     await page.goto("/login");
 
+    // Elm now boots without awaiting GET /api/config, but first paint is still
+    // async — `allTextContents()` does NOT auto-wait, so wait for the nav to
+    // render before reading it (otherwise we read [] on a cold page).
     const navLinks = page.locator(".app-nav__link");
+    await expect(navLinks.first()).toBeVisible({ timeout: 10000 });
     const texts = await navLinks.allTextContents();
 
     expect(texts).toContain("Catalogue");

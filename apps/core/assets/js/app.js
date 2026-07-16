@@ -172,20 +172,22 @@ try {
   // Ignore corrupted localStorage data
 }
 
-// Mount the Elm application. Flags carry the stored auth (top-level, as
-// written to localStorage) PLUS the server-provided runtime config
-// (`ageGatingEnabled`). `boot` is invoked once `GET /api/config` resolves;
-// on any failure it is invoked with `false` so age-gating UI fails safe
-// (hidden). All the port wiring below lives inside `boot` because it needs
-// the `app` handle returned by `Elm.Main.init`.
-function boot(ageGatingEnabled) {
+// Mount the Elm application IMMEDIATELY — no network round-trip may block first
+// paint. Flags carry the stored auth (top-level, as written to localStorage)
+// PLUS `ageGatingEnabled: false`, the fail-safe production default (all
+// age-gating UI hidden). The REAL flag value is fetched in the background right
+// after init (see below) and delivered to Elm over the `ageGatingConfig`
+// inbound port a beat later, so in test (flag on) the age UI reveals shortly
+// after boot without ever delaying render. All the port wiring below lives
+// inside `boot` because it needs the `app` handle returned by `Elm.Main.init`.
+function boot() {
   var flags = {};
   if (storedAuth && typeof storedAuth === "object") {
     Object.keys(storedAuth).forEach(function (key) {
       flags[key] = storedAuth[key];
     });
   }
-  flags.ageGatingEnabled = ageGatingEnabled === true;
+  flags.ageGatingEnabled = false;
 
   var app = Elm.Main.init({
     node: document.getElementById("elm"),
@@ -528,22 +530,31 @@ if (app.ports && app.ports.openUploadStream) {
     window._uploadStream = es;
   });
 }
-}
 
 // ---------------------------------------------------------------------------
-// Fetch the server-provided runtime config, THEN boot Elm. The config is
-// unauthenticated (`GET /api/config`) and currently carries a single flag,
-// `ageGatingEnabled`. On any failure (network error, non-2xx, malformed
-// JSON, or a missing field) we boot with `ageGatingEnabled: false` — the
-// fail-safe default that hides all age-gating UI in production.
+// Background server-config fetch (ADR-020). Runs AFTER Elm has already booted,
+// so it never blocks first paint. The config is unauthenticated
+// (`GET /api/config`) and currently carries a single flag, `ageGatingEnabled`.
+// The resolved boolean is delivered to Elm over the `ageGatingConfig` inbound
+// port. On ANY failure (network error, non-2xx, malformed JSON, or a missing
+// field) we send nothing — Elm keeps its fail-safe boot default (`false`,
+// age-gating UI hidden).
 // ---------------------------------------------------------------------------
-fetch("/api/config", { headers: { Accept: "application/json" } })
-  .then(function (response) {
-    return response.ok ? response.json() : { ageGatingEnabled: false };
-  })
-  .then(function (config) {
-    boot(Boolean(config && config.ageGatingEnabled === true));
-  })
-  .catch(function () {
-    boot(false);
-  });
+if (app.ports && app.ports.ageGatingConfig) {
+  fetch("/api/config", { headers: { Accept: "application/json" } })
+    .then(function (response) {
+      return response.ok ? response.json() : null;
+    })
+    .then(function (config) {
+      if (config) {
+        app.ports.ageGatingConfig.send(Boolean(config.ageGatingEnabled));
+      }
+    })
+    .catch(function () {
+      // Stay false — do nothing.
+    });
+}
+}
+
+// Boot immediately — the server config arrives asynchronously (see boot()).
+boot();
