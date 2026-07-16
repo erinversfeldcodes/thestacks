@@ -37,6 +37,19 @@ defmodule Stacks.Transparency.Cache do
     end
   end
 
+  @doc """
+  Fetch the last cached value for `key` regardless of age. Used for
+  stale-on-error reads (serve the last good value when a fresh computation
+  fails). Returns `{:ok, value}` when any entry exists, otherwise `:miss`.
+  """
+  @spec get_stale(term()) :: {:ok, term()} | :miss
+  def get_stale(key) do
+    case safe_lookup(key) do
+      [{^key, value, _inserted_at}] -> {:ok, value}
+      _ -> :miss
+    end
+  end
+
   @doc "Store a value under `key` with the current monotonic timestamp."
   @spec put(term(), term()) :: :ok
   def put(key, value) do

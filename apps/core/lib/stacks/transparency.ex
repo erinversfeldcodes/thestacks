@@ -246,7 +246,7 @@ defmodule Stacks.Transparency do
       :unavailable ->
         # Do not cache a failure: retry next request. Serve the last good value
         # stale-on-error if one exists, otherwise report unavailable.
-        case Cache.get(@live_cache_key, :infinity) do
+        case Cache.get_stale(@live_cache_key) do
           {:ok, stale} -> stale
           :miss -> :unavailable
         end

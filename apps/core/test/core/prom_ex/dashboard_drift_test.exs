@@ -23,6 +23,8 @@ defmodule Core.PromEx.DashboardDriftTest do
 
   use ExUnit.Case, async: true
 
+  alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
+
   @dashboard_relative_path "grafana/moderation_agegate.json"
 
   # #228 families live under these Prometheus name prefixes.
@@ -34,7 +36,7 @@ defmodule Core.PromEx.DashboardDriftTest do
   # Registered Prometheus family names, derived from the plugin's declared
   # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
-    Core.PromEx.Plugins.Stacks.event_metrics([])
+    StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
     |> Enum.map(fn metric -> metric.name |> Enum.join("_") end)
     |> MapSet.new()

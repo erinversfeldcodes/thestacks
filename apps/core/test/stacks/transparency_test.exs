@@ -50,7 +50,7 @@ defmodule Stacks.TransparencyTest do
 
     test "every whitelist entry is a fixed atom key mapped to a code-defined query" do
       keys = Transparency.whitelist_keys()
-      assert length(keys) > 0
+      refute Enum.empty?(keys)
       assert Enum.all?(keys, &is_atom/1)
     end
   end
@@ -72,7 +72,7 @@ defmodule Stacks.TransparencyTest do
 
       %{live: live} = Transparency.metrics()
       assert is_list(live)
-      assert length(live) > 0
+      refute Enum.empty?(live)
 
       Enum.each(live, fn entry ->
         assert is_binary(entry.label)
@@ -87,7 +87,7 @@ defmodule Stacks.TransparencyTest do
     test "every durable entry carries what/how/why teaching metadata" do
       %{durable: durable} = Transparency.metrics()
       assert is_list(durable)
-      assert length(durable) > 0
+      refute Enum.empty?(durable)
 
       Enum.each(durable, fn entry ->
         assert is_binary(entry.label)
@@ -139,7 +139,7 @@ defmodule Stacks.TransparencyTest do
 
       assert metrics.live == :unavailable
       assert is_list(metrics.durable)
-      assert length(metrics.durable) > 0
+      refute Enum.empty?(metrics.durable)
     end
 
     test "an errored compute is not crashing or leaking the error term" do
@@ -147,6 +147,23 @@ defmodule Stacks.TransparencyTest do
 
       body = Transparency.metrics() |> Jason.encode!()
       refute String.contains?(body, "timeout")
+    end
+  end
+
+  describe "stale-on-error cache" do
+    test "get_stale returns the last cached value regardless of age; get respects TTL" do
+      Cache.put(:live_signals, [:cached])
+
+      # A zero TTL makes the fresh read miss (the entry is never younger than
+      # 0ms under monotonic time)...
+      assert Cache.get(:live_signals, 0) == :miss
+      # ...but the stale-on-error read still serves the last good value — the
+      # exact path refresh_live_signals/0 takes when a later compute errors.
+      assert Cache.get_stale(:live_signals) == {:ok, [:cached]}
+    end
+
+    test "get_stale is a miss when nothing was ever cached for the key" do
+      assert Cache.get_stale(:never_cached) == :miss
     end
   end
 
