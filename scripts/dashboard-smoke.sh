@@ -44,12 +44,17 @@
 # → $CORE_APP. Dry-run defaults the app to "DRYRUN_APP" if none is given.
 #
 # ── Env ──────────────────────────────────────────────────────────────────────
-#   GRAFANA_HOST              Base URL of the org Grafana (fly-metrics.net).
-#   GRAFANA_AUTH_TOKEN        Grafana service-account token (Bearer).
+# REQUIRED (live mode):
 #   FLY_PROMETHEUS_READ_TOKEN Fly managed-Prometheus read token (raw `FlyV1 …`
 #                             macaroon from `fly tokens create readonly`; sent
 #                             as the whole Authorization value, not `Bearer`).
 #   FLY_PROMETHEUS_ORG        Fly org slug (path component of the query URL).
+# OPTIONAL (adds the Grafana-side datasource-health probe + routes panel queries
+# through Grafana's own proxy; BOTH must be set to enable). fly-metrics.net is
+# SSO-only with no service-account tokens, so these are frequently unavailable —
+# when unset the smoke still validates every panel against Fly-Prometheus direct.
+#   GRAFANA_HOST              Base URL of the org Grafana (fly-metrics.net).
+#   GRAFANA_AUTH_TOKEN        Grafana service-account token (Bearer).
 #   GRAFANA_DATASOURCE_UID    Datasource uid the panels query. Default
 #                             "prometheus" — MUST match the `uid` the dashboard
 #                             JSON hard-codes (Core.PromEx dashboard_assigns/0),
@@ -99,8 +104,16 @@ else
   fi
   # Required-secret preflight for live mode. Fail before any network call so the
   # operator gets one clear message, not N confusing per-panel errors.
+  #
+  # Only the two Fly Prometheus reads are REQUIRED: they validate every panel's
+  # app-scoped query against the same VictoriaMetrics store Grafana renders from.
+  # GRAFANA_HOST + GRAFANA_AUTH_TOKEN are OPTIONAL — they add the Grafana→Prometheus
+  # datasource-health check and route panel queries through Grafana's own proxy.
+  # Fly's hosted Grafana (fly-metrics.net) is SSO-only and exposes no service
+  # accounts / API keys, so a Grafana token is often un-mintable; when absent we
+  # skip the Grafana-specific connectivity probe and query Fly-Prometheus direct.
   missing=()
-  for var in GRAFANA_HOST GRAFANA_AUTH_TOKEN FLY_PROMETHEUS_READ_TOKEN FLY_PROMETHEUS_ORG; do
+  for var in FLY_PROMETHEUS_READ_TOKEN FLY_PROMETHEUS_ORG; do
     if [[ -z "${!var:-}" ]]; then
       missing+=("${var}")
     fi
@@ -385,28 +398,43 @@ def run_dry():
 
 # ── Live: connectivity + per-panel data, with a shared retry budget ───────────
 def run_live():
+    # Grafana is optional: it needs BOTH a host and a token. Without them we
+    # still fully validate every panel query against Fly managed-Prometheus (the
+    # same store Grafana reads) — we just can't run the Grafana-side datasource
+    # health probe or route through Grafana's proxy.
+    grafana_enabled = bool(GRAFANA_HOST and GRAFANA_TOKEN)
+
     print(f"== Dashboard render + connectivity smoke ==")
-    print(f"   app={APP}  datasource-uid={DS_UID}  grafana={GRAFANA_HOST}")
+    print(f"   app={APP}  datasource-uid={DS_UID}  "
+          f"grafana={GRAFANA_HOST if grafana_enabled else '(disabled — no token)'}")
     print(f"   fly-prometheus-org={FLY_ORG}  retry-budget={RETRY_BUDGET:.0f}s\n")
 
-    # (1) Connectivity — the dead-datasource fear.
-    print("[1/2] Grafana → Prometheus connectivity ...")
-    ok, detail = grafana_datasource_health()
-    if not ok:
-        print(f"  FAIL: {detail}")
-        print("\nSUMMARY: connectivity check FAILED — Grafana cannot reach "
-              "Prometheus (dashboards would be blank). Not proceeding to panels.")
-        return 1
-    print(f"  PASS: datasource '{DS_UID}' healthy ({detail})\n")
+    # (1) Connectivity — the dead-datasource fear. Grafana-specific; only runs
+    #     when a Grafana token is available.
+    if grafana_enabled:
+        print("[1/2] Grafana → Prometheus connectivity ...")
+        ok, detail = grafana_datasource_health()
+        if not ok:
+            print(f"  FAIL: {detail}")
+            print("\nSUMMARY: connectivity check FAILED — Grafana cannot reach "
+                  "Prometheus (dashboards would be blank). Not proceeding to panels.")
+            return 1
+        print(f"  PASS: datasource '{DS_UID}' healthy ({detail})\n")
+    else:
+        print("[1/2] Grafana → Prometheus connectivity ... SKIPPED")
+        print("  note: no GRAFANA_AUTH_TOKEN (fly-metrics.net is SSO-only, no "
+              "service-account tokens). Validating panels directly against Fly "
+              "managed-Prometheus instead — this still proves each app-scoped "
+              "query returns data from the store Grafana renders.\n")
 
-    # (2) Panels render data — prefer through-Grafana, fall back to Fly-direct.
+    # (2) Panels render data — prefer through-Grafana when enabled, else Fly-direct.
     queries = collect_queries()
     print(f"[2/2] {len(queries)} data-panel queries (app-scoped to {APP!r}) ...")
 
-    # Probe once through Grafana; if the query PATH is unusable, do the whole
-    # run against Fly-direct (connectivity is already proven above).
-    backend = "grafana"
-    if queries:
+    # Probe once through Grafana (when enabled); if the query PATH is unusable,
+    # do the whole run against Fly-direct.
+    backend = "grafana" if grafana_enabled else "fly"
+    if grafana_enabled and queries:
         state, why = query_via_grafana(queries[0]["query"])
         if state == "transport":
             print(f"  note: Grafana /api/ds/query path unusable ({why}); "
@@ -464,8 +492,8 @@ def run_live():
 
     total = len(queries)
     passed = total - len(failures)
-    print(f"\nSUMMARY: connectivity PASS · panels {passed}/{total} rendered data "
-          f"via {backend}.")
+    conn = "connectivity PASS" if grafana_enabled else "connectivity SKIPPED (no Grafana token)"
+    print(f"\nSUMMARY: {conn} · panels {passed}/{total} rendered data via {backend}.")
     if failures:
         print("Empty panels after retries (would render blank for this preview):")
         for q in failures:
