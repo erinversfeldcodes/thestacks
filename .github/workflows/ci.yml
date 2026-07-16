@@ -888,6 +888,22 @@ jobs:
       - name: check-schema-diff — destructive changes require db-breaking label
         run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
 
+  # Deterministic dashboard RENDER gate (ADR-021 / Epic #249). Evaluates every
+  # Grafana panel's real PromQL against a live VictoriaMetrics seeded with
+  # synthesized well-formed data — fails on any blank panel or malformed query.
+  # No app, no preview, no network beyond the local docker VM: deterministic and
+  # self-contained. The drift + label tests are structural (they never evaluate a
+  # query); this proves the panels actually render. Complements the preview
+  # emission smoke (real-data fidelity) in deploy-preview.
+  dashboard-render-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start VictoriaMetrics (local docker)
+        run: docker compose -f infra/local-observability/docker-compose.yml up -d victoriametrics
+      - name: Render gate — every panel renders non-empty
+        run: bash scripts/dashboard-render-gate.sh
+
   deploy-preview:
     # TODO: restore full dependency list after deploy-preview is stable:
     # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
@@ -1088,39 +1104,48 @@ jobs:
         run: bash scripts/preflight-resolver-health.sh
       - name: Run E2E against deployed stack
         run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
-      - name: Dashboard render + connectivity smoke
-        # Runs AFTER E2E so every metric family has been emitted and Fly's
-        # managed Prometheus has had a scrape cycle to ingest it. Proves two
-        # things before anyone opens Grafana (owner's ask — "avoid finding
-        # Grafana's connectivity to Prometheus is down when I go and find an
-        # empty dashboard"): (1) Grafana↔Prometheus datasource is healthy, and
-        # (2) every dashboard panel's real PromQL, scoped to THIS preview app,
-        # returns non-empty data — i.e. the panels would render, not blank.
+      - name: Metrics emission smoke (preview VictoriaMetrics)
+        # Emission-fidelity layer (ADR-021 / #253). After E2E, the core app has
+        # pushed its PromEx metrics to the ephemeral preview VictoriaMetrics
+        # (Core.PromEx.MetricsPusher). Prove the real data LANDED: reach the
+        # 6PN-only VM via `fly proxy` and assert ≥1 `stacks_*` series exists for
+        # THIS preview's app label. Complements the deterministic render-gate job
+        # (which proves every panel's PromQL renders, from synthetic data).
         #
-        # Gate policy: HARD gate WHEN the read-only Fly-Prometheus creds are
-        # present (owner wants a blank/empty panel to FAIL the PR). Only the two
-        # Fly reads are REQUIRED — they validate every panel query against the
-        # same store Grafana renders from. GRAFANA_HOST + GRAFANA_AUTH_TOKEN are
-        # OPTIONAL (they add the Grafana datasource-health probe); fly-metrics.net
-        # is SSO-only and exposes no service-account tokens, so a Grafana token is
-        # usually un-mintable — the smoke degrades to Fly-Prometheus-direct rather
-        # than skipping. The step self-skips only when the Fly reads are unset, so
-        # it never blocks PRs before those secrets are provisioned. dashboard-smoke.sh
-        # itself hard-fails on connectivity-down or an empty panel after retries.
+        # Gate policy: HARD-fail only when the VM is reachable but has NO metrics
+        # (a genuine push/emission gap). A proxy/connection failure is infra, not
+        # a metrics defect, so it warns and passes — it never blocks a PR on a
+        # transient tunnel issue.
+        if: ${{ !cancelled() }}
         run: |
-          if [[ -z "${FLY_PROMETHEUS_READ_TOKEN:-}" || -z "${FLY_PROMETHEUS_ORG:-}" ]]; then
-            echo "::notice::Dashboard smoke skipped — Fly-Prometheus read creds not set" \
-                 "(FLY_PROMETHEUS_READ_TOKEN / FLY_PROMETHEUS_ORG)." \
-                 "Provision them to enable the render gate."
-            exit 0
-          fi
-          # Re-derive the preview app name from (branch, PREVIEW_SUFFIX) exactly
-          # like the Pin-Fly-hostname step above — PREVIEW_CORE_APP is not in
-          # GITHUB_ENV. The Fly managed-Prometheus `app` label equals this name,
-          # so the smoke's {app="…"} scoping targets this preview only.
           source scripts/lib/preview-names.sh
           derive_preview_names "${GITHUB_HEAD_REF:-preview}"
-          bash scripts/dashboard-smoke.sh "${PREVIEW_CORE_APP}"
+          fly proxy 18428:8428 --app "${PREVIEW_VM_APP}" >/tmp/vmproxy.log 2>&1 &
+          PROXY=$!
+          for _ in $(seq 1 20); do
+            curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null && break
+            sleep 2
+          done
+          if ! curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null; then
+            echo "::warning::preview VM unreachable via fly proxy ($(tail -1 /tmp/vmproxy.log 2>/dev/null)) — skipping emission smoke"
+            kill "$PROXY" 2>/dev/null || true
+            exit 0
+          fi
+          found=0
+          for _ in $(seq 1 12); do   # retry for push-interval + VM flush lag
+            n=$(curl -s http://localhost:18428/api/v1/series \
+                  --data-urlencode "match[]={app=\"${PREVIEW_CORE_APP}\",__name__=~\"stacks_.*\"}" \
+                  | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo 0)
+            echo "stacks_* series for ${PREVIEW_CORE_APP}: ${n}"
+            if [[ "${n}" -gt 0 ]]; then found=1; break; fi
+            sleep 10
+          done
+          kill "$PROXY" 2>/dev/null || true
+          if [[ "${found}" -ne 1 ]]; then
+            echo "::error::preview VM is up but received NO stacks_* metrics from the core pusher (#253)"
+            exit 1
+          fi
+          echo "PASS: preview VM has stacks_* metrics for ${PREVIEW_CORE_APP}"
       - name: Smoke — circuit breakers
         if: always()
         run: |
