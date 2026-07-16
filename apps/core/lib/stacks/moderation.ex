@@ -2,11 +2,13 @@ defmodule Stacks.Moderation do
   @moduledoc """
   Moderation pipeline for uploaded book images.
 
-  Runs a 4-step pipeline:
+  Runs a 3-step pipeline:
   1. is_book? — vision model checks if image contains a book
   2. extract_all — vision model extracts all books from the image
-  3. classify_subject — BISAC subject classification from book subjects
-  4. store_with_tier — stores books with appropriate visibility_tier
+  3. store — resolves ISBNs/metadata and stores each book as `public`.
+     Age-gating is NOT decided here. A book becomes age-gated only when a
+     person marks it "adults only" (`Stacks.Books.set_visibility_tier/3`) or
+     the platform owner moderates it — never from automated classification.
 
   Sidecar API contract:
   - POST /classify  → %{"classification" => "CLASSIFICATION_RESULT_BOOK"|"CLASSIFICATION_RESULT_NOT_BOOK"|"CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => float, "model_used" => str}
@@ -443,24 +445,6 @@ defmodule Stacks.Moderation do
     )
   end
 
-  defp determine_visibility_tier(bisac_codes) do
-    adult_codes = ["FIC005000", "FIC027000", "FIC069000"]
-
-    if Enum.any?(bisac_codes, &(&1 in adult_codes)) do
-      emit_tiering(:age_gated)
-      "age_gated"
-    else
-      emit_tiering(:public)
-      "public"
-    end
-  end
-
-  # Step-3 age-gate tiering funnel counter. `tier` is a whitelisted atom
-  # (:age_gated / :public) — no BISAC code, ISBN, or title in metadata.
-  defp emit_tiering(tier) do
-    :telemetry.execute([:stacks, :moderation, :tiering], %{count: 1}, %{tier: tier})
-  end
-
   # `used_fast_path` tracks whether the synchronous OL/GB lookup was
   # skipped because the ISBN checksum was valid. Without this flag we
   # can't distinguish two `metadata == %{}` cases that must be handled
@@ -501,16 +485,19 @@ defmodule Stacks.Moderation do
     context[:vision_model_used] == "local_ocr" and Books.valid_isbn_checksum?(isbn)
   end
 
+  # Books enter the system `public` by default (the schema default on
+  # `op.books.visibility_tier`). We deliberately do NOT set a
+  # `"visibility_tier"` key here: the automatic subject→BISAC age-gate
+  # classifier was removed — a book becomes age-gated only when a PERSON
+  # marks it (see `Stacks.Books.set_visibility_tier/3`), never because
+  # code guessed from metadata. `bisac_codes` carries only real codes the
+  # resolver supplied; it is no longer derived from a fake genre map.
   defp build_book_attrs(isbn, metadata, used_fast_path, context) do
-    subjects = metadata[:subjects] || []
-    bisac_codes = subjects_to_bisac(subjects)
-
     base_attrs = %{
       "isbn" => isbn,
       "title" => derive_title(isbn, metadata, used_fast_path),
-      "subjects" => subjects,
-      "bisac_codes" => bisac_codes,
-      "visibility_tier" => determine_visibility_tier(bisac_codes),
+      "subjects" => metadata[:subjects] || [],
+      "bisac_codes" => metadata[:bisac_codes] || [],
       "description" => metadata[:description],
       "cover_image_url" => metadata[:cover_image_url],
       "publisher" => metadata[:publisher],
@@ -551,24 +538,5 @@ defmodule Stacks.Moderation do
       )
 
       :ok
-  end
-
-  defp subjects_to_bisac(subjects) do
-    subject_to_bisac_map = %{
-      "fiction" => "FIC000000",
-      "mystery" => "FIC022000",
-      "science fiction" => "FIC028000",
-      "fantasy" => "FIC009000",
-      "romance" => "FIC027000",
-      "biography" => "BIO000000",
-      "history" => "HIS000000",
-      "self-help" => "SEL000000",
-      "children" => "JUV000000"
-    }
-
-    subjects
-    |> Enum.map(fn s -> Map.get(subject_to_bisac_map, String.downcase(s)) end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
   end
 end

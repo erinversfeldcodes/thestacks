@@ -52,6 +52,12 @@ config :core, ecto_repos: [Core.Repo]
 
 config :core, :env, :test
 
+# Age-gating is shipped dark in production (ADR-020) but ON in test so the full
+# enforcement suite (AgeGate.enforce/2, Books.maybe_exclude_age_gated/2,
+# Visibility.check_age_gate/3) keeps exercising the gate. Flag-off no-op tests
+# flip this to false locally via Application.put_env and restore it.
+config :core, :age_gating_enabled, true
+
 config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient

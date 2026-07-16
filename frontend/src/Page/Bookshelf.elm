@@ -160,7 +160,6 @@ type Msg
     = ShelvesLoaded (Result Http.Error (List Shelf))
     | AddShelf
     | ShelfAdded (Result Http.Error Shelf)
-    | VerifyAge
     | DismissAgeGate
     | BookClicked Book
     | RSSLinkMsg RSSLink.Msg
@@ -256,9 +255,6 @@ update msg model =
                 Err _ ->
                     ( model, Cmd.none, NoOut )
 
-        VerifyAge ->
-            ( model, Cmd.none, NavigateTo SettingsAgeVerification )
-
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
@@ -331,9 +327,7 @@ view model =
                         )
                    , if model.showAgeGate then
                         ageGate
-                            { onVerify = VerifyAge
-                            , onDismiss = DismissAgeGate
-                            }
+                            { onDismiss = DismissAgeGate }
 
                      else
                         div [ attribute "aria-live" "polite" ]

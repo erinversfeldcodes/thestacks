@@ -807,15 +807,15 @@ defmodule Stacks.AccountsTest do
       assert %{steps: steps, completed: false, next_step: "profile"} =
                Accounts.onboarding_status(user.id)
 
-      assert steps == %{"profile" => false, "age_verification" => false, "privacy" => false}
+      assert steps == %{"profile" => false, "privacy" => false}
     end
 
     test "partially-completed user returns correct next_step" do
       user = insert(:user, onboarding_steps: %{"profile" => true})
       status = Accounts.onboarding_status(user.id)
-      assert status.next_step == "age_verification"
+      assert status.next_step == "privacy"
       assert status.steps["profile"] == true
-      assert status.steps["age_verification"] == false
+      assert status.steps["privacy"] == false
     end
 
     test "fully-completed user has next_step = nil and completed = true" do
@@ -823,7 +823,6 @@ defmodule Stacks.AccountsTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
@@ -847,10 +846,9 @@ defmodule Stacks.AccountsTest do
       assert updated.onboarding_steps["profile"] == true
     end
 
-    test "completing all three steps sets onboarding_completed to true" do
+    test "completing all steps sets onboarding_completed to true" do
       user = insert(:user)
       {:ok, _} = Accounts.complete_onboarding_step(user.id, "profile")
-      {:ok, _} = Accounts.complete_onboarding_step(user.id, "age_verification")
       {:ok, updated} = Accounts.complete_onboarding_step(user.id, "privacy")
       reloaded = Repo.reload!(updated)
       assert reloaded.onboarding_completed == true
@@ -861,13 +859,13 @@ defmodule Stacks.AccountsTest do
       assert {:error, :invalid_step} = Accounts.complete_onboarding_step(user.id, "invalid")
     end
 
-    test "completes age_verification step" do
+    # The self-declared "verify your age" step was dropped (ADR-020) — it is now
+    # an invalid onboarding step.
+    test "age_verification is no longer a valid step" do
       user = insert(:user)
 
-      assert {:ok, updated} =
+      assert {:error, :invalid_step} =
                Accounts.complete_onboarding_step(user.id, "age_verification")
-
-      assert updated.onboarding_steps["age_verification"] == true
     end
 
     test "completes privacy step" do
@@ -883,14 +881,12 @@ defmodule Stacks.AccountsTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
 
       assert {:ok, updated} = Accounts.reset_onboarding(user.id)
       assert updated.onboarding_steps["profile"] == false
-      assert updated.onboarding_steps["age_verification"] == false
       assert updated.onboarding_steps["privacy"] == false
     end
 
@@ -899,7 +895,6 @@ defmodule Stacks.AccountsTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )
@@ -914,7 +909,6 @@ defmodule Stacks.AccountsTest do
         insert(:user,
           onboarding_steps: %{
             "profile" => true,
-            "age_verification" => true,
             "privacy" => true
           }
         )

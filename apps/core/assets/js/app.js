@@ -172,11 +172,25 @@ try {
   // Ignore corrupted localStorage data
 }
 
-// Mount the Elm application with auth flags
-var app = Elm.Main.init({
-  node: document.getElementById("elm"),
-  flags: storedAuth,
-});
+// Mount the Elm application. Flags carry the stored auth (top-level, as
+// written to localStorage) PLUS the server-provided runtime config
+// (`ageGatingEnabled`). `boot` is invoked once `GET /api/config` resolves;
+// on any failure it is invoked with `false` so age-gating UI fails safe
+// (hidden). All the port wiring below lives inside `boot` because it needs
+// the `app` handle returned by `Elm.Main.init`.
+function boot(ageGatingEnabled) {
+  var flags = {};
+  if (storedAuth && typeof storedAuth === "object") {
+    Object.keys(storedAuth).forEach(function (key) {
+      flags[key] = storedAuth[key];
+    });
+  }
+  flags.ageGatingEnabled = ageGatingEnabled === true;
+
+  var app = Elm.Main.init({
+    node: document.getElementById("elm"),
+    flags: flags,
+  });
 
 // ---------------------------------------------------------------------------
 // Port: Persist auth to localStorage on login
@@ -514,3 +528,22 @@ if (app.ports && app.ports.openUploadStream) {
     window._uploadStream = es;
   });
 }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch the server-provided runtime config, THEN boot Elm. The config is
+// unauthenticated (`GET /api/config`) and currently carries a single flag,
+// `ageGatingEnabled`. On any failure (network error, non-2xx, malformed
+// JSON, or a missing field) we boot with `ageGatingEnabled: false` — the
+// fail-safe default that hides all age-gating UI in production.
+// ---------------------------------------------------------------------------
+fetch("/api/config", { headers: { Accept: "application/json" } })
+  .then(function (response) {
+    return response.ok ? response.json() : { ageGatingEnabled: false };
+  })
+  .then(function (config) {
+    boot(Boolean(config && config.ageGatingEnabled === true));
+  })
+  .catch(function () {
+    boot(false);
+  });

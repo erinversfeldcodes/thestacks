@@ -5,10 +5,9 @@ defmodule Stacks.ModerationTest do
   The vision client is configured to Stacks.AI.MockClient in test.exs, so all
   calls to AIClient.call_vision/2 use the mock without hitting the network.
 
-  classify_subjects calls Books.resolve_isbn, which would make real HTTP calls
-  to Open Library. The moderation code already handles that failure gracefully
-  by returning {:ok, %{subjects: [], bisac_codes: []}} when resolve_isbn fails,
-  so no HTTP mocking is needed.
+  ISBN resolution (Books.resolve_isbn) would otherwise make real HTTP calls to
+  Open Library; the pipeline handles a resolution failure gracefully (empty
+  subjects/bisac_codes), so no HTTP mocking is needed here.
   """
 
   # async: false — tests use Application.put_env to swap the vision client,
@@ -48,21 +47,20 @@ defmodule Stacks.ModerationTest do
       assert book.visibility_tier == "public"
     end
 
-    test "stores book with age_gated visibility_tier when adult BISAC code present" do
-      age_gated_book = insert(:book, visibility_tier: "age_gated")
-      insert(:book_edition, book: age_gated_book, isbn: "9780385490818")
+    test "creates a public book even when subjects would previously have gated it" do
+      # The automatic subject→BISAC age-gate classifier was removed: a book is
+      # age-gated only when a PERSON marks it (Books.set_visibility_tier/3),
+      # never because code guessed from metadata. "romance" used to map to an
+      # adult BISAC code and force-gate the book; it must now enter public.
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{"ISBN:9780743273565" => %{"title" => "An Adult Romance", "subjects" => ["romance"]}}}
+      )
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.AdultBisacClient)
-
-        context = %{image_b64: @test_image_b64}
-        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
-        assert book.visibility_tier == "age_gated"
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      context = %{image_b64: @test_image_b64}
+      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
+      assert book.visibility_tier == "public"
     end
 
     test "returns existing book when ISBN already in database" do
@@ -640,32 +638,6 @@ defmodule Stacks.ModerationTest do
              }
            ],
            "model_used" => "Qwen/Qwen2.5-VL-7B-Instruct"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule AdultBisacClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780385490818"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
          }}
 
     def call_vision(_endpoint, _payload), do: {:ok, %{}}

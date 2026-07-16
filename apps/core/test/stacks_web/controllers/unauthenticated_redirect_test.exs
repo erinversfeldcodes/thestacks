@@ -24,11 +24,6 @@ defmodule StacksWeb.Controllers.UnauthenticatedRedirectTest do
       assert json_response(conn, 401)
     end
 
-    test "PUT /api/settings/age_verification without auth returns 401", %{conn: conn} do
-      conn = put(conn, "/api/settings/age_verification", %{})
-      assert json_response(conn, 401)
-    end
-
     test "DELETE /api/gdpr/account without auth returns 401", %{conn: conn} do
       conn = delete(conn, "/api/gdpr/account")
       assert json_response(conn, 401)

@@ -242,13 +242,17 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:outcome]
         ),
 
-        # Step 3 — age-gate tiering. `tier` ∈ public|age_gated. Exported as
+        # Age-gate tiering. Repointed (Issue #118): the automatic
+        # subject→BISAC classifier was removed, so this now fires from
+        # `Stacks.Books.set_visibility_tier/3` when a PERSON sets the tier.
+        # `tier` ∈ public|age_gated, `source` ∈ user|owner. Exported as
         # `stacks_moderation_tiering_count_total`.
         counter(
           [:stacks, :moderation, :tiering, :count, :total],
           event_name: [:stacks, :moderation, :tiering],
-          description: "Moderation step-3 visibility-tier assignment (public vs age_gated).",
-          tags: [:tier]
+          description:
+            "Visibility-tier changes (public vs age_gated) set by a user or the owner.",
+          tags: [:tier, :source]
         ),
 
         # Compound-title expansion — one per `" OR "` split. Exported as
@@ -270,12 +274,14 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:outcome]
         ),
 
-        # Age-verification requests. `outcome` ∈ success|invalid. Exported
-        # as `stacks_age_verification_count_total`.
+        # Provider-sourced age verifications recorded (ADR-020). `outcome` ∈
+        # success|error. Repointed from the removed self-declared endpoint to
+        # Stacks.AgeVerification.record_verification/3. Exported as
+        # `stacks_age_verification_count_total`.
         counter(
           [:stacks, :age_verification, :count, :total],
           event_name: [:stacks, :age_verification],
-          description: "Age-verification update requests (200 success vs 422 invalid).",
+          description: "Provider-sourced age verifications recorded (success vs error).",
           tags: [:outcome]
         ),
 

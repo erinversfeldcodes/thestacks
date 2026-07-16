@@ -31,7 +31,6 @@ type Route
     | SettingsPassword
     | SettingsNotifications
     | SettingsConsent
-    | SettingsAgeVerification
     | SettingsAuditLog
     | Insights
     | CostTransparency
@@ -50,6 +49,7 @@ type Route
     | AdminSourceApproval
     | AdminScraperConfig
     | AdminMetrics
+    | AdminBookModeration
     | Groups
     | GroupDetail String
     | Profile String
@@ -75,7 +75,6 @@ parser =
         , Parser.map SettingsPassword (s "settings" </> s "password")
         , Parser.map SettingsNotifications (s "settings" </> s "notifications")
         , Parser.map SettingsConsent (s "settings" </> s "consent")
-        , Parser.map SettingsAgeVerification (s "settings" </> s "age-verification")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Insights (s "me" </> s "insights")
         , Parser.map Settings (s "settings")
@@ -95,6 +94,7 @@ parser =
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminMetrics (s "admin" </> s "metrics")
+        , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
         , Parser.map GroupDetail (s "groups" </> string)
         , Parser.map Groups (s "groups")
         , Parser.map ProfileShelf (s "u" </> string </> string)
@@ -158,9 +158,6 @@ toPath route =
         SettingsConsent ->
             "/settings/consent"
 
-        SettingsAgeVerification ->
-            "/settings/age-verification"
-
         SettingsAuditLog ->
             "/settings/audit-log"
 
@@ -215,6 +212,9 @@ toPath route =
         AdminMetrics ->
             "/admin/metrics"
 
+        AdminBookModeration ->
+            "/admin/book-moderation"
+
         Groups ->
             "/groups"
 
@@ -253,9 +253,6 @@ isSettingsRoute route =
             True
 
         SettingsConsent ->
-            True
-
-        SettingsAgeVerification ->
             True
 
         SettingsAuditLog ->

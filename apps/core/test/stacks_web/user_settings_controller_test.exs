@@ -1,99 +1,19 @@
 defmodule StacksWeb.UserSettingsControllerTest do
   @moduledoc """
-  Tests for PUT /api/settings/age_verification.
+  Tests for the user-settings endpoints (profile, location, password,
+  notifications, profile visibility). Age verification is no longer a user
+  setting (ADR-020) — self-declaration was removed.
   """
 
   use CoreWeb.ConnCase, async: true
-  use Oban.Testing, repo: Core.Repo
 
-  import Ecto.Query
   import Stacks.Factory
 
-  alias Core.Repo
   alias Stacks.Accounts.Guardian
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
-  end
-
-  describe "PUT /api/settings/age_verification" do
-    test "returns 200 and sets age_verified to true", %{conn: conn} do
-      user = insert(:user, age_verified: false)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: true})
-
-      assert %{"age_verified" => true} = json_response(conn, 200)
-    end
-
-    test "returns 200 and sets age_verified to false", %{conn: conn} do
-      user = insert(:user, age_verified: true)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: false})
-
-      assert %{"age_verified" => false} = json_response(conn, 200)
-    end
-
-    test "returns 422 when age_verified parameter is missing", %{conn: conn} do
-      user = insert(:user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{})
-
-      assert %{"error" => "age_verified parameter is required and must be a boolean"} =
-               json_response(conn, 422)
-    end
-
-    test "returns 422 when age_verified is not a boolean", %{conn: conn} do
-      user = insert(:user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: "yes"})
-
-      assert %{"error" => "age_verified parameter is required and must be a boolean"} =
-               json_response(conn, 422)
-    end
-
-    test "returns 401 when not authenticated", %{conn: conn} do
-      conn = put(conn, "/api/settings/age_verification", %{age_verified: true})
-      assert json_response(conn, 401)
-    end
-
-    # Issue #118, punch #4 (US-4.2 §6 "confirm no side effects"): age verification
-    # is a single op.users UPDATE — it must emit NO domain event and enqueue NO
-    # Oban job. This is a negative-emission characterization test: the feature is
-    # already correct (update_age_verification/2 never calls Events.emit or
-    # Oban.insert), and this would fail the moment an event or job were added.
-    test "emits no domain event and enqueues no job", %{conn: conn} do
-      user = insert(:user, age_verified: false)
-
-      events_before = Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: true})
-
-      assert %{"age_verified" => true} = json_response(conn, 200)
-
-      # No new rows in the immutable event_log …
-      events_after = Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
-      assert events_after == events_before
-
-      # … and no background job of any worker was enqueued.
-      refute_enqueued(worker: Stacks.Workers.DbtRefreshHandler)
-      assert [] = all_enqueued()
-    end
   end
 
   describe "PUT /api/settings/profile" do

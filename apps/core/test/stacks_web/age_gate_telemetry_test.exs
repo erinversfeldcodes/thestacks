@@ -6,8 +6,8 @@ defmodule StacksWeb.AgeGateTelemetryTest do
   Covers:
   - `AgeGate.enforce/2` — `:blocked` (403) vs `:passed` outcome, emitted
     ONLY for age-gated books (never the passthrough clause).
-  - `UserSettingsController.update_age_verification/2` — `:success` (200)
-    vs `:invalid` (422) outcome.
+  - `Stacks.AgeVerification.record_verification/3` — `:success` outcome
+    (repointed from the removed self-declared settings endpoint, ADR-020).
 
   Metadata tags are whitelisted atoms only — no email, user id, or other
   PII (GDPR: telemetry is a warehouse-adjacent sink).
@@ -18,6 +18,7 @@ defmodule StacksWeb.AgeGateTelemetryTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.AgeVerification
   alias StacksWeb.Plugs.AgeGate
 
   @age_gated_book %{visibility_tier: "age_gated"}
@@ -37,11 +38,6 @@ defmodule StacksWeb.AgeGateTelemetryTest do
     )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
-  end
-
-  defp auth_conn(conn, user) do
-    {:ok, token, _} = Guardian.encode_and_sign(user)
-    put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
   # ── AgeGate.enforce/2 ──────────────────────────────────────────────────
@@ -91,52 +87,31 @@ defmodule StacksWeb.AgeGateTelemetryTest do
     end
   end
 
-  # ── update_age_verification/2 ──────────────────────────────────────────
+  # ── AgeVerification.record_verification/3 (ADR-020) ─────────────────────
 
-  describe "age-verification request telemetry" do
-    test "emits :success on a 200 verification update (happy)", %{conn: conn} do
+  describe "age-verification telemetry" do
+    test "emits :success when a provider verification is recorded (happy)" do
       attach_telemetry([[:stacks, :age_verification]])
       user = insert(:user, age_verified: false)
 
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: true})
-
-      assert %{"age_verified" => true} = json_response(conn, 200)
+      assert {:ok, verified} = AgeVerification.record_verification(user, "test", nil)
+      assert verified.age_verified == true
 
       assert_receive {:telemetry_event, [:stacks, :age_verification], %{count: 1},
                       %{outcome: :success}}
     end
 
-    test "emits :invalid on a 422 (missing parameter) update (sad)", %{conn: conn} do
+    test "emits :success (repointed family) — never the removed :invalid outcome" do
       attach_telemetry([[:stacks, :age_verification]])
-      user = insert(:user)
+      user = insert(:user, age_verified: false)
 
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{})
-
-      assert json_response(conn, 422)
+      assert {:ok, _} = AgeVerification.record_verification(user, "test", nil)
 
       assert_receive {:telemetry_event, [:stacks, :age_verification], %{count: 1},
-                      %{outcome: :invalid}}
-    end
+                      %{outcome: :success}}
 
-    test "emits :invalid on a 422 (non-boolean parameter) update (sad)", %{conn: conn} do
-      attach_telemetry([[:stacks, :age_verification]])
-      user = insert(:user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> put("/api/settings/age_verification", %{age_verified: "yes"})
-
-      assert json_response(conn, 422)
-
-      assert_receive {:telemetry_event, [:stacks, :age_verification], %{count: 1},
-                      %{outcome: :invalid}}
+      refute_receive {:telemetry_event, [:stacks, :age_verification], _, %{outcome: :invalid}},
+                     100
     end
   end
 end

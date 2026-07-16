@@ -53,6 +53,11 @@ type alias Model =
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
     , showAgeGate : Bool
+
+    -- Server-provided runtime flag (ADR-020). Age-gating ships dark: when
+    -- `False` (the production default) the age-gate block is never rendered,
+    -- even defensively, since the backend also stops issuing the 403.
+    , ageGatingEnabled : Bool
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
     , availability : RemoteData Http.Error (List AvailabilityItem)
@@ -85,7 +90,6 @@ type Msg
     | RemoveCompleted (Result Http.Error ())
     | ToggleFormat Format
     | EditionSelected String
-    | VerifyAge
     | DismissAgeGate
     | CloseOverlay
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
@@ -115,6 +119,7 @@ init bookId maybeToken maybePreviousRoute =
       , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
       , showAgeGate = False
+      , ageGatingEnabled = False
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
       , availability = Loading
@@ -252,9 +257,6 @@ update msg model maybeToken =
 
                     else
                         ( { model | book = Failure err }, Cmd.none, NoOut )
-
-        VerifyAge ->
-            ( model, Cmd.none, NavigateTo Route.SettingsAgeVerification )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
@@ -479,11 +481,9 @@ view model =
                 ""
     in
     div [ class ("page page--book-detail" ++ animationClass) ]
-        [ if model.showAgeGate then
+        [ if model.showAgeGate && model.ageGatingEnabled then
             ageGate
-                { onVerify = VerifyAge
-                , onDismiss = DismissAgeGate
-                }
+                { onDismiss = DismissAgeGate }
 
           else
             div [ class "book-detail__parchment" ]
@@ -1104,11 +1104,9 @@ but without the page wrapper classes.
 -}
 overlayContent : Model -> Html Msg
 overlayContent model =
-    if model.showAgeGate then
+    if model.showAgeGate && model.ageGatingEnabled then
         ageGate
-            { onVerify = VerifyAge
-            , onDismiss = DismissAgeGate
-            }
+            { onDismiss = DismissAgeGate }
 
     else
         div [ class "book-detail__parchment" ]

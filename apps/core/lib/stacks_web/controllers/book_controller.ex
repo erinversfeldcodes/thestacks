@@ -135,6 +135,51 @@ defmodule StacksWeb.BookController do
     end
   end
 
+  @doc """
+  PUT /api/books/:id/age-gate — the person who added a book raises its age
+  gate (marks it "adults only"). Body: `{"adults_only": true}` (also accepts
+  `{"age_gated": true}`).
+
+  Raise-only (user path): a user may only RAISE the gate (`public →
+  age_gated`); attempting to lower it (`age_gated → public`) returns 403 —
+  only the platform owner may un-gate. `visibility_tier` is not PII; no new
+  personal data is introduced.
+
+  Returns 200 with the updated book JSON, 403 on a raise-only violation,
+  404 when the book is missing.
+  """
+  @spec set_age_gate(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def set_age_gate(conn, %{"id" => id} = params) do
+    tier = if age_gate_requested?(params), do: "age_gated", else: "public"
+
+    case Books.set_visibility_tier(id, tier, source: :user, raise_only: true) do
+      {:ok, book} ->
+        json(conn, %{book: ProtoJSON.book(Books.get_book_detail(book.id))})
+
+      {:error, :forbidden} ->
+        conn |> put_status(403) |> json(%{error: "forbidden"})
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "validation_failed", details: format_errors(changeset)})
+    end
+  end
+
+  # The endpoint's purpose is marking a book adults-only, so a missing flag
+  # defaults to raising the gate. An explicit falsey flag on an age-gated
+  # book is a lower attempt, which the raise-only guard rejects with 403.
+  defp age_gate_requested?(%{"adults_only" => value}), do: truthy?(value)
+  defp age_gate_requested?(%{"age_gated" => value}), do: truthy?(value)
+  defp age_gate_requested?(_params), do: true
+
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(_other), do: false
+
   @doc "GET /api/books/:id — retrieve a book by UUID."
   def show(conn, %{"id" => id}) do
     book = cached_or_fetch(id)
