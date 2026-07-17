@@ -25,29 +25,29 @@ kill_timeout = "30s"                 # allow VM to flush its in-memory buffer on
 # samples become queryable sooner — matters for the post-E2E preview smoke.
 # 3-month retention; data on the mounted volume so it survives redeploys (#232).
 [processes]
-  vm = "/victoria-metrics-prod --storageDataPath=/victoria-metrics-data --retentionPeriod=3 --httpListenAddr=:8428 --search.latencyOffset=15s"
+  # FLAGS ONLY — the image ENTRYPOINT is already `/victoria-metrics-prod`, and Fly
+  # appends this cmd to it. Repeating the binary here ran `/victoria-metrics-prod
+  # /victoria-metrics-prod --flags`, so VM's own path became the first positional
+  # arg, Go's flag.Parse stopped there, every flag was ignored, and VM exited on
+  # the unexpected argument → crash-loop → machine stopped. (Root cause of the
+  # "VM won't stay up" saga.)
+  vm = "--storageDataPath=/victoria-metrics-data --retentionPeriod=3 --httpListenAddr=:8428 --search.latencyOffset=15s"
 
-# TCP service on 6PN only (no `handlers`/public IP → private). min_machines_running
-# = 1 keeps prod always-on; deploy-stack.sh may relax this for ephemeral previews.
+# TCP service on 6PN only (no `handlers`/public IP → private). Gives `fly deploy`
+# proper start-tracking + `min_machines_running`. NO health check: on a 6PN-only
+# app Fly's checker can't reach the port, so a check sits perpetually "warning"
+# and makes `fly deploy` hang. Liveness is proven by the CI emission smoke (real
+# data lands). The VM stays up now that the `[processes]` cmd is flags-only (it
+# was crash-looping on the double-binary before).
 [[services]]
   internal_port = 8428
   protocol = "tcp"
-  processes = ["vm"]                 # bind the service to the named process group
+  processes = ["vm"]
   auto_stop_machines = false
-  auto_start_machines = true
   min_machines_running = 1
 
   [[services.ports]]
     port = 8428
-
-  # Liveness: VM serves /health on 8428. A passing check in `fly status` is the
-  # deploy-time proof that the store is up (and gates the preview smoke).
-  [[services.http_checks]]
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "30s"             # VM reopens its data store on boot
-    method = "get"
-    path = "/health"
 
 [[mounts]]
   source = "vm_data"
