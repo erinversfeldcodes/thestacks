@@ -77,7 +77,7 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); wo
 - [x] `gdpr_data_rights` dashboard registered via `dashboards/0`, every panel teaching.
 - [x] Export/deletion latency metric + audit-read counter wired, registered, firing-tested.
 - [x] Drift + live-exposure tests (families appear after export/deletion/consent interaction).
-- [ ] `just verify` passes; test audit GREEN; no PII in tags — audit GREEN + GDPR-reviewed tags; full-branch `just verify` is the pre-PR gate.
+- [x] `just verify` passes; test audit GREEN; no PII in tags — full-branch `just verify` GREEN 2026-07-17; GDPR-reviewed tags.
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); worker/revoke via firing tests.
 
 ## Dependencies

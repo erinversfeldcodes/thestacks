@@ -83,7 +83,7 @@ Verdict: DONE — validated live 2026-07-17 on preview stack (emission gate + br
 - [x] All visibility/social/ViewAs families registered in PromEx and exported — present in VM (emission gate).
 - [x] `visibility_social` dashboard registered via `dashboards/0`, teaching panels; renders live (dashboards.spec).
 - [x] Drift test + live-exposure — drift/completeness green (13/0); live-exposure via emission gate + browser render.
-- [ ] `just verify` passes; test audit GREEN — audit GREEN; full-branch `just verify` is the remaining pre-PR gate.
+- [x] `just verify` passes; test audit GREEN — full-branch `just verify` GREEN 2026-07-17 (elixir/dialyzer/credo/sobelow, elm 855, dbt 231).
 - [x] Meets the Completion Bar — live-exposure proven (families in VM after E2E drive + browser paints), not assumed.
 
 ## Dependencies

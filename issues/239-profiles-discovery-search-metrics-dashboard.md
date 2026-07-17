@@ -85,7 +85,7 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); sh
 - [x] The four families registered + exported.
 - [x] `discovery` dashboard registered, every panel teaching.
 - [x] Drift + live-exposure tests (each metric appears after its interaction / firing test).
-- [ ] `just verify` passes; test audit GREEN — audit GREEN; full-branch `just verify` is the pre-PR gate.
+- [x] `just verify` passes; test audit GREEN — full-branch `just verify` GREEN 2026-07-17 (elixir/dialyzer/credo/sobelow, elm 855, dbt 231).
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); shelf-cap via firing test.
 
 ## Dependencies

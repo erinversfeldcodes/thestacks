@@ -84,7 +84,7 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); se
 - [x] The three families registered + exported at `/internal/metrics`.
 - [x] `auth_security` dashboard registered, every panel teaching; reuse-detected panel flagged alert-worthy.
 - [x] Drift + live-exposure tests (each metric appears after its triggering interaction / firing test).
-- [ ] `just verify` passes; test audit GREEN; no PII in tags — audit GREEN + GDPR whitelisted tags; full-branch `just verify` is the pre-PR gate.
+- [x] `just verify` passes; test audit GREEN; no PII in tags — full-branch `just verify` GREEN 2026-07-17; GDPR whitelisted tags.
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); rare paths via firing tests.
 
 ## Dependencies
