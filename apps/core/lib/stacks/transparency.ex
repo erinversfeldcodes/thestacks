@@ -4,17 +4,17 @@ defmodule Stacks.Transparency do
 
   Serves the subset of platform observability the public `/metrics` page (#235)
   renders — combining **live ops signals** (windowed rates / current values
-  queried from Fly's managed Prometheus via a fixed allowlist) with **durable
+  queried from Fly's managed Prometheus via a fixed whitelist) with **durable
   aggregates** (public-safe corpus/cost totals). Everything is an aggregate,
   never a per-user value.
 
-  ## The privacy boundary is the allowlist + the durable column set
+  ## The privacy boundary is the whitelist + the durable column set
 
-  Nothing is public by default. Live signals come ONLY from `@allowlist` — a
+  Nothing is public by default. Live signals come ONLY from `@whitelist` — a
   fixed, code-defined list of safe PromQL queries built from the registered
   `stacks_*` metric families (see `Core.PromEx.Plugins.Stacks`). There is NO
   function that accepts a caller-supplied PromQL string; `run_signal/1` accepts
-  only a allowlist KEY. Durable aggregates come from `durable_stats/0`, a fixed
+  only a whitelist KEY. Durable aggregates come from `durable_stats/0`, a fixed
   set of anonymised corpus/cost counts. Adding a signal to either is an
   explicit, reviewed code change — so nothing leaks by construction.
 
@@ -55,30 +55,16 @@ defmodule Stacks.Transparency do
   @cache_ttl_ms @cache_ttl_seconds * 1_000
   @live_cache_key :live_signals
 
-  # ── App scoping (Fly org-wide Prometheus) ───────────────────────────────────
-  # Fly's managed Prometheus is ORG-WIDE: every scraped series carries an `app`
-  # label (`thestacks-core` for prod, `stacks-core-pr-…` for previews). The
-  # PUBLIC page must show prod-only data, so every allowlist query is scoped to
-  # the app this node serves. The app name is derived from `FLY_APP_NAME` (set
-  # automatically on every Fly machine) with a config/default fallback, and the
-  # `app="…"` matcher is injected as a code-defined literal (NOT user input) —
-  # the allowlist remains the privacy boundary.
-  @default_app "thestacks-core"
-
-  # ── Live PromQL allowlist ───────────────────────────────────────────────────
+  # ── Live PromQL whitelist ───────────────────────────────────────────────────
   # Fixed, code-defined queries built ONLY from metric families registered in
   # `Core.PromEx.Plugins.Stacks`. Each entry is an aggregate (sum/min across
   # series) — no per-series/per-user label is projected. This list IS the live
   # privacy boundary; a query not here can never run.
-  #
-  # Each query carries an `app="$app"` placeholder in its metric selector; the
-  # placeholder is substituted with the concrete serving-app literal at query
-  # time (see `scoped_query/1` / `app_label/0`), never with caller input.
-  @allowlist [
+  @whitelist [
     %{
       key: :isbn_not_found_rate,
       query:
-        ~s|sum(rate(stacks_moderation_isbn_resolution_count_total{app="$app",outcome="isbn_not_found"}[1h]))|,
+        ~s|sum(rate(stacks_moderation_isbn_resolution_count_total{outcome="isbn_not_found"}[1h]))|,
       label: "ISBN-not-found rate",
       what:
         "How often, per second over the last hour, a scanned book could not be matched to a verified ISBN.",
@@ -90,7 +76,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :moderation_throughput,
-      query: ~s|sum(rate(stacks_moderation_classification_count_total{app="$app"}[1h]))|,
+      query: ~s|sum(rate(stacks_moderation_classification_count_total[1h]))|,
       label: "Moderation throughput",
       what:
         "How many uploads per second are being classified by the moderation pipeline this hour.",
@@ -101,7 +87,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :age_gate_block_rate,
-      query: ~s|sum(rate(stacks_age_gate_enforce_count_total{app="$app",outcome="blocked"}[1h]))|,
+      query: ~s|sum(rate(stacks_age_gate_enforce_count_total{outcome="blocked"}[1h]))|,
       label: "Age-gate blocks",
       what:
         "How often per second the age gate blocked access to an age-restricted book this hour.",
@@ -112,7 +98,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :breakers_healthy,
-      query: ~s|min(stacks_fuse_state_state{app="$app"})|,
+      query: ~s|min(stacks_fuse_state_state)|,
       label: "Circuit breakers healthy",
       what:
         "Whether every dependency circuit breaker is currently closed (1 = all healthy, 0 = one blown).",
@@ -123,7 +109,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :gdpr_export_rate_24h,
-      query: ~s|sum(rate(stacks_gdpr_export_count_total{app="$app"}[24h]))|,
+      query: ~s|sum(rate(stacks_gdpr_export_count_total[24h]))|,
       label: "Data exports in progress",
       what: "The rate of GDPR data-export jobs over the last 24 hours.",
       how:
@@ -134,7 +120,7 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :handler_error_rate,
-      query: ~s|sum(rate(stacks_events_handler_error_count_total{app="$app"}[1h]))|,
+      query: ~s|sum(rate(stacks_events_handler_error_count_total[1h]))|,
       label: "Background error rate",
       what: "How often per second a background event handler failed this hour.",
       how:
@@ -176,29 +162,22 @@ defmodule Stacks.Transparency do
     }
   end
 
-  @doc "The fixed set of allowlist signal keys (atoms) — the only runnable live signals."
-  @spec allowlist_keys() :: [atom()]
-  def allowlist_keys, do: Enum.map(@allowlist, & &1.key)
+  @doc "The fixed set of whitelist signal keys (atoms) — the only runnable live signals."
+  @spec whitelist_keys() :: [atom()]
+  def whitelist_keys, do: Enum.map(@whitelist, & &1.key)
 
   @doc """
-  The raw PromQL of every allowlisted live signal. For introspection/tests only —
-  e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
-  """
-  @spec allowlist_queries() :: [String.t()]
-  def allowlist_queries, do: Enum.map(@allowlist, & &1.query)
+  Runs a single whitelisted live signal by KEY.
 
-  @doc """
-  Runs a single allowlisted live signal by KEY.
-
-  Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
-  Returns `{:error, :not_allowlisted}` for any key not in the fixed allowlist,
+  Accepts only a whitelist key (atom) — never a raw/user-supplied PromQL string.
+  Returns `{:error, :not_whitelisted}` for any key not in the fixed whitelist,
   so there is no path to run an arbitrary or injected query.
   """
   @spec run_signal(atom()) :: {:ok, number()} | {:error, term()}
   def run_signal(key) when is_atom(key) do
-    case Enum.find(@allowlist, &(&1.key == key)) do
-      nil -> {:error, :not_allowlisted}
-      entry -> prometheus_client().query(scoped_query(entry.query))
+    case Enum.find(@whitelist, &(&1.key == key)) do
+      nil -> {:error, :not_whitelisted}
+      entry -> prometheus_client().query(entry.query)
     end
   end
 
@@ -274,15 +253,15 @@ defmodule Stacks.Transparency do
     end
   end
 
-  # Runs every allowlisted query through the configured client. If EVERY query
+  # Runs every whitelisted query through the configured client. If EVERY query
   # errors (e.g. token absent), the whole section is `:unavailable`. Otherwise
   # returns the entries that resolved to a number.
   defp compute_live_signals do
     client = prometheus_client()
 
     results =
-      Enum.map(@allowlist, fn entry ->
-        case client.query(scoped_query(entry.query)) do
+      Enum.map(@whitelist, fn entry ->
+        case client.query(entry.query) do
           {:ok, value} when is_number(value) -> {:ok, live_entry(entry, value)}
           _ -> :error
         end
@@ -341,28 +320,5 @@ defmodule Stacks.Transparency do
 
   defp prometheus_client do
     Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
-  end
-
-  # ── App scoping ─────────────────────────────────────────────────────────────
-
-  # Substitutes the `$app` placeholder in a code-defined allowlist query with the
-  # concrete serving-app literal. The replacement value is `app_label/0` — a
-  # config/env-derived constant, NEVER caller input — so this cannot widen the
-  # fixed allowlist into a query-injection surface.
-  defp scoped_query(query) when is_binary(query) do
-    String.replace(query, "$app", app_label())
-  end
-
-  # The Fly app whose metrics this node should expose publicly. Fly sets
-  # `FLY_APP_NAME` on every machine (`thestacks-core` in prod, `stacks-core-pr-…`
-  # on previews); a config override wins for tests/staging, and the prod app name
-  # is the final fallback so a mis-set env never blends preview traffic into the
-  # public prod page.
-  defp app_label do
-    Application.get_env(
-      :core,
-      :fly_metrics_app,
-      System.get_env("FLY_APP_NAME") || @default_app
-    )
   end
 end

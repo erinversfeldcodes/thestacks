@@ -1,44 +1,49 @@
 defmodule Stacks.Transparency.Prometheus do
   @moduledoc """
-  Read-only client for the self-hosted VictoriaMetrics store (ADR-021 / #241 / #255).
+  Real read-only client for Fly's managed-Prometheus HTTP API (Issue #241 /
+  ADR-019 §2).
 
-  Runs a single instant query against `<base>/api/v1/query` — VictoriaMetrics
-  speaks the Prometheus query API — and extracts a single scalar from the result.
-  `<base>` is the 6PN-internal VM URL (e.g.
-  `http://thestacks-victoriametrics.internal:8428`), so **no auth/token** is
-  needed: the endpoint is unreachable from the public internet. This replaces the
-  Fly managed-Prometheus client, whose scrape never ingested a sample (#248).
+  Runs a single instant query against
+  `https://api.fly.io/prometheus/<org>/api/v1/query` with a read token, and
+  extracts a single scalar value from the result.
 
-  ## Config guard
+  ## Token guard
 
-  The base URL comes from `config :core, :metrics_query_url` (runtime.exs defaults
-  it to the metrics push target — the same VM). When unset — local/test — this
-  client returns `{:error, :not_configured}` and `Stacks.Transparency` degrades
-  the live section to `:unavailable`. It must never break boot or raise.
+  The read token (`FLY_PROMETHEUS_READ_TOKEN`) and org slug
+  (`FLY_PROMETHEUS_ORG`) are Fly secrets, guarded like the log-shipper /
+  Grafana config: when either is absent this client returns
+  `{:error, :not_configured}` and `Stacks.Transparency` degrades the live
+  section to `:unavailable`. It must never break boot or raise.
 
-  Only queries drawn from `Stacks.Transparency`'s fixed allowlist ever reach this
-  client — there is no code path that forwards a user-supplied query — and the
-  allowlist is proven a subset of `Core.PromEx.MetricAudience` `:public` metrics.
+  Only queries drawn from `Stacks.Transparency`'s fixed whitelist ever reach
+  this client — there is no code path that forwards a user-supplied query.
   """
 
   @behaviour Stacks.Transparency.PrometheusClient
 
   require Logger
 
+  @default_base_url "https://api.fly.io/prometheus"
   @receive_timeout 8_000
 
   @impl true
   @spec query(String.t()) :: {:ok, number()} | {:error, term()}
   def query(promql) when is_binary(promql) do
-    with {:ok, base} <- fetch_base_url() do
-      do_query(promql, base)
+    with {:ok, token} <- fetch_token(),
+         {:ok, org} <- fetch_org() do
+      do_query(promql, org, token)
     end
   end
 
-  defp do_query(promql, base) do
-    url = "#{base}/api/v1/query?query=#{URI.encode_www_form(promql)}"
+  defp do_query(promql, org, token) do
+    base = Application.get_env(:core, :fly_prometheus_base_url, @default_base_url)
+    url = "#{base}/#{org}/api/v1/query?query=#{URI.encode_www_form(promql)}"
 
-    req = Finch.build(:get, url, [{"Accept", "application/json"}])
+    req =
+      Finch.build(:get, url, [
+        {"Authorization", "Bearer #{token}"},
+        {"Accept", "application/json"}
+      ])
 
     case Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
@@ -84,9 +89,16 @@ defmodule Stacks.Transparency.Prometheus do
     end
   end
 
-  defp fetch_base_url do
-    case Application.get_env(:core, :metrics_query_url) do
-      url when is_binary(url) and url != "" -> {:ok, String.trim_trailing(url, "/")}
+  defp fetch_token do
+    case Application.get_env(:core, :fly_prometheus_token) do
+      token when is_binary(token) and token != "" -> {:ok, token}
+      _ -> {:error, :not_configured}
+    end
+  end
+
+  defp fetch_org do
+    case Application.get_env(:core, :fly_prometheus_org) do
+      org when is_binary(org) and org != "" -> {:ok, org}
       _ -> {:error, :not_configured}
     end
   end

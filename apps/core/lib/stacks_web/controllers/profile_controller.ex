@@ -50,28 +50,15 @@ defmodule StacksWeb.ProfileController do
   defp with_visible_profile(conn, handle, fun) do
     viewer = build_viewer(conn)
 
-    # NO-PII: tag only the bounded `outcome` atom (ok|not_found). NEVER the
-    # handle (PII + unbounded cardinality). `:not_found` covers BOTH the
-    # absent-handle branch and the ghost/block 404 branch so the 404 rate is a
-    # single enumeration/broken-link signal. Telemetry is warehouse-adjacent.
     case Accounts.get_user_by_handle(handle) do
       nil ->
-        emit_profile_view(:not_found)
         not_found(conn)
 
       target ->
-        if Visibility.profile_visible?(target, viewer) do
-          emit_profile_view(:ok)
-          fun.(target, viewer)
-        else
-          emit_profile_view(:not_found)
-          not_found(conn)
-        end
+        if Visibility.profile_visible?(target, viewer),
+          do: fun.(target, viewer),
+          else: not_found(conn)
     end
-  end
-
-  defp emit_profile_view(outcome) when outcome in [:ok, :not_found] do
-    :telemetry.execute([:stacks, :profile, :view], %{count: 1}, %{outcome: outcome})
   end
 
   defp render_shelf(conn, target, bookshelf_name, viewer) do
@@ -93,19 +80,12 @@ defmodule StacksWeb.ProfileController do
       # single request cannot walk thousands of placements. The owner's own
       # full-shelf view (BookshelfController) is unaffected: it does not use this
       # path and applies no cap.
-      visible =
-        shelves |> Enum.flat_map(& &1.placements) |> Visibility.filter_visible_placements(viewer)
-
-      cap = public_shelf_cap()
-      visible_ids = visible |> Enum.take(cap) |> MapSet.new(& &1.id)
-
-      # NO-PII: untagged occurrence counter — emitted ONLY when the cap actually
-      # truncated rows (visible-placement count exceeded the cap), never per
-      # placement. No handle/user-id/shelf name reaches the sink (telemetry is
-      # warehouse-adjacent). Frequent hits = very large shelves or scraping.
-      if length(visible) > cap do
-        :telemetry.execute([:stacks, :shelf, :browse_capped], %{count: 1}, %{})
-      end
+      visible_ids =
+        shelves
+        |> Enum.flat_map(& &1.placements)
+        |> Visibility.filter_visible_placements(viewer)
+        |> Enum.take(public_shelf_cap())
+        |> MapSet.new(& &1.id)
 
       shelf_json =
         Enum.map(shelves, fn shelf ->

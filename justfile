@@ -411,22 +411,3 @@ lock-vision:
         apps/vision/requirements.txt apps/vision/requirements-dev.txt
     '
     echo "Regenerated apps/vision/requirements.lock + requirements-dev.lock"
-
-# Local observability stack (ADR-021 / Epic #249): VictoriaMetrics + anonymous
-# Grafana so you can SEE the public dashboards populate with real data. Run
-# alongside Phoenix started with METRICS_SCRAPE_TOKEN=local-dev-metrics-token.
-# Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
-observe:
-    docker compose -f infra/local-observability/docker-compose.yml up
-
-# Stop + remove the local observability stack (keeps the vm-data volume).
-observe-down:
-    docker compose -f infra/local-observability/docker-compose.yml down
-
-# Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
-# EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
-# synthesized well-formed data) and fails on any blank panel or malformed query.
-# Deterministic; complements the CI preview VM emission smoke (real emission fidelity).
-render-gate:
-    docker compose -f infra/local-observability/docker-compose.yml up -d
-    scripts/dashboard-render-gate.sh

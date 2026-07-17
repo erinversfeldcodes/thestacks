@@ -188,30 +188,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
   # #176). When the header is absent or empty (local dev / ExUnit conns) we
   # fall back to `conn.remote_ip`.
   defp get_ip(conn) do
-    {ip, source} =
-      case get_req_header(conn, "fly-client-ip") do
-        [ip | _] when ip != "" ->
-          # Trusted Fly edge header present → this is the real client IP.
-          {ip, :trusted_proxy}
-
-        _ ->
-          # Header absent/empty → fall back to the socket peer IP. `conn.remote_ip`
-          # is always a resolved tuple (Plug guarantees it), so there is no nil
-          # case to handle here.
-          {conn.remote_ip |> :inet.ntoa() |> to_string(), :remote_ip}
-      end
-
-    # Trusted-client-IP source meter (Issue #240, closes the #176 gap): which
-    # resolution path produced the rate-limit key. NO-PII: the tag is ONLY the
-    # bounded `source` atom (:trusted_proxy | :remote_ip) — NEVER the IP value
-    # itself. An IP is personal data (GDPR); the source-kind is not, and tagging
-    # the IP would also explode label cardinality. Unexpected `:remote_ip` on a
-    # Fly deploy signals the fly-client-ip edge header isn't arriving, so
-    # rate-limit keying may be bypassed/mis-attributed. Exported as
-    # `stacks_rate_limit_client_ip_count_total{source=…}`.
-    :telemetry.execute([:stacks, :rate_limit, :client_ip], %{count: 1}, %{source: source})
-
-    ip
+    case get_req_header(conn, "fly-client-ip") do
+      [ip | _] when ip != "" -> ip
+      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
+    end
   end
 
   defmodule Server do

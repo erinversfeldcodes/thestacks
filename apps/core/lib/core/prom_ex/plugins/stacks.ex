@@ -55,25 +55,6 @@ defmodule Core.PromEx.Plugins.Stacks do
   # Top bucket of 5000ms catches genuinely pathological queries.
   @query_duration_buckets [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
 
-  # Buckets for the GDPR export/deletion job wall-time (Issue #238). These
-  # jobs must finish well under the 30-day erasure/portability SLA; in
-  # practice they complete in sub-second to low-minutes, so the buckets
-  # span 100ms → 5min and a p95 over the distribution is the SLA-health
-  # SLI. The measurement is already in milliseconds (the worker computes
-  # elapsed via `System.monotonic_time`), so no unit conversion is applied.
-  @gdpr_job_duration_buckets [
-    100,
-    250,
-    500,
-    1_000,
-    5_000,
-    10_000,
-    30_000,
-    60_000,
-    120_000,
-    300_000
-  ]
-
   @impl true
   def event_metrics(_opts) do
     [
@@ -235,57 +216,6 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:bucket]
         ),
 
-        # Trusted-client-IP resolution source (Issue #240, closes #176 gap) —
-        # which path produced the per-IP rate-limit key. `source` is a bounded,
-        # whitelisted atom (:trusted_proxy = Fly edge `fly-client-ip` header |
-        # :remote_ip = socket peer fallback | :fallback = neither resolvable) set
-        # in RateLimiter.get_ip/1. NEVER the IP value itself (GDPR: an IP is
-        # personal data + would explode cardinality — only the source-kind is
-        # tagged). A rise in :fallback, or :remote_ip on a Fly deploy, means the
-        # proxy/IP chain is misconfigured (rate-limit bypass/mis-attribution
-        # risk). Exported as `stacks_rate_limit_client_ip_count_total{source=…}`.
-        counter(
-          [:stacks, :rate_limit, :client_ip, :count, :total],
-          event_name: [:stacks, :rate_limit, :client_ip],
-          description:
-            "Trusted-client-IP resolution source for rate-limit keying (trusted_proxy|remote_ip|fallback); no IP value tagged.",
-          tags: [:source]
-        ),
-
-        # ── Auth/session security counters (Issue #237, epic #231) ────
-        # Refresh-token REUSE detected — fires from Accounts.check_token_family/3
-        # on the family-burn branch when a rotated/superseded refresh token is
-        # replayed (token theft). No tags: any non-zero value is alert-worthy.
-        # Exported as `stacks_auth_refresh_reuse_detected_count_total`.
-        counter(
-          [:stacks, :auth, :refresh, :reuse_detected, :count, :total],
-          event_name: [:stacks, :auth, :refresh, :reuse_detected],
-          description:
-            "Replayed/rotated refresh tokens caught by the reuse gate (token-theft signal, alert-worthy)."
-        ),
-
-        # Session absolute-cap expiry — fires from AuthController.refresh/2 when a
-        # session exceeds its 7-day window and is force-expired. `reason` is a
-        # bounded whitelisted atom (:lifetime_cap). Exported as
-        # `stacks_auth_session_expired_count_total{reason=…}`.
-        counter(
-          [:stacks, :auth, :session, :expired, :count, :total],
-          event_name: [:stacks, :auth, :session, :expired],
-          description: "Sessions force-expired by the absolute lifetime cap.",
-          tags: [:reason]
-        ),
-
-        # MFA verification outcomes — fires from Stacks.MFA.verify_totp/2 and
-        # verify_recovery_code/2. `outcome` is a bounded whitelisted atom
-        # (:success | :failure). Exported as
-        # `stacks_auth_mfa_verify_count_total{outcome=…}`.
-        counter(
-          [:stacks, :auth, :mfa, :verify, :count, :total],
-          event_name: [:stacks, :auth, :mfa, :verify],
-          description: "MFA verification attempts (TOTP + recovery code), by outcome.",
-          tags: [:outcome]
-        ),
-
         # ── Moderation funnel step counters (Issue #228, US-4.1 §13) ──
         # Per-step observability of the moderation pipeline so the funnel
         # can be broken down by outcome rather than collapsed into the
@@ -377,22 +307,6 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:result]
         ),
 
-        # Export job wall-time (Issue #238). Same event as the outcome counter,
-        # reading the `:duration` measurement (job wall-time in ms the worker
-        # computes via `System.monotonic_time`). p95 over this distribution is
-        # the SLA-health SLI: exports must land well under the 30-day
-        # portability promise. Exported as
-        # `stacks_gdpr_export_duration_milliseconds_{bucket,sum,count}`.
-        distribution(
-          [:stacks, :gdpr, :export, :duration, :milliseconds],
-          event_name: [:stacks, :gdpr, :export],
-          measurement: :duration,
-          description:
-            "GDPR data-export job wall-time (ms), by result — p95 watches the 30-day SLA.",
-          tags: [:result],
-          reporter_options: [buckets: @gdpr_job_duration_buckets]
-        ),
-
         # ── GDPR: account-deletion job outcomes + failed step ─────────
         # One event per AccountDeletionJob. On failure, `failed_step` carries
         # the Ecto.Multi step id where the erasure broke (e.g. `:delete_user`),
@@ -403,22 +317,6 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :deletion],
           description: "GDPR account-deletion job outcomes (right to erasure).",
           tags: [:result, :failed_step]
-        ),
-
-        # Deletion job wall-time (Issue #238). Same event as the outcome
-        # counter, reading the `:duration` measurement (ms via
-        # `System.monotonic_time`). Tagged by `:result` only (NOT `:failed_step`
-        # — a per-step histogram would explode cardinality). p95 watches the
-        # 30-day erasure SLA. Exported as
-        # `stacks_gdpr_deletion_duration_milliseconds_{bucket,sum,count}`.
-        distribution(
-          [:stacks, :gdpr, :deletion, :duration, :milliseconds],
-          event_name: [:stacks, :gdpr, :deletion],
-          measurement: :duration,
-          description:
-            "GDPR account-deletion job wall-time (ms), by result — p95 watches the 30-day SLA.",
-          tags: [:result],
-          reporter_options: [buckets: @gdpr_job_duration_buckets]
         ),
 
         # ── GDPR: consent grant / revoke counters ─────────────────────
@@ -479,180 +377,6 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :audit, :write],
           description: "Audit-log write throughput (one per successful insert).",
           tags: [:action, :resource_type]
-        ),
-
-        # ── GDPR: audit-log READ counter (Issue #238) ─────────────────
-        # One event per user audit-log listing (`Stacks.Audit.list_for_user/2`)
-        # so the "who looked at the audit log" side is observable, not just
-        # writes. Deliberately UNTAGGED — no user-id/handle/IP reaches the
-        # sink (GDPR: telemetry is warehouse-adjacent). Exported as
-        # `stacks_gdpr_audit_read_count_total`.
-        counter(
-          [:stacks, :gdpr, :audit, :read, :count, :total],
-          event_name: [:stacks, :gdpr, :audit, :read],
-          description: "Audit-log read throughput (one per user audit-log listing; no PII tag)."
-        ),
-
-        # ── Visibility / Social / ViewAs counters (Issue #236) ────────
-        # These families are EMITTED by #197 (profile-visibility changes,
-        # ceiling rejections, the recap job, user block/unblock, and the ViewAs
-        # owner-preview plug) but were never registered here, so they were absent
-        # from `/internal/metrics` until #236. No new instrumentation is added —
-        # this is registration only. Every tag below is a bounded, whitelisted
-        # atom set at the emit site (never a handle/email/user-id — GDPR:
-        # telemetry is warehouse-adjacent).
-        #
-        # Profile-visibility changes — `direction` ∈ tighten|loosen|same, from
-        # Stacks.Visibility.emit_profile_visibility_change/2. Exported as
-        # `stacks_visibility_profile_change_count_total{direction=…}`.
-        counter(
-          [:stacks, :visibility, :profile_change, :count, :total],
-          event_name: [:stacks, :visibility, :profile_change],
-          description: "Profile-visibility changes, by direction (tighten vs loosen vs same).",
-          tags: [:direction]
-        ),
-
-        # Ceiling rejections — a mutation refused for exceeding its parent's
-        # visibility ceiling. `resource_type` ∈ bookshelf|placement|post|other,
-        # from Stacks.Visibility.emit_ceiling_rejection/1. Exported as
-        # `stacks_visibility_ceiling_rejection_count_total{resource_type=…}`.
-        counter(
-          [:stacks, :visibility, :ceiling_rejection, :count, :total],
-          event_name: [:stacks, :visibility, :ceiling_rejection],
-          description: "Mutations rejected for exceeding their parent's visibility ceiling.",
-          tags: [:resource_type]
-        ),
-
-        # Visibility-recap outcomes — one event per VisibilityRecapJob run.
-        # `outcome` ∈ noop|capped|error. Telemetry.Metrics is one-metric-per-
-        # measurement, so the occurrence counter (tagged by outcome) is declared
-        # here and the three capped batch-sizes as `sum`s below. The recap emit
-        # maps carry bookshelves_capped/placements_capped/posts_capped (NOT a
-        # `count` key) — the Counter reporter increments per-event regardless of
-        # measurement, so the outcome-tagged occurrence count is exact. Exported
-        # as `stacks_visibility_recap_count_total{outcome=…}`.
-        counter(
-          [:stacks, :visibility, :recap, :count, :total],
-          event_name: [:stacks, :visibility, :recap],
-          description: "Visibility-recap job runs, by outcome (noop vs capped vs error).",
-          tags: [:outcome]
-        ),
-
-        # Recap batch sizes — each recap event carries how many bookshelves /
-        # placements / posts were capped down to the new profile ceiling. `sum`
-        # over the respective measurement so the totals are observable. Exported
-        # as `stacks_visibility_recap_{bookshelves,placements,posts}_capped_total`.
-        sum(
-          [:stacks, :visibility, :recap, :bookshelves_capped, :total],
-          event_name: [:stacks, :visibility, :recap],
-          measurement: :bookshelves_capped,
-          description: "Bookshelves capped down by the visibility-recap job."
-        ),
-        sum(
-          [:stacks, :visibility, :recap, :placements_capped, :total],
-          event_name: [:stacks, :visibility, :recap],
-          measurement: :placements_capped,
-          description: "Placements capped down by the visibility-recap job."
-        ),
-        sum(
-          [:stacks, :visibility, :recap, :posts_capped, :total],
-          event_name: [:stacks, :visibility, :recap],
-          measurement: :posts_capped,
-          description: "Blog posts capped down by the visibility-recap job."
-        ),
-
-        # User block / unblock — untagged occurrence counters from
-        # Stacks.Social.block_user/2 and unblock_user/2. Exported as
-        # `stacks_social_block_count_total` and `stacks_social_unblock_count_total`.
-        counter(
-          [:stacks, :social, :block, :count, :total],
-          event_name: [:stacks, :social, :block],
-          description: "Users blocked (op.user_blocks inserts)."
-        ),
-        counter(
-          [:stacks, :social, :unblock, :count, :total],
-          event_name: [:stacks, :social, :unblock],
-          description: "Users unblocked (op.user_blocks deletes)."
-        ),
-
-        # Block errors — a block insert that failed. `reason` ∈
-        # already_blocked|invalid (bounded atom from block_error_reason/1).
-        # Exported as `stacks_social_block_error_count_total{reason=…}`.
-        counter(
-          [:stacks, :social, :block_error, :count, :total],
-          event_name: [:stacks, :social, :block_error],
-          description: "Failed block attempts, by reason (already_blocked vs invalid).",
-          tags: [:reason]
-        ),
-
-        # ViewAs usage — one per accepted `?view_as=` perspective in
-        # StacksWeb.Plugs.ViewAsPlug. `perspective` ∈
-        # unauthenticated|platform|specific_user (KIND only, never the raw uuid).
-        # Exported as `stacks_view_as_usage_count_total{perspective=…}`.
-        counter(
-          [:stacks, :view_as, :usage, :count, :total],
-          event_name: [:stacks, :view_as, :usage],
-          description: "ViewAs owner-preview usage, by perspective kind.",
-          tags: [:perspective]
-        ),
-
-        # ViewAs errors — a rejected ViewAs request. `reason` ∈
-        # invalid_perspective|not_implemented|forbidden; `phase` ∈ parse|authorize.
-        # Exported as `stacks_view_as_error_count_total{reason=…,phase=…}`.
-        counter(
-          [:stacks, :view_as, :error, :count, :total],
-          event_name: [:stacks, :view_as, :error],
-          description: "Rejected ViewAs requests, by reason and phase (parse vs authorize).",
-          tags: [:reason, :phase]
-        ),
-
-        # ── Discovery / profiles / people-search counters (Issue #239) ────
-        # Instrumentation of the public discovery surfaces (#210–#217, #221).
-        # Every tag below is a bounded, whitelisted atom set at the emit site —
-        # NEVER the search query string, a handle, a user-id, or an IP (those are
-        # unbounded cardinality + PII; telemetry is warehouse-adjacent).
-        #
-        # People-search outcomes — one per `GET /api/search/users`. `outcome` ∈
-        # hit|zero_result (zero_result = empty result list). The zero_result rate
-        # is the search-quality signal. Exported as
-        # `stacks_search_people_count_total{outcome=…}`.
-        # (The emit also carries a `:results` numeric measurement — total matches
-        # served — which a future `sum` family can consume; kept out of the
-        # registered families for now to keep the panel↔family lock-step simple.)
-        counter(
-          [:stacks, :search, :people, :count, :total],
-          event_name: [:stacks, :search, :people],
-          description: "People-search requests, by outcome (hit vs zero_result).",
-          tags: [:outcome]
-        ),
-
-        # Public-profile resolution outcomes — one per `/u/:handle` read.
-        # `outcome` ∈ ok|not_found (not_found covers absent handle AND ghost/block
-        # 404). The not_found rate is the broken-link / enumeration-probe signal.
-        # Exported as `stacks_profile_view_count_total{outcome=…}`.
-        counter(
-          [:stacks, :profile, :view, :count, :total],
-          event_name: [:stacks, :profile, :view],
-          description: "Public-profile resolutions, by outcome (ok vs not_found/404).",
-          tags: [:outcome]
-        ),
-
-        # Public-shelf pagination-cap hits — one per shelf-browse response the
-        # #221 public_shelf_cap actually truncated. Untagged. Exported as
-        # `stacks_shelf_browse_capped_count_total`.
-        counter(
-          [:stacks, :shelf, :browse_capped, :count, :total],
-          event_name: [:stacks, :shelf, :browse_capped],
-          description: "Public shelf-browse responses truncated by the public_shelf_cap (#221)."
-        ),
-
-        # Handle claims — one per successful profile update that set or changed
-        # `:handle`. Untagged (the handle value never becomes a label). Exported
-        # as `stacks_handle_claimed_count_total`.
-        counter(
-          [:stacks, :handle, :claimed, :count, :total],
-          event_name: [:stacks, :handle, :claimed],
-          description: "Public `/u/:handle` claims (handle set or changed on a profile update)."
         )
       ])
     ]
