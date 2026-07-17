@@ -662,10 +662,18 @@ fi
 # break a PR's E2E — if it fails we simply don't set the push URL on core.
 if [[ "$PROD_MODE" -eq 1 ]]; then
     VM_APP="${VM_APP:-thestacks-victoriametrics}"
+    VM_HOST="${VM_APP}.internal"
 else
     VM_APP="${PREVIEW_VM_APP}"
+    # The preview VM is a 6PN-only `[[services]]` app. Direct-instance
+    # `<app>.internal:8428` is connection-refused (the port is only exposed via
+    # fly-proxy, not on the instance's 6PN address), but the Flycast address routes
+    # through fly-proxy and works — proven for BOTH the core push (Finch, inet6
+    # pool) and Grafana's datasource. So preview addresses the VM via `.flycast`,
+    # with a private Flycast IP allocated after the app exists (below).
+    VM_HOST="${VM_APP}.flycast"
 fi
-VM_INTERNAL_URL="http://${VM_APP}.internal:8428"
+VM_INTERNAL_URL="http://${VM_HOST}:8428"
 METRICS_PUSH_URL=""
 
 echo ""
@@ -674,6 +682,13 @@ if [[ "$PROD_MODE" -eq 0 ]]; then
     fly apps destroy "${VM_APP}" --yes 2>&1 | grep -v "^Error" || true
 fi
 ensure_fly_app "${VM_APP}"
+
+# Preview: allocate a private Flycast IPv6 so `<app>.flycast` resolves and the
+# fly-proxy-routed :8428 service is reachable (VM_HOST above). Idempotent — a
+# repeat allocation is a no-op. Prod reaches the VM via `.internal` and needs none.
+if [[ "$PROD_MODE" -eq 0 ]]; then
+    fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
+fi
 
 # VM needs a data volume at /victoria-metrics-data. Preview recreated it fresh
 # with the app; prod creates it once. Match fly.core.toml's primary_region.
@@ -705,31 +720,61 @@ else
     echo "WARN: VictoriaMetrics deploy failed — core runs without metrics push (non-fatal)."
 fi
 
-# ── Deploy public Grafana (PROD ONLY) ───────────────────────────────────────
-# Human-facing public dashboards (ADR-021 / Epic #249 #254). Anonymous, read-only;
+# ── Deploy Grafana (PROD public + PREVIEW render-check) ──────────────────────
+# Human-facing dashboards (ADR-021 / Epic #249 #254). Anonymous, read-only;
 # dashboards + datasource are file-provisioned (baked into deploy/grafana/Dockerfile
-# from the app's dashboard JSON), pointed at the 6PN VM. Prod-only — preview stacks
-# validate metrics via the CI emission smoke against the VM, not Grafana. Non-fatal:
-# a Grafana hiccup must not break the core deploy.
+# from the app's dashboard JSON). The datasource URL is env-driven (STACKS_VM_URL):
+#   • PROD    — always-on public dashboards at thestacks-grafana, → the prod VM.
+#   • PREVIEW — ephemeral per-PR Grafana → the preview VM, so the browser
+#     dashboard-render E2E (e2e/tests/dashboards.spec.ts) can load each dashboard
+#     and prove it renders live data. Torn down by cleanup-preview.sh.
+# Grafana reaches the 6PN VM via `.internal` server-side (Grafana is Go — its
+# resolver handles the IPv6-only name natively, unlike the app's Erlang/Finch).
+# Non-fatal: a Grafana hiccup must not break the core deploy. Preview only deploys
+# Grafana when the VM came up (nothing to point at otherwise). The preview Grafana
+# URL is deterministic (https://${PREVIEW_GRAFANA_APP}.fly.dev) — the CI browser
+# render step re-derives it from the shared preview-names, so it is not exported here.
+_deploy_grafana=0
 if [[ "$PROD_MODE" -eq 1 ]]; then
     GRAFANA_APP="${GRAFANA_APP:-thestacks-grafana}"
+    GRAFANA_VM_URL="http://thestacks-victoriametrics.internal:8428"
+    _deploy_grafana=1
+elif [[ -n "$METRICS_PUSH_URL" ]]; then
+    GRAFANA_APP="${PREVIEW_GRAFANA_APP}"
+    GRAFANA_VM_URL="${VM_INTERNAL_URL}"
+    _deploy_grafana=1
+fi
+
+if [[ "$_deploy_grafana" -eq 1 ]]; then
     echo ""
-    echo "==> Deploying public Grafana (app: ${GRAFANA_APP})..."
+    echo "==> Deploying Grafana (app: ${GRAFANA_APP})..."
+    # Preview: recreate fresh each run (immutable, code-provisioned — no state to keep).
+    if [[ "$PROD_MODE" -eq 0 ]]; then
+        fly apps destroy "${GRAFANA_APP}" --yes 2>&1 | grep -v "^Error" || true
+    fi
     ensure_fly_app "${GRAFANA_APP}"
-    # Public read-only dashboard needs a shared IPv4 (like core) so IPv6-less
-    # clients can reach it; SNI-routed and free.
+    # Read-only dashboard needs a shared IPv4 (like core) so IPv6-less clients can
+    # reach it; SNI-routed and free.
     fly ips allocate-v4 --shared --app "${GRAFANA_APP}" 2>&1 || true
 
     _grafana_deploy_once() {
-        (cd "$REPO_ROOT" && fly deploy \
+        # The positional REPO_ROOT is the build WORKING DIRECTORY: it makes Fly
+        # resolve the toml's `[build] dockerfile = "deploy/grafana/Dockerfile"` AND
+        # the build context from repo root, so the Dockerfile's COPY paths
+        # (deploy/grafana/provisioning, apps/core/priv/grafana) resolve. Without it,
+        # `--config deploy/fly.grafana.toml` makes Fly resolve the dockerfile
+        # relative to the config dir → deploy/deploy/grafana/… (not found).
+        (cd "$REPO_ROOT" && fly deploy "$REPO_ROOT" \
             --app "${GRAFANA_APP}" \
             --config "${REPO_ROOT}/deploy/fly.grafana.toml" \
+            --env "STACKS_VM_URL=${GRAFANA_VM_URL}" \
+            --env "GF_SERVER_ROOT_URL=https://${GRAFANA_APP}.fly.dev" \
             --ha=false --depot=false)
     }
     if deploy_with_retry "grafana" _grafana_deploy_once; then
-        echo "PASS deploy: public Grafana at https://${GRAFANA_APP}.fly.dev"
+        echo "PASS deploy: Grafana at https://${GRAFANA_APP}.fly.dev"
     else
-        echo "WARN: Grafana deploy failed — public dashboards unavailable (non-fatal)."
+        echo "WARN: Grafana deploy failed — dashboards unavailable (non-fatal)."
     fi
 fi
 

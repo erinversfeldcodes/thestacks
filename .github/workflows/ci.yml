@@ -1099,48 +1099,63 @@ jobs:
         # LIVE section must render real panels (ADR-021 / #255) — transparency.spec
         # enforces it with a retry budget for push/flush/cache lag.
         run: CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 BASE_URL="${CORE_URL}" scripts/test-e2e.sh
-      - name: Metrics emission smoke (preview VictoriaMetrics)
-        # Emission-fidelity layer (ADR-021 / #253). After E2E, the core app has
-        # pushed its PromEx metrics to the ephemeral preview VictoriaMetrics
-        # (Core.PromEx.MetricsPusher). Prove the real data LANDED: reach the
-        # 6PN-only VM via `fly proxy` and assert ≥1 `stacks_*` series exists for
-        # THIS preview's app label. Complements the deterministic render-gate job
-        # (which proves every panel's PromQL renders, from synthetic data).
+      - name: Dashboard emission gate (preview VictoriaMetrics)
+        # Emission-fidelity layer (ADR-021 / #253/#256). After the E2E drive, the core
+        # app has pushed its PromEx metrics to the ephemeral preview VM
+        # (Core.PromEx.MetricsPusher). Prove the real data LANDED *per dashboard*: reach
+        # the 6PN-only VM via fly proxy and run scripts/dashboard-emission-gate.sh, which
+        # asserts every dashboard receives live data and every curated always-driven
+        # family is present (a stronger successor to the old "≥1 series total" smoke).
         #
-        # Gate policy: HARD-fail only when the VM is reachable but has NO metrics
-        # (a genuine push/emission gap). A proxy/connection failure is infra, not
-        # a metrics defect, so it warns and passes — it never blocks a PR on a
-        # transient tunnel issue.
+        # Proxy to the VM's FLYCAST address, not `.internal`: the preview VM is a
+        # 6PN-only [[services]] app whose direct-instance `.internal:8428` is
+        # connection-refused; `.flycast` routes through fly-proxy and works.
+        #
+        # Gate policy: HARD-fail on a real missing-family (a push/emission gap). A proxy/
+        # connection failure is infra, not a metrics defect, so it warns and passes.
         if: ${{ !cancelled() }}
         run: |
           source scripts/lib/preview-names.sh
           derive_preview_names "${GITHUB_HEAD_REF:-preview}"
-          fly proxy 18428:8428 --app "${PREVIEW_VM_APP}" >/tmp/vmproxy.log 2>&1 &
+          fly proxy 18428:8428 "${PREVIEW_VM_APP}.flycast" --app "${PREVIEW_VM_APP}" >/tmp/vmproxy.log 2>&1 &
           PROXY=$!
           for _ in $(seq 1 20); do
             curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null && break
             sleep 2
           done
           if ! curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null; then
-            echo "::warning::preview VM unreachable via fly proxy ($(tail -1 /tmp/vmproxy.log 2>/dev/null)) — skipping emission smoke"
+            echo "::warning::preview VM unreachable via fly proxy ($(tail -1 /tmp/vmproxy.log 2>/dev/null)) — skipping emission gate"
             kill "$PROXY" 2>/dev/null || true
             exit 0
           fi
-          found=0
-          for _ in $(seq 1 12); do   # retry for push-interval + VM flush lag
-            n=$(curl -s http://localhost:18428/api/v1/series \
-                  --data-urlencode "match[]={app=\"${PREVIEW_CORE_APP}\",__name__=~\"stacks_.*\"}" \
-                  | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo 0)
-            echo "stacks_* series for ${PREVIEW_CORE_APP}: ${n}"
-            if [[ "${n}" -gt 0 ]]; then found=1; break; fi
-            sleep 10
-          done
+          sleep 30   # cover push interval (15s) + VM flush (~10s) + latencyOffset for the last drive
+          set +e
+          EMISSION_GATE_VM=http://localhost:18428 \
+          EMISSION_GATE_APP="${PREVIEW_CORE_APP}" \
+            bash scripts/dashboard-emission-gate.sh
+          rc=$?
+          set -e
           kill "$PROXY" 2>/dev/null || true
-          if [[ "${found}" -ne 1 ]]; then
-            echo "::error::preview VM is up but received NO stacks_* metrics from the core pusher (#253)"
-            exit 1
+          exit $rc
+      - name: Grafana dashboards render (preview browser check)
+        # View-layer proof (ADR-021 / #254). Load each #236–240 dashboard in the preview
+        # Grafana (deployed by deploy-stack.sh, pointed at the preview VM) and assert it
+        # renders: no panel in a datasource/query error state, and the happy-path
+        # dashboards paint live data. Runs AFTER the E2E drive so data exists; browsers +
+        # node deps are already installed by the E2E step above. Non-fatal if the preview
+        # Grafana didn't come up (its deploy is non-fatal).
+        if: ${{ !cancelled() }}
+        run: |
+          source scripts/lib/preview-names.sh
+          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
+          GRAFANA_URL="https://${PREVIEW_GRAFANA_APP}.fly.dev"
+          if ! curl -sf -o /dev/null --max-time 20 "${GRAFANA_URL}/api/health"; then
+            echo "::warning::preview Grafana ${GRAFANA_URL} unreachable — skipping dashboard render check"
+            exit 0
           fi
-          echo "PASS: preview VM has stacks_* metrics for ${PREVIEW_CORE_APP}"
+          cd e2e
+          GRAFANA_URL="${GRAFANA_URL}" npx playwright test tests/dashboards.spec.ts \
+            --project=chromium --no-deps --reporter=line
       - name: Smoke — circuit breakers
         if: always()
         run: |
