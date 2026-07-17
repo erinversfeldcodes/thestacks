@@ -898,7 +898,7 @@ jobs:
   dashboard-render-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Start VictoriaMetrics (local docker)
         run: docker compose -f infra/local-observability/docker-compose.yml up -d victoriametrics
       - name: Render gate — every panel renders non-empty
