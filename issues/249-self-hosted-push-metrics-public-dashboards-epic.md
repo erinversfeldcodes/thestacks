@@ -24,21 +24,28 @@ fail-closed; the core app keeps scale-to-zero and only one tiny VM machine is al
   Prometheus-class store is required; Postgres can't replace it.
 - fly-metrics.net is SSO-only → can't be public and can't be provisioned from code.
 
-## Decomposition (dependency order; each child ≤3 controllers / ≤2 endpoints / ~300 LOC)
+## Decomposition (dependency order; each phase ≤3 controllers / ≤2 endpoints / ~300 LOC)
 
-1. **#250 Audience classification gate (no drops).** Under the ADR-021 §4 rule (public unless
+> These are **phases of this epic**, implemented directly — NOT separate issue files.
+> `P1`–`P7` are phase labels for cross-reference, not tickets; don't go looking for
+> `issues/25x-*.md`. Only **P1** is also broken out as its own ticket (**#250**),
+> because it was scoped before the rest. All phases are ✅ done — see the commit log
+> on `feat/wave2-observability`.
+
+
+1. **P1 Audience classification gate (no drops).** Under the ADR-021 §4 rule (public unless
    PII/de-anon), **all 49 current families are public** — nothing is dropped (display, don't
    delete). Build the fail-closed **classification gate**: a new metric defaults to *not-public*
    and must be explicitly promoted; the two non-public routes are per-user (#242 own-view) and
    admin break-glass (#138) — mechanism/route only, not built here. Output: all-current-public +
    the gate + a test proving a new metric isn't public until promoted. (No infra.)
 
-2. **#251 `@whitelist` → `@allowlist` rename + fail-closed audience gate.** Rename the
+2. **P2 `@whitelist` → `@allowlist` rename + fail-closed audience gate.** Rename the
    transparency attribute + API (`allowlist_keys/0`, `:not_allowlisted`) and wire the audience
    registry as the public/operator boundary. (Scoped to `transparency.ex` + its 2 consumers +
    tests; do NOT touch the unrelated "bounded whitelisted atom" comments elsewhere.)
 
-3. **#252 VictoriaMetrics deploy.** `deploy/fly.victoriametrics.toml` (tiny VM + volume, 6PN-only,
+3. **P3 VictoriaMetrics deploy.** `deploy/fly.victoriametrics.toml` (tiny VM + volume, 6PN-only,
    remote-write auth). **Two lifecycles, one config:**
    - **Preview = EPHEMERAL.** A per-PR VM app created by `deploy-stack.sh` and **destroyed on
      teardown** with the rest of the preview (wire BOTH create and destroy — don't leak VMs). No
@@ -47,7 +54,7 @@ fail-closed; the core app keeps scale-to-zero and only one tiny VM machine is al
    - **Prod = ALWAYS-ON.** `min_machines_running = 1`, provisioned once at prod cutover (the only
      standing cost). Core app stays scale-to-zero regardless.
 
-4. **#253 Push ingestion — in-BEAM pusher (no vmagent/sidecar).** A
+4. **P4 Push ingestion — in-BEAM pusher (no vmagent/sidecar).** A
    `Core.PromEx.MetricsPusher` GenServer periodically POSTs PromEx's own text
    exposition (the same bytes `/internal/metrics` serves) to the VM's
    `/api/v1/import/prometheus` over 6PN (`http://<vm-app>.internal:8428`). VM accepts
@@ -57,15 +64,15 @@ fail-closed; the core app keeps scale-to-zero and only one tiny VM machine is al
    #248). Retire the Fly `[metrics]` scrape reliance + the `MetricsAuth` 6PN scrape
    bypass for ingestion. Verify samples land in VM after a deploy+drive.
 
-5. **#254 Self-hosted public Grafana.** Fly app (or co-located), anonymous viewer,
+5. **P5 Self-hosted public Grafana.** Fly app (or co-located), anonymous viewer,
    file-provisioned datasource (→ VM, `uid: prometheus`) + curated dashboards-as-code. Public
    URL. Retire PromEx Grafana-upload path + `GRAFANA_HOST`/`GRAFANA_AUTH_TOKEN` secrets.
 
-6. **#255 Repoint transparency page (#241) to self-hosted VM.**
+6. **P6 Repoint transparency page (#241) to self-hosted VM.**
    `Stacks.Transparency.Prometheus` queries the self-hosted VM (same Prometheus HTTP wire) via
    `@allowlist`; durable marts unchanged. Public page shows the `:public` set.
 
-7. **#256 Completeness gate + retire dead infra.** Repurpose `DashboardDriftTest` to enforce
+7. **P7 Completeness gate + retire dead infra.** Repurpose `DashboardDriftTest` to enforce
    *measured ⊆ displayed* (every registered metric has a public panel; a future non-public metric
    must be routed to #242/break-glass or the build fails). Re-point the #232 dashboard-smoke at the
    self-hosted VM. Close/retire #248; remove Fly-managed-Prometheus + fly-metrics.net assumptions
@@ -93,7 +100,7 @@ this bar** (reuse the teaching descriptions; add rows/section-intros; fix units/
 live). All are **public** dashboards (no operator tier). No metric is dropped, so no panels are
 removed for curation — every registered metric keeps its panel.
 
-## Dead-delivery removal (do first, part of #256 / a cleanup commit)
+## Dead-delivery removal (do first, part of P7 / a cleanup commit)
 These are wired to the abandoned Fly-managed-Prometheus + fly-metrics.net path — deleted, not
 adapted: the PromEx Grafana-**upload** path (`prom_ex.ex` grafana assign + `runtime.exs`
 `GRAFANA_HOST`/`GRAFANA_AUTH_TOKEN` branch); the CI dashboard-smoke step + GitHub secrets
@@ -105,7 +112,7 @@ the Fly `[metrics]` scrape reliance for ingestion. KEEP: telemetry emission + em
 A throwaway `fly deploy` of `deploy/fly.victoriametrics.toml` proved the config **deploys and
 VM boots/runs stably** on Fly (image + `[processes]` command + volume + `[[services]]`). Fixes
 found and folded into the config: `processes = ["vm"]` is REQUIRED on the service when a named
-process group exists; 256mb → 512mb. **Known lifecycle nuance for #252:** a 6PN-only app (no
+process group exists; 256mb → 512mb. **Known lifecycle nuance for P3:** a 6PN-only app (no
 public IP) is NOT managed by Fly's proxy, so `min_machines_running`/auto-start don't keep it up
 on their own. Resolve in deploy-stack.sh by either allocating a **Flycast private IP**
 (`fly ips allocate-v6 --private`) so the proxy enforces `min_machines_running`, or explicitly
@@ -140,14 +147,14 @@ asserts non-empty — no "eyeball it" step is acceptable. Two layers:
 
 ## Verification
 - **`just render-gate` green** — every panel renders non-empty against the local VM (the gate above).
-- After #252/#253: query the self-hosted VM directly — `stacks_*` samples present post-drive.
-- After #254: hit the public Grafana URL unauthenticated → dashboards render with data.
-- After #255: transparency page shows live values from VM.
-- #256: `DashboardDriftTest` green (measured ⊆ displayed); dashboard-smoke green against VM.
+- After P3/P4: query the self-hosted VM directly — `stacks_*` samples present post-drive.
+- After P5: hit the public Grafana URL unauthenticated → dashboards render with data.
+- After P6: transparency page shows live values from VM.
+- P7: `DashboardDriftTest` green (measured ⊆ displayed); dashboard-smoke green against VM.
 - `just run just verify` before each child's review.
 
 ## Dependencies
 - ADR-021 (design lock). Supersedes the infra half of ADR-019 §2/§5 and #232; dissolves #248.
 
 ## Agent Assignment
-- infra/deploy (#252/#254), elixir (#250/#251/#253/#255), platform/test (#256).
+- infra/deploy (P3/P5), elixir (P1/P2/P4/P6), platform/test (P7).
