@@ -888,22 +888,6 @@ jobs:
       - name: check-schema-diff — destructive changes require db-breaking label
         run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
 
-  # Deterministic dashboard RENDER gate (ADR-021 / Epic #249). Evaluates every
-  # Grafana panel's real PromQL against a live VictoriaMetrics seeded with
-  # synthesized well-formed data — fails on any blank panel or malformed query.
-  # No app, no preview, no network beyond the local docker VM: deterministic and
-  # self-contained. The drift + label tests are structural (they never evaluate a
-  # query); this proves the panels actually render. Complements the preview
-  # emission smoke (real-data fidelity) in deploy-preview.
-  dashboard-render-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Start VictoriaMetrics (local docker)
-        run: docker compose -f infra/local-observability/docker-compose.yml up -d victoriametrics
-      - name: Render gate — every panel renders non-empty
-        run: bash scripts/dashboard-render-gate.sh
-
   deploy-preview:
     # TODO: restore full dependency list after deploy-preview is stable:
     # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
@@ -953,10 +937,6 @@ jobs:
       # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
-      # (Retired ADR-021: the Fly managed-Prometheus + fly-metrics.net Grafana
-      # creds are gone. The preview VM emission smoke reaches the self-hosted
-      # VictoriaMetrics via `fly proxy` using FLY_API_TOKEN; the deterministic
-      # render-gate job needs no creds at all.)
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
       - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
@@ -1094,68 +1074,7 @@ jobs:
       - name: Preflight — external resolver health
         run: bash scripts/preflight-resolver-health.sh
       - name: Run E2E against deployed stack
-        # E2E_EXPECT_LIVE_METRICS=1: the preview has the self-hosted VictoriaMetrics
-        # wired and the core pusher delivering samples, so the transparency page's
-        # LIVE section must render real panels (ADR-021 / #255) — transparency.spec
-        # enforces it with a retry budget for push/flush/cache lag.
-        run: CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 BASE_URL="${CORE_URL}" scripts/test-e2e.sh
-      - name: Dashboard emission gate (preview VictoriaMetrics)
-        # Emission-fidelity layer (ADR-021 / #253/#256). After the E2E drive, the core
-        # app has pushed its PromEx metrics to the ephemeral preview VM
-        # (Core.PromEx.MetricsPusher). Prove the real data LANDED *per dashboard*: reach
-        # the 6PN-only VM via fly proxy and run scripts/dashboard-emission-gate.sh, which
-        # asserts every dashboard receives live data and every curated always-driven
-        # family is present (a stronger successor to the old "≥1 series total" smoke).
-        #
-        # Proxy to the VM's FLYCAST address, not `.internal`: the preview VM is a
-        # 6PN-only [[services]] app whose direct-instance `.internal:8428` is
-        # connection-refused; `.flycast` routes through fly-proxy and works.
-        #
-        # Gate policy: HARD-fail on a real missing-family (a push/emission gap). A proxy/
-        # connection failure is infra, not a metrics defect, so it warns and passes.
-        if: ${{ !cancelled() }}
-        run: |
-          source scripts/lib/preview-names.sh
-          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
-          fly proxy 18428:8428 "${PREVIEW_VM_APP}.flycast" --app "${PREVIEW_VM_APP}" >/tmp/vmproxy.log 2>&1 &
-          PROXY=$!
-          for _ in $(seq 1 20); do
-            curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null && break
-            sleep 2
-          done
-          if ! curl -sf -o /dev/null http://localhost:18428/health 2>/dev/null; then
-            echo "::warning::preview VM unreachable via fly proxy ($(tail -1 /tmp/vmproxy.log 2>/dev/null)) — skipping emission gate"
-            kill "$PROXY" 2>/dev/null || true
-            exit 0
-          fi
-          sleep 30   # cover push interval (15s) + VM flush (~10s) + latencyOffset for the last drive
-          set +e
-          EMISSION_GATE_VM=http://localhost:18428 \
-          EMISSION_GATE_APP="${PREVIEW_CORE_APP}" \
-            bash scripts/dashboard-emission-gate.sh
-          rc=$?
-          set -e
-          kill "$PROXY" 2>/dev/null || true
-          exit $rc
-      - name: Grafana dashboards render (preview browser check)
-        # View-layer proof (ADR-021 / #254). Load each #236–240 dashboard in the preview
-        # Grafana (deployed by deploy-stack.sh, pointed at the preview VM) and assert it
-        # renders: no panel in a datasource/query error state, and the happy-path
-        # dashboards paint live data. Runs AFTER the E2E drive so data exists; browsers +
-        # node deps are already installed by the E2E step above. Non-fatal if the preview
-        # Grafana didn't come up (its deploy is non-fatal).
-        if: ${{ !cancelled() }}
-        run: |
-          source scripts/lib/preview-names.sh
-          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
-          GRAFANA_URL="https://${PREVIEW_GRAFANA_APP}.fly.dev"
-          if ! curl -sf -o /dev/null --max-time 20 "${GRAFANA_URL}/api/health"; then
-            echo "::warning::preview Grafana ${GRAFANA_URL} unreachable — skipping dashboard render check"
-            exit 0
-          fi
-          cd e2e
-          GRAFANA_URL="${GRAFANA_URL}" npx playwright test tests/dashboards.spec.ts \
-            --project=chromium --no-deps --reporter=line
+        run: CI=1 E2E_SERVICES=none BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Smoke — circuit breakers
         if: always()
         run: |

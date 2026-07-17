@@ -653,131 +653,6 @@ else
     SEARXNG_INTERNAL_URL=""
 fi
 
-# ── Deploy metrics store (VictoriaMetrics) ──────────────────────────────────
-# Self-hosted metrics store (ADR-021 / Epic #249). The core app PUSHES its
-# PromEx metrics here (Core.PromEx.MetricsPusher → /api/v1/import/prometheus over
-# 6PN), replacing Fly's managed-Prometheus scrape that never ingested a sample
-# (#248). Preview: ephemeral per-PR app, torn down by cleanup-preview.sh. Prod:
-# always-on (min_machines_running=1). Non-fatal: a metrics-store hiccup must not
-# break a PR's E2E — if it fails we simply don't set the push URL on core.
-if [[ "$PROD_MODE" -eq 1 ]]; then
-    VM_APP="${VM_APP:-thestacks-victoriametrics}"
-    VM_HOST="${VM_APP}.internal"
-else
-    VM_APP="${PREVIEW_VM_APP}"
-    # The preview VM is a 6PN-only `[[services]]` app. Direct-instance
-    # `<app>.internal:8428` is connection-refused (the port is only exposed via
-    # fly-proxy, not on the instance's 6PN address), but the Flycast address routes
-    # through fly-proxy and works — proven for BOTH the core push (Finch, inet6
-    # pool) and Grafana's datasource. So preview addresses the VM via `.flycast`,
-    # with a private Flycast IP allocated after the app exists (below).
-    VM_HOST="${VM_APP}.flycast"
-fi
-VM_INTERNAL_URL="http://${VM_HOST}:8428"
-METRICS_PUSH_URL=""
-
-echo ""
-echo "==> Deploying metrics store (app: ${VM_APP})..."
-if [[ "$PROD_MODE" -eq 0 ]]; then
-    fly apps destroy "${VM_APP}" --yes 2>&1 | grep -v "^Error" || true
-fi
-ensure_fly_app "${VM_APP}"
-
-# Preview: allocate a private Flycast IPv6 so `<app>.flycast` resolves and the
-# fly-proxy-routed :8428 service is reachable (VM_HOST above). Idempotent — a
-# repeat allocation is a no-op. Prod reaches the VM via `.internal` and needs none.
-if [[ "$PROD_MODE" -eq 0 ]]; then
-    fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
-fi
-
-# VM needs a data volume at /victoria-metrics-data. Preview recreated it fresh
-# with the app; prod creates it once. Match fly.core.toml's primary_region.
-if ! fly volumes list --app "${VM_APP}" --json 2>/dev/null | grep -q '"name"[: ]*"vm_data"'; then
-    fly volumes create vm_data --app "${VM_APP}" --region iad --size 1 --yes 2>&1 \
-        | grep -v "^Error" || true
-fi
-
-_vm_deploy_once() {
-    (cd "$REPO_ROOT" && fly deploy \
-        --app "${VM_APP}" \
-        --config "${REPO_ROOT}/deploy/fly.victoriametrics.toml" \
-        --ha=false --depot=false)
-}
-if deploy_with_retry "victoriametrics" _vm_deploy_once; then
-    # 6PN-only app (no public IP): Fly's proxy does not enforce
-    # min_machines_running, so explicitly start the machine after deploy — the
-    # same idiom the core block uses below. Without this the VM can sit stopped
-    # and the core push silently no-ops.
-    fly machines list --app "${VM_APP}" --json 2>/dev/null \
-        | python3 -c "import json,sys; [print(m['id']) for m in json.load(sys.stdin)]" 2>/dev/null \
-        | while read -r mid; do
-            [[ -z "$mid" ]] && continue
-            fly machine start "$mid" --app "${VM_APP}" 2>/dev/null || true
-        done
-    METRICS_PUSH_URL="${VM_INTERNAL_URL}"
-    echo "PASS deploy: metrics store at ${VM_INTERNAL_URL}"
-else
-    echo "WARN: VictoriaMetrics deploy failed — core runs without metrics push (non-fatal)."
-fi
-
-# ── Deploy Grafana (PROD public + PREVIEW render-check) ──────────────────────
-# Human-facing dashboards (ADR-021 / Epic #249 #254). Anonymous, read-only;
-# dashboards + datasource are file-provisioned (baked into deploy/grafana/Dockerfile
-# from the app's dashboard JSON). The datasource URL is env-driven (STACKS_VM_URL):
-#   • PROD    — always-on public dashboards at thestacks-grafana, → the prod VM.
-#   • PREVIEW — ephemeral per-PR Grafana → the preview VM, so the browser
-#     dashboard-render E2E (e2e/tests/dashboards.spec.ts) can load each dashboard
-#     and prove it renders live data. Torn down by cleanup-preview.sh.
-# Grafana reaches the 6PN VM via `.internal` server-side (Grafana is Go — its
-# resolver handles the IPv6-only name natively, unlike the app's Erlang/Finch).
-# Non-fatal: a Grafana hiccup must not break the core deploy. Preview only deploys
-# Grafana when the VM came up (nothing to point at otherwise). The preview Grafana
-# URL is deterministic (https://${PREVIEW_GRAFANA_APP}.fly.dev) — the CI browser
-# render step re-derives it from the shared preview-names, so it is not exported here.
-_deploy_grafana=0
-if [[ "$PROD_MODE" -eq 1 ]]; then
-    GRAFANA_APP="${GRAFANA_APP:-thestacks-grafana}"
-    GRAFANA_VM_URL="http://thestacks-victoriametrics.internal:8428"
-    _deploy_grafana=1
-elif [[ -n "$METRICS_PUSH_URL" ]]; then
-    GRAFANA_APP="${PREVIEW_GRAFANA_APP}"
-    GRAFANA_VM_URL="${VM_INTERNAL_URL}"
-    _deploy_grafana=1
-fi
-
-if [[ "$_deploy_grafana" -eq 1 ]]; then
-    echo ""
-    echo "==> Deploying Grafana (app: ${GRAFANA_APP})..."
-    # Preview: recreate fresh each run (immutable, code-provisioned — no state to keep).
-    if [[ "$PROD_MODE" -eq 0 ]]; then
-        fly apps destroy "${GRAFANA_APP}" --yes 2>&1 | grep -v "^Error" || true
-    fi
-    ensure_fly_app "${GRAFANA_APP}"
-    # Read-only dashboard needs a shared IPv4 (like core) so IPv6-less clients can
-    # reach it; SNI-routed and free.
-    fly ips allocate-v4 --shared --app "${GRAFANA_APP}" 2>&1 || true
-
-    _grafana_deploy_once() {
-        # The positional REPO_ROOT is the build WORKING DIRECTORY: it makes Fly
-        # resolve the toml's `[build] dockerfile = "deploy/grafana/Dockerfile"` AND
-        # the build context from repo root, so the Dockerfile's COPY paths
-        # (deploy/grafana/provisioning, apps/core/priv/grafana) resolve. Without it,
-        # `--config deploy/fly.grafana.toml` makes Fly resolve the dockerfile
-        # relative to the config dir → deploy/deploy/grafana/… (not found).
-        (cd "$REPO_ROOT" && fly deploy "$REPO_ROOT" \
-            --app "${GRAFANA_APP}" \
-            --config "${REPO_ROOT}/deploy/fly.grafana.toml" \
-            --env "STACKS_VM_URL=${GRAFANA_VM_URL}" \
-            --env "GF_SERVER_ROOT_URL=https://${GRAFANA_APP}.fly.dev" \
-            --ha=false --depot=false)
-    }
-    if deploy_with_retry "grafana" _grafana_deploy_once; then
-        echo "PASS deploy: Grafana at https://${GRAFANA_APP}.fly.dev"
-    else
-        echo "WARN: Grafana deploy failed — dashboards unavailable (non-fatal)."
-    fi
-fi
-
 # ── Create core app ───────────────────────────────────────────────────────────
 # Do NOT destroy the app between deployments. fly deploy replaces machines
 # in-place, so destroy+create is redundant and causes a NXDOMAIN DNS cache
@@ -824,7 +699,6 @@ fly secrets set \
     ${STACKS_APP_DB_PASSWORD:+STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD}"} \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
-    ${METRICS_PUSH_URL:+STACKS_METRICS_PUSH_URL="${METRICS_PUSH_URL}"} \
     ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \

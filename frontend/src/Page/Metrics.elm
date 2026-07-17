@@ -23,7 +23,7 @@ section is `unavailable` (Prometheus unconfigured) or the whole fetch fails.
 
 import Api exposing (LiveSignals(..), TransparencyEntry, TransparencyMetrics)
 import Html exposing (Html, a, details, div, h1, h2, h3, p, section, span, summary, text)
-import Html.Attributes exposing (class, href, rel, target)
+import Html.Attributes exposing (class, href)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -211,29 +211,7 @@ viewObserveSection =
             , a [ class "metrics__rights-link", href "/settings/consent" ]
                 [ text "Manage your consent" ]
             ]
-        , div [ class "metrics__dashboards" ]
-            [ h3 [ class "metrics__rights-title" ] [ text "The full picture" ]
-            , p [ class "metrics__observe-prose" ]
-                [ text "These curated signals are drawn from the same live dashboards our operators use. You can see the whole set." ]
-            , a
-                [ class "metrics__dashboards-link"
-                , href grafanaUrl
-                , target "_blank"
-                , rel "noopener noreferrer"
-                , testId "metrics-grafana-link"
-                ]
-                [ text "See the full operational dashboards →" ]
-            ]
         ]
-
-
-{-| The public, read-only Grafana instance (ADR-021 / #254) — a single fixed
-public URL, so it is a constant rather than server-config. Anonymous access; the
-metrics store behind it is never exposed (Grafana proxies queries server-side).
--}
-grafanaUrl : String
-grafanaUrl =
-    "https://thestacks-grafana.fly.dev"
 
 
 

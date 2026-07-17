@@ -71,22 +71,22 @@ _Compact — observability; 4 net-new emits._
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Emit (search / profile / shelf-cap / handle) | yes | ✅ wired + firing-tested (`prom_ex_custom_metrics_test.exs`, `discovery_drift_test.exs`); no query/handle tags. |
-| Metrics exported | yes | ✅ families registered in the `Stacks` plugin; present in VM (emission gate). |
-| Dashboard + teaching panels | yes | ✅ `discovery.json` registered; loads + renders live in preview Grafana (dashboards.spec). |
-| Drift + live-exposure | yes | ✅ `discovery_drift_test` + `DashboardCompletenessTest` green (13/0). Live-exposure: 3/4 families live in VM after the E2E drive (`profile_view`, `search_people`, `handle_claimed`). The 1 undriven (`shelf_browse_capped`) fires only when a shelf exceeds the public cap — firing-tested, not hit by a happy-path drive. |
+| Emit (search / profile / shelf-cap / handle) | yes | ❌ all four uninstrumented. (→ ✅, firing tests) |
+| Metrics exported | yes | ❌ (→ ✅) |
+| Dashboard + teaching panels | yes | ❌ (→ ✅) |
+| Drift + live-exposure | yes | ❌ (→ ✅) |
 | 1–13 app layers | no | n/a — discovery behaviour covered by #210–#217/#221. |
 
-Punch: (1) 4 emits + firing tests ✅; (2) register ✅; (3) dashboard ✅; (4) drift ✅; (5) live-exposure ✅.
-Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); shelf-cap via firing test.
+Punch: (1) 4 emits + firing tests; (2) register; (3) dashboard; (4) drift; (5) live-exposure.
+Verdict: baseline — 5 punch items.
 
 ## Definition of Done
-- [x] Search (zero-result), profile-404, shelf-cap, and handle-claim emits wired + firing-tested; NO query/handle tags.
-- [x] The four families registered + exported.
-- [x] `discovery` dashboard registered, every panel teaching.
-- [x] Drift + live-exposure tests (each metric appears after its interaction / firing test).
-- [x] `just verify` passes; test audit GREEN — full-branch `just verify` GREEN 2026-07-17 (elixir/dialyzer/credo/sobelow, elm 855, dbt 231).
-- [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); shelf-cap via firing test.
+- [ ] Search (zero-result), profile-404, shelf-cap, and handle-claim emits wired + firing-tested; NO query/handle tags.
+- [ ] The four families registered + exported.
+- [ ] `discovery` dashboard registered, every panel teaching.
+- [ ] Drift + live-exposure tests (each metric appears after its interaction).
+- [ ] `just verify` passes; test audit GREEN.
+- [ ] Meets the Completion Bar.
 
 ## Dependencies
 #210–#217, #221 (discovery features — merged). **Deferred: start after the current #118+#231 PR.**
