@@ -78,6 +78,14 @@ derive_preview_names() {
     # shellcheck disable=SC2034
     PREVIEW_SEARXNG_APP="stacks-searxng-pr-${PREVIEW_COMPONENT}"
     # shellcheck disable=SC2034
+    # Short prefix (13 chars) — "stacks-victoriametrics-pr-" (26) would blow the
+    # 30-char Fly cap, so the metrics-store preview app uses `stacks-vm-pr-`.
+    PREVIEW_VM_APP="stacks-vm-pr-${PREVIEW_COMPONENT}"
+    # shellcheck disable=SC2034
+    # "stacks-grafana-pr-" is 18 chars — same as the scraper/searxng prefixes the
+    # 12-char component budget is sized for, so it fits the 30-char Fly cap.
+    PREVIEW_GRAFANA_APP="stacks-grafana-pr-${PREVIEW_COMPONENT}"
+    # shellcheck disable=SC2034
     PREVIEW_MODAL_APP="thestacks-vision-${PREVIEW_COMPONENT}"
     # shellcheck disable=SC2034
     PREVIEW_NEON_BRANCH="preview/${PREVIEW_COMPONENT}"

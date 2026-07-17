@@ -283,6 +283,15 @@ defmodule StacksWeb.AuthController do
       # sends the user to /login on this 401.
       revoke_refresh_token(old_token)
 
+      # Absolute session-lifetime-cap expiry (Issue #237). The session exceeded
+      # its 7-day window measured from ORIGINAL issue and may not be renewed —
+      # the user is force-logged-out. Count it so re-login spikes are visible.
+      # `reason` is a bounded whitelisted atom (:lifetime_cap), NOT PII — no
+      # token/user-id/IP in the metadata (telemetry is warehouse-adjacent, GDPR).
+      :telemetry.execute([:stacks, :auth, :session, :expired], %{count: 1}, %{
+        reason: :lifetime_cap
+      })
+
       conn
       |> put_status(401)
       |> json(%{error: "session_expired"})

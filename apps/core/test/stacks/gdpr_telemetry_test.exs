@@ -50,26 +50,35 @@ defmodule Stacks.GDPRTelemetryTest do
   # ── Export / Deletion job outcomes ─────────────────────────────────────────
 
   describe "DataExportJob outcome telemetry" do
-    test "emits [:stacks, :gdpr, :export] with result :ok on success" do
+    test "emits [:stacks, :gdpr, :export] with result :ok + a non-negative duration on success" do
       attach_telemetry([[:stacks, :gdpr, :export]])
       user = insert(:user)
 
       assert :ok = perform_job(DataExportJob, %{"user_id" => user.id})
 
-      assert_receive {:telemetry_event, [:stacks, :gdpr, :export], %{count: 1}, %{result: :ok}}
+      # Issue #238: the emit now carries the job wall-time in the `:duration`
+      # measurement (ms) so the latency distribution can watch the 30-day SLA.
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :export], measurements, %{result: :ok}}
+
+      assert %{count: 1, duration: duration} = measurements
+      assert is_integer(duration) and duration >= 0
     end
 
-    test "emits [:stacks, :gdpr, :export] with result :error on failure" do
+    test "emits [:stacks, :gdpr, :export] with result :error + a duration on failure" do
       attach_telemetry([[:stacks, :gdpr, :export]])
 
       assert {:error, _} = perform_job(DataExportJob, %{"user_id" => Ecto.UUID.generate()})
 
-      assert_receive {:telemetry_event, [:stacks, :gdpr, :export], %{count: 1}, %{result: :error}}
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :export], measurements,
+                      %{result: :error}}
+
+      assert %{count: 1, duration: duration} = measurements
+      assert is_integer(duration) and duration >= 0
     end
   end
 
   describe "AccountDeletionJob outcome telemetry" do
-    test "emits [:stacks, :gdpr, :deletion] with result :ok on success" do
+    test "emits [:stacks, :gdpr, :deletion] with result :ok + a non-negative duration on success" do
       attach_telemetry([[:stacks, :gdpr, :deletion]])
       user = insert(:user)
 
@@ -77,17 +86,24 @@ defmodule Stacks.GDPRTelemetryTest do
 
       # `failed_step: :none` on success keeps the tag set identical to the
       # failure branch so the PromEx counter records both series (see plugin).
-      assert_receive {:telemetry_event, [:stacks, :gdpr, :deletion], %{count: 1},
+      # Issue #238: the emit also carries the job wall-time in `:duration` (ms).
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :deletion], measurements,
                       %{result: :ok, failed_step: :none}}
+
+      assert %{count: 1, duration: duration} = measurements
+      assert is_integer(duration) and duration >= 0
     end
 
-    test "emits [:stacks, :gdpr, :deletion] with result :error and the failed-step id" do
+    test "emits [:stacks, :gdpr, :deletion] with result :error, the failed-step id + a duration" do
       attach_telemetry([[:stacks, :gdpr, :deletion]])
 
       assert {:error, _} = perform_job(AccountDeletionJob, %{"user_id" => Ecto.UUID.generate()})
 
-      assert_receive {:telemetry_event, [:stacks, :gdpr, :deletion], %{count: 1},
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :deletion], measurements,
                       %{result: :error, failed_step: :delete_user}}
+
+      assert %{count: 1, duration: duration} = measurements
+      assert is_integer(duration) and duration >= 0
     end
   end
 
@@ -194,6 +210,25 @@ defmodule Stacks.GDPRTelemetryTest do
 
       assert_receive {:telemetry_event, [:stacks, :gdpr, :audit, :write], %{count: 1},
                       %{action: "test.telemetry_action", resource_type: "test"}}
+    end
+  end
+
+  # ── Audit-log read throughput (Issue #238) ─────────────────────────────────
+
+  describe "audit read telemetry" do
+    test "Audit.list_for_user/2 emits [:stacks, :gdpr, :audit, :read] with no PII metadata" do
+      attach_telemetry([[:stacks, :gdpr, :audit, :read]])
+      user = insert(:user)
+
+      # A prior write so the listing has a row (the read emit fires regardless).
+      assert {:ok, _} = Audit.log(user.id, "test.read_action", resource_type: "test")
+
+      assert {[_ | _], total, 1, _per_page} = Audit.list_for_user(user.id)
+      assert total >= 1
+
+      # Untagged, empty-metadata emit: no user-id/handle/IP reaches the sink.
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :audit, :read], %{count: 1}, metadata}
+      assert metadata == %{}
     end
   end
 end
