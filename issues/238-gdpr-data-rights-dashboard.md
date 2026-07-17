@@ -63,22 +63,22 @@ _Compact — observability; existing metrics + 2 small additions._
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Dashboard exists + registered + teaching | yes | ❌ no GDPR dashboard. (→ ✅) |
-| Export/deletion latency metric | yes | ❌ only outcome counters exist. (→ ✅) |
-| Audit-read counter | yes | ❌ only writes metered. (→ ✅) |
-| Drift + live-exposure | yes | ❌ (→ ✅) |
+| Dashboard exists + registered + teaching | yes | ✅ `gdpr_data_rights.json` registered; loads + renders live in preview Grafana (dashboards.spec). |
+| Export/deletion latency metric | yes | ✅ `gdpr_export/deletion_duration_milliseconds` registered; live in VM after the E2E drive (emission gate). |
+| Audit-read counter | yes | ✅ `gdpr_audit_read_count` registered; live in VM (emission gate). |
+| Drift + live-exposure | yes | ✅ drift + `DashboardCompletenessTest` green (13/0). Live-exposure: 7/11 families live in VM after the E2E drive (export, deletion, consent-grant, audit read/write). The 4 undriven (`gdpr_consent_revoke`, `gdpr_image_expired/orphan/stuck`) are the retention-worker sweeps + consent-revoke — firing-tested in `prom_ex_custom_metrics_test.exs`; not fired by a happy-path drive. |
 | Existing GDPR counters | — | ✅ (unchanged, `gdpr_telemetry_test.exs`) |
 | 1–13 app layers | no | n/a — GDPR behaviour covered by #121/#183–#189. |
 
-Punch: (1) dashboard + teaching panels; (2) export/deletion latency + firing test; (3) audit-read counter + firing test; (4) drift; (5) live-exposure.
-Verdict: baseline — 5 punch items.
+Punch: (1) dashboard + teaching panels ✅; (2) export/deletion latency ✅; (3) audit-read counter ✅; (4) drift ✅; (5) live-exposure ✅.
+Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); worker/revoke families via firing tests.
 
 ## Definition of Done
-- [ ] `gdpr_data_rights` dashboard registered via `dashboards/0`, every panel teaching.
-- [ ] Export/deletion latency metric + audit-read counter wired, registered, firing-tested.
-- [ ] Drift + live-exposure tests (families appear after export/deletion/consent interaction).
-- [ ] `just verify` passes; test audit GREEN; no PII in tags (GDPR-reviewed).
-- [ ] Meets the Completion Bar.
+- [x] `gdpr_data_rights` dashboard registered via `dashboards/0`, every panel teaching.
+- [x] Export/deletion latency metric + audit-read counter wired, registered, firing-tested.
+- [x] Drift + live-exposure tests (families appear after export/deletion/consent interaction).
+- [ ] `just verify` passes; test audit GREEN; no PII in tags — audit GREEN + GDPR-reviewed tags; full-branch `just verify` is the pre-PR gate.
+- [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); worker/revoke via firing tests.
 
 ## Dependencies
 #121/#183–#189 (GDPR features + metrics — merged). **Deferred: start after the current #118+#231 PR.**
