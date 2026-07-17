@@ -1,0 +1,23 @@
+# Datasource → the 6PN-only self-hosted VictoriaMetrics. Grafana proxies queries
+# server-side (access: proxy), so the store is never reached by the client — the
+# public sees Grafana, never the VM. `uid: prometheus` MUST match the uid the
+# dashboard JSON hard-codes (Core.PromEx dashboard_assigns/0), or every panel
+# renders blank.
+#
+# `url` is env-interpolated (Grafana expands `$VAR`/`${VAR}` in provisioning). It
+# is supplied by `STACKS_VM_URL` — set to the prod VM in fly.grafana.toml `[env]`
+# and overridden per-preview via `fly deploy -e STACKS_VM_URL=…` (deploy-stack.sh)
+# so a preview Grafana points at its own preview VM. Grafana is Go, whose resolver
+# handles the IPv6-only 6PN name natively (unlike the app's Erlang/Finch, which
+# needs the inet6 pool).
+apiVersion: 1
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: ${STACKS_VM_URL}
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST

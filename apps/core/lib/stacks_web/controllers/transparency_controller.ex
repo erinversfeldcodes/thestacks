@@ -4,7 +4,7 @@ defmodule StacksWeb.TransparencyController do
   (Issue #241 / ADR-019).
 
   `GET /api/transparency/metrics` returns `{live, durable, generated_at,
-  cache_ttl}` — a whitelisted, anonymised subset of platform observability with
+  cache_ttl}` — a allowlisted, anonymised subset of platform observability with
   teaching metadata per entry. It never proxies the raw `/internal/metrics`
   firehose, never accepts a user-supplied PromQL query, and exposes no PII or
   de-anonymisable dimension. See `Stacks.Transparency` for the privacy boundary.

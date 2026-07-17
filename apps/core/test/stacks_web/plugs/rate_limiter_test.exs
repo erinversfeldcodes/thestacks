@@ -305,6 +305,66 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     end
   end
 
+  # ── Trusted-client-IP source metric (Issue #240, #176 gap) ─────────────────────
+  #
+  # get_ip/1 emits [:stacks, :rate_limit, :client_ip] with a bounded `source`
+  # atom describing WHICH resolution path produced the rate-limit key. The IP
+  # VALUE is never tagged (GDPR: an IP is personal data; the source-kind is not).
+  # get_ip/1 is private, so these tests drive it through the public call/2 (the
+  # :global bucket keys per-IP, so every call resolves the client IP once).
+
+  describe "call/2 client-IP source telemetry" do
+    setup do
+      test_pid = self()
+      handler_id = "test-client-ip-240-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :rate_limit, :client_ip],
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      :ok
+    end
+
+    test "header present → source: :trusted_proxy (and no IP value in metadata)", %{conn: conn} do
+      conn =
+        %{conn | remote_ip: {10, 9, 0, 1}}
+        |> put_req_header("fly-client-ip", "198.51.100.77")
+
+      refute RateLimiter.call(conn, []).halted
+
+      assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
+      # Exactly the bounded source atom — the IP value never becomes a tag.
+      assert metadata == %{source: :trusted_proxy}
+    end
+
+    test "header absent, remote_ip present → source: :remote_ip (and no IP value in metadata)",
+         %{conn: conn} do
+      conn = %{conn | remote_ip: {10, 9, 0, 2}}
+
+      refute RateLimiter.call(conn, []).halted
+
+      assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
+      assert metadata == %{source: :remote_ip}
+    end
+
+    test "empty fly-client-ip header falls through to remote_ip", %{conn: conn} do
+      conn =
+        %{conn | remote_ip: {10, 9, 0, 3}}
+        |> put_req_header("fly-client-ip", "")
+
+      refute RateLimiter.call(conn, []).halted
+
+      assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
+      assert metadata == %{source: :remote_ip}
+    end
+  end
+
   # ── ETS unavailable ───────────────────────────────────────────────────────────
 
   describe "call/2 when ETS table is unavailable" do
