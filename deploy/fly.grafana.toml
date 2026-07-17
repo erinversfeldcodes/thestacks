@@ -13,9 +13,18 @@ app = "thestacks-grafana"
 primary_region = "iad"
 
 [build]
-  dockerfile = "deploy/grafana/Dockerfile"
+  # Relative to THIS config file's dir (deploy/) — Fly resolves `[build] dockerfile`
+  # against the config location, so "deploy/grafana/Dockerfile" would double to
+  # deploy/deploy/grafana/Dockerfile. The build context is repo root (deploy-stack.sh
+  # passes it as the positional working dir) so the Dockerfile's COPY paths resolve.
+  dockerfile = "grafana/Dockerfile"
 
 [env]
+  # Datasource target for the provisioned VictoriaMetrics datasource (Grafana
+  # expands ${STACKS_VM_URL} in provisioning). This is the PROD default; a preview
+  # Grafana overrides it via `fly deploy -e STACKS_VM_URL=…` (deploy-stack.sh) to
+  # point at its own preview VM.
+  STACKS_VM_URL = "http://thestacks-victoriametrics.internal:8428"
   # Public read-only: anonymous Viewer, and NO login form / basic auth so there is
   # no interactive write path — the dashboards are immutable, code-provisioned.
   GF_AUTH_ANONYMOUS_ENABLED = "true"
