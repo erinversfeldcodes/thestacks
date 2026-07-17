@@ -223,4 +223,20 @@ ${deployed_e2e_section}"
     echo "[hook] Updating PR #${pr_num} CI summary..." >&2
     gh pr edit "$pr_num" --body "$new_body"
     echo "[hook] Done." >&2
+
+    # Belt-and-suspenders push. This pre-push hook does a lot of slow work (full
+    # `just ci` + preview deploy) BEFORE git performs the actual object transfer,
+    # so a GitHub connection that flakes at that final moment would drop the push
+    # and force the whole hook to re-run. Push the branch explicitly here — right
+    # after a successful `gh` call, so we know GitHub is reachable — with
+    # --no-verify so it bypasses THIS hook (no recursion). git's own subsequent
+    # push is then a no-op fast-forward; if it fails transiently, the commits are
+    # already on the remote. Non-fatal: a real non-fast-forward surfaces on git's
+    # own push too, so we never mask it.
+    echo "[hook] Pushing ${branch} to origin to guarantee the latest commits land..." >&2
+    if git push origin "$branch" --no-verify; then
+        echo "[hook] Push complete." >&2
+    else
+        echo "[hook] Explicit push failed — git's own push will retry (resolve any non-fast-forward manually)." >&2
+    fi
 }
