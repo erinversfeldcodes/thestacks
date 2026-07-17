@@ -78,7 +78,7 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); ra
 - [x] `platform_ops` dashboard registered via `dashboards/0`, every panel teaching.
 - [x] Trusted-client-IP metric wired (bounded `source` tag), registered, firing-tested.
 - [x] Drift + live-exposure tests (families appear after tripping a limit / fuse / query).
-- [ ] `just verify` passes; test audit GREEN — audit GREEN; full-branch `just verify` is the pre-PR gate.
+- [x] `just verify` passes; test audit GREEN — full-branch `just verify` GREEN 2026-07-17 (elixir/dialyzer/credo/sobelow, elm 855, dbt 231).
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); excluded-spec families via firing tests.
 
 ## Dependencies
