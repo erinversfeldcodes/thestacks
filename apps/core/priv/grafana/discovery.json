@@ -1,0 +1,184 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["stacks", "discovery", "profiles", "search", "issue-239", "issue-231"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(app)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": "label_values(app)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "The Stacks — Discovery & Profiles",
+  "uid": "stacks-discovery",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Discovery & profiles (Issue #239)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "People-search volume + zero-result rate",
+      "description": "WHAT: rate of people-search requests split by outcome (hit vs zero_result), plus the zero-result RATE (zero_result / total) as a search-quality signal. HOW: rate() over stacks_search_people_count_total{outcome=…}, emitted once per GET /api/search/users in UserSearchController.index/2 with outcome=:zero_result when the result list is empty (never the query string — PII/cardinality). MEANS: mostly-hit with a small zero_result trickle is healthy discovery; the zero_result rate is how often readers search and find nobody. WATCH: a rising zero-result rate means search feels empty — retune the trigram/ILIKE matching or surface a 'no matches' UX; a total-volume spike with flat hits can indicate scraping or enumeration.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "zero-result rate" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_search_people_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(stacks_search_people_count_total{app=\"$app\",outcome=\"zero_result\"}[$__rate_interval])) / clamp_min(sum(rate(stacks_search_people_count_total{app=\"$app\"}[$__rate_interval])), 1)",
+          "legendFormat": "zero-result rate"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Public-profile 404 rate",
+      "description": "WHAT: the fraction of public-profile resolutions that 404 (not_found / total), alongside the raw ok vs not_found rates. HOW: rate() over stacks_profile_view_count_total{outcome=…}, emitted once per /u/:handle read in ProfileController.with_visible_profile/3 with outcome=:not_found on BOTH the absent-handle branch and the ghost/block 404 branch (never the handle — PII). MEANS: a low, steady not_found rate is normal (typos, stale links); the ratio is the broken-link / hidden-profile friction signal. WATCH: a sustained spike in the 404 rate means many hits on ghost/blocked/absent handles — broken external links or handle-enumeration probing; correlate with the profile/search rate-limit 429s.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "404 rate" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(stacks_profile_view_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(stacks_profile_view_count_total{app=\"$app\",outcome=\"not_found\"}[$__rate_interval])) / clamp_min(sum(rate(stacks_profile_view_count_total{app=\"$app\"}[$__rate_interval])), 1)",
+          "legendFormat": "404 rate"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Public-shelf pagination-cap hits",
+      "description": "WHAT: rate of public shelf-browse responses that the #221 public_shelf_cap (default 500) actually truncated. HOW: rate() over stacks_shelf_browse_capped_count_total, emitted by ProfileController.render_shelf/4 ONLY when the visible-placement count exceeded the cap (never per placement). MEANS: normally near-zero — most shelves are well under 500 visible placements, so the cap rarely bites. WATCH: frequent cap hits mean someone is walking very large shelves (a genuine power-reader collection or a scraper paginating a public shelf); a sustained rise confirms the #221 bound is doing its job and is worth correlating with the profile-404 and search-volume panels.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(stacks_shelf_browse_capped_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "cap hits/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Handle claims over time",
+      "description": "WHAT: rate of public /u/:handle claims — a profile update that set or changed the reader's handle. HOW: rate() over stacks_handle_claimed_count_total, emitted by Stacks.Accounts.update_profile/2 only when the changeset actually changed :handle (never the handle value — untagged). MEANS: this is the adoption curve for public handles — a low, steady trickle as readers opt into a public /u/:handle presence, with occasional bumps when someone renames. WATCH: a sudden spike could be a rename campaign or automated account setup; a flatline at zero after launch means readers are not discovering or bothering with the handle-claim flow in Settings.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(stacks_handle_claimed_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "handle claims/s"
+        }
+      ]
+    }
+  ]
+}

@@ -199,6 +199,13 @@ defmodule Stacks.Audit do
         _ -> []
       end
 
+    # GDPR telemetry (Issue #238): audit-log READ throughput. One event per
+    # user audit-log listing so "who looked at the audit log" is observable,
+    # not just writes. Deliberately UNTAGGED — no user-id/handle/IP reaches the
+    # sink (GDPR: telemetry is warehouse-adjacent). Registered in
+    # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_read_count_total`.
+    :telemetry.execute([:stacks, :gdpr, :audit, :read], %{count: 1}, %{})
+
     {Enum.map(rows, &decode_read_row/1), total, page, per_page}
   end
 

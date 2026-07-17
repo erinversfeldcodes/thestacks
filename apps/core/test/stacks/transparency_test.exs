@@ -3,7 +3,7 @@ defmodule Stacks.TransparencyTest do
   Tests for the public transparency data layer (Issue #241 / ADR-019).
 
   Load-bearing invariants:
-    * whitelist enforcement — only fixed, code-defined queries run; there is
+    * allowlist enforcement — only fixed, code-defined queries run; there is
       NO code path that runs an arbitrary / user-supplied PromQL string;
     * anonymisation — the payload is aggregates only (no per-user field,
       no de-anonymisable / linked-account dimension);
@@ -29,31 +29,75 @@ defmodule Stacks.TransparencyTest do
     :ok
   end
 
-  describe "whitelist enforcement" do
-    test "a whitelisted signal returns a number via the client" do
+  describe "allowlist enforcement" do
+    test "a allowlisted signal returns a number via the client" do
       MockPrometheusClient.put_response({:ok, 0.42})
 
-      key = hd(Transparency.whitelist_keys())
+      key = hd(Transparency.allowlist_keys())
       assert {:ok, value} = Transparency.run_signal(key)
       assert is_number(value)
     end
 
-    test "an un-whitelisted key cannot be run (no arbitrary/injected PromQL path)" do
-      # The public API accepts only whitelist KEYS (atoms), never raw PromQL.
-      assert {:error, :not_whitelisted} = Transparency.run_signal(:definitely_not_a_signal)
+    test "an un-allowlisted key cannot be run (no arbitrary/injected PromQL path)" do
+      # The public API accepts only allowlist KEYS (atoms), never raw PromQL.
+      assert {:error, :not_allowlisted} = Transparency.run_signal(:definitely_not_a_signal)
 
       # Even an atom that looks like an injection attempt is rejected — there is
       # no branch that forwards a caller-supplied string to the client.
-      assert {:error, :not_whitelisted} =
+      assert {:error, :not_allowlisted} =
                Transparency.run_signal(:"rate(secret_metric[1h]) or 1")
     end
 
-    test "every whitelist entry is a fixed atom key mapped to a code-defined query" do
-      keys = Transparency.whitelist_keys()
+    test "every allowlist entry is a fixed atom key mapped to a code-defined query" do
+      keys = Transparency.allowlist_keys()
       refute Enum.empty?(keys)
       assert Enum.all?(keys, &is_atom/1)
     end
   end
+
+  describe "app scoping (Fly org-wide Prometheus)" do
+    # Fly's managed Prometheus is org-wide and adds an `app` label to every
+    # series; the PUBLIC page must show prod-only data, not blended preview
+    # traffic. Every allowlist query must therefore be app-scoped, and the
+    # scoping must be a code-defined literal (no user input can reach it).
+    setup do
+      # Pin a deterministic app label for the assertions below, then restore.
+      prev = Application.get_env(:core, :fly_metrics_app)
+      Application.put_env(:core, :fly_metrics_app, "thestacks-core")
+      on_exit(fn -> restore_env(:fly_metrics_app, prev) end)
+      :ok
+    end
+
+    test "the query sent to the client is scoped to the serving app" do
+      MockPrometheusClient.put_response({:ok, 1.0})
+
+      key = hd(Transparency.allowlist_keys())
+      assert {:ok, _} = Transparency.run_signal(key)
+
+      # The client receives the substituted, app-scoped query — never the raw
+      # `$app` placeholder and never an unscoped selector.
+      sent = MockPrometheusClient.last_query()
+      assert sent =~ ~s|app="thestacks-core"|
+      refute sent =~ "$app"
+    end
+
+    test "every allowlisted query carries an app-scope matcher, so none can regress unscoped" do
+      MockPrometheusClient.put_response({:ok, 1.0})
+
+      # Run each signal; assert the query the client actually saw is app-scoped
+      # on its stacks_* selector.
+      for key <- Transparency.allowlist_keys() do
+        assert {:ok, _} = Transparency.run_signal(key)
+        sent = MockPrometheusClient.last_query()
+
+        assert sent =~ ~r/stacks_[a-zA-Z0-9_]+\{[^}]*app="thestacks-core"/,
+               "allowlist query for #{inspect(key)} is not app-scoped: #{sent}"
+      end
+    end
+  end
+
+  defp restore_env(_key, nil), do: :ok
+  defp restore_env(key, value), do: Application.put_env(:core, key, value)
 
   describe "metrics/0 — shape + teaching metadata" do
     test "returns live, durable, generated_at, cache_ttl" do
@@ -110,7 +154,7 @@ defmodule Stacks.TransparencyTest do
         entry_keys = entry |> Map.keys() |> MapSet.new()
 
         assert MapSet.subset?(entry_keys, @allowed_entry_keys),
-               "entry exposed a non-whitelisted field: #{inspect(MapSet.difference(entry_keys, @allowed_entry_keys))}"
+               "entry exposed a non-allowlisted field: #{inspect(MapSet.difference(entry_keys, @allowed_entry_keys))}"
       end
     end
 
