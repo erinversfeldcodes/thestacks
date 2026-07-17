@@ -70,21 +70,21 @@ _Compact — observability. Load-bearing: registration present, drift, live-expo
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Metrics exported (PromEx registration) | yes | ❌ the 8 families are emitted but absent from `stacks.ex`. (→ ✅) |
-| Dashboard exists + registered + teaching panels | yes | ❌ no visibility/social dashboard. (→ ✅) |
-| Drift (dashboard ↔ registered) | yes | ❌ (→ ✅) |
-| Live-exposure after interaction | yes | ❌ (→ ✅) |
+| Metrics exported (PromEx registration) | yes | ✅ families registered in `Core.PromEx.Plugins.Stacks`; present in VM (`dashboard-emission-gate.sh`). |
+| Dashboard exists + registered + teaching panels | yes | ✅ `visibility_social.json` registered via `dashboards/0`; loads + renders live in preview Grafana (`e2e/tests/dashboards.spec.ts`). |
+| Drift (dashboard ↔ registered) | yes | ✅ `visibility_social_drift_test` + `DashboardCompletenessTest` green (13/0 — displayed ⊆ measured, no dead panels). |
+| Live-exposure after interaction | yes | ✅ 8/11 referenced families live in VM after the preview E2E drive (emission gate); browser render asserts live panels paint. The 3 undriven (`social_block_error`, `view_as_error`, `visibility_ceiling_rejection`) are error/rejection paths — registered + panel-backed, fire only on those paths, not a happy-path drive. |
 | 1–13 app layers | no | n/a — the emit + behaviour are already covered by #197/#122 tests. |
 
-Punch: (1) register 8 families; (2) dashboard + teaching panels; (3) drift test; (4) live-exposure test.
-Verdict: baseline — 4 punch items.
+Punch: (1) register families ✅; (2) dashboard + teaching panels ✅; (3) drift test ✅; (4) live-exposure test ✅.
+Verdict: DONE — validated live 2026-07-17 on preview stack (emission gate + browser render).
 
 ## Definition of Done
-- [ ] All 8 visibility/social/ViewAs families registered in PromEx and exported at `/internal/metrics`.
-- [ ] `visibility_social` dashboard registered via `dashboards/0`, every panel with a teaching `description`.
-- [ ] Drift test (dashboard ↔ registered families) + live-exposure test (families appear after real interaction).
-- [ ] `just verify` passes; test audit GREEN.
-- [ ] Meets the Completion Bar — the live-exposure test proves interaction → metric, not assumed.
+- [x] All visibility/social/ViewAs families registered in PromEx and exported — present in VM (emission gate).
+- [x] `visibility_social` dashboard registered via `dashboards/0`, teaching panels; renders live (dashboards.spec).
+- [x] Drift test + live-exposure — drift/completeness green (13/0); live-exposure via emission gate + browser render.
+- [ ] `just verify` passes; test audit GREEN — audit GREEN; full-branch `just verify` is the remaining pre-PR gate.
+- [x] Meets the Completion Bar — live-exposure proven (families in VM after E2E drive + browser paints), not assumed.
 
 ## Dependencies
 #197 (emit — merged). Independent of #232 (validated without live Grafana). **Deferred: start after the
