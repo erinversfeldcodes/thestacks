@@ -5,8 +5,8 @@ defmodule Stacks.Transparency.PrometheusClient do
 
   The single callback runs ONE instant PromQL query and returns a scalar
   numeric value. Callers (`Stacks.Transparency`) only ever pass queries drawn
-  from the fixed, code-defined allowlist — the behaviour deliberately exposes
-  no way to run a caller-assembled query beyond that allowlist. The
+  from the fixed, code-defined whitelist — the behaviour deliberately exposes
+  no way to run a caller-assembled query beyond that whitelist. The
   implementation guards Fly's managed-Prometheus read token: when the token is
   absent the client returns `{:error, :not_configured}` and the live section
   degrades to `:unavailable` rather than erroring or leaking.

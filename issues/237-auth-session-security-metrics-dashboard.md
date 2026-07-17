@@ -70,22 +70,22 @@ _Compact — observability + 3 new security emits._
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Emit (reuse / session-cap / MFA) | yes | ✅ wired + firing tests (`auth_security_telemetry_test.exs`, `auth_controller_test.exs` — happy + sad). |
-| Metrics exported | yes | ✅ families registered in the `Stacks` plugin; present in VM (emission gate). |
-| Dashboard + teaching panels | yes | ✅ `auth_security.json` registered; loads + renders live in preview Grafana (dashboards.spec). |
-| Drift + live-exposure | yes | ✅ `auth_security_drift_test` + `DashboardCompletenessTest` green (13/0). Live-exposure: happy-path families (login-failure, registration, jwt-issued) live in VM after the E2E drive. The 4 undriven (`refresh_reuse_detected`, `refresh_revoke_failed`, `mfa_verify`, `session_expired`) are attack/MFA/expiry paths — proven by the firing tests above; a happy-path drive can't trigger them. |
+| Emit (reuse / session-cap / MFA) | yes | ❌ `guardian.ex`, `auth_controller.ex` cap path, `mfa.ex` emit nothing. (→ ✅, firing tests) |
+| Metrics exported | yes | ❌ the 3 families unregistered. (→ ✅) |
+| Dashboard + teaching panels | yes | ❌ no auth dashboard. (→ ✅) |
+| Drift + live-exposure | yes | ❌ (→ ✅) |
 | 1–10,12,13 | no | n/a — auth behaviour already tested (#124/#178/#179/#180). |
 
-Punch: (1) 3 emits + firing tests ✅; (2) register ✅; (3) dashboard ✅; (4) drift ✅; (5) live-exposure ✅.
-Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); security counters covered by firing tests.
+Punch: (1) 3 emits + firing tests; (2) register; (3) dashboard; (4) drift; (5) live-exposure.
+Verdict: baseline — 5 punch items; the reuse-detected counter is the highest-value (security).
 
 ## Definition of Done
-- [x] Refresh-reuse-detected, session-cap, and MFA-verify emits wired with firing tests (happy + sad).
-- [x] The three families registered + exported at `/internal/metrics`.
-- [x] `auth_security` dashboard registered, every panel teaching; reuse-detected panel flagged alert-worthy.
-- [x] Drift + live-exposure tests (each metric appears after its triggering interaction / firing test).
-- [x] `just verify` passes; test audit GREEN; no PII in tags — full-branch `just verify` GREEN 2026-07-17; GDPR whitelisted tags.
-- [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); rare paths via firing tests.
+- [ ] Refresh-reuse-detected, session-cap, and MFA-verify emits wired with firing tests (happy + sad).
+- [ ] The three families registered + exported at `/internal/metrics`.
+- [ ] `auth_security` dashboard registered, every panel teaching; reuse-detected panel flagged alert-worthy.
+- [ ] Drift + live-exposure tests (each metric appears after its triggering interaction).
+- [ ] `just verify` passes; test audit GREEN; no PII in tags (GDPR-reviewed).
+- [ ] Meets the Completion Bar.
 
 ## Dependencies
 #178/#179/#180 (session behaviour — merged). **Deferred: start after the current #118+#231 PR.**

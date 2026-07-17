@@ -40,11 +40,7 @@ defmodule Core.Application do
           Stacks.Transparency.Cache,
           {Oban, Application.fetch_env!(:core, Oban)},
           CoreWeb.Telemetry,
-          Core.PromEx,
-          # Pushes PromEx metrics to self-hosted VictoriaMetrics (#253). No-op
-          # (init → :ignore) unless STACKS_METRICS_PUSH_URL is set. Must start
-          # after Core.PromEx (reads its metrics) and Stacks.Finch (posts them).
-          Core.PromEx.MetricsPusher
+          Core.PromEx
         ] ++ endpoint_children() ++ pipeline_children()
 
     opts = [strategy: :one_for_one, name: Core.Supervisor]
@@ -100,37 +96,15 @@ defmodule Core.Application do
     vision_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
     scraper_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
     searxng_url = Application.get_env(:core, :searxng_url, "http://localhost:8888")
-    # VictoriaMetrics push + query targets (ADR-021 / #249). Both reach VM over
-    # 6PN (`<app>.internal`/`<app>.flycast`), so they need the same inet6 pool —
-    # otherwise MetricsPusher and Transparency.Prometheus dial IPv4 and get
-    # `:nxdomain` on the IPv6-only name. `nil` when unset (local/test/CI).
-    metrics_push_url = Application.get_env(:core, :metrics_push_url)
-    metrics_query_url = Application.get_env(:core, :metrics_query_url)
 
     inet6_pool = [conn_opts: [transport_opts: [inet6: true]]]
 
     pools =
-      [vision_url, scraper_url, searxng_url, metrics_push_url, metrics_query_url]
-      |> Enum.filter(&sixpn_url?/1)
-      |> Map.new(&{pool_key(&1), inet6_pool})
+      [vision_url, scraper_url, searxng_url]
+      |> Enum.filter(&String.contains?(&1, ".internal"))
+      |> Map.new(&{&1, inet6_pool})
 
     {Finch, name: Stacks.Finch, pools: pools}
-  end
-
-  # A 6PN URL (`<app>.internal`/`<app>.flycast`) resolves to an IPv6-only
-  # address, so its Finch pool needs `inet6: true`. `nil`/local URLs are skipped.
-  defp sixpn_url?(url) when is_binary(url),
-    do: String.contains?(url, ".internal") or String.contains?(url, ".flycast")
-
-  defp sixpn_url?(_), do: false
-
-  # Finch keys pools by scheme+host+port, so a URL carrying a path/query (the
-  # metrics push URL is stored bare, but be defensive) must be reduced to its
-  # origin before use as a pool key.
-  defp pool_key(url) do
-    uri = URI.parse(url)
-    port = uri.port || URI.default_port(uri.scheme)
-    "#{uri.scheme}://#{uri.host}:#{port}"
   end
 
   # Phoenix endpoint child — default-on, with an explicit opt-out for
