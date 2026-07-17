@@ -45,7 +45,7 @@ rate-limit rejections) publicly is an intentional radical-transparency choice, n
 These are aggregate, non-PII, non-de-anonymisable, so they are `:public` per the rule.
 
 ## Technical Requirements
-- Registry consumed by `@allowlist` (#251) and the completeness gate (#256).
+- Registry consumed by `@allowlist` (the allowlist-rename phase) and the completeness gate (the completeness-gate phase).
 - No `:telemetry.execute` sites or plugin entries are removed (no drops).
 - Own-view (#242) and break-glass (#138) are classification VALUES + routing hooks only — the
   surfaces themselves are out of scope for this issue.
@@ -54,10 +54,10 @@ These are aggregate, non-PII, non-de-anonymisable, so they are `:public` per the
 - [ ] Audience registry implemented; all 49 families explicitly `:public`; unclassified defaults
       to not-public (fail-closed), proven by a test.
 - [ ] `just verify` green; no metric instrumentation removed.
-- [ ] Feeds #251 (`@allowlist`) and #256 (completeness gate).
+- [ ] Feeds the allowlist-rename phase (`@allowlist`) and the completeness-gate phase (completeness gate).
 
 ## Dependencies
-Parent #249. Blocks #251, #255, #256. Grounded by the #249 metric audit.
+Parent #249. Blocks the allowlist-rename phase, the transparency-repoint phase, the completeness-gate phase. Grounded by the #249 metric audit.
 
 ## Agent Assignment
 elixir-agent.
