@@ -705,6 +705,34 @@ else
     echo "WARN: VictoriaMetrics deploy failed — core runs without metrics push (non-fatal)."
 fi
 
+# ── Deploy public Grafana (PROD ONLY) ───────────────────────────────────────
+# Human-facing public dashboards (ADR-021 / Epic #249 #254). Anonymous, read-only;
+# dashboards + datasource are file-provisioned (baked into deploy/grafana/Dockerfile
+# from the app's dashboard JSON), pointed at the 6PN VM. Prod-only — preview stacks
+# validate metrics via the CI emission smoke against the VM, not Grafana. Non-fatal:
+# a Grafana hiccup must not break the core deploy.
+if [[ "$PROD_MODE" -eq 1 ]]; then
+    GRAFANA_APP="${GRAFANA_APP:-thestacks-grafana}"
+    echo ""
+    echo "==> Deploying public Grafana (app: ${GRAFANA_APP})..."
+    ensure_fly_app "${GRAFANA_APP}"
+    # Public read-only dashboard needs a shared IPv4 (like core) so IPv6-less
+    # clients can reach it; SNI-routed and free.
+    fly ips allocate-v4 --shared --app "${GRAFANA_APP}" 2>&1 || true
+
+    _grafana_deploy_once() {
+        (cd "$REPO_ROOT" && fly deploy \
+            --app "${GRAFANA_APP}" \
+            --config "${REPO_ROOT}/deploy/fly.grafana.toml" \
+            --ha=false --depot=false)
+    }
+    if deploy_with_retry "grafana" _grafana_deploy_once; then
+        echo "PASS deploy: public Grafana at https://${GRAFANA_APP}.fly.dev"
+    else
+        echo "WARN: Grafana deploy failed — public dashboards unavailable (non-fatal)."
+    fi
+fi
+
 # ── Create core app ───────────────────────────────────────────────────────────
 # Do NOT destroy the app between deployments. fly deploy replaces machines
 # in-place, so destroy+create is redundant and causes a NXDOMAIN DNS cache

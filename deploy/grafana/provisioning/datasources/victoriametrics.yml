@@ -1,0 +1,16 @@
+# Prod datasource → the 6PN-only self-hosted VictoriaMetrics. Grafana proxies
+# queries server-side (access: proxy), so the store is never reached by the
+# client — the public sees Grafana, never the VM. `uid: prometheus` MUST match
+# the uid the dashboard JSON hard-codes (Core.PromEx dashboard_assigns/0), or
+# every panel renders blank.
+apiVersion: 1
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://thestacks-victoriametrics.internal:8428
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
