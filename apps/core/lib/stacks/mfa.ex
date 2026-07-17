@@ -98,8 +98,10 @@ defmodule Stacks.MFA do
 
       mfa ->
         if NimbleTOTP.valid?(mfa.totp_secret, code) do
+          emit_verify(:success)
           :ok
         else
+          emit_verify(:failure)
           {:error, :invalid_code}
         end
     end
@@ -122,8 +124,10 @@ defmodule Stacks.MFA do
         hashed = hash_code(code)
 
         if hashed in mfa.recovery_codes do
+          emit_verify(:success)
           consume_recovery_code(mfa, hashed)
         else
+          emit_verify(:failure)
           {:error, :invalid_code}
         end
     end
@@ -160,6 +164,15 @@ defmodule Stacks.MFA do
   # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
+
+  # MFA verify-outcome counter (Issue #237). Fires on both the TOTP and the
+  # recovery-code verification paths so every code-checking route an attacker
+  # brute-forces (and every legitimate friction point) is observable. `outcome`
+  # is a bounded whitelisted atom (:success | :failure) — never the code,
+  # secret, or user-id (telemetry is warehouse-adjacent, GDPR).
+  defp emit_verify(outcome) when outcome in [:success, :failure] do
+    :telemetry.execute([:stacks, :auth, :mfa, :verify], %{count: 1}, %{outcome: outcome})
+  end
 
   defp consume_recovery_code(mfa, hashed) do
     remaining = List.delete(mfa.recovery_codes, hashed)

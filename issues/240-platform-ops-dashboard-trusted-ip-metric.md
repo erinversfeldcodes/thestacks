@@ -65,21 +65,21 @@ _Compact — observability; existing metrics + 1 new emit._
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Dashboard exists + registered + teaching | yes | ❌ no platform dashboard. (→ ✅) |
-| Trusted-client-IP metric | yes | ❌ IP-trust decision unmetered. (→ ✅) |
-| Drift + live-exposure | yes | ❌ (→ ✅) |
+| Dashboard exists + registered + teaching | yes | ✅ `platform_ops.json` registered; loads + renders live in preview Grafana (dashboards.spec). |
+| Trusted-client-IP metric | yes | ✅ `rate_limit_client_ip_count` (bounded `source` tag) wired; firing-tested (`rate_limiter_test.exs`, `audit_ip_deployed_test.exs`); live in VM (emission gate). |
+| Drift + live-exposure | yes | ✅ `platform_ops_drift_test` + `DashboardCompletenessTest` green (13/0). Live-exposure: 8/10 families live in VM after the E2E drive (events, router/repo latency, fuse-state, client-IP). The 2 undriven (`rate_limit_rejected`, `upload_terminal`) come from the rate-limit + upload/Modal specs excluded from the preview drive — firing-tested; not run in this drive. |
 | Existing platform counters | — | ✅ (unchanged) |
 | 1–13 app layers | no | n/a — platform behaviour covered by #176/#206/circuit-breakers. |
 
-Punch: (1) dashboard + teaching panels; (2) trusted-IP emit + firing test; (3) drift; (4) live-exposure.
-Verdict: baseline — 4 punch items.
+Punch: (1) dashboard + teaching panels ✅; (2) trusted-IP emit + firing test ✅; (3) drift ✅; (4) live-exposure ✅.
+Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); rate-limit/upload families via firing tests (specs excluded from drive).
 
 ## Definition of Done
-- [ ] `platform_ops` dashboard registered via `dashboards/0`, every panel teaching.
-- [ ] Trusted-client-IP metric wired (bounded `source` tag), registered, firing-tested.
-- [ ] Drift + live-exposure tests (families appear after tripping a limit / fuse / query).
-- [ ] `just verify` passes; test audit GREEN.
-- [ ] Meets the Completion Bar.
+- [x] `platform_ops` dashboard registered via `dashboards/0`, every panel teaching.
+- [x] Trusted-client-IP metric wired (bounded `source` tag), registered, firing-tested.
+- [x] Drift + live-exposure tests (families appear after tripping a limit / fuse / query).
+- [x] `just verify` passes; test audit GREEN — full-branch `just verify` GREEN 2026-07-17 (elixir/dialyzer/credo/sobelow, elm 855, dbt 231).
+- [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); excluded-spec families via firing tests.
 
 ## Dependencies
 #176/#206, circuit-breakers (merged). **Deferred: start after the current #118+#231 PR.**

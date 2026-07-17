@@ -1,0 +1,21 @@
+# VictoriaMetrics scrape config for LOCAL dev only (see docker-compose.yml).
+# Prod does NOT use this — it uses remote_write push (Epic #249 #253).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: thestacks-core-local
+    metrics_path: /internal/metrics
+    # StacksWeb.Plugs.MetricsAuth guards /internal/* with `Authorization: Bearer
+    # <METRICS_SCRAPE_TOKEN>`. Locally the scrape is not a 6PN request, so the
+    # unauthenticated Fly bypass does NOT apply — the bearer is required. This
+    # dev-only token must match METRICS_SCRAPE_TOKEN in the shell that runs
+    # `mix phx.server`. NOT a secret; local only.
+    authorization:
+      type: Bearer
+      credentials: local-dev-metrics-token
+    static_configs:
+      - targets: ["host.docker.internal:4000"]
+        labels:
+          # Populates the dashboards' `$app` template variable (label_values(app)).
+          app: thestacks-local
