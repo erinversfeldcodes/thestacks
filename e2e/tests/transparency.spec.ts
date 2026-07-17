@@ -65,6 +65,47 @@ test.describe("Public transparency page (/metrics)", () => {
     });
   });
 
+  // The full user-based path: a visitor can reach the public Grafana dashboards
+  // starting from the HOME page (#254). Rendering the page isn't enough — the
+  // dashboards must be NAVIGABLE from home. Clicks every internal hop, then
+  // asserts the external Grafana link is present + correct (a preview has no
+  // Grafana app of its own, so we prove the reachable link, not a cross-env load).
+  test("public Grafana is navigable from the home page (home → About → /metrics → dashboards)", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // Home → About via the brand dropdown.
+    await page.locator(".app-nav__dropdown").first().hover();
+    const aboutLink = page.locator('a.app-nav__dropdown-link[href="/about"]');
+    await expect(aboutLink).toBeVisible({ timeout: 10_000 });
+    await aboutLink.click();
+    await expect(page).toHaveURL((url) => url.pathname === "/about");
+
+    // About → transparency /metrics.
+    const metricsLink = page.getByTestId("about-metrics-link");
+    await expect(metricsLink).toBeVisible({ timeout: 10_000 });
+    await metricsLink.click();
+    await expect(page).toHaveURL((url) => url.pathname === "/metrics");
+    await expect(page.getByTestId("metrics-content")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // The public Grafana link — the reachable path to the full dashboards. It's
+    // visible on this home-navigated page and targets the external Grafana in a
+    // new tab. We assert the navigation TARGET rather than loading the prod app
+    // cross-env (a preview has no Grafana of its own), which is the standard,
+    // non-flaky way to prove an external link is navigable.
+    const grafanaLink = page.getByTestId("metrics-grafana-link");
+    await expect(grafanaLink).toBeVisible();
+    await expect(grafanaLink).toHaveAttribute(
+      "href",
+      "https://thestacks-grafana.fly.dev",
+    );
+    await expect(grafanaLink).toHaveAttribute("target", "_blank");
+    await expect(grafanaLink).toHaveAttribute("rel", /noopener/);
+  });
+
   // Browser-level counterpart to the CI preview VM emission smoke (ADR-021 / #255):
   // proves the LIVE section actually renders real metric panels, not just the
   // graceful "unavailable" fallback. Gated on E2E_EXPECT_LIVE_METRICS because live
