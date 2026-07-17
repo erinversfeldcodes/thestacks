@@ -1,0 +1,14 @@
+# Load every dashboard-as-code baked into the image at /var/lib/grafana/dashboards
+# (deploy/grafana/Dockerfile COPYs apps/core/priv/grafana there). No manual import.
+apiVersion: 1
+providers:
+  - name: stacks
+    orgId: 1
+    folder: The Stacks
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
