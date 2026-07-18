@@ -949,4 +949,29 @@ defmodule Stacks.AccountsTest do
       )
     )
   end
+
+  describe "expired_unverified_ids/1" do
+    test "returns only unverified accounts older than the TTL" do
+      # `now` is injected far in the future so freshly-inserted rows read as
+      # older than (now - 24h), without fiddling with created_at.
+      future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
+
+      unverified_a = insert(:user, email: "unv-a@thestacks.test", email_confirmed: false)
+      unverified_b = insert(:user, email: "unv-b@thestacks.test", email_confirmed: false)
+      confirmed = insert(:user, email: "conf@thestacks.test", email_confirmed: true)
+
+      ids = Accounts.expired_unverified_ids(future)
+
+      assert unverified_a.id in ids
+      assert unverified_b.id in ids
+      refute confirmed.id in ids, "confirmed accounts are never expired-unverified"
+    end
+
+    test "excludes unverified accounts still within the TTL" do
+      fresh = insert(:user, email: "fresh-unv@thestacks.test", email_confirmed: false)
+
+      # Real now: a just-created account is well within the 24h window.
+      refute fresh.id in Accounts.expired_unverified_ids(DateTime.utc_now())
+    end
+  end
 end
