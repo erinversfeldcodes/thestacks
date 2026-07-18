@@ -31,6 +31,13 @@ defmodule Stacks.Accounts do
   # Changeset functions (migrated from User schema for codegen compatibility)
   # ---------------------------------------------------------------------------
 
+  # An email-confirmation link (and therefore an unverified account) lives 24h
+  # after creation. Single source of truth: `Stacks.Email.confirm_email/1` uses
+  # this for the token's `max_age`, and `ExpiredUnverifiedAccountsJob` uses it to
+  # reap accounts whose link has expired. See docs/runbooks/gdpr-erase-user.md
+  # (erasure) and the daily crontab in config/config.exs.
+  @unverified_account_ttl_seconds 24 * 60 * 60
+
   @registration_required_fields [:email, :password]
   # `:age_verified` is intentionally NOT castable from user input (ADR-020):
   # self-declaration is gone; it is set only by Stacks.AgeVerification.
@@ -275,6 +282,32 @@ defmodule Stacks.Accounts do
   end
 
   def get_user_by_handle(_), do: nil
+
+  @doc """
+  Seconds an email-confirmation link (and the unverified account behind it) stays
+  valid after creation. The confirmation token's `max_age` and the
+  expired-account reaper both key off this one value.
+  """
+  @spec unverified_account_ttl_seconds() :: pos_integer()
+  def unverified_account_ttl_seconds, do: @unverified_account_ttl_seconds
+
+  @doc """
+  IDs of accounts whose email-confirmation link has expired: never confirmed and
+  created more than `unverified_account_ttl_seconds/0` ago. Used by
+  `Stacks.Workers.ExpiredUnverifiedAccountsJob` to reap abandoned signups.
+
+  `now` is injectable for deterministic tests.
+  """
+  @spec expired_unverified_ids(DateTime.t()) :: [binary()]
+  def expired_unverified_ids(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
+
+    Repo.all(
+      from u in User,
+        where: u.email_confirmed == false and u.created_at < ^cutoff,
+        select: u.id
+    )
+  end
 
   @doc """
   People search for the discovery surface (US-10.5.4).

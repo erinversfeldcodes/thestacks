@@ -69,7 +69,11 @@ config :core, Oban,
        # Reaps expired rows from op.guardian_tokens (Issue #124, A2). Access
        # tokens that expire without an explicit logout leave dead rows behind;
        # this purges them via an indexed range delete on `exp`. Midnight UTC.
-       {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob}
+       {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob},
+       # Reaps abandoned signups: accounts that never confirmed their email and
+       # whose 24h confirmation link has expired. Each is erased via the full
+       # GDPR right-to-erasure path. 09:00 UTC (an otherwise-empty slot).
+       {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob}
      ]}
   ],
   # Queue concurrency is sized against the ObanRepo pool + each queue's real
