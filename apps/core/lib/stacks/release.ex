@@ -25,8 +25,10 @@ defmodule Stacks.Release do
   gate, not `ALLOW_SEEDS`.
   """
 
+  alias Core.Repo
   alias Ecto.Adapters.SQL
   alias Stacks.Accounts
+  alias Stacks.Accounts.User
   alias Stacks.GDPR.Deletion
 
   @app :core
@@ -105,48 +107,63 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Operator-run GDPR right-to-erasure for one user, resolved by email or handle.
-  Invoked from the `gdpr-erase-user` GitHub Actions workflow via:
+  Operator-run GDPR right-to-erasure for ONE user, addressed strictly by
+  `user_id`. Invoked from the `gdpr-erase-user` GitHub Actions workflow via:
 
       bin/core rpc 'Stacks.Release.gdpr_erase_user("<base64-json>")'
 
-  The single argument is `Base64(JSON)` so the workflow can carry arbitrary
-  identifier/reason text into the rpc expression with NO shell/Elixir injection
-  surface — the Base64 alphabet cannot break out of the string literal. Decoded
-  JSON keys:
+  The single argument is `Base64(JSON)` so the workflow carries arbitrary
+  reason text into the rpc expression with NO shell/Elixir injection surface —
+  the Base64 alphabet cannot break out of the string literal. Decoded JSON keys:
 
-    * `"identifier"` (required) — email (contains `@`) or handle.
+    * `"user_id"` (required) — the UUID of the user to erase. This is the ONLY
+      globally-unique identifier; the destructive path refuses anything else so
+      it can never resolve ambiguously to the wrong person. Resolve an email or
+      handle to a `user_id` first with `gdpr_lookup_user/1` (the lookup workflow).
     * `"reason"` (required to execute) — operator justification, recorded
       encrypted in the `user.data_deleted` audit row. Must NOT contain the
       subject's personal data.
     * `"execute"` — `true` to actually erase; anything else is a dry run.
-    * `"confirm"` (required to execute) — must equal `"identifier"` verbatim.
+    * `"confirm"` (required to execute) — must equal `"user_id"` verbatim.
 
-  A dry run (the default) resolves the user and prints the per-target counts
-  that WOULD be erased, mutating nothing. Runs inside the live node (`rpc`), so
-  it uses the already-started `Core.Repo`.
+  A dry run (the default) prints the per-target counts that WOULD be erased,
+  mutating nothing. Runs inside the live node (`rpc`), so it uses the
+  already-started `Core.Repo`.
 
   Prints machine-parseable `GDPR_ERASE_*` markers and RAISES on any failure so
-  the invoking `fly ssh` command exits non-zero. The erasure itself scrubs the
+  the invoking `fly ssh` command exits non-zero. The erasure scrubs the
   operational + event-log data immediately; the analytics warehouse drops it on
   the next daily `DbtRefreshJob` full run (config.exs crontab, ≤24h).
   """
   @spec gdpr_erase_user(binary()) :: :ok
   def gdpr_erase_user(params_b64) when is_binary(params_b64) do
     params = params_b64 |> Base.decode64!() |> Jason.decode!()
-    identifier = params |> Map.get("identifier", "") |> to_string() |> String.trim()
+    user_id = params |> Map.get("user_id", "") |> to_string() |> String.trim()
     reason = params |> Map.get("reason", "") |> to_string() |> String.trim()
     confirm = params |> Map.get("confirm", "") |> to_string() |> String.trim()
     execute? = Map.get(params, "execute") == true
 
-    if identifier == "", do: erase_fail!("identifier is required")
+    if user_id == "", do: erase_fail!("user_id is required")
 
-    user = resolve_erase_user(identifier)
-    if is_nil(user), do: erase_fail!("no user found for identifier #{inspect(identifier)}")
+    # Refuse anything that is not a UUID — no email/handle resolution lives in
+    # the destructive path, so it can never delete the wrong user on an
+    # ambiguous key. Use gdpr_lookup_user/1 to turn an email into a user_id.
+    case Ecto.UUID.cast(user_id) do
+      :error ->
+        erase_fail!(
+          "user_id #{inspect(user_id)} is not a valid UUID — resolve it via the lookup workflow"
+        )
 
-    IO.puts("GDPR_ERASE_RESOLVED user_id=#{user.id}")
+      {:ok, _} ->
+        :ok
+    end
 
-    {:ok, counts} = Deletion.preview_user_data(user.id)
+    if is_nil(Repo.get(User, user_id)),
+      do: erase_fail!("no user exists with user_id #{inspect(user_id)}")
+
+    IO.puts("GDPR_ERASE_RESOLVED user_id=#{user_id}")
+
+    {:ok, counts} = Deletion.preview_user_data(user_id)
     IO.puts("GDPR_ERASE_PREVIEW #{Jason.encode!(counts)}")
 
     cond do
@@ -157,12 +174,54 @@ defmodule Stacks.Release do
       reason == "" ->
         erase_fail!("reason is required to execute an erasure")
 
-      confirm != identifier ->
-        erase_fail!("confirmation does not match identifier — refusing to erase")
+      confirm != user_id ->
+        erase_fail!("confirmation does not match user_id — refusing to erase")
 
       true ->
-        do_erase(user.id, reason)
+        do_erase(user_id, reason)
     end
+  end
+
+  @doc """
+  Read-only lookup that resolves an email or handle to its `user_id`(s) —
+  the non-destructive companion to `gdpr_erase_user/1`, driven by the
+  `gdpr-lookup-user` workflow:
+
+      bin/core rpc 'Stacks.Release.gdpr_lookup_user("<base64-json>")'
+
+  Decoded JSON: `%{"query" => email-or-handle}`. An email (`@`) is matched
+  case-insensitively and MAY return several rows (email is not a unique key);
+  a handle is unique and returns at most one. Prints one
+  `GDPR_LOOKUP_MATCH user_id=<uuid> email=<email> handle=<handle>` per match and
+  a trailing `GDPR_LOOKUP_COUNT <n>`, so the operator can pick the right
+  `user_id` to feed the erase workflow. Never mutates anything.
+  """
+  @spec gdpr_lookup_user(binary()) :: :ok
+  def gdpr_lookup_user(params_b64) when is_binary(params_b64) do
+    params = params_b64 |> Base.decode64!() |> Jason.decode!()
+    query = params |> Map.get("query", "") |> to_string() |> String.trim()
+
+    if query == "" do
+      IO.puts("GDPR_LOOKUP_ERROR query is required")
+      raise "GDPR lookup aborted: query is required"
+    end
+
+    matches =
+      if String.contains?(query, "@") do
+        Accounts.find_users_by_email(query)
+      else
+        case Accounts.get_user_by_handle(query) do
+          nil -> []
+          user -> [user]
+        end
+      end
+
+    Enum.each(matches, fn u ->
+      IO.puts("GDPR_LOOKUP_MATCH user_id=#{u.id} email=#{u.email} handle=#{u.handle}")
+    end)
+
+    IO.puts("GDPR_LOOKUP_COUNT #{length(matches)}")
+    :ok
   end
 
   defp do_erase(user_id, reason) do
@@ -185,14 +244,6 @@ defmodule Stacks.Release do
 
       {:error, step, reason, _changes} ->
         erase_fail!("erasure transaction failed at #{step}: #{inspect(reason)}")
-    end
-  end
-
-  defp resolve_erase_user(identifier) do
-    if String.contains?(identifier, "@") do
-      Accounts.get_user_by_email(identifier)
-    else
-      Accounts.get_user_by_handle(identifier)
     end
   end
 

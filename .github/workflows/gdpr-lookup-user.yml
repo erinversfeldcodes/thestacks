@@ -1,0 +1,93 @@
+name: GDPR lookup user
+
+# Read-only companion to the erase workflow: resolves an email or handle to its
+# user_id(s) by running `Stacks.Release.gdpr_lookup_user/1` inside the LIVE core
+# node via `fly ssh console ... rpc`. It mutates nothing — its sole purpose is to
+# give the operator the user_id to feed into `GDPR erase user` (which accepts
+# ONLY a user_id, so it can never resolve ambiguously to the wrong person).
+#
+# An email is matched case-insensitively and MAY return several user_ids (email
+# is not a unique key); a handle is unique and returns at most one.
+#
+# Restricted to the authorised operator (see the "Restrict operators" step) —
+# resolving an email to a user_id exposes account-linkage, so it is gated the
+# same as the erase workflow. Params are Base64(JSON) → no injection surface.
+# See docs/runbooks/gdpr-erase-user.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: "Email (contains @, matched case-insensitively) or handle to resolve to user_id(s)"
+        required: true
+        type: string
+      target_app:
+        description: "Target Fly core app (default: thestacks-core)"
+        required: false
+        type: string
+        default: thestacks-core
+
+permissions:
+  contents: read
+
+jobs:
+  gdpr-lookup-user:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: gdpr-erasure
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      CORE_APP: ${{ inputs.target_app }}
+      LOOKUP_QUERY: ${{ inputs.query }}
+    steps:
+      - name: Restrict operators
+        run: |
+          case "${{ github.actor }}" in
+            erinversfeldcodes) ;;
+            *)
+              echo "::error::${{ github.actor }} is not authorised to run the GDPR lookup"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          if [[ -z "${LOOKUP_QUERY// /}" ]]; then
+            echo "::error::query is required"
+            exit 1
+          fi
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      - name: Resolve query to user_id(s)
+        run: |
+          set -euo pipefail
+
+          params_json="$(jq -cn --arg query "$LOOKUP_QUERY" '{query: $query}')"
+          params_b64="$(printf '%s' "$params_json" | base64 -w0)"
+
+          echo "Looking up '$LOOKUP_QUERY' on app '$CORE_APP'..."
+          set +e
+          out="$(flyctl ssh console --app "$CORE_APP" \
+            -C "/app/bin/core rpc 'Stacks.Release.gdpr_lookup_user(\"$params_b64\")'" 2>&1)"
+          rc=$?
+          set -e
+
+          echo "----- matches -----"
+          echo "$out" | grep -E "GDPR_LOOKUP_(MATCH|COUNT)" || echo "$out"
+          echo "-------------------"
+
+          if echo "$out" | grep -q "GDPR_LOOKUP_ERROR"; then
+            echo "::error::lookup reported an error"
+            exit 1
+          fi
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::rpc invocation failed (exit $rc)"
+            exit $rc
+          fi
+
+          echo "::notice::Feed the chosen user_id into the 'GDPR erase user' workflow."
