@@ -10,6 +10,7 @@ module Page.Login exposing
     , expiredDraftInit
     , expiredInit
     , farewellInit
+    , forgotInit
     , init
     , isSubmitDisabled
     , update
@@ -21,11 +22,10 @@ module Page.Login exposing
     )
 
 import Api exposing (AuthResponse, RegisterError(..))
-import Html exposing (Html, a, button, div, h1, input, label, p, span, text)
-import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
+import Html exposing (Html, button, div, h1, input, label, p, span, text)
+import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
-import Navigation.Route as Route
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -62,6 +62,10 @@ type alias Model =
     -- Set after a successful account deletion (Issue #188) when the user is
     -- redirected here. Drives a warm farewell notice distinct from an expiry.
     , accountDeleted : Bool
+
+    -- Outcome of a forgot-password request (ForgotPasswordMode). The email
+    -- reuses the shared `email` field.
+    , forgotState : RemoteData Http.Error ()
     }
 
 
@@ -69,6 +73,7 @@ type Mode
     = LoginMode
     | RegisterMode
     | RegistrationPending String
+    | ForgotPasswordMode
 
 
 {-| A failed submission. Login failures are always transport/status errors;
@@ -93,6 +98,8 @@ type Msg
     | DisplayNameChanged String
     | ModeSwitched Mode
     | FormSubmitted
+    | ForgotSubmitted
+    | GotForgotResponse (Result Http.Error ())
     | GotAuthResponse (Result Http.Error AuthResponse)
     | GotRegisterResponse (Result RegisterError ())
     | TransitionCompleted AuthResponse
@@ -121,7 +128,16 @@ init =
     , sessionExpired = False
     , draftSaved = False
     , accountDeleted = False
+    , forgotState = NotAsked
     }
+
+
+{-| Initial state for the /forgot-password deep link: the login card opened
+straight onto its "reset your password" mode.
+-}
+forgotInit : Model
+forgotInit =
+    { init | mode = ForgotPasswordMode }
 
 
 {-| Initial login state to show after a global session-expiry redirect: identical
@@ -239,10 +255,29 @@ update msg model =
                 , sessionExpired = False
                 , draftSaved = False
                 , accountDeleted = False
+                , forgotState = NotAsked
               }
             , Cmd.none
             , NoOut
             )
+
+        ForgotSubmitted ->
+            if String.isEmpty (String.trim model.email) then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | forgotState = Loading }
+                , Api.forgotPassword model.email GotForgotResponse
+                , NoOut
+                )
+
+        GotForgotResponse result ->
+            case result of
+                Ok () ->
+                    ( { model | forgotState = Success () }, Cmd.none, NoOut )
+
+                Err err ->
+                    ( { model | forgotState = Failure err }, Cmd.none, NoOut )
 
         FormSubmitted ->
             let
@@ -262,6 +297,9 @@ update msg model =
                                 GotRegisterResponse
 
                         RegistrationPending _ ->
+                            Cmd.none
+
+                        ForgotPasswordMode ->
                             Cmd.none
             in
             ( { model | submitState = Loading, sessionExpired = False, draftSaved = False, accountDeleted = False }, cmd, NoOut )
@@ -345,91 +383,48 @@ viewPendingCard email =
 viewFormCard : Model -> Html Msg
 viewFormCard model =
     div [ class "login-card", testId "login-form" ]
-        [ h1 [ class "login-card__title" ] [ text "The Stacks" ]
-        , p [ class "login-card__subtitle" ]
-            [ text
-                (case model.mode of
-                    RegisterMode ->
-                        "Register for entry to the collection"
+        (h1 [ class "login-card__title" ] [ text "The Stacks" ]
+            :: p [ class "login-card__subtitle" ] [ text (cardSubtitle model.mode) ]
+            :: viewSessionExpiredNotice model
+            :: viewAccountDeletedNotice model
+            :: (case model.mode of
+                    ForgotPasswordMode ->
+                        [ viewForgotForm model ]
 
-                    LoginMode ->
-                        "Present your credentials to enter"
+                    _ ->
+                        viewCredentialsForm model
+               )
+        )
 
-                    RegistrationPending _ ->
-                        "Present your credentials to enter"
-                )
-            ]
-        , viewSessionExpiredNotice model
-        , viewAccountDeletedNotice model
-        , div
-            [ class "login-card__tabs"
-            , attribute "role" "tablist"
-            ]
-            [ button
-                [ class
-                    (if model.mode == LoginMode then
-                        "login-card__tab login-card__tab--active"
 
-                     else
-                        "login-card__tab"
-                    )
-                , attribute "role" "tab"
-                , attribute "aria-selected"
-                    (if model.mode == LoginMode then
-                        "true"
+cardSubtitle : Mode -> String
+cardSubtitle mode =
+    case mode of
+        RegisterMode ->
+            "Register for entry to the collection"
 
-                     else
-                        "false"
-                    )
-                , onClick (ModeSwitched LoginMode)
-                ]
-                [ text "Sign In" ]
-            , button
-                [ class
-                    (if model.mode == RegisterMode then
-                        "login-card__tab login-card__tab--active"
+        ForgotPasswordMode ->
+            "Reset your password"
 
-                     else
-                        "login-card__tab"
-                    )
-                , attribute "role" "tab"
-                , attribute "aria-selected"
-                    (if model.mode == RegisterMode then
-                        "true"
+        _ ->
+            "Present your credentials to enter"
 
-                     else
-                        "false"
-                    )
-                , onClick (ModeSwitched RegisterMode)
-                ]
-                [ text "Register" ]
-            ]
-        , case model.mode of
-            RegisterMode ->
-                div [ class (fieldClass model.displayNameValidation) ]
-                    [ label [ class "login-card__label", for "display-name" ]
-                        [ text "Display Name" ]
-                    , input
-                        [ id "display-name"
-                        , class "login-card__input"
-                        , type_ "text"
-                        , placeholder "Your name"
-                        , value model.displayName
-                        , onInput DisplayNameChanged
-                        ]
-                        []
-                    , viewFieldHint model.displayNameValidation
-                    ]
 
-            _ ->
-                text ""
+{-| The in-card "reset your password" form — a mode of the login card so it
+inherits the same styling and the library background, rather than a bare
+standalone page.
+-}
+viewForgotForm : Model -> Html Msg
+viewForgotForm model =
+    div [ class "login-card__forgot-form" ]
+        [ p [ class "login-card__subtitle" ]
+            [ text "Enter your email and we'll send you a link to set a new password." ]
         , div [ class (fieldClass model.emailValidation) ]
-            [ label [ class "login-card__label", for "email" ]
-                [ text "Email" ]
+            [ label [ class "login-card__label", for "email" ] [ text "Email" ]
             , input
                 [ id "email"
                 , class "login-card__input"
-                , testId "login-email"
+                , testId "forgot-email"
                 , type_ "email"
                 , placeholder "you@example.com"
                 , value model.email
@@ -439,79 +434,191 @@ viewFormCard model =
                 []
             , viewFieldHint model.emailValidation
             ]
-        , div [ class (fieldClass model.passwordValidation) ]
-            [ label [ class "login-card__label", for "password" ]
-                [ text "Password" ]
-            , input
-                [ id "password"
-                , class "login-card__input"
-                , testId "login-password"
-                , type_ "password"
-                , placeholder "Enter your password"
-                , value model.password
-                , onInput PasswordChanged
-                , attribute "aria-required" "true"
-                ]
-                []
-            , viewFieldHint model.passwordValidation
-            ]
-        , case model.mode of
-            RegisterMode ->
-                div [ class (fieldClass model.passwordConfirmValidation) ]
-                    [ label [ class "login-card__label", for "password-confirm" ]
-                        [ text "Confirm Password" ]
-                    , input
-                        [ id "password-confirm"
-                        , class "login-card__input"
-                        , testId "login-password-confirm"
-                        , type_ "password"
-                        , placeholder "Re-enter your password"
-                        , value model.passwordConfirm
-                        , onInput PasswordConfirmChanged
-                        , attribute "aria-required" "true"
-                        ]
-                        []
-                    , viewFieldHint model.passwordConfirmValidation
-                    ]
-
-            _ ->
-                text ""
-        , viewError model
         , button
             [ class "login-card__submit"
-            , testId "login-submit"
-            , onClick FormSubmitted
-            , disabled (isSubmitDisabled model)
+            , testId "forgot-submit"
+            , onClick ForgotSubmitted
+            , disabled (model.forgotState == Loading || String.isEmpty (String.trim model.email))
             ]
-            [ case model.submitState of
+            [ case model.forgotState of
                 Loading ->
                     span [ class "spinner spinner--small" ] []
 
                 _ ->
-                    text
-                        (case model.mode of
-                            RegisterMode ->
-                                "Request Entry"
-
-                            LoginMode ->
-                                "Enter the Stacks"
-
-                            RegistrationPending _ ->
-                                "Enter the Stacks"
-                        )
+                    text "Send reset link"
             ]
-        , case model.mode of
-            LoginMode ->
-                a
-                    [ class "login-card__forgot"
-                    , href (Route.toPath Route.ForgotPassword)
-                    , testId "forgot-password-link"
-                    ]
-                    [ text "Forgot your password?" ]
+        , case model.forgotState of
+            Success _ ->
+                p [ class "login-card__subtitle", testId "forgot-success" ]
+                    [ text "If that email is registered, a reset link is on its way. Check your inbox." ]
+
+            Failure _ ->
+                p [ class "login-card__subtitle", testId "forgot-error" ]
+                    [ text "Something went wrong. Please try again." ]
 
             _ ->
                 text ""
+        , button
+            [ class "login-card__back"
+            , type_ "button"
+            , testId "forgot-back"
+            , onClick (ModeSwitched LoginMode)
+            ]
+            [ text "Back to sign in" ]
         ]
+
+
+viewCredentialsForm : Model -> List (Html Msg)
+viewCredentialsForm model =
+    [ div
+        [ class "login-card__tabs"
+        , attribute "role" "tablist"
+        ]
+        [ button
+            [ class
+                (if model.mode == LoginMode then
+                    "login-card__tab login-card__tab--active"
+
+                 else
+                    "login-card__tab"
+                )
+            , attribute "role" "tab"
+            , attribute "aria-selected"
+                (if model.mode == LoginMode then
+                    "true"
+
+                 else
+                    "false"
+                )
+            , onClick (ModeSwitched LoginMode)
+            ]
+            [ text "Sign In" ]
+        , button
+            [ class
+                (if model.mode == RegisterMode then
+                    "login-card__tab login-card__tab--active"
+
+                 else
+                    "login-card__tab"
+                )
+            , attribute "role" "tab"
+            , attribute "aria-selected"
+                (if model.mode == RegisterMode then
+                    "true"
+
+                 else
+                    "false"
+                )
+            , onClick (ModeSwitched RegisterMode)
+            ]
+            [ text "Register" ]
+        ]
+    , case model.mode of
+        RegisterMode ->
+            div [ class (fieldClass model.displayNameValidation) ]
+                [ label [ class "login-card__label", for "display-name" ]
+                    [ text "Display Name" ]
+                , input
+                    [ id "display-name"
+                    , class "login-card__input"
+                    , type_ "text"
+                    , placeholder "Your name"
+                    , value model.displayName
+                    , onInput DisplayNameChanged
+                    ]
+                    []
+                , viewFieldHint model.displayNameValidation
+                ]
+
+        _ ->
+            text ""
+    , div [ class (fieldClass model.emailValidation) ]
+        [ label [ class "login-card__label", for "email" ]
+            [ text "Email" ]
+        , input
+            [ id "email"
+            , class "login-card__input"
+            , testId "login-email"
+            , type_ "email"
+            , placeholder "you@example.com"
+            , value model.email
+            , onInput EmailChanged
+            , attribute "aria-required" "true"
+            ]
+            []
+        , viewFieldHint model.emailValidation
+        ]
+    , div [ class (fieldClass model.passwordValidation) ]
+        [ label [ class "login-card__label", for "password" ]
+            [ text "Password" ]
+        , input
+            [ id "password"
+            , class "login-card__input"
+            , testId "login-password"
+            , type_ "password"
+            , placeholder "Enter your password"
+            , value model.password
+            , onInput PasswordChanged
+            , attribute "aria-required" "true"
+            ]
+            []
+        , viewFieldHint model.passwordValidation
+        ]
+    , case model.mode of
+        RegisterMode ->
+            div [ class (fieldClass model.passwordConfirmValidation) ]
+                [ label [ class "login-card__label", for "password-confirm" ]
+                    [ text "Confirm Password" ]
+                , input
+                    [ id "password-confirm"
+                    , class "login-card__input"
+                    , testId "login-password-confirm"
+                    , type_ "password"
+                    , placeholder "Re-enter your password"
+                    , value model.passwordConfirm
+                    , onInput PasswordConfirmChanged
+                    , attribute "aria-required" "true"
+                    ]
+                    []
+                , viewFieldHint model.passwordConfirmValidation
+                ]
+
+        _ ->
+            text ""
+    , viewError model
+    , button
+        [ class "login-card__submit"
+        , testId "login-submit"
+        , onClick FormSubmitted
+        , disabled (isSubmitDisabled model)
+        ]
+        [ case model.submitState of
+            Loading ->
+                span [ class "spinner spinner--small" ] []
+
+            _ ->
+                text
+                    (case model.mode of
+                        RegisterMode ->
+                            "Request Entry"
+
+                        _ ->
+                            "Enter the Stacks"
+                    )
+        ]
+    , case model.mode of
+        LoginMode ->
+            button
+                [ class "login-card__forgot"
+                , type_ "button"
+                , onClick (ModeSwitched ForgotPasswordMode)
+                , testId "forgot-password-link"
+                ]
+                [ text "Forgot your password?" ]
+
+        _ ->
+            text ""
+    ]
 
 
 isSubmitDisabled : Model -> Bool
@@ -537,7 +644,7 @@ isSubmitDisabled model =
                         || isInvalidOrPristine model.passwordConfirmValidation
                         || isInvalidOrPristine model.displayNameValidation
 
-                RegistrationPending _ ->
+                _ ->
                     True
     in
     model.submitState == Loading || model.transitionState /= Idle || fieldsInvalid
@@ -711,10 +818,7 @@ httpErrorMessage mode err =
                 RegisterMode ->
                     "A reader with that email already frequents these halls. Try signing in instead."
 
-                LoginMode ->
-                    "Please ensure all fields are properly filled."
-
-                RegistrationPending _ ->
+                _ ->
                     "Please ensure all fields are properly filled."
 
         Http.BadStatus 423 ->
@@ -734,8 +838,5 @@ httpErrorMessage mode err =
                 RegisterMode ->
                     "Registration could not be completed. The email may already be in use."
 
-                LoginMode ->
-                    "The door remains shut. Invalid email or password."
-
-                RegistrationPending _ ->
+                _ ->
                     "The door remains shut. Invalid email or password."

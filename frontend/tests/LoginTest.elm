@@ -113,6 +113,7 @@ suite =
                             , sessionExpired = False
                             , draftSaved = False
                             , accountDeleted = False
+                            , forgotState = NotAsked
                             }
 
                         ( model, _, _ ) =
@@ -381,5 +382,57 @@ suite =
                 \_ ->
                     Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 503))
                         |> Expect.equal "The library is briefly overloaded. Please try again in a few seconds."
+            ]
+        , describe "forgot-password mode (in the login card)"
+            [ test "switching to ForgotPasswordMode sets the mode" <|
+                \_ ->
+                    let
+                        ( m, _, _ ) =
+                            Login.update (ModeSwitched Login.ForgotPasswordMode) Login.init
+                    in
+                    m.mode |> Expect.equal Login.ForgotPasswordMode
+            , test "ForgotSubmitted with an email moves forgotState to Loading" <|
+                \_ ->
+                    let
+                        ( m1, _, _ ) =
+                            Login.update (EmailChanged "reader@test.com") Login.init
+
+                        ( m2, _, _ ) =
+                            Login.update ForgotSubmitted m1
+                    in
+                    m2.forgotState |> Expect.equal Loading
+            , test "ForgotSubmitted with a blank email is a no-op" <|
+                \_ ->
+                    let
+                        ( m, _, _ ) =
+                            Login.update ForgotSubmitted Login.init
+                    in
+                    m.forgotState |> Expect.equal NotAsked
+            , test "a successful forgot response shows Success" <|
+                \_ ->
+                    let
+                        ( m1, _, _ ) =
+                            Login.update (EmailChanged "reader@test.com") Login.init
+
+                        ( m2, _, _ ) =
+                            Login.update ForgotSubmitted m1
+
+                        ( m3, _, _ ) =
+                            Login.update (GotForgotResponse (Ok ())) m2
+                    in
+                    m3.forgotState |> Expect.equal (Success ())
+            , test "a failed forgot response shows Failure" <|
+                \_ ->
+                    let
+                        ( m1, _, _ ) =
+                            Login.update (EmailChanged "reader@test.com") Login.init
+
+                        ( m2, _, _ ) =
+                            Login.update ForgotSubmitted m1
+
+                        ( m3, _, _ ) =
+                            Login.update (GotForgotResponse (Err Http.NetworkError)) m2
+                    in
+                    m3.forgotState |> Expect.equal (Failure Http.NetworkError)
             ]
         ]

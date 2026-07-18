@@ -24,7 +24,7 @@ async function registerAndConfirm(
 }
 
 test.describe("Password reset", () => {
-  test("the forgot-password page is reachable and sends a reset email", async ({
+  test("the forgot-password form opens in the login card and sends a reset email", async ({
     page,
     request,
   }) => {
@@ -32,11 +32,15 @@ test.describe("Password reset", () => {
     const ready = await registerAndConfirm(request, email, "old-password-1");
     test.skip(!ready, "requires STACKS_E2E_TEST_HELPERS=1");
 
-    // The link off the login page reaches the forgot-password form.
+    // Clicking "Forgot your password?" swaps the login card into its
+    // reset-password mode in place (no navigation) — the form is part of the
+    // login card, not a separate bare page.
     await page.goto("/login");
     await page.getByTestId("forgot-password-link").click();
-    await expect(page).toHaveURL(/\/forgot-password/);
-    await expect(page.locator(".page--login h1")).toHaveText("Reset your password");
+    await expect(page.locator(".login-card__subtitle").first()).toContainText(
+      "Reset your password"
+    );
+    await expect(page.getByTestId("forgot-email")).toBeVisible();
 
     // Submitting the email shows the generic (no-enumeration) confirmation...
     await page.getByTestId("forgot-email").fill(email);

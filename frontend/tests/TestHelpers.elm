@@ -1313,6 +1313,9 @@ loginEffects msg model =
                 Login.RegistrationPending _ ->
                     SimulatedEffect.Cmd.none
 
+                Login.ForgotPasswordMode ->
+                    SimulatedEffect.Cmd.none
+
         _ ->
             SimulatedEffect.Cmd.none
 

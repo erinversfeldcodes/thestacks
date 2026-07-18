@@ -48,7 +48,6 @@ import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
-import Page.ForgotPassword as ForgotPassword
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Insights as Insights
@@ -202,7 +201,6 @@ type Page
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
     | PageConfirmEmail ConfirmStatus
-    | PageForgotPassword ForgotPassword.Model
     | PageResetPassword ResetPassword.Model
     | PageNotFound
 
@@ -830,7 +828,10 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             ( PageConfirmEmail status, Cmd.none )
 
         ForgotPassword ->
-            ( PageForgotPassword ForgotPassword.init, Cmd.none )
+            -- The forgot-password form is a mode of the login card, not a
+            -- standalone page — deep-linking /forgot-password opens the login
+            -- card straight onto that mode.
+            ( PageLogin Login.forgotInit, Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -1143,7 +1144,6 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | LoginMsg Login.Msg
-    | ForgotPasswordMsg ForgotPassword.Msg
     | ResetPasswordMsg ResetPassword.Msg
     | LoginTransitionCompleted
     | BookshelfMsg Bookshelf.Msg
@@ -1662,20 +1662,6 @@ update msg model =
                     in
                     ( { model | page = PageSettingsPassword newSubModel }
                     , Cmd.map PasswordMsg subCmd
-                    )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        ForgotPasswordMsg subMsg ->
-            case model.page of
-                PageForgotPassword subModel ->
-                    let
-                        ( newSubModel, subCmd ) =
-                            ForgotPassword.update subMsg subModel
-                    in
-                    ( { model | page = PageForgotPassword newSubModel }
-                    , Cmd.map ForgotPasswordMsg subCmd
                     )
 
                 _ ->
@@ -2861,9 +2847,6 @@ viewPage model =
 
         PageConfirmEmail status ->
             viewConfirmEmail status
-
-        PageForgotPassword subModel ->
-            Html.map ForgotPasswordMsg (ForgotPassword.view subModel)
 
         PageResetPassword subModel ->
             Html.map ResetPasswordMsg (ResetPassword.view subModel)

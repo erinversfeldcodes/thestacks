@@ -178,6 +178,7 @@ formValidationTests =
                         , sessionExpired = False
                         , draftSaved = False
                         , accountDeleted = False
+                        , forgotState = NotAsked
                         }
 
                     html =
@@ -214,6 +215,7 @@ formValidationTests =
                         , sessionExpired = False
                         , draftSaved = False
                         , accountDeleted = False
+                        , forgotState = NotAsked
                         }
 
                     html =
