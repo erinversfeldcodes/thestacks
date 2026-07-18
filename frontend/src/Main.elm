@@ -48,6 +48,7 @@ import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
+import Page.ForgotPassword as ForgotPassword
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Insights as Insights
@@ -58,6 +59,7 @@ import Page.Marketplace.ListingDetail as ListingDetail
 import Page.Marketplace.MyListings as MyListings
 import Page.Metrics as MetricsPage
 import Page.Profile as ProfilePage
+import Page.ResetPassword as ResetPassword
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AuditLog as AuditLog
@@ -200,6 +202,8 @@ type Page
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
     | PageConfirmEmail ConfirmStatus
+    | PageForgotPassword ForgotPassword.Model
+    | PageResetPassword ResetPassword.Model
     | PageNotFound
 
 
@@ -487,6 +491,12 @@ requiresAuth route =
             False
 
         ConfirmEmail _ ->
+            False
+
+        ForgotPassword ->
+            False
+
+        ResetPassword _ ->
             False
 
         NotFound ->
@@ -819,6 +829,12 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
+        ForgotPassword ->
+            ( PageForgotPassword ForgotPassword.init, Cmd.none )
+
+        ResetPassword token ->
+            ( PageResetPassword (ResetPassword.init token), Cmd.none )
+
         NotFound ->
             ( PageNotFound, Cmd.none )
 
@@ -1127,6 +1143,8 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | LoginMsg Login.Msg
+    | ForgotPasswordMsg ForgotPassword.Msg
+    | ResetPasswordMsg ResetPassword.Msg
     | LoginTransitionCompleted
     | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
@@ -1644,6 +1662,34 @@ update msg model =
                     in
                     ( { model | page = PageSettingsPassword newSubModel }
                     , Cmd.map PasswordMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ForgotPasswordMsg subMsg ->
+            case model.page of
+                PageForgotPassword subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ForgotPassword.update subMsg subModel
+                    in
+                    ( { model | page = PageForgotPassword newSubModel }
+                    , Cmd.map ForgotPasswordMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ResetPasswordMsg subMsg ->
+            case model.page of
+                PageResetPassword subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ResetPassword.update subMsg subModel
+                    in
+                    ( { model | page = PageResetPassword newSubModel }
+                    , Cmd.map ResetPasswordMsg subCmd
                     )
 
                 _ ->
@@ -2577,6 +2623,12 @@ pageTitle route =
         ConfirmEmail EmailConfirmFailed ->
             "Confirmation Failed — The Stacks"
 
+        ForgotPassword ->
+            "Reset Password — The Stacks"
+
+        ResetPassword _ ->
+            "Reset Password — The Stacks"
+
         NotFound ->
             "Not Found — The Stacks"
 
@@ -2809,6 +2861,12 @@ viewPage model =
 
         PageConfirmEmail status ->
             viewConfirmEmail status
+
+        PageForgotPassword subModel ->
+            Html.map ForgotPasswordMsg (ForgotPassword.view subModel)
+
+        PageResetPassword subModel ->
+            Html.map ResetPasswordMsg (ResetPassword.view subModel)
 
         PageNotFound ->
             viewNotFound
