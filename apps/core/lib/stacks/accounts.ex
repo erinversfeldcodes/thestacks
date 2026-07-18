@@ -272,6 +272,22 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
+  Returns ALL users whose email matches case-insensitively — the lookup used to
+  resolve an email to `user_id`(s) for GDPR erasure. Unlike `get_user_by_email/1`
+  (an exact, downcased match that a mixed-case stored email can slip past), this
+  folds case on both sides so every candidate surfaces. Returns a list precisely
+  because an email is NOT a guaranteed-unique key (only `user_id` is) — the
+  operator disambiguates, and the erasure itself takes a `user_id`.
+  """
+  @spec find_users_by_email(String.t()) :: [User.t()]
+  def find_users_by_email(email) when is_binary(email) do
+    normalised = String.downcase(String.trim(email))
+    Repo.all(from u in User, where: fragment("lower(?)", u.email) == ^normalised)
+  end
+
+  def find_users_by_email(_), do: []
+
+  @doc """
   Returns a user by public handle (case-insensitive), or nil if not found.
   Keys the public profile at `/u/:handle`.
   """
