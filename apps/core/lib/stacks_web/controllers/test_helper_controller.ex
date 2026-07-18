@@ -14,6 +14,7 @@ defmodule StacksWeb.TestHelperController do
 
   alias Stacks.Accounts
   alias Stacks.AgeVerification
+  alias Swoosh.Adapters.Local.Storage.Memory
 
   # Reserved test TLD (RFC 6761) used for ALL E2E/test accounts:
   #   - suite users:       e2e-<slug>@thestacks.test   (seeds.exs / helpers.ts suiteEmail)
@@ -49,6 +50,58 @@ defmodule StacksWeb.TestHelperController do
   end
 
   def confirmation_token(conn, _params), do: not_found(conn)
+
+  @doc """
+  GET /api/test/sent-emails?email=<email>
+
+  Returns the transactional emails delivered to the given address from the
+  Swoosh **Local** mailbox (the in-memory adapter used by the default preview /
+  offline E2E stack), so the E2E suite can assert an email was actually SENT and
+  extract the link it carries — proving the whole send path, not just that a DB
+  token exists.
+
+  Scoped to `@thestacks.test` emails ONLY, and only rows in the mailbox
+  addressed to that exact address are returned — a real user's mail can never
+  surface here, even on a public preview with the flag on. Returns
+  `200 {"emails": [%{to, subject, html_body, text_body}]}` (most recent first),
+  or `404` for any out-of-scope email.
+
+  When the stack is configured with a real provider (Resend, e.g. a
+  `preview-real-email` PR or prod), nothing lands in the Local mailbox and this
+  returns an empty list — the helper is for the default Local preview.
+  """
+  def sent_emails(conn, %{"email" => email}) when is_binary(email) do
+    if e2e_test_email?(email) do
+      target = String.downcase(email)
+
+      emails =
+        Memory.all()
+        |> Enum.filter(fn mail -> email_addressed_to?(mail, target) end)
+        |> Enum.map(fn mail ->
+          %{
+            to: Enum.map(mail.to, &address/1),
+            subject: mail.subject,
+            html_body: mail.html_body,
+            text_body: mail.text_body
+          }
+        end)
+
+      json(conn, %{emails: emails})
+    else
+      not_found(conn)
+    end
+  end
+
+  def sent_emails(conn, _params), do: not_found(conn)
+
+  defp email_addressed_to?(mail, target) do
+    Enum.any?(mail.to, fn recipient -> String.downcase(address(recipient)) == target end)
+  end
+
+  # Swoosh normalises recipients to `{name, address}` tuples, but tolerate a
+  # bare address string too.
+  defp address({_name, addr}), do: addr
+  defp address(addr) when is_binary(addr), do: addr
 
   @doc """
   PUT /api/test/age-verification  body: {"email": <email>, "verified": <bool>}

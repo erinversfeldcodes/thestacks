@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import {
+  extractLink,
   fetchConfirmationToken,
+  fetchSentEmails,
   registerViaApi,
   uniqueEmail,
 } from "./helpers";
@@ -87,5 +89,50 @@ test.describe("Email confirmation — full flow", () => {
     await expect(page.locator(".page--confirm-email h1")).toHaveText(
       "Email confirmed"
     );
+  });
+
+  test("register → confirmation email is sent → its link confirms the account", async ({
+    page,
+    request,
+  }) => {
+    // This proves the WHOLE send path: the email is actually delivered (read
+    // from the Swoosh mailbox), and the link IT carries confirms the account —
+    // not a token pulled from the DB.
+    const email = uniqueEmail("e2e-mailflow");
+    const reg = await registerViaApi(request, {
+      email,
+      password: "a-strong-password",
+      displayName: "Mail Flow",
+    });
+    expect(reg.ok()).toBeTruthy();
+
+    // 1. The confirmation email was actually sent (async via Oban — poll).
+    const emails = await fetchSentEmails(request, email);
+    test.skip(
+      emails === null,
+      "requires the /api/test/sent-emails helper (STACKS_E2E_TEST_HELPERS=1)"
+    );
+    expect(emails!.length).toBeGreaterThan(0);
+    const confirmation = emails!.find((e) => /confirm/i.test(e.subject));
+    expect(
+      confirmation,
+      "expected a confirmation email with 'Confirm' in the subject"
+    ).toBeTruthy();
+
+    // 2. Extract the confirm link FROM the email body.
+    const link = extractLink(confirmation!, /\/api\/auth\/confirm\/[^"'\s]+/);
+    expect(link, "confirmation email must carry a /api/auth/confirm/ link").toBeTruthy();
+
+    // 3. Clicking that link 302s through to the Elm success page.
+    await page.goto(link!);
+    await expect(page).toHaveURL(/\/confirm-email\/success/);
+    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+      "Email confirmed"
+    );
+
+    // 4. The account is now confirmed — its confirmation token is cleared, so
+    //    the token helper no longer returns one.
+    const tokenAfter = await fetchConfirmationToken(request, email);
+    expect(tokenAfter).toBeNull();
   });
 });

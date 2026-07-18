@@ -14,6 +14,8 @@ defmodule StacksWeb.TestHelperControllerTest do
 
   import Stacks.Factory
 
+  alias Swoosh.Adapters.Local.Storage.Memory
+
   @flag "STACKS_E2E_TEST_HELPERS"
 
   setup do
@@ -163,6 +165,86 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert conn.status == 404
       refute conn.resp_body =~ "super-secret-lookalike-token"
     end
+  end
+
+  # ── GET /api/test/sent-emails (WS2 — prove the email was actually sent) ──────
+  #
+  # Reads the Swoosh Local mailbox so the E2E suite can assert an email was
+  # delivered and extract its link. Same `@thestacks.test`-only scoping as the
+  # other helpers — a real user's mail can never surface here.
+  describe "GET /api/test/sent-emails with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "returns emails delivered to the given test-domain address", %{conn: conn} do
+      addr = "e2e-inbox@thestacks.test"
+
+      push_email(addr, "Confirm your email — The Stacks",
+        html: "<a href=\"https://x/api/auth/confirm/tok-123\">Confirm</a>",
+        text: "confirm: https://x/api/auth/confirm/tok-123"
+      )
+
+      conn = get(conn, "/api/test/sent-emails", email: addr)
+
+      assert %{"emails" => [email]} = json_response(conn, 200)
+      assert email["to"] == [addr]
+      assert email["subject"] == "Confirm your email — The Stacks"
+      assert email["html_body"] =~ "/api/auth/confirm/tok-123"
+      assert email["text_body"] =~ "/api/auth/confirm/tok-123"
+    end
+
+    test "only returns mail addressed to the requested address", %{conn: conn} do
+      push_email("e2e-mine@thestacks.test", "Mine", html: "mine")
+      push_email("e2e-other@thestacks.test", "Other", html: "other")
+
+      conn = get(conn, "/api/test/sent-emails", email: "e2e-mine@thestacks.test")
+
+      assert %{"emails" => [email]} = json_response(conn, 200)
+      assert email["subject"] == "Mine"
+    end
+
+    test "returns 404 for a NON-e2e-domain email even if that address has mail", %{conn: conn} do
+      push_email("real-inbox@gmail.com", "Real user mail", html: "secret-real-body")
+
+      conn = get(conn, "/api/test/sent-emails", email: "real-inbox@gmail.com")
+
+      assert conn.status == 404
+      refute conn.resp_body =~ "secret-real-body"
+    end
+
+    test "returns 404 when the email param is missing", %{conn: conn} do
+      conn = get(conn, "/api/test/sent-emails")
+      assert conn.status == 404
+    end
+  end
+
+  describe "GET /api/test/sent-emails with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404", %{conn: conn} do
+      push_email("e2e-flagoff@thestacks.test", "Should not be readable", html: "hidden-body")
+
+      conn = get(conn, "/api/test/sent-emails", email: "e2e-flagoff@thestacks.test")
+
+      assert conn.status == 404
+      refute conn.resp_body =~ "hidden-body"
+    end
+  end
+
+  defp push_email(to, subject, opts) do
+    Swoosh.Email.new(
+      from: {"The Stacks", "noreply@thestacks.app"},
+      to: {"", to},
+      subject: subject,
+      html_body: Keyword.get(opts, :html),
+      text_body: Keyword.get(opts, :text)
+    )
+    |> Memory.push()
   end
 
   # ── PUT /api/test/age-verification (ADR-020) ─────────────────────────────────
