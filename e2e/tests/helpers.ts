@@ -281,6 +281,10 @@ export async function fetchSentEmails(
       );
     }
     const body = await resp.json();
+    // A real provider (Resend) is configured — mail never lands in the Local
+    // mailbox, so reading it is meaningless. Signal "unavailable" so callers
+    // test.skip rather than failing on an expectedly-empty inbox.
+    if (body.mailbox_readable === false) return null;
     if (Array.isArray(body.emails) && body.emails.length > 0) {
       return body.emails as SentEmail[];
     }
