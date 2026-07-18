@@ -8,6 +8,9 @@ defmodule Stacks.ReleaseTest do
   """
   use Core.DataCase, async: false
 
+  import ExUnit.CaptureIO
+  import Stacks.Factory
+
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.User
@@ -287,8 +290,151 @@ defmodule Stacks.ReleaseTest do
   end
 
   # ---------------------------------------------------------------------------
+  # gdpr_erase_user/1 — operator right-to-erasure (GitHub Actions entry point)
+  # ---------------------------------------------------------------------------
+
+  describe "gdpr_erase_user/1 dry run (user_id only)" do
+    test "previews by user_id without deleting" do
+      user = insert(:user, email: "erase-dry@stacks.test", handle: "erase_dry")
+
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_erase_user(encode(%{user_id: user.id}))
+        end)
+
+      assert out =~ "GDPR_ERASE_RESOLVED user_id=#{user.id}"
+      assert out =~ "GDPR_ERASE_PREVIEW"
+      assert out =~ "GDPR_ERASE_RESULT dry_run"
+      assert Accounts.get_user(user.id), "dry run must not delete"
+    end
+  end
+
+  describe "gdpr_erase_user/1 execute (user_id only)" do
+    test "deletes the user when execute + matching confirm + reason are present" do
+      user = insert(:user, email: "erase-go@stacks.test", handle: "erase_go")
+      insert(:bookshelf, user: user)
+
+      out =
+        capture_io(fn ->
+          assert :ok =
+                   Release.gdpr_erase_user(
+                     encode(%{
+                       user_id: user.id,
+                       execute: true,
+                       confirm: user.id,
+                       reason: "verified erasure request"
+                     })
+                   )
+        end)
+
+      assert out =~ "GDPR_ERASE_RESULT deleted"
+      assert Accounts.get_user(user.id) == nil
+    end
+
+    test "raises and preserves the user when confirm does not match the user_id" do
+      user = insert(:user, email: "erase-nomatch@stacks.test", handle: "erase_nomatch")
+
+      assert_raise RuntimeError, ~r/confirmation does not match/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(
+            encode(%{
+              user_id: user.id,
+              execute: true,
+              confirm: Ecto.UUID.generate(),
+              reason: "x"
+            })
+          )
+        end)
+      end
+
+      assert Accounts.get_user(user.id)
+    end
+
+    test "raises when execute is set but reason is blank" do
+      user = insert(:user, email: "erase-noreason@stacks.test", handle: "erase_noreason")
+
+      assert_raise RuntimeError, ~r/reason is required/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(encode(%{user_id: user.id, execute: true, confirm: user.id}))
+        end)
+      end
+
+      assert Accounts.get_user(user.id)
+    end
+  end
+
+  describe "gdpr_erase_user/1 refuses ambiguous / invalid input" do
+    test "raises on a non-UUID identifier (no email/handle resolution)" do
+      user = insert(:user, email: "erase-byemail@stacks.test", handle: "erase_byemail")
+
+      assert_raise RuntimeError, ~r/not a valid UUID/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(encode(%{user_id: user.email}))
+        end)
+      end
+
+      assert Accounts.get_user(user.id), "an email must never resolve in the erase path"
+    end
+
+    test "raises when the user_id is a valid UUID but no such user exists" do
+      assert_raise RuntimeError, ~r/no user exists/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(encode(%{user_id: Ecto.UUID.generate()}))
+        end)
+      end
+    end
+
+    test "raises when user_id is missing" do
+      assert_raise RuntimeError, ~r/user_id is required/, fn ->
+        capture_io(fn -> Release.gdpr_erase_user(encode(%{reason: "x"})) end)
+      end
+    end
+  end
+
+  describe "gdpr_lookup_user/1 (email/handle → user_id, read-only)" do
+    test "finds every user matching an email case-insensitively" do
+      u1 = insert(:user, email: "dup@stacks.test", handle: "dup_one")
+      # A second row with the SAME email but different case — the exact-match
+      # get_user_by_email would miss it; the lookup must surface both.
+      u2 = insert(:user, email: "DUP@stacks.test", handle: "dup_two")
+
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_lookup_user(encode(%{query: "dup@stacks.test"}))
+        end)
+
+      assert out =~ "user_id=#{u1.id}"
+      assert out =~ "user_id=#{u2.id}"
+      assert out =~ "GDPR_LOOKUP_COUNT 2"
+    end
+
+    test "finds a user by unique handle" do
+      user = insert(:user, email: "byhandle@stacks.test", handle: "lookup_handle")
+
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_lookup_user(encode(%{query: "lookup_handle"}))
+        end)
+
+      assert out =~ "user_id=#{user.id}"
+      assert out =~ "GDPR_LOOKUP_COUNT 1"
+    end
+
+    test "reports zero matches for an unknown query without raising" do
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_lookup_user(encode(%{query: "ghost@stacks.test"}))
+        end)
+
+      assert out =~ "GDPR_LOOKUP_COUNT 0"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp encode(params), do: params |> Jason.encode!() |> Base.encode64()
 
   defp from_user_by_email_query(email) do
     import Ecto.Query

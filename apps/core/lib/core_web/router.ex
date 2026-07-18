@@ -391,6 +391,7 @@ defmodule CoreWeb.Router do
   scope "/api/test", StacksWeb do
     pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
+    get "/sent-emails", TestHelperController, :sent_emails
     put "/age-verification", TestHelperController, :set_age_verification
   end
 

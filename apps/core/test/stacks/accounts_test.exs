@@ -949,4 +949,45 @@ defmodule Stacks.AccountsTest do
       )
     )
   end
+
+  describe "find_users_by_email/1" do
+    test "returns every user matching case-insensitively (email is not unique)" do
+      a = insert(:user, email: "casing@stacks.test")
+      b = insert(:user, email: "CASING@stacks.test")
+
+      ids = "Casing@Stacks.Test" |> Accounts.find_users_by_email() |> Enum.map(& &1.id)
+
+      assert a.id in ids
+      assert b.id in ids
+    end
+
+    test "returns [] when nothing matches" do
+      assert Accounts.find_users_by_email("nobody-here@stacks.test") == []
+    end
+  end
+
+  describe "expired_unverified_ids/1" do
+    test "returns only unverified accounts older than the TTL" do
+      # `now` is injected far in the future so freshly-inserted rows read as
+      # older than (now - 24h), without fiddling with created_at.
+      future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
+
+      unverified_a = insert(:user, email: "unv-a@thestacks.test", email_confirmed: false)
+      unverified_b = insert(:user, email: "unv-b@thestacks.test", email_confirmed: false)
+      confirmed = insert(:user, email: "conf@thestacks.test", email_confirmed: true)
+
+      ids = Accounts.expired_unverified_ids(future)
+
+      assert unverified_a.id in ids
+      assert unverified_b.id in ids
+      refute confirmed.id in ids, "confirmed accounts are never expired-unverified"
+    end
+
+    test "excludes unverified accounts still within the TTL" do
+      fresh = insert(:user, email: "fresh-unv@thestacks.test", email_confirmed: false)
+
+      # Real now: a just-created account is well within the 24h window.
+      refute fresh.id in Accounts.expired_unverified_ids(DateTime.utc_now())
+    end
+  end
 end

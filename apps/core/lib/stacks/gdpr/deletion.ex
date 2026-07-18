@@ -31,11 +31,74 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
+  Previews what `delete_user_data/2` would erase for a user WITHOUT mutating
+  anything — the read-only counterpart used by the operator dry-run
+  (`Stacks.Release.gdpr_erase_user/1`).
+
+  Returns `{:ok, counts}` with a per-target row count (using the exact same
+  scopes the erasure uses, so the preview cannot drift from the real thing), or
+  `{:error, :user_not_found}` if no user has that id.
+  """
+  @spec preview_user_data(binary()) :: {:ok, map()} | {:error, :user_not_found}
+  def preview_user_data(user_id) do
+    case Repo.get(User, user_id) do
+      nil ->
+        {:error, :user_not_found}
+
+      _user ->
+        bookshelf_ids =
+          Repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id)
+
+        {:ok,
+         %{
+           bookshelves: length(bookshelf_ids),
+           placements: count(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids),
+           placement_history:
+             count(
+               from h in PlacementHistory,
+                 where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
+             ),
+           comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
+           event_log_rows_scrubbed: count(user_event_log_query(user_id)),
+           sessions_revoked:
+             count(from f in AuthTokenFamily, where: f.user_id == ^user_id) +
+               count(
+                 from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
+               )
+         }}
+    end
+  end
+
+  defp count(query), do: Repo.aggregate(query, :count)
+
+  # The set of op.event_log rows the erasure scrubs — the user's own aggregate
+  # plus events under other aggregates whose payload references the user. Shared
+  # by the :scrub_event_log step and preview_user_data/1 so the two never drift.
+  defp user_event_log_query(user_id) do
+    uid = to_string(user_id)
+
+    from(e in EventLog,
+      where:
+        (e.aggregate_type == "user" and e.aggregate_id == ^user_id) or
+          fragment("? ->> 'user_id' = ?", e.payload, ^uid) or
+          fragment("? ->> 'author_id' = ?", e.payload, ^uid) or
+          fragment("? ->> 'seller_id' = ?", e.payload, ^uid)
+    )
+  end
+
+  @doc """
   Deletes all operational data for a user.
+
+  `opts` may carry `:reason` (operator justification — recorded, encrypted, in
+  the `user.data_deleted` audit row's metadata; do NOT put the data subject's
+  personal data in it) and `:actor` (who initiated the erasure).
+
   Returns `{:ok, map()}` on success.
   """
-  @spec delete_user_data(binary()) :: {:ok, map()} | {:error, atom(), term(), map()}
-  def delete_user_data(user_id) do
+  @spec delete_user_data(binary(), keyword()) :: {:ok, map()} | {:error, atom(), term(), map()}
+  def delete_user_data(user_id, opts \\ []) do
+    audit_metadata = opts |> Keyword.take([:reason, :actor]) |> Map.new()
+
     Multi.new()
     |> Multi.run(:set_gdpr_guc, fn repo, _ ->
       repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
@@ -111,19 +174,8 @@ defmodule Stacks.GDPR.Deletion do
       # op.event_log has NO append-only trigger (unlike audit.audit_log), so
       # this plain UPDATE needs no `app.audit_gdpr_erasure` GUC. It runs on the
       # Multi's `repo`, so it commits/rolls back atomically with the erasure.
-      uid = to_string(user_id)
-
       {count, _} =
-        repo.update_all(
-          from(e in EventLog,
-            where:
-              (e.aggregate_type == "user" and e.aggregate_id == ^user_id) or
-                fragment("? ->> 'user_id' = ?", e.payload, ^uid) or
-                fragment("? ->> 'author_id' = ?", e.payload, ^uid) or
-                fragment("? ->> 'seller_id' = ?", e.payload, ^uid)
-          ),
-          set: [payload: %{}, metadata: %{}]
-        )
+        repo.update_all(user_event_log_query(user_id), set: [payload: %{}, metadata: %{}])
 
       {:ok, count}
     end)
@@ -155,7 +207,11 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, family_count + token_count}
     end)
     |> Multi.run(:audit, fn _repo, _ ->
-      Audit.log(nil, "user.data_deleted", resource_type: "user", resource_id: user_id)
+      Audit.log(nil, "user.data_deleted",
+        resource_type: "user",
+        resource_id: user_id,
+        metadata: audit_metadata
+      )
     end)
     |> Multi.run(:reset_gdpr_guc, fn repo, _ ->
       repo.query!("RESET app.audit_gdpr_erasure")

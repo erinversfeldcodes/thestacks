@@ -276,6 +276,18 @@ if [[ $HAS_NPM -eq 1 ]]; then
   fi
 fi
 
+# --- Issue tracking integrity (completion-bar §9/§10) ---
+# When issue files changed, enforce evidence tokens on checked DoD boxes and reject
+# phantom #NNN tracking refs — the "documentation lies" pattern (#236–240 shipped
+# marked-done with unchecked bars; epics cited phantom #252/#254). See
+# check-issue-evidence.sh + docs/agents/standards/completion-bar.md.
+if echo "$ALL_CHANGED" | grep -qE '^issues/.*\.md$'; then
+  run_check \
+    "issue-evidence (completion-bar §9/§10)" \
+    "attach an evidence token to each checked DoD box; point every tracking #NNN at a real issues/NNN-*.md" \
+    bash "${REPO_ROOT}/scripts/hooks/lib/check-issue-evidence.sh" "${REPO_ROOT}"
+fi
+
 if [[ $FAIL -ne 0 ]]; then
   printf '%s\n' "${SUMMARY[@]}" >&2
   printf '%s\n' "Fix the above failures before the session ends." >&2

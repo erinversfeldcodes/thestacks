@@ -132,7 +132,13 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
             # age-gate E2E specs exercise ENFORCEMENT, which reads
             # Stacks.FeatureFlags.age_gating_enabled? (env AGE_GATING_ENABLED).
             # Turn it on for this local/CI Phoenix so the age-gate suite is live.
-            AGE_GATING_ENABLED=true MIX_ENV=dev mix phx.server
+            #
+            # STACKS_E2E_TEST_HELPERS=1 exposes the /api/test/* helper endpoints
+            # (confirmation-token, sent-emails, age-verification) the full-flow
+            # specs need — without it every helper-gated spec silently test.skips
+            # (confirm-email full flow, password-reset). The preview stack sets
+            # this via deploy-stack.sh; the local Phoenix must set it too.
+            AGE_GATING_ENABLED=true STACKS_E2E_TEST_HELPERS=1 MIX_ENV=dev mix phx.server
         ) &>/tmp/stacks-phoenix.log &
         STARTED_PIDS+=($!)
         SERVICES_STARTED+=(phoenix)

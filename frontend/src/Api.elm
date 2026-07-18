@@ -62,6 +62,7 @@ module Api exposing
     , deleteAccount
     , deleteComment
     , dismissAssociation
+    , forgotPassword
     , getAdminSources
     , getAuditLog
     , getBlogPost
@@ -109,6 +110,7 @@ module Api exposing
     , rejectSource
     , removeBook
     , requestExport
+    , resetPassword
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
@@ -387,6 +389,39 @@ login body toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
+        }
+
+
+{-| Request a password-reset email. The backend always responds 200 (no user
+enumeration), so the caller only distinguishes success from a transport error.
+-}
+forgotPassword : String -> (Result Http.Error () -> msg) -> Cmd msg
+forgotPassword email toMsg =
+    Http.post
+        { url = baseUrl ++ "/api/auth/forgot-password"
+        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
+        , expect = Http.expectWhatever toMsg
+        }
+
+
+{-| Set a new password using the signed token from a reset email. 400 =
+invalid/expired token, 422 = password validation failed.
+-}
+resetPassword :
+    { token : String, password : String }
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+resetPassword body toMsg =
+    Http.post
+        { url = baseUrl ++ "/api/auth/reset-password"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "token", Encode.string body.token )
+                    , ( "password", Encode.string body.password )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
         }
 
 
