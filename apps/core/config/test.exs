@@ -60,6 +60,10 @@ config :core, :age_gating_enabled, true
 
 config :core, :rate_limiting_enabled, false
 config :core, :vision_client, Stacks.AI.MockClient
+
+# Fail any test that emits an event whose payload drifts from the declared
+# Stacks.Events.PayloadContract (keys/version). Off in prod by default.
+config :core, :validate_event_payload_contract, true
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
 # Disable ISBN cache in test — ETS is global, tests register different
 # mock responses for the same ISBN, so caching would cross-contaminate.
