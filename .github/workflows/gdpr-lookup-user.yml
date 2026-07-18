@@ -1,18 +1,17 @@
-name: GDPR lookup user
+name: Look up user id
 
-# Read-only companion to the erase workflow: resolves an email or handle to its
-# user_id(s) by running `Stacks.Release.gdpr_lookup_user/1` inside the LIVE core
-# node via `fly ssh console ... rpc`. It mutates nothing — its sole purpose is to
-# give the operator the user_id to feed into `GDPR erase user` (which accepts
-# ONLY a user_id, so it can never resolve ambiguously to the wrong person).
+# READ-ONLY lookup: resolves an email or handle to its user_id(s) by running
+# `Stacks.Release.gdpr_lookup_user/1` inside the LIVE core node via
+# `fly ssh console ... rpc`. It mutates NOTHING — it just prints the user_id so
+# you can find a specific account (e.g. to feed a later admin action).
 #
 # An email is matched case-insensitively and MAY return several user_ids (email
 # is not a unique key); a handle is unique and returns at most one.
 #
-# Restricted to the authorised operator (see the "Restrict operators" step) —
-# resolving an email to a user_id exposes account-linkage, so it is gated the
-# same as the erase workflow. Params are Base64(JSON) → no injection surface.
-# See docs/runbooks/gdpr-erase-user.md.
+# Restricted to the authorised operator (the "Restrict operators" step) because
+# resolving an email to a user_id exposes account-linkage. It is NOT gated by
+# the erase-approval environment — it deletes nothing. Params are Base64(JSON)
+# → no injection surface.
 
 on:
   workflow_dispatch:
@@ -31,10 +30,9 @@ permissions:
   contents: read
 
 jobs:
-  gdpr-lookup-user:
+  lookup-user:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: gdpr-erasure
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       CORE_APP: ${{ inputs.target_app }}
@@ -90,4 +88,4 @@ jobs:
             exit $rc
           fi
 
-          echo "::notice::Feed the chosen user_id into the 'GDPR erase user' workflow."
+          echo "::notice::Lookup complete — nothing was modified."
