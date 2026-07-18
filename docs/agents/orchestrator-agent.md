@@ -741,16 +741,24 @@ After the reviewer approves the **final phase** of the plan (or after every phas
 
 ## Phase 3: Completion
 
-**⛔ Completion Bar gate.** Before writing any completion file, using completion
-language, or opening a PR, verify the work meets **every** item of
-`docs/agents/standards/completion-bar.md` — with evidence, on the fully-integrated
-branch. In particular: every named story **driven live** (local stack first, then
-preview — not unit/code-read alone), all 13 layers validated (events + metrics
-**asserted**), **no dangling reviewer findings** (P2/P3 fixed or de-scoped to a
-tracked issue), logs clean under the live drive, and the issue's Pre-Check +
-Test-Audit regenerated to reflect reality. If any item is unmet, the issue/epic is
-**not complete** — resolve it or spin a tracked follow-up (and, in an epic,
-complete that follow-up before the PR).
+**⛔ Completion Bar gate — run `completion-audit`, do not self-certify.** Before
+writing any completion file, using completion language, or opening a PR, run the
+`.claude/skills/completion-audit/` skill over the fully-integrated branch. It is an
+adversarial "prove it is NOT done" pass and it **gates this phase** — a FAIL blocks
+completion. It enforces **every** item of `docs/agents/standards/completion-bar.md`
+with a cited evidence token, over **every deliverable** (not only named user
+stories — infra/observability/platform deliverables must show a *real signal
+observed at the far end*, e.g. a metric that landed in the store and rendered, not
+the emit code). In particular it checks: every deliverable **driven live** (local
+stack first, then preview — not unit/code-read, not synthetic-gate-only), all 13
+layers validated (events + metrics **asserted**), **no structure-only gate standing
+in for a real one**, **no dangling reviewer findings** (P2/P3 fixed or de-scoped to
+a tracked issue), **no phantom `#NNN`**, logs clean under the live drive, and the
+issue's Pre-Check + Test-Audit regenerated to reality. If it FAILs, the issue/epic
+is **not complete** — resolve it or spin a tracked follow-up (and, in an epic,
+complete that follow-up before the PR). This is not the honour system: the
+`check-issue-evidence` Stop hook also blocks evidence-less DoD boxes and phantom
+refs at the edit boundary.
 
 When all plan phases are approved and committed:
 1. Write `plans/<NNN>-<slug>-complete.md`.
@@ -945,8 +953,12 @@ The `committed` field is set to `true` only after the human confirms the commit 
 1. [Concrete implementation step]
 2. [Concrete implementation step]
 **Test Command**: [e.g., mix test, cargo test]
+**Proving gate**: [The REAL-path gate that proves this phase's deliverable actually works —
+  the user-observable outcome + how a *real signal* is observed at the far end. NOT a
+  synthetic/existence gate. e.g. "register a user via the UI and see the session cookie" or
+  "drive the flow, then query the store and see the metric value render". completion-bar §1/§8.]
 **DoD Items**:
-- [ ] Item relevant to this phase
+- [ ] Item relevant to this phase — evidence: [test / command→output / live-drive artifact]
 
 ### Phase 2: [Title]
 ...
