@@ -1,0 +1,150 @@
+name: GDPR erase user
+
+# Operator-initiated GDPR right-to-erasure for a single user, resolved by
+# email or handle. Runs `Stacks.Release.gdpr_erase_user/1` inside the LIVE
+# production core node via `fly ssh console ... rpc` (no second BEAM, reuses
+# the running node's Vault/Repo; only FLY_API_TOKEN leaves CI — the prod
+# DATABASE_URL and CLOAK_KEY never touch the runner).
+#
+# Safety model:
+#   * Dry run is the DEFAULT. A dry run resolves the user and prints the
+#     per-target counts that WOULD be erased, deleting nothing.
+#   * Actual deletion requires execute=true, a non-empty reason (recorded,
+#     encrypted, in the audit row), AND re-typing the exact identifier in
+#     `confirm`. All three are re-checked inside the release function too.
+#   * The `gdpr-erasure` GitHub Environment gates the job — configure it with
+#     required reviewers so every run (dry run or execute) needs approval.
+#
+# The parameters are passed to the node as Base64(JSON) so arbitrary
+# identifier/reason text carries into the rpc expression with NO shell/Elixir
+# injection surface (the Base64 alphabet cannot break out of the string
+# literal).
+#
+# Warehouse note: the erasure scrubs the operational + event-log data
+# immediately; the analytics warehouse (dbt marts) drops it on the next daily
+# DbtRefreshJob full run (apps/core/config/config.exs crontab — 05:00 UTC,
+# ≤24h). See docs/runbooks/gdpr-erase-user.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      identifier:
+        description: "User email (contains @) or handle to erase"
+        required: true
+        type: string
+      reason:
+        description: "Operator justification (recorded, encrypted, in the audit row). Do NOT include the subject's personal data. Required to execute."
+        required: false
+        type: string
+        default: ""
+      execute:
+        description: "Actually delete. Leave unchecked for a dry-run preview (default)."
+        required: false
+        type: boolean
+        default: false
+      confirm:
+        description: "Re-type the exact identifier to confirm. Required only when execute is checked."
+        required: false
+        type: string
+        default: ""
+      target_app:
+        description: "Target Fly core app (default: thestacks-core; override only for validation against a preview app)"
+        required: false
+        type: string
+        default: thestacks-core
+
+permissions:
+  contents: read
+
+jobs:
+  gdpr-erase-user:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: gdpr-erasure
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      CORE_APP: ${{ inputs.target_app }}
+      ERASE_IDENTIFIER: ${{ inputs.identifier }}
+      ERASE_REASON: ${{ inputs.reason }}
+      ERASE_EXECUTE: ${{ inputs.execute }}
+      ERASE_CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Validate inputs before touching production
+        run: |
+          set -euo pipefail
+          if [[ -z "${ERASE_IDENTIFIER// /}" ]]; then
+            echo "::error::identifier is required"
+            exit 1
+          fi
+          if [[ "$ERASE_EXECUTE" == "true" ]]; then
+            if [[ -z "${ERASE_REASON// /}" ]]; then
+              echo "::error::reason is required to execute an erasure"
+              exit 1
+            fi
+            if [[ "$ERASE_CONFIRM" != "$ERASE_IDENTIFIER" ]]; then
+              echo "::error::confirm must exactly match identifier to execute (got a mismatch)"
+              exit 1
+            fi
+            echo "Mode: EXECUTE — will erase '$ERASE_IDENTIFIER' on app '$CORE_APP'"
+          else
+            echo "Mode: DRY RUN — will preview '$ERASE_IDENTIFIER' on app '$CORE_APP' (nothing deleted)"
+          fi
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      - name: Run erasure (rpc into the live node)
+        run: |
+          set -euo pipefail
+
+          # Build the JSON param object with jq so any characters in the
+          # identifier/reason are properly escaped, then Base64 it. The Base64
+          # blob is the ONLY thing interpolated into the rpc expression, so
+          # there is no shell/Elixir injection surface.
+          params_json="$(jq -cn \
+            --arg identifier "$ERASE_IDENTIFIER" \
+            --arg reason "$ERASE_REASON" \
+            --arg confirm "$ERASE_CONFIRM" \
+            --argjson execute "${ERASE_EXECUTE:-false}" \
+            '{identifier: $identifier, reason: $reason, confirm: $confirm, execute: $execute}')"
+          params_b64="$(printf '%s' "$params_json" | base64 -w0)"
+
+          echo "Invoking gdpr_erase_user on app '$CORE_APP'..."
+          # Mirror the proven release-task form (release.ex moduledoc /
+          # deploy-stack.sh): the Elixir expression is single-quoted; the
+          # Base64 blob is the only interpolated value and is a double-quoted
+          # Elixir string literal inside it.
+          set +e
+          out="$(flyctl ssh console --app "$CORE_APP" \
+            -C "/app/bin/core rpc 'Stacks.Release.gdpr_erase_user(\"$params_b64\")'" 2>&1)"
+          rc=$?
+          set -e
+
+          echo "----- node output -----"
+          echo "$out"
+          echo "-----------------------"
+
+          if echo "$out" | grep -q "GDPR_ERASE_ERROR"; then
+            echo "::error::erasure reported an error"
+            exit 1
+          fi
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::rpc invocation failed (exit $rc)"
+            exit $rc
+          fi
+
+          if [[ "$ERASE_EXECUTE" == "true" ]]; then
+            echo "$out" | grep -q "GDPR_ERASE_RESULT deleted" || {
+              echo "::error::expected a 'deleted' result but did not find one"
+              exit 1
+            }
+            echo "::notice::user erased. Warehouse propagates on the next daily dbt full refresh (≤24h)."
+          else
+            echo "$out" | grep -q "GDPR_ERASE_RESULT dry_run" || {
+              echo "::error::expected a dry-run result but did not find one"
+              exit 1
+            }
+            echo "::notice::dry run complete — nothing deleted."
+          fi
