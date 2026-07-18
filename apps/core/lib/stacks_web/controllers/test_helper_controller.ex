@@ -86,13 +86,24 @@ defmodule StacksWeb.TestHelperController do
           }
         end)
 
-      json(conn, %{emails: emails})
+      # `mailbox_readable` tells the E2E client whether reading this mailbox is
+      # meaningful: only the Local adapter routes sends here. When a real
+      # provider (Resend) is configured — e.g. a `preview-real-email` PR — mail
+      # never lands in this in-memory store, so the client should SKIP rather
+      # than fail on an (expectedly) empty mailbox.
+      json(conn, %{mailbox_readable: mailbox_readable?(), emails: emails})
     else
       not_found(conn)
     end
   end
 
   def sent_emails(conn, _params), do: not_found(conn)
+
+  defp mailbox_readable? do
+    :core
+    |> Application.get_env(Stacks.Email.Mailer, [])
+    |> Keyword.get(:adapter) == Swoosh.Adapters.Local
+  end
 
   defp email_addressed_to?(mail, target) do
     Enum.any?(mail.to, fn recipient -> String.downcase(address(recipient)) == target end)
