@@ -22,10 +22,30 @@ defmodule Stacks.Events.Upcaster do
   no upcast clause exists for the given type and version.
   """
   @spec upcast(map()) :: map()
-  # Version 1 is the initial schema version for all event types.
+  # blog.post_* v1 → v2: the free-text `title` was removed from the payload. It is
+  # redundant with `aggregate_id` (the post id) and violated the UUID-only event
+  # invariant (see `Stacks.Events`). Strip it so historical v1 events present the v2
+  # shape to consumers. Payload keys are strings after the JSONB round-trip; drop
+  # both string and atom forms to be safe. (More specific than the v1 clause below,
+  # so these must come first.)
+  def upcast(%{event_type: "blog.post_created", schema_version: 1} = event),
+    do: drop_blog_title(event)
+
+  def upcast(%{event_type: "blog.post_updated", schema_version: 1} = event),
+    do: drop_blog_title(event)
+
+  def upcast(%{event_type: "blog.post_published", schema_version: 1} = event),
+    do: drop_blog_title(event)
+
+  # Version 1 is the initial (and current) schema version for every other event type.
   # No transformation needed — this clause documents that v1 is current.
   def upcast(%{schema_version: 1} = event), do: event
 
   # Catch-all: unknown versions pass through unchanged (forward compatibility).
   def upcast(event), do: event
+
+  defp drop_blog_title(%{payload: payload} = event),
+    do: %{event | payload: Map.drop(payload, ["title", :title]), schema_version: 2}
+
+  defp drop_blog_title(event), do: %{event | schema_version: 2}
 end
