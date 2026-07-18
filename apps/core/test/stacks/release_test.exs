@@ -8,6 +8,9 @@ defmodule Stacks.ReleaseTest do
   """
   use Core.DataCase, async: false
 
+  import ExUnit.CaptureIO
+  import Stacks.Factory
+
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.User
@@ -287,8 +290,115 @@ defmodule Stacks.ReleaseTest do
   end
 
   # ---------------------------------------------------------------------------
+  # gdpr_erase_user/1 — operator right-to-erasure (GitHub Actions entry point)
+  # ---------------------------------------------------------------------------
+
+  describe "gdpr_erase_user/1 dry run" do
+    test "resolves by email and previews without deleting" do
+      user = insert(:user, email: "erase-dry@stacks.test", handle: "erase_dry")
+
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_erase_user(encode(%{identifier: user.email}))
+        end)
+
+      assert out =~ "GDPR_ERASE_RESOLVED user_id=#{user.id}"
+      assert out =~ "GDPR_ERASE_PREVIEW"
+      assert out =~ "GDPR_ERASE_RESULT dry_run"
+      # Nothing deleted.
+      assert Accounts.get_user_by_email(user.email)
+    end
+
+    test "resolves by handle" do
+      user = insert(:user, email: "erase-handle@stacks.test", handle: "erase_handle")
+
+      out =
+        capture_io(fn ->
+          assert :ok = Release.gdpr_erase_user(encode(%{identifier: "erase_handle"}))
+        end)
+
+      assert out =~ "GDPR_ERASE_RESOLVED user_id=#{user.id}"
+      assert Accounts.get_user_by_email(user.email)
+    end
+  end
+
+  describe "gdpr_erase_user/1 execute" do
+    test "deletes the user when execute + confirm + reason are all present" do
+      user = insert(:user, email: "erase-go@stacks.test", handle: "erase_go")
+      insert(:bookshelf, user: user)
+
+      out =
+        capture_io(fn ->
+          assert :ok =
+                   Release.gdpr_erase_user(
+                     encode(%{
+                       identifier: user.email,
+                       execute: true,
+                       confirm: user.email,
+                       reason: "verified erasure request"
+                     })
+                   )
+        end)
+
+      assert out =~ "GDPR_ERASE_RESULT deleted"
+      assert Accounts.get_user_by_email(user.email) == nil
+    end
+
+    test "raises and preserves the user when confirm does not match" do
+      user = insert(:user, email: "erase-nomatch@stacks.test", handle: "erase_nomatch")
+
+      assert_raise RuntimeError, ~r/confirmation does not match/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(
+            encode(%{
+              identifier: user.email,
+              execute: true,
+              confirm: "wrong@stacks.test",
+              reason: "x"
+            })
+          )
+        end)
+      end
+
+      assert Accounts.get_user_by_email(user.email)
+    end
+
+    test "raises when execute is set but reason is blank" do
+      user = insert(:user, email: "erase-noreason@stacks.test", handle: "erase_noreason")
+
+      assert_raise RuntimeError, ~r/reason is required/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(
+            encode(%{identifier: user.email, execute: true, confirm: user.email})
+          )
+        end)
+      end
+
+      assert Accounts.get_user_by_email(user.email)
+    end
+  end
+
+  describe "gdpr_erase_user/1 resolution failures" do
+    test "raises when no user matches the identifier" do
+      assert_raise RuntimeError, ~r/no user found/, fn ->
+        capture_io(fn ->
+          Release.gdpr_erase_user(encode(%{identifier: "ghost@stacks.test"}))
+        end)
+      end
+    end
+
+    test "raises when identifier is missing" do
+      assert_raise RuntimeError, ~r/identifier is required/, fn ->
+        capture_io(fn -> Release.gdpr_erase_user(encode(%{reason: "x"})) end)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp encode(params), do: params |> Jason.encode!() |> Base.encode64()
 
   defp from_user_by_email_query(email) do
     import Ecto.Query

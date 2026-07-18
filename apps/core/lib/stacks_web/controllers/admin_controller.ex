@@ -104,7 +104,7 @@ defmodule StacksWeb.AdminController do
       |> put_status(422)
       |> json(%{error: "reason_required"})
     else
-      case Deletion.delete_user_data(user_id) do
+      case Deletion.delete_user_data(user_id, reason: reason, actor: "admin_api") do
         {:ok, _} ->
           conn
           |> assign(:audit_row_count, 1)

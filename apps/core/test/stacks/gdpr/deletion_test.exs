@@ -139,6 +139,28 @@ defmodule Stacks.GDPR.DeletionTest do
       assert row.resource_id == Ecto.UUID.dump!(user.id)
     end
 
+    test "records the operator :reason (encrypted) in the erasure audit row (#138)" do
+      user = insert(:user)
+
+      assert {:ok, _result} =
+               Deletion.delete_user_data(user.id,
+                 reason: "verified DSAR ticket",
+                 actor: "gh-actions"
+               )
+
+      metadata_bin =
+        Repo.one(
+          from(a in "audit_log", where: a.action == "user.data_deleted", select: a.metadata),
+          prefix: "audit"
+        )
+
+      # Audit metadata is Cloak-encrypted at rest — decrypt to confirm the
+      # operator justification survived, and that no PII actor leaked in.
+      decrypted = metadata_bin |> Stacks.Vault.decrypt!() |> Jason.decode!()
+      assert decrypted["reason"] == "verified DSAR ticket"
+      assert decrypted["actor"] == "gh-actions"
+    end
+
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
       other_id = Ecto.UUID.generate()
