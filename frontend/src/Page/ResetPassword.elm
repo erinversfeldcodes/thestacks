@@ -8,7 +8,7 @@ module Page.ResetPassword exposing
 
 import Api
 import Html exposing (Html, a, button, div, h1, input, label, p, text)
-import Html.Attributes exposing (class, disabled, href, placeholder, type_, value)
+import Html.Attributes exposing (class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route
@@ -86,23 +86,34 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
+    -- Reuse the login page's static scene (library background + dim + vignette)
+    -- and centre the card in its overlay, so the reset page reached from the
+    -- email link matches the login card. The animated door layers/ports are
+    -- login-only, so this renders the background statically — no animation.
     div [ class "page page--login" ]
-        [ div [ class "login-card" ]
-            [ h1 [ class "login-card__title" ] [ text "Choose a new password" ]
-            , case model.submitting of
-                Success _ ->
-                    div [ testId "reset-success" ]
-                        [ p [ class "success" ] [ text "Your password has been reset." ]
-                        , a
-                            [ class "btn btn--primary"
-                            , href (Route.toPath Route.Login)
-                            , testId "reset-login-link"
+        [ div [ class "layer-arrival" ] []
+        , div [ class "layer-bookshelf" ] []
+        , div [ class "layer-bookshelf-dim" ] []
+        , div [ class "layer-vignette" ] []
+        , div [ class "login-overlay" ]
+            [ div [ class "login-card" ]
+                [ h1 [ class "login-card__title" ] [ text "Choose a new password" ]
+                , case model.submitting of
+                    Success _ ->
+                        div [ testId "reset-success" ]
+                            [ p [ class "login-card__subtitle" ]
+                                [ text "Your password has been reset." ]
+                            , a
+                                [ class "btn btn--primary"
+                                , href (Route.toPath Route.Login)
+                                , testId "reset-login-link"
+                                ]
+                                [ text "Sign in" ]
                             ]
-                            [ text "Sign in" ]
-                        ]
 
-                _ ->
-                    viewForm model
+                    _ ->
+                        viewForm model
+                ]
             ]
         ]
 
@@ -122,11 +133,12 @@ viewForm model =
                 Nothing
     in
     div []
-        [ div [ class "form-field" ]
-            [ label [ class "form-field__label" ] [ text "New password" ]
+        [ div [ class "login-card__field" ]
+            [ label [ class "login-card__label", for "reset-password" ] [ text "New password" ]
             , input
-                [ type_ "password"
-                , class "form-field__input"
+                [ id "reset-password"
+                , type_ "password"
+                , class "login-card__input"
                 , value model.password
                 , onInput SetPassword
                 , placeholder "At least 8 characters"
@@ -134,11 +146,12 @@ viewForm model =
                 ]
                 []
             ]
-        , div [ class "form-field" ]
-            [ label [ class "form-field__label" ] [ text "Confirm new password" ]
+        , div [ class "login-card__field" ]
+            [ label [ class "login-card__label", for "reset-confirm" ] [ text "Confirm new password" ]
             , input
-                [ type_ "password"
-                , class "form-field__input"
+                [ id "reset-confirm"
+                , type_ "password"
+                , class "login-card__input"
                 , value model.confirmPassword
                 , onInput SetConfirmPassword
                 , placeholder "Repeat new password"
@@ -148,29 +161,29 @@ viewForm model =
             ]
         , case validationError of
             Just errMsg ->
-                p [ class "error" ] [ text errMsg ]
+                p [ class "login-card__error" ] [ text errMsg ]
 
             Nothing ->
                 text ""
         , case model.submitting of
             Loading ->
-                button [ class "btn btn--primary btn--disabled", disabled True ]
+                button [ class "login-card__submit", disabled True ]
                     [ text "Resetting..." ]
 
             _ ->
-                button [ class "btn btn--primary", onClick Submit, testId "reset-submit" ]
+                button [ class "login-card__submit", onClick Submit, testId "reset-submit" ]
                     [ text "Reset password" ]
         , case model.submitting of
             Failure (Http.BadStatus 400) ->
-                p [ class "error", testId "reset-error" ]
+                p [ class "login-card__error", testId "reset-error" ]
                     [ text "This reset link is invalid or has expired. Request a new one." ]
 
             Failure (Http.BadStatus 422) ->
-                p [ class "error", testId "reset-error" ]
+                p [ class "login-card__error", testId "reset-error" ]
                     [ text "Password must be at least 8 characters." ]
 
             Failure _ ->
-                p [ class "error", testId "reset-error" ]
+                p [ class "login-card__error", testId "reset-error" ]
                     [ text "Something went wrong. Please try again." ]
 
             _ ->
