@@ -41,7 +41,10 @@ defmodule Stacks.Blog do
           event_type: "blog.post_created",
           aggregate_type: "post",
           aggregate_id: post.id,
-          payload: %{user_id: user.id, title: post.title, visibility: post.visibility}
+          # v2: title dropped — free text belongs on the row, not the event_log
+          # (events.ex UUID-only invariant). The post is identified by aggregate_id.
+          schema_version: 2,
+          payload: %{user_id: user.id, visibility: post.visibility}
         })
       end)
     end
@@ -69,9 +72,10 @@ defmodule Stacks.Blog do
           event_type: "blog.post_updated",
           aggregate_type: "post",
           aggregate_id: updated_post.id,
+          # v2: title dropped (see blog.post_created).
+          schema_version: 2,
           payload: %{
             user_id: user.id,
-            title: updated_post.title,
             visibility: updated_post.visibility
           }
         })
@@ -96,7 +100,9 @@ defmodule Stacks.Blog do
           event_type: "blog.post_published",
           aggregate_type: "post",
           aggregate_id: published_post.id,
-          payload: %{user_id: user.id, title: published_post.title}
+          # v2: title dropped (see blog.post_created).
+          schema_version: 2,
+          payload: %{user_id: user.id}
         })
       end)
     end

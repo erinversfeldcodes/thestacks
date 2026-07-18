@@ -99,7 +99,7 @@ defmodule Stacks.BlogTest do
       assert event_count("blog.post_created") == before_count + 1
     end
 
-    test "blog.post_created event payload includes user_id, title, and visibility" do
+    test "blog.post_created event payload is UUID-only (user_id + visibility, no free-text title)" do
       user = insert(:user, profile_visibility: "platform")
 
       {:ok, post} =
@@ -112,8 +112,10 @@ defmodule Stacks.BlogTest do
       payload = latest_event_payload("blog.post_created", post.id)
 
       assert payload["user_id"] == user.id
-      assert payload["title"] == "Payload Post"
       assert payload["visibility"] == "platform"
+      # v2: title dropped — free text stays on the row, not in the event_log
+      # (events.ex UUID-only invariant). The post is identified by aggregate_id.
+      refute Map.has_key?(payload, "title")
     end
   end
 
@@ -156,7 +158,7 @@ defmodule Stacks.BlogTest do
       assert event_count("blog.post_updated") == before_count + 1
     end
 
-    test "blog.post_updated event payload includes user_id, title, and visibility" do
+    test "blog.post_updated event payload is UUID-only (user_id + visibility, no free-text title)" do
       user = insert(:user, profile_visibility: "platform")
       post = insert(:post, user: user, visibility: "platform", title: "Original")
 
@@ -166,8 +168,9 @@ defmodule Stacks.BlogTest do
       payload = latest_event_payload("blog.post_updated", post.id)
 
       assert payload["user_id"] == user.id
-      assert payload["title"] == "Updated Title"
       assert payload["visibility"] == "owner"
+      # v2: title dropped (see blog.post_created).
+      refute Map.has_key?(payload, "title")
     end
   end
 

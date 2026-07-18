@@ -119,7 +119,7 @@ defmodule Stacks.Events.SubscriberWorkerTest do
           event_type: "book.created",
           aggregate_type: "book",
           aggregate_id: book_id,
-          payload: %{title: "Test Book"},
+          payload: %{isbn: "9780000000000", title: "Test Book", visibility_tier: "public"},
           metadata: %{actor: "test"}
         })
 
@@ -153,7 +153,7 @@ defmodule Stacks.Events.SubscriberWorkerTest do
           event_type: "book.created",
           aggregate_type: "book",
           aggregate_id: Ecto.UUID.generate(),
-          payload: %{},
+          payload: %{isbn: "9780000000000", title: "Test Book", visibility_tier: "public"},
           metadata: %{actor: "test"}
         })
 

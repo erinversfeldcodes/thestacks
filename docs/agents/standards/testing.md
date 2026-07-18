@@ -8,6 +8,8 @@ Tests validate that users can accomplish their goals. Every test traces back to 
 
 The lint suite — including format checks for every changed file — runs automatically via the `Stop` Claude Code hook (`.claude/settings.json`), so a passing test run isn't enough on its own: the hook must also exit cleanly before a session can finish.
 
+**A structure-only gate is never completion proof.** A gate that runs on *synthetic, mock, or existence* data — one that seeds its own series (`dashboard-render-gate`), asserts `≥1 series`, checks `displayed ⊆ measured` drift, or confirms "the test exists / the route is wired" — proves the artifact is *well-formed*, never that it *works with real data*. Declaring a deliverable done requires **at least one gate that exercises the real path with real data end-to-end** (a real request through the running stack; a real metric emitted → landed in the store → queried back → rendered). Where a check uses synthetic data, say so and name the companion real-path gate. This is why #248 shipped blank behind a green render-gate: it proved the PromQL parsed, never that a sample arrived. See `docs/agents/standards/completion-bar.md` §1/§8.
+
 ---
 
 ## The 12 Layers

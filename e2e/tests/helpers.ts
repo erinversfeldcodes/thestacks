@@ -247,6 +247,62 @@ export async function fetchConfirmationToken(
   return body.token as string;
 }
 
+export interface SentEmail {
+  to: string[];
+  subject: string;
+  html_body: string | null;
+  text_body: string | null;
+}
+
+/**
+ * Poll the sent-emails test-helper until at least one email addressed to
+ * `email` appears (transactional email is delivered asynchronously via the
+ * :notifications Oban queue). Reads the Swoosh Local mailbox, so it proves the
+ * message was actually SENT — not just that a DB token exists.
+ *
+ * Returns the emails, `null` when the helper is unavailable (flag off — callers
+ * should `test.skip`), or `[]` if none arrived before the timeout.
+ */
+export async function fetchSentEmails(
+  request: APIRequestContext,
+  email: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<SentEmail[] | null> {
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  const deadline = Date.now() + timeoutMs;
+  const url = `/api/test/sent-emails?email=${encodeURIComponent(email)}`;
+
+  while (Date.now() < deadline) {
+    const resp = await request.get(url);
+    if (resp.status() === 404) return null;
+    if (!resp.ok()) {
+      throw new Error(
+        `sent-emails helper returned HTTP ${resp.status()} for ${email}`
+      );
+    }
+    const body = await resp.json();
+    // A real provider (Resend) is configured — mail never lands in the Local
+    // mailbox, so reading it is meaningless. Signal "unavailable" so callers
+    // test.skip rather than failing on an expectedly-empty inbox.
+    if (body.mailbox_readable === false) return null;
+    if (Array.isArray(body.emails) && body.emails.length > 0) {
+      return body.emails as SentEmail[];
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return [];
+}
+
+/**
+ * Extract the first URL matching `pattern` from an email's html/text body —
+ * e.g. the /api/auth/confirm/:token or /reset-password/:token link.
+ */
+export function extractLink(email: SentEmail, pattern: RegExp): string | null {
+  const haystack = `${email.html_body ?? ""} ${email.text_body ?? ""}`;
+  const match = haystack.match(pattern);
+  return match ? match[0] : null;
+}
+
 /**
  * Sign in through the login form and wait for the post-login redirect.
  * Mirrors the flow the real user takes (fill → submit → door transition).

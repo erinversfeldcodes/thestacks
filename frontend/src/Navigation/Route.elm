@@ -55,6 +55,8 @@ type Route
     | Profile String
     | ProfileShelf String String
     | ConfirmEmail ConfirmStatus
+    | ForgotPassword
+    | ResetPassword String
     | NotFound
 
 
@@ -101,6 +103,8 @@ parser =
         , Parser.map Profile (s "u" </> string)
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
+        , Parser.map ForgotPassword (s "forgot-password")
+        , Parser.map ResetPassword (s "reset-password" </> string)
         ]
 
 
@@ -232,6 +236,12 @@ toPath route =
 
         ConfirmEmail EmailConfirmFailed ->
             "/confirm-email/error"
+
+        ForgotPassword ->
+            "/forgot-password"
+
+        ResetPassword token ->
+            "/reset-password/" ++ token
 
         NotFound ->
             "/not-found"

@@ -36,11 +36,26 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.AdminSession
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
-  alias Stacks.Events
   alias Stacks.Events.EventLog
   alias Stacks.GDPR.Deletion
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
+
+  # Insert an op.event_log row DIRECTLY, bypassing the contract-guarded
+  # Events.emit/1. Used only to seed LEGACY / pre-contract PII-bearing rows —
+  # the exact shapes emit/1 rightly rejects today but the GDPR scrubber must
+  # still redact from historical data.
+  defp seed_legacy_event(attrs) do
+    Repo.insert!(%EventLog{
+      event_type: attrs.event_type,
+      aggregate_type: attrs.aggregate_type,
+      aggregate_id: attrs.aggregate_id,
+      schema_version: Map.get(attrs, :schema_version, 1),
+      payload: Map.get(attrs, :payload, %{}),
+      metadata: Map.get(attrs, :metadata, %{}),
+      occurred_at: DateTime.utc_now()
+    })
+  end
 
   describe "delete_user_data/1 GUC integration" do
     test "delete_user_data records the GDPR erasure GUC value in the multi result" do
@@ -124,30 +139,52 @@ defmodule Stacks.GDPR.DeletionTest do
       assert row.resource_id == Ecto.UUID.dump!(user.id)
     end
 
+    test "records the operator :reason (encrypted) in the erasure audit row (#138)" do
+      user = insert(:user)
+
+      assert {:ok, _result} =
+               Deletion.delete_user_data(user.id,
+                 reason: "verified DSAR ticket",
+                 actor: "gh-actions"
+               )
+
+      metadata_bin =
+        Repo.one(
+          from(a in "audit_log", where: a.action == "user.data_deleted", select: a.metadata),
+          prefix: "audit"
+        )
+
+      # Audit metadata is Cloak-encrypted at rest — decrypt to confirm the
+      # operator justification survived, and that no PII actor leaked in.
+      decrypted = metadata_bin |> Stacks.Vault.decrypt!() |> Jason.decode!()
+      assert decrypted["reason"] == "verified DSAR ticket"
+      assert decrypted["actor"] == "gh-actions"
+    end
+
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
       other_id = Ecto.UUID.generate()
 
       # Seed a LEGACY PII-bearing event on the erased user's aggregate — the
       # shape older emitters wrote before Issue #121 made user.* events
-      # UUID-only. Both payload and metadata carry PII here.
-      assert {:ok, _} =
-               Events.emit(%{
-                 event_type: "user.profile_updated",
-                 aggregate_type: "user",
-                 aggregate_id: user.id,
-                 payload: %{display_name: "Ada Lovelace"},
-                 metadata: %{ip: "10.0.0.1"}
-               })
+      # UUID-only. Both payload and metadata carry PII here. Inserted directly
+      # (not via Events.emit/1) because the payload contract now rightly rejects
+      # this shape — it is exactly the legacy row the scrubber must handle.
+      seed_legacy_event(%{
+        event_type: "user.profile_updated",
+        aggregate_type: "user",
+        aggregate_id: user.id,
+        payload: %{display_name: "Ada Lovelace"},
+        metadata: %{ip: "10.0.0.1"}
+      })
 
       # An unrelated event on a DIFFERENT aggregate — must be left untouched.
-      assert {:ok, _} =
-               Events.emit(%{
-                 event_type: "book.created",
-                 aggregate_type: "book",
-                 aggregate_id: other_id,
-                 payload: %{isbn: "9780262510875", title: "SICP"}
-               })
+      seed_legacy_event(%{
+        event_type: "book.created",
+        aggregate_type: "book",
+        aggregate_id: other_id,
+        payload: %{isbn: "9780262510875", title: "SICP"}
+      })
 
       before_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_id))
 
@@ -181,30 +218,30 @@ defmodule Stacks.GDPR.DeletionTest do
       # blog.post_created carries the user's free-text post TITLE + user_id
       # under aggregate_type "post" — Phase 7's aggregate_type == "user" scrub
       # does NOT reach it, so this is the cross-aggregate leak #185 closes.
-      assert {:ok, _} =
-               Events.emit(%{
-                 event_type: "blog.post_created",
-                 aggregate_type: "post",
-                 aggregate_id: post_id,
-                 payload: %{
-                   user_id: user.id,
-                   title: "My deeply personal post title",
-                   visibility: "public"
-                 }
-               })
+      # A LEGACY shape (title was dropped from blog.post_created going forward);
+      # inserted directly since the payload contract now rejects the title key.
+      seed_legacy_event(%{
+        event_type: "blog.post_created",
+        aggregate_type: "post",
+        aggregate_id: post_id,
+        payload: %{
+          user_id: user.id,
+          title: "My deeply personal post title",
+          visibility: "public"
+        }
+      })
 
       # A DIFFERENT user's blog post — must be left untouched.
-      assert {:ok, _} =
-               Events.emit(%{
-                 event_type: "blog.post_created",
-                 aggregate_type: "post",
-                 aggregate_id: other_post_id,
-                 payload: %{
-                   user_id: other_user.id,
-                   title: "Someone else's post",
-                   visibility: "public"
-                 }
-               })
+      seed_legacy_event(%{
+        event_type: "blog.post_created",
+        aggregate_type: "post",
+        aggregate_id: other_post_id,
+        payload: %{
+          user_id: other_user.id,
+          title: "Someone else's post",
+          visibility: "public"
+        }
+      })
 
       before_other = Repo.one(from(e in EventLog, where: e.aggregate_id == ^other_post_id))
 

@@ -20,6 +20,7 @@ defmodule Stacks.Events do
 
   alias Core.Repo
   alias Stacks.Events.EventLog
+  alias Stacks.Events.PayloadContract
   alias Stacks.Events.SubscriberWorker
   alias Stacks.Events.Upcaster
 
@@ -53,6 +54,13 @@ defmodule Stacks.Events do
           optional(:metadata) => map()
         }) :: {:ok, map()} | {:error, term()}
   def emit(%{event_type: _, aggregate_type: _, aggregate_id: _} = event) do
+    # Non-prod payload-contract guard (Stacks.Events.PayloadContract): a payload whose
+    # keys/version drift from the declared contract raises, failing the emitting test.
+    # Off in prod by default (flag unset) → zero runtime cost. Re-raised past the
+    # rescue below so it is loud, not swallowed into {:error, _}.
+    if Application.get_env(:core, :validate_event_payload_contract, false),
+      do: PayloadContract.validate!(event)
+
     now = DateTime.utc_now()
     event_id = Ecto.UUID.generate()
 
@@ -90,6 +98,8 @@ defmodule Stacks.Events do
         {:error, :emit_failed}
     end
   rescue
+    # A contract violation must be loud (fail the test), not swallowed into {:error, _}.
+    e in PayloadContract.Violation -> reraise e, __STACKTRACE__
     error -> {:error, error}
   end
 

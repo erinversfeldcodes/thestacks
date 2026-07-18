@@ -67,7 +67,11 @@ defmodule Stacks.Email do
   """
   @spec confirm_email(String.t()) :: {:ok, User.t()} | {:error, :invalid}
   def confirm_email(token) do
-    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_confirm", token, max_age: 172_800) do
+    # 24h link lifetime — kept in lock-step with the expired-unverified reaper
+    # (single source of truth in Accounts).
+    max_age = Accounts.unverified_account_ttl_seconds()
+
+    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_confirm", token, max_age: max_age) do
       {:ok, user_id} ->
         user = Repo.get_by(User, id: user_id, email_confirmation_token: token)
         do_confirm_email(user)

@@ -1,0 +1,165 @@
+name: GDPR erase user
+
+# Operator-initiated GDPR right-to-erasure for a single user, addressed STRICTLY
+# by user_id (the only globally-unique key). Runs
+# `Stacks.Release.gdpr_erase_user/1` inside the LIVE production core node via
+# `fly ssh console ... rpc` (no second BEAM, reuses the running node's
+# Vault/Repo; only FLY_API_TOKEN leaves CI — the prod DATABASE_URL and CLOAK_KEY
+# never touch the runner).
+#
+# Resolve an email/handle to a user_id FIRST with the `GDPR lookup user`
+# workflow (gdpr-lookup-user.yml). The erase path deliberately refuses anything
+# but a UUID so it can never delete the wrong person on an ambiguous key.
+#
+# Safety model:
+#   * Only the authorised operator (see the "Restrict operators" step) can run
+#     this, AND the `gdpr-erasure` GitHub Environment gates the job with required
+#     reviewers — configure it so every run needs approval.
+#   * Dry run is the DEFAULT: prints the per-target counts that WOULD be erased,
+#     deleting nothing.
+#   * Actual deletion requires execute=true, a non-empty reason (recorded,
+#     encrypted, in the audit row), AND re-typing the exact user_id in `confirm`.
+#     All three are re-checked inside the release function too.
+#   * Params are passed as Base64(JSON) → no shell/Elixir injection surface.
+#
+# Warehouse note: the erasure scrubs the operational + event-log data
+# immediately; the analytics warehouse (dbt marts) drops it on the next daily
+# DbtRefreshJob full run (apps/core/config/config.exs crontab — 05:00 UTC,
+# ≤24h). See docs/runbooks/gdpr-erase-user.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: "UUID of the user to erase (resolve an email via the GDPR lookup workflow first)"
+        required: true
+        type: string
+      reason:
+        description: "Operator justification (recorded, encrypted, in the audit row). Do NOT include the subject's personal data. Required to execute."
+        required: false
+        type: string
+        default: ""
+      execute:
+        description: "Actually delete. Leave unchecked for a dry-run preview (default)."
+        required: false
+        type: boolean
+        default: false
+      confirm:
+        description: "Re-type the exact user_id to confirm. Required only when execute is checked."
+        required: false
+        type: string
+        default: ""
+      target_app:
+        description: "Target Fly core app (default: thestacks-core; override only for validation against a preview app)"
+        required: false
+        type: string
+        default: thestacks-core
+
+permissions:
+  contents: read
+
+jobs:
+  gdpr-erase-user:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: gdpr-erasure
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      CORE_APP: ${{ inputs.target_app }}
+      ERASE_USER_ID: ${{ inputs.user_id }}
+      ERASE_REASON: ${{ inputs.reason }}
+      ERASE_EXECUTE: ${{ inputs.execute }}
+      ERASE_CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Restrict operators
+        # Belt-and-suspenders alongside the Environment's required reviewers:
+        # only the authorised operator may run this at all. Anyone else fails
+        # fast, before flyctl is even installed.
+        run: |
+          case "${{ github.actor }}" in
+            erinversfeldcodes) ;;
+            *)
+              echo "::error::${{ github.actor }} is not authorised to run GDPR erasure"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate inputs before touching production
+        run: |
+          set -euo pipefail
+          if [[ -z "${ERASE_USER_ID// /}" ]]; then
+            echo "::error::user_id is required"
+            exit 1
+          fi
+          # A quick UUID sanity check here (the release function re-validates).
+          if ! [[ "$ERASE_USER_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::user_id must be a UUID — resolve an email/handle via the GDPR lookup workflow first"
+            exit 1
+          fi
+          if [[ "$ERASE_EXECUTE" == "true" ]]; then
+            if [[ -z "${ERASE_REASON// /}" ]]; then
+              echo "::error::reason is required to execute an erasure"
+              exit 1
+            fi
+            if [[ "$ERASE_CONFIRM" != "$ERASE_USER_ID" ]]; then
+              echo "::error::confirm must exactly match user_id to execute (got a mismatch)"
+              exit 1
+            fi
+            echo "Mode: EXECUTE — will erase user_id '$ERASE_USER_ID' on app '$CORE_APP'"
+          else
+            echo "Mode: DRY RUN — will preview user_id '$ERASE_USER_ID' on app '$CORE_APP' (nothing deleted)"
+          fi
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      - name: Run erasure (rpc into the live node)
+        run: |
+          set -euo pipefail
+
+          # Build the JSON param object with jq (proper escaping), then Base64
+          # it. The Base64 blob is the ONLY thing interpolated into the rpc
+          # expression, so there is no shell/Elixir injection surface.
+          params_json="$(jq -cn \
+            --arg user_id "$ERASE_USER_ID" \
+            --arg reason "$ERASE_REASON" \
+            --arg confirm "$ERASE_CONFIRM" \
+            --argjson execute "${ERASE_EXECUTE:-false}" \
+            '{user_id: $user_id, reason: $reason, confirm: $confirm, execute: $execute}')"
+          params_b64="$(printf '%s' "$params_json" | base64 -w0)"
+
+          echo "Invoking gdpr_erase_user on app '$CORE_APP'..."
+          set +e
+          out="$(flyctl ssh console --app "$CORE_APP" \
+            -C "/app/bin/core rpc 'Stacks.Release.gdpr_erase_user(\"$params_b64\")'" 2>&1)"
+          rc=$?
+          set -e
+
+          echo "----- node output -----"
+          echo "$out"
+          echo "-----------------------"
+
+          if echo "$out" | grep -q "GDPR_ERASE_ERROR"; then
+            echo "::error::erasure reported an error"
+            exit 1
+          fi
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::rpc invocation failed (exit $rc)"
+            exit $rc
+          fi
+
+          if [[ "$ERASE_EXECUTE" == "true" ]]; then
+            echo "$out" | grep -q "GDPR_ERASE_RESULT deleted" || {
+              echo "::error::expected a 'deleted' result but did not find one"
+              exit 1
+            }
+            echo "::notice::user erased. Warehouse propagates on the next daily dbt full refresh (≤24h)."
+          else
+            echo "$out" | grep -q "GDPR_ERASE_RESULT dry_run" || {
+              echo "::error::expected a dry-run result but did not find one"
+              exit 1
+            }
+            echo "::notice::dry run complete — nothing deleted."
+          fi

@@ -21,10 +21,11 @@ module Page.Login exposing
     )
 
 import Api exposing (AuthResponse, RegisterError(..))
-import Html exposing (Html, button, div, h1, input, label, p, span, text)
-import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
+import Html exposing (Html, a, button, div, h1, input, label, p, span, text)
+import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Navigation.Route as Route
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -499,6 +500,17 @@ viewFormCard model =
                                 "Enter the Stacks"
                         )
             ]
+        , case model.mode of
+            LoginMode ->
+                a
+                    [ class "login-card__forgot"
+                    , href (Route.toPath Route.ForgotPassword)
+                    , testId "forgot-password-link"
+                    ]
+                    [ text "Forgot your password?" ]
+
+            _ ->
+                text ""
         ]
 
 

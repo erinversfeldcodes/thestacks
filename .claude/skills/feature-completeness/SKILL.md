@@ -19,10 +19,17 @@ correct*, not just *everything in the test-only charter is covered*.
 ## When to use
 - Any E2E / test-coverage / validation / test-hardening issue that names user stories
   (the 110–127 family), at **planning time** and **before authoring any test suite**.
+- **Any infra / observability / platform / pipeline deliverable — not just named user
+  stories.** These have no "user story" but the same failure mode: a metrics/events/
+  ingestion pipeline can be fully coded, tests green, and deliver **nothing** end-to-end.
+  For these, "built" means a **real signal traverses the whole path and is observed at the
+  far end** (a metric emitted → landed in the store → queried back → rendered), *not* that
+  the producing code exists. (The #248 lesson: the observability stack shipped blank because
+  no sample ever reached the store — invisible to every code-read and synthetic gate.)
 - When a `test-audit` cell is about to be classified and you're unsure whether it is
   "test missing, feature exists" (a punch item) or "feature not implemented" (this skill).
-- When picking up any issue that *claims* to cover a user story you have not confirmed
-  is built.
+- When picking up any issue/epic that *claims* to deliver something you have not confirmed
+  works end-to-end with a real signal.
 
 ## The pre-check — per named user story
 1. **Trace the happy path end-to-end through the real code.** Every hop, with file:line:

@@ -95,6 +95,18 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - Protobuf: docs/agents/standards/protobuf.md
 - Migrations: docs/agents/standards/migrations.md
 - Dashboards (ops Grafana): docs/agents/standards/dashboards.md
+- **Completion bar (the exit criterion for any issue/epic): docs/agents/standards/completion-bar.md** —
+  every deliverable driven live (real signal observed), every claim carries an evidence token, no
+  structure-only gate as proof, no phantom `#NNN`. Enforced mechanically by the `check-issue-evidence`
+  Stop hook and the `completion-audit` skill (below), not on the honour system.
+
+## Completion Skills (enforce the bar — run before any "done"/PR-open)
+- `feature-completeness` — is each named story (or infra/observability deliverable) actually *built* +
+  driven live? Runs at planning + before authoring tests.
+- `test-audit` — is each of the 13 layers *tested*? The embedded audit that must be GREEN at exit.
+- `completion-audit` — the epic-wide **adversarial** "prove it is NOT done" gate over the whole
+  deliverable; gates the orchestrator's Phase 3. Automates the "is this really done?" sweep.
+- `verify-and-followup` — run the gates, report with evidence, file residuals as tracked issues.
 
 ## Canonical References
 - Architecture: docs/technical-architecture.md
