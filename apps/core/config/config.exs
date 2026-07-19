@@ -179,11 +179,15 @@ config :core, Stacks.Vault,
 
 config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 
-# Sender for all transactional email. Uses Resend's `onboarding@resend.dev` test
-# sender for now (works before any domain is verified, but only delivers to the
-# Resend account owner's own inbox). Flip to `{"The Stacks", "noreply@thestacks.app"}`
-# once `thestacks.app` is verified in Resend — or override per-env via the
-# EMAIL_FROM runtime var (config/runtime.exs).
+# TODO(email): TEMPORARY STOPGAP sender — Resend's `onboarding@resend.dev` test
+# address. It CANNOT deliver to real users: verified 2026-07 that Resend's
+# onboarding mode only accepts the Resend-account owner's own email, AND only when
+# the recipient has no display name (a `{name, addr}` "to" 403s). So real
+# verification/reset emails will NOT reach actual signups with this sender.
+# ACTION: once a domain is verified at resend.com/domains, flip this to
+# `{"The Stacks", "noreply@thestacks.app"}` (or set the EMAIL_FROM env var) — that
+# is the ONLY remaining step to make prod email actually work. Overridable per-env
+# via EMAIL_FROM (config/runtime.exs).
 config :core, :email_from, {"The Stacks", "onboarding@resend.dev"}
 
 config :swoosh, :api_client, Swoosh.ApiClient.Req
