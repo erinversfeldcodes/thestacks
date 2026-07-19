@@ -1,17 +1,16 @@
 module Page.BookshelfShelvesTest exposing (suite)
 
-{-| Program tests for the physical shelf entity feature (Issue #151).
+{-| Program tests for bookshelf spine rendering.
 
-These tests verify that the bookshelf page renders server-provided shelves
-instead of client-side row grouping, and that shelf management actions work.
-
-These tests are expected to FAIL until the Shelf type and related Msg
-constructors are implemented.
+The bookcase auto-flows: it fetches the server's shelves but flattens their
+placements and re-groups them into rows that fill the bookcase width (the
+physical op.shelves boundaries from #151 are ignored on the frontend). These
+tests verify books render as spines, and that an all-empty response still shows
+the empty-bookshelf message.
 
 -}
 
 import Dict
-import Html.Attributes
 import Http
 import Json.Encode as Encode
 import Page.Bookshelf as Bookshelf
@@ -85,18 +84,15 @@ encodePlacement =
 
 suite : Test
 suite =
-    describe "Page.Bookshelf — Physical Shelves (Issue #151)"
-        [ shelvesRenderedInOrder
-        , eachShelfIsDistinctRow
+    describe "Page.Bookshelf — auto-flow shelf rendering"
+        [ booksRenderInRows
         , emptyShelvesShowEmptyState
-        , addShelfButtonPresent
-        , addShelfButtonFiresPost
         ]
 
 
-shelvesRenderedInOrder : Test
-shelvesRenderedInOrder =
-    test "shelves_rendered_in_order: API response with two shelves renders books from shelf-1 before shelf-2" <|
+booksRenderInRows : Test
+booksRenderInRows =
+    test "books_render_in_rows: placements from the server's shelves render as book spines, flattened into bookcase rows" <|
         \() ->
             startLibrary
                 |> ProgramTest.simulateHttpResponse "GET"
@@ -107,27 +103,7 @@ shelvesRenderedInOrder =
                         ]
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "bookcase__shelf" ]
-
-
-eachShelfIsDistinctRow : Test
-eachShelfIsDistinctRow =
-    test "each_shelf_is_distinct_row: each server shelf renders as a separate bookcase__shelf element" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/bookshelves/library"
-                    (simulateShelvesResponse
-                        [ { id = "shelf-1", position = 0, placements = [ encodePlacement ] }
-                        , { id = "shelf-2", position = 1, placements = [] }
-                        ]
-                    )
-                |> ProgramTest.expectViewHas
-                    [ Selector.all
-                        [ Selector.class "bookcase__shelf"
-                        , Selector.attribute (Html.Attributes.attribute "data-shelf-id" "shelf-2")
-                        ]
-                    ]
+                    [ Selector.class "book-button" ]
 
 
 emptyShelvesShowEmptyState : Test
@@ -143,38 +119,3 @@ emptyShelvesShowEmptyState =
                     )
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Your library is waiting" ]
-
-
-addShelfButtonPresent : Test
-addShelfButtonPresent =
-    test "add_shelf_button_present: authenticated owner sees Add Shelf button" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/bookshelves/library"
-                    (simulateShelvesResponse
-                        [ { id = "shelf-1", position = 0, placements = [] }
-                        ]
-                    )
-                |> ProgramTest.expectViewHas
-                    [ Selector.all
-                        [ Selector.tag "button"
-                        , Selector.text "Add shelf"
-                        ]
-                    ]
-
-
-addShelfButtonFiresPost : Test
-addShelfButtonFiresPost =
-    test "add_shelf_button_fires_post: clicking Add Shelf fires POST to shelves endpoint" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/bookshelves/library"
-                    (simulateShelvesResponse
-                        [ { id = "shelf-1", position = 0, placements = [] }
-                        ]
-                    )
-                |> ProgramTest.clickButton "Add shelf"
-                |> ProgramTest.expectHttpRequestWasMade "POST"
-                    "/api/bookshelves/library/shelves"

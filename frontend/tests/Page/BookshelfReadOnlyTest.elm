@@ -194,7 +194,7 @@ rendersReceivedPlacements =
             browse
                 |> ProgramTest.simulateHttpResponse "GET" profileEndpoint oneShelf
                 |> ProgramTest.expectViewHas
-                    [ Selector.class "bookcase__shelf" ]
+                    [ Selector.class "book-button" ]
 
 
 noAddShelfControl : Test

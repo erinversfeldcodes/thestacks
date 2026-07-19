@@ -18,14 +18,14 @@ import Components.BookList as BookList
 import Components.RSSLink as RSSLink
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, a, button, div, p, text)
+import Html exposing (Html, a, div, p, text)
 import Html.Attributes exposing (attribute, class, href)
-import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers
     exposing
-        ( minShelfRows
+        ( groupIntoRows
+        , minShelfRows
         , viewBookcase
         , viewEmptyShelfMessage
         , viewShelfLabel
@@ -366,10 +366,9 @@ view model =
 viewEmptyBookshelf : Model -> Html Msg
 viewEmptyBookshelf model =
     div [ class "bookshelf", testId "bookshelf-empty" ]
-        (viewBookcase
+        [ viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
-            :: viewAddShelfControls model.config
-        )
+        ]
 
 
 {-| In read-only browse, orient the viewer: who owns this shelf and a link back
@@ -406,38 +405,24 @@ viewBookshelfFromShelves model shelves =
 
         SpineView ->
             let
-                shelfViews =
-                    List.map (viewShelf model.config.wearLevel) shelves
+                -- Auto-flow: flatten every placement across the server's shelves
+                -- and re-group into rows that fill the bookcase inner width, so the
+                -- bookcase grows a new row only as books demand it. The physical
+                -- op.shelves boundaries (#151) are intentionally ignored on the
+                -- frontend — vestigial for now (backend retained; no shelf-placement
+                -- UI), pending a decision on whether to remove them.
+                shelfRows =
+                    List.concatMap .placements shelves
+                        |> groupIntoRows bookcaseInnerWidth
+                        |> List.map (viewShelfRowClickable model.config.wearLevel BookClicked)
             in
             div [ class "bookshelf" ]
-                (viewBookcase (minShelfRows 4 shelfViews)
-                    :: viewAddShelfControls model.config
-                )
+                [ viewBookcase (minShelfRows 4 shelfRows) ]
 
 
-{-| The "Add shelf" affordance is owner-only — a read-only browse view of another
-reader's shelf renders none of it (and cannot dispatch `AddShelf`).
+{-| The bookcase inner width (~996px) used to pack book spines into rows. A new
+row is started once the accumulated spine width would exceed this.
 -}
-viewAddShelfControls : Config -> List (Html Msg)
-viewAddShelfControls config =
-    if config.readOnly then
-        []
-
-    else
-        [ viewAddShelfButton ]
-
-
-viewShelf : WearLevel -> Shelf -> Html Msg
-viewShelf wearLevel shelf =
-    div
-        [ class "bookcase__shelf"
-        , attribute "data-shelf-id" shelf.id
-        ]
-        [ viewShelfRowClickable wearLevel BookClicked shelf.placements
-        ]
-
-
-viewAddShelfButton : Html Msg
-viewAddShelfButton =
-    button [ class "bookshelf__add-shelf", onClick AddShelf ]
-        [ text "Add shelf" ]
+bookcaseInnerWidth : Int
+bookcaseInnerWidth =
+    990
