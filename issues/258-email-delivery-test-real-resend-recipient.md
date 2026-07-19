@@ -76,18 +76,18 @@ n/a — no user stories (test-isolation/harness bug).
 ## Test Audit
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 6 (external service calls — email/Resend) | yes | ❌ delivery tests fail against real Resend on `example.com`; needs env-var recipient (→ ✅ when `just run mix test` is 0-failures locally AND CI green) |
+| 6 (external service calls — email/Resend) | yes | ✅ hermetic default (Test adapter, 11/0, zero real sends) + real-Resend opt-in via `TEST_EMAIL_RECIPIENT` (adapter=Resend, 11/0); `assert_delivered/1` adapter-aware. `just verify` 0 failures; CI green (no key → Test adapter). |
 | 1–5, 7–13 | no | n/a — test-isolation fix, no app-behaviour change |
 
 ## Definition of Done
-- [ ] `just run mix test` is 0 failures locally with `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` present and `TEST_EMAIL_RECIPIENT` UNSET — evidence: command→output (`… tests, 0 failures`) — the `EmailDeliveryJobTest` 5 pass via the Test adapter
-- [ ] Default run sends ZERO real emails (Test adapter) — evidence: runtime.exs guard `config_env() == :test` keeps Test adapter unless `TEST_EMAIL_RECIPIENT` set; assert no Resend HTTP in the run
-- [ ] Recipient read from `TEST_EMAIL_RECIPIENT`, not hardcoded — evidence: test diff showing `System.get_env("TEST_EMAIL_RECIPIENT")` with factory fallback
-- [ ] Assertion is adapter-aware — evidence: test diff (`assert_email_sent` under Test adapter; `:ok`-only under real Resend)
-- [ ] Opt-in path works: with `TEST_EMAIL_RECIPIENT` set, the 5 delivery tests exercise the real Resend send and pass — evidence: command→output with the var set
-- [ ] `TEST_EMAIL_RECIPIENT` documented (commented) in `.env.example`; NOT added to `.env` — evidence: diff
-- [ ] `just verify` passes (0 failures) — evidence: command→output
-- [ ] Test audit (above) GREEN — evidence: regenerated table
+- [x] `just run mix test` is 0 failures locally with `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` present and `TEST_EMAIL_RECIPIENT` UNSET — evidence: `email_delivery_job_test.exs` → `11 tests, 0 failures`, adapter resolved `Swoosh.Adapters.Test`; commit `3c8f355a`
+- [x] Default run sends ZERO real emails (Test adapter) — evidence: `config/runtime.exs:169-176` `present?/1` guard keeps Test adapter unless `TEST_EMAIL_RECIPIENT` non-empty; adapter proven `Swoosh.Adapters.Test` for both unset AND empty-string `TEST_EMAIL_RECIPIENT`
+- [x] Recipient read from `TEST_EMAIL_RECIPIENT`, not hardcoded — evidence: `email_delivery_job_test.exs` `recipient_opts/0` (`System.get_env("TEST_EMAIL_RECIPIENT")`, factory fallback, `""`→unset)
+- [x] Assertion is adapter-aware — evidence: `email_delivery_job_test.exs` `assert_delivered/1` (`assert_email_sent` under Test adapter; `:ok = perform_job` under real Resend)
+- [x] Opt-in path works: with `TEST_EMAIL_RECIPIENT` set, the 5 delivery tests exercise the real Resend send and pass — evidence: `TEST_EMAIL_RECIPIENT=delivered@resend.dev` → adapter `Swoosh.Adapters.Resend`, `11 tests, 0 failures` (real HTTP sends)
+- [x] `TEST_EMAIL_RECIPIENT` documented (commented) in `.env.example`; NOT added to `.env` — evidence: `.env.example:181` commented; `grep -c TEST_EMAIL_RECIPIENT .env` = 0
+- [x] `just verify` passes (0 failures) — evidence: `FINAL_VERIFY_EXIT=0` (elixir 2745/0, elm-review 0, elm-test 867/0, dbt 231/231, credo/dialyzer/proto ✅)
+- [x] Test audit (above) GREEN — evidence: L6 cell ✅ below
 
 ## Dependencies
 None. Discovered during Issue #110 (2B-i regression gate); pre-existing, unrelated to the cost fixture.

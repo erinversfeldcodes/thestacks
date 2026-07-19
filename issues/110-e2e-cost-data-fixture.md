@@ -52,17 +52,17 @@ test named in the cell. This issue carries no embedded audit of its own;
 its DoD is satisfied by greening the relevant #119 cells.
 
 ## Definition of Done
-- [ ] Preview deploys have cost data immediately after seeding
-- [ ] Costs E2E test passes without the `hasCostData` conditional
-- [ ] Fixture is protected by an Elixir test: after the seed cost-data path runs against a
+- [x] Preview deploys have cost data immediately after seeding — evidence: **natural path observed** — redeploy from the committed branch logged `Seeding … (seeds.exs differs from main)` → `Seeds loaded successfully` (full `seed_live/0` ran clean incl. the Platform Costs block); `GET /api/costs` on the preview returned `total_cents:1168, 4 categories, 5 items` with **no `rpc`**
+- [x] Costs E2E test passes without the `hasCostData` conditional — evidence: `e2e/tests/costs.spec.ts:23-42` (conditional removed); `costs.spec.ts` **4/4** (setup 2/2) vs the natural-seeded preview
+- [x] Fixture is protected by an Elixir test: after the seed cost-data path runs against a
       fresh DB, `Stacks.Costs.current_period_costs/0` returns the current-month line items with
       `total_cents > 0` and every row's period inside the current calendar month (guards against
-      period-drift silently emptying the E2E) — evidence: new test file:line
-- [ ] Fixture cost-item logic lives in a testable `Stacks.Costs` function (not raw rows inside
-      `seeds.exs`), so the above test exercises the real seed path — evidence: function + caller
-- [ ] `just verify` passes
-- [ ] #119 audit Layer-13 cells updated to `✅` citing the un-conditionalised costs E2E test
-- [ ] Feature-Completeness Pre-Check (above) is ✅ for US-5.1 — happy path built end-to-end and
+      period-drift silently emptying the E2E) — evidence: `apps/core/test/stacks/costs_test.exs` `describe "seed_current_period_costs/0"` (5-item populate, sum==1168, raw-table period `==:eq`, idempotency); 14/0
+- [x] Fixture cost-item logic lives in a testable `Stacks.Costs` function (not raw rows inside
+      `seeds.exs`), so the above test exercises the real seed path — evidence: `Stacks.Costs.seed_current_period_costs/0` (`costs.ex:215`) via shared `build_cost_items/3` (#259), called at `seeds.exs:1011`
+- [x] `just verify` passes — evidence: `FINAL_VERIFY_EXIT=0` after #258 (elixir 2745/0, elm-review 0, elm-test 867/0, dbt 231/231, credo/dialyzer/proto ✅)
+- [x] #119 audit Layer-13 cells updated to `✅` citing the un-conditionalised costs E2E test — evidence: `issues/119-e2e-metrics-rss.md:326` (cell) + `:347` (punch #10), commit `8abe3adc`
+- [x] Feature-Completeness Pre-Check (above) is ✅ for US-5.1 — happy path built end-to-end and
       observed working on a live stack (banner amount + category cards render from real
       `op.platform_costs` data)
 

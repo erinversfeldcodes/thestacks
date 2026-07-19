@@ -52,14 +52,14 @@ Both the elixir-reviewer and the Principal Engineer flagged this on #110 as a lo
 ## Test Audit
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| 5 (Oban job) + context | yes | ⚠️ existing refresh_costs_job_test + costs seed tests must stay green after the extraction; add one assertion that both callers produce the same item shape (→ ✅ when done) |
+| 5 (Oban job) + context | yes | ✅ `costs_test.exs` `describe "build_cost_items/3"` pins the shared definition (0→5 items/[534,534,0,0,100]/sum 1168/"0 inferences"; 7→Modal 21/"7 inferences"); `refresh_costs_job_test.exs` + seed tests stay green (19/0). |
 | others | no | n/a — pure refactor, no behaviour change |
 
 ## Definition of Done
-- [ ] Single `Costs.build_cost_items/3`; both `RefreshCostsJob` and `seed_current_period_costs/0` call it — evidence: diff
-- [ ] `refresh_costs_job_test.exs` + `costs_test.exs` green — evidence: command→output
-- [ ] No behaviour change (same items/period/conflict/event) — evidence: reviewer confirmation
-- [ ] `just verify` passes — evidence: command→output
+- [x] Single `Costs.build_cost_items/3`; both `RefreshCostsJob` and `seed_current_period_costs/0` call it — evidence: `costs.ex:226` (builder) + `refresh_costs_job.ex:29` (job caller) + `costs.ex:289` (seed pipe); commit `1c3e9aa5`
+- [x] `refresh_costs_job_test.exs` + `costs_test.exs` green — evidence: `just run mix test …/costs_test.exs …/refresh_costs_job_test.exs` → `19 tests, 0 failures`; full verify `2747 tests, 0 failures`
+- [x] No behaviour change (same items/period/conflict/event) — evidence: elixir-reviewer APPROVED "byte-identical"; `costs.refreshed` event + `upsert_cost/1` conflict target + period formula untouched in diff
+- [x] `just verify` passes — evidence: `V259_EXIT=0` (elixir 2747/0, elm-review 0, elm-test 867/0, dbt 231/231, credo/dialyzer/proto ✅)
 
 ## Dependencies
 Depends on #110 (introduces `seed_current_period_costs/0`). Do after #110 merges.
