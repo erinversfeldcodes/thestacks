@@ -276,6 +276,13 @@ if config_env() == :prod do
         api_key: System.fetch_env!("RESEND_API_KEY")
     end
 
+    # Override the transactional-email sender without a redeploy. Defaults to
+    # `onboarding@resend.dev` (config.exs); set EMAIL_FROM to a verified address
+    # (e.g. noreply@thestacks.app) once the Resend domain is verified.
+    if from = System.get_env("EMAIL_FROM") do
+      config :core, :email_from, {"The Stacks", from}
+    end
+
     # Erlang clustering on Fly.io — only active when FLY_APP_NAME is set.
     # rel/env.sh.eex sets RELEASE_DISTRIBUTION=name and RELEASE_NODE=<app>@<ipv6>.
     # Phoenix.PubSub's pg adapter broadcasts across all connected nodes automatically

@@ -179,6 +179,13 @@ config :core, Stacks.Vault,
 
 config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 
+# Sender for all transactional email. Uses Resend's `onboarding@resend.dev` test
+# sender for now (works before any domain is verified, but only delivers to the
+# Resend account owner's own inbox). Flip to `{"The Stacks", "noreply@thestacks.app"}`
+# once `thestacks.app` is verified in Resend — or override per-env via the
+# EMAIL_FROM runtime var (config/runtime.exs).
+config :core, :email_from, {"The Stacks", "onboarding@resend.dev"}
+
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 
 # ── Time-zone database + hackney neutralisation ─────────────────────────────
