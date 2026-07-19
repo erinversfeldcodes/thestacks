@@ -151,6 +151,16 @@ else
   end
 end
 
+# Real transactional email via Resend can be opted into in ANY environment
+# (e.g. local testing of the actual send path) by setting EMAIL_PROVIDER=resend
+# + RESEND_API_KEY — independent of the prod/PHX_SERVER gate below. Off by
+# default: dev uses the in-memory Local mailbox and test uses the Test adapter.
+if System.get_env("EMAIL_PROVIDER") == "resend" && System.get_env("RESEND_API_KEY") do
+  config :core, Stacks.Email.Mailer,
+    adapter: Swoosh.Adapters.Resend,
+    api_key: System.get_env("RESEND_API_KEY")
+end
+
 # ── Prod-only (release) ───────────────────────────────────────────────────────
 # This block has two layers:
 #
