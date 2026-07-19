@@ -2477,6 +2477,30 @@ h4 {
     cursor: not-allowed;
 }
 
+/* -- Secondary text-link actions (forgot password, back to sign in) -- */
+
+.login-card__forgot,
+.login-card__back {
+    display: block;
+    width: 100%;
+    margin-top: 0.85rem;
+    padding: 0.35rem 0;
+    background: none;
+    border: none;
+    color: #4a7c59;
+    font-family: inherit;
+    font-size: 0.9rem;
+    text-align: center;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.login-card__forgot:hover,
+.login-card__back:hover {
+    color: #3a6147;
+    text-decoration: underline;
+}
+
 /* -- Field validation -- */
 
 .login-card__field--valid .login-card__input { border-color: #6b7c3f; }
