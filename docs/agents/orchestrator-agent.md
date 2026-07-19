@@ -278,6 +278,15 @@ actually *built* end-to-end?" — the question that must pass before any test-wr
 "Audit GREEN" must mean *every named story is built and correct*, not *everything in the test-only
 charter is covered*.
 
+0. **Do not trust the issue's self-classification.** An issue that declares itself
+   "n/a — no user stories / just a fixture / infra" does **not** thereby escape this gate — that
+   self-declaration is exactly the #124 failure mode. The orchestrator independently asks: *does this
+   deliverable exist to make a user story, or an infra/observability signal, provable or reachable
+   end-to-end?* If yes (a fixture that unblocks an E2E, a seed that feeds a page, a pipeline that
+   feeds a dashboard), the story/signal it serves **is** in scope for this gate — run the pre-check
+   against it and drive it live, regardless of what the issue's `Feature-Completeness Pre-Check`
+   section currently says. Correct that section in the issue to reality before proceeding.
+
 1. Invoke the **`feature-completeness` skill** (or delegate it to a specialist) for the issue. For
    each named user story it traces the happy path through the real code (route → controller/context
    returning real data → side-effects → frontend render → reachable in nav, each with file:line) AND
@@ -295,6 +304,29 @@ charter is covered*.
 4. **MANDATORY STOP** if any named story is 🟡/❌: present the pre-check verdicts and the
    build-in-scope-vs-de-scope decision to the human before finalising the plan. A validation issue
    may not proceed to test-writing phases while a named story it claims is unbuilt.
+
+### DoD & Test-Layer Sufficiency Check ⛔ PLANNING GATE
+
+The issue's `Definition of Done` is a **starting point, not a specification** — treat it as
+possibly incomplete and verify sufficiency during planning, before finalising phases. Do **not**
+adopt the issue's DoD verbatim into the plan without this check.
+
+1. **Test-layer coverage.** Run the **`test-audit` skill** (for audit-bearing issues) or, for an
+   issue that delegates its audit elsewhere (audit-relevant only), apply the 13-layer lens directly:
+   for each layer the change touches, is there a test that would *fail if this change regressed*?
+   The common gap: the deliverable's own mechanism is unprotected (e.g. a **fixture/seed** that
+   nothing but a flaky preview gate would catch if it silently stopped producing data). Every
+   deliverable must be protected by a test at the *lowest* layer that can prove it, not only at E2E.
+2. **Deliverable protection.** If the deliverable is a fixture, seed, generator, config, or pipeline,
+   require that its logic live somewhere **unit-testable** (a function, not raw rows buried in a
+   script) and that a test exercises the real path. Add the missing test as a DoD item + plan step.
+3. **Amend the issue.** Add any missing DoD items (with an evidence token each) directly to the
+   issue file's `Definition of Done` before writing the plan, so the plan and its gates enforce the
+   *sufficient* DoD, not the as-filed one. Note the additions in the plan synopsis at the Phase-1 stop.
+4. **Cross-cutting lenses are not optional.** Independently determine whether the change touches the
+   `gdpr-review` surface (migrations, schemas, event emitters, user-data endpoints, workers, dbt) and
+   run that lens if so — or record *why it is genuinely N/A* (e.g. "aggregate platform data, zero
+   PII, no user FK"). "N/A" is a positive finding you state, never a step you silently skip.
 
 ---
 
