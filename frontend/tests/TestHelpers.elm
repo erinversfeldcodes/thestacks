@@ -760,27 +760,9 @@ uploadEffects msg model maybeToken =
 
 {-| Translate Bookshelf page Cmds into SimulatedEffects.
 -}
-libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> Maybe String -> SimulatedEffect Bookshelf.Msg
-libraryEffects msg model maybeToken =
+libraryEffects : Bookshelf.Msg -> SimulatedEffect Bookshelf.Msg
+libraryEffects msg =
     case msg of
-        Bookshelf.AddShelf ->
-            case maybeToken of
-                Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/bookshelves/" ++ model.config.apiName ++ "/shelves"
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect =
-                            SimulatedEffect.Http.expectJson Bookshelf.ShelfAdded
-                                Types.Shelf.shelfDecoder
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -1139,7 +1121,7 @@ libraryProgram maybeToken =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg model maybeToken )
+                ( newModel, libraryEffects msg )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1168,7 +1150,7 @@ profileShelfProgram maybeToken handle bookshelfName =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg model maybeToken )
+                ( newModel, libraryEffects msg )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity

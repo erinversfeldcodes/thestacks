@@ -42,7 +42,6 @@ module Api exposing
     , UploadInit
     , acceptInvitation
     , activateListing
-    , addShelf
     , adminBookDecoder
     , adminBooksResponseDecoder
     , adminListBooks
@@ -149,7 +148,7 @@ import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitati
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
-import Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (Shelf, shelvesResponseDecoder)
 import Url.Builder
 
 
@@ -803,23 +802,6 @@ getBookshelf shelfName token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg shelvesResponseDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-addShelf :
-    String
-    -> String
-    -> (Result Http.Error Shelf -> msg)
-    -> Cmd msg
-addShelf shelfName token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/shelves"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg shelfDecoder
         , timeout = Nothing
         , tracker = Nothing
         }

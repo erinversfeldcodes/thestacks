@@ -1,4 +1,4 @@
-module Types.Shelf exposing (Shelf, shelfDecoder, shelvesResponseDecoder)
+module Types.Shelf exposing (Shelf, shelvesResponseDecoder)
 
 import Json.Decode as Decode
 import Types.Placement exposing (Placement, placementDecoder)
