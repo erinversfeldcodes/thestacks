@@ -178,6 +178,57 @@ defmodule Stacks.CostsTest do
     end
   end
 
+  describe "build_cost_items/3" do
+    # Single source of truth (Issue #259): both RefreshCostsJob and
+    # seed_current_period_costs/0 build their items via this function, so this
+    # pins the shared definition both callers depend on.
+    setup do
+      now = DateTime.utc_now()
+      period_start = %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
+      days = Calendar.ISO.days_in_month(now.year, now.month)
+
+      period_end = %{
+        now
+        | day: days,
+          hour: 23,
+          minute: 59,
+          second: 59,
+          microsecond: {999_999, 6}
+      }
+
+      %{period_start: period_start, period_end: period_end}
+    end
+
+    test "with vision_jobs 0 yields the 5 seeded line items summing to 1168", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0)
+
+      assert length(items) == 5
+
+      assert Enum.map(items, & &1.category) == ~w(hosting hosting compute database domain)
+      assert Enum.map(items, & &1.amount_cents) == [534, 534, 0, 0, 100]
+      assert Enum.reduce(items, 0, fn i, acc -> acc + i.amount_cents end) == 1168
+
+      # Every item carries the shared period + currency envelope.
+      for item <- items do
+        assert item.period_start == ctx.period_start
+        assert item.period_end == ctx.period_end
+        assert item.currency == "USD"
+      end
+
+      modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
+      assert modal.amount_cents == 0
+      assert modal.description =~ "0 inferences this month"
+    end
+
+    test "with vision_jobs 7 computes the Modal item from the usage count", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 7)
+
+      modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
+      assert modal.amount_cents == 21
+      assert modal.description =~ "7 inferences this month"
+    end
+  end
+
   describe "seed_current_period_costs/0" do
     # Guards the E2E cost-data fixture (Issue #110): seeds.exs calls this so
     # preview/local deploys always have current-period cost data for the costs
