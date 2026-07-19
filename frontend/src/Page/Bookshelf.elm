@@ -407,10 +407,11 @@ viewBookshelfFromShelves model shelves =
             let
                 -- Auto-flow: flatten every placement across the server's shelves
                 -- and re-group into rows that fill the bookcase inner width, so the
-                -- bookcase grows a new row only as books demand it. The physical
-                -- op.shelves boundaries (#151) are intentionally ignored on the
-                -- frontend — vestigial for now (backend retained; no shelf-placement
-                -- UI), pending a decision on whether to remove them.
+                -- bookcase grows a new row only as books demand it. This is a
+                -- deliberate presentation choice — the frontend does not surface the
+                -- physical op.shelves boundaries (#151). The shelves themselves are
+                -- live backend infrastructure (place_book assigns each placement a
+                -- shelf); we simply render across them rather than per-shelf.
                 shelfRows =
                     List.concatMap .placements shelves
                         |> groupIntoRows bookcaseInnerWidth
