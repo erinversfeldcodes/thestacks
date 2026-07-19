@@ -177,4 +177,75 @@ defmodule Stacks.CostsTest do
       assert Costs.book_count() == 0
     end
   end
+
+  describe "seed_current_period_costs/0" do
+    # Guards the E2E cost-data fixture (Issue #110): seeds.exs calls this so
+    # preview/local deploys always have current-period cost data for the costs
+    # page E2E. The 5 static line items mirror RefreshCostsJob with Modal at 0
+    # inferences (amount_cents 0), summing to 1168 cents.
+    #
+    # Same current-calendar-month window as Costs.current_period_costs/0.
+    defp beginning_of_current_month do
+      now = DateTime.utc_now()
+      %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
+    end
+
+    defp end_of_current_month do
+      now = DateTime.utc_now()
+      days = Calendar.ISO.days_in_month(now.year, now.month)
+      %{now | day: days, hour: 23, minute: 59, second: 59, microsecond: {999_999, 6}}
+    end
+
+    test "populates current_period_costs/0 with the 5 static line items" do
+      assert Costs.current_period_costs() == []
+
+      Costs.seed_current_period_costs()
+
+      costs = Costs.current_period_costs()
+      assert costs != []
+      assert length(costs) == 5
+    end
+
+    test "seeded items sum to a positive total (1168 cents with Modal at 0)" do
+      Costs.seed_current_period_costs()
+
+      total_cents =
+        Costs.current_period_costs()
+        |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end)
+
+      # Static items: Fly.io Core 534 + Fly.io Vision 534 + Modal 0 (0 inferences)
+      # + Neon 0 + Domain 100 = 1168.
+      assert total_cents > 0
+      assert total_cents == 1168
+    end
+
+    test "every seeded row's period lies inside the current calendar month" do
+      Costs.seed_current_period_costs()
+
+      month_start = beginning_of_current_month()
+      month_end = end_of_current_month()
+
+      # Anti-regression guard: if the period formula ever drifts so rows fall
+      # outside current_period_costs/0's month window, the E2E silently reverts
+      # to empty-state. Query the RAW table (not the already-month-filtered
+      # current_period_costs/0 view, which would exclude any drifted row upstream
+      # and make this loop pass vacuously). The seed sets every row to precisely
+      # beginning/end-of-month, so :eq is the tightest correct assertion, and the
+      # length check keeps the loop non-empty so :eq actually fires.
+      seeded_rows = Core.Repo.all(PlatformCost)
+      assert length(seeded_rows) == 5
+
+      for cost <- seeded_rows do
+        assert DateTime.compare(cost.period_start, month_start) == :eq
+        assert DateTime.compare(cost.period_end, month_end) == :eq
+      end
+    end
+
+    test "is idempotent — running twice does not duplicate rows" do
+      Costs.seed_current_period_costs()
+      Costs.seed_current_period_costs()
+
+      assert length(Costs.current_period_costs()) == 5
+    end
+  end
 end

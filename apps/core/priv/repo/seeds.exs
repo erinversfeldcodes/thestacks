@@ -1003,4 +1003,11 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
+# ── Platform Costs ──────────────────────────────────────────────────────────
+# Seed the 5 static current-month platform cost line items (Issue #110) so
+# preview/local deploys always have current-period data for the /costs page E2E.
+# Idempotent — seed_current_period_costs/0 upserts on [:service, :period_start,
+# :period_end], matching the daily RefreshCostsJob cron's conflict semantics.
+Stacks.Costs.seed_current_period_costs()
+
 IO.puts("Seeds loaded successfully.")

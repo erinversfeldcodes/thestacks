@@ -20,27 +20,24 @@ test.describe("Cost Transparency", () => {
       timeout: 10_000,
     });
 
-    // Cost data depends on RefreshCostsJob having run.
-    // On fresh preview deploys the job may not have fired yet.
-    const hasCostData =
-      (await page.getByTestId('costs-category-card').count()) > 0;
+    // Cost data is guaranteed by #110's seed fixture
+    // (Stacks.Costs.seed_current_period_costs/0, called from seeds.exs), so these
+    // assert unconditionally — no dependency on RefreshCostsJob having fired.
 
-    if (hasCostData) {
-      // Total banner should show a dollar amount
-      await expect(page.locator(".costs__banner-amount")).toBeVisible();
-      await expect(page.locator(".costs__banner-amount")).toContainText("$");
+    // Total banner should show a dollar amount
+    await expect(page.locator(".costs__banner-amount")).toBeVisible();
+    await expect(page.locator(".costs__banner-amount")).toContainText("$");
 
-      // At least one category card should render
-      await expect(
-        page.getByTestId('costs-category-card').first()
-      ).toBeVisible();
+    // At least one category card should render
+    await expect(
+      page.getByTestId('costs-category-card').first()
+    ).toBeVisible();
 
-      // Story cards should be present
-      await expect(page.locator(".costs__story-card")).toHaveCount(3);
-      await expect(
-        page.locator(".costs__story-card").first()
-      ).toContainText("$");
-    }
+    // Story cards should be present
+    await expect(page.locator(".costs__story-card")).toHaveCount(3);
+    await expect(
+      page.locator(".costs__story-card").first()
+    ).toContainText("$");
 
     // Philosophy note at the bottom
     await expect(page.locator(".costs__philosophy-text")).toContainText(
