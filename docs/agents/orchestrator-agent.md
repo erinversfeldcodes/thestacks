@@ -327,6 +327,32 @@ adopt the issue's DoD verbatim into the plan without this check.
    `gdpr-review` surface (migrations, schemas, event emitters, user-data endpoints, workers, dbt) and
    run that lens if so — or record *why it is genuinely N/A* (e.g. "aggregate platform data, zero
    PII, no user FK"). "N/A" is a positive finding you state, never a step you silently skip.
+5. **Proving-gate observability for every runtime/deploy-time DoD item** (the #110 lesson). The
+   feature-completeness and test-layer checks above are **feature-shaped** — they ask "is it built?"
+   and "is each layer tested?". They do NOT, on their own, prove that a **delivery/pipeline mechanism
+   actually fires in its target environment**. A fixture/seed/migration/cron/deploy-hook/pipeline can
+   be fully coded, unit-tested, and still deliver **nothing** where it's supposed to (the #248/#110
+   failure class). So for **every DoD item that asserts a runtime- or deploy-time OUTCOME** ("preview
+   deploys have X", "the cron populates Y", "the metric appears in the dashboard"), write a concrete
+   proving-gate at **planning** naming all three of:
+   - **(a) the real signal** — the exact observable (`GET /api/costs` non-empty; a row in `op.…`; a
+     rendered value), not "the code exists" or "a unit test passes";
+   - **(b) where it is observed at the far end** — the actual target environment (a *deployed* preview,
+     the prod dashboard), not a local proxy;
+   - **(c) the preconditions for the mechanism to fire** — the real conditions under which it triggers
+     (a **committed** change so `git diff origin/main` sees it; a specific env flag; a time window).
+     If the observation **cannot be made without a precondition**, that precondition is a **planning
+     finding surfaced now**, not something discovered mid-execution at the 2B-iii gate.
+
+   Trace the deliverable's **write/delivery path end-to-end**, not just its read/render path
+   (`deploy → seed-detection → seed_live → op.table` — not merely `controller → context → view`). Two
+   sharp questions that would have caught #110 at planning: *"how does the data physically arrive in
+   the target env, and have we named how we'll watch it arrive?"* and *"under what real condition does
+   this mechanism fire, and does our validation actually meet that condition (e.g. is the change
+   committed)?"* Also sweep the write path's **own side effects** (a `:telemetry.execute` / event the
+   seed itself emits → assert it) and its **temporal/edge behaviour** (month-boundary, TTL, empty
+   state) — the static happy-path drive won't surface these. Fold each into the DoD with its proving
+   gate before finalising the plan.
 
 ---
 
