@@ -27,31 +27,45 @@ n/a — no user stories (test-isolation/harness bug).
 
 ## Root Cause (verified 2026-07-19)
 - `justfile:2` — `set dotenv-load` → every `just` command (incl. `just run mix test`) loads `.env`,
-  which carries `RESEND_API_KEY`. So the test process runs with the key present.
-- With the key present, the mailer resolves to the real Resend adapter, overriding
-  `apps/core/config/test.exs:102` (`config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Test`).
+  which carries `EMAIL_PROVIDER=resend` + `RESEND_API_KEY`. So the test process runs with both present.
+- `config/runtime.exs:158` (repo-root, runs in ALL envs incl. `:test`): when `EMAIL_PROVIDER == "resend"`
+  and `RESEND_API_KEY` is set, it configures `Swoosh.Adapters.Resend`, **overriding**
+  `apps/core/config/test.exs:102` (`adapter: Swoosh.Adapters.Test`).
 - The factory default recipient is `apps/core/test/support/factory.ex:41`
   (`email: sequence(:email, &"user#{&1}@example.com")`). Resend `422`s `example.com` recipients.
 - Deterministic (reproduced across two runs, 5/5). **CI is green** because CI has no local `.env`, so
-  `RESEND_API_KEY` is absent → the Test adapter stays configured → no network call.
+  `EMAIL_PROVIDER`/`RESEND_API_KEY` are absent → the Test adapter stays configured → no network call.
 - Failing tests (all in `apps/core/test/stacks/workers/email_delivery_job_test.exs`):
-  marketplace_sale (`:32`), wishlist_availability (`:58`), registration_confirmation (`:` bypass),
-  password_reset, gdpr_export_ready.
+  marketplace_sale (`:32`), wishlist_availability (`:58`), registration_confirmation, password_reset,
+  gdpr_export_ready.
+- **Deeper wrinkle:** the delivery tests assert `assert_email_sent(subject: …)`, a Swoosh
+  `TestAssertions` macro that reads an in-process mailbox — it ONLY works with `Swoosh.Adapters.Test`.
+  So merely fixing the recipient would trade the `422` for an `assert_email_sent` failure under the
+  real adapter, and would fire real emails on every `just run mix test`.
+
+## Chosen Approach (owner decision 2026-07-19): hermetic by default, env-var opt-in
+1. **`config/runtime.exs:158`** — in `:test`, keep the Test adapter by DEFAULT; only wire
+   `Swoosh.Adapters.Resend` when `TEST_EMAIL_RECIPIENT` is ALSO set (explicit real-send opt-in). Leave
+   non-test env behaviour unchanged (`EMAIL_PROVIDER=resend` + key → Resend). Net: `just run mix test`
+   (which loads `EMAIL_PROVIDER=resend` + key but NOT `TEST_EMAIL_RECIPIENT`) uses the Test adapter →
+   green, `assert_email_sent` works, zero real emails.
+2. **`email_delivery_job_test.exs`** — the 5 delivery tests read the recipient from
+   `System.get_env("TEST_EMAIL_RECIPIENT")`, falling back to the factory default when unset (NOT
+   hardcoded). Make the delivery assertion **adapter-aware**: when the configured adapter is
+   `Swoosh.Adapters.Test`, assert `assert_email_sent(subject: …)`; when the real adapter is active
+   (opt-in), assert only `:ok = perform_job(...)` (a real send to the valid recipient) and skip the
+   in-process mailbox assertion. `perform` must return `:ok` in both modes.
+3. **`.env.example`** — document `TEST_EMAIL_RECIPIENT` (commented, e.g.
+   `# TEST_EMAIL_RECIPIENT=erinversfeld@gmail.com`) as the real-send opt-in for testing the actual
+   Resend path. Do **NOT** add it to `.env` — everyday runs stay hermetic.
 
 ## Technical Requirements
-- The delivery tests must send to a **recipient supplied by an env var** (e.g. `TEST_EMAIL_RECIPIENT`),
-  whose value in `.env` is `erinversfeld@gmail.com` (the Resend account owner, which Resend accepts).
-  **Do not hardcode the address in the test** — read it from the environment; the value lives in `.env`
-  (and CI/`.env.example` documentation), not in source.
-- When the env var is unset (e.g. a clean checkout with the Test adapter active), the tests must still
-  pass — the Test adapter accepts any recipient, so the env-var recipient is only *required* to be a
-  real address when a live adapter is in play. Choose a sensible default/fallback so a keyless
-  environment (CI) is unaffected.
-- Preferred implementation: a small test-support helper (e.g. `Stacks.Factory` override or a
-  `test/support` function) that stamps `email:` from `System.get_env("TEST_EMAIL_RECIPIENT")` for the
-  delivery tests, rather than editing each `insert(:user, …)` call site. Keep the factory's global
-  `example.com` default for the rest of the suite (only the delivery tests need a deliverable address).
-- Document `TEST_EMAIL_RECIPIENT` in `.env.example` (or the canonical env doc) with a one-line note.
+- Implement the 3 points above. The default (no `TEST_EMAIL_RECIPIENT`) suite must be green AND send
+  zero real emails, even with `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` present (the `just run` reality).
+- The opt-in path (`TEST_EMAIL_RECIPIENT` set) must exercise the real Resend send to the given
+  recipient and still pass (adapter-aware assertion).
+- The address value is never hardcoded in a test — it comes from the env var; `.env.example` documents
+  it; `.env` does not carry it by default.
 
 ## Reviewer Context
 - `just` auto-loads `.env` via `set dotenv-load` (justfile:2) — this is why a "test" run picks up real
@@ -66,11 +80,13 @@ n/a — no user stories (test-isolation/harness bug).
 | 1–5, 7–13 | no | n/a — test-isolation fix, no app-behaviour change |
 
 ## Definition of Done
-- [ ] `just run mix test` is 0 failures locally with `RESEND_API_KEY` present — evidence: command→output (`… tests, 0 failures`)
-- [ ] Recipient is read from an env var, not hardcoded — evidence: test/support diff showing `System.get_env("TEST_EMAIL_RECIPIENT")`
-- [ ] Keyless run (Test adapter / CI) still passes — evidence: run with the var unset → 0 failures
-- [ ] `TEST_EMAIL_RECIPIENT` documented in `.env.example` — evidence: diff
-- [ ] `just verify` passes — evidence: command→output
+- [ ] `just run mix test` is 0 failures locally with `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` present and `TEST_EMAIL_RECIPIENT` UNSET — evidence: command→output (`… tests, 0 failures`) — the `EmailDeliveryJobTest` 5 pass via the Test adapter
+- [ ] Default run sends ZERO real emails (Test adapter) — evidence: runtime.exs guard `config_env() == :test` keeps Test adapter unless `TEST_EMAIL_RECIPIENT` set; assert no Resend HTTP in the run
+- [ ] Recipient read from `TEST_EMAIL_RECIPIENT`, not hardcoded — evidence: test diff showing `System.get_env("TEST_EMAIL_RECIPIENT")` with factory fallback
+- [ ] Assertion is adapter-aware — evidence: test diff (`assert_email_sent` under Test adapter; `:ok`-only under real Resend)
+- [ ] Opt-in path works: with `TEST_EMAIL_RECIPIENT` set, the 5 delivery tests exercise the real Resend send and pass — evidence: command→output with the var set
+- [ ] `TEST_EMAIL_RECIPIENT` documented (commented) in `.env.example`; NOT added to `.env` — evidence: diff
+- [ ] `just verify` passes (0 failures) — evidence: command→output
 - [ ] Test audit (above) GREEN — evidence: regenerated table
 
 ## Dependencies

@@ -155,7 +155,25 @@ end
 # (e.g. local testing of the actual send path) by setting EMAIL_PROVIDER=resend
 # + RESEND_API_KEY — independent of the prod/PHX_SERVER gate below. Off by
 # default: dev uses the in-memory Local mailbox and test uses the Test adapter.
-if System.get_env("EMAIL_PROVIDER") == "resend" && System.get_env("RESEND_API_KEY") do
+#
+# In :test, default to the hermetic Test adapter (config/test.exs) even when
+# EMAIL_PROVIDER=resend + RESEND_API_KEY are present — `just` loads `.env`
+# (dotenv-load) so both are set on every `just run mix test`. Opt into a real
+# Resend send only when a real recipient is explicitly provided via
+# TEST_EMAIL_RECIPIENT — see issue #258. Non-test envs are unchanged.
+# An env var counts only when non-nil AND non-empty — an exported-but-empty
+# `TEST_EMAIL_RECIPIENT=` (or empty EMAIL_PROVIDER/RESEND_API_KEY) must read as
+# unset, so it can't silently wire the real adapter with the factory
+# example.com default (→ Resend 422). Mirrors the "" -> unset semantics of the
+# test's recipient_opts/0 helper so the guard and the test agree.
+present? = fn name -> (System.get_env(name) || "") != "" end
+
+resend_configured? = System.get_env("EMAIL_PROVIDER") == "resend" && present?.("RESEND_API_KEY")
+
+real_send? =
+  resend_configured? && (config_env() != :test || present?.("TEST_EMAIL_RECIPIENT"))
+
+if real_send? do
   config :core, Stacks.Email.Mailer,
     adapter: Swoosh.Adapters.Resend,
     api_key: System.get_env("RESEND_API_KEY")
