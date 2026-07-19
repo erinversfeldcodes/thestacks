@@ -21,6 +21,22 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     Application.get_env(:core, :email_from, {"The Stacks", "noreply@thestacks.app"})
   end
 
+  # Recipient for a transactional email.
+  #
+  # TEMPORARY STOPGAP (see the matching TODO(email) in config/config.exs): while the
+  # sender is Resend's `onboarding@resend.dev` test address, Resend 403s any recipient
+  # carrying a display name (a `{name, addr}` "to") and only accepts a bare address to
+  # the Resend-account owner. So we send to the bare `user.email` while onboarding mode
+  # is active, and restore the `{display_name, email}` tuple automatically once the
+  # sender is a verified domain (i.e. `:email_from` no longer points at onboarding).
+  defp recipient(user) do
+    case from_address() do
+      {_name, "onboarding@resend.dev"} -> user.email
+      "onboarding@resend.dev" -> user.email
+      _ -> {user.display_name || user.email, user.email}
+    end
+  end
+
   # All known email templates. Any job with an unrecognised template is discarded
   # immediately (no retries) to prevent blocking the queue.
   @known_templates %{
@@ -86,7 +102,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     confirmation_url = base_url <> "/api/auth/confirm/#{token}"
 
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Confirm your email — The Stacks")
     |> Swoosh.Email.html_body(Templates.registration_confirmation(confirmation_url))
@@ -97,7 +113,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     reset_url = base_url <> "/reset-password/#{token}"
 
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Reset your password — The Stacks")
     |> Swoosh.Email.html_body(Templates.password_reset(reset_url))
@@ -105,7 +121,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   defp build_email(user, :marketplace_sale, %{"role" => role, "book_title" => book_title}) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Book transaction update — The Stacks")
     |> Swoosh.Email.html_body(Templates.marketplace_sale(role, book_title))
@@ -113,7 +129,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   defp build_email(user, :gdpr_export_ready, %{"download_url" => download_url}) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Your data export is ready — The Stacks")
     |> Swoosh.Email.html_body(Templates.gdpr_export_ready(download_url))
@@ -121,7 +137,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   defp build_email(user, :wishlist_availability, %{"book_title" => book_title}) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("A book on your WishList is available — The Stacks")
     |> Swoosh.Email.html_body(Templates.wishlist_availability(book_title))
@@ -129,7 +145,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   defp build_email(user, :opt_out_confirmation, _params) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Removal request received — The Stacks")
     |> Swoosh.Email.html_body(Templates.opt_out_confirmation())
@@ -141,7 +157,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
          "accept_url" => accept_url
        }) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("You've been invited to a group — The Stacks")
     |> Swoosh.Email.html_body(Templates.group_invitation(inviter_name, group_name, accept_url))
@@ -154,7 +170,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
          "offer_url" => offer_url
        }) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("New offer on your listing — The Stacks")
     |> Swoosh.Email.html_body(
@@ -169,7 +185,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
          "seller_name" => seller_name
        }) do
     Swoosh.Email.new()
-    |> Swoosh.Email.to({user.display_name || user.email, user.email})
+    |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("A book on your WishList is available — The Stacks")
     |> Swoosh.Email.html_body(

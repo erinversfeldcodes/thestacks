@@ -1,8 +1,15 @@
 defmodule Stacks.Email.Templates do
   @moduledoc "HTML email templates for transactional emails."
 
+  alias Stacks.Accounts
+
   @doc "Confirmation email sent after registration."
   def registration_confirmation(confirmation_url) do
+    # Derive the stated expiry from the single source of truth so the copy can
+    # never drift from the actual link lifetime (the confirm flow and the daily
+    # expired-unverified reaper both use this same TTL).
+    expiry_hours = div(Accounts.unverified_account_ttl_seconds(), 3600)
+
     """
     <html>
     <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
@@ -16,7 +23,7 @@ defmodule Stacks.Email.Templates do
           </a>
         </p>
         <p style="font-size: 12px; color: #7a6b5d;">
-          This link expires in 48 hours. If you did not register, you can safely ignore this email.
+          This link expires in #{expiry_hours} hours. If you did not register, you can safely ignore this email.
         </p>
       </div>
     </body>
