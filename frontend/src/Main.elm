@@ -2906,30 +2906,46 @@ viewHome =
         , p [ class "home__subtitle" ]
             [ text "Your personal collection, beautifully organised." ]
         , div [ class "home__actions" ]
-            [ a [ href (Route.toPath AntiLibrary), class "btn btn--primary" ]
-                [ text "View Antilibrary" ]
-            , a [ href (Route.toPath Upload), class "btn btn--secondary" ]
-                [ text "Add a Book" ]
+            [ a [ href (Route.toPath About), class "btn btn--primary home__link--about" ]
+                [ text "About The Stacks" ]
+            , a [ href (Route.toPath MarketplaceBrowse), class "btn btn--secondary home__link--marketplace" ]
+                [ text "Browse the Marketplace" ]
             ]
         ]
 
 
 viewConfirmEmail : ConfirmStatus -> Html Msg
 viewConfirmEmail status =
+    -- Reuse the login page's static scene (library background + dim + vignette)
+    -- so the email-confirmation result matches the login and reset-password cards.
+    -- The animated door layers are login-only; this renders the background
+    -- statically — no animation.
+    div [ class "page page--login" ]
+        [ div [ class "layer-arrival" ] []
+        , div [ class "layer-bookshelf" ] []
+        , div [ class "layer-bookshelf-dim" ] []
+        , div [ class "layer-vignette" ] []
+        , div [ class "login-overlay" ]
+            [ div [ class "login-card" ] (viewConfirmEmailCard status) ]
+        ]
+
+
+viewConfirmEmailCard : ConfirmStatus -> List (Html Msg)
+viewConfirmEmailCard status =
     case status of
         EmailConfirmed ->
-            div [ class "page page--confirm-email" ]
-                [ h1 [] [ text "Email confirmed" ]
-                , p [] [ text "Your email address has been verified. You can now use The Stacks." ]
-                , a [ href (Route.toPath Login), class "btn btn--primary" ] [ text "Sign in" ]
-                ]
+            [ h1 [ class "login-card__title" ] [ text "Email confirmed" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "Your email address has been verified. You can now sign in to The Stacks." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Sign in" ]
+            ]
 
         EmailConfirmFailed ->
-            div [ class "page page--confirm-email page--confirm-email--error" ]
-                [ h1 [] [ text "Confirmation failed" ]
-                , p [] [ text "This link has expired or is no longer valid. Please register again to receive a new confirmation email." ]
-                , a [ href "/", class "btn btn--primary" ] [ text "Go home" ]
-                ]
+            [ h1 [ class "login-card__title" ] [ text "Confirmation failed" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "This confirmation link is no longer valid — it may have expired, already been used, or its account may no longer exist. Please register again to receive a fresh confirmation email." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Back to sign in" ]
+            ]
 
 
 viewNotFound : Html Msg

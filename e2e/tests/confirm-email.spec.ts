@@ -11,31 +11,31 @@ test.describe("Email confirmation pages", () => {
   test("success page renders heading and sign-in link", async ({ page }) => {
     await page.goto("/confirm-email/success");
 
-    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+    await expect(page.locator(".login-card__title")).toHaveText(
       "Email confirmed"
     );
-    await expect(page.locator(".page--confirm-email p")).toContainText(
+    await expect(page.locator(".login-card__subtitle")).toContainText(
       "verified"
     );
 
-    const signInLink = page.locator('.page--confirm-email a[href="/login"]');
+    const signInLink = page.locator('.login-card a[href="/login"]');
     await expect(signInLink).toBeVisible();
     await expect(signInLink).toHaveText("Sign in");
   });
 
-  test("error page renders heading and go-home link", async ({ page }) => {
+  test("error page renders heading and back-to-sign-in link", async ({ page }) => {
     await page.goto("/confirm-email/error");
 
-    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+    await expect(page.locator(".login-card__title")).toHaveText(
       "Confirmation failed"
     );
-    await expect(page.locator(".page--confirm-email p")).toContainText(
+    await expect(page.locator(".login-card__subtitle")).toContainText(
       "expired"
     );
 
-    const homeLink = page.locator('.page--confirm-email a[href="/"]');
-    await expect(homeLink).toBeVisible();
-    await expect(homeLink).toHaveText("Go home");
+    const backLink = page.locator('.login-card a[href="/login"]');
+    await expect(backLink).toBeVisible();
+    await expect(backLink).toHaveText("Back to sign in");
   });
 
   test("invalid confirmation token redirects to error page", async ({
@@ -46,7 +46,7 @@ test.describe("Email confirmation pages", () => {
     await page.goto("/api/auth/confirm/not-a-real-token");
 
     await expect(page).toHaveURL(/\/confirm-email\/error/);
-    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+    await expect(page.locator(".login-card__title")).toHaveText(
       "Confirmation failed"
     );
   });
@@ -54,7 +54,7 @@ test.describe("Email confirmation pages", () => {
   test("sign-in link on success page navigates to login", async ({ page }) => {
     await page.goto("/confirm-email/success");
 
-    await page.click('.page--confirm-email a[href="/login"]');
+    await page.click('.login-card a[href="/login"]');
 
     await expect(page).toHaveURL(/\/login/);
   });
@@ -86,7 +86,7 @@ test.describe("Email confirmation — full flow", () => {
     await page.goto(`/api/auth/confirm/${token}`);
 
     await expect(page).toHaveURL(/\/confirm-email\/success/);
-    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+    await expect(page.locator(".login-card__title")).toHaveText(
       "Email confirmed"
     );
   });
@@ -126,7 +126,7 @@ test.describe("Email confirmation — full flow", () => {
     // 3. Clicking that link 302s through to the Elm success page.
     await page.goto(link!);
     await expect(page).toHaveURL(/\/confirm-email\/success/);
-    await expect(page.locator(".page--confirm-email h1")).toHaveText(
+    await expect(page.locator(".login-card__title")).toHaveText(
       "Email confirmed"
     );
 

@@ -3845,3 +3845,325 @@ h4 {
     border-color: rgba(184, 134, 11, 0.8);
 }
 
+
+/* ==========================================================================
+   Public transparency pages — /metrics and /about
+   Mirror the /costs aesthetic (gradient hero banner, titled sections, card
+   grids) using the same design tokens, so the three public pages read as one
+   family. See the .costs__* block above for the reference styling.
+   ========================================================================== */
+
+.page--metrics,
+.page--about {
+    padding-bottom: 4rem;
+}
+
+/* -- Shared title / subtitle (match .costs__title / .costs__subtitle) -- */
+
+.metrics__title,
+.about__title {
+    font-size: var(--size-4xl);
+    font-family: var(--font-heading);
+    letter-spacing: 0.01em;
+    margin-bottom: 0.5rem;
+}
+
+.metrics__subtitle,
+.about__lede {
+    color: var(--text-muted, #a09070);
+    font-style: italic;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    margin-bottom: 2.5rem;
+    line-height: 1.6;
+}
+
+.metrics__content {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.metrics__loading {
+    color: var(--text-muted, #a09070);
+    font-style: italic;
+    padding: 2rem 0;
+}
+
+.metrics__error {
+    color: var(--text-muted, #a09070);
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* -- Flagship costs widget → hero banner (mirror .costs__banner) -- */
+
+.metrics__costs {
+    background: linear-gradient(135deg, #2a1f14, #3d2b1f);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem 2.5rem;
+    margin-bottom: 3rem;
+    text-align: center;
+    box-shadow: var(--shadow-md);
+}
+
+.metrics__costs-title {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    color: var(--text);
+    margin-bottom: 1rem;
+}
+
+.metrics__costs-figure {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+}
+
+.metrics__costs-amount {
+    font-family: var(--font-heading);
+    font-size: 3.5rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.1;
+}
+
+.metrics__costs-caption {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
+.metrics__costs-prose {
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: var(--size-base);
+    color: var(--text-muted, #a09070);
+    line-height: 1.7;
+    max-width: 620px;
+    margin: 0 auto 1rem;
+}
+
+/* -- Sections (mirror .costs__stories / .costs__section-title) -- */
+
+.metrics__section {
+    margin-bottom: 3rem;
+}
+
+.metrics__section-title,
+.about__section-title {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    margin-bottom: 0.5rem;
+    color: var(--text);
+}
+
+.metrics__section-lede {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+    max-width: 640px;
+}
+
+.metrics__unavailable {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    font-style: italic;
+    padding: 1.25rem;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+    background-color: rgba(255, 255, 255, 0.015);
+}
+
+/* -- Panel grid + cards (mirror .costs__story-grid / .costs__story-card) -- */
+
+.metrics__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.25rem;
+}
+
+.metrics__panel {
+    background: linear-gradient(145deg, rgba(61, 43, 31, 0.6), rgba(42, 31, 20, 0.8));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.metrics__panel:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: var(--shadow-sm);
+}
+
+.metrics__panel-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.metrics__panel-label {
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    color: var(--text-muted, #a09070);
+}
+
+.metrics__panel-value {
+    font-family: var(--font-mono);
+    font-size: var(--size-xxl);
+    color: var(--accent);
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+/* -- Teaching expander (native <details>) -- */
+
+.metrics__teaching {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+}
+
+.metrics__teaching-summary {
+    font-size: var(--size-sm);
+    color: var(--accent);
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+}
+
+.metrics__teaching-summary::-webkit-details-marker {
+    display: none;
+}
+
+.metrics__teaching-summary::before {
+    content: "▸ ";
+    font-size: var(--size-xs);
+}
+
+.metrics__teaching[open] .metrics__teaching-summary::before {
+    content: "▾ ";
+}
+
+.metrics__teaching-what,
+.metrics__teaching-how,
+.metrics__teaching-why {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    line-height: 1.6;
+    margin-top: 0.6rem;
+}
+
+.metrics__teaching-label {
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* -- Data-rights + dashboards blocks -- */
+
+.metrics__rights,
+.metrics__dashboards {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background-color: rgba(255, 255, 255, 0.025);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.metrics__rights-title {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+}
+
+.metrics__rights-link,
+.metrics__dashboards-link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    font-size: var(--size-sm);
+}
+
+.metrics__rights-link:hover,
+.metrics__dashboards-link:hover {
+    text-decoration: underline;
+}
+
+.metrics__observe-prose {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    line-height: 1.6;
+    max-width: 640px;
+}
+
+/* -- About page: prominent transparency link cards -- */
+
+.about__transparency {
+    margin-top: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.about__section-prose {
+    font-size: var(--size-base);
+    color: var(--text-muted, #a09070);
+    line-height: 1.7;
+    max-width: 640px;
+    margin-bottom: 1.25rem;
+}
+
+.about__link {
+    display: block;
+    background: linear-gradient(145deg, rgba(61, 43, 31, 0.6), rgba(42, 31, 20, 0.8));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+    text-decoration: none;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+}
+
+.about__link::after {
+    content: " →";
+    color: var(--accent);
+}
+
+.about__link:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+/* -- Responsive -- */
+
+@media (max-width: 768px) {
+    .metrics__costs {
+        padding: 1.5rem 1rem;
+    }
+
+    .metrics__costs-amount {
+        font-size: 2.5rem;
+    }
+
+    .metrics__grid {
+        grid-template-columns: 1fr;
+    }
+}

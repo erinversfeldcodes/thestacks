@@ -57,3 +57,45 @@ test.describe("Cost Transparency", () => {
     expect(Array.isArray(body.data.categories)).toBe(true);
   });
 });
+
+// /costs must be REACHABLE by clicking, not just by knowing the URL. These drive
+// the real UI as a logged-out visitor: the tests above page.goto("/costs")
+// directly, which proves the page renders but never that a user can find it.
+test.describe("Cost Transparency — reachable via UI (logged out)", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("About → /costs via the costs link", async ({ page }) => {
+    await page.goto("/about");
+
+    const costsLink = page.getByTestId("about-costs-link");
+    await expect(costsLink).toBeVisible({ timeout: 10_000 });
+    await costsLink.click();
+
+    await expect(page).toHaveURL((url) => url.pathname === "/costs");
+    await expect(page.getByTestId("costs-content")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(".costs__title")).toHaveText("Cost Transparency");
+  });
+
+  test("home → About → /costs (full click-path from the landing page)", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // The home page links straight to About (a visible call-to-action button),
+    // so a visitor reaches it without the brand-logo hover dropdown.
+    const aboutLink = page.locator('.page--home a[href="/about"]');
+    await expect(aboutLink).toBeVisible({ timeout: 10_000 });
+    await aboutLink.click();
+    await expect(page).toHaveURL((url) => url.pathname === "/about");
+
+    const costsLink = page.getByTestId("about-costs-link");
+    await expect(costsLink).toBeVisible({ timeout: 10_000 });
+    await costsLink.click();
+    await expect(page).toHaveURL((url) => url.pathname === "/costs");
+    await expect(page.getByTestId("costs-content")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});
