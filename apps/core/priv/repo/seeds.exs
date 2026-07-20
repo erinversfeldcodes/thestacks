@@ -1011,9 +1011,11 @@ Repo.insert_all(
 Stacks.Costs.seed_current_period_costs()
 
 # ── Source Health Checks ────────────────────────────────────────────────────
-# Representative per-source health rows so the admin metrics dashboard's Source
-# Health section is non-empty in dev/E2E (Issue #262). Synthetic source names,
-# no user FK / PII. Covers a healthy, a degraded, and a broken source.
+# Representative per-source health rows so the admin scraper-health page
+# (Route.AdminScraperConfig, GET /api/admin/source-health) is non-empty in
+# dev/E2E (Issue #262). Synthetic source names, no user FK / PII. Covers a
+# healthy, a degraded, and a broken source. (The metrics dashboard that also
+# read these was removed in #267; the scraper-health page still consumes them.)
 Repo.insert_all(
   "source_health_checks",
   [

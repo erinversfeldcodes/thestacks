@@ -1,7 +1,16 @@
 # Issue #119: E2E Test Suite — Metrics Dashboard & RSS Feeds
 
 ## Summary
-Comprehensive E2E test coverage for the owner-only metrics dashboard (US-5.1) and per-shelf Atom RSS feeds (US-6.1).
+Comprehensive E2E test coverage for the per-shelf Atom RSS feeds (US-6.1).
+
+**US-5.1 (metrics) — resolved via deprecation (#267).** The in-app `/admin/metrics`
+SPA metrics dashboard was **deprecated and removed** by Issue #267 (superseded by the
+Grafana observability stack, ADR-021/#236–240; it was also broken end-to-end — the SPA
+never obtained the `admin_session` the endpoints require). US-5.1's operational-metrics
+surface is therefore the **Grafana dashboards**, which are validated by
+`e2e/tests/dashboards.spec.ts` (#236–240) — **not** by SPA/API E2E in this issue. The
+metrics portions of the plan below are historical; only the US-6.1 (RSS) sections remain
+in scope for #119.
 
 ## User Stories
 US-5.1 (View the Metrics Dashboard), US-6.1 (Subscribe to Shelf RSS Feeds)
@@ -40,7 +49,7 @@ against them as-is. Resolution: implementation fixes **spun out to dedicated iss
 
 | User Story | Happy-path hops (file:line) | Verdict | Broken/partial hops → resolution |
 |-----------|------------------------------|---------|----------------------------------|
-| US-5.1 — View the Metrics Dashboard | route `Route.elm:51`/`router.ex:305-308` ✅ · `:admin`+MFA guard `admin_auth_pipeline.ex:62`/`require_mfa.ex:93` ✅ · `MetricsController` `metrics_controller.ex:14-31` 🟡 (`%{data:…}` envelope) · `Page/Admin/Metrics.elm` 4 sections ✅ · decoders `Api.elm:2678,2760,2818,2862` ❌ (none unwrap `data`) · nav `Main.elm:2662` ✅ | 🟡 | **❌ decoder envelope** (all 4 endpoints render zeros/errors — the hard blocker); **🟡 USD-as-ZAR** (`Metrics.elm:391`, no conversion → relabel to USD); **🟡 trend `flat` vs rendered `stable`** (`Metrics.elm:366`); **🟡 source-health missing `lastSuccess/lastFailure` + string-vs-enum** (`metrics.ex:137`); **🟡 `enrichment_gaps`/`quality_trends` empty stubs w/o marts**; source_health unseeded → **#261** (decoder envelope + USD relabel + trend token) + **#262** (source-health fields/shape + mart-less aggregation + seed) |
+| US-5.1 — Operational Metrics (surface = **Grafana**) | ~~in-app `/admin/metrics` SPA dashboard~~ **deprecated & removed via #267** (superseded by the Grafana observability stack, ADR-021/#236–240; SPA dashboard was broken end-to-end — never obtained `admin_session`). US-5.1's ops-metrics surface is the **Grafana dashboards**, validated by `e2e/tests/dashboards.spec.ts` (#236–240) — outside this issue's SPA/API E2E scope. | ✅ (via Grafana) | Resolved by **#267** (deprecation). No SPA/API metrics E2E to author here; #261/#262 decoder-contract + aggregation learnings preserved as prior art for the future PII/personal-insights dashboards (#268). |
 | US-6.1 — Subscribe to Shelf RSS Feeds | route `router.ex:117` ✅ · `FeedController` all 4 status paths + ETag/304 + Cache-Control `feed_controller.ex:24-46` ✅ · Atom builder `feeds.ex:54-112` ✅ · visibility gate `feeds.ex:27-33` ✅ · event handler→`RegenerateFeedJob` ✅ wired · `RSSLink.elm` ✅ · `Bookshelf.elm:190` 🟡 (visibility hardcoded) · `regenerate_feed_job.ex:24-30` 🟡 (no-op, no store) | 🟡 | **🟡 frontend visibility hardcoded `"platform"`** (RSS icon shows on every shelf; "hidden for private" untestable → lift real visibility); **🟡 regen job is a no-op** (no feed store → build a real feed cache) → **#263** (lift real shelf visibility) + **#264** (feed cache + real regen) |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).

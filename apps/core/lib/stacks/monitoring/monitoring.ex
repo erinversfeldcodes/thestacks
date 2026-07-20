@@ -154,6 +154,21 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
+  Lists all source health checks in the wire shape the admin scraper-health
+  page (`Api.getSourceHealth`) consumes:
+  `{name, source_type, status, consecutive_failures, last_success_at, last_failure_at}`
+  with plain-string `source_type`/`status` and ISO8601-or-nil timestamps.
+  `source_name` is remapped to the `name` key the decoder reads.
+  """
+  @spec list_source_health() :: [map()]
+  def list_source_health do
+    SourceHealthCheck
+    |> order_by(asc: :source_name)
+    |> Repo.all()
+    |> Enum.map(&to_wire/1)
+  end
+
+  @doc """
   Computes the health status from the consecutive failure count.
 
   - 0-2: `"healthy"`
@@ -168,6 +183,20 @@ defmodule Stacks.Monitoring do
   # ---------------------------------------------------------------------------
   # Private
   # ---------------------------------------------------------------------------
+
+  defp to_wire(%SourceHealthCheck{} = check) do
+    %{
+      name: check.source_name,
+      source_type: check.source_type,
+      status: check.status,
+      consecutive_failures: check.consecutive_failures,
+      last_success_at: iso8601(check.last_success_at),
+      last_failure_at: iso8601(check.last_failure_at)
+    }
+  end
+
+  defp iso8601(nil), do: nil
+  defp iso8601(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp emit_health_event(%SourceHealthCheck{} = check) do
     Events.emit_safe(%{

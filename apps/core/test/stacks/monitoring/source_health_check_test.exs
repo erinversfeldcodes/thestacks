@@ -204,6 +204,58 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
     end
   end
 
+  describe "list_source_health/0" do
+    test "returns rows in the scraper-health wire shape, ordered by source_name" do
+      now = DateTime.utc_now()
+
+      insert(:source_health_check,
+        source_name: "zeta-source",
+        source_type: "rss_feed",
+        status: "broken",
+        consecutive_failures: 9,
+        last_success_at: nil,
+        last_failure_at: now
+      )
+
+      insert(:source_health_check,
+        source_name: "alpha-source",
+        source_type: "scraper_config",
+        status: "healthy",
+        consecutive_failures: 0,
+        last_success_at: now,
+        last_failure_at: nil
+      )
+
+      [first, second] = Monitoring.list_source_health()
+
+      # Ordered by source_name ascending.
+      assert first.name == "alpha-source"
+      assert second.name == "zeta-source"
+
+      # Exact wire contract the frontend `getSourceHealth` decoder consumes:
+      # {name, source_type, status, consecutive_failures, last_success_at, last_failure_at}.
+      assert Map.keys(first) |> Enum.sort() == [
+               :consecutive_failures,
+               :last_failure_at,
+               :last_success_at,
+               :name,
+               :source_type,
+               :status
+             ]
+
+      # Plain-string source_type/status (not proto enums).
+      assert first.source_type == "scraper_config"
+      assert first.status == "healthy"
+      # ISO8601-or-nil timestamps.
+      assert is_binary(first.last_success_at)
+      assert first.last_failure_at == nil
+    end
+
+    test "returns an empty list when no checks exist" do
+      assert Monitoring.list_source_health() == []
+    end
+  end
+
   describe "compute_status/1" do
     test "returns healthy for 0-2 failures" do
       assert Monitoring.compute_status(0) == "healthy"

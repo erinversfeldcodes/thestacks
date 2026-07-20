@@ -163,4 +163,42 @@ defmodule StacksWeb.SourceAdminControllerTest do
       assert conn.status == 401
     end
   end
+
+  describe "GET /api/admin/source-health" do
+    test "returns per-source health under a data envelope for admin JWT", %{conn: conn} do
+      {conn, _user, _session} = setup_admin_conn(conn)
+
+      insert(:source_health_check,
+        source_name: "openlibrary-covers",
+        source_type: "scraper_config",
+        status: "healthy",
+        consecutive_failures: 0,
+        last_success_at: DateTime.utc_now(),
+        last_failure_at: nil
+      )
+
+      conn = get(conn, "/api/admin/source-health")
+
+      assert %{"data" => [row]} = json_response(conn, 200)
+      assert row["name"] == "openlibrary-covers"
+      assert row["source_type"] == "scraper_config"
+      assert row["status"] == "healthy"
+      assert row["consecutive_failures"] == 0
+      assert is_binary(row["last_success_at"])
+      assert row["last_failure_at"] == nil
+    end
+
+    test "returns 401 for regular owner JWT (no MFA)", %{conn: conn} do
+      {conn, _user} = owner_conn(conn)
+
+      conn = get(conn, "/api/admin/source-health")
+
+      assert conn.status == 401
+    end
+
+    test "returns 401 for unauthenticated request", %{conn: conn} do
+      conn = get(conn, "/api/admin/source-health")
+      assert conn.status == 401
+    end
+  end
 end

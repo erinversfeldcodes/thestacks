@@ -20,7 +20,6 @@ this suite fails to compile (RED). After the conversion each page returns a
 
 import Expect
 import Http
-import Page.Admin.Metrics as Metrics
 import Page.Admin.ScraperConfig as ScraperConfig
 import Page.Admin.SourceApproval as SourceApproval
 import Page.Blog.Editor as Editor
@@ -119,53 +118,6 @@ suite =
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Privacy.NoOut
-            ]
-        , describe "Admin.Metrics"
-            [ test "metrics_dashboard_401_bubbles: DashboardReceived 401 → SessionExpired" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            Metrics.update
-                                (Metrics.DashboardReceived (Err unauthorized))
-                                (Tuple.first (Metrics.init (Just "tok")))
-                    in
-                    outMsg |> Expect.equal Metrics.SessionExpired
-            , test "metrics_quality_401_bubbles: QualityTrendsReceived 401 → SessionExpired" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            Metrics.update
-                                (Metrics.QualityTrendsReceived (Err unauthorized))
-                                (Tuple.first (Metrics.init (Just "tok")))
-                    in
-                    outMsg |> Expect.equal Metrics.SessionExpired
-            , test "metrics_source_health_401_bubbles: SourceHealthReceived 401 → SessionExpired" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            Metrics.update
-                                (Metrics.SourceHealthReceived (Err unauthorized))
-                                (Tuple.first (Metrics.init (Just "tok")))
-                    in
-                    outMsg |> Expect.equal Metrics.SessionExpired
-            , test "metrics_enrichment_401_bubbles: EnrichmentGapsReceived 401 → SessionExpired" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            Metrics.update
-                                (Metrics.EnrichmentGapsReceived (Err unauthorized))
-                                (Tuple.first (Metrics.init (Just "tok")))
-                    in
-                    outMsg |> Expect.equal Metrics.SessionExpired
-            , test "metrics_non401_stays_local: DashboardReceived network error → NoOut" <|
-                \() ->
-                    let
-                        ( _, _, outMsg ) =
-                            Metrics.update
-                                (Metrics.DashboardReceived (Err nonAuth))
-                                (Tuple.first (Metrics.init (Just "tok")))
-                    in
-                    outMsg |> Expect.equal Metrics.NoOut
             ]
         , describe "Admin.ScraperConfig"
             [ test "scraper_config_401_bubbles: SourceHealthReceived 401 → SessionExpired" <|

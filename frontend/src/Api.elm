@@ -14,12 +14,10 @@ module Api exposing
     , BookDetailResponse
     , CatalogueResponse
     , Deanonymisation
-    , EnrichmentGaps
     , InterestProfile
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
-    , MetricsDashboard
     , NotificationPreferences
     , OnboardingStatus
     , PersonalInferences
@@ -31,7 +29,6 @@ module Api exposing
     , ProfileShelfSummary
     , PublicProfile
     , PublicProfileSummary
-    , QualityTrends
     , RegisterError(..)
     , RiskInference
     , ShelfVisibilitySetting
@@ -61,7 +58,6 @@ module Api exposing
     , deleteAccount
     , deleteComment
     , dismissAssociation
-    , enrichmentGapsDecoder
     , forgotPassword
     , getAdminSources
     , getAuditLog
@@ -70,12 +66,10 @@ module Api exposing
     , getBook
     , getBookshelf
     , getCatalogue
-    , getEnrichmentGaps
     , getGroup
     , getGroupFeed
     , getInferences
     , getListings
-    , getMetrics
     , getMyListings
     , getMyPlacements
     , getOnboardingStatus
@@ -83,7 +77,6 @@ module Api exposing
     , getPrivacySettings
     , getProfile
     , getProfileShelf
-    , getQualityTrends
     , getSourceHealth
     , getTransparencyMetrics
     , getUserPlacements
@@ -97,7 +90,6 @@ module Api exposing
     , logout
     , lookupByIsbn
     , mergeFormat
-    , metricsDashboardDecoder
     , moveBook
     , personalInferencesDecoder
     , placeBook
@@ -105,7 +97,6 @@ module Api exposing
     , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
-    , qualityTrendsDecoder
     , refresh
     , register
     , rejectIdentification
@@ -119,7 +110,6 @@ module Api exposing
     , searchUsers
     , setBookAgeGate
     , soldListing
-    , sourceHealthListDecoder
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
@@ -137,7 +127,6 @@ import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
-import Stacks.Api.V1.Admin as ProtoAdmin
 import Stacks.Api.V1.AuthResponses as ProtoAuth
 import Stacks.Api.V1.BookResponses as ProtoBookResp
 import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
@@ -2590,10 +2579,10 @@ adminSetBookAgeGate bookId ageGated token toMsg =
 
 
 
--- ADMIN: METRICS
+-- SOURCE HEALTH (admin scraper page)
 
 
-{-| Source health record from GET /api/metrics/source-health.
+{-| Source health record from GET /api/admin/source-health.
 -}
 type alias SourceHealth =
     { name : String
@@ -2607,7 +2596,7 @@ type alias SourceHealth =
 
 {-| Decoder for one source-health record.
 
-The `/api/metrics/source-health` endpoint (#262) emits `source_type` and `status`
+The `/api/admin/source-health` endpoint emits `source_type` and `status`
 as **plain strings** (not proto enums), alongside `last_success_at`/`last_failure_at`.
 Decode that JSON shape directly rather than through the proto SourceHealthCheck decoder.
 
@@ -2628,7 +2617,7 @@ sourceHealthListDecoder =
     Decode.field "data" (Decode.list sourceHealthDecoder)
 
 
-{-| GET /api/metrics/source-health — fetch per-source health status.
+{-| GET /api/admin/source-health — fetch per-source health status.
 -}
 getSourceHealth :
     String
@@ -2638,216 +2627,9 @@ getSourceHealth token toMsg =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/metrics/source-health"
+        , url = baseUrl ++ "/api/admin/source-health"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg sourceHealthListDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Main metrics dashboard data from GET /api/metrics.
--}
-type alias MetricsDashboard =
-    { totalBooks : Int
-    , coverPercentage : Float
-    , pricePercentage : Float
-    , reviewPercentage : Float
-    , gdprImagesPending : Int
-    , costs : List CostItem
-    }
-
-
-type alias CostItem =
-    { name : String
-    , category : String
-    , amountZar : Int
-    }
-
-
-{-| Adapter: proto MetricsDashboard -> app MetricsDashboard.
-
-Maps the proto's nested structure to the app's flat shape. Quality percentages
-come from the first quality trend row (if present). Costs are flattened from
-CostBreakdown.categories, attaching each category name to its items.
-
--}
-fromProtoMetricsDashboard : ProtoAdmin.MetricsDashboard -> MetricsDashboard
-fromProtoMetricsDashboard proto =
-    let
-        firstTrend =
-            List.head proto.qualityTrends
-
-        coverPct =
-            firstTrend |> Maybe.map .coverPct |> Maybe.withDefault 0.0
-
-        pricePct =
-            firstTrend |> Maybe.map .pricePct |> Maybe.withDefault 0.0
-
-        reviewPct =
-            firstTrend |> Maybe.map .reviewPct |> Maybe.withDefault 0.0
-
-        flattenCategory cat =
-            List.map (fromProtoCostItem cat.category) cat.items
-    in
-    { totalBooks = proto.systemHealth.totalBooks
-    , coverPercentage = coverPct
-    , pricePercentage = pricePct
-    , reviewPercentage = reviewPct
-    , gdprImagesPending = proto.gdpr.imagesPendingDeletion
-    , costs = List.concatMap flattenCategory proto.costs.categories
-    }
-
-
-{-| Adapter: proto CostItem -> app CostItem, attaching the parent category name.
--}
-fromProtoCostItem : String -> ProtoAdmin.CostItem -> CostItem
-fromProtoCostItem categoryName proto =
-    { name = proto.service
-    , category = categoryName
-    , amountZar = proto.amountCents
-    }
-
-
-metricsDashboardDecoder : Decoder MetricsDashboard
-metricsDashboardDecoder =
-    Decode.field "data"
-        (Decode.map fromProtoMetricsDashboard ProtoAdmin.decodeMetricsDashboard)
-
-
-{-| GET /api/metrics — fetch main dashboard data.
--}
-getMetrics :
-    String
-    -> (Result Http.Error MetricsDashboard -> msg)
-    -> Cmd msg
-getMetrics token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/metrics"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg metricsDashboardDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Quality trend data from GET /api/metrics/quality-trends.
-
-The proto has QualityTrendRow with percentage floats. The API endpoint wraps these
-in a list; we take the two most recent rows to compute trend direction (up/down/stable)
-by comparing cover\_pct, price\_pct, and review\_pct.
-
--}
-type alias QualityTrends =
-    { coverTrend : String
-    , priceTrend : String
-    , reviewTrend : String
-    }
-
-
-{-| Adapter: list of proto QualityTrendRow -> app QualityTrends.
-
-Compares the two most recent rows to derive trend direction. If fewer than two
-rows are available, defaults to "stable".
-
--}
-fromProtoQualityTrendRows : List ProtoAdmin.QualityTrendRow -> QualityTrends
-fromProtoQualityTrendRows rows =
-    let
-        sorted =
-            List.sortBy .snapshotDate rows |> List.reverse
-
-        trendDir prev cur =
-            if cur > prev then
-                "up"
-
-            else if cur < prev then
-                "down"
-
-            else
-                "stable"
-    in
-    case sorted of
-        current :: previous :: _ ->
-            { coverTrend = trendDir previous.coverPct current.coverPct
-            , priceTrend = trendDir previous.pricePct current.pricePct
-            , reviewTrend = trendDir previous.reviewPct current.reviewPct
-            }
-
-        _ ->
-            { coverTrend = "stable"
-            , priceTrend = "stable"
-            , reviewTrend = "stable"
-            }
-
-
-qualityTrendsDecoder : Decoder QualityTrends
-qualityTrendsDecoder =
-    Decode.field "data"
-        (Decode.map fromProtoQualityTrendRows
-            (Decode.list ProtoAdmin.decodeQualityTrendRow)
-        )
-
-
-{-| GET /api/metrics/quality-trends — fetch quality trend indicators.
--}
-getQualityTrends :
-    String
-    -> (Result Http.Error QualityTrends -> msg)
-    -> Cmd msg
-getQualityTrends token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/metrics/quality-trends"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg qualityTrendsDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Enrichment gap counts from GET /api/metrics/enrichment-gaps.
--}
-type alias EnrichmentGaps =
-    { booksWithoutPrices : Int
-    , booksWithoutCovers : Int
-    , booksWithoutReviews : Int
-    }
-
-
-{-| Adapter: proto EnrichmentGaps -> app EnrichmentGaps.
-Proto includes a status field which the app type does not need.
--}
-fromProtoEnrichmentGaps : ProtoAdmin.EnrichmentGaps -> EnrichmentGaps
-fromProtoEnrichmentGaps proto =
-    { booksWithoutPrices = proto.booksWithoutPrices
-    , booksWithoutCovers = proto.booksWithoutCovers
-    , booksWithoutReviews = proto.booksWithoutReviews
-    }
-
-
-enrichmentGapsDecoder : Decoder EnrichmentGaps
-enrichmentGapsDecoder =
-    Decode.field "data"
-        (Decode.map fromProtoEnrichmentGaps ProtoAdmin.decodeEnrichmentGaps)
-
-
-{-| GET /api/metrics/enrichment-gaps — fetch enrichment gap counts.
--}
-getEnrichmentGaps :
-    String
-    -> (Result Http.Error EnrichmentGaps -> msg)
-    -> Cmd msg
-getEnrichmentGaps token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/metrics/enrichment-gaps"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg enrichmentGapsDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
