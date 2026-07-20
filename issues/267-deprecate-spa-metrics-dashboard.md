@@ -62,13 +62,22 @@ n/a — this REMOVES a partially-built, superseded surface (verified broken end-
 | 1 (API) / 10 (Elm) | yes | ✅ when the routes/page/controller/context + their tests are removed and `just verify` is green with no dangling refs (elm-review NoUnused clean, no dialyzer/credo warnings) |
 | others | no | n/a — pure removal |
 
+## Course-correction (applied): source-health RELOCATED, not deleted
+The removal agent found `source-health` (`getSourceHealth`/`SourceHealth`/`/api/metrics/source-health`
+/#262 seed rows) is **not** dead — the retained `/admin/scrapers` `Page.Admin.ScraperConfig` page
+consumes it. Deleting it would have broken a live page (violating this issue's own goal). So it was
+**relocated**: `Stacks.Monitoring.list_source_health/0` + `SourceAdminController.source_health` +
+`GET /api/admin/source-health` (retained `:admin` pipeline); frontend `getSourceHealth` URL repointed;
+`SourceHealth` type/decoder + #262 seed rows KEPT. #262's backend work thus survives at its real home.
+
 ## Definition of Done
-- [ ] `/admin/metrics` SPA route + `Page.Admin.Metrics` + Main.elm wiring removed; app compiles, elm-review clean — evidence: `elm-review` 0 errors + `elm make`
-- [ ] `/api/metrics*` routes + `MetricsController` + `Stacks.Admin.Metrics` context + tests + #262 seed rows removed — evidence: diff + `just verify` green
-- [ ] `#261` metrics decoders/types removed from `Api.elm`; `/costs` decoders untouched — evidence: diff
-- [ ] Docs + user stories updated (US-5.1.1 superseded by Grafana; host-page dependents flagged) — evidence: diff
-- [ ] `just verify` passes (no dangling refs, no unused-code warnings) — evidence: command→output
-- [ ] Test audit GREEN — evidence: table
+- [x] `/admin/metrics` SPA route + `Page.Admin.Metrics` + Main.elm wiring removed; app compiles, elm-review clean — evidence: `elm-review` 0 errors, `elm make` 33 modules, elm-test 864/0; commit `c2c98627`
+- [x] `/api/metrics*` routes + `MetricsController` + `Stacks.Admin.Metrics` context + tests removed; source-health **relocated** (see above); #262 seed rows kept for the scraper-health page — evidence: `git grep` remnant check empty; `just verify` green
+- [x] `#261` metrics decoders/types removed from `Api.elm` (`MetricsDashboard`/`QualityTrends`/`EnrichmentGaps`); `SourceHealth` + `/costs` decoders untouched — evidence: diff `c2c98627`
+- [x] Docs + user stories updated (US-5.1.1 superseded by Grafana; host-page dependents flagged) — evidence: `docs/{user-stories,implementation-mapping,technical-architecture}.md` diff
+- [x] `just verify` passes (no dangling refs, no unused-code warnings) — evidence: exit 0 (elixir 2749/0, elm 864/0, dbt 64+231, credo/dialyzer/elm-review clean)
+- [x] Test audit GREEN — evidence: removal + relocation tests green; L1/L10 cells ✅
+- [ ] Residual cleanup (non-blocking, tracked): stale "consumer MetricsController" comments in `dbt/models/marts/schema.yml`; now-unused `MetricsDashboard`/`QualityTrends`/`EnrichmentGaps` messages in `admin.proto` (additive, harmless) — de-scoped to future cleanup, not gating the epic PR
 
 ## Dependencies
 Part of the #119 epic (lands on `feat/119-e2e`). Enables the #119 reshape (US-5.1 → Grafana surface).
