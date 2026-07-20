@@ -37,6 +37,13 @@ n/a — the feed cache is built (#264); this hardens error paths.
    when a unique index already covers the column (generator change) — or drop it in a follow-up
    migration. Prefer the generator fix so it doesn't recur for future tables.
 
+3. **Remove dead `Feeds.generate_atom/2`** (epic PE finding). After #264, no lib code calls
+   `generate_atom/2` — `FeedController.show` uses `fetch_feed/2` and `RegenerateFeedJob.perform` uses
+   `regenerate/2`, both routing through `resolve_platform_bookshelf` + `render_and_cache`.
+   `generate_atom/2` is referenced only by its own `feeds_test.exs` and now duplicates the resolve+build
+   logic. Remove it and migrate its assertions onto `fetch_feed/2`/`regenerate/2`, or refactor it into
+   the shared builder.
+
 ## Reviewer Context
 - The changeset-error path is **unlikely** (a bare-struct `Repo.insert` typically raises on a DB
   constraint rather than returning `{:error, changeset}`), which is why it's non-blocking — but the
@@ -55,6 +62,7 @@ n/a — the feed cache is built (#264); this hardens error paths.
 ## Definition of Done
 - [ ] Cache-write failure serves the fresh feed (or graceful error), no 500/crash; `@spec`s accurate — evidence: controller + worker tests
 - [ ] `op.feed_cache` has a single `bookshelf_id` index (generator suppresses the redundant one, or drop migration) — evidence: migration/schema + `proto.sync --check` green
+- [ ] Dead `Feeds.generate_atom/2` removed (or folded into the shared builder); its assertions migrated to `fetch_feed/2`/`regenerate/2` — evidence: diff + green feeds tests
 - [ ] `just verify` passes — evidence: command→output
 - [ ] Test audit GREEN — evidence: table
 
