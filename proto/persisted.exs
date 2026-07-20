@@ -147,6 +147,49 @@
     },
 
     # -------------------------------------------------------------------------
+    # Feed cache (Issue #264 — persisted Atom XML per platform-visible
+    # bookshelf, backing StacksWeb.FeedController. Derived/regenerable, so kept
+    # OUT of the warehouse (skip_dbt / dbt_grant: false) like the book caches —
+    # but user-linked personal data, so the FK CASCADEs and GDPR erasure has an
+    # explicit :delete_feed_cache step in Stacks.GDPR.Deletion.
+    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/infra/v1/feed_cache.proto",
+      proto_message: "FeedCacheEntry",
+      table_name: "feed_cache",
+      schema_prefix: "op",
+      ecto_module: Stacks.Feeds.FeedCacheEntry,
+      ecto_path: "lib/stacks/gen/feeds/feed_cache_entry.ex",
+      dbt_path: "stg_feed_cache.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: false,
+      skip_dbt: true,
+      # NB: the generator auto-emits a non-unique FK index named
+      # `feed_cache_bookshelf_id_index` for the `references_table` override
+      # below, so the explicit unique index MUST use a distinct name to avoid a
+      # duplicate-relation collision. The unique index is the upsert conflict
+      # target (`ON CONFLICT (bookshelf_id)`).
+      indexes: [
+        %{
+          name: "feed_cache_bookshelf_id_unique_index",
+          columns: [:bookshelf_id],
+          unique: true
+        }
+      ],
+      field_overrides: %{
+        bookshelf_id: %{
+          belongs_to: Stacks.Shelving.Bookshelf,
+          references_table: :bookshelves,
+          on_delete: :delete_all,
+          null: false
+        },
+        atom_xml: %{null: false},
+        etag: %{null: false}
+      }
+    },
+
+    # -------------------------------------------------------------------------
     # Partners
     # -------------------------------------------------------------------------
     %{

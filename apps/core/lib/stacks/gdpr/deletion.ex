@@ -28,6 +28,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
   alias Stacks.Events.EventLog
+  alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -58,6 +59,7 @@ defmodule Stacks.GDPR.Deletion do
                from h in PlacementHistory,
                  where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
              ),
+           feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
            sessions_revoked:
@@ -123,6 +125,20 @@ defmodule Stacks.GDPR.Deletion do
     end)
     |> Multi.run(:delete_placements, fn repo, %{bookshelf_ids: bookshelf_ids} ->
       {count, _} = repo.delete_all(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids)
+      {:ok, count}
+    end)
+    |> Multi.run(:delete_feed_cache, fn repo, %{bookshelf_ids: bookshelf_ids} ->
+      # GDPR erasure: op.feed_cache holds derived Atom XML for the user's
+      # platform-visible bookshelves (the XML embeds user-authored book titles
+      # in <title>/<summary>). Its only user path is bookshelf_id →
+      # op.bookshelves, which the op.users schema-guard never inspects — so this
+      # explicit step is the authoritative erasure guarantee. The FK's ON DELETE
+      # CASCADE (from :delete_bookshelves below) is belt-and-suspenders; ordering
+      # this BEFORE :delete_bookshelves makes the delete independent of cascade
+      # timing. Scoped strictly to the erased user's bookshelves.
+      {count, _} =
+        repo.delete_all(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids)
+
       {:ok, count}
     end)
     |> Multi.run(:delete_bookshelves, fn repo, _ ->

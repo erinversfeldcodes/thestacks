@@ -1,0 +1,35 @@
+// feed_cache.proto — Persisted Atom XML for one platform-visible bookshelf feed.
+//
+// NOT A WIRE CONTRACT. Like the sibling book_cache.proto, this file is
+// persistence plumbing only — it describes the shape of rows in the Postgres
+// feed cache (`op.feed_cache`) that backs the Atom feed served by
+// `StacksWeb.FeedController`. `Stacks.Workers.RegenerateFeedJob` upserts a row
+// when a placement event fires; the controller reads it (filling on a miss).
+// No service reads or writes this over the network. The `infra/v1/` directory
+// flags that distinction; genuine cross-boundary contracts belong under
+// `internal/v1/`.
+//
+// One row per bookshelf (bookshelf_id unique). Derived/regenerable — never
+// exported to dbt (skip_dbt) — but personal data (the XML embeds user-authored
+// titles), so it is reached by GDPR erasure.
+//
+// Adding a field? Use the next unused number. Removing? Add `reserved <n>;`
+// and `reserved "<name>";` so the numbers can never be reused.
+// Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.infra.v1;
+
+// FeedCacheEntry — persisted Atom XML for one platform-visible bookshelf's feed.
+// Maps to op.feed_cache.
+message FeedCacheEntry {
+  // FK → op.bookshelves.id. Unique natural key — one cache row per bookshelf.
+  string bookshelf_id = 1 [json_name = "bookshelf_id"];
+
+  // Rendered Atom 1.0 XML for the feed (Feeds.build_atom_xml output).
+  string atom_xml = 2 [json_name = "atom_xml"];
+
+  // ETag = lowercase hex MD5 of atom_xml (Feeds.compute_etag). Stored alongside
+  // the XML so a cache hit serves the identical etag a fresh render would.
+  string etag = 3 [json_name = "etag"];
+}

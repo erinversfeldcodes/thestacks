@@ -7,6 +7,8 @@ defmodule Stacks.Feeds do
   events fire, and served by `FeedController` with ETag caching.
   """
 
+  alias Core.Repo
+  alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.Shelving
 
   require Logger
@@ -49,7 +51,96 @@ defmodule Stacks.Feeds do
     :crypto.hash(:md5, xml) |> Base.encode16(case: :lower)
   end
 
+  @doc """
+  Cache-first fetch used by `FeedController`.
+
+  Resolves the platform-visible bookshelf, then serves the persisted
+  `op.feed_cache` row on a hit. On a miss it generates the feed, synchronously
+  fills the cache (so the next read is a guaranteed hit), and serves the fresh
+  result. Because the stored etag is the pure MD5 of the stored XML, a `304`
+  holds identically across a cache hit and a miss-fill.
+
+  Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
+  """
+  @spec fetch_feed(binary(), String.t()) ::
+          {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
+  def fetch_feed(user_id, bookshelf_name) do
+    with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
+      case get_cached(bookshelf.id) do
+        {:ok, xml, etag} -> {:ok, xml, etag}
+        :miss -> render_and_cache(bookshelf)
+      end
+    end
+  end
+
+  @doc """
+  Regenerates the feed for a bookshelf and upserts the `op.feed_cache` row.
+
+  Used by `RegenerateFeedJob` on a placement event. Idempotent: two runs over
+  unchanged data leave a single row with the same etag (the etag is a pure
+  function of the XML). Non-public / missing bookshelves write no row and
+  surface `{:error, :not_public}` / `{:error, :not_found}` for the caller to
+  translate into skip/cancel.
+
+  Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
+  """
+  @spec regenerate(binary(), String.t()) ::
+          {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
+  def regenerate(user_id, bookshelf_name) do
+    with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
+      render_and_cache(bookshelf)
+    end
+  end
+
+  @doc """
+  Reads the persisted feed for a bookshelf id.
+
+  Returns `{:ok, xml, etag}` on a hit or `:miss` when no row exists.
+  """
+  @spec get_cached(binary()) :: {:ok, String.t(), String.t()} | :miss
+  def get_cached(bookshelf_id) do
+    case Repo.get_by(FeedCacheEntry, bookshelf_id: bookshelf_id) do
+      nil -> :miss
+      %FeedCacheEntry{atom_xml: xml, etag: etag} -> {:ok, xml, etag}
+    end
+  end
+
+  @doc """
+  Upserts the `op.feed_cache` row for a bookshelf (one row per bookshelf).
+
+  Conflicts on the unique `bookshelf_id` index replace the XML, etag, and
+  `updated_at` only. Returns `{:ok, entry}` or `{:error, changeset}`.
+  """
+  @spec put_cache(binary(), String.t(), String.t()) ::
+          {:ok, FeedCacheEntry.t()} | {:error, Ecto.Changeset.t()}
+  def put_cache(bookshelf_id, xml, etag) do
+    Repo.insert(
+      %FeedCacheEntry{bookshelf_id: bookshelf_id, atom_xml: xml, etag: etag},
+      on_conflict: {:replace, [:atom_xml, :etag, :updated_at]},
+      conflict_target: :bookshelf_id
+    )
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  defp resolve_platform_bookshelf(user_id, bookshelf_name) do
+    case Shelving.get_bookshelf(user_id, bookshelf_name) do
+      nil -> {:error, :not_found}
+      %{visibility: visibility} when visibility != "platform" -> {:error, :not_public}
+      bookshelf -> {:ok, bookshelf}
+    end
+  end
+
+  defp render_and_cache(bookshelf) do
+    placements = Shelving.get_bookshelf_books(bookshelf.user_id, bookshelf.name)
+    xml = build_atom_xml(bookshelf, placements)
+    etag = compute_etag(xml)
+
+    case put_cache(bookshelf.id, xml, etag) do
+      {:ok, _entry} -> {:ok, xml, etag}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
 
   defp build_atom_xml(bookshelf, placements) do
     user = bookshelf.user
