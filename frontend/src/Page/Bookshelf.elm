@@ -158,8 +158,6 @@ type OutMsg
 
 type Msg
     = ShelvesLoaded (Result Http.Error (List Shelf))
-    | AddShelf
-    | ShelfAdded (Result Http.Error Shelf)
     | DismissAgeGate
     | BookClicked Book
     | RSSLinkMsg RSSLink.Msg
@@ -223,37 +221,6 @@ update msg model =
 
                     else
                         ( { model | shelves = Failure err }, Cmd.none, NoOut )
-
-        AddShelf ->
-            -- Defence in depth: no mutation is ever issued in read-only browse
-            -- mode, even if this Msg were somehow constructed.
-            if model.config.readOnly then
-                ( model, Cmd.none, NoOut )
-
-            else
-                let
-                    cmd =
-                        case model.token of
-                            Just token ->
-                                Api.addShelf model.config.apiName token ShelfAdded
-
-                            Nothing ->
-                                Cmd.none
-                in
-                ( model, cmd, NoOut )
-
-        ShelfAdded result ->
-            case result of
-                Ok shelf ->
-                    case model.shelves of
-                        Success shelves ->
-                            ( { model | shelves = Success (shelves ++ [ shelf ]) }, Cmd.none, NoOut )
-
-                        _ ->
-                            ( { model | shelves = Success [ shelf ] }, Cmd.none, NoOut )
-
-                Err _ ->
-                    ( model, Cmd.none, NoOut )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )

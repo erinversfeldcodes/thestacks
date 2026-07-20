@@ -278,6 +278,15 @@ actually *built* end-to-end?" — the question that must pass before any test-wr
 "Audit GREEN" must mean *every named story is built and correct*, not *everything in the test-only
 charter is covered*.
 
+0. **Do not trust the issue's self-classification.** An issue that declares itself
+   "n/a — no user stories / just a fixture / infra" does **not** thereby escape this gate — that
+   self-declaration is exactly the #124 failure mode. The orchestrator independently asks: *does this
+   deliverable exist to make a user story, or an infra/observability signal, provable or reachable
+   end-to-end?* If yes (a fixture that unblocks an E2E, a seed that feeds a page, a pipeline that
+   feeds a dashboard), the story/signal it serves **is** in scope for this gate — run the pre-check
+   against it and drive it live, regardless of what the issue's `Feature-Completeness Pre-Check`
+   section currently says. Correct that section in the issue to reality before proceeding.
+
 1. Invoke the **`feature-completeness` skill** (or delegate it to a specialist) for the issue. For
    each named user story it traces the happy path through the real code (route → controller/context
    returning real data → side-effects → frontend render → reachable in nav, each with file:line) AND
@@ -295,6 +304,55 @@ charter is covered*.
 4. **MANDATORY STOP** if any named story is 🟡/❌: present the pre-check verdicts and the
    build-in-scope-vs-de-scope decision to the human before finalising the plan. A validation issue
    may not proceed to test-writing phases while a named story it claims is unbuilt.
+
+### DoD & Test-Layer Sufficiency Check ⛔ PLANNING GATE
+
+The issue's `Definition of Done` is a **starting point, not a specification** — treat it as
+possibly incomplete and verify sufficiency during planning, before finalising phases. Do **not**
+adopt the issue's DoD verbatim into the plan without this check.
+
+1. **Test-layer coverage.** Run the **`test-audit` skill** (for audit-bearing issues) or, for an
+   issue that delegates its audit elsewhere (audit-relevant only), apply the 13-layer lens directly:
+   for each layer the change touches, is there a test that would *fail if this change regressed*?
+   The common gap: the deliverable's own mechanism is unprotected (e.g. a **fixture/seed** that
+   nothing but a flaky preview gate would catch if it silently stopped producing data). Every
+   deliverable must be protected by a test at the *lowest* layer that can prove it, not only at E2E.
+2. **Deliverable protection.** If the deliverable is a fixture, seed, generator, config, or pipeline,
+   require that its logic live somewhere **unit-testable** (a function, not raw rows buried in a
+   script) and that a test exercises the real path. Add the missing test as a DoD item + plan step.
+3. **Amend the issue.** Add any missing DoD items (with an evidence token each) directly to the
+   issue file's `Definition of Done` before writing the plan, so the plan and its gates enforce the
+   *sufficient* DoD, not the as-filed one. Note the additions in the plan synopsis at the Phase-1 stop.
+4. **Cross-cutting lenses are not optional.** Independently determine whether the change touches the
+   `gdpr-review` surface (migrations, schemas, event emitters, user-data endpoints, workers, dbt) and
+   run that lens if so — or record *why it is genuinely N/A* (e.g. "aggregate platform data, zero
+   PII, no user FK"). "N/A" is a positive finding you state, never a step you silently skip.
+5. **Proving-gate observability for every runtime/deploy-time DoD item** (the #110 lesson). The
+   feature-completeness and test-layer checks above are **feature-shaped** — they ask "is it built?"
+   and "is each layer tested?". They do NOT, on their own, prove that a **delivery/pipeline mechanism
+   actually fires in its target environment**. A fixture/seed/migration/cron/deploy-hook/pipeline can
+   be fully coded, unit-tested, and still deliver **nothing** where it's supposed to (the #248/#110
+   failure class). So for **every DoD item that asserts a runtime- or deploy-time OUTCOME** ("preview
+   deploys have X", "the cron populates Y", "the metric appears in the dashboard"), write a concrete
+   proving-gate at **planning** naming all three of:
+   - **(a) the real signal** — the exact observable (`GET /api/costs` non-empty; a row in `op.…`; a
+     rendered value), not "the code exists" or "a unit test passes";
+   - **(b) where it is observed at the far end** — the actual target environment (a *deployed* preview,
+     the prod dashboard), not a local proxy;
+   - **(c) the preconditions for the mechanism to fire** — the real conditions under which it triggers
+     (a **committed** change so `git diff origin/main` sees it; a specific env flag; a time window).
+     If the observation **cannot be made without a precondition**, that precondition is a **planning
+     finding surfaced now**, not something discovered mid-execution at the 2B-iii gate.
+
+   Trace the deliverable's **write/delivery path end-to-end**, not just its read/render path
+   (`deploy → seed-detection → seed_live → op.table` — not merely `controller → context → view`). Two
+   sharp questions that would have caught #110 at planning: *"how does the data physically arrive in
+   the target env, and have we named how we'll watch it arrive?"* and *"under what real condition does
+   this mechanism fire, and does our validation actually meet that condition (e.g. is the change
+   committed)?"* Also sweep the write path's **own side effects** (a `:telemetry.execute` / event the
+   seed itself emits → assert it) and its **temporal/edge behaviour** (month-boundary, TTL, empty
+   state) — the static happy-path drive won't surface these. Fold each into the DoD with its proving
+   gate before finalising the plan.
 
 ---
 

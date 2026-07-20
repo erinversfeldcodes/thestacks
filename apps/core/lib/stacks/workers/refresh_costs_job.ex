@@ -17,18 +17,6 @@ defmodule Stacks.Workers.RefreshCostsJob do
   alias Stacks.Costs
   alias Stacks.Events
 
-  # ── Known pricing (from published rate cards) ─────────────────────────────
-  # Fly.io shared-cpu-1x, 512MB: $5.34/mo (see fly.core.toml [[vm]])
-  # Modal A10G GPU: ~$0.000463/sec (~$0.028/inference at ~60s)
-  # Neon free tier: $0 (0.5 GiB storage, 190 compute hours)
-  # Domain: ~$12/year = $1.00/month amortised
-
-  @fly_core_cents 534
-  @fly_vision_cents 534
-  @modal_per_inference_cents 3
-  @neon_cents 0
-  @domain_monthly_cents 100
-
   @impl true
   def perform(_job) do
     Logger.info("RefreshCostsJob: refreshing platform cost data")
@@ -38,7 +26,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_end = end_of_month(now)
 
     vision_jobs = Costs.vision_jobs_this_month()
-    cost_items = build_cost_items(period_start, period_end, vision_jobs)
+    cost_items = Costs.build_cost_items(period_start, period_end, vision_jobs)
 
     results =
       Enum.map(cost_items, fn item ->
@@ -76,45 +64,6 @@ defmodule Stacks.Workers.RefreshCostsJob do
       Logger.error("RefreshCostsJob: #{length(failures)} items failed")
       {:error, "#{length(failures)} cost items failed to upsert"}
     end
-  end
-
-  defp build_cost_items(period_start, period_end, vision_jobs) do
-    base = %{period_start: period_start, period_end: period_end, currency: "USD"}
-
-    modal_cents = vision_jobs * @modal_per_inference_cents
-
-    [
-      Map.merge(base, %{
-        category: "hosting",
-        service: "Fly.io Core",
-        description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD)",
-        amount_cents: @fly_core_cents
-      }),
-      Map.merge(base, %{
-        category: "hosting",
-        service: "Fly.io Vision Sidecar",
-        description: "FastAPI HMAC proxy to Modal (shared-cpu-1x, 512MB, IAD)",
-        amount_cents: @fly_vision_cents
-      }),
-      Map.merge(base, %{
-        category: "compute",
-        service: "Modal GPU Inference",
-        description: "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month (~$0.03/each)",
-        amount_cents: modal_cents
-      }),
-      Map.merge(base, %{
-        category: "database",
-        service: "Neon PostgreSQL",
-        description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
-        amount_cents: @neon_cents
-      }),
-      Map.merge(base, %{
-        category: "domain",
-        service: "Domain Registration",
-        description: "thestacks.app — annual registration amortised monthly",
-        amount_cents: @domain_monthly_cents
-      })
-    ]
   end
 
   defp beginning_of_month(%DateTime{} = dt) do

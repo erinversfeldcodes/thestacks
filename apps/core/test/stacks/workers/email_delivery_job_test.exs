@@ -2,8 +2,11 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   @moduledoc """
   Tests for Stacks.Workers.EmailDeliveryJob.
 
-  Uses Swoosh.Adapters.Test (configured in test.exs) which stores delivered
-  emails in the test process for assertion.
+  Defaults to Swoosh.Adapters.Test (configured in test.exs) which stores
+  delivered emails in the test process for assertion. Setting
+  TEST_EMAIL_RECIPIENT (issue #258) opts into the real Resend adapter and
+  routes deliveries to that address; delivery assertions are adapter-aware
+  (`assert_delivered/1`) so the same tests pass under either adapter.
   """
 
   use Core.DataCase, async: true
@@ -14,6 +17,28 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   alias Stacks.Email
   alias Stacks.Workers.EmailDeliveryJob
+
+  # Recipient override for the delivery tests. Under `just run mix test` the real
+  # Resend adapter is only wired when TEST_EMAIL_RECIPIENT is set (issue #258);
+  # Resend 422s the factory's `user{n}@example.com` default, so route deliveries
+  # to the provided real address. Unset → hermetic Test adapter → factory default.
+  defp recipient_opts do
+    case System.get_env("TEST_EMAIL_RECIPIENT") do
+      nil -> []
+      "" -> []
+      addr -> [email: addr]
+    end
+  end
+
+  # Adapter-aware delivery assertion. Under the hermetic Swoosh.Adapters.Test
+  # adapter, assert the email landed in the in-process mailbox. Under the real
+  # Resend adapter (TEST_EMAIL_RECIPIENT opt-in), the `:ok` from perform_job/2
+  # already proves the send — Swoosh.TestAssertions can't read a real send.
+  defp assert_delivered(subject) do
+    if Application.get_env(:core, Stacks.Email.Mailer)[:adapter] == Swoosh.Adapters.Test do
+      assert_email_sent(subject: subject)
+    end
+  end
 
   # A user whose confirmation token has been persisted the way
   # Accounts.register/1 does it (a signed Phoenix.Token). send_registration_
@@ -30,7 +55,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   describe "perform/1 — notification preference gating" do
     test "delivers marketplace_sale when notify_marketplace is true" do
-      user = insert(:user, notify_marketplace: true)
+      user = insert(:user, [notify_marketplace: true] ++ recipient_opts())
 
       assert :ok =
                perform_job(EmailDeliveryJob, %{
@@ -39,7 +64,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                  "params" => %{"role" => "seller", "book_title" => "Dune"}
                })
 
-      assert_email_sent(subject: "Book transaction update — The Stacks")
+      assert_delivered("Book transaction update — The Stacks")
     end
 
     test "skips marketplace_sale when notify_marketplace is false" do
@@ -56,7 +81,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
     end
 
     test "delivers wishlist_availability when notify_wishlist_availability is true" do
-      user = insert(:user, notify_wishlist_availability: true)
+      user = insert(:user, [notify_wishlist_availability: true] ++ recipient_opts())
 
       assert :ok =
                perform_job(EmailDeliveryJob, %{
@@ -65,7 +90,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                  "params" => %{"book_title" => "The Name of the Rose"}
                })
 
-      assert_email_sent(subject: "A book on your WishList is available — The Stacks")
+      assert_delivered("A book on your WishList is available — The Stacks")
     end
 
     test "skips wishlist_availability when notify_wishlist_availability is false" do
@@ -84,7 +109,12 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   describe "perform/1 — bypass preference templates" do
     test "delivers registration_confirmation regardless of prefs" do
-      user = insert(:user, notify_marketplace: false, notify_wishlist_availability: false)
+      user =
+        insert(
+          :user,
+          [notify_marketplace: false, notify_wishlist_availability: false] ++ recipient_opts()
+        )
+
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
 
       assert :ok =
@@ -94,11 +124,11 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                  "params" => %{"token" => token}
                })
 
-      assert_email_sent(subject: "Confirm your email — The Stacks")
+      assert_delivered("Confirm your email — The Stacks")
     end
 
     test "delivers password_reset regardless of prefs" do
-      user = insert(:user, notify_marketplace: false)
+      user = insert(:user, [notify_marketplace: false] ++ recipient_opts())
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "password_reset", user.id)
 
       assert :ok =
@@ -108,11 +138,11 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                  "params" => %{"token" => token}
                })
 
-      assert_email_sent(subject: "Reset your password — The Stacks")
+      assert_delivered("Reset your password — The Stacks")
     end
 
     test "delivers gdpr_export_ready regardless of prefs" do
-      user = insert(:user, notify_marketplace: false)
+      user = insert(:user, [notify_marketplace: false] ++ recipient_opts())
 
       assert :ok =
                perform_job(EmailDeliveryJob, %{
@@ -121,7 +151,7 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                  "params" => %{"download_url" => "https://example.com/export.zip"}
                })
 
-      assert_email_sent(subject: "Your data export is ready — The Stacks")
+      assert_delivered("Your data export is ready — The Stacks")
     end
   end
 

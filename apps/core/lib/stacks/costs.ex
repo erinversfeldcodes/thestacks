@@ -18,6 +18,18 @@ defmodule Stacks.Costs do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Shelving.Placement
 
+  # ── Known pricing (from published rate cards) ─────────────────────────────
+  # Fly.io shared-cpu-1x, 512MB: $5.34/mo (see deploy/fly.core.toml [[vm]])
+  # Modal A10G GPU: ~$0.000463/sec (~$0.03/inference at ~60s)
+  # Neon free tier: $0 (0.5 GiB storage, 190 compute hours)
+  # Domain: ~$12/year = $1.00/month amortised
+
+  @fly_core_cents 534
+  @fly_vision_cents 534
+  @modal_per_inference_cents 3
+  @neon_cents 0
+  @domain_monthly_cents 100
+
   # ── Cost Queries ──────────────────────────────────────────────────────────
 
   @doc """
@@ -193,6 +205,91 @@ defmodule Stacks.Costs do
     end
 
     result
+  end
+
+  # ── Cost Item Builder (single source of truth, Issue #259) ────────────────
+
+  @doc """
+  Builds the 5 platform cost line items for a billing period.
+
+  Single source of truth for the platform cost line items, shared by
+  `Stacks.Workers.RefreshCostsJob` (which passes the live
+  `vision_jobs_this_month/0` count) and `seed_current_period_costs/0` (which
+  passes `0`). Each item is a map with `:category`, `:service`, `:description`,
+  `:amount_cents`, `:period_start`, `:period_end`, and `:currency`.
+
+  The Modal item's `amount_cents` is `vision_jobs * #{@modal_per_inference_cents}`
+  and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
+  `amount_cents: 0` and `"0 inferences this month"`.
+  """
+  @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer()) :: [map()]
+  def build_cost_items(period_start, period_end, vision_jobs) do
+    base = %{period_start: period_start, period_end: period_end, currency: "USD"}
+
+    modal_cents = vision_jobs * @modal_per_inference_cents
+
+    [
+      Map.merge(base, %{
+        category: "hosting",
+        service: "Fly.io Core",
+        description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD)",
+        amount_cents: @fly_core_cents
+      }),
+      Map.merge(base, %{
+        category: "hosting",
+        service: "Fly.io Vision Sidecar",
+        description: "FastAPI HMAC proxy to Modal (shared-cpu-1x, 512MB, IAD)",
+        amount_cents: @fly_vision_cents
+      }),
+      Map.merge(base, %{
+        category: "compute",
+        service: "Modal GPU Inference",
+        description: "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month (~$0.03/each)",
+        amount_cents: modal_cents
+      }),
+      Map.merge(base, %{
+        category: "database",
+        service: "Neon PostgreSQL",
+        description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
+        amount_cents: @neon_cents
+      }),
+      Map.merge(base, %{
+        category: "domain",
+        service: "Domain Registration",
+        description: "thestacks.app — annual registration amortised monthly",
+        amount_cents: @domain_monthly_cents
+      })
+    ]
+  end
+
+  # ── Seed Fixture (E2E cost-data, Issue #110) ──────────────────────────────
+
+  @doc """
+  Seeds the 5 static current-month platform cost line items so preview/local
+  deploys always have current-period data for the `/costs` page E2E.
+
+  The daily `Stacks.Workers.RefreshCostsJob` cron only runs at `"0 6 * * *"`, so
+  a fresh preview has no cost data until it fires. This fixture reuses the shared
+  `build_cost_items/3` builder with **Modal fixed at 0 inferences**
+  (`vision_jobs: 0` → `amount_cents: 0`), summing to 1168 cents — the same list
+  the cron produces, guaranteeing seed and cron can't diverge.
+
+  Uses the same current-calendar-month window as `current_period_costs/0` and
+  the same `[:service, :period_start, :period_end]` conflict target as
+  `upsert_cost/1`, so the daily cron updates these rows in place rather than
+  duplicating them. Idempotent. Returns `:ok`.
+  """
+  @spec seed_current_period_costs() :: :ok
+  def seed_current_period_costs do
+    now = DateTime.utc_now()
+    period_start = beginning_of_month(now)
+    period_end = end_of_month(now)
+
+    period_start
+    |> build_cost_items(period_end, 0)
+    |> Enum.each(&upsert_cost/1)
+
+    :ok
   end
 
   # ── Public Breakdown ──────────────────────────────────────────────────────

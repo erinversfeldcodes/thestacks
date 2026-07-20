@@ -22,8 +22,14 @@ ISSUE_FILES=$(
   { git diff --name-only HEAD 2>/dev/null
     git diff --name-only --cached 2>/dev/null
     git ls-files --others --exclude-standard 2>/dev/null
-  } | grep -E '^issues/.*\.md$' | sort -u
+  } | grep -E '^issues/.*\.md$' \
+    | grep -vE '^issues/complete/' \
+    | sort -u
 )
+# issues/complete/ is the archive for finished issues. Moving a completed issue
+# there makes it a "new" untracked file, which would otherwise re-trigger a
+# whole-file evidence re-scan of already-done DoDs. Archived issues are not being
+# authored — skip them; the evidence gate only guards active issues/*.md.
 [[ -z "$ISSUE_FILES" ]] && exit 0
 
 # Emit the ADDED lines of a file (without the leading +). Tracked → diff vs HEAD;
