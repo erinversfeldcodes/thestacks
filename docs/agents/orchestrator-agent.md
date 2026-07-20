@@ -269,6 +269,43 @@ Run this phase **before** planning whenever starting work on a new feature or ro
 
 11. Create the initial state file at `plans/<NNN>-<slug>-state.json` with all phases set to `pending`. See the **State File** section below for the schema.
 
+### Existing-Implementation / Canonical-Surface Reconciliation ⛔ PLANNING GATE
+
+Run this **first** in Phase 1, before Feature-Completeness — because Feature-Completeness asks "is
+*this surface* built?", and this gate asks the prior question: **"is this capability already
+implemented somewhere else, and is the surface this issue targets the canonical one — or is it
+superseded?"** (The #119 lesson: four issues were scoped to *fix* the in-app `/admin/metrics` SPA
+dashboard; it turned out to be **superseded by the Grafana observability stack (ADR-021, #236–240)**
+we'd already shipped and E2E-tested. The signals were all in context — the CI failure was literally
+the *Grafana* render-gate, `dashboards.spec.ts` existed, memory named ADR-021 — but every gate ran
+*inside* the issue's "fix the SPA page" framing and none asked whether that page should exist. #261/
+#262 fixed a surface we then deprecated.)
+
+For **any issue that scopes work to build or fix a capability** (a dashboard, endpoint, service,
+page, pipeline, report):
+
+1. **Inventory what already implements this capability.** Independently — do not trust the issue's
+   framing. Grep/read for *other* surfaces doing the same job: other controllers/endpoints, other
+   pages/routes, a Grafana/ops surface, a public page, a sibling service, a cron/pipeline. Check
+   ADRs (`docs/**/decisions/`), memory, and sibling/recent issues (the reorg/`issues/complete/` too).
+   The tell is usually already in your context — a CI gate, an existing spec, a memory line.
+2. **Name the canonical surface.** If two+ implementations of the capability exist, decide which is
+   canonical (usually: the one that's live, tested, and current per the latest ADR). State it.
+3. **Fork on the finding:**
+   - **Distinct, both wanted** → proceed; document in the plan *why* they coexist (different
+     audience/scope), so the next person doesn't re-ask.
+   - **Target is superseded/redundant** → the deliverable is **deprecate the target**, not repair it.
+     Stop the build/fix scoping. This is a **scope inversion** — surface it to the human before
+     scoping any implementation work (you're about to spend effort on a dead surface otherwise).
+   - **Unclear which is canonical** → investigate the design/ADRs and bring a recommendation; do not
+     scope build work on an assumption.
+4. **MANDATORY STOP if the target is superseded or the canonical surface is ambiguous** — present the
+   inventory + the supersession/reconciliation call to the human before finalising the plan. Building
+   or fixing a surface that a shipped implementation already supersedes is the failure this gate exists
+   to prevent.
+
+Then run Feature-Completeness (below) only on surfaces that survive this reconciliation as canonical.
+
 ### Feature-Completeness Pre-Check (validation & E2E issues) ⛔ PLANNING GATE
 
 For any issue whose deliverable is to **validate** user stories (E2E / coverage / test-hardening —
