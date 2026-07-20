@@ -1,5 +1,13 @@
 # Issue #262: US-5.1 Metrics Dashboard — Backend Data Completeness
 
+> **⛔ SUPERSEDED by #267 (2026-07-20), partially preserved.** Built (merged `60662126`); then the
+> SPA `/admin/metrics` dashboard was deprecated (superseded by Grafana, ADR-021/#236–240). **Source-health
+> survives** — it was **relocated** to `Stacks.Monitoring.list_source_health/0` + `GET /api/admin/source-health`
+> (it feeds the retained `/admin/scrapers` page), and the #262 `source_health_checks` seed rows were kept.
+> The `enrichment_gaps`/`quality_trends` mart-less aggregation (which only fed the removed SPA dashboard)
+> was **removed** with `Stacks.Admin.Metrics`; its pattern is prior art for **#268**. DoD below left unchecked —
+> the deliverable was undone/relocated, not shipped as scoped.
+
 ## Summary
 Fill the backend data gaps in `Stacks.Admin.Metrics` that leave the admin metrics
 dashboard's Source Health, Enrichment Gaps, and Data-Quality-Trend sections empty

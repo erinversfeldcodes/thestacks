@@ -143,33 +143,18 @@ Verdict: 🟡 partial — the one broken hop is exactly this issue's deliverable
 **Verdict:** baseline ❌ — 0 passing of 3 target cells; feature hop exists, tests + wiring missing.
 
 ## Definition of Done
-- [ ] `BookshelfController.show` response includes top-level `visibility` equal to the bookshelf's
-      real `op.visibility_level` — evidence: `bookshelf_controller_test.exs "returns bookshelf
-      visibility in response"` GREEN (`<token>`)
-- [ ] `getBookshelf` decodes `visibility` (tolerant default) and `ShelvesLoaded (Ok …)` sets
-      `model.visibility`; init no longer relies on a hardcoded `"platform"` — evidence: `git diff`
-      `Page/Bookshelf.elm:190,207-213` + `Api.elm:793-807` + `Types/Shelf.elm` (`<token>`)
-- [ ] RSS icon renders for a `"platform"` shelf and is HIDDEN for a non-platform shelf — evidence:
-      `BookshelfShelvesTest.elm "rss_icon_renders_for_platform_shelf"` +
-      `"rss_icon_hidden_for_non_platform_shelf"` GREEN (`<token>`)
-- [ ] Public-profile shelf path (`getPublicBookshelf`, `Api.elm:2297-2305`) unchanged and still
-      GREEN — evidence: `BookshelfReadOnlyTest.elm` / `elm-test` output (`<token>`)
-- [ ] Contract change reviewed — additive top-level `visibility` field; decoder tolerant of absent
-      value — evidence: contract-reviewer sign-off (`<token>`)
-- [ ] **Feature-Completeness Pre-Check (above) is ✅** — the single broken visibility hop closed;
-      RSS gate now driven by real server data (`<token>`)
-- [ ] Every behaviour has a validation path — Layer 10 (Elm program test) + Layer 1 (controller
-      test); browser drive deferred to #119 with rationale (`<token>`)
-- [ ] Tests written and passing (`just run mix test` for `bookshelf_controller_test.exs`; `elm-test`
-      for `BookshelfShelvesTest.elm`) — evidence: command → output (`<token>`)
-- [ ] Standards compliance verified (`just run just verify` passes; GDPR review N/A — see below) —
-      evidence: verify output (`<token>`)
-- [ ] **Test audit (embedded above) is GREEN** — 3 target cells ✅, 0 ❌/⚠️. Regenerate as final
-      step (`<token>`)
-- [ ] **`completion-audit` skill passed on the integrated branch** (`<token>`)
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — RSS
-      show/hide observed on a live stack (or explicitly delegated to #119's E2E with the token), logs
-      clean, tracking regenerated (`<token>`)
+- [x] `BookshelfController.show` response includes top-level `visibility` — evidence: `bookshelf_controller_test.exs` (3 cases: platform/owner/absent→"owner"), 28/0; commit `f58bebf1`
+- [x] `getBookshelf` decodes `visibility` and `ShelvesLoaded (Ok …)` sets `model.visibility`; init no longer hardcodes `"platform"` (→ `"owner"`) — evidence: diff `f58bebf1` (`Page/Bookshelf.elm`, `Api.elm`, `Types/Shelf.elm` new `BookshelfResponse`)
+- [x] RSS icon renders for a `"platform"` shelf and HIDDEN for non-platform — evidence: `BookshelfShelvesTest.elm` show/hide program tests GREEN; **live-driven** `rss.spec.ts` 5/5 (icon show + hide)
+- [x] Public-profile shelf path unchanged and GREEN — evidence: `BookshelfReadOnlyTest.elm` 8/8; shared `shelvesResponseDecoder` byte-unchanged
+- [x] Contract change reviewed — evidence: contract-reviewer APPROVED (additive `visibility`, tolerant decoder, profile path intact)
+- [x] **Feature-Completeness Pre-Check ✅** — the broken visibility hop closed; RSS gate driven by real server data — evidence: `rss.spec.ts` "hidden for non-platform" GREEN live
+- [x] Every behaviour has a validation path — Layer 10 (Elm program) + Layer 1 (controller) + #119 `rss.spec.ts` browser live-drive — evidence: 5/5 local
+- [x] Tests written and passing — evidence: elm 864/0 + `bookshelf_controller_test.exs` 28/0
+- [x] Standards compliance (`just verify` passes; GDPR N/A) — evidence: integration verify GREEN (elixir 2749/0, elm 864/0, dbt 295)
+- [x] **Test audit GREEN** — 3 target cells ✅ — evidence: BookshelfShelvesTest + bookshelf_controller_test
+- [x] **`completion-audit` passed on the integrated branch** — evidence: epic-wide completion-audit 2026-07-20
+- [x] **Meets the Completion Bar** — RSS show/hide observed live (`rss.spec.ts` 5/5, "hidden for private" GREEN), logs clean — evidence: local live-drive; commit `f58bebf1`
 
 ### GDPR
 **N/A — no new personal data.** Shelf `visibility` is an existing `op.visibility_level` column

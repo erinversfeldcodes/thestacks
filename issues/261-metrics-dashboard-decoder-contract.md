@@ -1,5 +1,12 @@
 # Issue #261: Metrics dashboard — fix the frontend decoder contract (render real data)
 
+> **⛔ SUPERSEDED by #267 (2026-07-20).** This fix was built (merged `8e32a9a0`) and then **removed**
+> when the SPA `/admin/metrics` dashboard was deprecated — it was discovered broken end-to-end (the
+> SPA sends an `access` token; the endpoints require `admin_session`, and there is no break-glass UI)
+> AND superseded by the Grafana observability stack (ADR-021/#236–240). The decoder-envelope +
+> USD-formatting **pattern** is preserved as prior art for the future user-facing PII/personal-insights
+> dashboards (**#268**). DoD below intentionally left unchecked — the deliverable was undone, not shipped.
+
 ## Summary
 The admin metrics dashboard (`/admin/metrics`, `Page.Admin.Metrics`) never renders real data:
 `StacksWeb.MetricsController` wraps every response in `%{data: …}`, but none of the four Elm
