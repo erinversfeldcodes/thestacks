@@ -309,7 +309,7 @@ viewCostTrackingSection remoteDashboard =
                             [ tr []
                                 [ th [] [ text "Service" ]
                                 , th [] [ text "Category" ]
-                                , th [] [ text "Amount (ZAR)" ]
+                                , th [] [ text "Amount (USD)" ]
                                 ]
                             ]
                         , tbody []
@@ -323,7 +323,7 @@ viewCostRow cost =
     tr []
         [ td [] [ text cost.name ]
         , td [] [ text cost.category ]
-        , td [] [ text (formatZar cost.amountZar) ]
+        , td [] [ text (formatUsd cost.amountZar) ]
         ]
 
 
@@ -388,13 +388,13 @@ formatPercentage pct =
     String.fromFloat rounded ++ "%"
 
 
-formatZar : Int -> String
-formatZar cents =
+formatUsd : Int -> String
+formatUsd cents =
     let
-        rands =
+        dollars =
             toFloat cents / 100
 
         rounded =
-            toFloat (round (rands * 100)) / 100
+            toFloat (round (dollars * 100)) / 100
     in
-    "R " ++ String.fromFloat rounded
+    "$" ++ String.fromFloat rounded

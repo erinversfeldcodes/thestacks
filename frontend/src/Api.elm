@@ -61,6 +61,7 @@ module Api exposing
     , deleteAccount
     , deleteComment
     , dismissAssociation
+    , enrichmentGapsDecoder
     , forgotPassword
     , getAdminSources
     , getAuditLog
@@ -96,6 +97,7 @@ module Api exposing
     , logout
     , lookupByIsbn
     , mergeFormat
+    , metricsDashboardDecoder
     , moveBook
     , personalInferencesDecoder
     , placeBook
@@ -103,6 +105,7 @@ module Api exposing
     , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
+    , qualityTrendsDecoder
     , refresh
     , register
     , rejectIdentification
@@ -116,6 +119,7 @@ module Api exposing
     , searchUsers
     , setBookAgeGate
     , soldListing
+    , sourceHealthListDecoder
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
@@ -140,7 +144,6 @@ import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
 import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
-import Stacks.Monitoring.V1.SourceHealthCheck as ProtoHealth
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
@@ -2602,61 +2605,27 @@ type alias SourceHealth =
     }
 
 
-{-| Adapter: proto SourceHealthCheck -> app SourceHealth.
-Proto uses typed enums for status/sourceType; API sends string values.
+{-| Decoder for one source-health record.
+
+The `/api/metrics/source-health` endpoint (#262) emits `source_type` and `status`
+as **plain strings** (not proto enums), alongside `last_success_at`/`last_failure_at`.
+Decode that JSON shape directly rather than through the proto SourceHealthCheck decoder.
+
 -}
-fromProtoSourceHealthCheck : ProtoHealth.SourceHealthCheck -> SourceHealth
-fromProtoSourceHealthCheck proto =
-    { name = proto.sourceName
-    , sourceType = sourceTypeToString proto.sourceType
-    , status = healthStatusToString proto.status
-    , consecutiveFailures = proto.consecutiveFailures
-    , lastSuccess = proto.lastSuccessAt
-    , lastFailure = proto.lastFailureAt
-    }
-
-
-sourceTypeToString : ProtoHealth.SourceType -> String
-sourceTypeToString st =
-    case st of
-        ProtoHealth.SourceTypeScraperConfig ->
-            "scraper_config"
-
-        ProtoHealth.SourceTypeReviewSource ->
-            "review_source"
-
-        ProtoHealth.SourceTypeRssFeed ->
-            "rss_feed"
-
-        ProtoHealth.SourceTypeEventSource ->
-            "event_source"
-
-        ProtoHealth.SourceTypeLlmOutput ->
-            "llm_output"
-
-        ProtoHealth.SourceTypeUnspecified ->
-            "unspecified"
-
-
-healthStatusToString : ProtoHealth.HealthStatus -> String
-healthStatusToString hs =
-    case hs of
-        ProtoHealth.HealthStatusHealthy ->
-            "healthy"
-
-        ProtoHealth.HealthStatusDegraded ->
-            "degraded"
-
-        ProtoHealth.HealthStatusBroken ->
-            "broken"
-
-        ProtoHealth.HealthStatusUnspecified ->
-            "unspecified"
-
-
 sourceHealthDecoder : Decoder SourceHealth
 sourceHealthDecoder =
-    Decode.map fromProtoSourceHealthCheck ProtoHealth.decodeSourceHealthCheck
+    Decode.map6 SourceHealth
+        (Decode.field "name" Decode.string)
+        (Decode.field "source_type" Decode.string)
+        (Decode.field "status" Decode.string)
+        (Decode.field "consecutive_failures" Decode.int)
+        (Decode.maybe (Decode.field "last_success_at" Decode.string))
+        (Decode.maybe (Decode.field "last_failure_at" Decode.string))
+
+
+sourceHealthListDecoder : Decoder (List SourceHealth)
+sourceHealthListDecoder =
+    Decode.field "data" (Decode.list sourceHealthDecoder)
 
 
 {-| GET /api/metrics/source-health — fetch per-source health status.
@@ -2671,7 +2640,7 @@ getSourceHealth token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/metrics/source-health"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "sources" (Decode.list sourceHealthDecoder))
+        , expect = Http.expectJson toMsg sourceHealthListDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2742,7 +2711,8 @@ fromProtoCostItem categoryName proto =
 
 metricsDashboardDecoder : Decoder MetricsDashboard
 metricsDashboardDecoder =
-    Decode.map fromProtoMetricsDashboard ProtoAdmin.decodeMetricsDashboard
+    Decode.field "data"
+        (Decode.map fromProtoMetricsDashboard ProtoAdmin.decodeMetricsDashboard)
 
 
 {-| GET /api/metrics — fetch main dashboard data.
@@ -2766,7 +2736,7 @@ getMetrics token toMsg =
 {-| Quality trend data from GET /api/metrics/quality-trends.
 
 The proto has QualityTrendRow with percentage floats. The API endpoint wraps these
-in a list; we take the two most recent rows to compute trend direction (up/down/flat)
+in a list; we take the two most recent rows to compute trend direction (up/down/stable)
 by comparing cover\_pct, price\_pct, and review\_pct.
 
 -}
@@ -2780,7 +2750,7 @@ type alias QualityTrends =
 {-| Adapter: list of proto QualityTrendRow -> app QualityTrends.
 
 Compares the two most recent rows to derive trend direction. If fewer than two
-rows are available, defaults to "flat".
+rows are available, defaults to "stable".
 
 -}
 fromProtoQualityTrendRows : List ProtoAdmin.QualityTrendRow -> QualityTrends
@@ -2797,7 +2767,7 @@ fromProtoQualityTrendRows rows =
                 "down"
 
             else
-                "flat"
+                "stable"
     in
     case sorted of
         current :: previous :: _ ->
@@ -2807,16 +2777,18 @@ fromProtoQualityTrendRows rows =
             }
 
         _ ->
-            { coverTrend = "flat"
-            , priceTrend = "flat"
-            , reviewTrend = "flat"
+            { coverTrend = "stable"
+            , priceTrend = "stable"
+            , reviewTrend = "stable"
             }
 
 
 qualityTrendsDecoder : Decoder QualityTrends
 qualityTrendsDecoder =
-    Decode.map fromProtoQualityTrendRows
-        (Decode.list ProtoAdmin.decodeQualityTrendRow)
+    Decode.field "data"
+        (Decode.map fromProtoQualityTrendRows
+            (Decode.list ProtoAdmin.decodeQualityTrendRow)
+        )
 
 
 {-| GET /api/metrics/quality-trends — fetch quality trend indicators.
@@ -2859,7 +2831,8 @@ fromProtoEnrichmentGaps proto =
 
 enrichmentGapsDecoder : Decoder EnrichmentGaps
 enrichmentGapsDecoder =
-    Decode.map fromProtoEnrichmentGaps ProtoAdmin.decodeEnrichmentGaps
+    Decode.field "data"
+        (Decode.map fromProtoEnrichmentGaps ProtoAdmin.decodeEnrichmentGaps)
 
 
 {-| GET /api/metrics/enrichment-gaps — fetch enrichment gap counts.
