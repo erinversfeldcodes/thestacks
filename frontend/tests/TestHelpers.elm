@@ -47,7 +47,7 @@ import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
 import Types.Placement exposing (Placement, placementDecoder)
 import Types.RemoteData
-import Types.Shelf exposing (shelvesResponseDecoder)
+import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
 
 
@@ -780,7 +780,7 @@ libraryInitEffects maybeToken =
                 , body = SimulatedEffect.Http.emptyBody
                 , expect =
                     SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
-                        shelvesResponseDecoder
+                        bookshelfResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -812,7 +812,11 @@ profileShelfInitEffects maybeToken handle bookshelfName =
         , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = SimulatedEffect.Http.emptyBody
         , expect =
-            SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+            -- Mirror Api.getProfileShelf: the read-only profile payload carries
+            -- no visibility, so map it into the shared ShelvesLoaded response
+            -- shape with the "owner" default (RSS is never rendered here).
+            SimulatedEffect.Http.expectJson
+                (Bookshelf.ShelvesLoaded << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
                 shelvesResponseDecoder
         , timeout = Nothing
         , tracker = Nothing

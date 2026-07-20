@@ -117,7 +117,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.ShelvesLoaded (Ok []))
+                                (Bookshelf.ShelvesLoaded (Ok { shelves = [], visibility = "owner" }))
                                 libraryInit
                     in
                     Expect.all

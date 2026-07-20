@@ -51,7 +51,9 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    Api.getBookshelf "reading_pile" token BooksLoaded
+                    -- This page only needs the shelves; drop the response's
+                    -- visibility (added for the RSS gate on Page.Bookshelf).
+                    Api.getBookshelf "reading_pile" token (BooksLoaded << Result.map .shelves)
 
                 Nothing ->
                     Cmd.none

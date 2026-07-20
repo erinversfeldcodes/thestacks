@@ -28,10 +28,20 @@ startLibrary =
 
 
 {-| Build a shelf API response JSON with the given shelves.
-Each shelf has an id, position, and list of placements.
+Each shelf has an id, position, and list of placements. Visibility defaults to
+"platform" (the historical behaviour these tests were written against).
 -}
 simulateShelvesResponse : List { id : String, position : Int, placements : List Encode.Value } -> Http.Response String
 simulateShelvesResponse shelves =
+    simulateShelvesResponseWithVisibility "platform" shelves
+
+
+{-| Like `simulateShelvesResponse` but with an explicit top-level `visibility`,
+matching the real `GET /api/bookshelves/:name` payload. Used to drive the RSS
+gate, which shows only for a `"platform"` bookshelf.
+-}
+simulateShelvesResponseWithVisibility : String -> List { id : String, position : Int, placements : List Encode.Value } -> Http.Response String
+simulateShelvesResponseWithVisibility visibility shelves =
     let
         encodeShelf s =
             Encode.object
@@ -43,7 +53,9 @@ simulateShelvesResponse shelves =
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "shelves", Encode.list encodeShelf shelves ) ]
+                    [ ( "shelves", Encode.list encodeShelf shelves )
+                    , ( "visibility", Encode.string visibility )
+                    ]
                 )
     in
     Http.GoodStatus_
@@ -87,6 +99,8 @@ suite =
     describe "Page.Bookshelf — auto-flow shelf rendering"
         [ booksRenderInRows
         , emptyShelvesShowEmptyState
+        , rssIconRendersForPlatformShelf
+        , rssIconHiddenForNonPlatformShelf
         ]
 
 
@@ -119,3 +133,33 @@ emptyShelvesShowEmptyState =
                     )
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Your library is waiting" ]
+
+
+rssIconRendersForPlatformShelf : Test
+rssIconRendersForPlatformShelf =
+    test "rss_icon_renders_for_platform_shelf: RSS affordance renders when the loaded shelf visibility is platform" <|
+        \() ->
+            startLibrary
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateShelvesResponseWithVisibility "platform"
+                        [ { id = "shelf-1", position = 0, placements = [ encodePlacement ] }
+                        ]
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "rss-link" ]
+
+
+rssIconHiddenForNonPlatformShelf : Test
+rssIconHiddenForNonPlatformShelf =
+    test "rss_icon_hidden_for_non_platform_shelf: RSS affordance is hidden when the loaded shelf visibility is non-platform (owner)" <|
+        \() ->
+            startLibrary
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateShelvesResponseWithVisibility "owner"
+                        [ { id = "shelf-1", position = 0, placements = [ encodePlacement ] }
+                        ]
+                    )
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.class "rss-link" ]

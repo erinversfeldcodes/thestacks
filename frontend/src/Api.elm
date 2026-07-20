@@ -151,7 +151,7 @@ import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitati
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
-import Types.Shelf exposing (Shelf, shelvesResponseDecoder)
+import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Url.Builder
 
 
@@ -796,7 +796,7 @@ searchBooks query token toMsg =
 getBookshelf :
     String
     -> String
-    -> (Result Http.Error (List Shelf) -> msg)
+    -> (Result Http.Error BookshelfResponse -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
     Http.request
@@ -804,7 +804,7 @@ getBookshelf shelfName token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , expect = Http.expectJson toMsg bookshelfResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
