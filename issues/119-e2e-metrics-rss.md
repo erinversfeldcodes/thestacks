@@ -33,10 +33,15 @@ it — delete the story from Summary + User Stories above and spin out a feature
 "to verify"; fill verdicts + file:line evidence when this issue is picked up.
 -->
 
-| User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
-|-----------|------------------------------|-------------------|---------|------------|
-| US-5.1 — View the Metrics Dashboard | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-6.1 — Subscribe to Shelf RSS Feeds | ⬜ to verify | ⬜ to verify | ⬜ | — |
+Traced 2026-07-20 (code-reading pass; two build-status agents). Both stories are **🟡 PARTIAL** —
+structurally built but broken/stubbed at the integration layer, so #119 cannot write passing E2E
+against them as-is. Resolution: implementation fixes **spun out to dedicated issues** that land on
+`feat/119-e2e` before #119's test phases (refs filled in once created — see Dependencies).
+
+| User Story | Happy-path hops (file:line) | Verdict | Broken/partial hops → resolution |
+|-----------|------------------------------|---------|----------------------------------|
+| US-5.1 — View the Metrics Dashboard | route `Route.elm:51`/`router.ex:305-308` ✅ · `:admin`+MFA guard `admin_auth_pipeline.ex:62`/`require_mfa.ex:93` ✅ · `MetricsController` `metrics_controller.ex:14-31` 🟡 (`%{data:…}` envelope) · `Page/Admin/Metrics.elm` 4 sections ✅ · decoders `Api.elm:2678,2760,2818,2862` ❌ (none unwrap `data`) · nav `Main.elm:2662` ✅ | 🟡 | **❌ decoder envelope** (all 4 endpoints render zeros/errors — the hard blocker); **🟡 USD-as-ZAR** (`Metrics.elm:391`, no conversion → relabel to USD); **🟡 trend `flat` vs rendered `stable`** (`Metrics.elm:366`); **🟡 source-health missing `lastSuccess/lastFailure` + string-vs-enum** (`metrics.ex:137`); **🟡 `enrichment_gaps`/`quality_trends` empty stubs w/o marts**; source_health unseeded → **#261** (decoder envelope + USD relabel + trend token) + **#262** (source-health fields/shape + mart-less aggregation + seed) |
+| US-6.1 — Subscribe to Shelf RSS Feeds | route `router.ex:117` ✅ · `FeedController` all 4 status paths + ETag/304 + Cache-Control `feed_controller.ex:24-46` ✅ · Atom builder `feeds.ex:54-112` ✅ · visibility gate `feeds.ex:27-33` ✅ · event handler→`RegenerateFeedJob` ✅ wired · `RSSLink.elm` ✅ · `Bookshelf.elm:190` 🟡 (visibility hardcoded) · `regenerate_feed_job.ex:24-30` 🟡 (no-op, no store) | 🟡 | **🟡 frontend visibility hardcoded `"platform"`** (RSS icon shows on every shelf; "hidden for private" untestable → lift real visibility); **🟡 regen job is a no-op** (no feed store → build a real feed cache) → **#263** (lift real shelf visibility) + **#264** (feed cache + real regen) |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -47,7 +52,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - **Source Health table**: Status badges (healthy/degraded/broken) with correct CSS classes
 - **Data Quality cards**: Coverage percentages with trend arrows (up/down/stable)
 - **Enrichment Gaps cards**: Integer counts for books without prices/covers/reviews
-- **Cost Tracking ledger**: Service/Category/Amount table with ZAR formatting ("R X.XX")
+- **Cost Tracking ledger**: Service/Category/Amount table with USD formatting ("$ X.XX") — the cost system is USD; the ZAR label was a spec/build mismatch fixed in #261
 - **GDPR section**: "N images pending deletion" card
 - **Individual section failure**: One section shows error, others render normally
 - **RSS icon on bookshelf**: RSS button renders when bookshelf has `visibility: "platform"`
@@ -343,7 +348,7 @@ modified during this audit (pre-implementation baseline).
 | 6 | L10 US-5.1 happy | Elm state-machine tests for `Page.Admin.Metrics`: init fires 4 parallel `Api.getMetrics/getQualityTrends/getSourceHealth/getEnrichmentGaps` via `Cmd.batch`; all 4 fields start `Loading` (`NotAsked` when no token); each `*Received (Ok _)` → `Success` independently. | new `frontend/tests/Page/AdminMetricsProgramTest.elm` |
 | 7 | L10 US-5.1 sad | Elm failure-state tests: each `*Received (Err _)` renders its own error independently; page skeleton renders when all 4 sections fail. | same file as #6 |
 | 8 | L11 US-5.1 | Assert `mart_job_stats` surfaces the enumerated workers (`WritingAssistantNudgeWorker`, `EmbedPostWorker`, `EmbedShelfPlacementWorker`, `EmbedBookContentWorker`, `WritingAssistantDataPurgeWorker`) and that the `writing_assistant` cost category is distinct from `post_association` (Issue §12); tighten `job_stats/0`/`source_health/0` beyond "returns a list". | `apps/core/test/stacks/admin/metrics_test.exs` + `dbt` mart tests |
-| 9 | L1/L10 US-5.1 (E2E) | Playwright metrics-dashboard UI (Issue §1): 4 sections render independently; Source Health status badges (`status-badge--healthy/degraded/broken`); Data Quality trend arrows; Enrichment Gaps integer cards; Cost Tracking ledger with ZAR ("R X.XX"); GDPR "N images pending deletion"; individual-section-failure (one errors, others render). | new `e2e/tests/metrics.spec.ts` |
+| 9 | L1/L10 US-5.1 (E2E) | Playwright metrics-dashboard UI (Issue §1): 4 sections render independently; Source Health status badges (`status-badge--healthy/degraded/broken`); Data Quality trend arrows; Enrichment Gaps integer cards; Cost Tracking ledger with USD ("$ X.XX"); GDPR "N images pending deletion"; individual-section-failure (one errors, others render). | new `e2e/tests/metrics.spec.ts` |
 | 10 | L13 US-5.1 happy (E2E) | ✅ **RESOLVED by #110.** The `hasCostData` conditional has been removed from `e2e/tests/costs.spec.ts`; the spec now asserts banner amount / category cards / 3 story cards unconditionally. #110's seed fixture (`Stacks.Costs.seed_current_period_costs/0`, called from `seeds.exs`) guarantees current-period cost data on preview/local, so the with-data assertions always execute. | `e2e/tests/costs.spec.ts` (done via #110) |
 | 11 | L8 US-6.1 happy | Assert `Cache-Control: public, max-age=300` header on the feed response (US-6.1 §10, Issue §9 — currently unasserted); add a controller-level "ETag changes when placements change" test. | `apps/core/test/stacks_web/controllers/feed_controller_test.exs` |
 | 12 | L10 US-6.1 happy | `Components.RSSLink` Elm test: `ToggleUrl` toggles `showUrl`; when `visibility == "platform"` the popover renders the feed URL (`/api/feeds/{userId}/{bookshelfName}`) + "Subscribe in your RSS reader:" help text. | new `frontend/tests/RSSLinkTest.elm` |
@@ -405,10 +410,19 @@ instrumentation.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
 
 ## Dependencies
-Requires metrics dashboard implementation, feed controller, dbt mart models.
+This is a **validation issue** — its named stories are 🟡 (see Feature-Completeness Pre-Check). The
+implementation fixes are spun out and MUST land on `feat/119-e2e` before #119's test phases:
+- **#261** — metrics dashboard decoder contract (unwrap `data`, USD relabel, trend token) [`issues/261-metrics-dashboard-decoder-contract.md`]
+- **#262** — metrics dashboard backend data (source-health fields/shape, mart-less aggregation, seed) [`issues/262-metrics-dashboard-backend-data.md`]
+- **#263** — RSS real shelf visibility wiring [`issues/263-rss-shelf-visibility-wiring.md`]
+- **#264** — RSS feed cache + real event-driven regeneration [`issues/264-rss-feed-cache-regeneration.md`]
+
+Also folds in a **CI fix** (in-scope for #119): `scripts/dashboard-render-gate.sh:32-37` does a single-shot
+`curl /health` preflight with no readiness wait → races VM startup and FATALs (main CI run 29742639866).
+Add a bounded readiness-retry loop (poll `/health` up to ~30s) before failing.
 
 ## Agent Assignment
-testing-agent
+testing-coordinator (E2E) + platform-agent (render-gate fix)
 
 ## Progress Notes
 [Updated by agents during execution.]
