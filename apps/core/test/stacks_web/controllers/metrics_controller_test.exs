@@ -93,6 +93,42 @@ defmodule StacksWeb.MetricsControllerTest do
       assert %{"data" => _data} = json_response(conn, 200)
     end
 
+    test "serializes each entry in the SourceHealth wire shape", %{conn: conn} do
+      insert(:source_health_check,
+        source_name: "wire-src",
+        source_type: "scraper_config",
+        status: "degraded",
+        consecutive_failures: 2,
+        last_success_at: DateTime.utc_now(),
+        last_failure_at: DateTime.utc_now()
+      )
+
+      {conn, _user, _session} = setup_admin_conn(conn)
+
+      conn = get(conn, "/api/metrics/source-health")
+
+      assert %{"data" => data} = json_response(conn, 200)
+      entry = Enum.find(data, &(&1["name"] == "wire-src"))
+      assert entry
+
+      assert Enum.sort(Map.keys(entry)) ==
+               [
+                 "consecutive_failures",
+                 "last_failure_at",
+                 "last_success_at",
+                 "name",
+                 "source_type",
+                 "status"
+               ]
+
+      # plain strings, not proto enum integers
+      assert entry["source_type"] == "scraper_config"
+      assert entry["status"] == "degraded"
+      assert entry["consecutive_failures"] == 2
+      assert is_binary(entry["last_success_at"])
+      assert is_binary(entry["last_failure_at"])
+    end
+
     test "returns 401 for regular owner JWT (no MFA)", %{conn: conn} do
       {conn, _user} = owner_conn(conn)
 
