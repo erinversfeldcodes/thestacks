@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 /**
@@ -26,6 +26,56 @@ import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("bookshelf") });
 test.describe.configure({ mode: "serial" });
+
+/**
+ * Raise/lower the suite user's PROFILE visibility.
+ *
+ * The `bookshelf` suite user is seeded with `profile_visibility = "owner"`,
+ * which is a HARD ceiling (#195, `validate_bookshelf_profile_ceiling/3`): a
+ * shelf may not be more visible than the profile, so an "owner" profile forces
+ * every shelf to "owner" and a `PUT …/visibility -> platform` is rejected 422
+ * ("less restrictive than the profile visibility ceiling"). These specs flip
+ * shelves to "platform", so we raise the profile ceiling to "platform" for the
+ * duration of the file and restore it to "owner" afterwards — the spec owns its
+ * own precondition and needs no seed change (works local/CI/preview).
+ */
+async function setProfileVisibility(
+  browser: Browser,
+  visibility: string,
+): Promise<void> {
+  const context = await browser.newContext({
+    storageState: suiteAuthFile("bookshelf"),
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto("/library");
+    const res = await apiCallFromPage(
+      page,
+      "PUT",
+      "/api/settings/profile_visibility",
+      { profile_visibility: visibility },
+    );
+    expect(
+      res.status,
+      `PUT /api/settings/profile_visibility -> ${visibility} (got ${res.status})`,
+    ).toBe(200);
+  } finally {
+    await context.close();
+  }
+}
+
+// Raise the profile ceiling before any test flips a shelf to "platform", and
+// restore it after the whole file — afterAll always runs, including on failure,
+// so the shared suite user is left as seeded ("owner") for other suites.
+// bookshelf.spec.ts is the only other spec on this suite user and never asserts
+// on profile/shelf visibility, so the brief raise cannot interfere with it.
+test.beforeAll(async ({ browser }) => {
+  await setProfileVisibility(browser, "platform");
+});
+
+test.afterAll(async ({ browser }) => {
+  await setProfileVisibility(browser, "owner");
+});
 
 async function setVisibility(
   page: Page,
