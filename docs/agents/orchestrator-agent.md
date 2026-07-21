@@ -917,8 +917,18 @@ Between batched stops, keep the human informed via the epic state block (below) 
 the human may interrupt at any time.
 
 ### Merge & integration discipline
+- **The integration/epic verification gate is `just ci`, NOT `just verify`** (the #119 lesson).
+  `just verify` is the fast inner-loop check; it **skips** whole CI groups — `security` (sobelow +
+  Trivy/npm-vuln scan on the lockfiles + dockle), `squawk` (migration-safety lint), `licenses`, and
+  the `npm audit` inside `elm: lint`. An epic that is "`just verify` green" can still fail the real
+  push/PR CI on a dependency advisory, an unsafe migration, or a license issue. So run **`just run
+  just ci`** (or the specific missing groups: `scripts/security.sh`, `scripts/security-squawk.sh`,
+  `scripts/lint-elm.sh`) before declaring the integration branch green — especially when the diff
+  adds a **migration** (squawk) or touches **npm deps / lockfiles** (security/audit). (Local-only
+  caveat: `security`'s dockle step needs a running Docker daemon; a dockle-only local failure with
+  clean sobelow/Trivy is an environment limitation, not a gate failure — CI has Docker.)
 - A child is "done" only after: its own full flow passes, its branch is committed, it is merged
-  into the integration branch, and `just verify` is **re-run green on the integration branch
+  into the integration branch, and **`just ci`** is **re-run green on the integration branch
   post-merge** (a child green in isolation can break integration).
 - Order merges within a level to minimise conflicts (smallest / most-foundational first).
 - Resolve conflicts on the integration branch; if a resolution is non-mechanical, stop for the human.
