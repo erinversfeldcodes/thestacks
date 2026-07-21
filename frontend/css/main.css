@@ -1796,11 +1796,50 @@ h4 {
 }
 
 /* ===== Room Transitions (fade through dark) ===== */
-/* Placeholder: room transition classes applied via Elm but not yet styled.
-   Safe to add opacity/overlay animations now that preserve-3d is removed. */
+/* US-1.2.5: walking down a hallway into a different room. The new space starts
+   dim and slightly contracted, holds a beat of near-stillness in the warm dark,
+   then resolves outward from the centre. 0.4s sits mid-band of the story's
+   300-500ms requirement. The keyframes name matches the class name — Main.elm
+   clears the transition class by matching the animationend event's
+   animationName against it. */
 
-.fade-through-dark-in {}
-.fade-through-dark-out {}
+@keyframes fade-through-dark-in {
+    0% {
+        opacity: 0;
+        transform: scale(0.985);
+        filter: brightness(0.3) sepia(0.35);
+    }
+
+    45% {
+        opacity: 0.4;
+        transform: scale(0.99);
+        filter: brightness(0.55) sepia(0.25);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+        filter: brightness(1) sepia(0);
+    }
+}
+
+.fade-through-dark-in {
+    animation: fade-through-dark-in 0.4s ease-out;
+}
+
+/* Reduced motion: suppress the navigation transitions entirely. Declared after
+   the rules above so the equal-specificity override wins. Matches the existing
+   pattern at the `.book-pile__book--selected` and `.book` blocks. */
+
+@media (prefers-reduced-motion: reduce) {
+    .slide-in-left,
+    .slide-in-right,
+    .slide-out-left,
+    .slide-out-right,
+    .fade-through-dark-in {
+        animation: none;
+    }
+}
 
 /* ===== Responsive ===== */
 
