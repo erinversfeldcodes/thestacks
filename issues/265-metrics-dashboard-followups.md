@@ -1,5 +1,11 @@
 # Issue #265: Metrics dashboard follow-ups — enrichment-gaps mart shape + USD padding
 
+> **⛔ CLOSED — OBSOLETED by #267 (2026-07-21).** Both items targeted the SPA metrics dashboard
+> (`Stacks.Admin.Metrics.enrichment_gaps/0` and `Page/Admin/Metrics.elm` `formatUsd`), which #267
+> **deleted** when it deprecated that dashboard. Nothing to fix — the code no longer exists. Any
+> residual mart-shape concern belongs to the future PII/personal-insights dashboards (#268) if they
+> re-consume `mart_enrichment_gaps`. Do not work this issue.
+
 ## Summary
 Two non-blocking follow-ups from the #119 epic review (elm-reviewer + elixir-reviewer): (1) the
 `enrichment_gaps/0` **mart branch** returns a structurally different JSON shape than the mart-less
