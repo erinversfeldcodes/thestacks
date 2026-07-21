@@ -30,6 +30,21 @@
  * the navigation not yet rendered. Every read therefore waits for a transition
  * sample to be observed first. This is a wait, not a weakened assertion: if the
  * feature stops applying a class the wait times out and the test fails.
+ *
+ * AND WHY "WAIT FOR CLEARED" IS NEVER ENOUGH ON ITS OWN
+ * ----------------------------------------------------
+ * The same render gap makes `waitForTransitionCleared` trivially satisfiable:
+ * straight after a click the class has not been applied *yet*, so "no transition
+ * class is present" is already true and the wait returns instantly, having
+ * observed nothing. Chaining click → wait-for-cleared → click therefore lets
+ * navigations pile up inside one frame; the class gets swapped mid-flight
+ * instead of removed and re-added, and the recorded sequence varies run to run.
+ * That is precisely what made this spec non-deterministic against a deployed
+ * preview while passing locally (issue #277).
+ *
+ * So every wait-for-cleared must be preceded by a wait for the class to have
+ * been *applied* (`recordedTransitions`). Applied-then-cleared is the invariant;
+ * cleared alone is vacuous.
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -136,6 +151,10 @@ async function recordedTransitions(
  *
  * Only valid under normal motion — under `prefers-reduced-motion` no
  * `animationend` fires, so the class is never cleared.
+ *
+ * MUST be called only after `recordedTransitions` has confirmed the class was
+ * applied. Called straight after a click it returns immediately without
+ * observing anything — see the header comment.
  */
 async function waitForTransitionCleared(page: Page): Promise<void> {
   await page.waitForFunction(
@@ -269,18 +288,32 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
     await gotoShelf(page, "/library");
     await startRecording(page);
 
-    // Let each animation finish before the next navigation, so the recording
-    // shows the class being genuinely removed and re-added rather than merely
-    // swapped mid-flight.
+    // Let each animation both *start* and *finish* before the next navigation,
+    // so the recording shows the class being genuinely removed and re-added
+    // rather than merely swapped mid-flight.
+    //
+    // Waiting only for "cleared" is not enough: immediately after a click the
+    // class has not been applied yet, so that wait is already satisfied and
+    // returns having observed nothing (see the header comment). The
+    // `recordedTransitions(page, n)` call is what pins the applied half of the
+    // applied-then-cleared invariant, and it is an added requirement — every
+    // one of the three navigations must now be observed to apply a class, where
+    // before a silently-skipped one went unnoticed.
     await clickShelf(page, "/antilibrary");
+    await recordedTransitions(page, 1);
     await waitForTransitionCleared(page);
     await clickShelf(page, "/library");
+    await recordedTransitions(page, 2);
     await waitForTransitionCleared(page);
     await clickShelf(page, "/antilibrary");
+    await recordedTransitions(page, 3);
     await waitForTransitionCleared(page);
 
     const samples = await readRecording(page);
     const sequence = samples.map((s) => transitionClassOf(s.className));
+
+    // All three navigations animated — none was collapsed into a neighbour.
+    expect(transitionSamples(samples)).toHaveLength(3);
 
     // slide-in-right must be applied twice, with the class absent in between —
     // that gap is what lets the browser restart the animation.
