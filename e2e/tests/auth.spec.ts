@@ -98,8 +98,16 @@ test.describe("Owner-only admin navigation", () => {
     // Hovering the toggle reveals the dropdown menu (:hover -> display:block).
     await adminToggle.hover();
 
-    const sources = page.locator('a[href="/admin/sources"]');
-    const scrapers = page.locator('a[href="/admin/scrapers"]');
+    // Scope to the dropdown SUB-links (`app-nav__dropdown-link`): the "Admin"
+    // toggle ALSO has href="/admin/sources" (it points at the sources page), so
+    // an unscoped `a[href="/admin/sources"]` matches 2 elements and trips
+    // Playwright strict mode. The sub-link is the one carrying text "Sources".
+    const sources = page.locator(
+      'a.app-nav__dropdown-link[href="/admin/sources"]'
+    );
+    const scrapers = page.locator(
+      'a.app-nav__dropdown-link[href="/admin/scrapers"]'
+    );
     await expect(sources).toBeVisible();
     await expect(sources).toHaveText("Sources");
     await expect(scrapers).toBeVisible();
