@@ -19,7 +19,9 @@
 **Acceptance Criteria:**
 - Horizontal slide for adjacent bookshelf navigation.
 - Fade-through-darkness for room transitions (Reading Pile).
-- Navigation bar remains fixed during transitions.
+- Navigation bar remains visually stable during transitions — it must not shift or resize. (Read as
+  geometric stability, **not** `position: fixed`: `.app-header` is `position: relative` by design,
+  `main.css:172`. Only `main.app__main` animates, so the header is outside the animated subtree.)
 - Transition duration 300-500ms.
 
 ---
@@ -124,16 +126,53 @@ N/A
 - **API calls on init**: Each destination fires its own `Api.getBookshelf` call.
 - **Initial model state**: Each destination has its own initial model (see individual US-1.2.x stories).
 
+### Transition mechanism
+
+> **Corrected 2026-07-21 (issue #277).** This section previously described the transition as driven by
+> `themeClass` (`shelf-library` → `shelf-antilibrary`). That was never implementable: `themeClass` sets
+> CSS *custom properties* only (`--shelf-bg`, `--shelf-text`, …, `main.css:42-108`), and custom
+> properties do not animate — no `transition` or `animation` is declared on them. The spec and the code
+> disagreed, and the code is authoritative. `themeClass` keeps its real job: the per-shelf palette.
+
+The transition is driven by a **transition class applied to `main.app__main`**:
+
+- `Animation.Transition.transitionClass : Route -> Route -> String` picks the class from the
+  *(previous route, new route)* pair on each `UrlChanged` (`Main.elm`).
+- `Main.Model.transition : Maybe String` holds it; `view` appends it to the `app__main` class list.
+- Each class name is identical to the `@keyframes` name it triggers (`frontend/css/main.css`).
+- When the animation finishes, an `animationend` handler on `main.app__main` clears the class
+  (`Animation.Transition.clearOnAnimationEnd`), so the **next** navigation re-adds it and the browser
+  restarts the animation. Without this, a second navigation selecting the same class would re-render an
+  identical class string, which does not restart a CSS animation.
+
 ### Transition types by route pair
 
-| From | To | Transition Type | CSS Mechanism |
-|------|----|----------------|---------------|
-| Library | AntiLibrary | Horizontal slide | `themeClass` changes from `shelf-library` to `shelf-antilibrary` |
-| Library | WishList | Horizontal slide | `themeClass` changes |
-| AntiLibrary | WishList | Horizontal slide | `themeClass` changes |
-| Any bookshelf | Reading Pile | Fade through darkness | Page type changes from `page--shelf` to `shelf-reading-pile` |
-| Any bookshelf | Looking for Home | Fade through darkness | Page type changes |
-| Reading Pile | Any bookshelf | Fade through darkness | Reverse room transition |
+The three bookcase bookshelves are ordered as the nav renders them: **Library (0) · AntiLibrary (1) ·
+WishList (2)**. The slide is **directional** — it follows the direction of travel along that order, so a
+back-navigation reads differently from a forward one.
+
+| From | To | Transition Type | Class applied | Duration |
+|------|----|----------------|---------------|----------|
+| Library | AntiLibrary | Horizontal slide, forwards | `slide-in-right` | 300 ms |
+| Library | WishList | Horizontal slide, forwards | `slide-in-right` | 300 ms |
+| AntiLibrary | WishList | Horizontal slide, forwards | `slide-in-right` | 300 ms |
+| AntiLibrary | Library | Horizontal slide, backwards | `slide-in-left` | 300 ms |
+| WishList | Library | Horizontal slide, backwards | `slide-in-left` | 300 ms |
+| WishList | AntiLibrary | Horizontal slide, backwards | `slide-in-left` | 300 ms |
+| Any bookshelf | Reading Pile | Fade through darkness | `fade-through-dark-in` | 400 ms |
+| Any bookshelf | Looking for Home | Fade through darkness | `fade-through-dark-in` | 400 ms |
+| Reading Pile | Any bookshelf | Fade through darkness | `fade-through-dark-in` | 400 ms |
+| Same bookshelf, or any other route pair | — | Fade through darkness | `fade-through-dark-in` | 400 ms |
+
+Both durations sit inside the story's 300–500 ms requirement.
+
+Book detail is deliberately absent: it renders as an overlay and never pushes a route
+(`docs/decisions/005-book-detail-overlay-not-route.md`), so it never reaches `transitionClass`.
+
+### Reduced motion
+
+`@media (prefers-reduced-motion: reduce)` sets `animation: none` on every transition class, suppressing
+the navigation animation for users who have asked for less motion.
 
 ### Update cycle
 - **Msg `UrlChanged url`**: Main.elm parses the new route, discards the current page model, calls `initPage` for the new route.
@@ -144,7 +183,7 @@ N/A
 ### View
 - **Key elements**: The `page` CSS class on the wrapper div carries both `page--shelf` (for shelf pages) or page-type-specific classes. CSS transitions are defined on these classes.
 - **ARIA attributes**: N/A for transitions specifically.
-- **CSS classes**: Transition animation classes are driven by the `themeClass` field in each `Page.Bookshelf` config (`shelf-library`, `shelf-antilibrary`, `shelf-wishlist`) plus the room-page classes `shelf-reading-pile` and `shelf-looking-for-home` (the latter two come from the separate Reading Pile and Looking For Home modules, not the unified `Page.Bookshelf` config). The wallpaper classes (`wallpaper--damask`, `wallpaper--botanical`, `wallpaper--floral`, `wallpaper--dragons`) also change, contributing to the parallax effect.
+- **CSS classes**: The **transition animation** class is applied to `main.app__main` and comes from `Animation.Transition.transitionClass` — see "Transition mechanism" above. Separately, the `themeClass` field in each `Page.Bookshelf` config (`shelf-library`, `shelf-antilibrary`, `shelf-wishlist`) plus the room-page classes `shelf-reading-pile` and `shelf-looking-for-home` (the latter two come from the separate Reading Pile and Looking For Home modules, not the unified `Page.Bookshelf` config) switch the per-shelf **colour palette** via CSS custom properties; they do not animate. The wallpaper classes (`wallpaper--damask`, `wallpaper--botanical`, `wallpaper--floral`, `wallpaper--dragons`) also change with the shelf.
 
 ---
 
@@ -164,8 +203,8 @@ Note: Transitions are purely client-side CSS animations. No HTTP requests or dat
 
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
-| `transition.duration{type="slide"}` | CSS animation timing | Fixed (ms) | CSS `transition-duration` on `themeClass` change | 300-500ms (design spec) |
-| `transition.duration{type="fade"}` | CSS animation timing | Fixed (ms) | CSS `transition-duration` on page type change | 300-500ms (design spec) |
+| `transition.duration{type="slide"}` | CSS animation timing | Fixed (ms) | Computed `animation-duration` of `.slide-in-left` / `.slide-in-right` on `main.app__main` | 300-500ms (design spec); actual 300ms |
+| `transition.duration{type="fade"}` | CSS animation timing | Fixed (ms) | Computed `animation-duration` of `.fade-through-dark-in` on `main.app__main` | 300-500ms (design spec); actual 400ms |
 | `navigation.frequency_per_session` | Elm event tracking | Counter per session | Count of `UrlChanged` msgs that trigger bookshelf transitions | Informational (engagement) |
 | `page.time_on_shelf{shelf}` | Elm event tracking | Histogram (s) | Time between entering a bookshelf route and navigating away | Informational (dwell time) |
 
