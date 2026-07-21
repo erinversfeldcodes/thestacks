@@ -11,13 +11,15 @@ the empty-bookshelf message.
 -}
 
 import Dict
+import Expect
 import Http
 import Json.Encode as Encode
 import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import TestHelpers exposing (libraryProgram)
+import TestHelpers exposing (libraryProgram, namedPlacement, simulateMultiShelfResponse)
 
 
 {-| Helper to start a library program with an auth token.
@@ -101,7 +103,62 @@ suite =
         , emptyShelvesShowEmptyState
         , rssIconRendersForPlatformShelf
         , rssIconHiddenForNonPlatformShelf
+        , shelfOrderIsPreserved
         ]
+
+
+{-| Per-shelf ordering must survive the auto-flow flattening.
+
+`Shelving.list_shelves/1` orders shelves by `s.position` (`shelving.ex:712`),
+and the frontend preserves that order only because
+`List.concatMap .placements shelves` is order-preserving
+(`Page/Bookshelf.elm:333,380,396`). Auto-flow re-groups placements into rows
+that fill the bookcase width, which discards the _shelf boundaries_ — it must
+not discard the _sequence_.
+
+Nothing else asserts this at any layer: the two tests that covered it
+(`shelves_rendered_in_order`, `each_shelf_is_distinct_row`) were deleted in
+`989d86ab` along with the per-shelf DOM element they queried, and the ordering
+half was never carried anywhere else. This restores that guard against the DOM
+the page renders today (Issue #112).
+
+-}
+shelfOrderIsPreserved : Test
+shelfOrderIsPreserved =
+    test "shelf_order_is_preserved: a book on shelf position 1 renders before a book on shelf position 2" <|
+        \() ->
+            startLibrary
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateMultiShelfResponse
+                        [ { id = "shelf-first"
+                          , position = 1
+                          , placements = [ namedPlacement "book-alpha" "Alpha" ]
+                          }
+                        , { id = "shelf-second"
+                          , position = 2
+                          , placements = [ namedPlacement "book-beta" "Beta" ]
+                          }
+                        ]
+                    )
+                -- Both books are on the page at all...
+                |> ProgramTest.ensureView
+                    (Query.findAll [ Selector.class "book-button" ]
+                        >> Query.count (Expect.equal 2)
+                    )
+                -- ...and shelf-first's book comes first. Pinning BOTH positions
+                -- is what makes a reversal fail: asserting only index 0 would
+                -- still pass if the flattening emitted [alpha, alpha].
+                |> ProgramTest.ensureView
+                    (Query.findAll [ Selector.class "book-button" ]
+                        >> Query.index 0
+                        >> Query.has [ Selector.id "spine-book-alpha" ]
+                    )
+                |> ProgramTest.expectView
+                    (Query.findAll [ Selector.class "book-button" ]
+                        >> Query.index 1
+                        >> Query.has [ Selector.id "spine-book-beta" ]
+                    )
 
 
 booksRenderInRows : Test

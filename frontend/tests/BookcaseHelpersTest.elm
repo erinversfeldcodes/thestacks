@@ -8,15 +8,22 @@ These tests validate the DoD items for Issue #029:
   - viewShelfRow renders .shelf-row containing .shelf-row\_\_back, .shelf-row\_\_books, .shelf-row\_\_plank, .shelf-row\_\_lip
   - Books are grouped into rows that fit within the shelf width
 
+Issue #112 punch #14 adds the cases that matter in production: `groupIntoRows`
+at the real bookcase inner width (990px) rather than a toy `maxWidth`, and the
+`minShelfRows 4` padding that keeps a sparse bookcase looking like furniture.
+
 -}
 
 import Components.Spine exposing (WearLevel(..))
 import Expect
-import Page.Bookshelf.Helpers exposing (groupIntoRows, viewShelfRow)
+import Html
+import Page.Bookshelf.Helpers exposing (groupIntoRows, minShelfRows, viewShelfRow)
+import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import TestHelpers exposing (testPlacement)
+import TestHelpers exposing (libraryProgram, placementWithPages, simulateBookshelfResponse, testPlacement)
+import Types.Placement exposing (Placement)
 
 
 suite : Test
@@ -24,6 +31,9 @@ suite =
     describe "Page.Bookshelf.Helpers bookcase frame structure"
         [ shelfRowHasLip
         , groupIntoRowsRespectsFit
+        , groupIntoRowsAtProductionWidth
+        , minShelfRowsPadding
+        , productionWidthDrivenThroughThePage
         ]
 
 
@@ -60,3 +70,137 @@ groupIntoRowsRespectsFit =
                     |> List.length
                     |> Expect.greaterThan 1
         ]
+
+
+{-| The bookcase inner width in production is 990px (`Page.Bookshelf`'s
+`bookcaseInnerWidth`). Packing is by `spineWidth pageCount + 2`:
+
+  - a 371-page book is the `spineWidth` floor — 35px + 2 = 37px, so 26 fit
+    (962px) and the 27th would reach 999px;
+  - a 660-page book is the `spineWidth` ceiling — 55px + 2 = 57px, so 17 fit
+    (969px) and the 18th would reach 1026px.
+
+These are the exact row boundaries, not a "more than one row" smoke check.
+
+-}
+groupIntoRowsAtProductionWidth : Test
+groupIntoRowsAtProductionWidth =
+    describe "groupIntoRows 990 (production bookcase inner width)"
+        [ test "thin_spines_fill_one_row: 26 minimum-width books fill exactly one row" <|
+            \_ ->
+                groupIntoRows 990 (thinBooks 26)
+                    |> List.map List.length
+                    |> Expect.equal [ 26 ]
+        , test "thin_spines_overflow_at_27: the 27th minimum-width book starts a second row" <|
+            \_ ->
+                groupIntoRows 990 (thinBooks 27)
+                    |> List.map List.length
+                    |> Expect.equal [ 26, 1 ]
+        , test "thick_spines_fill_one_row: 17 maximum-width books fill exactly one row" <|
+            \_ ->
+                groupIntoRows 990 (thickBooks 17)
+                    |> List.map List.length
+                    |> Expect.equal [ 17 ]
+        , test "thick_spines_overflow_at_18: the 18th maximum-width book starts a second row" <|
+            \_ ->
+                groupIntoRows 990 (thickBooks 18)
+                    |> List.map List.length
+                    |> Expect.equal [ 17, 1 ]
+        , test "mixed_spines_pack_by_width_not_count: thick books fill a row sooner than thin ones" <|
+            \_ ->
+                let
+                    thinRows =
+                        List.length (groupIntoRows 990 (thinBooks 20))
+
+                    thickRows =
+                        List.length (groupIntoRows 990 (thickBooks 20))
+                in
+                ( thinRows, thickRows )
+                    |> Expect.equal ( 1, 2 )
+        , test "no_books_no_rows: an empty bookshelf produces no rows at all" <|
+            \_ ->
+                groupIntoRows 990 []
+                    |> Expect.equal []
+        ]
+
+
+{-| `minShelfRows 4` is what stops a nearly-empty bookcase rendering as a
+single floating plank: short bookshelves are padded up to four rows, and a
+bookshelf that already exceeds four is left alone.
+-}
+minShelfRowsPadding : Test
+minShelfRowsPadding =
+    describe "minShelfRows 4 pads a short bookcase"
+        [ test "empty_pads_to_four: no rows are padded up to four" <|
+            \_ ->
+                minShelfRows 4 []
+                    |> List.length
+                    |> Expect.equal 4
+        , test "one_row_pads_to_four: a single row is padded up to four" <|
+            \_ ->
+                minShelfRows 4 [ Html.text "row" ]
+                    |> List.length
+                    |> Expect.equal 4
+        , test "four_rows_unpadded: exactly four rows are left alone" <|
+            \_ ->
+                minShelfRows 4 (List.repeat 4 (Html.text "row"))
+                    |> List.length
+                    |> Expect.equal 4
+        , test "tall_bookcase_not_truncated: six rows stay six — padding never removes rows" <|
+            \_ ->
+                minShelfRows 4 (List.repeat 6 (Html.text "row"))
+                    |> List.length
+                    |> Expect.equal 6
+        ]
+
+
+{-| The width above is only meaningful if it is the width the page actually
+uses. Driving 27 minimum-width books through the real bookshelf pins
+`Page.Bookshelf`'s (private) `bookcaseInnerWidth` to 990: the first rendered
+shelf row must hold 26 books and the second exactly 1.
+-}
+productionWidthDrivenThroughThePage : Test
+productionWidthDrivenThroughThePage =
+    test "page_packs_rows_at_production_width: the rendered bookcase breaks after 26 minimum-width books" <|
+        \() ->
+            ProgramTest.start () (libraryProgram (Just "test-token"))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateBookshelfResponse (thinBooks 27))
+                |> ProgramTest.ensureView
+                    (Query.findAll [ Selector.class "shelf-row__books" ]
+                        >> Query.index 0
+                        >> Query.findAll [ Selector.class "book-button" ]
+                        >> Query.count (Expect.equal 26)
+                    )
+                |> ProgramTest.ensureView
+                    (Query.findAll [ Selector.class "shelf-row__books" ]
+                        >> Query.index 1
+                        >> Query.findAll [ Selector.class "book-button" ]
+                        >> Query.count (Expect.equal 1)
+                    )
+                -- Two book rows, padded out to the four-row minimum.
+                |> ProgramTest.expectView
+                    (Query.findAll [ Selector.class "shelf-row" ]
+                        >> Query.count (Expect.equal 4)
+                    )
+
+
+
+-- FIXTURES
+
+
+{-| Books at the `spineWidth` floor: 35px + 2px gap = 37px each.
+-}
+thinBooks : Int -> List Placement
+thinBooks n =
+    List.range 1 n
+        |> List.map (\i -> placementWithPages ("thin-" ++ String.fromInt i) 371)
+
+
+{-| Books at the `spineWidth` ceiling: 55px + 2px gap = 57px each.
+-}
+thickBooks : Int -> List Placement
+thickBooks n =
+    List.range 1 n
+        |> List.map (\i -> placementWithPages ("thick-" ++ String.fromInt i) 660)
