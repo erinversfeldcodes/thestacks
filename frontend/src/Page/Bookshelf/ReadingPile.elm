@@ -1,6 +1,6 @@
 module Page.Bookshelf.ReadingPile exposing
     ( Model
-    , Msg
+    , Msg(..)
     , OutMsg(..)
     , init
     , update
