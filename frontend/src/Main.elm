@@ -17,8 +17,7 @@ port module Main exposing
     , viewNav
     )
 
-import Animation.RoomTransition as RoomTransition
-import Animation.SlideTransition as SlideTransition
+import Animation.Transition exposing (transitionClass)
 import Api
 import Browser
 import Browser.Dom
@@ -2350,19 +2349,6 @@ openOverlay model bookId =
         , Task.attempt (always FocusResult) (Browser.Dom.focus "book-overlay-close")
         ]
     )
-
-
-transitionClass : Route -> Route -> String
-transitionClass from to =
-    case ( from, to ) of
-        ( _, BookDetail _ ) ->
-            SlideTransition.slideInRight
-
-        ( BookDetail _, _ ) ->
-            SlideTransition.slideOutRight
-
-        _ ->
-            RoomTransition.fadeThroughDarkIn
 
 
 
