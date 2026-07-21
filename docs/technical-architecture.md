@@ -2629,6 +2629,17 @@ end
 
 #### US-5.1.1: Metrics Dashboard
 
+> **SUPERSEDED (Issue #267):** The in-app `/admin/metrics` operational-metrics dashboard
+> is superseded by the Grafana observability stack (ADR-021, #231/#236–240). The
+> operational-metrics surface is Grafana (`apps/core/priv/grafana/*`, validated by
+> `e2e/tests/dashboards.spec.ts`), not an in-app page. `Page.Admin.Metrics`,
+> `Stacks.Admin.Metrics`, `StacksWeb.MetricsController`, and the `/api/metrics*` routes
+> were removed in #267; the scraper-health slice survives as
+> `Stacks.Monitoring.list_source_health/0` (`GET /api/admin/source-health`) for the
+> retained scraper-health page. The test example below is retained for historical
+> context only. Host-page dependents (partner-request cards, US-9.5.1 partner engagement
+> metrics) will need a new home when built.
+
 ```elixir
 describe "metrics dashboard" do
   test "returns system health, job status, data freshness, and costs" do

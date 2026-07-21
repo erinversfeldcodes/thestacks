@@ -17,9 +17,10 @@
 - Does this issue combine unrelated concerns (e.g. settings + RLS + retrofit)? → Split.
 
 ## Wiring
-<!-- Every issue must declare whether it includes router/UI wiring. -->
-- [ ] This issue includes router wiring and is user-facing when complete.
-- [ ] This issue is implementation only. Wired by issue #___.
+<!-- State one, in prose (reserve `- [x]` for completed DoD items with evidence — a bare
+     checkbox here trips the completion-evidence hook): whether this issue includes router/UI
+     wiring (user-facing on completion), or is implementation-only (name the issue that wires it). -->
+Router wiring: <includes wiring, user-facing on completion | implementation-only, wired by #NNN>
 
 ## Feature-Completeness Pre-Check
 <!--

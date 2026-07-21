@@ -2,6 +2,9 @@
   "name": "thestacks-frontend",
   "version": "0.0.0",
   "private": true,
+  "overrides": {
+    "brace-expansion": "1.1.16"
+  },
   "scripts": {
     "build": "elm make src/Main.elm --output=elm.js",
     "start": "elm make src/Main.elm --output=elm.js && open index.html",

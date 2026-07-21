@@ -299,21 +299,13 @@ defmodule CoreWeb.Router do
     delete "/users/:id/block", SocialController, :unblock
   end
 
-  # Metrics dashboard — MFA-verified admin session required
-  scope "/api", StacksWeb do
-    pipe_through [:api, :admin, :rate_limit_admin]
-    get "/metrics", MetricsController, :index
-    get "/metrics/quality-trends", MetricsController, :quality_trends
-    get "/metrics/source-health", MetricsController, :source_health
-    get "/metrics/enrichment-gaps", MetricsController, :enrichment_gaps
-  end
-
   # Source and partner admin — MFA-verified admin session required
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin, :rate_limit_admin]
     get "/sources", SourceAdminController, :index
     put "/sources/:id/approve", SourceAdminController, :approve
     put "/sources/:id/reject", SourceAdminController, :reject
+    get "/source-health", SourceAdminController, :source_health
 
     # Owner age-gate moderation (#118): list all books (incl. age-gated) and
     # override a book's visibility tier in EITHER direction.

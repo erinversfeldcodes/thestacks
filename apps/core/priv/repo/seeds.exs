@@ -1010,4 +1010,60 @@ Repo.insert_all(
 # :period_end], matching the daily RefreshCostsJob cron's conflict semantics.
 Stacks.Costs.seed_current_period_costs()
 
+# ── Source Health Checks ────────────────────────────────────────────────────
+# Representative per-source health rows so the admin scraper-health page
+# (Route.AdminScraperConfig, GET /api/admin/source-health) is non-empty in
+# dev/E2E (Issue #262). Synthetic source names, no user FK / PII. Covers a
+# healthy, a degraded, and a broken source. (The metrics dashboard that also
+# read these was removed in #267; the scraper-health page still consumes them.)
+Repo.insert_all(
+  "source_health_checks",
+  [
+    %{
+      id: Seeds.uuid(8001),
+      source_name: "openlibrary-covers",
+      source_type: "scraper_config",
+      status: "healthy",
+      consecutive_failures: 0,
+      total_successes: 1240,
+      total_failures: 3,
+      last_success_at: mar_01,
+      last_failure_at: jan_15,
+      last_failure_reason: nil,
+      created_at: jan_01,
+      updated_at: mar_01
+    },
+    %{
+      id: Seeds.uuid(8002),
+      source_name: "goodreads-reviews",
+      source_type: "review_source",
+      status: "degraded",
+      consecutive_failures: 2,
+      total_successes: 512,
+      total_failures: 47,
+      last_success_at: mar_01,
+      last_failure_at: mar_01,
+      last_failure_reason: "HTTP 429 rate limited",
+      created_at: jan_01,
+      updated_at: mar_01
+    },
+    %{
+      id: Seeds.uuid(8003),
+      source_name: "indie-bookshop-rss",
+      source_type: "rss_feed",
+      status: "broken",
+      consecutive_failures: 14,
+      total_successes: 88,
+      total_failures: 61,
+      last_success_at: jan_15,
+      last_failure_at: mar_01,
+      last_failure_reason: "connection refused",
+      created_at: jan_01,
+      updated_at: mar_01
+    }
+  ],
+  prefix: "op",
+  on_conflict: :nothing
+)
+
 IO.puts("Seeds loaded successfully.")

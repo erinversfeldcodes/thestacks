@@ -56,7 +56,9 @@ defmodule StacksWeb.BookshelfController do
   defp render_bookshelf(conn, user, bookshelf_name, viewer) do
     case Shelving.get_bookshelf(user.id, bookshelf_name) do
       nil ->
-        json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
+        # No bookshelf row exists yet → report the enum default ("owner"). A
+        # non-platform bookshelf keeps the RSS affordance hidden, which is correct.
+        json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: [], visibility: "owner"})
 
       bookshelf ->
         render_visible_bookshelf(conn, user, bookshelf_name, bookshelf, viewer)
@@ -74,7 +76,8 @@ defmodule StacksWeb.BookshelfController do
       json(conn, %{
         bookshelf: bookshelf_name,
         count: placement_count,
-        shelves: shelf_json
+        shelves: shelf_json,
+        visibility: bookshelf.visibility
       })
     end
   end

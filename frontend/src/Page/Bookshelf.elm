@@ -33,7 +33,7 @@ import Page.Bookshelf.Helpers
         )
 import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
-import Types.Shelf exposing (Shelf)
+import Types.Shelf exposing (BookshelfResponse, Shelf)
 import Util.TestId exposing (testId)
 
 
@@ -157,7 +157,7 @@ type OutMsg
 
 
 type Msg
-    = ShelvesLoaded (Result Http.Error (List Shelf))
+    = ShelvesLoaded (Result Http.Error BookshelfResponse)
     | DismissAgeGate
     | BookClicked Book
     | RSSLinkMsg RSSLink.Msg
@@ -173,7 +173,13 @@ init config maybeToken userId =
                 ( True, Just handle ) ->
                     -- Browsing another reader's shelf: optional-auth GET so the
                     -- backend visibility-filters against the viewer (even anon).
-                    Api.getProfileShelf maybeToken handle config.apiName ShelvesLoaded
+                    -- The read-only path never renders RSS, so the profile
+                    -- payload carries no visibility; default it to "owner" to
+                    -- reuse the shared ShelvesLoaded response shape.
+                    Api.getProfileShelf maybeToken
+                        handle
+                        config.apiName
+                        (ShelvesLoaded << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
 
                 _ ->
                     case maybeToken of
@@ -187,7 +193,11 @@ init config maybeToken userId =
       , showAgeGate = False
       , config = config
       , userId = userId
-      , visibility = "platform"
+
+      -- Loading-state placeholder only: the real value arrives with
+      -- ShelvesLoaded. "owner" (the enum default) keeps the RSS affordance
+      -- hidden until the server's actual visibility is known.
+      , visibility = "owner"
       , rssLink = RSSLink.init
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
@@ -206,8 +216,11 @@ update msg model =
     case msg of
         ShelvesLoaded result ->
             case result of
-                Ok shelves ->
-                    ( { model | shelves = Success shelves }
+                Ok response ->
+                    ( { model
+                        | shelves = Success response.shelves
+                        , visibility = response.visibility
+                      }
                     , Cmd.none
                     , NoOut
                     )

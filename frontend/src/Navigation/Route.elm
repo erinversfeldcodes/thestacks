@@ -48,7 +48,6 @@ type Route
     | BlogPost String
     | AdminSourceApproval
     | AdminScraperConfig
-    | AdminMetrics
     | AdminBookModeration
     | Groups
     | GroupDetail String
@@ -95,7 +94,6 @@ parser =
         , Parser.map BlogArchive (s "blog")
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
-        , Parser.map AdminMetrics (s "admin" </> s "metrics")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
         , Parser.map GroupDetail (s "groups" </> string)
         , Parser.map Groups (s "groups")
@@ -212,9 +210,6 @@ toPath route =
 
         AdminScraperConfig ->
             "/admin/scrapers"
-
-        AdminMetrics ->
-            "/admin/metrics"
 
         AdminBookModeration ->
             "/admin/book-moderation"

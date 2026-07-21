@@ -80,25 +80,34 @@ test.describe("Authentication", () => {
 });
 
 test.describe("Owner-only admin navigation", () => {
-  test("the platform owner sees the Admin dropdown (Metrics/Sources/Scrapers)", async ({
+  test("the platform owner sees the Admin dropdown (Sources/Scrapers)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
     // navDropdown renders the "Admin" primary as a dropdown toggle link that
-    // points at the metrics page; the Sources/Scrapers sub-links live in a
+    // points at the sources page (the in-app metrics dashboard was removed in
+    // #267 — superseded by Grafana); the Sources/Scrapers sub-links live in a
     // sibling <ul class="app-nav__dropdown-menu"> that CSS keeps display:none
     // until the dropdown is hovered (or focus-within). Target the toggle by
     // its accessible role/name, then hover to reveal the sub-links.
     const adminToggle = page.getByRole("link", { name: "Admin", exact: true });
     await expect(adminToggle).toBeVisible();
-    await expect(adminToggle).toHaveAttribute("href", "/admin/metrics");
+    await expect(adminToggle).toHaveAttribute("href", "/admin/sources");
 
     // Hovering the toggle reveals the dropdown menu (:hover -> display:block).
     await adminToggle.hover();
 
-    const sources = page.locator('a[href="/admin/sources"]');
-    const scrapers = page.locator('a[href="/admin/scrapers"]');
+    // Scope to the dropdown SUB-links (`app-nav__dropdown-link`): the "Admin"
+    // toggle ALSO has href="/admin/sources" (it points at the sources page), so
+    // an unscoped `a[href="/admin/sources"]` matches 2 elements and trips
+    // Playwright strict mode. The sub-link is the one carrying text "Sources".
+    const sources = page.locator(
+      'a.app-nav__dropdown-link[href="/admin/sources"]'
+    );
+    const scrapers = page.locator(
+      'a.app-nav__dropdown-link[href="/admin/scrapers"]'
+    );
     await expect(sources).toBeVisible();
     await expect(sources).toHaveText("Sources");
     await expect(scrapers).toBeVisible();
@@ -116,7 +125,6 @@ test.describe("Non-owner admin navigation", () => {
     // Authenticated nav is present …
     await expect(page.getByTestId("user-menu")).toBeVisible();
     // … but there is no Admin entry point of any kind.
-    await expect(page.locator('a[href="/admin/metrics"]')).toHaveCount(0);
     await expect(page.locator('a[href="/admin/sources"]')).toHaveCount(0);
     await expect(page.locator('a[href="/admin/scrapers"]')).toHaveCount(0);
   });

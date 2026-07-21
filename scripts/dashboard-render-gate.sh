@@ -29,9 +29,20 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 export RENDER_GATE_VM="${RENDER_GATE_VM:-http://localhost:8428}"
 export DASHBOARD_DIR="${DASHBOARD_DIR:-${REPO_ROOT}/apps/core/priv/grafana}"
 
-# Preflight: VM reachable?
-if ! curl -sf -o /dev/null "${RENDER_GATE_VM}/health" 2>/dev/null; then
-  echo "FATAL: VictoriaMetrics not reachable at ${RENDER_GATE_VM}." >&2
+# Preflight: wait for VM to be reachable. CI starts the VictoriaMetrics container
+# immediately before this gate, and it needs a moment to accept connections — a
+# single-shot check races startup and FATALs spuriously (main CI run 29742639866).
+# Poll /health for up to ~30s before failing.
+vm_ready=""
+for _ in $(seq 1 30); do
+  if curl -sf -o /dev/null "${RENDER_GATE_VM}/health" 2>/dev/null; then
+    vm_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ -z "$vm_ready" ]; then
+  echo "FATAL: VictoriaMetrics not reachable at ${RENDER_GATE_VM} after 30s." >&2
   echo "       Start the local stack first:  just observe" >&2
   exit 2
 fi

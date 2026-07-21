@@ -193,6 +193,46 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
+  describe "GET /api/bookshelves/:bookshelf_name — visibility in response" do
+    test "returns the bookshelf's platform visibility as a top-level field", %{conn: conn} do
+      user = insert(:user, profile_visibility: "platform")
+      insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      assert resp["visibility"] == "platform"
+    end
+
+    test "returns the bookshelf's owner visibility as a top-level field", %{conn: conn} do
+      user = insert(:user)
+      insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      assert resp["visibility"] == "owner"
+    end
+
+    test "defaults visibility to owner when the bookshelf does not exist yet", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/wishlist")
+
+      resp = json_response(conn, 200)
+      assert resp["visibility"] == "owner"
+    end
+  end
+
   describe "GET /api/bookshelves/:bookshelf_name — placement serialization" do
     test "includes book editions in placement response", %{conn: conn} do
       user = insert(:user)

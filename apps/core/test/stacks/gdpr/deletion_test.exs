@@ -37,6 +37,7 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
   alias Stacks.Events.EventLog
+  alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.Deletion
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
@@ -382,6 +383,45 @@ defmodule Stacks.GDPR.DeletionTest do
       reloaded_theirs = Repo.get(PostComment, theirs.id)
       assert reloaded_theirs.body == "unrelated public thoughts"
       assert reloaded_theirs.author_id == other_user.id
+    end
+  end
+
+  describe "delete_user_data/1 feed cache erasure (#264)" do
+    test "erasing a user removes their feed_cache rows and preview reports the count" do
+      # op.feed_cache holds derived Atom XML for a user's platform-visible
+      # bookshelves. Its only user path is bookshelf_id → op.bookshelves, which
+      # the op.users schema-guard never inspects — so erasure needs the explicit
+      # :delete_feed_cache Multi step (belt) + the FK CASCADE (braces).
+      user = insert(:user, profile_visibility: "platform")
+      other = insert(:user, profile_visibility: "platform")
+
+      bs1 = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      bs2 = insert(:bookshelf, user: user, name: "antilibrary", visibility: "platform")
+      other_bs = insert(:bookshelf, user: other, name: "library", visibility: "platform")
+
+      for bs <- [bs1, bs2, other_bs] do
+        Repo.insert!(%FeedCacheEntry{
+          bookshelf_id: bs.id,
+          atom_xml: "<feed xmlns=\"x\">#{bs.id}</feed>",
+          etag: "etag-#{bs.id}"
+        })
+      end
+
+      # Preview reports the erased user's feed_cache rows BEFORE erasure.
+      assert {:ok, preview} = Deletion.preview_user_data(user.id)
+      assert preview.feed_cache == 2
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+      assert Map.has_key?(result, :delete_feed_cache)
+
+      # Zero feed_cache rows remain for the erased user's bookshelves.
+      assert Repo.aggregate(
+               from(fc in FeedCacheEntry, where: fc.bookshelf_id in ^[bs1.id, bs2.id]),
+               :count
+             ) == 0
+
+      # Another user's feed cache is untouched.
+      assert Repo.get_by(FeedCacheEntry, bookshelf_id: other_bs.id)
     end
   end
 

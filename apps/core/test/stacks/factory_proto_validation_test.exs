@@ -90,11 +90,15 @@ defmodule Stacks.FactoryProtoValidationTest do
   # populated by Stacks.Books.BookCache during the identification pipeline.
   # Tests that exercise the cache use the cache module directly; no fixture
   # builder is needed.
+  # FeedCacheEntry (#264): write-through Atom-feed cache populated by
+  # Stacks.Feeds.regenerate/2 (RegenerateFeedJob) / filled on FeedController
+  # miss; feed tests exercise it via the Feeds module directly, no fixture.
   @excluded_schemas [
     Stacks.Events.EventLog,
     Stacks.Audit.Entry,
     Stacks.Books.IsbnResolverCacheEntry,
-    Stacks.Books.TitleSearchCacheEntry
+    Stacks.Books.TitleSearchCacheEntry,
+    Stacks.Feeds.FeedCacheEntry
   ]
 
   # ── Per-factory field coverage tests ──────────────────────────────────────

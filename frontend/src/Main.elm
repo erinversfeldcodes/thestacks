@@ -36,7 +36,6 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
-import Page.Admin.Metrics as AdminMetrics
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.SourceApproval as AdminSourceApproval
 import Page.Blog.Archive as BlogArchive
@@ -195,7 +194,6 @@ type Page
     | PageBlogPost BlogPostPage.Model
     | PageAdminSourceApproval AdminSourceApproval.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
-    | PageAdminMetrics AdminMetrics.Model
     | PageAdminBookModeration AdminBookModeration.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
@@ -765,17 +763,6 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             else
                 ( PageNotFound, Cmd.none )
 
-        Route.AdminMetrics ->
-            if isOwner maybeAuth then
-                let
-                    ( subModel, subCmd ) =
-                        AdminMetrics.init maybeToken
-                in
-                ( PageAdminMetrics subModel, Cmd.map AdminMetricsMsg subCmd )
-
-            else
-                ( PageNotFound, Cmd.none )
-
         Route.AdminBookModeration ->
             -- Owner-only AND gated behind the age-gating flag (ADR-020). While
             -- age-gating ships dark the moderation surface is unavailable — a
@@ -1171,7 +1158,6 @@ type Msg
     | BlogPostMsg BlogPostPage.Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
-    | AdminMetricsMsg AdminMetrics.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
@@ -1974,25 +1960,6 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AdminMetricsMsg subMsg ->
-            case model.page of
-                PageAdminMetrics subModel ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            AdminMetrics.update subMsg subModel
-                    in
-                    case outMsg of
-                        AdminMetrics.NoOut ->
-                            ( { model | page = PageAdminMetrics newSubModel }
-                            , Cmd.map AdminMetricsMsg subCmd
-                            )
-
-                        AdminMetrics.SessionExpired ->
-                            handleSessionExpiry model
-
-                _ ->
-                    ( model, Cmd.none )
-
         AdminBookModerationMsg subMsg ->
             case model.page of
                 PageAdminBookModeration subModel ->
@@ -2585,9 +2552,6 @@ pageTitle route =
         Route.AdminScraperConfig ->
             "Scraper Health — The Stacks"
 
-        Route.AdminMetrics ->
-            "Metrics — The Stacks"
-
         Route.AdminBookModeration ->
             "Book Moderation — The Stacks"
 
@@ -2660,7 +2624,7 @@ viewNav route maybeAuth userMenu =
                             ]
                         , if auth.user.role == "owner" then
                             navDropdown route
-                                Route.AdminMetrics
+                                Route.AdminSourceApproval
                                 "Admin"
                                 [ ( Route.AdminSourceApproval, "Sources" )
                                 , ( Route.AdminScraperConfig, "Scrapers" )
@@ -2829,9 +2793,6 @@ viewPage model =
 
         PageAdminScraperConfig subModel ->
             Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
-
-        PageAdminMetrics subModel ->
-            Html.map AdminMetricsMsg (AdminMetrics.view subModel)
 
         PageAdminBookModeration subModel ->
             Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)

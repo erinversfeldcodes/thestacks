@@ -126,6 +126,13 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 - After submission: "Your request has been sent to the curator. You'll receive an email when it's reviewed."
 - The platform owner sees pending requests as index cards pinned to the Metrics Dashboard, each showing the business name, type, location, and a thumbnail of their website.
 
+> **Host-page note (Issue #267):** The in-app owner "Metrics Dashboard" (US-5.1.1)
+> that these partner-request cards were pinned to has been **superseded by the Grafana
+> observability stack** (ADR-021, #236–240) and removed from the SPA. The operational-
+> metrics surface is now Grafana, which is not a place to host interactive partner-
+> request cards. When partner approval is built, these cards will need a new in-app home
+> (e.g. a dedicated owner partner-admin page).
+
 ---
 
 #### US-9.1.2 Manage Partner API Keys
@@ -259,6 +266,11 @@ The Stacks isn't just about scraping — businesses and communities should be ab
 ### 9.5 Partner Analytics
 
 #### US-9.5.1 View Partner Engagement Metrics
+
+> **Host-page note (Issue #267):** This partner-facing engagement dashboard is distinct
+> from the removed in-app owner metrics dashboard (US-5.1.1, superseded by Grafana). When
+> built, it will need its own partner-facing home — it cannot live on the operational
+> Grafana surface.
 
 **As a** partner, **I want to** see how many users have viewed my listings **so that** I can understand whether The Stacks is driving awareness for my business.
 

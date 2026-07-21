@@ -4,10 +4,17 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
+  alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.Feeds.Handlers.PlacementHandler
   alias Stacks.Workers.RegenerateFeedJob
+
+  defp cached_etag(bookshelf_id) do
+    Repo.one(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf_id, select: fc.etag)
+  end
 
   # ---------------------------------------------------------------------------
   # placement.created
@@ -190,6 +197,52 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
 
       assert :ok = PlacementHandler.handle_event(event)
       refute_enqueued(worker: RegenerateFeedJob)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # End-to-end: event → enqueued job → drained → feed_cache written (Issue #264)
+  # ---------------------------------------------------------------------------
+
+  describe "handle_event/1 → drain → feed_cache written" do
+    test "a placement.created on a platform shelf leaves the cache row written" do
+      user = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      event = %{
+        event_type: "placement.created",
+        aggregate_id: placement.id,
+        payload: %{"bookshelf" => "library"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+      Oban.drain_queue(queue: :default)
+
+      row = Repo.get_by(FeedCacheEntry, bookshelf_id: bookshelf.id)
+      assert row, "draining the enqueued RegenerateFeedJob must write the cache row"
+      assert row.atom_xml =~ "The Secret History"
+    end
+
+    test "placement.moved rewrites BOTH source and destination cache rows" do
+      user = insert(:user, profile_visibility: "platform")
+      src = insert(:bookshelf, user: user, name: "antilibrary", visibility: "platform")
+      dst = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "Moved Book")
+      placement = insert(:placement, bookshelf: dst, book: book)
+
+      event = %{
+        event_type: "placement.moved",
+        aggregate_id: placement.id,
+        payload: %{"to_bookshelf" => "library", "from_bookshelf" => "antilibrary"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+      Oban.drain_queue(queue: :default)
+
+      assert cached_etag(src.id), "source bookshelf feed cache must be (re)written"
+      assert cached_etag(dst.id), "destination bookshelf feed cache must be (re)written"
     end
   end
 end

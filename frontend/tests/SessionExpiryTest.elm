@@ -142,7 +142,7 @@ bookshelfSuccessStaysLocal =
                     Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
 
                 ( _, _, outMsg ) =
-                    Bookshelf.update (Bookshelf.ShelvesLoaded (Ok [])) model
+                    Bookshelf.update (Bookshelf.ShelvesLoaded (Ok { shelves = [], visibility = "owner" })) model
             in
             outMsg |> Expect.equal Bookshelf.NoOut
 

@@ -1,12 +1,15 @@
 defmodule Stacks.Workers.RegenerateFeedJob do
   @moduledoc """
-  Oban worker that regenerates an Atom feed when a shelf placement changes.
+  Oban worker that regenerates an Atom feed when a shelf placement changes and
+  upserts the result into the `op.feed_cache` store.
 
   Triggered by `placement.created`, `placement.moved`, and `placement.removed`
   events via the event handler `Stacks.Feeds.Handlers.PlacementHandler`.
 
-  The job is a no-op for non-platform-visible shelves — it logs a debug
-  message and returns `:ok`.
+  On a platform-visible bookshelf it renders the Atom XML and upserts the cache
+  row (`Stacks.Feeds.regenerate/2`); the run is idempotent. The job is a no-op
+  for non-platform-visible shelves — it logs a debug message and returns `:ok`
+  without writing a row.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -21,10 +24,10 @@ defmodule Stacks.Workers.RegenerateFeedJob do
       "RegenerateFeedJob: regenerating feed for user=#{user_id} bookshelf=#{bookshelf_name}"
     )
 
-    case Feeds.generate_atom(user_id, bookshelf_name) do
+    case Feeds.regenerate(user_id, bookshelf_name) do
       {:ok, _xml, etag} ->
         Logger.info(
-          "RegenerateFeedJob: feed regenerated for user=#{user_id} bookshelf=#{bookshelf_name} etag=#{etag}"
+          "RegenerateFeedJob: feed regenerated + cached for user=#{user_id} bookshelf=#{bookshelf_name} etag=#{etag}"
         )
 
         :ok

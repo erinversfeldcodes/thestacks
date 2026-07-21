@@ -12,6 +12,7 @@ defmodule StacksWeb.SourceAdminController do
 
   alias Stacks.Discovery
   alias Stacks.Enrichment.DiscoveredSource
+  alias Stacks.Monitoring
 
   def index(conn, params) do
     opts = [
@@ -40,6 +41,11 @@ defmodule StacksWeb.SourceAdminController do
     with {:ok, source} <- Discovery.reject_source(id) do
       json(conn, %{source: serialize_source(source)})
     end
+  end
+
+  @doc "GET /api/admin/source-health — per-source health for the scraper-health page."
+  def source_health(conn, _params) do
+    json(conn, %{data: Monitoring.list_source_health()})
   end
 
   defp serialize_source(%DiscoveredSource{} = s) do

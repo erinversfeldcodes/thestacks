@@ -45,7 +45,7 @@
 | **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.4, US-1.6.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8). Everything a single user needs to start using The Stacks. |
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
-| **Phase 4** | Polish | US-3.1.1, US-5.1.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (Metrics), and sharing (RSS/OPDS). |
+| **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
 | **Phase 5** | Marketplace (Classifieds) | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-13.1.1, US-13.1.2 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering. Requires Phase 6 visibility infrastructure. |
@@ -145,7 +145,7 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-3.1.1 | RW (cork board) | RW (spaces) | -- | -- | RW (third_spaces, third_space_events) | -- | Brave Search, SearXNG |
 | US-4.1.1 | R (status display) | RW (pipeline) | RW (classification) | -- | RW (books, audit_log) | -- | Modal vision service, Open Library, Google Books |
 | US-4.1.2 | RW (verification) | RW (KYC flow) | -- | -- | RW (audit_log) | -- | Smile Identity / Yoti / Sumsub |
-| US-5.1.1 | RW (dashboard) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
+| US-5.1.1 _(in-app dashboard superseded by Grafana, #267)_ | -- (Grafana) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (listings, bookshelf_placements, uploaded_images) | -- | -- |
 | US-7.2 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
@@ -1108,15 +1108,26 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 #### US-5.1.1 -- Operational Metrics
 
+> **SUPERSEDED (Issue #267):** The in-app `/admin/metrics` operational-metrics
+> dashboard is superseded by the Grafana observability stack (ADR-021, #231/#236–240).
+> The operational-metrics surface is Grafana (`apps/core/priv/grafana/*`, E2E:
+> `e2e/tests/dashboards.spec.ts`), **not** an in-app page. The `Page.Admin.Metrics`
+> module, `Stacks.Admin.Metrics` context, `StacksWeb.MetricsController`, and the
+> `/api/metrics*` routes were removed in #267. The scraper-health slice survives as
+> `Stacks.Monitoring.list_source_health/0` → `GET /api/admin/source-health`, consumed
+> by the retained `Page.Admin.ScraperConfig` page. Host-page dependents that assumed
+> this dashboard — the partner-request cards (US-9.1.1) and partner engagement metrics
+> (US-9.5.1) — will need a new home when built.
+
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | System health, job status, data freshness, source discovery stats, costs, GDPR compliance. Curator's desk aesthetic. NOT user reading analytics. |
-| **Phase** | Phase 4 (Polish) |
+| **Phase** | Phase 4 (Polish) — **SUPERSEDED by Grafana (#267)** |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Admin.Metrics` module. `Components.MetricCard`, `Components.JobStatusTable`, `Components.FreshnessGauge`, `Components.CostTracker`. Curator's desk visual theme. |
-| **Backend (Phoenix)** | `Stacks.Admin.Metrics` context -- aggregates from Oban telemetry, dbt freshness, audit log. `StacksWeb.Admin.MetricsController`. |
+| **Frontend (Elm)** | ~~`Page.Admin.Metrics` module~~ removed (#267). Ops-metrics surface is Grafana. |
+| **Backend (Phoenix)** | ~~`Stacks.Admin.Metrics` context / `StacksWeb.MetricsController`~~ removed (#267). Source-health survives as `Stacks.Monitoring.list_source_health/0` for the scraper-health page. |
 | **Database** | **Read:** `op.audit_log`, `wh.*` (warehouse views), Oban job tables, `op.discovered_sources`. |
 | **Jobs (Oban)** | `Stacks.Workers.MetricsSnapshotJob` -- periodic snapshot of system state. |
 | **External Services** | None (all internal data). |
