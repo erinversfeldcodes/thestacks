@@ -779,7 +779,8 @@ libraryInitEffects maybeToken =
                 , url = "/api/bookshelves/library"
                 , body = SimulatedEffect.Http.emptyBody
                 , expect =
-                    SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+                    SimulatedEffect.Http.expectJson
+                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig))
                         bookshelfResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
@@ -816,7 +817,10 @@ profileShelfInitEffects maybeToken handle bookshelfName =
             -- no visibility, so map it into the shared ShelvesLoaded response
             -- shape with the "owner" default (RSS is never rendered here).
             SimulatedEffect.Http.expectJson
-                (Bookshelf.ShelvesLoaded << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+                (Bookshelf.ShelvesLoaded
+                    (Bookshelf.requestKey (Bookshelf.profileConfig handle bookshelfName))
+                    << Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
+                )
                 shelvesResponseDecoder
         , timeout = Nothing
         , tracker = Nothing

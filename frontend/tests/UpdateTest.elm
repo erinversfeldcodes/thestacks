@@ -91,7 +91,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.ShelvesLoaded (Err (Http.BadStatus 403)))
+                                (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err (Http.BadStatus 403)))
                                 libraryInit
                     in
                     Expect.all
@@ -104,7 +104,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.ShelvesLoaded (Err Http.NetworkError))
+                                (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err Http.NetworkError))
                                 libraryInit
                     in
                     Expect.all
@@ -117,7 +117,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Bookshelf.update
-                                (Bookshelf.ShelvesLoaded (Ok { shelves = [], visibility = "owner" }))
+                                (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" }))
                                 libraryInit
                     in
                     Expect.all
