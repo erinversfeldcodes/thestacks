@@ -115,9 +115,14 @@ for migration in "${MIGRATION_FILES[@]}"; do
     #   migration already runs inside Ecto's migration transaction.
     # * adding-field-with-default — false positive on PG 11+ (Neon is PG 15
     #   where non-volatile DEFAULTs are metadata-only, no table rewrite).
+    # * ban-concurrent-index-creation-in-transaction — false positive: our
+    #   CONCURRENTLY migrations set `@disable_ddl_transaction true` (an
+    #   Ecto-level attribute invisible to squawk's raw-SQL fragment extraction),
+    #   so the index is genuinely built outside a transaction. Proto-generated
+    #   `references_table` migrations always emit CONCURRENTLY + this attribute.
     if ! squawk \
             --assume-in-transaction \
-            --exclude=require-timeout-settings,adding-field-with-default \
+            --exclude=require-timeout-settings,adding-field-with-default,ban-concurrent-index-creation-in-transaction \
             "$tmpfile"; then
         VIOLATIONS=$((VIOLATIONS + 1))
     fi
