@@ -486,8 +486,19 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        book_id: %{belongs_to: Stacks.Books.Book},
-        bookshelf_id: %{belongs_to: Stacks.Shelving.Bookshelf},
+        # Issue #112 punch #4: explicit referential-integrity tests in the
+        # warehouse. Auto-inferred relationships are off by design (unreliable
+        # ref names), but these two joins are the ones every placement mart
+        # denormalises through, so an orphan here silently drops rows from
+        # mart_community_read_count rather than erroring.
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          dbt_tests: [{:relationships, "stg_books"}]
+        },
+        bookshelf_id: %{
+          belongs_to: Stacks.Shelving.Bookshelf,
+          dbt_tests: [{:relationships, "stg_bookshelves"}]
+        },
         shelf_id: %{belongs_to: Stacks.Shelving.Shelf},
         formats: %{ecto_type: {:array, :string}, default: []},
         visibility: %{default: "owner"},

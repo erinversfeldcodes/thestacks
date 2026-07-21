@@ -103,9 +103,9 @@ it — delete the story from Summary + User Stories above and spin out a feature
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
 | US-1.2.1 — Browse the Library Shelf | `Bookshelf.elm:283` (page + themeClass) · `Helpers.elm:88` (`.shelf-label` aria-label) · `Helpers.elm:76-81` (bookcase sides/inner) · `Helpers.elm:159-177` (`.shelf-row` + `.book-button`) · `Bookshelf.elm:397-401` (`groupIntoRows`/`minShelfRows 4`) | ✅ driven live 2026-07-21 (#270): `aria-label="Library"`, 4 `.shelf-row`, 1 `.lighting`, 2 `.bookcase__side`, 1 `.bookcase__inner`, 5 `.book-button`, no overflow, spine click → `class="book-overlay"`; console/pageerror empty | ✅ | None — confirmed built |
-| US-1.2.2 — Browse the AntiLibrary Shelf | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.2.3 — Browse the WishList Shelf | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.2.4 — Browse the Reading Pile | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.2.2 — Browse the AntiLibrary Shelf | `Bookshelf.elm:74` (`antiLibraryConfig`: `shelf-antilibrary` / `wallpaper--botanical`) · shared unified module, same hops as US-1.2.1 | ✅ driven live 2026-07-21 — observed rendering with botanical wallpaper, "ANTILIBRARY" label, spines and bookcase frame; confirmed on the **deployed preview** (`stacks-core-pr-feat-e2e-112.fly.dev`) by `bookshelf.spec.ts` "AntiLibrary page has shelf-antilibrary class and botanical wallpaper" passing in the 230-pass run | ✅ | None — confirmed built |
+| US-1.2.3 — Browse the WishList Shelf | `Bookshelf.elm:87` (`wishListConfig`: `shelf-wishlist` / `wallpaper--floral`) · shared unified module | ✅ driven live 2026-07-21 — theme/wallpaper/spines observed; confirmed on the **deployed preview** by `bookshelf.spec.ts` "WishList page has shelf-wishlist class and floral wallpaper" and the now-unguarded "WishList empty state matches US-1.6.5 wording" both passing | ✅ | None — confirmed built |
+| US-1.2.4 — Browse the Reading Pile | `Main.elm:551-556` → `Page/Bookshelf/ReadingPile.elm` (separate routed module) · `:102` `shelf-reading-pile` · `:106` `wallpaper--dragons` · `:137-144` armchair · `:155` `book-pile[role=list]` | ✅ driven live 2026-07-21 — observed pile layout (books stacked horizontally, NOT a bookcase), dragon wallpaper and armchair rendering; confirmed on the **deployed preview** by the now-**unguarded** `reading-pile.spec.ts` assertions (armchair selector corrected to `.armchair` per #272) and "Reading Pile empty state matches US-1.6.5 wording" passing | ✅ | None — confirmed built |
 | US-1.2.5 — Shelf Transitions | `Main.elm:1208` (compute) ✅ · `Animation/Transition.elm:16-17` `transitionClass` 🟡 (branches only on `BookDetail`; moved out of `Main.elm` by #271) · `Main.elm:2440-2447` (class onto `main.app__main`) ✅ · `main.css:1802-1803` ❌ (`.fade-through-dark-in {}` is empty) | ❌ driven live 2026-07-21 (#270): adjacent `/library`→`/antilibrary` **and** room `/antilibrary`→`/reading-pile` both yield `"app__main fade-through-dark-in"`; computed `animation-name: none`, `animation-duration: 0s`. No visible transition of any kind. | ❌ → **build in-scope** | **BUILT IN-SCOPE via child issue #277**, delivered on `feat/e2e-112`. The story is NOT de-scoped — #112 keeps it and delivers it. #112 punch **#9** and **#21** move to #277 (they test this feature). Row goes ✅ when #277's live drive passes. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
@@ -305,6 +305,34 @@ N/A — bookshelf listings are not cached. Each browse hits the database directl
 #### Performance
 - Page load time (navigation to `BooksLoaded`): p50 < 400ms, p95 < 1200ms
 - Shelf render time (`groupIntoRows` + render): p95 < 100ms for 200 books
+
+## GDPR Lens — N/A, stated as a positive finding
+
+Recorded 2026-07-21. The `gdpr-review` surface (migrations, Ecto schemas, event emitters, user-data
+endpoints, workers, dbt models) was independently assessed across the whole epic diff, not skipped:
+
+| Surface touched | Assessment |
+|---|---|
+| **Migrations** | None added. No schema change anywhere in the epic. |
+| **Ecto schemas** | Unchanged. No new column, no new personal-data field. |
+| **User-data endpoints** | No route added or changed. `BookshelfController` gained **tests only**; its behaviour is untouched. |
+| **Event emitters** | None added. Shelf browsing is read-only and emits no events (#112 §4). |
+| **Workers / Oban** | None. Browsing triggers no jobs (#112 §5). |
+| **dbt models** | `stg_bookshelf_placements` gained two **`relationships` tests** on existing FK columns (`book_id`, `bookshelf_id`) via `proto/persisted.exs`. These are referential-integrity *assertions* — they add no column, select no new field, and move no data. |
+| **Seeds** | `seeds.exs` adds one synthetic E2E fixture user (`empty-shelves`, idx 25) with zero placements. Dev/test fixture only; never runs against production data. |
+| **Frontend** | `Page.Bookshelf` gained a `requestKey` used to discard stale responses (#274). It is derived from config (`apiName` + optional profile handle) — not user data, not persisted, not transmitted. |
+
+**Finding: genuinely N/A.** The epic introduces no new personal data, no new user-data surface, and no
+new path by which personal data is stored, emitted, or exported. Erasure reachability
+(`GDPR.Deletion.delete_user_data/1`) and export coverage (`GDPR.Export.export_user_data/2`) are
+unchanged, because the set of personal-data columns is unchanged. No `ConsentCheck` gate is required
+for a read-only browse of the requesting user's own shelves, which is already auth-gated by the
+`:authenticated` pipeline and `ViewAsPlug`.
+
+One nuance worth stating rather than assuming: the new `empty-shelves` fixture user is a **real row in
+the dev/test database** with an email and password hash. It is created only by `seeds.exs`, which is
+guarded from production, and it carries no more personal data than the fifteen E2E suite users that
+already existed. It does not widen the production data surface.
 
 ## Test Audit
 
