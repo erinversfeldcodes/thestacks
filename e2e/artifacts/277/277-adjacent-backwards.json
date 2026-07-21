@@ -1,0 +1,22 @@
+{
+  "samples": [
+    {
+      "className": "app__main",
+      "animationName": "none",
+      "animationDuration": "0s",
+      "animationTimingFunction": "ease"
+    },
+    {
+      "className": "app__main slide-in-left",
+      "animationName": "slide-in-left",
+      "animationDuration": "0.3s",
+      "animationTimingFunction": "ease-out"
+    },
+    {
+      "className": "app__main slide-in-left",
+      "animationName": "slide-in-left",
+      "animationDuration": "0.3s",
+      "animationTimingFunction": "ease-out"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "before": {
+    "mainClass": "app__main",
+    "animationName": "none",
+    "animationDuration": "0s",
+    "opacity": "1",
+    "transform": "none",
+    "navSelector": ".app-nav",
+    "navPosition": "static"
+  },
+  "during": {
+    "mainClass": "app__main",
+    "animationName": "none",
+    "animationDuration": "0s",
+    "opacity": "1",
+    "transform": "none",
+    "navSelector": ".app-nav",
+    "navPosition": "static"
+  },
+  "after": {
+    "mainClass": "app__main fade-through-dark-in",
+    "animationName": "none",
+    "animationDuration": "0s",
+    "opacity": "1",
+    "transform": "none",
+    "navSelector": ".app-nav",
+    "navPosition": "static"
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

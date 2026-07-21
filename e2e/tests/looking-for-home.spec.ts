@@ -17,13 +17,18 @@ test.describe("Looking for a Home page", () => {
     await expect(page.locator(".page__title")).toContainText("Looking for a Home");
   });
 
-  test("page renders content (pile view or empty state)", async ({ page }) => {
+  test("empty state matches US-1.6.5 wording", async ({ page }) => {
+    // No suite user is seeded with looking_for_home placements, so this shelf
+    // is empty for every suite user — asserted unconditionally.
     await page.goto("/looking-for-home");
     await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
 
-    // The page should show either a pile view with books or an empty/loading state
-    const hasPileView = (await page.locator(".pile-view").count()) > 0;
-    const hasEmpty = (await page.locator(".page__title").count()) > 0;
-    expect(hasPileView || hasEmpty).toBeTruthy();
+    // Looking-for-Home is the only page using Components.EmptyBookshelf.
+    // Note the en dash in the copy (LookingForHome.elm:102).
+    await expect(page.locator(".empty-shelf__message")).toContainText(
+      "Nothing here yet — these are books looking for a new home.",
+      { timeout: 10000 }
+    );
+    await expect(page.locator(".pile-view")).toHaveCount(0);
   });
 });

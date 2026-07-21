@@ -10,6 +10,72 @@ Comprehensive end-to-end test coverage for browsing all five bookshelves (Librar
 - [US-1.2.4 — Browse the Reading Pile](../docs/user_stories/US-1.2.4-browse-reading-pile.md)
 - [US-1.2.5 — Shelf Transitions](../docs/user_stories/US-1.2.5-shelf-transitions.md)
 
+## Epic — child issues
+
+**#112 is an epic root.** Its planning gates (2026-07-21) found that the embedded Test Audit below is a
+2026-07-08 baseline that two later commits invalidated in part, and that several punch items require
+work outside a test-only charter. That work is tracked as five child issues, delivered on the
+integration branch `feat/e2e-112` before the PR opens:
+
+| # | Child issue | Gates / unblocks |
+|---|-------------|------------------|
+| **#270** | Close the US-1.2.5 live drive + scope out uncovered work | ⛔ **BLOCKS Phase 1** — no test-writing until its verdicts land |
+| **#272** | E2E `empty-shelves` seed user | Unblocks punch #19 (Phase 1) |
+| **#271** | Expose `ReadingPile.Msg(..)` + `Main.transitionClass` | Unblocks punch #7, #8, #9 (Phase 3) |
+| **#274** | Navigating away mid-load must not corrupt page state | Delivers punch #10 |
+| **#273** | Add `bookshelves_p95_ms` SLI to the SLO gate | Delivers punch #24; makes the L11/L12 `n/a — covered by SLO gate` rationale truthful |
+| **#277** | **Build US-1.2.5 shelf transitions** (discovered unbuilt by #270) | ⛔ **Gates the PR** — #112 claims US-1.2.5, so it must deliver it. Absorbs punch #9 + #21. Design pass required first |
+
+**Status 2026-07-21:** #270, #271, #274 complete and merged into `feat/e2e-112`; integration
+`just verify` green (2749 Elixir / 882 elm-test / 231 dbt). #274 fixed a **real user-visible defect**
+found in the process: stale `ShelvesLoaded` responses from a sibling shelf were painted onto the
+destination page (Library's books under the "Antilibrary" label), because Library/AntiLibrary/WishList
+share one `PageBookshelf` constructor and `BookshelfResponse` carries no bookshelf identity.
+
+Plan: `plans/112-e2e-shelf-browsing-plan.md`.
+
+### ⚠️ Known defects in the Test Audit below (corrected in Phase 0 — do not author tests from it first)
+
+The audit is stale in ten specific ways. Authoring tests from it as-written produces broken work:
+
+1. **Phantom test citation.** Layer 10 cites `UpdateTest.elm — "VerifyAge produces NavigateTo
+   SettingsAgeVerification"`. **That test does not exist** (`UpdateTest.elm` has 8 tests, none of them
+   this). A false ✅.
+2. **Phantom selector.** `bookcase__shelf` (line 48-49) has **zero occurrences** in `frontend/`. The
+   live DOM is the `shelf-row` family (`Page/Bookshelf/Helpers.elm:104-113`). Punch #15/#16/#17 are
+   correct as written; the *prose* is wrong.
+3. **Stale API contract.** §10 (lines 201-210) and line 138 describe `BooksLoaded` / `books` /
+   `{bookshelf, count, placements}`. Live unified page uses `ShelvesLoaded` /
+   `shelves : RemoteData Http.Error (List Shelf)` (`Page/Bookshelf.elm:140,160`) and the response is
+   `{bookshelf, count, shelves, visibility}` (`bookshelf_controller.ex:75-80`). **Applies to the
+   unified page only** — `ReadingPile`/`LookingForHome` genuinely use `BooksLoaded`/`books`. Do not
+   blanket-replace: punch #5/#6/#11 need fixing, punch #7/#8 are correct as written.
+4. **Age-gate Verify is not a gap.** Lines 130-133 and 208 specify a Verify button →
+   `/settings/age-verification`. Deliberately removed by **ADR-020 §2**; the gate renders a single
+   "Go Back" button (`Components/AgeGate.elm:8-23`); provider-sourced flow tracked in **#069**.
+   Correct treatment: `n/a (ADR-020 §2, #069)`. Punch #23's Verify half is unbuildable.
+5. **Punch #13 (RSS) is already done** — `BookshelfShelvesTest.elm:140,155` cover both directions
+   (landed `f58bebf1`). Strike it.
+6. **Two cited tests were deleted** in `989d86ab` (2026-07-19), which auto-flowed rows and removed the
+   #151 per-shelf DOM element: `shelves_rendered_in_order` and `each_shelf_is_distinct_row`.
+7. **New uncarried gap:** per-shelf **ordering** is now unasserted at every layer, yet still a real
+   requirement — `Shelving.list_shelves/1` orders by `s.position` (`shelving.ex:712`) and the UI
+   preserves it via order-preserving `List.concatMap .placements shelves` (`Page/Bookshelf.elm:333,380,396`).
+   Add as a new punch item.
+8. **Punch #3 targets the wrong function.** The controller calls `Shelving.get_bookshelf_shelves/2`
+   (`bookshelf_controller.ex:71`), not `get_bookshelf_books/2`. The N+1 guard must target the former.
+9. **`Animation.SlideTransition` / `RoomTransition` are String constants**
+   (`Animation/SlideTransition.elm:8,13`, `Animation/RoomTransition.elm:5`), not type constructors as
+   line 428 implies. `transitionClass` is `Main.elm:2355-2365`, **not** `Main.elm:1464`.
+10. **Systematically stale line numbers** in `Page/Bookshelf.elm` refs: `antiLibraryConfig` `:74` (not
+    `:63`), `wishListConfig` `:87` (not `:74`), `lighting` `:285` (not `:234`),
+    `ViewModeChanged`/`SortColumnClicked` `:164-165` (not `:202-207`).
+
+**Implementation note that will otherwise cost an afternoon:** assert shelf labels via the
+**`aria-label`** attribute (`Page/Bookshelf/Helpers.elm:88`), never `innerText` — `main.css:3266`
+applies `text-transform: uppercase`, so `innerText()` returns `"LIBRARY"` and a
+`toContain("Library")` assertion fails against a perfectly working page.
+
 ## Scope Check
 - Does this issue touch more than 3 controllers? No (BookshelfController only).
 - Does this issue add more than 2 new endpoints? No (test-only).
@@ -17,8 +83,8 @@ Comprehensive end-to-end test coverage for browsing all five bookshelves (Librar
 - Does this issue combine unrelated concerns? No (all shelf browsing).
 
 ## Wiring
-- [ ] This issue includes router wiring and is user-facing when complete.
-- [x] This issue is implementation only. Wired by issue #___ (test infrastructure).
+Router wiring: implementation-only (test coverage; no new user-facing surface of its own). The one
+user-facing change delivered under this epic is US-1.2.5's transitions, wired by child issue **#277**.
 
 ## Feature-Completeness Pre-Check
 <!--
@@ -36,11 +102,11 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.2.1 — Browse the Library Shelf | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.2.1 — Browse the Library Shelf | `Bookshelf.elm:283` (page + themeClass) · `Helpers.elm:88` (`.shelf-label` aria-label) · `Helpers.elm:76-81` (bookcase sides/inner) · `Helpers.elm:159-177` (`.shelf-row` + `.book-button`) · `Bookshelf.elm:397-401` (`groupIntoRows`/`minShelfRows 4`) | ✅ driven live 2026-07-21 (#270): `aria-label="Library"`, 4 `.shelf-row`, 1 `.lighting`, 2 `.bookcase__side`, 1 `.bookcase__inner`, 5 `.book-button`, no overflow, spine click → `class="book-overlay"`; console/pageerror empty | ✅ | None — confirmed built |
 | US-1.2.2 — Browse the AntiLibrary Shelf | ⬜ to verify | ⬜ to verify | ⬜ | — |
 | US-1.2.3 — Browse the WishList Shelf | ⬜ to verify | ⬜ to verify | ⬜ | — |
 | US-1.2.4 — Browse the Reading Pile | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.2.5 — Shelf Transitions | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.2.5 — Shelf Transitions | `Main.elm:1208` (compute) ✅ · `Animation/Transition.elm:16-17` `transitionClass` 🟡 (branches only on `BookDetail`; moved out of `Main.elm` by #271) · `Main.elm:2440-2447` (class onto `main.app__main`) ✅ · `main.css:1802-1803` ❌ (`.fade-through-dark-in {}` is empty) | ❌ driven live 2026-07-21 (#270): adjacent `/library`→`/antilibrary` **and** room `/antilibrary`→`/reading-pile` both yield `"app__main fade-through-dark-in"`; computed `animation-name: none`, `animation-duration: 0s`. No visible transition of any kind. | ❌ → **build in-scope** | **BUILT IN-SCOPE via child issue #277**, delivered on `feat/e2e-112`. The story is NOT de-scoped — #112 keeps it and delivers it. #112 punch **#9** and **#21** move to #277 (they test this feature). Row goes ✅ when #277's live drive passes. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 

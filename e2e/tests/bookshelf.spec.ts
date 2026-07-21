@@ -70,15 +70,27 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
 });
 
 test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
+  // The `empty-shelves` suite user is seeded with five bookshelves and ZERO
+  // placements (`Seeds.e2e_empty_suites/0`), so every empty state below renders
+  // deterministically and is asserted unconditionally — no `count() > 0` guard.
+  test.use({ storageState: suiteAuthFile("empty-shelves") });
+
+  // A zero-placement user is exactly who `shouldShowOnboarding` (Main.elm:2845)
+  // targets, so the first-run overlay would cover the very shelves under test.
+  // The seed marks this user onboarded; this hook fails loudly if that regresses
+  // rather than letting the assertions pass against an obscured page.
+  test.afterEach(async ({ page }) => {
+    await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
+  });
+
   test("Library empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/library");
     await page.waitForSelector(".shelf-library", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Your library is waiting"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Your library is waiting. Move a book here when you've finished reading it.",
+      { timeout: 10000 }
+    );
   });
 
   test("AntiLibrary empty state matches US-1.6.5 wording", async ({
@@ -87,22 +99,20 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Books you own but haven't read yet"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Books you own but haven't read yet. Upload a photo to start building your collection.",
+      { timeout: 10000 }
+    );
   });
 
   test("WishList empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Books you're dreaming about"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN.",
+      { timeout: 10000 }
+    );
   });
 
   test("Reading Pile empty state matches US-1.6.5 wording", async ({
@@ -110,24 +120,23 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   }) => {
     await page.goto("/reading-pile");
     await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
-    // Wait for loading to finish — either books appear or the empty message shows
-    await page.waitForFunction(
-      () => {
-        const loading = document.querySelector(".loading");
-        const loadingMsg = document.querySelector(".reading-pile__empty-msg");
-        const isLoading =
-          loading !== null ||
-          (loadingMsg !== null &&
-            loadingMsg.textContent?.includes("Loading"));
-        return !isLoading;
-      },
+    const emptyMsg = page.locator(".reading-pile__empty-msg");
+    await expect(emptyMsg).toContainText(
+      "Nothing on the pile right now. Move a book from your Antilibrary to start reading.",
       { timeout: 15000 }
     );
-    const emptyMsg = page.locator(".reading-pile__empty-msg");
-    if ((await emptyMsg.count()) > 0) {
-      await expect(emptyMsg).toContainText(
-        "Nothing on the pile right now"
-      );
-    }
+  });
+
+  test("Looking for a Home empty state matches US-1.6.5 wording", async ({
+    page,
+  }) => {
+    await page.goto("/looking-for-home");
+    await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
+    // Looking-for-Home is the only page using Components.EmptyBookshelf.
+    // Note the en dash in the copy (LookingForHome.elm:102).
+    await expect(page.locator(".empty-shelf__message")).toContainText(
+      "Nothing here yet — these are books looking for a new home.",
+      { timeout: 10000 }
+    );
   });
 });

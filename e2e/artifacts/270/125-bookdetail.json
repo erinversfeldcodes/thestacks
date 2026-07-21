@@ -1,0 +1,15 @@
+{
+  "url": "http://localhost:4000/library",
+  "overlayPresent": true,
+  "afterClick": {
+    "mainClass": "app__main",
+    "animationName": "none",
+    "animationDuration": "0s",
+    "opacity": "1",
+    "transform": "none",
+    "navSelector": ".app-nav",
+    "navPosition": "static"
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

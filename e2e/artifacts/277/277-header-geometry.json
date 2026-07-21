@@ -1,0 +1,32 @@
+{
+  "before": {
+    "top": 0,
+    "left": 0,
+    "width": 1280,
+    "height": 71.390625
+  },
+  "duringAdjacent": {
+    "top": 0,
+    "left": 0,
+    "width": 1280,
+    "height": 71.390625
+  },
+  "afterAdjacent": {
+    "top": 0,
+    "left": 0,
+    "width": 1280,
+    "height": 71.390625
+  },
+  "duringRoom": {
+    "top": 0,
+    "left": 0,
+    "width": 1280,
+    "height": 71.390625
+  },
+  "afterRoom": {
+    "top": 0,
+    "left": 0,
+    "width": 1280,
+    "height": 71.390625
+  }
+}

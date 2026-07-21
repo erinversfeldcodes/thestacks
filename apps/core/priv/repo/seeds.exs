@@ -43,9 +43,16 @@ defmodule Seeds do
       {21, "search", "E2E Search"},
       {22, "settings", "E2E Settings"},
       {23, "shelf-actions", "E2E Shelf Actions"},
-      {24, "upload", "E2E Upload"}
+      {24, "upload", "E2E Upload"},
+      {25, "empty-shelves", "E2E Empty Shelves"}
     ]
   end
+
+  @doc """
+  Suite slugs that get bookshelves but deliberately **no** placements, so the
+  per-shelf empty states (US-1.6.5) can be asserted unconditionally.
+  """
+  def e2e_empty_suites, do: ["empty-shelves"]
 end
 
 # ── Timestamps ──────────────────────────────────────────────────────────────
@@ -65,6 +72,15 @@ e2e_users =
   Enum.map(Seeds.e2e_suites(), fn {idx, slug, display} ->
     %{
       id: Seeds.uuid(idx),
+      # `shouldShowOnboarding` (Main.elm:2845) renders the first-run overlay for any
+      # authenticated user with zero placements, which would cover the empty shelves
+      # the empty-suite fixture exists to expose. Mark those users onboarded.
+      # `onboarding_completed` is a generated column over these two keys.
+      onboarding_steps:
+        if(slug in Seeds.e2e_empty_suites(),
+          do: %{"profile" => true, "privacy" => true},
+          else: %{}
+        ),
       email: "e2e-#{slug}@thestacks.test",
       display_name: display,
       # handle is NOT NULL (#211); hyphens aren't valid in the handle format,
@@ -716,14 +732,18 @@ shelf_id_by_bookshelf =
   |> Map.new()
 
 # ── E2E user placements ──────────────────────────────────────────────────
-# Each E2E user gets 5 books on library, 3 on antilibrary, 2 on reading_pile.
+# Each E2E user gets 5 books on library, 3 on antilibrary, 2 on reading_pile —
+# except the `e2e_empty_suites/0` slugs, which stay at zero so the per-shelf
+# empty states (US-1.6.5) are assertable.
 # Uses works from the seed data. Placement UUID range: 5000+.
 
 # Collect all work IDs from the edition_to_work_map (unique work indices)
 all_work_indices = edition_to_work_map |> Map.values() |> Enum.uniq() |> Enum.sort()
 
 e2e_placement_rows =
-  Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
+  Seeds.e2e_suites()
+  |> Enum.reject(fn {_user_idx, slug, _display} -> slug in Seeds.e2e_empty_suites() end)
+  |> Enum.flat_map(fn {user_idx, _slug, _display} ->
     shelf_base = 400 + (user_idx - 10) * 10
     place_base = 5000 + (user_idx - 10) * 20
     # Each user gets a different slice of works so they don't collide.
