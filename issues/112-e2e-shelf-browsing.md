@@ -529,7 +529,7 @@ against `e2e/tests/`:
 
 | US | Happy Path | Sad Path |
 |----|------------|----------|
-| all | ✅ route_group_test.exs — "tags /api/bookshelves/library as :bookshelves" + "tags /api/bookshelves/<name>/placements as :bookshelves" (router-dispatch tagging mechanism); upload_telemetry_test.exs Suite 11 — "422 for invalid bookshelf name emits telemetry" (POST placements route, same tagging path) | ❌ **[feature gap]** — `scripts/check-slo-gate.sh` gates p95 only for `auth`, `catalogue`, `upload` route groups; the `:bookshelves` group (which this endpoint is tagged into) has **no p95 SLI**, so "n/a — covered by SLO gate" does not currently hold for shelf browsing. Also no telemetry-firing test for **GET** /api/bookshelves/:name (Suite 11 covers POST placements only) — **[test missing, feature exists]** |
+| all | ✅ route_group_test.exs — "tags /api/bookshelves/library as :bookshelves" + "tags /api/bookshelves/<name>/placements as :bookshelves" (router-dispatch tagging mechanism); **bookshelf_telemetry_test.exs (#112 punch #25) — GET /api/bookshelves/:name fires router-dispatch telemetry with `route_group: :bookshelves`** | ✅ **RESOLVED** — `scripts/check-slo-gate.sh` now gates `bookshelves_p95_ms` (route group `bookshelves`, threshold 500 ms), added by **#273** and **calibrated against a real deployed-preview measurement** (2026-07-22: server-side p95 ≤ 100 ms over 100 authenticated requests, gate reads value=100 breached=False). "n/a — covered by SLO gate" now holds truthfully. The GET telemetry gap is closed by punch #25's `bookshelf_telemetry_test.exs`. |
 
 Per-US repetition is n/a — the route group is shared across all five
 bookshelf names; one gate/one firing test covers them all.
@@ -539,9 +539,10 @@ bookshelf names; one gate/one firing test covers them all.
 All cells `n/a — covered by SLO gate, not unit tests`. In-test SLA bounds
 (p50 < 400ms page load, `groupIntoRows` p95 < 100ms for 200 books) are an
 anti-pattern under variable CI timing — same rationale as the upload
-audit. Note the Layer-11 caveat: until `bookshelves_p95_ms` exists in
-`check-slo-gate.sh`, the "covered by SLO gate" delegation is aspirational
-for this route group (punch #24).
+audit. **The Layer-11 caveat is now RESOLVED:** `bookshelves_p95_ms` exists in
+`check-slo-gate.sh` (added by #273, threshold 500 ms, calibrated against a real
+preview measurement of p95 ≤ 100 ms), so the "covered by SLO gate" delegation
+holds for this route group.
 
 #### Layer 13: Cost Tracking
 

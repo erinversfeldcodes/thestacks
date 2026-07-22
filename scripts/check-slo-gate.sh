@@ -638,10 +638,22 @@ slis.append(http_entry)
 # measures request latency again — then restore a 2000-3000 ms threshold.
 # See ADR 015 section "Future work: experimental framework for model
 # comparison".
+# `bookshelves_p95_ms` threshold is 500 ms. The `:bookshelves` route group
+# serves the shelf-browse read path (GET /api/bookshelves/:name → a bounded
+# query with `book: [:author, :editions]` preloads; no N+1 — guarded by
+# apps/core/test/stacks/shelving_query_test.exs). Issue #273 measured p95 on a
+# healthy deployed preview (stacks-core-pr-feat-e2e-112, 2026-07-22, 100
+# authenticated requests across all five shelves, all HTTP 200): server-side
+# router-dispatch p95 <= 100 ms (72/100 under 50 ms, 99/100 under 100 ms). 500
+# ms matches the other read groups (auth, catalogue) and leaves ~5x headroom
+# over the measured p95 — it absorbs cold-start and load variance while still
+# catching a real latency regression (an N+1 reintroduction, a lost index, a
+# slow preload). Recalibrate if the placements query shape changes.
 HIST = "stacks_router_dispatch_stop_duration_milliseconds_bucket"
 for group, threshold, name in [
     ("auth", 500, "auth_p95_ms"),
     ("catalogue", 500, "catalogue_p95_ms"),
+    ("bookshelves", 500, "bookshelves_p95_ms"),
     ("upload", 30000, "upload_p95_ms"),
 ]:
     p95 = histogram_p95_by_group(HIST, "route_group", group)
