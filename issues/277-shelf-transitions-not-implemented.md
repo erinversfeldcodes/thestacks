@@ -62,7 +62,7 @@ Router wiring: includes wiring — user-facing on completion. The route plumbing
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.2.5 — Bookshelf Transitions | `Main.elm:1208-1209` (compute) ✅ · `Animation/Transition.elm:27-42` `transitionClass` ✅ · `Main.elm:2440-2448` (class + `animationend` on `main.app__main`) ✅ · `main.css:1782-1842` CSS ✅ | Live drive 2026-07-21 (`e2e/artifacts/277/`): adjacent forwards → `slide-in-right` / `0.3s`; adjacent backwards → `slide-in-left` / `0.3s`; room → `fade-through-dark-in` / `0.4s`. Mid-animation screenshots show the slide offset and the dark fade. | ✅ | Built and observed live |
+| US-1.2.5 — Bookshelf Transitions | `Main.elm:1208-1209` (compute) ✅ · `Animation/Transition.elm:27-42` `transitionClass` ✅ · `Main.elm:2440-2448` (class + `animationend` on `main.app__main`) ✅ · `main.css:1782-1842` CSS ✅ | Live drive 2026-07-21 (captures transient/gitignored): adjacent forwards → `slide-in-right` / `0.3s`; adjacent backwards → `slide-in-left` / `0.3s`; room → `fade-through-dark-in` / `0.4s`. Mid-animation screenshots show the slide offset and the dark fade. | ✅ | Built and observed live |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -78,7 +78,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 branches **only** on `BookDetail`. Every bookshelf→bookshelf pair falls through to the `_ ->`
 catch-all and returns `RoomTransition.fadeThroughDarkIn`.
 
-Observed live (`e2e/artifacts/270/125-adjacent.json`, `125-room.json`):
+Observed live 2026-07-21 (captures transient, not retained in-repo):
 
 - `/library` → `/antilibrary` (adjacent — story wants a **horizontal slide**):
   `"mainClass": "app__main fade-through-dark-in"`
@@ -122,7 +122,7 @@ animation-end message, or a `Process.sleep`-free `Task`-driven reset) or otherwi
 ### Defect 4 — the `SlideTransition` branches are unreachable from the UI
 The `( _, BookDetail _ )` / `( BookDetail _, _ )` branches return the slide classes, but book clicks
 open an **overlay** rather than pushing a route (ADR `docs/decisions/005-book-detail-overlay-not-route.md`,
-`Main.elm:1378-1385`). Driven live (`e2e/artifacts/270/125-bookdetail.json`): clicking a spine left the
+`Main.elm:1378-1385`). Driven live 2026-07-21: clicking a spine left the
 URL at `http://localhost:4000/library`, rendered `class="book-overlay"`, and `mainClass` stayed
 `"app__main"` with **no** transition class. Decide whether these branches are dead code to delete or
 should be repurposed for the overlay's own animation.
@@ -193,18 +193,18 @@ below.
 ## Definition of Done
 Live drive run 2026-07-21 against local Phoenix on `:4000` (`STACKS_E2E_TEST_HELPERS=1`,
 `AGE_GATING_ENABLED=true`), assets rebuilt from `apps/core/assets` first. Artifacts in
-`e2e/artifacts/277/`.
+the live drive of 2026-07-21 (values transcribed above; raw captures gitignored).
 
-- [x] Adjacent bookshelf navigation applies a horizontal-slide class — evidence: `277-adjacent-forwards.json` `{className: "app__main slide-in-right", animationName: "slide-in-right", animationDuration: "0.3s"}`; `277-adjacent-backwards.json` → `slide-in-left` / `0.3s`; screenshot `277-b-during-adjacent-slide.png` catches the content mid-slide, horizontally offset
-- [x] Room navigation (Reading Pile / Looking for Home) applies a fade-through-darkness class with non-zero styling — evidence: `277-room.json` `{className: "app__main fade-through-dark-in", animationName: "fade-through-dark-in", animationDuration: "0.4s"}`; screenshot `277-d-during-room-fade.png` catches the page mid-fade, dimmed to near-black with the header still lit
+- [x] Adjacent bookshelf navigation applies a horizontal-slide class — evidence (live drive 2026-07-21, raw captures transient/not retained): forwards `{className: "app__main slide-in-right", animationName: "slide-in-right", animationDuration: "0.3s"}`; backwards → `slide-in-left` / `0.3s`; screenshot caught the content mid-slide, horizontally offset. Also gated in `e2e/tests/shelf-transitions.spec.ts` (asserts computed style, run on preview)
+- [x] Room navigation (Reading Pile / Looking for Home) applies a fade-through-darkness class with non-zero styling — evidence (live drive 2026-07-21): `{className: "app__main fade-through-dark-in", animationName: "fade-through-dark-in", animationDuration: "0.4s"}`; screenshot caught the page mid-fade, dimmed to near-black with the header still lit
 - [x] Computed `animation-duration` is within 300–500 ms for both transition types — evidence: slide `0.3s`, fade `0.4s`, both asserted in-band by `shelf-transitions.spec.ts`
-- [x] The transition class is cleared after the animation so repeat navigations re-trigger it — evidence: **preview** `--repeat-each=3` against `https://stacks-core-pr-feat-e2e-112.fly.dev` → 27/27 green, EXIT 0 (log: `scratchpad/preview-repeat3.log`); failure power proven by runtime mutation (`addStyleTag` forcing `animation: none !important` → no `animationend` fires → class never cleared → `TimeoutError`, EXIT 1). Local capture `277-repeat-retrigger.json` shows the sequence `[null, slide-in-right, null, slide-in-left, null, slide-in-right, null, slide-in-left, null]`.
+- [x] The transition class is cleared after the animation so repeat navigations re-trigger it — evidence: **preview** `--repeat-each=3` against `https://stacks-core-pr-feat-e2e-112.fly.dev` → 27/27 green, EXIT 0 (log: `scratchpad/preview-repeat3.log`); failure power proven by runtime mutation (`addStyleTag` forcing `animation: none !important` → no `animationend` fires → class never cleared → `TimeoutError`, EXIT 1). Local capture (live drive 2026-07-21, transient) showed the sequence `[null, slide-in-right, null, slide-in-left, null, slide-in-right, null, slide-in-left, null]`.
   > ⚠️ **This item was AMBER until 2026-07-21 and local green is what hid it.** The original test chained `click → waitForTransitionCleared → click`. Because Elm applies the class on the *next animation frame*, "no transition class present" was **already true** when that wait ran, so it returned instantly having observed nothing and navigations piled into one frame — the class was swapped mid-flight rather than removed-and-re-added. It passed 27/27 locally and was non-deterministic against the deployed preview. Worse, an instrumented run **passed the old assertions while never exercising the mechanism**: the second `slide-in-right` was reached by direct swap from `slide-in-left` with no cleared state between, so the assertion was satisfied by an unrelated clear. Fixed by pinning the *applied* half of the invariant (`recordedTransitions(page, n)` before each wait) plus a new `toHaveLength(3)` requiring all three navigations to animate. Element identity was ruled out as a cause: a marker expando survived every navigation and three independent observers (captured-node, ancestor-subtree, rAF poll) produced identical sequences — Elm patches the class, it never remounts `main.app__main`.
-- [x] `.app-header` geometry is unchanged across both transitions — evidence: `277-header-geometry.json`, `{top: 0, left: 0, width: 1280, height: 71.390625}` byte-identical across before / during-adjacent / after-adjacent / during-room / after-room
-- [x] `prefers-reduced-motion: reduce` suppresses the animation — evidence: `277-reduced-motion.json` `{emulationActive: true}` with `slide-in-right` → `animationName: "none"` and `fade-through-dark-in` → `animationName: "none"`
+- [x] `.app-header` geometry is unchanged across both transitions — evidence (live drive 2026-07-21): `{top: 0, left: 0, width: 1280, height: 71.390625}` byte-identical across before / during-adjacent / after-adjacent / during-room / after-room
+- [x] `prefers-reduced-motion: reduce` suppresses the animation — evidence (live drive 2026-07-21): `{emulationActive: true}` with `slide-in-right` → `animationName: "none"` and `fade-through-dark-in` → `animationName: "none"`; also gated in `shelf-transitions.spec.ts` (asserts `matchMedia` active before asserting suppression)
 - [x] Defect 4 resolved — the `BookDetail` slide branches are deleted; rationale recorded in the `Animation/Transition.elm` module docstring (lines 13-15) and story doc line 170 — evidence: no `BookDetail` reference remains in `Animation/Transition.elm`
 - [x] The story document's `themeClass` mechanism is reconciled with the implementation — evidence: `docs/user_stories/US-1.2.5-shelf-transitions.md:132-135` records that `themeClass` was never implementable as a transition driver and that `transitionClass` is authoritative; `:186` documents `themeClass`'s real job (palette only)
-- [x] **Feature-Completeness Pre-Check (above) is ✅** — happy path built end-to-end and observed on a live stack — evidence: live drive 2026-07-21 against local Phoenix `:4000` (assets rebuilt from `apps/core/assets`), captured in the six artifacts cited on the rows above (`277-adjacent-forwards.json`, `277-adjacent-backwards.json`, `277-room.json`, `277-repeat-retrigger.json`, `277-header-geometry.json`, `277-reduced-motion.json`) plus screenshots `277-b-during-adjacent-slide.png` / `277-d-during-room-fade.png`; full chromium suite **206 passed, 10 skipped (all environment-gated, itemised), 0 failed**
+- [x] **Feature-Completeness Pre-Check (above) is ✅** — happy path built end-to-end and observed on a live stack — evidence: live drive 2026-07-21 against local Phoenix `:4000` (assets rebuilt from `apps/core/assets`), values transcribed on the rows above; **and re-run green on the deployed preview** (`shelf-transitions.spec.ts` 27/27 under `--repeat-each=3`); full chromium suite **206 passed, 10 skipped (all environment-gated, itemised), 0 failed**
 - [x] Every behaviour has a validation path — unit (`TransitionTest.elm`: class selection + `clearOnAnimationEnd`) + E2E (computed animation, 9 tests) + reduced-motion
 - [x] Tests written and passing — `elm-test` green; `shelf-transitions.spec.ts` 9/9, stable across `--repeat-each=3` (27/27)
 - [x] Standards compliance verified — evidence: `just run just verify` → EXIT 0 on `feat/e2e-112` (`mix test` 2749 tests / 0 failures; `elm-test` 900 / 0; dbt PASS=64/64 models, PASS=231/231 tests; `mix proto.sync --check` clean; coverage 81.9%)
@@ -215,7 +215,7 @@ Live drive run 2026-07-21 against local Phoenix on `:4000` (`STACKS_E2E_TEST_HEL
 ## Dependencies
 - **#271 — SATISFIED (merged 2026-07-21).** `transitionClass` is extracted to
   `Animation/Transition.elm` and unit-testable; `TransitionTest.elm` exists to extend.
-- Discovered by #270 (live-drive gate). Evidence in `e2e/artifacts/270/`.
+- Discovered by #270 (live-drive gate); values transcribed in this issue and #270 (raw captures gitignored).
 - **Epic child of #112 — gates its PR.** Branch from `feat/e2e-112`, merge back into it. #112's
   US-1.2.5 pre-check row goes ✅ only when this issue's live drive passes.
 
@@ -267,7 +267,7 @@ deployed Grafana/VictoriaMetrics), 1 × `confirm-email.spec.ts` full flow and 2 
 `shelf-transitions.spec.ts` is stable at 27/27 across `--repeat-each=3`.
 
 ### Filed
-Filed 2026-07-21 by the #270 live-drive gate. Evidence: `e2e/artifacts/270/` —
-`125-adjacent.json`, `125-room.json`, `125-bookdetail.json` and the matching
+Filed 2026-07-21 by the #270 live-drive gate. Evidence (values transcribed above; raw captures gitignored) —
+the #270 live-drive captures (values transcribed above; raw files transient/gitignored) and the matching
 `125-a`…`125-g` screenshots. Console and page errors were **empty** across all drives, so this is a
 silent no-op, not a runtime failure.
