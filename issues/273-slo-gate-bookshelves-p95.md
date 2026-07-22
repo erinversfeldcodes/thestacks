@@ -77,4 +77,28 @@ Compact format — deploy-gate issue.
 `platform-agent`. Reviewer: `platform-reviewer`.
 
 ## Progress Notes
-[Updated by agents during execution.]
+
+### 2026-07-22 — measured, armed, and the threshold decision (orchestrator)
+
+**Measurement (the calibration #273 demanded — NOT a copied default).** Against a healthy deployed
+preview (`stacks-core-pr-feat-e2e-112.fly.dev`), 100 authenticated requests across all five shelves,
+all HTTP 200, scraped from the **exact gate histogram** the SLO gate reads
+(`stacks_router_dispatch_stop_duration_milliseconds_bucket{route_group="bookshelves"}` via
+`/internal/metrics`, token-authed): **server-side router-dispatch p95 ≤ 100 ms** — 72/100 under 50 ms,
+99/100 under 100 ms, all 100 under 250 ms. Gate then read `value=100 threshold=500 breached=False` on
+real data; forced-failure demo at `threshold=50` gave `breached=True` (comparison fires both ways).
+
+**Why 500 ms — and an honest note on the tradeoff.** 500 ms is the project's **read-tier** threshold
+(shared with `auth` and `catalogue`, also read paths). That it equals theirs is *tier placement*, not
+a blind copy — bookshelves is a read path, and the measurement (p95 ≤ 100 ms) confirms it belongs in
+that tier. The honest tradeoff the reviewer rightly flags: 500 ms is ~5× the measured p95, so this SLI
+only fires on **gross** production degradation (a lost index → seq scan on a large table, an infra
+fault), not a subtle one. That is deliberate and correct here, because **the subtle regression this
+route is most exposed to — an N+1 reintroduction — is guarded far more tightly one layer down**:
+`apps/core/test/stacks/shelving_query_test.exs` asserts query-count **equality across data sizes**,
+which fails deterministically on any N+1 regardless of latency. The SLO gate is the coarse
+production-latency backstop; the unit test is the precise N+1 guard. Arming conservatively (read-tier,
+generous headroom) also follows the `upload_p95_ms` precedent of avoiding false-positive deploy blocks
+from cold-start/load variance. **Follow-up worth tracking:** once a production p95 baseline and its
+variance are observed, this can tighten toward ~250 ms (2.5× headroom) to catch subtler degradation —
+noted here rather than guessed at now.

@@ -125,9 +125,14 @@ Elixir 1.18.4), assets rebuilt via `apps/core/assets && npm run deploy`, `.env` 
 `STACKS_E2E_TEST_HELPERS=1`, `AGE_GATING_ENABLED=true`. Playwright `BASE_URL=http://localhost:4000`
 (Phoenix serves the pre-built SPA; `:4001` is only used when the frontend is served separately).
 
-**Drive specs (left in place for inspection — not deleted):**
-- `e2e/tests/fc270-drive.spec.ts` — the four primary observations
-- `e2e/tests/fc270-drive2.spec.ts` — follow-up measurements (accessible name, overflow, header stability)
+**Drive specs (temporary scratch — since DELETED, 2026-07-21):** the drive used
+`e2e/tests/fc270-drive.spec.ts` (four primary observations) and `fc270-drive2.spec.ts` (follow-up
+measurements) as throwaway harnesses. They were never committed and were deleted along with the other
+`fc*-drive*` scratch specs during epic cleanup — do NOT expect to find them. The observed values are
+transcribed inline in the rows above; the **durable, re-runnable** replacement is
+`e2e/tests/shelf-transitions.spec.ts` (committed), which asserts computed style and ran 27/27 on the
+deployed preview. (Corrected 2026-07-22: an earlier version of this note wrongly claimed the scratch
+specs were "left in place" — they were not.)
 
 **Artifacts:** captured live 2026-07-21 (9 screenshots + 5 JSON captures); values transcribed into the DoD rows above. Raw files are transient and gitignored (`e2e/artifacts/`), not retained in-repo.
 
