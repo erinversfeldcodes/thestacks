@@ -667,11 +667,13 @@ Note two references worth cleaning up (neither blocks this audit): the
 backing `issues/276-*.md`, and `#069` (age-gate Verify) is likewise
 file-less — both should be given real issues or corrected.
 ## Definition of Done
-- [ ] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
-- [ ] `just verify` passes
+- [x] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local` — evidence: all 25 punch items resolved (see regenerated Test Audit); Elm 940, Elixir 2749, dbt 233, epic-scope E2E (`--project=chromium`) 214 passed / 0 failed
+- [x] No flaky tests — evidence: two flakes discovered during the epic were **root-cause-fixed, not retried around** — the marketplace global-feed-ordering flake (pinned assertions to the listing under test, `314ed3ba`) and the shelf-transitions wait-for-absence race (added a wait-for-presence before each wait-for-cleared, `50db28fb`); epic-scope suite green with no retries/skips beyond the deployed-infra set
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — evidence: US-1.2.1/1.2.2/1.2.3/1.2.4 built and observed live; US-1.2.5 was found unbuilt by #270 and **built in-scope via #277** (green 27/27 on the deployed preview), not de-scoped — #112 delivers every story it names. No story reaches GREEN via `n/a (see #NNN)`.
+- [x] **Test audit (embedded above) is GREEN** — evidence: re-baselined 2026-07-22, tally `38 ✅ / 0 ⚠️ / 0 ❌ / 92 n/a`; every ✅ cites a real test string (6 spot-checked against real files by the orchestrator); two honest limitations recorded inside ✅ cells (punch #11 harness-bound, punch #2 `enable_seqscan=off`) rather than smoothed away
+- [x] `just verify` passes — evidence: `just run just verify` EXIT 0 on `feat/e2e-112` (2749 elixir / 940 elm / 233 dbt; proto.sync --check clean); `just ci` green except dockle (Docker-daemon-dependent, CI-only per project caveat), semgrep 0 blocking, gitleaks/licenses/squawk clean
+- [x] **`completion-audit` passed on the integrated branch** — evidence: adversarial re-run 2026-07-22 (2nd run; 1st FAILed on stale audit + unworked punch list + unchecked child DoDs, all since remediated). Verified: tally internally consistent, zero phantom `#NNN`, vision-clean diff (upload-skip legitimate), all child DoDs closed with tokens.
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — every deliverable driven live (US-1.2.5 on preview, empty-shelves fixture on preview, bookshelves p95 measured on preview), 13 layers validated, no dangling reviewer findings (residuals tracked as #275/#276/#278), logs clean under the live drive, tracking regenerated to reality.
 
 ## Dependencies
 - Seeded bookshelf data with placements and books

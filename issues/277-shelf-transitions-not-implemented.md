@@ -209,8 +209,8 @@ the live drive of 2026-07-21 (values transcribed above; raw captures gitignored)
 - [x] Tests written and passing — `elm-test` green; `shelf-transitions.spec.ts` 9/9, stable across `--repeat-each=3` (27/27)
 - [x] Standards compliance verified — evidence: `just run just verify` → EXIT 0 on `feat/e2e-112` (`mix test` 2749 tests / 0 failures; `elm-test` 900 / 0; dbt PASS=64/64 models, PASS=231/231 tests; `mix proto.sync --check` clean; coverage 81.9%)
 - [x] **Test audit (embedded above) is GREEN** — 0 ❌, 0 ⚠️ — evidence: L10 unit `frontend/tests/Animation/TransitionTest.elm` (23 tests: class selection for all six adjacent pairs + all room pairs, plus `clearOnAnimationEnd` incl. the bubbling filter); L12/E2E `e2e/tests/shelf-transitions.spec.ts` (9 tests, all asserting **computed** `animation-name`/`animation-duration`, never class presence), stable 27/27 under `--repeat-each=3`. Non-vacuity: unit layer shown failing 9/9 against pre-fix `transitionClass`; CSS layer shown failing against the pre-fix empty rule (`animation-name=none, duration=0s`)
-- [ ] **`completion-audit` skill passed on the integrated branch** — not run by this drive; remains open
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — every item with an evidence token
+- [x] **`completion-audit` skill passed on the integrated branch** — evidence: epic-wide adversarial re-run 2026-07-22 (part of #112's completion audit); US-1.2.5 verified built, driven live 27/27 on the deployed preview, failure power proven by runtime mutation
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — evidence: driven live on the deployed preview (not code-read, not synthetic); the transient-class re-trigger (the weakest link) proven with a real DOM sequence; all DoD items above carry evidence tokens
 
 ## Dependencies
 - **#271 — SATISFIED (merged 2026-07-21).** `transitionClass` is extracted to
