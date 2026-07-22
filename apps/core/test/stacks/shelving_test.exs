@@ -142,6 +142,35 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  describe "move_book/3 — shelf reassignment and browse visibility" do
+    test "the moved placement's shelf belongs to the destination bookshelf" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "antilibrary")
+
+      moved = Repo.get!(Placement, placement.id) |> Repo.preload(shelf: :bookshelf)
+      assert moved.shelf != nil
+      assert moved.shelf.bookshelf.name == "antilibrary"
+      assert moved.shelf.bookshelf.user_id == user.id
+    end
+
+    test "get_bookshelf_shelves lists the book on the TARGET and not the SOURCE after a move" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
+
+      # Sanity: the book starts on the source browse.
+      assert book.id in browse_book_ids(user.id, "wishlist")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "antilibrary")
+
+      assert book.id in browse_book_ids(user.id, "antilibrary")
+      refute book.id in browse_book_ids(user.id, "wishlist")
+    end
+  end
+
   describe "reading pile 50-item limit (#276)" do
     test "place_book/3 allows the 50th reading_pile placement" do
       user = insert(:user)
@@ -322,7 +351,7 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
-  describe "reread_book/1" do
+  describe "reread_book/2" do
     setup do
       user = insert(:user)
       # Use a non-library bookshelf so reread can create a fresh library placement
@@ -333,15 +362,15 @@ defmodule Stacks.ShelvingTest do
     end
 
     test "creates a new placement on the library bookshelf", %{user: user, placement: placement} do
-      assert {:ok, new_placement} = Shelving.reread_book(placement.id)
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
       assert new_placement.book_id == placement.book_id
 
       library_bookshelf = Repo.get_by(Bookshelf, user_id: user.id, name: "library")
       assert new_placement.bookshelf_id == library_bookshelf.id
     end
 
-    test "new placement is separate from the original", %{placement: placement} do
-      assert {:ok, new_placement} = Shelving.reread_book(placement.id)
+    test "new placement is separate from the original", %{user: user, placement: placement} do
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
       refute new_placement.id == placement.id
     end
 
@@ -350,7 +379,7 @@ defmodule Stacks.ShelvingTest do
       bookshelf: bookshelf,
       placement: placement
     } do
-      assert {:ok, _new_placement} = Shelving.reread_book(placement.id)
+      assert {:ok, _new_placement} = Shelving.reread_book(placement.id, user.id)
 
       library_bookshelf = Repo.get_by(Bookshelf, user_id: user.id, name: "library")
 
@@ -364,12 +393,21 @@ defmodule Stacks.ShelvingTest do
       assert history != nil
     end
 
-    test "emits placement.reread event", %{placement: placement} do
+    test "emits placement.reread event", %{user: user, placement: placement} do
       before_count = event_count("placement.reread")
 
-      Shelving.reread_book(placement.id)
+      Shelving.reread_book(placement.id, user.id)
 
       assert event_count("placement.reread") == before_count + 1
+    end
+
+    test "returns :unauthorized when the user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+      assert {:error, :unauthorized} = Shelving.reread_book(placement.id, other_user.id)
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.reread_book(Ecto.UUID.generate(), user.id)
     end
   end
 
@@ -386,6 +424,17 @@ defmodule Stacks.ShelvingTest do
     test "returns :unauthorized when user does not own the placement", %{placement: placement} do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.abandon_book(placement.id, other_user.id)
+    end
+
+    test "abandon_book surfaces the book on the looking_for_home browse and off the source" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      assert {:ok, _} = Shelving.abandon_book(placement.id, user.id)
+
+      assert book.id in browse_book_ids(user.id, "looking_for_home")
+      refute book.id in browse_book_ids(user.id, "reading_pile")
     end
   end
 
@@ -951,6 +1000,17 @@ defmodule Stacks.ShelvingTest do
     end
 
     bookshelf
+  end
+
+  # Returns the book_ids visible on a bookshelf's browse — i.e. reached through
+  # its PHYSICAL shelves (op.shelves, #151), exactly as get_bookshelf_shelves/2
+  # feeds the browse UI. A placement whose shelf_id points at the source
+  # bookshelf after a move is invisible here even though bookshelf_id updated.
+  defp browse_book_ids(user_id, bookshelf_name) do
+    user_id
+    |> Shelving.get_bookshelf_shelves(bookshelf_name)
+    |> Enum.flat_map(& &1.placements)
+    |> Enum.map(& &1.book_id)
   end
 
   defp active_pile_count(user_id) do

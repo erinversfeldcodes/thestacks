@@ -268,6 +268,16 @@ defmodule Stacks.Shelving do
       from_bookshelf = placement.bookshelf
       from_bookshelf_name = from_bookshelf.name
       to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
+      # Browse lists placements through their physical shelf (op.shelves, #151),
+      # so a move must re-home the placement onto a shelf of the DESTINATION
+      # bookshelf — otherwise it stays visible on the source and never on the
+      # target. Mirrors the creation-time assignment in place_book/3 and
+      # reread_book/2: get-or-create the destination's default (position 0)
+      # shelf. Resolved outside the Multi exactly as place_book/3 does; on a
+      # capacity rejection the destination is a full reading_pile that already
+      # owns its default shelf, so this is a no-op read and no write precedes
+      # the rejection.
+      to_shelf = get_or_create_default_shelf(to_bookshelf.id)
 
       Multi.new()
       |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
@@ -275,7 +285,7 @@ defmodule Stacks.Shelving do
       end)
       |> Multi.update(
         :placement,
-        placement_changeset(placement, %{bookshelf_id: to_bookshelf.id})
+        placement_changeset(placement, %{bookshelf_id: to_bookshelf.id, shelf_id: to_shelf.id})
       )
       |> Multi.insert(:history, fn _ ->
         placement_history_changeset(%PlacementHistory{}, %{
@@ -321,10 +331,26 @@ defmodule Stacks.Shelving do
   PlacementHistory record capturing the move from the original bookshelf to
   the library bookshelf.
   """
-  @spec reread_book(binary()) :: {:ok, Placement.t()} | {:error, Ecto.Changeset.t()}
-  def reread_book(placement_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
-    user_id = placement.bookshelf.user_id
+  @spec reread_book(binary(), binary()) ::
+          {:ok, Placement.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def reread_book(placement_id, user_id) do
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
+
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
+
+        if placement.bookshelf.user_id != user_id do
+          {:error, :unauthorized}
+        else
+          do_reread_book(placement, user_id)
+        end
+    end
+  end
+
+  defp do_reread_book(placement, user_id) do
     original_bookshelf_id = placement.bookshelf.id
     library_bookshelf = get_or_create_bookshelf(user_id, "library")
     default_shelf = get_or_create_default_shelf(library_bookshelf.id)
