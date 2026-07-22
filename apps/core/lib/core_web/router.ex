@@ -385,6 +385,10 @@ defmodule CoreWeb.Router do
     get "/confirmation-token", TestHelperController, :confirmation_token
     get "/sent-emails", TestHelperController, :sent_emails
     put "/age-verification", TestHelperController, :set_age_verification
+    # Mints a confirmed `.test`-domain user + session token in one call so E2E
+    # specs skip the :auth-bucket register/login dance (Issue #192). Hard
+    # `.test`-domain allowlist in the controller — never mints a real account.
+    post "/session", TestHelperController, :mint_session
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)

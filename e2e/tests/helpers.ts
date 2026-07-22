@@ -304,6 +304,74 @@ export function extractLink(email: SentEmail, pattern: RegExp): string | null {
   return match ? match[0] : null;
 }
 
+// ── Session-mint helper (Issue #192) ───────────────────────────────────────
+
+export interface MintedSession {
+  email: string;
+  token: string;
+  userId: string;
+  displayName: string;
+}
+
+/**
+ * Mint a fresh, CONFIRMED user with a ready-to-use session token in one call
+ * via the POST /api/test/session helper (STACKS_E2E_TEST_HELPERS=1 only).
+ * Unlike register→confirm→login, this does NOT consume the shared `:auth`
+ * rate bucket (60/60s per IP), so parallel fresh-user specs cannot 429 each
+ * other. The server enforces a hard `.test`-domain allowlist; the minted
+ * user's password is E2E_PASSWORD if a spec later needs the real login form.
+ *
+ * Returns `null` when the helper is unavailable (flag off) — callers should
+ * `test.skip(session === null, ...)`, matching fetchConfirmationToken.
+ */
+export async function mintSession(
+  request: APIRequestContext,
+  opts: { email?: string; displayName?: string } = {}
+): Promise<MintedSession | null> {
+  const resp = await request.post("/api/test/session", {
+    data: {
+      ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.displayName ? { display_name: opts.displayName } : {}),
+    },
+  });
+  if (resp.status() === 404) return null;
+  if (resp.status() !== 201) {
+    throw new Error(`session-mint helper returned HTTP ${resp.status()}`);
+  }
+  const body = await resp.json();
+  return {
+    email: body.email as string,
+    token: body.token as string,
+    userId: body.user_id as string,
+    displayName: body.display_name as string,
+  };
+}
+
+/**
+ * Land the browser authenticated as a minted user by injecting the session
+ * into localStorage under "stacks-auth" — the exact shape the Elm saveAuth
+ * port writes and auth.setup.ts injects. The NEXT page.goto() boots the SPA
+ * with the session present, skipping the login form and door animation.
+ */
+export async function injectSession(
+  page: Page,
+  session: MintedSession
+): Promise<void> {
+  // Navigate to the app origin first so localStorage is writable for it.
+  await page.goto("/");
+  await page.evaluate(
+    (auth) => {
+      localStorage.setItem("stacks-auth", JSON.stringify(auth));
+    },
+    {
+      token: session.token,
+      userId: session.userId,
+      email: session.email,
+      displayName: session.displayName,
+    }
+  );
+}
+
 /**
  * Sign in through the login form and wait for the post-login redirect.
  * Mirrors the flow the real user takes (fill → submit → door transition).

@@ -27,6 +27,20 @@ defmodule Stacks.Notifications.EmailConfirmationHandler do
     :ok
   end
 
+  # Already confirmed by the time this async handler runs — a confirmation
+  # email is pointless, so no-op successfully rather than surfacing
+  # :missing_confirmation_token (mark_confirmed/1 nils the token) and putting
+  # the SubscriberWorker into retry. Hit routinely by the E2E session-mint
+  # helper (Issue #192: register → mark_confirmed before the handler fires),
+  # and possible for a real user who confirms extremely fast. Genuinely
+  # unconfirmed-but-tokenless users still fall through to the error branch
+  # below — that error remains meaningful.
+  defp do_send_confirmation(%{email_confirmed: true}) do
+    Logger.debug("EmailConfirmationHandler: user already confirmed, skipping confirmation email")
+
+    :ok
+  end
+
   defp do_send_confirmation(user) do
     case Email.send_registration_confirmation(user) do
       {:ok, _user} ->
