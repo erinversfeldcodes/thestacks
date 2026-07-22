@@ -994,7 +994,12 @@ bookDetailEffects msg model maybeToken =
                         , body =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
-                        , expect = SimulatedEffect.Http.expectWhatever BookDetail.MoveCompleted
+                        , expect =
+                            -- Mirrors Api.expectMove: the 422 reading_pile_full
+                            -- body must reach MoveCompleted as its own error.
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.MoveCompleted
+                                Api.moveResponseToResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }

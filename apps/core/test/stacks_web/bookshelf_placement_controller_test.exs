@@ -128,6 +128,19 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       conn = post(conn, "/api/bookshelves/library/placements", %{book_id: book.id})
       assert json_response(conn, 401)
     end
+
+    test "returns 422 with reading_pile_full code when the pile is at the 50 cap", %{conn: conn} do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/bookshelves/reading_pile/placements", %{book_id: book.id})
+
+      assert %{"error" => "reading_pile_full"} = json_response(conn, 422)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -187,6 +200,21 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     test "returns 401 when not authenticated", %{conn: conn, placement: placement} do
       conn = put(conn, "/api/placements/#{placement.id}/move", %{bookshelf: "wishlist"})
       assert json_response(conn, 401)
+    end
+
+    test "returns 422 with reading_pile_full code when moving into a full pile", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      fill_reading_pile(user, 50)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "reading_pile"})
+
+      assert %{"error" => "reading_pile_full"} = json_response(conn, 422)
     end
   end
 
@@ -451,5 +479,18 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
       assert json_response(conn, 401)
     end
+  end
+
+  # Fills the user's reading_pile bookshelf with `count` active placements,
+  # inserted directly so the 50-cap (#276) boundary can be staged.
+  defp fill_reading_pile(user, count) when count >= 1 do
+    bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+    shelf = insert(:shelf, bookshelf: bookshelf)
+
+    for _ <- 1..count do
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: insert(:book))
+    end
+
+    bookshelf
   end
 end

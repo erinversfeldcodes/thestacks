@@ -152,8 +152,13 @@ view model =
 
 viewBookPile : Maybe String -> List Placement -> Html Msg
 viewBookPile selectedBookId placements =
+    -- #276: no `List.take 50` here — deliberately removed. The 50-book cap is
+    -- enforced at the write path (Stacks.Shelving.reading_pile_limit/0), and
+    -- piles that already exceeded it are grandfathered: every book they hold
+    -- must render. A view-layer truncation would silently hide those books,
+    -- which was the original defect.
     div [ class "book-pile", attribute "role" "list" ]
-        (List.indexedMap (viewPiledBook selectedBookId) (List.take 50 placements))
+        (List.indexedMap (viewPiledBook selectedBookId) placements)
 
 
 viewPiledBook : Maybe String -> Int -> Placement -> Html Msg

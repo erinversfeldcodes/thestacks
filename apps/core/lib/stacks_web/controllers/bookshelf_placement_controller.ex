@@ -31,6 +31,13 @@ defmodule StacksWeb.BookshelfPlacementController do
           |> put_status(201)
           |> json(%{placement: ProtoJSON.placement_ref(placement)})
 
+        # #276: stable error code the Elm client matches on to show the
+        # specific "reading pile is full" message.
+        {:error, :reading_pile_full} ->
+          conn
+          |> put_status(422)
+          |> json(%{error: "reading_pile_full"})
+
         {:error, changeset} ->
           conn
           |> put_status(422)
@@ -61,6 +68,13 @@ defmodule StacksWeb.BookshelfPlacementController do
         conn
         |> put_status(403)
         |> json(%{error: "forbidden"})
+
+      # #276: stable error code the Elm client matches on to show the
+      # specific "reading pile is full" message.
+      {:error, :reading_pile_capacity, :reading_pile_full, _} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "reading_pile_full"})
 
       {:error, _, reason, _} ->
         conn

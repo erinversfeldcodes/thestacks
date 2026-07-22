@@ -5,6 +5,7 @@ defmodule Stacks.ShelvingTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Ecto.Adapters.SQL.Sandbox
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
@@ -138,6 +139,159 @@ defmodule Stacks.ShelvingTest do
       Shelving.move_book(placement.id, user.id, "wishlist")
 
       assert event_count("placement.moved") == before_count + 1
+    end
+  end
+
+  describe "reading pile 50-item limit (#276)" do
+    test "place_book/3 allows the 50th reading_pile placement" do
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      book = insert(:book)
+
+      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "reading_pile")
+      assert placement.book_id == book.id
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "place_book/3 rejects the 51st reading_pile placement" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "move_book/3 allows a move that makes exactly 50" do
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "move_book/3 rejects a move that would make 51" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      assert {:error, :reading_pile_capacity, :reading_pile_full, _} =
+               Shelving.move_book(placement.id, user.id, "reading_pile")
+
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "rejected place_book writes no placement, event, or audit row" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      events_before = event_count("placement.created")
+      audits_before = audit_count("placement.created")
+
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      assert active_pile_count(user.id) == 50
+      assert event_count("placement.created") == events_before
+      assert audit_count("placement.created") == audits_before
+    end
+
+    test "rejected move_book leaves the placement and writes no history, event, or audit row" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :reading_pile_capacity, :reading_pile_full, _} =
+               Shelving.move_book(placement.id, user.id, "reading_pile")
+
+      unmoved = Repo.get!(Placement, placement.id)
+      assert unmoved.bookshelf_id == library.id
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+
+    test "the limit applies to reading_pile only" do
+      user = insert(:user)
+      library = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: library)
+
+      for _ <- 1..50 do
+        insert(:placement, bookshelf: library, shelf: shelf, book: insert(:book))
+      end
+
+      book = insert(:book)
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+    end
+
+    test "grandfathered over-limit piles keep their books and can still move books out" do
+      user = insert(:user)
+      pile = fill_reading_pile(user, 55)
+      book = insert(:book)
+
+      # No new placement while over the limit...
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      # ...but every existing book is intact (no data loss)...
+      assert active_pile_count(user.id) == 55
+
+      # ...and moving a book OUT of the pile still works.
+      out_placement =
+        Placement
+        |> where([p], p.bookshelf_id == ^pile.id and is_nil(p.removed_at))
+        |> limit(1)
+        |> Repo.one!()
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(out_placement.id, user.id, "library")
+      assert active_pile_count(user.id) == 54
+    end
+
+    test "moving within a full reading pile is not blocked" do
+      user = insert(:user)
+      pile = fill_reading_pile(user, 50)
+
+      placement =
+        Placement
+        |> where([p], p.bookshelf_id == ^pile.id and is_nil(p.removed_at))
+        |> limit(1)
+        |> Repo.one!()
+
+      # A same-bookshelf "move" does not add a book, so the cap must not fire.
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "two concurrent placements cannot exceed the cap" do
+      # NOTE: under the SQL sandbox both tasks share the test's DB connection,
+      # so their transactions serialize here regardless of the FOR UPDATE lock.
+      # This test proves the end-to-end invariant (never > 50); the
+      # cross-connection race itself is closed by the documented
+      # SELECT ... FOR UPDATE on the bookshelf row in the capacity check.
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      owner = self()
+
+      results =
+        [insert(:book), insert(:book)]
+        |> Enum.map(fn book ->
+          Task.async(fn ->
+            Sandbox.allow(Repo, owner, self())
+            Shelving.place_book(user.id, book.id, "reading_pile")
+          end)
+        end)
+        |> Task.await_many()
+
+      assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(results, &match?({:error, :reading_pile_full}, &1)) == 1
+      assert active_pile_count(user.id) == 50
     end
   end
 
@@ -774,6 +928,38 @@ defmodule Stacks.ShelvingTest do
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
+  end
+
+  defp audit_count(action) do
+    Repo.aggregate(
+      from(a in "audit_log", prefix: "audit", where: a.action == ^action),
+      :count
+    )
+  end
+
+  # Fills the user's reading_pile bookshelf with `count` active placements,
+  # inserted directly (bypassing place_book) so over-limit grandfather
+  # scenarios can be staged. Returns the bookshelf.
+  defp fill_reading_pile(user, count) when count >= 1 do
+    bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+    shelf = insert(:shelf, bookshelf: bookshelf)
+
+    for _ <- 1..count do
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: insert(:book))
+    end
+
+    bookshelf
+  end
+
+  defp active_pile_count(user_id) do
+    Repo.aggregate(
+      from(p in Placement,
+        join: b in Bookshelf,
+        on: p.bookshelf_id == b.id,
+        where: b.user_id == ^user_id and b.name == "reading_pile" and is_nil(p.removed_at)
+      ),
       :count
     )
   end

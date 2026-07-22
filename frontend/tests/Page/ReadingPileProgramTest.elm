@@ -66,7 +66,8 @@ suite =
             , firstClickOnlySelects
             , secondClickNavigatesToBookDetail
             , deselectClearsTheSelection
-            , pileRendersAtMostFifty
+            , pileRendersExactlyFifty
+            , grandfatheredPileRendersEverything
             ]
         , describe "sad paths (punch #8)"
             [ forbiddenRaisesAgeGate
@@ -171,30 +172,45 @@ deselectClearsTheSelection =
                 |> ProgramTest.expectViewHasNot [ Selector.class "book-pile__book--selected" ]
 
 
-pileRendersAtMostFifty : Test
-pileRendersAtMostFifty =
-    test "reading_pile_render_cap: the pile renders at most 50 books" <|
+pileRendersExactlyFifty : Test
+pileRendersExactlyFifty =
+    test "reading_pile_renders_fifty: a pile at the 50-book cap renders all 50" <|
         \() ->
-            let
-                sixtyBooks =
-                    List.range 1 60
-                        |> List.map
-                            (\n ->
-                                namedPlacement ("book-" ++ String.fromInt n)
-                                    ("Title " ++ String.fromInt n)
-                            )
-            in
             startPile
                 |> ProgramTest.simulateHttpResponse "GET"
                     pileEndpoint
-                    (simulateBookshelfResponse sixtyBooks)
-                -- `viewBookPile` caps at `List.take 50`. This asserts the cap
-                -- holds; it does NOT bless the silent loss of books 51+, which
-                -- is a tracked defect (#276) with no user-visible affordance.
+                    (simulateBookshelfResponse (numberedPile 50))
                 |> ProgramTest.expectView
                     (Query.findAll [ Selector.class "book-pile__book" ]
                         >> Query.count (Expect.equal 50)
                     )
+
+
+grandfatheredPileRendersEverything : Test
+grandfatheredPileRendersEverything =
+    test "reading_pile_grandfather_renders_all: an over-limit (grandfathered) pile renders every book — none are silently hidden" <|
+        \() ->
+            -- #276: the 50 cap is enforced at the WRITE path. Piles that
+            -- already exceed 50 are grandfathered, so the view must render
+            -- all of them — silent truncation was the original defect.
+            startPile
+                |> ProgramTest.simulateHttpResponse "GET"
+                    pileEndpoint
+                    (simulateBookshelfResponse (numberedPile 60))
+                |> ProgramTest.expectView
+                    (Query.findAll [ Selector.class "book-pile__book" ]
+                        >> Query.count (Expect.equal 60)
+                    )
+
+
+numberedPile : Int -> List Placement
+numberedPile count =
+    List.range 1 count
+        |> List.map
+            (\n ->
+                namedPlacement ("book-" ++ String.fromInt n)
+                    ("Title " ++ String.fromInt n)
+            )
 
 
 

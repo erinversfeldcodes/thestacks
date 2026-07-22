@@ -33,6 +33,12 @@ defmodule Stacks.Shelving do
   # ── Placement changeset constants ──────────────────────────────────
   @valid_reading_statuses ~w(to_read reading completed abandoned)
 
+  # ── Reading-pile capacity (#276) ───────────────────────────────────
+  # The single source of truth for the 50-book Reading Pile cap. The Elm
+  # view must never re-derive or truncate to this number — enforcement
+  # lives here, at the write path.
+  @reading_pile_limit 50
+
   @placement_optional_fields [
     :position,
     :placed_at,
@@ -184,11 +190,20 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
+  Returns the maximum number of active placements allowed on a `reading_pile`
+  bookshelf (#276). Defined once here — the write path enforces it; views must
+  not truncate to it.
+  """
+  @spec reading_pile_limit() :: pos_integer()
+  def reading_pile_limit, do: @reading_pile_limit
+
+  @doc """
   Places a book on a bookshelf for a user. Creates the bookshelf if it doesn't exist.
-  Returns `{:ok, placement}` or `{:error, changeset}`.
+  Returns `{:ok, placement}`, `{:error, changeset}`, or `{:error, :reading_pile_full}`
+  when the placement would take the reading pile past #{@reading_pile_limit} books.
   """
   @spec place_book(binary(), binary(), String.t()) ::
-          {:ok, Placement.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
   def place_book(user_id, book_id, bookshelf_name) do
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
@@ -196,6 +211,9 @@ defmodule Stacks.Shelving do
     visibility_tier = lookup_book_visibility_tier(book_id)
 
     Multi.new()
+    |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
+      check_reading_pile_capacity(repo, bookshelf)
+    end)
     |> Multi.insert(
       :placement,
       placement_changeset(%Placement{}, %{
@@ -236,6 +254,8 @@ defmodule Stacks.Shelving do
   @doc """
   Moves a book placement to a new bookshelf. Verifies ownership.
   Creates a PlacementHistory record. Uses Ecto.Multi for atomicity.
+  A move into a full reading pile fails with
+  `{:error, :reading_pile_capacity, :reading_pile_full, _}`.
   """
   @spec move_book(binary(), binary(), String.t()) ::
           {:ok, map()} | {:error, :unauthorized} | {:error, atom(), term(), map()}
@@ -250,6 +270,9 @@ defmodule Stacks.Shelving do
       to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
 
       Multi.new()
+      |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
+        check_move_capacity(repo, from_bookshelf, to_bookshelf)
+      end)
       |> Multi.update(
         :placement,
         placement_changeset(placement, %{bookshelf_id: to_bookshelf.id})
@@ -909,6 +932,51 @@ defmodule Stacks.Shelving do
       _ -> nil
     end
   end
+
+  # Enforces the reading-pile cap (#276) inside the write transaction.
+  #
+  # Concurrency decision: a count-check inside the Ecto.Multi transaction,
+  # preceded by `SELECT ... FOR UPDATE` on the bookshelf row. A bare count
+  # could race — under READ COMMITTED two concurrent placements could each
+  # count 49 and both insert, ending at 51. Locking the user's single
+  # reading_pile bookshelf row serializes placements into that pile: the
+  # second transaction blocks on the lock until the first commits, then its
+  # count sees the true total and rejects. A DB CHECK constraint cannot
+  # express a cross-row count, and a trigger would duplicate this domain rule
+  # in SQL; per-user pile writes are far too infrequent for row-lock
+  # serialization to matter for throughput.
+  #
+  # Grandfather decision: the check asks "would this ADD exceed the cap"
+  # (>= limit before inserting), so piles that already exceed 50 keep every
+  # book — no data loss, no hiding — but accept no new placements until they
+  # drop below the limit. (Dev-DB survey 2026-07-22: largest pile was 4, so
+  # no user is currently grandfathered.)
+  defp check_reading_pile_capacity(repo, %Bookshelf{name: "reading_pile", id: bookshelf_id}) do
+    repo.one(from(b in Bookshelf, where: b.id == ^bookshelf_id, lock: "FOR UPDATE"))
+
+    active_count =
+      repo.aggregate(
+        from(p in Placement, where: p.bookshelf_id == ^bookshelf_id and is_nil(p.removed_at)),
+        :count
+      )
+
+    if active_count >= @reading_pile_limit do
+      {:error, :reading_pile_full}
+    else
+      {:ok, active_count}
+    end
+  end
+
+  defp check_reading_pile_capacity(_repo, %Bookshelf{}), do: {:ok, :not_limited}
+
+  # A same-bookshelf "move" adds no book, so the cap must not fire — otherwise
+  # a full (or grandfathered over-limit) pile could never be reorganised in
+  # place.
+  defp check_move_capacity(_repo, %Bookshelf{id: same_id}, %Bookshelf{id: same_id}),
+    do: {:ok, :same_bookshelf}
+
+  defp check_move_capacity(repo, _from_bookshelf, to_bookshelf),
+    do: check_reading_pile_capacity(repo, to_bookshelf)
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do

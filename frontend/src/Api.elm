@@ -18,6 +18,7 @@ module Api exposing
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
+    , MoveError(..)
     , NotificationPreferences
     , OnboardingStatus
     , PersonalInferences
@@ -91,6 +92,7 @@ module Api exposing
     , lookupByIsbn
     , mergeFormat
     , moveBook
+    , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
     , publicProfileDecoder
@@ -799,11 +801,58 @@ getBookshelf shelfName token toMsg =
         }
 
 
+{-| Error type for `moveBook` (#276). The backend rejects a move that would
+take the reading pile past its 50-book cap with a 422 whose body carries the
+stable `reading_pile_full` code; `Http.expectWhatever` would discard that
+body, so a custom expect surfaces it as a distinguishable constructor.
+-}
+type MoveError
+    = ReadingPileFull
+    | MoveHttpError Http.Error
+
+
+{-| Decodes the 422 body's `error` code. Only `reading_pile_full` is
+promoted to its own constructor; every other body stays a plain HTTP error.
+Pure so the elm-program-test simulated effect can reuse the exact mapping.
+-}
+moveResponseToResult : Http.Response String -> Result MoveError ()
+moveResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (MoveHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (MoveHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (MoveHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            if
+                metadata.statusCode
+                    == 422
+                    && Decode.decodeString (Decode.field "error" Decode.string) bodyText
+                    == Ok "reading_pile_full"
+            then
+                Err ReadingPileFull
+
+            else
+                Err (MoveHttpError (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ _ ->
+            Ok ()
+
+
+expectMove : (Result MoveError () -> msg) -> Http.Expect msg
+expectMove toMsg =
+    Http.expectStringResponse toMsg moveResponseToResult
+
+
 moveBook :
     String
     -> String
     -> String
-    -> (Result Http.Error () -> msg)
+    -> (Result MoveError () -> msg)
     -> Cmd msg
 moveBook placementId targetBookshelf token toMsg =
     Http.request
@@ -815,7 +864,7 @@ moveBook placementId targetBookshelf token toMsg =
                 (Requests.encodeMoveBookRequest
                     { bookshelf = targetBookshelf }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = expectMove toMsg
         , timeout = Nothing
         , tracker = Nothing
         }

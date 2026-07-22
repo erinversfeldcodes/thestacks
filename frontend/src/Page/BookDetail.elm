@@ -48,7 +48,7 @@ type alias Model =
     , currentBookshelf : String
     , selectedBookshelf : String
     , selectedFormats : List Format
-    , moveState : RemoteData Http.Error ()
+    , moveState : RemoteData Api.MoveError ()
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
@@ -81,7 +81,7 @@ type Msg
     | CloseBookshelfMover
     | SelectBookshelf String
     | ConfirmMove
-    | MoveCompleted (Result Http.Error ())
+    | MoveCompleted (Result Api.MoveError ())
     | ConfirmPlace
     | PlaceCompleted String (Result Http.Error Placement)
     | OpenRemoveModal
@@ -318,12 +318,15 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err err ->
+                Err Api.ReadingPileFull ->
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+
+                Err (Api.MoveHttpError err) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         ConfirmPlace ->
             case ( model.book, maybeToken ) of
@@ -355,7 +358,9 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                        -- placeBook still reports a plain Http.Error; wrap it
+                        -- so it shares moveState with the move path.
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
             ( { model | removeModalOpen = True }, Cmd.none, NoOut )
@@ -946,7 +951,7 @@ viewShelfActions model =
         ]
 
 
-viewMoveState : RemoteData Http.Error () -> Html Msg
+viewMoveState : RemoteData Api.MoveError () -> Html Msg
 viewMoveState state =
     case state of
         NotAsked ->
@@ -960,7 +965,16 @@ viewMoveState state =
             div [ class "book-detail__status book-detail__status--success" ]
                 [ text "Moved successfully." ]
 
-        Failure _ ->
+        Failure Api.ReadingPileFull ->
+            -- #276: the write path rejected the move because the reading
+            -- pile is at its 50-book cap. Distinct from a transport failure.
+            div
+                [ class "book-detail__status book-detail__status--error"
+                , testId "reading-pile-full-msg"
+                ]
+                [ text "Your reading pile is full — finish or remove a book before adding another." ]
+
+        Failure (Api.MoveHttpError _) ->
             div [ class "book-detail__status book-detail__status--error" ]
                 [ text "Failed to move book. Please try again." ]
 
