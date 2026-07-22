@@ -38,6 +38,7 @@ export const E2E_SUITES = [
   "bookshelf",
   "catalogue",
   "editions",
+  "empty-shelves",
   "looking-for-home",
   "navigation",
   "reading-pile",

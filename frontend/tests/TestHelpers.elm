@@ -1,8 +1,13 @@
 module TestHelpers exposing
-    ( bookDetailProgram
+    ( ReadingPileTestModel
+    , bookDetailProgram
+    , bookshelfProgram
     , libraryProgram
     , loginProgram
+    , namedPlacement
+    , placementWithPages
     , profileShelfProgram
+    , readingPileProgram
     , searchProgram
     , simulateAuthErrorResponse
     , simulateAuthResponse
@@ -13,6 +18,7 @@ module TestHelpers exposing
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
     , simulateMergeFormatResponse
+    , simulateMultiShelfResponse
     , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
@@ -36,6 +42,7 @@ import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
+import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Login as Login
 import Page.Search as Search
 import Page.Upload as Upload
@@ -83,6 +90,39 @@ testBook =
     , editionCount = 1
     , subjects = [ "Psychology", "Self-Help" ]
     , visibilityTier = Public
+    }
+
+
+{-| A placement wrapping a distinguishable book: its own book id and title, so
+several of them can be told apart in the rendered DOM (each clickable spine
+carries `id="spine-<bookId>"` and renders its title in `.book__title`).
+-}
+namedPlacement : String -> String -> Placement
+namedPlacement bookId title =
+    { testPlacement
+        | id = "placement-" ++ bookId
+        , book = Just { testBook | id = bookId, title = title }
+    }
+
+
+{-| A placement whose book has an explicit page count, which is what
+`Components.Spine.spineWidth` (and therefore `groupIntoRows`) keys off.
+-}
+placementWithPages : String -> Int -> Placement
+placementWithPages bookId pageCount =
+    let
+        edition =
+            { testEdition | id = "edition-" ++ bookId, pageCount = Just pageCount }
+    in
+    { testPlacement
+        | id = "placement-" ++ bookId
+        , book =
+            Just
+                { testBook
+                    | id = bookId
+                    , editions = [ edition ]
+                    , primaryEdition = Just edition
+                }
     }
 
 
@@ -288,6 +328,37 @@ simulateBookshelfResponse placements =
             Encode.encode 0
                 (Encode.object
                     [ ( "shelves", Encode.list identity [ shelfJson ] ) ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/bookshelves/library"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| Create an HTTP response for a bookshelf listing carrying several shelves,
+each with its own id, `position` and placements — the real
+`GET /api/bookshelves/:name` shape. Unlike `simulateBookshelfResponse` (one
+default shelf) this lets a test observe how the page flattens _across_ shelves,
+which is what makes per-shelf ordering observable.
+-}
+simulateMultiShelfResponse : List { id : String, position : Int, placements : List Placement } -> Http.Response String
+simulateMultiShelfResponse shelves =
+    let
+        encodeShelf shelf =
+            Encode.object
+                [ ( "id", Encode.string shelf.id )
+                , ( "position", Encode.int shelf.position )
+                , ( "placements", Encode.list encodePlacement shelf.placements )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "shelves", Encode.list encodeShelf shelves ) ]
                 )
     in
     Http.GoodStatus_
@@ -767,19 +838,26 @@ libraryEffects msg =
             SimulatedEffect.Cmd.none
 
 
-{-| Translate Bookshelf init Cmds into SimulatedEffects.
+{-| Translate the owner-mode `Page.Bookshelf.init` Cmd into a SimulatedEffect.
+
+Mirrors `Page.Bookshelf.init`'s own structure: with no token there is no
+request at all, and with a token the GET targets `config.apiName` and tags the
+response with `requestKey config` (Issue #274). Keyed off the config so the
+Library / Antilibrary / Wish List harnesses all share one mirror.
+
 -}
-libraryInitEffects : Maybe String -> SimulatedEffect Bookshelf.Msg
-libraryInitEffects maybeToken =
+bookshelfInitEffects : Bookshelf.Config -> Maybe String -> SimulatedEffect Bookshelf.Msg
+bookshelfInitEffects config maybeToken =
     case maybeToken of
         Just token ->
             SimulatedEffect.Http.request
                 { method = "GET"
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/bookshelves/library"
+                , url = "/api/bookshelves/" ++ config.apiName
                 , body = SimulatedEffect.Http.emptyBody
                 , expect =
-                    SimulatedEffect.Http.expectJson Bookshelf.ShelvesLoaded
+                    SimulatedEffect.Http.expectJson
+                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey config))
                         bookshelfResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
@@ -816,7 +894,10 @@ profileShelfInitEffects maybeToken handle bookshelfName =
             -- no visibility, so map it into the shared ShelvesLoaded response
             -- shape with the "owner" default (RSS is never rendered here).
             SimulatedEffect.Http.expectJson
-                (Bookshelf.ShelvesLoaded << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+                (Bookshelf.ShelvesLoaded
+                    (Bookshelf.requestKey (Bookshelf.profileConfig handle bookshelfName))
+                    << Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
+                )
                 shelvesResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
@@ -1107,18 +1188,29 @@ uploadProgram ageGatingEnabled maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Create a ProgramTest harness for the Bookshelf page.
+{-| Create a ProgramTest harness for the Bookshelf page in its Library config.
 -}
 libraryProgram : Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
-libraryProgram maybeToken =
+libraryProgram =
+    bookshelfProgram Bookshelf.libraryConfig
+
+
+{-| Create a ProgramTest harness for `Page.Bookshelf` under any owner-mode
+config. Library, Antilibrary and Wish List all render through this one module,
+so the only thing that varies between them is the `Config` — pass
+`Bookshelf.antiLibraryConfig` / `Bookshelf.wishListConfig` to drive those
+surfaces (Issue #112 punch #5/#6).
+-}
+bookshelfProgram : Bookshelf.Config -> Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+bookshelfProgram config maybeToken =
     ProgramTest.createElement
         { init =
             \() ->
                 let
                     ( model, _ ) =
-                        Bookshelf.init Bookshelf.libraryConfig maybeToken "test-user-id"
+                        Bookshelf.init config maybeToken "test-user-id"
                 in
-                ( model, libraryInitEffects maybeToken )
+                ( model, bookshelfInitEffects config maybeToken )
         , update =
             \msg model ->
                 let
@@ -1129,6 +1221,75 @@ libraryProgram maybeToken =
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Harness model for the Reading Pile program test.
+
+`Page.Bookshelf.ReadingPile.update` returns a third `OutMsg` element that the
+page itself cannot observe — `Main` consumes it. Recording the most recent
+`OutMsg` alongside the page model lets a program test assert the navigation
+intent a book click produces (Issue #112 punch #7) rather than only the model
+change, without reaching past the page into `Main`.
+
+-}
+type alias ReadingPileTestModel =
+    { page : ReadingPile.Model
+    , lastOut : ReadingPile.OutMsg
+    }
+
+
+{-| Create a ProgramTest harness for the Reading Pile page.
+-}
+readingPileProgram : Maybe String -> ProgramDefinition () ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
+readingPileProgram maybeToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        ReadingPile.init maybeToken
+                in
+                ( { page = model, lastOut = ReadingPile.NoOut }
+                , readingPileInitEffects maybeToken
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _, out ) =
+                        ReadingPile.update msg model.page
+                in
+                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+        , view = \model -> ReadingPile.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Translate the Reading Pile init Cmd into a SimulatedEffect.
+
+Mirrors `ReadingPile.init`: `GET /api/bookshelves/reading_pile`, dropping the
+response's `visibility` (the pile has no RSS affordance) so only the shelves
+reach `BooksLoaded`.
+
+-}
+readingPileInitEffects : Maybe String -> SimulatedEffect ReadingPile.Msg
+readingPileInitEffects maybeToken =
+    case maybeToken of
+        Just token ->
+            SimulatedEffect.Http.request
+                { method = "GET"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/bookshelves/reading_pile"
+                , body = SimulatedEffect.Http.emptyBody
+                , expect =
+                    SimulatedEffect.Http.expectJson
+                        (ReadingPile.BooksLoaded << Result.map .shelves)
+                        bookshelfResponseDecoder
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            SimulatedEffect.Cmd.none
 
 
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view

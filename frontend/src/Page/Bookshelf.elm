@@ -7,6 +7,7 @@ module Page.Bookshelf exposing
     , init
     , libraryConfig
     , profileConfig
+    , requestKey
     , update
     , view
     , wishListConfig
@@ -156,8 +157,31 @@ type OutMsg
     | SessionExpired
 
 
+{-| Identifies which bookshelf a `ShelvesLoaded` response was requested for.
+
+Library, Antilibrary and Wish List all render through this one module and all
+sit behind Main.elm's single `PageBookshelf` constructor, so Main's
+constructor-match cannot tell them apart: a response for the shelf the user has
+just left is still delivered to the shelf they landed on. Tagging the message
+with the requesting config lets `update` drop it (Issue #274, US-1.2.5).
+
+The handle is part of the key because the same `apiName` is also fetched in
+read-only mode for another reader's profile shelf — `/library` and
+`/u/ada/library` are different requests.
+
+-}
+requestKey : Config -> String
+requestKey config =
+    case config.profileHandle of
+        Just handle ->
+            "@" ++ handle ++ "/" ++ config.apiName
+
+        Nothing ->
+            config.apiName
+
+
 type Msg
-    = ShelvesLoaded (Result Http.Error BookshelfResponse)
+    = ShelvesLoaded String (Result Http.Error BookshelfResponse)
     | DismissAgeGate
     | BookClicked Book
     | RSSLinkMsg RSSLink.Msg
@@ -179,12 +203,12 @@ init config maybeToken userId =
                     Api.getProfileShelf maybeToken
                         handle
                         config.apiName
-                        (ShelvesLoaded << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+                        (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
 
                 _ ->
                     case maybeToken of
                         Just token ->
-                            Api.getBookshelf config.apiName token ShelvesLoaded
+                            Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
 
                         Nothing ->
                             Cmd.none
@@ -214,26 +238,36 @@ init config maybeToken userId =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
-        ShelvesLoaded result ->
-            case result of
-                Ok response ->
-                    ( { model
-                        | shelves = Success response.shelves
-                        , visibility = response.visibility
-                      }
-                    , Cmd.none
-                    , NoOut
-                    )
+        ShelvesLoaded key result ->
+            if key /= requestKey model.config then
+                -- Stale: this response belongs to a bookshelf the user has since
+                -- navigated away from. Because Library / Antilibrary / Wish List
+                -- share Main's single `PageBookshelf` constructor, it still lands
+                -- here — applying it would paint the previous shelf's books onto
+                -- this one (Issue #274). Drop it; this page's own request is still
+                -- in flight and will resolve on its own.
+                ( model, Cmd.none, NoOut )
 
-                Err (Http.BadStatus 403) ->
-                    ( { model | shelves = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+            else
+                case result of
+                    Ok response ->
+                        ( { model
+                            | shelves = Success response.shelves
+                            , visibility = response.visibility
+                          }
+                        , Cmd.none
+                        , NoOut
+                        )
 
-                Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                    Err (Http.BadStatus 403) ->
+                        ( { model | shelves = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
 
-                    else
-                        ( { model | shelves = Failure err }, Cmd.none, NoOut )
+                    Err err ->
+                        if Api.isUnauthorized err then
+                            ( model, Cmd.none, SessionExpired )
+
+                        else
+                            ( { model | shelves = Failure err }, Cmd.none, NoOut )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )

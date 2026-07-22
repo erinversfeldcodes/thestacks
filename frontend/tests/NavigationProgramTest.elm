@@ -16,11 +16,16 @@ Together these prove that navigating to a URL renders the right page.
 import Expect
 import Navigation.Route as Route exposing (Route(..))
 import Page.Bookshelf as Bookshelf
+import Page.Bookshelf.LookingForHome as LookingForHome
+import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Search as Search
 import Page.Upload as Upload
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
+import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (BookshelfResponse, Shelf)
 import Url
 
 
@@ -43,7 +48,162 @@ suite =
         , navigateToLibrary
         , navigateToSearch
         , navigateNotFound
+        , navigateAwayMidLoad
         ]
+
+
+
+-- NAVIGATE AWAY MID-LOAD (Issue #274, US-1.2.5 sad path)
+
+
+{-| A shelf payload carrying one recognisable book, standing in for the
+response to the bookshelf the user has just navigated AWAY from.
+-}
+staleLibraryResponse : BookshelfResponse
+staleLibraryResponse =
+    { shelves =
+        [ Shelf "shelf-library-1" 0 [ TestHelpers.testPlacement ]
+        ]
+    , visibility = "owner"
+    }
+
+
+{-| Issue #274 — US-1.2.5 sad path.
+
+Main.elm dispatches page messages by matching on the `Page` constructor
+(`Main.elm:1347-1396`), so a response for a page the user has left is dropped
+for every _cross-constructor_ move (Library -> Reading Pile, etc.).
+
+Library, Antilibrary and Wish List, however, all share the single
+`PageBookshelf` constructor (`Main.elm:542-549`), so a response for one of them
+still reaches the model of another. `BookshelfResponse` carries no bookshelf
+identity, so `Page.Bookshelf.update` cannot tell whose response it is holding.
+These tests pin the invariant: only the response the CURRENT config asked for
+may be applied.
+
+-}
+navigateAwayMidLoad : Test
+navigateAwayMidLoad =
+    describe "navigate away mid-load (Issue #274)"
+        [ staleSiblingShelfResponseIsDiscarded
+        , staleSiblingShelfResponseDoesNotRender
+        , matchingShelfResponseIsStillApplied
+        , pilePagesStartIndependentlyLoading
+        ]
+
+
+{-| The core hazard: leave /library while its GET is in flight, land on
+/antilibrary, and let the library response arrive afterwards. The antilibrary
+model must still be Loading -- it has its own request outstanding.
+-}
+staleSiblingShelfResponseIsDiscarded : Test
+staleSiblingShelfResponseIsDiscarded =
+    test "navigate_away_mid_load: a Library response arriving after routing to the Antilibrary is discarded" <|
+        \() ->
+            let
+                -- 1. The user is on /library. Its GET is issued and left UNRESOLVED.
+                ( libraryModel, _ ) =
+                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+
+                -- 2. The user routes to /antilibrary. Main.elm builds a fresh
+                --    PageBookshelf model with its own in-flight GET.
+                ( antiLibraryModel, _ ) =
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+
+                -- 3. NOW the library response lands. Main.elm routes it to whichever
+                --    PageBookshelf is current -- which is the antilibrary.
+                ( afterStale, _, _ ) =
+                    Bookshelf.update
+                        (Bookshelf.ShelvesLoaded
+                            (Bookshelf.requestKey Bookshelf.libraryConfig)
+                            (Ok staleLibraryResponse)
+                        )
+                        antiLibraryModel
+            in
+            Expect.all
+                -- The premise: the library GET really was still in flight.
+                [ \_ -> libraryModel.shelves |> Expect.equal Loading
+
+                -- The invariant: the antilibrary keeps waiting on its OWN request.
+                , \_ -> afterStale.shelves |> Expect.equal Loading
+                ]
+                ()
+
+
+{-| The user-visible consequence of the same hazard: the destination page must
+not paint the previous shelf's books.
+-}
+staleSiblingShelfResponseDoesNotRender : Test
+staleSiblingShelfResponseDoesNotRender =
+    test "navigate_away_mid_load: the Antilibrary does not render the stale Library book" <|
+        \() ->
+            let
+                ( antiLibraryModel, _ ) =
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+
+                ( afterStale, _, _ ) =
+                    Bookshelf.update
+                        (Bookshelf.ShelvesLoaded
+                            (Bookshelf.requestKey Bookshelf.libraryConfig)
+                            (Ok staleLibraryResponse)
+                        )
+                        antiLibraryModel
+            in
+            Bookshelf.view afterStale
+                |> Query.fromHtml
+                |> Query.hasNot [ Selector.text "The Power of Habit" ]
+
+
+{-| Non-vacuity guard: discarding must be selective. The response the CURRENT
+page actually asked for still has to be applied.
+-}
+matchingShelfResponseIsStillApplied : Test
+matchingShelfResponseIsStillApplied =
+    test "navigate_away_mid_load: the response the current bookshelf asked for is still applied" <|
+        \() ->
+            let
+                ( libraryModel, _ ) =
+                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+
+                ( afterFresh, _, _ ) =
+                    Bookshelf.update
+                        (Bookshelf.ShelvesLoaded
+                            (Bookshelf.requestKey Bookshelf.libraryConfig)
+                            (Ok staleLibraryResponse)
+                        )
+                        libraryModel
+            in
+            afterFresh.shelves
+                |> Expect.equal (Success staleLibraryResponse.shelves)
+
+
+{-| Reading Pile and Looking for a Home own separate models (`BooksLoaded` /
+`books`), so the unified page's behaviour does not imply theirs. Each is the
+sole route behind its own `Page` constructor (`Main.elm:551-563`), so the
+constructor match in `Main.elm:1398-1459` already discards any response that
+arrives after the user has routed away -- there is no same-constructor sibling
+that could receive it.
+
+This test pins the precondition that keeps that true: each page initialises its
+OWN `books` field to `Loading`, independently of the other.
+
+-}
+pilePagesStartIndependentlyLoading : Test
+pilePagesStartIndependentlyLoading =
+    test "navigate_away_mid_load: Reading Pile and Looking for a Home hold independent Loading state" <|
+        \() ->
+            let
+                ( readingPileModel, _ ) =
+                    ReadingPile.init (Just "test-token")
+
+                ( lookingForHomeModel, _ ) =
+                    LookingForHome.init (Just "test-token")
+            in
+            Expect.all
+                [ \_ -> readingPileModel.books |> Expect.equal Loading
+                , \_ -> lookingForHomeModel.books |> Expect.equal Loading
+                ]
+                ()
 
 
 navigateToUpload : Test

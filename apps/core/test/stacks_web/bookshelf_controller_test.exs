@@ -333,6 +333,164 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
+  # Punch #1 (Issue #112, L1 US-1.2.4): the "returns all valid bookshelf names"
+  # loop only asserts the echoed name — it seeds nothing, so a reading_pile
+  # response body has never been asserted. These tests seed placements and
+  # assert the full nested shape and the documented ordering.
+  describe "GET /api/bookshelves/reading_pile — populated response (US-1.2.4)" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      shelf = insert(:shelf, bookshelf: bookshelf, position: 0)
+      author = insert(:author, name: "Ursula K. Le Guin")
+      book = insert(:book, title: "The Dispossessed", author: author)
+      edition = insert(:book_edition, book: book, isbn: "9780060512750", is_primary: true)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          shelf: shelf,
+          book: book,
+          position: 0,
+          formats: ["paperback"],
+          personal_rating: 5,
+          notes: "Halfway through",
+          reading_status: "reading",
+          current_page: 142
+        )
+
+      resp =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/reading_pile")
+        |> json_response(200)
+
+      {:ok,
+       user: user,
+       bookshelf: bookshelf,
+       shelf: shelf,
+       book: book,
+       edition: edition,
+       author: author,
+       placement: placement,
+       resp: resp}
+    end
+
+    test "returns the bookshelf name and a count matching the seeded placements", %{resp: resp} do
+      assert resp["bookshelf"] == "reading_pile"
+      assert resp["count"] == 1
+      assert resp["visibility"] == "owner"
+    end
+
+    test "wraps placements in a shelf carrying the shelf's id and position", %{
+      resp: resp,
+      shelf: shelf
+    } do
+      assert [shelf_json] = resp["shelves"]
+      assert shelf_json["id"] == shelf.id
+      assert shelf_json["position"] == 0
+      assert length(shelf_json["placements"]) == 1
+    end
+
+    test "returns every placement field the pile UI reads", %{
+      resp: resp,
+      placement: placement
+    } do
+      assert [pj] = all_placements(resp)
+      assert pj["id"] == placement.id
+      assert pj["position"] == 0
+      assert pj["formats"] == ["paperback"]
+      assert pj["personal_rating"] == 5
+      assert pj["notes"] == "Halfway through"
+      assert pj["reading_status"] == "reading"
+      assert pj["current_page"] == 142
+      assert pj["visibility"] == "owner"
+      assert is_binary(pj["placed_at"])
+    end
+
+    test "nests the book with its author, editions and primary_edition", %{
+      resp: resp,
+      book: book,
+      author: author,
+      edition: edition
+    } do
+      assert [pj] = all_placements(resp)
+      book_json = pj["book"]
+
+      assert book_json["id"] == book.id
+      assert book_json["title"] == "The Dispossessed"
+      assert book_json["author"]["id"] == author.id
+      assert book_json["author"]["name"] == "Ursula K. Le Guin"
+      assert book_json["edition_count"] == 1
+      assert [edition_json] = book_json["editions"]
+      assert edition_json["id"] == edition.id
+      assert edition_json["isbn"] == "9780060512750"
+      assert book_json["primary_edition"]["id"] == edition.id
+    end
+
+    test "orders placements by position then placed_at, and shelves by position", %{
+      conn: conn,
+      user: user,
+      bookshelf: bookshelf,
+      shelf: shelf
+    } do
+      # Second shelf, deliberately inserted first at a LATER position so an
+      # unordered query would surface it before shelf 0.
+      shelf_two = insert(:shelf, bookshelf: bookshelf, position: 1)
+      third = insert(:book, title: "Third")
+      insert(:placement, bookshelf: bookshelf, shelf: shelf_two, book: third, position: 0)
+
+      # Two more on shelf 0, inserted out of position order.
+      second = insert(:book, title: "Second")
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: second, position: 1)
+
+      resp =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/reading_pile")
+        |> json_response(200)
+
+      assert resp["count"] == 3
+      assert [s0, s1] = resp["shelves"]
+      assert s0["id"] == shelf.id
+      assert s1["id"] == shelf_two.id
+
+      assert Enum.map(s0["placements"], & &1["book"]["title"]) == [
+               "The Dispossessed",
+               "Second"
+             ]
+
+      assert Enum.map(s1["placements"], & &1["book"]["title"]) == ["Third"]
+    end
+
+    test "excludes removed placements from a populated reading pile", %{
+      conn: conn,
+      user: user,
+      bookshelf: bookshelf,
+      shelf: shelf
+    } do
+      removed_book = insert(:book, title: "Abandoned")
+
+      insert(:placement,
+        bookshelf: bookshelf,
+        shelf: shelf,
+        book: removed_book,
+        position: 9,
+        removed_at: DateTime.utc_now()
+      )
+
+      resp =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/reading_pile")
+        |> json_response(200)
+
+      assert resp["count"] == 1
+      titles = Enum.map(all_placements(resp), & &1["book"]["title"])
+      refute "Abandoned" in titles
+    end
+  end
+
   describe "GET /api/bookshelves/:bookshelf_name — view_as halted" do
     test "returns 403 when non-owner requests view_as perspective on another user's bookshelf",
          %{conn: conn} do

@@ -102,7 +102,7 @@ bookshelf401BubblesOutMsg =
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
-                        (Bookshelf.ShelvesLoaded (Err (Http.BadStatus 401)))
+                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err (Http.BadStatus 401)))
                         model
             in
             outMsg |> Expect.notEqual Bookshelf.NoOut
@@ -142,7 +142,7 @@ bookshelfSuccessStaysLocal =
                     Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
 
                 ( _, _, outMsg ) =
-                    Bookshelf.update (Bookshelf.ShelvesLoaded (Ok { shelves = [], visibility = "owner" })) model
+                    Bookshelf.update (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" })) model
             in
             outMsg |> Expect.equal Bookshelf.NoOut
 
@@ -161,7 +161,7 @@ bookshelf403StaysLocal =
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
-                        (Bookshelf.ShelvesLoaded (Err (Http.BadStatus 403)))
+                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err (Http.BadStatus 403)))
                         model
             in
             outMsg |> Expect.equal Bookshelf.NoOut

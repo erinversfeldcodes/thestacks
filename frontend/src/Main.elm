@@ -17,8 +17,7 @@ port module Main exposing
     , viewNav
     )
 
-import Animation.RoomTransition as RoomTransition
-import Animation.SlideTransition as SlideTransition
+import Animation.Transition as Transition exposing (transitionClass)
 import Api
 import Browser
 import Browser.Dom
@@ -29,6 +28,7 @@ import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
 import Html.Attributes exposing (attribute, class, href, id)
+import Html.Events
 import Http
 import Json.Decode as Decode
 import Json.Encode
@@ -1130,6 +1130,7 @@ loginCompletionCmd key auth baseCmd =
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
+    | TransitionEnded String
     | LoginMsg Login.Msg
     | ResetPasswordMsg ResetPassword.Msg
     | LoginTransitionCompleted
@@ -1243,6 +1244,18 @@ update msg model =
                     model.accountDeletedNotice && newRoute /= Login
               }
             , cmd
+            )
+
+        TransitionEnded animationName ->
+            -- Clear the navigation transition class once its own animation has
+            -- finished, so the next navigation re-adds it and the browser
+            -- restarts the animation (US-1.2.5, issue #277). The bubbling
+            -- filter lives in Animation.Transition, where it is unit-tested.
+            ( { model
+                | transition =
+                    Transition.clearOnAnimationEnd animationName model.transition
+              }
+            , Cmd.none
             )
 
         LoginMsg subMsg ->
@@ -2352,19 +2365,6 @@ openOverlay model bookId =
     )
 
 
-transitionClass : Route -> Route -> String
-transitionClass from to =
-    case ( from, to ) of
-        ( _, BookDetail _ ) ->
-            SlideTransition.slideInRight
-
-        ( BookDetail _, _ ) ->
-            SlideTransition.slideOutRight
-
-        _ ->
-            RoomTransition.fadeThroughDarkIn
-
-
 
 -- SUBSCRIPTIONS
 
@@ -2444,6 +2444,10 @@ view model =
                                 Nothing ->
                                     ""
                            )
+                    )
+                , Html.Events.on "animationend"
+                    (Decode.map TransitionEnded
+                        (Decode.field "animationName" Decode.string)
                     )
                 ]
                 [ viewPage model ]

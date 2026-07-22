@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("bookshelf") });
@@ -69,16 +69,275 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
   });
 });
 
+test.describe("Bookshelf pages — bookcase structure (US-1.2.1/2/3)", () => {
+  // Every assertion below is unconditional. The `bookshelf` suite user has 5
+  // library / 3 antilibrary / 0 wishlist placements; `minShelfRows 4`
+  // (Helpers.elm:208) pads to four rows in all three cases, so ">= 4 rows"
+  // holds for a populated AND an empty bookshelf without a data guard.
+
+  // Attribute and count assertions do NOT require visibility, so a page fully
+  // covered by the first-run overlay (`shouldShowOnboarding`, Main.elm:2845)
+  // would still satisfy them. This hook fails loudly on that, so a structural
+  // green always means a page the user can actually see.
+  test.afterEach(async ({ page }) => {
+    await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
+    await expect(page.locator(".shelf-label")).toBeVisible();
+  });
+
+  test("Library renders the lamplight overlay as a real gradient", async ({
+    page,
+  }) => {
+    await page.goto("/library");
+    await page.waitForSelector(".shelf-library", { timeout: 10000 });
+
+    // `.lighting` (Bookshelf.elm:319) is an empty div — presence alone proves
+    // nothing, since it renders identically if main.css:3284 were dropped.
+    // Assert the warm lamplight it exists to paint.
+    const lighting = page.locator(".lighting");
+    await expect(lighting).toHaveCount(1);
+    const styles = await lighting.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { backgroundImage: s.backgroundImage, blend: s.mixBlendMode };
+    });
+    expect(styles.backgroundImage).toContain("radial-gradient");
+    expect(styles.blend).toBe("soft-light");
+  });
+
+  test("Library bookcase has 3D side panels and >= 4 shelf rows inside its inner frame", async ({
+    page,
+  }) => {
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+
+    await expect(page.locator(".bookcase__side--left")).toHaveCount(1);
+    await expect(page.locator(".bookcase__side--right")).toHaveCount(1);
+    await expect(page.locator(".bookcase__inner")).toHaveCount(1);
+
+    // Rows must live INSIDE .bookcase__inner — a descendant selector, not a
+    // page-wide count, so a row rendered outside the frame fails this.
+    const rowsInInner = page.locator(".bookcase__inner .shelf-row");
+    expect(await rowsInInner.count()).toBeGreaterThanOrEqual(4);
+    expect(await page.locator(".shelf-row").count()).toBe(
+      await rowsInInner.count()
+    );
+  });
+
+  test("Library shelf rows pack books without overflowing the bookcase", async ({
+    page,
+  }) => {
+    await ensureBookOnLibrary(page);
+    await page.goto("/library");
+    await page.locator(".book-button").first().waitFor({ timeout: 10000 });
+
+    // `groupIntoRows 990` (Bookshelf.elm:441) is a spine-width packing
+    // threshold, NOT a DOM pixel bound — rows render ~1012px wide to match
+    // .bookcase__inner. The observable contract is: no horizontal overflow,
+    // and every book in a row sits on ONE visual line (if packing over-filled
+    // a row, `flex-wrap: wrap` at main.css:3014 would push books onto a
+    // second line inside the same row, breaking the shelf illusion).
+    const rows = page.locator(".shelf-row__books");
+    const rowCount = await rows.count();
+    expect(rowCount).toBeGreaterThanOrEqual(4);
+
+    for (let i = 0; i < rowCount; i++) {
+      const metrics = await rows.nth(i).evaluate((el) => {
+        // `align-items: flex-end` sits every book on the shelf plank, so books
+        // on one line share a BOTTOM edge (their tops differ by height).
+        // A wrapped second line drops to a different bottom.
+        const bottoms = Array.from(el.querySelectorAll(".book-button")).map(
+          (b) => (b as HTMLElement).offsetTop + (b as HTMLElement).offsetHeight
+        );
+        return {
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+          distinctBottoms: new Set(bottoms).size,
+        };
+      });
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+      expect(metrics.distinctBottoms).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("AntiLibrary shelf label reads Antilibrary and the bookcase has >= 4 rows", async ({
+    page,
+  }) => {
+    await page.goto("/antilibrary");
+    await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
+
+    // aria-label, never innerText: main.css:3266 applies `text-transform:
+    // uppercase`, so innerText() returns "ANTILIBRARY" on a working page.
+    await expect(page.locator(".shelf-label")).toHaveAttribute(
+      "aria-label",
+      "Antilibrary"
+    );
+    expect(
+      await page.locator(".bookcase__inner .shelf-row").count()
+    ).toBeGreaterThanOrEqual(4);
+  });
+
+  test("WishList shelf label reads Wish List and the bookcase has >= 4 rows", async ({
+    page,
+  }) => {
+    await page.goto("/wishlist");
+    await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
+
+    await expect(page.locator(".shelf-label")).toHaveAttribute(
+      "aria-label",
+      "Wish List"
+    );
+    expect(
+      await page.locator(".bookcase__inner .shelf-row").count()
+    ).toBeGreaterThanOrEqual(4);
+  });
+});
+
+test.describe("Bookshelf pages — view mode toggle and list sorting", () => {
+  const titlesInOrder = (page: Page) =>
+    page.locator(".book-list__row td:nth-child(1)").allTextContents();
+
+  test("view-mode-toggle switches the bookcase to a sortable list view", async ({
+    page,
+  }) => {
+    await ensureBookOnLibrary(page);
+    await page.goto("/library");
+    await page.locator(".book-button").first().waitFor({ timeout: 10000 });
+
+    const toggle = page.locator(".view-mode-toggle");
+    await expect(toggle).toBeVisible();
+    // SpineView is the initial mode (Bookshelf.elm:226).
+    await expect(
+      toggle.getByRole("button", { name: "Spine view" })
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".book-list")).toHaveCount(0);
+
+    await toggle.getByRole("button", { name: "List view" }).click();
+
+    // The bookcase is gone and the table is here — not merely "a table exists".
+    await expect(page.locator(".bookcase")).toHaveCount(0);
+    await expect(page.locator(".bookshelf--list-view .book-list")).toBeVisible();
+    await expect(
+      toggle.getByRole("button", { name: "List view" })
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // Each th is `[ text label, indicator ]` (BookList.elm:82) — read the
+    // label text node so the active column's " ^" sort glyph doesn't leak in.
+    const headerLabels = await page
+      .locator(".book-list thead th")
+      .evaluateAll((ths) => ths.map((th) => th.firstChild?.textContent ?? ""));
+    expect(headerLabels).toEqual([
+      "Title",
+      "Author",
+      "Pages",
+      "Date Added",
+      "Formats",
+    ]);
+    // The list must contain the shelf's books, not an empty table.
+    expect(await page.locator(".book-list__row").count()).toBeGreaterThan(0);
+  });
+
+  test("clicking a column header sorts the list and toggles Asc <-> Desc", async ({
+    page,
+  }) => {
+    await ensureBookOnLibrary(page);
+    await page.goto("/library");
+    await page.locator(".book-button").first().waitFor({ timeout: 10000 });
+    await page
+      .locator(".view-mode-toggle")
+      .getByRole("button", { name: "List view" })
+      .click();
+    await expect(page.locator(".book-list")).toBeVisible();
+
+    const titleHeader = page.locator(".book-list thead th", {
+      hasText: "Title",
+    });
+    const authorHeader = page.locator(".book-list thead th", {
+      hasText: "Author",
+    });
+
+    // Initial state is Title/Asc (Bookshelf.elm:227) — assert the rendered
+    // rows really are title-ascending, so a broken sortPlacements fails here
+    // rather than passing on the aria attribute alone.
+    await expect(titleHeader).toHaveAttribute("aria-sort", "ascending");
+    const asc = await titlesInOrder(page);
+    expect(asc.length).toBeGreaterThan(1);
+    expect(asc).toEqual(
+      [...asc].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    );
+
+    // Same column again -> Desc, and the row order actually reverses.
+    await titleHeader.click();
+    await expect(titleHeader).toHaveAttribute("aria-sort", "descending");
+    expect(await titlesInOrder(page)).toEqual([...asc].reverse());
+
+    // And back to Asc.
+    await titleHeader.click();
+    await expect(titleHeader).toHaveAttribute("aria-sort", "ascending");
+    expect(await titlesInOrder(page)).toEqual(asc);
+
+    // A different column starts at Asc and takes the sort off Title.
+    await authorHeader.click();
+    await expect(authorHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect(titleHeader).toHaveAttribute("aria-sort", "none");
+    const byAuthor = await page
+      .locator(".book-list__row td:nth-child(2)")
+      .allTextContents();
+    expect(byAuthor).toEqual(
+      [...byAuthor].sort((a, b) =>
+        a.toLowerCase().localeCompare(b.toLowerCase())
+      )
+    );
+  });
+});
+
+test.describe("Bookshelf pages — error state", () => {
+  test("a 500 from the library endpoint surfaces the retry message", async ({
+    page,
+  }) => {
+    // Error injection only: there is no way to make the server 500 on demand.
+    // Precedent: settings.spec.ts:64, audit-log.spec.ts:95.
+    await page.route("**/api/bookshelves/library*", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: "{}",
+      })
+    );
+
+    await page.goto("/library");
+    await page.waitForSelector(".shelf-library", { timeout: 10000 });
+
+    // Bookshelf.elm:361-362 renders this copy on the Failure branch.
+    await expect(page.locator("p.error")).toContainText(
+      "Could not load your library. Please try again.",
+      { timeout: 10000 }
+    );
+    // The Failure branch must replace the bookcase, not render alongside it.
+    await expect(page.locator(".bookcase")).toHaveCount(0);
+  });
+});
+
 test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
+  // The `empty-shelves` suite user is seeded with five bookshelves and ZERO
+  // placements (`Seeds.e2e_empty_suites/0`), so every empty state below renders
+  // deterministically and is asserted unconditionally — no `count() > 0` guard.
+  test.use({ storageState: suiteAuthFile("empty-shelves") });
+
+  // A zero-placement user is exactly who `shouldShowOnboarding` (Main.elm:2845)
+  // targets, so the first-run overlay would cover the very shelves under test.
+  // The seed marks this user onboarded; this hook fails loudly if that regresses
+  // rather than letting the assertions pass against an obscured page.
+  test.afterEach(async ({ page }) => {
+    await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
+  });
+
   test("Library empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/library");
     await page.waitForSelector(".shelf-library", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Your library is waiting"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Your library is waiting. Move a book here when you've finished reading it.",
+      { timeout: 10000 }
+    );
   });
 
   test("AntiLibrary empty state matches US-1.6.5 wording", async ({
@@ -87,22 +346,20 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Books you own but haven't read yet"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Books you own but haven't read yet. Upload a photo to start building your collection.",
+      { timeout: 10000 }
+    );
   });
 
   test("WishList empty state matches US-1.6.5 wording", async ({ page }) => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
-    if ((await emptyText.count()) > 0) {
-      await expect(emptyText).toContainText(
-        "Books you're dreaming about"
-      );
-    }
+    await expect(emptyText).toContainText(
+      "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN.",
+      { timeout: 10000 }
+    );
   });
 
   test("Reading Pile empty state matches US-1.6.5 wording", async ({
@@ -110,24 +367,23 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
   }) => {
     await page.goto("/reading-pile");
     await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
-    // Wait for loading to finish — either books appear or the empty message shows
-    await page.waitForFunction(
-      () => {
-        const loading = document.querySelector(".loading");
-        const loadingMsg = document.querySelector(".reading-pile__empty-msg");
-        const isLoading =
-          loading !== null ||
-          (loadingMsg !== null &&
-            loadingMsg.textContent?.includes("Loading"));
-        return !isLoading;
-      },
+    const emptyMsg = page.locator(".reading-pile__empty-msg");
+    await expect(emptyMsg).toContainText(
+      "Nothing on the pile right now. Move a book from your Antilibrary to start reading.",
       { timeout: 15000 }
     );
-    const emptyMsg = page.locator(".reading-pile__empty-msg");
-    if ((await emptyMsg.count()) > 0) {
-      await expect(emptyMsg).toContainText(
-        "Nothing on the pile right now"
-      );
-    }
+  });
+
+  test("Looking for a Home empty state matches US-1.6.5 wording", async ({
+    page,
+  }) => {
+    await page.goto("/looking-for-home");
+    await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
+    // Looking-for-Home is the only page using Components.EmptyBookshelf.
+    // Note the en dash in the copy (LookingForHome.elm:102).
+    await expect(page.locator(".empty-shelf__message")).toContainText(
+      "Nothing here yet — these are books looking for a new home.",
+      { timeout: 10000 }
+    );
   });
 });

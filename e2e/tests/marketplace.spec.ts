@@ -77,6 +77,20 @@ async function createActiveListing(page: import("@playwright/test").Page): Promi
   return listing;
 }
 
+/** Locate the browse card for a SPECIFIC listing.
+ *
+ *  Browse is a global feed of every user's active listings ordered by
+ *  `listed_at DESC` (Marketplace.list_active_listings/1), so `.first()` is
+ *  whichever listing was most recently activated by ANY user — not necessarily
+ *  the one this test created. `public-profile.spec.ts` activates listings with
+ *  no `contact_info`, and `createActiveListing` below REUSES the suite user's
+ *  existing listing (leaving its `listed_at` stale), so after that spec has run
+ *  once the foreign listing sorts first permanently. Addressing the card by its
+ *  href keeps the assertions pinned to the listing under test. */
+function listingCard(page: import("@playwright/test").Page, listingId: string) {
+  return page.locator(`.marketplace__card[href="/marketplace/${listingId}"]`);
+}
+
 // ---------------------------------------------------------------------------
 // Unauthenticated browse
 // ---------------------------------------------------------------------------
@@ -150,16 +164,21 @@ test.describe("Marketplace — authenticated", () => {
     const listingId = await createActiveListing(page);
     expect(listingId).not.toBe("");
 
-    // Reload browse page — listing should now appear
+    // Reload browse page — our listing should now appear
     await page.goto("/marketplace");
     await expect(page.locator(".marketplace__grid")).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.locator(".marketplace__card").first()).toBeVisible();
+    await expect(listingCard(page, listingId)).toBeVisible();
 
-    // Click first card → navigate to detail page
-    await page.locator(".marketplace__card").first().click();
-    await expect(page).toHaveURL(/\/marketplace\//, { timeout: 10000 });
+    // Click OUR card → navigate to its detail page
+    await listingCard(page, listingId).click();
+    // Exact pathname match via predicate, not `new RegExp(listingId)` — building
+    // a regex from a variable trips semgrep's non-literal-regexp rule (blocking
+    // in `just ci`). The predicate is also stricter than the substring regex.
+    await expect(page).toHaveURL((url) => url.pathname === `/marketplace/${listingId}`, {
+      timeout: 10000,
+    });
     await expect(page.locator(".marketplace-detail")).toBeVisible({
       timeout: 10000,
     });
@@ -185,11 +204,11 @@ test.describe("Marketplace — authenticated", () => {
       timeout: 15000,
     });
 
-    const firstCard = page.locator(".marketplace__card").first();
-    await expect(firstCard.locator(".marketplace__condition-badge")).toBeVisible();
-    await expect(firstCard.locator(".marketplace__price")).toBeVisible();
-    await expect(firstCard.locator(".marketplace__card-title")).toBeVisible();
-    await expect(firstCard.locator(".marketplace__card-author")).toBeVisible();
+    const card = listingCard(page, listingId);
+    await expect(card.locator(".marketplace__condition-badge")).toBeVisible();
+    await expect(card.locator(".marketplace__price")).toBeVisible();
+    await expect(card.locator(".marketplace__card-title")).toBeVisible();
+    await expect(card.locator(".marketplace__card-author")).toBeVisible();
   });
 
   test("/marketplace/mine loads and shows My Listings page", async ({
@@ -203,10 +222,11 @@ test.describe("Marketplace — authenticated", () => {
 
   test("back link on detail page returns to marketplace", async ({ page }) => {
     await page.goto("/marketplace");
-    await createActiveListing(page);
+    const listingId = await createActiveListing(page);
+    expect(listingId).not.toBe("");
     await page.goto("/marketplace");
     await page.locator(".marketplace__grid").waitFor({ timeout: 15000 });
-    await page.locator(".marketplace__card").first().click();
+    await listingCard(page, listingId).click();
     await page.locator(".marketplace-detail__back a").click();
     await expect(page).toHaveURL(/\/marketplace$/, { timeout: 10000 });
   });
