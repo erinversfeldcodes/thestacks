@@ -8,20 +8,25 @@ simulated HTTP responses and user interactions.
 -}
 
 import Dict
+import Expect
 import Html.Attributes
 import Http
+import Navigation.Route as Route
 import Page.BookDetail as BookDetail
 import ProgramTest
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
     exposing
         ( bookDetailProgram
+        , bookDetailProgramWithOut
         , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
         , testBook
         , testPlacement
         )
+import Types.RemoteData exposing (RemoteData(..))
 
 
 {-| Helper to start a book detail program with an auth token.
@@ -45,6 +50,13 @@ suite =
         , placementLoadedShowsCurrentBookshelf
         , ariaRegionsPresent
         , ratingDisplayWithoutPlacement
+        , moveConfirmHappyUpdatesBookshelf
+        , removeConfirmNavigatesToPreviousRoute
+        , removeCompletedErrorShowsMessage
+        , confirmMoveNoPlacementIsNoOp
+        , confirmMoveNoTokenIsNoOp
+        , confirmRemoveNoPlacementIsNoOp
+        , confirmRemoveNoTokenIsNoOp
         ]
 
 
@@ -234,3 +246,186 @@ ratingDisplayWithoutPlacement =
                     (simulateBookDetailResponse "book-test-001" testBook)
                 |> ProgramTest.expectViewHas
                     [ Selector.class "book-detail__rating--empty" ]
+
+
+
+-- MOVE / REMOVE CONFIRM STATE-MACHINE COVERAGE (Issue #116 punch #15/#16)
+
+
+moveEndpoint : String
+moveEndpoint =
+    "/api/placements/placement-test-001/move"
+
+
+removeEndpoint : String
+removeEndpoint =
+    "/api/placements/placement-test-001"
+
+
+{-| A successful move: `Api.moveResponseToResult` maps any 2xx to `Ok ()`.
+-}
+moveSuccessResponse : Http.Response String
+moveSuccessResponse =
+    Http.GoodStatus_
+        { url = moveEndpoint
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        "{}"
+
+
+{-| A successful remove: `expectWhatever` maps any 2xx to `Ok ()`.
+-}
+removeSuccessResponse : Http.Response String
+removeSuccessResponse =
+    Http.GoodStatus_
+        { url = removeEndpoint
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        ""
+
+
+{-| #15 move-happy: `OpenBookshelfMover → SelectBookshelf → ConfirmMove →
+MoveCompleted (Ok _)` updates `currentBookshelf` (rendered in the shelf-actions
+title), closes the mover, and renders the success message.
+-}
+moveConfirmHappyUpdatesBookshelf : Test
+moveConfirmHappyUpdatesBookshelf =
+    test "move_confirm_happy: SelectBookshelf then ConfirmMove then MoveCompleted Ok updates currentBookshelf, closes the mover, and shows success" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Choose Bookshelf"
+                |> ProgramTest.update (BookDetail.SelectBookshelf "wishlist")
+                |> ProgramTest.clickButton "Move"
+                |> ProgramTest.simulateHttpResponse "PUT" moveEndpoint moveSuccessResponse
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Move to Shelf from Wish List" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Moved successfully." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.class "shelf-mover" ]
+
+
+{-| #15 remove-happy: `OpenRemoveModal → ConfirmRemove → RemoveCompleted (Ok _)`
+emits the OutMsg `NavigateTo previousRoute`. The page cannot observe its own
+OutMsg, so this uses the `bookDetailProgramWithOut` harness (which records it)
+with a concrete previous route to assert the navigation target.
+-}
+removeConfirmNavigatesToPreviousRoute : Test
+removeConfirmNavigatesToPreviousRoute =
+    test "remove_confirm_happy: ConfirmRemove then RemoveCompleted Ok emits OutMsg NavigateTo previousRoute" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Remove from collection"
+                |> ProgramTest.within (Query.find [ Selector.class "modal-overlay" ])
+                    (ProgramTest.clickButton "Remove")
+                |> ProgramTest.simulateHttpResponse "DELETE" removeEndpoint removeSuccessResponse
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal (BookDetail.NavigateTo Route.AntiLibrary) model.lastOut)
+
+
+{-| #16 remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.
+-}
+removeCompletedErrorShowsMessage : Test
+removeCompletedErrorShowsMessage =
+    test "remove_completed_error: a failed DELETE renders the remove failure message" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Remove from collection"
+                |> ProgramTest.within (Query.find [ Selector.class "modal-overlay" ])
+                    (ProgramTest.clickButton "Remove")
+                |> ProgramTest.simulateHttpResponse "DELETE"
+                    removeEndpoint
+                    (Http.BadStatus_
+                        { url = removeEndpoint
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Failed to remove book. Please try again." ]
+
+
+{-| #16 no-op guard: `ConfirmMove` with `placement == Nothing` fires no request
+(the simulated-effect layer's `(Just placement, Just token)` guard fails) and
+leaves `moveState` untouched.
+-}
+confirmMoveNoPlacementIsNoOp : Test
+confirmMoveNoPlacementIsNoOp =
+    test "confirm_move_no_placement: ConfirmMove with no placement fires no request and leaves moveState untouched" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.update
+                    (BookDetail.BookLoaded
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                    )
+                |> ProgramTest.update BookDetail.ConfirmMove
+                |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
+                |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
+
+
+{-| #16 no-op guard: `ConfirmMove` with a placement but `maybeToken == Nothing`
+fires no request and leaves `moveState` untouched. The placement is injected via
+`BookLoaded` because the no-token init makes no GET.
+-}
+confirmMoveNoTokenIsNoOp : Test
+confirmMoveNoTokenIsNoOp =
+    test "confirm_move_no_token: ConfirmMove with a placement but no token fires no request and leaves moveState untouched" <|
+        \() ->
+            ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
+                |> ProgramTest.update
+                    (BookDetail.BookLoaded
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                    )
+                |> ProgramTest.update BookDetail.ConfirmMove
+                |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
+                |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
+
+
+{-| #16 no-op guard: `ConfirmRemove` with `placement == Nothing` fires no request
+and leaves `removeState` untouched.
+-}
+confirmRemoveNoPlacementIsNoOp : Test
+confirmRemoveNoPlacementIsNoOp =
+    test "confirm_remove_no_placement: ConfirmRemove with no placement fires no request and leaves removeState untouched" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.update
+                    (BookDetail.BookLoaded
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                    )
+                |> ProgramTest.update BookDetail.ConfirmRemove
+                |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
+                |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.removeState)
+
+
+{-| #16 no-op guard: `ConfirmRemove` with a placement but `maybeToken == Nothing`
+fires no request and leaves `removeState` untouched.
+-}
+confirmRemoveNoTokenIsNoOp : Test
+confirmRemoveNoTokenIsNoOp =
+    test "confirm_remove_no_token: ConfirmRemove with a placement but no token fires no request and leaves removeState untouched" <|
+        \() ->
+            ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
+                |> ProgramTest.update
+                    (BookDetail.BookLoaded
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                    )
+                |> ProgramTest.update BookDetail.ConfirmRemove
+                |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
+                |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.removeState)

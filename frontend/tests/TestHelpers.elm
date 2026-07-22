@@ -1,6 +1,8 @@
 module TestHelpers exposing
-    ( ReadingPileTestModel
+    ( BookDetailTestModel
+    , ReadingPileTestModel
     , bookDetailProgram
+    , bookDetailProgramWithOut
     , bookshelfProgram
     , libraryProgram
     , loginProgram
@@ -40,6 +42,7 @@ import Dict
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Navigation.Route exposing (Route)
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.ReadingPile as ReadingPile
@@ -1625,5 +1628,47 @@ bookDetailProgram bookId maybeToken =
                 in
                 ( newModel, bookDetailEffects msg newModel maybeToken )
         , view = BookDetail.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Harness model that records the most recent BookDetail `OutMsg` alongside the
+page model. `Page.BookDetail.update` returns a third `OutMsg` element that the
+page itself cannot observe — `Main` consumes it. Recording it (as
+`ReadingPileTestModel` does for the Reading Pile) lets a program test assert the
+navigation intent a confirmed remove produces (`NavigateTo previousRoute`)
+rather than only the rendered model change.
+-}
+type alias BookDetailTestModel =
+    { page : BookDetail.Model
+    , lastOut : BookDetail.OutMsg
+    }
+
+
+{-| A BookDetail harness identical to `bookDetailProgram` except that it records
+the page's `OutMsg`. `bookDetailProgram` discards it; this one keeps the latest
+one so a test can observe `NavigateTo previousRoute` from a confirmed remove.
+Takes the previous route so the navigation target is a concrete, asserted value.
+-}
+bookDetailProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        BookDetail.init bookId maybeToken maybePreviousRoute
+                in
+                ( { page = model, lastOut = BookDetail.NoOut }
+                , bookDetailInitEffects bookId maybeToken
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, out ) =
+                        BookDetail.update msg model.page maybeToken
+                in
+                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+        , view = \model -> BookDetail.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity
