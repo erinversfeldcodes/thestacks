@@ -73,13 +73,13 @@ Compact format.
 | 1–9, 11–13 | no | n/a — client-side state handling only; no API, DB, event, job, storage, cache, dbt, metric or cost surface |
 
 ## Definition of Done
-- [ ] Program test: navigate away mid-load, stale response resolved afterwards, destination state intact — evidence: test name + run output
-- [ ] Same hazard covered for `ReadingPile` / `LookingForHome` — evidence: test name(s)
-- [ ] Test **fails** if the stale response is applied — evidence: deliberately broken run showing the failure
-- [ ] If a real defect was found, it is fixed and the fix is covered — evidence: diff + test; or "no defect found" with the evidence that established it
-- [ ] Every behaviour has a validation path — evidence: the program tests above; browser E2E `n/a` with the rationale recorded in the audit
-- [ ] `elm-test` green — evidence: command → pass count
-- [ ] `just verify` passes — evidence: command → output
+- [x] Program test: navigate away mid-load, stale response resolved afterwards, destination state intact — evidence: `frontend/tests/NavigationProgramTest.elm` "navigate_away_mid_load: a Library response arriving after routing to the Antilibrary is discarded" (+ the view-level "the Antilibrary does not render the stale Library book")
+- [x] Same hazard covered for `ReadingPile` / `LookingForHome` — evidence: structurally impossible for those two (each is the sole route behind its own `Page` constructor, so `Main.elm`'s constructor-match already discards a post-navigation response); the precondition is asserted, and the disposition is recorded in the issue's Test Audit (marked 🟡 with rationale, not a silent pass)
+- [x] Test **fails** if the stale response is applied — evidence: pre-fix run rendered "The Power of Habit" under the "Antilibrary" label (2 failed / 6 passed); deliberate-break proof (collapsing `requestKey` to a constant after the fix) re-fails the same two assertions
+- [x] If a real defect was found, it is fixed and the fix is covered — evidence: **real user-visible defect** — `requestKey` discrimination added at `frontend/src/Page/Bookshelf.elm:173-181` (`ShelvesLoaded` now carries the key) and `:241-249` (drops key mismatches); merged as `604020ec`
+- [x] Every behaviour has a validation path — evidence: the program tests above; browser E2E `n/a` (mid-flight navigation timing is inherently flaky; the deterministic program test proves the same invariant), rationale recorded in the audit
+- [x] `elm-test` green — evidence: 868 passing at the time of the fix; 940 on the integration branch post-merge
+- [x] `just verify` passes — evidence: green on the integration branch post-merge (`just run just verify` EXIT 0: 2749 elixir / 940 elm / 233 dbt)
 
 ## Dependencies
 None. Related: #125 (E2E Navigation & Error Handling), #112 (parent epic).

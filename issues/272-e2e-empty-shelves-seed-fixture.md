@@ -88,15 +88,14 @@ n/a — **stated as a positive finding, not skipped.** This adds a synthetic dev
 and no dbt model, and it never runs against production data. Erasure/export reachability is unchanged.
 
 ## Definition of Done
-- [ ] `empty-shelves` suite user added to `Seeds.e2e_suites()` and `E2E_SUITES` — evidence: diff
-- [ ] User is excluded from the placement `flat_map` and has zero placements — evidence: SQL count → 0
-- [ ] Existing suite users' placement counts unchanged (5/3/2) — evidence: SQL counts before/after
-- [ ] **Proving gate:** authenticated as the new user, all five shelves browsed on a live stack and the
-      empty-state text observed rendering — evidence: live-drive artifact per shelf (screenshot or captured text)
-- [ ] All five empty-state assertions run **unconditionally** — evidence: zero `if (count > 0)` guards remain in `bookshelf.spec.ts` / `looking-for-home.spec.ts` (grep → no matches)
-- [ ] Each assertion **fails** if the empty state stops rendering — evidence: deliberately broken run showing the failure, or equivalent proof of non-vacuity
-- [ ] Every behaviour has a validation path — evidence: the E2E assertions above
-- [ ] `just verify` passes — evidence: command → output
+- [x] `empty-shelves` suite user added to `Seeds.e2e_suites()` and `E2E_SUITES` — evidence: `apps/core/priv/repo/seeds.exs:47` `{25, "empty-shelves", "E2E Empty Shelves"}` + `e2e/tests/helpers.ts:41`; new `Seeds.e2e_empty_suites/0` allowlist (`seeds.exs:55`)
+- [x] User is excluded from the placement `flat_map` and has zero placements — evidence: `Enum.reject(... slug in Seeds.e2e_empty_suites())` at `seeds.exs:745` ahead of the placement `flat_map`; SQL count for the new user = 0 placements / 5 bookshelves
+- [x] Existing suite users' placement counts unchanged (5/3/2) — evidence: per-user md5 over ordered `(bookshelf, position, book_id, placement_id)` tuples **byte-identical** before/after (`diff` exit 0, all 15 pre-existing users); insert path exercised via full delete + re-seed
+- [x] **Proving gate:** authenticated as `e2e-empty-shelves@thestacks.test`, all five shelves browsed live (`BASE_URL=http://localhost:4000`), empty-state text observed rendering — evidence: 5 verbatim captures (Library "Your library is waiting…", AntiLibrary "Books you own but haven't read yet…", WishList "Books you're dreaming about…", Reading Pile "Nothing on the pile right now…", Looking for Home "Nothing here yet — these are books looking for a new home." — en dash confirmed)
+- [x] All five empty-state assertions run **unconditionally** — evidence: grep for `if ((await …count()) > 0)` in `bookshelf.spec.ts` / `reading-pile.spec.ts` / `looking-for-home.spec.ts` → **no matches**; all seven prior guards removed
+- [x] Each assertion **fails** if the empty state stops rendering — evidence: 3 break-and-observe runs (placements added to the empty-shelves user → all 5 bookshelf.spec assertions fail; placements added to looking-for-home user → that assertion fails; reading pile emptied → 3 reading-pile.spec assertions fail)
+- [x] Every behaviour has a validation path — evidence: the de-guarded E2E assertions above; two masked defects also fixed (armchair selector `.reading-pile__armchair`→`.armchair`; onboarding overlay obscuring the page, now seeded away with an `afterEach` overlay-count-0 guard)
+- [x] `just verify` passes — evidence: `just run just verify` EXIT 0 (2749 elixir / 940 elm / 233 dbt); committed `06e8dd65`
 
 ## Dependencies
 - Local PostgreSQL + seeded DB

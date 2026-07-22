@@ -67,7 +67,7 @@ Compact format — enabling change, no user-story surface.
 - [x] No behavioural change — evidence: diff contains only exposing/extraction changes
 - [x] `elm-review` clean, and does not revert the exposing change — evidence: `npx elm-review --config elm-review src/ tests/` → output
 - [x] `elm-test` suite green — evidence: command → pass count
-- [ ] `just verify` passes — **BLOCKED (environmental, not this change).** `just verify` cannot run in a
+- [x] `just verify` passes — evidence: green on the **integration branch** post-merge (`just run just verify` EXIT 0 on `feat/e2e-112`: 2749 elixir / 940 elm / 233 dbt). The worktree-local blocker below is why it was deferred to the integration run, not skipped. **BLOCKED-in-worktree (environmental, not this change):** `just verify` cannot run in a
   fresh worktree: it fails at its first recipe, `lint-elixir`, because `apps/core/lib/stacks/gen/`
   (~16 generated Ecto schemas) is gitignored and absent, so the umbrella will not compile —
   `Stacks.Accounts.User.__struct__/1 is undefined` and ~20 similar. `mix proto.sync`, the task that
