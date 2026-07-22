@@ -54,6 +54,16 @@ defmodule Stacks.Events.Registry do
     "placement.removed" => [
       Stacks.Feeds.Handlers.PlacementHandler
     ],
+    # placement.reread (US-1.6.3): emitted by Shelving.reread_book/2. Registered
+    # with an EMPTY handler set — matching the reading-lifecycle events below and
+    # PRESERVING this event's pre-existing no-handler behaviour (it was never
+    # wired to PlacementHandler/DbtRefreshHandler). stg_bookshelf_placements is a
+    # dbt view (the fresh library placement a re-read creates is reflected live),
+    # and no mart consumes re-read counts today, so no handler is warranted.
+    # Registering with `[]` keeps it in the all_event_types/0 catalog for
+    # replay/diagnostics without inventing a phantom handler. Surfacing re-reads
+    # in the activity feed would be a deliberate future change, tracked separately.
+    "placement.reread" => [],
     # Reading-lifecycle events (US-1.6.6), emitted by
     # Shelving.update_reading_progress/3. Registered with an EMPTY handler set
     # deliberately: `stg_bookshelf_placements` is a dbt `view` (it always

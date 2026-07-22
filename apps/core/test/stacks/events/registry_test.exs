@@ -43,6 +43,16 @@ defmodule Stacks.Events.RegistryTest do
       assert "placement.reading_started" in types
       assert "placement.reading_completed" in types
     end
+
+    # US-1.6.3 / Issue #116 punch #11: placement.reread (emitted by
+    # Shelving.reread_book/2) is registered with an EMPTY handler set — matching
+    # the reading-lifecycle events and preserving its pre-existing no-handler
+    # behaviour. As above, the []-assertion is vacuous alone (unregistered types
+    # also return []), so it is pinned to real registration via all_event_types/0.
+    test "placement.reread is registered with an empty handler set" do
+      assert Registry.handlers_for("placement.reread") == []
+      assert "placement.reread" in Registry.all_event_types()
+    end
   end
 
   describe "all_event_types/0" do

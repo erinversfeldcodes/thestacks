@@ -259,69 +259,98 @@ defmodule Stacks.Shelving do
   `{:error, :reading_pile_capacity, :reading_pile_full, _}`.
   """
   @spec move_book(binary(), binary(), String.t()) ::
-          {:ok, map()} | {:error, :unauthorized} | {:error, atom(), term(), map()}
+          {:ok, map()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, atom(), term(), map()}
   def move_book(placement_id, user_id, to_bookshelf_name) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
-    if placement.bookshelf.user_id != user_id do
-      {:error, :unauthorized}
-    else
-      from_bookshelf = placement.bookshelf
-      from_bookshelf_name = from_bookshelf.name
-      to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
-      # Browse lists placements through their physical shelf (op.shelves, #151),
-      # so a move must re-home the placement onto a shelf of the DESTINATION
-      # bookshelf — otherwise it stays visible on the source and never on the
-      # target. Mirrors the creation-time assignment in place_book/3 and
-      # reread_book/2: get-or-create the destination's default (position 0)
-      # shelf. Resolved outside the Multi exactly as place_book/3 does; on a
-      # capacity rejection the destination is a full reading_pile that already
-      # owns its default shelf, so this is a no-op read and no write precedes
-      # the rejection.
-      to_shelf = get_or_create_default_shelf(to_bookshelf.id)
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
 
-      Multi.new()
-      |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
-        check_move_capacity(repo, from_bookshelf, to_bookshelf)
-      end)
-      |> Multi.update(
-        :placement,
-        placement_changeset(placement, %{bookshelf_id: to_bookshelf.id, shelf_id: to_shelf.id})
-      )
-      |> Multi.insert(:history, fn _ ->
-        placement_history_changeset(%PlacementHistory{}, %{
-          book_id: placement.book_id,
-          from_bookshelf: from_bookshelf.id,
-          to_bookshelf: to_bookshelf.id,
-          moved_at: DateTime.utc_now()
-        })
-      end)
-      |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
-        Events.emit_safe(%{
-          event_type: "placement.moved",
-          aggregate_type: "placement",
-          aggregate_id: p.id,
-          payload: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
-        })
+        cond do
+          placement.bookshelf.user_id != user_id ->
+            {:error, :unauthorized}
 
-        {:ok, p}
-      end)
-      |> Multi.run(:audit, fn _repo, %{placement: p} ->
-        Audit.log(user_id, "placement.moved",
-          resource_type: "placement",
-          resource_id: p.id,
-          metadata: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
-        )
-      end)
-      |> Repo.transaction()
+          placement.bookshelf.name == to_bookshelf_name ->
+            # Same-bookshelf "move" is a no-op success. A user has at most one
+            # bookshelf per name, so an equal name means the same bookshelf. The
+            # Elm mover already excludes the current bookshelf, so this path is
+            # only reachable defensively (direct API/context call). Return the
+            # placement UNCHANGED — no PlacementHistory row, no `placement.moved`
+            # event, no audit entry, and (critically) WITHOUT the shelf_id reset
+            # the Multi below would perform, which would yank a book off a
+            # non-default shelf onto position 0 on a self-move. Shaped as
+            # `{:ok, %{placement: _}}` to match the Multi result the controller
+            # unwraps.
+            {:ok, %{placement: placement}}
+
+          true ->
+            do_move_book(placement, user_id, to_bookshelf_name)
+        end
     end
+  end
+
+  defp do_move_book(placement, user_id, to_bookshelf_name) do
+    from_bookshelf = placement.bookshelf
+    from_bookshelf_name = from_bookshelf.name
+    to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
+    # Browse lists placements through their physical shelf (op.shelves, #151),
+    # so a move must re-home the placement onto a shelf of the DESTINATION
+    # bookshelf — otherwise it stays visible on the source and never on the
+    # target. Mirrors the creation-time assignment in place_book/3 and
+    # reread_book/2: get-or-create the destination's default (position 0)
+    # shelf. Resolved outside the Multi exactly as place_book/3 does; on a
+    # capacity rejection the destination is a full reading_pile that already
+    # owns its default shelf, so this is a no-op read and no write precedes
+    # the rejection.
+    to_shelf = get_or_create_default_shelf(to_bookshelf.id)
+
+    Multi.new()
+    |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
+      check_move_capacity(repo, from_bookshelf, to_bookshelf)
+    end)
+    |> Multi.update(
+      :placement,
+      placement_changeset(placement, %{bookshelf_id: to_bookshelf.id, shelf_id: to_shelf.id})
+    )
+    |> Multi.insert(:history, fn _ ->
+      placement_history_changeset(%PlacementHistory{}, %{
+        book_id: placement.book_id,
+        from_bookshelf: from_bookshelf.id,
+        to_bookshelf: to_bookshelf.id,
+        moved_at: DateTime.utc_now()
+      })
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
+      Events.emit_safe(%{
+        event_type: "placement.moved",
+        aggregate_type: "placement",
+        aggregate_id: p.id,
+        payload: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
+      })
+
+      {:ok, p}
+    end)
+    |> Multi.run(:audit, fn _repo, %{placement: p} ->
+      Audit.log(user_id, "placement.moved",
+        resource_type: "placement",
+        resource_id: p.id,
+        metadata: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
+      )
+    end)
+    |> Repo.transaction()
   end
 
   @doc """
   Moves a book to the "looking_for_home" bookshelf (abandon flow).
   """
   @spec abandon_book(binary(), binary()) ::
-          {:ok, map()} | {:error, :unauthorized} | {:error, atom(), term(), map()}
+          {:ok, map()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, atom(), term(), map()}
   def abandon_book(placement_id, user_id) do
     move_book(placement_id, user_id, "looking_for_home")
   end
@@ -895,10 +924,20 @@ defmodule Stacks.Shelving do
     )
   end
 
-  defp shelf_changeset(shelf, attrs) do
+  @doc """
+  Changeset for creating a shelf. Declares the `(bookshelf_id, position)` unique
+  constraint (DB index `shelves_bookshelf_id_position_index`, migration
+  20260330130609) so a duplicate insert surfaces as `{:error, changeset}` instead
+  of raising `Ecto.ConstraintError`. `get_or_create_default_shelf/1` depends on
+  this: its race fallback (`{:error, _} -> get_by!`) only fires when the losing
+  concurrent insert returns an error tuple rather than raising.
+  """
+  @spec shelf_changeset(Shelf.t(), map()) :: Ecto.Changeset.t()
+  def shelf_changeset(shelf, attrs) do
     shelf
     |> cast(attrs, [:bookshelf_id, :position, :created_at])
     |> validate_required([:bookshelf_id, :position])
+    |> unique_constraint([:bookshelf_id, :position])
     |> put_created_at()
   end
 

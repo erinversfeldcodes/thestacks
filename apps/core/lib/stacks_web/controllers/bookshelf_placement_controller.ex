@@ -60,26 +60,40 @@ defmodule StacksWeb.BookshelfPlacementController do
   def move(conn, %{"id" => placement_id, "bookshelf" => to_bookshelf}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Shelving.move_book(placement_id, user.id, to_bookshelf) do
-      {:ok, %{placement: placement}} ->
-        json(conn, %{placement: ProtoJSON.placement_ref(placement)})
+    if to_bookshelf in @valid_bookshelves do
+      case Shelving.move_book(placement_id, user.id, to_bookshelf) do
+        {:ok, %{placement: placement}} ->
+          json(conn, %{placement: ProtoJSON.placement_ref(placement)})
 
-      {:error, :unauthorized} ->
-        conn
-        |> put_status(403)
-        |> json(%{error: "forbidden"})
+        {:error, :not_found} ->
+          conn
+          |> put_status(404)
+          |> json(%{error: "not found"})
 
-      # #276: stable error code the Elm client matches on to show the
-      # specific "reading pile is full" message.
-      {:error, :reading_pile_capacity, :reading_pile_full, _} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "reading_pile_full"})
+        {:error, :unauthorized} ->
+          conn
+          |> put_status(403)
+          |> json(%{error: "forbidden"})
 
-      {:error, _, reason, _} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: inspect(reason)})
+        # #276: stable error code the Elm client matches on to show the
+        # specific "reading pile is full" message.
+        {:error, :reading_pile_capacity, :reading_pile_full, _} ->
+          conn
+          |> put_status(422)
+          |> json(%{error: "reading_pile_full"})
+
+        {:error, _, reason, _} ->
+          conn
+          |> put_status(422)
+          |> json(%{error: inspect(reason)})
+      end
+    else
+      # Mirror create/2: reject an unknown bookshelf name at the boundary with a
+      # 422, before the context tries to lazily create it (get_or_create_bookshelf
+      # would otherwise raise on the invalid name).
+      conn
+      |> put_status(422)
+      |> json(%{error: "invalid bookshelf name"})
     end
   end
 

@@ -140,6 +140,122 @@ defmodule Stacks.ShelvingTest do
 
       assert event_count("placement.moved") == before_count + 1
     end
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.move_book(placement.id, other_user.id, "wishlist")
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.move_book(Ecto.UUID.generate(), user.id, "wishlist")
+    end
+
+    test "history row records to_bookshelf as the destination bookshelf id", %{
+      user: user,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      assert {:ok, %{history: history}} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      wishlist = Repo.get_by!(Bookshelf, user_id: user.id, name: "wishlist")
+      assert history.from_bookshelf == bookshelf.id
+      assert history.to_bookshelf == wishlist.id
+    end
+
+    test "writes an audit-log entry for the move (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.moved")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert audit_count("placement.moved") == before_count + 1
+
+      row = latest_audit_row("placement.moved")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.moved and ONLY that (no created/removed delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      removed_before = event_count("placement.removed")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.removed") == removed_before
+    end
+  end
+
+  describe "move_book/3 — same-bookshelf move is a no-op success (Fix B)" do
+    test "returns {:ok, placement} and writes no history, event, or audit row" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:ok, %{placement: returned}} = Shelving.move_book(placement.id, user.id, "library")
+      assert returned.id == placement.id
+
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+
+    test "does not reset a non-default shelf assignment to position 0" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      bookshelf = Repo.get_by!(Bookshelf, user_id: user.id, name: "library")
+
+      # Move the placement onto a second (non-position-0) shelf of the SAME
+      # bookshelf, then perform a same-bookshelf move: the no-op must NOT yank it
+      # back to the position-0 default shelf (which the old Multi path did).
+      {:ok, shelf2} = Shelving.create_shelf(bookshelf.id, user.id)
+      {:ok, on_shelf2} = Shelving.move_placement_to_shelf(placement.id, shelf2.id, user.id)
+      assert on_shelf2.shelf_id == shelf2.id
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "library")
+
+      reloaded = Repo.get!(Placement, placement.id)
+      assert reloaded.shelf_id == shelf2.id
+    end
+  end
+
+  describe "move_book/3 — atomicity / rollback" do
+    test "a step failure rolls back the placement update, history, event, and audit" do
+      # Force a deterministic mid-Multi failure: the placement UPDATE hits the
+      # partial unique index (one active placement per book+bookshelf) because the
+      # same book is already active on the destination. The whole transaction must
+      # roll back — the source placement stays put and nothing else is written.
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, source} = Shelving.place_book(user.id, book.id, "wishlist")
+      {:ok, _blocker} = Shelving.place_book(user.id, book.id, "antilibrary")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :placement, %Ecto.Changeset{}, _changes} =
+               Shelving.move_book(source.id, user.id, "antilibrary")
+
+      unmoved = Repo.get!(Placement, source.id) |> Repo.preload(:bookshelf)
+      assert unmoved.bookshelf.name == "wishlist"
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
   end
 
   describe "move_book/3 — shelf reassignment and browse visibility" do
@@ -349,6 +465,50 @@ defmodule Stacks.ShelvingTest do
 
       assert event_count("placement.removed") == before_count + 1
     end
+
+    test "writes an audit-log entry for the removal (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.removed")
+
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert audit_count("placement.removed") == before_count + 1
+
+      row = latest_audit_row("placement.removed")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.removed and ONLY that (no created/moved delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      moved_before = event_count("placement.moved")
+
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.moved") == moved_before
+    end
+
+    test "the underlying op.books record survives the soft-delete", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      # Placement is soft-deleted (removed_at set, row present)...
+      soft_deleted = Repo.get!(Placement, placement.id)
+      assert soft_deleted.removed_at != nil
+
+      # ...but the book row is untouched (remove is not a hard delete of the book).
+      assert Repo.get(Stacks.Books.Book, book.id) != nil
+    end
   end
 
   describe "reread_book/2" do
@@ -401,6 +561,39 @@ defmodule Stacks.ShelvingTest do
       assert event_count("placement.reread") == before_count + 1
     end
 
+    test "writes an audit-log entry for the re-read (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.reread")
+
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
+
+      assert audit_count("placement.reread") == before_count + 1
+
+      # The :audit step logs the NEW library placement do_reread_book/2 creates
+      # (resource_id: p.id, where p is the inserted placement), not the original.
+      row = latest_audit_row("placement.reread")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(new_placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.reread and ONLY that (no created/moved/removed delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      moved_before = event_count("placement.moved")
+      removed_before = event_count("placement.removed")
+
+      assert {:ok, _} = Shelving.reread_book(placement.id, user.id)
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.moved") == moved_before
+      assert event_count("placement.removed") == removed_before
+    end
+
     test "returns :unauthorized when the user does not own the placement", %{placement: placement} do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.reread_book(placement.id, other_user.id)
@@ -435,6 +628,51 @@ defmodule Stacks.ShelvingTest do
 
       assert book.id in browse_book_ids(user.id, "looking_for_home")
       refute book.id in browse_book_ids(user.id, "reading_pile")
+    end
+
+    test "a step failure rolls back the abandon (no history, event, or audit, placement unmoved)" do
+      # abandon_book delegates to move_book(_, _, "looking_for_home"); force the
+      # same deterministic update-step failure via the active-placement unique
+      # index (the book is already active on looking_for_home).
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, source} = Shelving.place_book(user.id, book.id, "reading_pile")
+      {:ok, _blocker} = Shelving.place_book(user.id, book.id, "looking_for_home")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :placement, %Ecto.Changeset{}, _changes} =
+               Shelving.abandon_book(source.id, user.id)
+
+      unmoved = Repo.get!(Placement, source.id) |> Repo.preload(:bookshelf)
+      assert unmoved.bookshelf.name == "reading_pile"
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+  end
+
+  describe "shelf_changeset/2 — unique (bookshelf_id, position) constraint (Fix A)" do
+    test "a duplicate (bookshelf_id, position) insert returns {:error, changeset}, not a raise" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      # First shelf at position 0.
+      insert(:shelf, bookshelf: bookshelf, position: 0)
+
+      # A second insert at the same (bookshelf_id, position) must surface the DB
+      # partial-unique index as a changeset error. Without the declared
+      # unique_constraint, Repo.insert RAISES Ecto.ConstraintError — which is
+      # exactly what breaks get_or_create_default_shelf/1's `{:error, _} -> get_by!`
+      # race fallback.
+      result =
+        %Stacks.Shelving.Shelf{}
+        |> Shelving.shelf_changeset(%{bookshelf_id: bookshelf.id, position: 0})
+        |> Repo.insert()
+
+      assert {:error, %Ecto.Changeset{} = changeset} = result
+      assert %{bookshelf_id: [_]} = errors_on(changeset)
     end
   end
 
@@ -1031,6 +1269,22 @@ defmodule Stacks.ShelvingTest do
     Repo.aggregate(
       from(a in "audit_log", prefix: "audit", where: a.action == ^action),
       :count
+    )
+  end
+
+  # Newest audit row for an action, with its target columns. audit_log stores
+  # user_id/resource_id as DUMPED binary UUIDs (Audit.log/3 → encode_uuid), so
+  # callers compare against Ecto.UUID.dump!/1. Pins that a regression logging the
+  # right action with a nil/wrong resource_id/resource_type/user_id would fail.
+  defp latest_audit_row(action) do
+    Repo.one(
+      from(a in "audit_log",
+        prefix: "audit",
+        where: a.action == ^action,
+        order_by: [desc: a.occurred_at],
+        limit: 1,
+        select: %{rt: a.resource_type, rid: a.resource_id, uid: a.user_id}
+      )
     )
   end
 
