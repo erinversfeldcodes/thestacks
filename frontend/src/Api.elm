@@ -28,6 +28,8 @@ module Api exposing
     , PrivacySettings
     , ProfileError(..)
     , ProfileShelfSummary
+    , Progress
+    , ProgressError(..)
     , PublicProfile
     , PublicProfileSummary
     , RegisterError(..)
@@ -95,6 +97,7 @@ module Api exposing
     , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
+    , progressResponseToResult
     , publicProfileDecoder
     , publicProfileSummaryDecoder
     , publishBlogPost
@@ -122,6 +125,7 @@ module Api exposing
     , updatePlacementVisibility
     , updateProfile
     , updateProfileVisibility
+    , updateProgress
     , updateShelfVisibility
     )
 
@@ -140,7 +144,7 @@ import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
-import Types.Placement exposing (Placement, placementDecoder, placementSummaryDecoder)
+import Types.Placement exposing (Placement, ReadingStatus, parseReadingStatus, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Url.Builder
@@ -885,6 +889,138 @@ removeBook placementId token toMsg =
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+
+-- READING PROGRESS (US-1.6.6)
+
+
+{-| The reading-progress fields returned by `PUT /api/placements/:id/progress`
+(`ProtoJSON.reading_progress/1`): `{id, reading_status, current_page,
+started_at, finished_at}`. Only these fields come back — NOT a full placement —
+so the host page folds them into the placement it already holds.
+-}
+type alias Progress =
+    { id : String
+    , readingStatus : Maybe ReadingStatus
+    , currentPage : Maybe Int
+    , startedAt : Maybe String
+    , finishedAt : Maybe String
+    }
+
+
+{-| A progress-update failure.
+
+A 422 carrying per-field `{errors: {current_page: [...]}}` (the page-count
+ceiling, a negative page, or an invalid status) is surfaced as
+`ProgressValidationFailed` so the page can explain "that page is past the end of
+the book". Every other failure — including the missing-status 422, which uses
+the `{error: ...}` shape — is a `ProgressRequestFailed`.
+
+-}
+type ProgressError
+    = ProgressValidationFailed (List ( String, List String ))
+    | ProgressRequestFailed Http.Error
+
+
+progressDecoder : Decoder Progress
+progressDecoder =
+    Decode.map5 Progress
+        (Decode.field "id" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "reading_status" Decode.string |> Decode.map parseReadingStatus
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "current_page" (Decode.nullable Decode.int)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "started_at" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "finished_at" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+
+
+{-| Map the raw HTTP response into a typed progress result. Pure so the
+elm-program-test simulated effect can reuse the exact mapping (mirrors
+`moveResponseToResult`). A 422 whose body carries `{errors: ...}` becomes
+`ProgressValidationFailed`; everything else is a `ProgressRequestFailed`.
+-}
+progressResponseToResult : Http.Response String -> Result ProgressError Progress
+progressResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ProgressRequestFailed (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ProgressRequestFailed Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ProgressRequestFailed Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString registerErrorsDecoder bodyText of
+                    Ok errors ->
+                        Err (ProgressValidationFailed errors)
+
+                    Err _ ->
+                        Err (ProgressRequestFailed (Http.BadStatus 422))
+
+            else
+                Err (ProgressRequestFailed (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString (Decode.field "placement" progressDecoder) bodyText of
+                Ok progress ->
+                    Ok progress
+
+                Err err ->
+                    Err (ProgressRequestFailed (Http.BadBody (Decode.errorToString err)))
+
+
+{-| PUT /api/placements/:id/progress — update a placement's reading status and
+(when reading) current page. `reading_status` is required; `current_page` is
+sent only when present.
+-}
+updateProgress :
+    String
+    -> { readingStatus : String, currentPage : Maybe Int }
+    -> String
+    -> (Result ProgressError Progress -> msg)
+    -> Cmd msg
+updateProgress placementId body token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
+        , body = Http.jsonBody (encodeProgressBody body)
+        , expect = Http.expectStringResponse toMsg progressResponseToResult
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+encodeProgressBody : { readingStatus : String, currentPage : Maybe Int } -> Encode.Value
+encodeProgressBody body =
+    Encode.object
+        (( "reading_status", Encode.string body.readingStatus )
+            :: (case body.currentPage of
+                    Just page ->
+                        [ ( "current_page", Encode.int page ) ]
+
+                    Nothing ->
+                        []
+               )
+        )
 
 
 {-| POST /api/gdpr/export — queue an export of the user's personal data.

@@ -54,6 +54,17 @@ defmodule Stacks.Events.Registry do
     "placement.removed" => [
       Stacks.Feeds.Handlers.PlacementHandler
     ],
+    # Reading-lifecycle events (US-1.6.6), emitted by
+    # Shelving.update_reading_progress/3. Registered with an EMPTY handler set
+    # deliberately: `stg_bookshelf_placements` is a dbt `view` (it always
+    # reflects the live reading_status/current_page — nothing to refresh), and
+    # no mart consumes reading progress today, so a DbtRefreshHandler would map
+    # to no models and enqueue a no-op job. Registering with `[]` keeps the
+    # registry the complete catalog of emitted event types (surfaced by
+    # `all_event_types/0` for replay/diagnostics) without inventing a phantom
+    # handler. Add a handler here if/when a reading-analytics mart lands.
+    "placement.reading_started" => [],
+    "placement.reading_completed" => [],
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],

@@ -25,6 +25,24 @@ defmodule Stacks.Events.RegistryTest do
                Stacks.Books.Handlers.CacheInvalidationHandler
              ]
     end
+
+    # US-1.6.6: the reading-lifecycle events are emitted by
+    # Shelving.update_reading_progress/3 and registered with an EMPTY handler
+    # set (stg_bookshelf_placements is a dbt view — always live — and no mart
+    # consumes reading progress today, so no handler is warranted). Registration
+    # keeps them in the catalog (all_event_types/0) without a phantom handler.
+    test "reading-lifecycle events are registered with an empty handler set" do
+      # handlers_for/1 returns [] for an UNREGISTERED type too (registry.ex
+      # falls back to Map.get(@registry, t, [])), so the empty-set assertion is
+      # vacuous on its own. Pin it to actual registration by also asserting the
+      # types appear in the catalog (all_event_types/0 only lists @registry keys).
+      assert Registry.handlers_for("placement.reading_started") == []
+      assert Registry.handlers_for("placement.reading_completed") == []
+
+      types = Registry.all_event_types()
+      assert "placement.reading_started" in types
+      assert "placement.reading_completed" in types
+    end
   end
 
   describe "all_event_types/0" do
@@ -34,6 +52,12 @@ defmodule Stacks.Events.RegistryTest do
 
     test "all entries are strings" do
       assert Enum.all?(Registry.all_event_types(), &is_binary/1)
+    end
+
+    test "catalogues the reading-lifecycle event types (US-1.6.6)" do
+      types = Registry.all_event_types()
+      assert "placement.reading_started" in types
+      assert "placement.reading_completed" in types
     end
   end
 end

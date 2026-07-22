@@ -52,7 +52,7 @@ import SimulatedEffect.Http
 import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
-import Types.Placement exposing (Placement, placementDecoder)
+import Types.Placement exposing (Placement, placementDecoder, readingStatusToString)
 import Types.RemoteData
 import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
@@ -266,6 +266,16 @@ encodePlacement placement =
                     Nothing ->
                         []
                )
+            ++ (case placement.readingStatus of
+                    Just status ->
+                        [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
+
+                    Nothing ->
+                        []
+               )
+            ++ encodeMaybe "current_page" Encode.int placement.currentPage
+            ++ encodeMaybe "started_at" Encode.string placement.startedAt
+            ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
         )
 
 
@@ -553,6 +563,16 @@ simulateBookDetailResponseWithPlacement bookId book placement =
                             Nothing ->
                                 []
                        )
+                    ++ (case placement.readingStatus of
+                            Just status ->
+                                [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
+
+                            Nothing ->
+                                []
+                       )
+                    ++ encodeMaybe "current_page" Encode.int placement.currentPage
+                    ++ encodeMaybe "started_at" Encode.string placement.startedAt
+                    ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
                 )
 
         json =
@@ -1041,6 +1061,48 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
+        BookDetail.ProgressCardMsg _ ->
+            -- `model` is the post-update model. A Loading progressSaveState means
+            -- the card emitted ProgressUpdateRequested and a PUT should be issued.
+            case ( model.placement, maybeToken, model.progressSaveState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/progress"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.ProgressSaved
+                                Api.progressResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.RecordReadRequested ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/move"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.MoveCompleted
+                                Api.moveResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
         BookDetail.PlacementVisibilitySelected _ ->
             -- `model` here is the post-update model (bookDetailProgram passes
             -- newModel). A Loading visibilityState means the client-side ceiling
@@ -1263,10 +1325,61 @@ readingPileProgram maybeToken =
                     ( newPage, _, out ) =
                         ReadingPile.update msg model.page
                 in
-                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+                ( { page = newPage, lastOut = out }, readingPileEffects msg newPage maybeToken )
         , view = \model -> ReadingPile.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Translate Reading Pile page Cmds into SimulatedEffects.
+
+Mirrors `ReadingPile.update`'s progress + record-read paths: a `CardMsg` that
+left `saveState = Loading` issues the `PUT /progress`; `RecordReadRequested`
+issues the `PUT /move` to the library. The request bodies are placeholders —
+tests supply the response, and the expect mapping (reused from `Api`) is what
+routes it back into the page.
+
+-}
+readingPileEffects : ReadingPile.Msg -> ReadingPile.Model -> Maybe String -> SimulatedEffect ReadingPile.Msg
+readingPileEffects msg newPage maybeToken =
+    case ( msg, maybeToken ) of
+        ( ReadingPile.CardMsg placementId _, Just token ) ->
+            case newPage.saveState of
+                Types.RemoteData.Loading ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placementId ++ "/progress"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                (ReadingPile.ProgressSaved placementId)
+                                Api.progressResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        ( ReadingPile.RecordReadRequested placementId, Just token ) ->
+            SimulatedEffect.Http.request
+                { method = "PUT"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/placements/" ++ placementId ++ "/move"
+                , body =
+                    SimulatedEffect.Http.jsonBody
+                        (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
+                , expect =
+                    SimulatedEffect.Http.expectStringResponse
+                        (ReadingPile.RecordReadDone placementId)
+                        Api.moveResponseToResult
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        _ ->
+            SimulatedEffect.Cmd.none
 
 
 {-| Translate the Reading Pile init Cmd into a SimulatedEffect.

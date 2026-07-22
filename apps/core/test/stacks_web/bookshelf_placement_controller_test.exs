@@ -479,6 +479,22 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
       assert json_response(conn, 401)
     end
+
+    test "returns 422 with a current_page field error when the page exceeds the book's page count",
+         %{conn: conn, user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{
+          reading_status: "reading",
+          current_page: 999_999
+        })
+
+      assert %{"errors" => %{"current_page" => [_ | _]}} = json_response(conn, 422)
+    end
   end
 
   # Fills the user's reading_pile bookshelf with `count` active placements,

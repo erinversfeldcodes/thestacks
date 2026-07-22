@@ -814,6 +814,52 @@ defmodule Stacks.ShelvingTest do
       assert %{reading_status: [_]} = errors_on(changeset)
     end
 
+    test "rejects current_page above the known primary-edition page count", %{user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:error, changeset} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 999_999
+               })
+
+      assert %{current_page: [_]} = errors_on(changeset)
+    end
+
+    test "accepts current_page equal to the known page count (boundary)", %{user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 112
+               })
+
+      assert updated.current_page == 112
+    end
+
+    test "permits any current_page when the page count is unknown", %{
+      user: user,
+      placement: placement
+    } do
+      # The setup book has no edition, so the primary-edition page count is
+      # unknown. The ceiling is permissive in that case — a reader is never
+      # blocked on missing catalogue metadata.
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 999_999
+               })
+
+      assert updated.current_page == 999_999
+    end
+
     test "emits placement.reading_started event on first reading transition", %{
       user: user,
       placement: placement

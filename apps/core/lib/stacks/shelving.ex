@@ -18,6 +18,7 @@ defmodule Stacks.Shelving do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Audit
+  alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
@@ -661,8 +662,10 @@ defmodule Stacks.Shelving do
   def update_reading_progress(placement_id, user_id, attrs) do
     placement =
       case Repo.get(Placement, placement_id) do
+        # Preload the book's editions too: the page-count ceiling (below) lives
+        # on the primary edition, not the placement, so we resolve it here.
         nil -> nil
-        p -> Repo.preload(p, :bookshelf)
+        p -> Repo.preload(p, [:bookshelf, book: :editions])
       end
 
     case placement do
@@ -697,8 +700,15 @@ defmodule Stacks.Shelving do
       |> maybe_set_started_at(is_first_reading)
       |> maybe_set_finished_at(is_completing)
 
+    page_ceiling = placement_page_count(placement)
+
     Multi.new()
-    |> Multi.update(:placement, reading_progress_changeset(placement, progress_attrs))
+    |> Multi.update(
+      :placement,
+      placement
+      |> reading_progress_changeset(progress_attrs)
+      |> maybe_validate_page_ceiling(page_ceiling)
+    )
     |> Multi.run(:emit_events, fn _repo, %{placement: updated} ->
       emit_reading_events(updated, is_first_reading, is_completing)
     end)
@@ -709,6 +719,28 @@ defmodule Stacks.Shelving do
       {:error, _, reason, _} -> {:error, reason}
     end
   end
+
+  # Reading progress may not exceed the book's primary-edition page count when
+  # that count is KNOWN. Page count lives on the edition, not the placement, so
+  # the ceiling is enforced at the context layer (here) rather than in
+  # `reading_progress_changeset/2`, which has no access to the book. When the
+  # page count is unknown (no edition, or an edition with a null/zero
+  # page_count) NO ceiling is applied — a reader is never blocked on missing
+  # catalogue metadata (permissive by design).
+  defp placement_page_count(%Placement{book: %Book{} = book}) do
+    case Books.primary_edition(book) do
+      %{page_count: pc} when is_integer(pc) and pc > 0 -> pc
+      _ -> nil
+    end
+  end
+
+  defp placement_page_count(_placement), do: nil
+
+  defp maybe_validate_page_ceiling(changeset, page_count) when is_integer(page_count) do
+    validate_number(changeset, :current_page, less_than_or_equal_to: page_count)
+  end
+
+  defp maybe_validate_page_ceiling(changeset, _page_count), do: changeset
 
   defp emit_reading_events(placement, is_first_reading, is_completing) do
     if is_first_reading do
