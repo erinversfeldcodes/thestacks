@@ -37,11 +37,11 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.6.1 — Move a Book Between Shelves | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.6.2 — Abandon a Book Back to AntiLibrary | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.6.3 — Record Multiple Reads | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.6.4 — Remove a Book from the Collection | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.6.5 — Empty Shelf States | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.6.1 — Move a Book Between Shelves | `PUT /placements/:id/move` → `move` (`bookshelf_placement_controller.ex:60`) → `Shelving.move_book/3` (`shelving.ex:262`) → browse `get_bookshelf_shelves/2` (`shelving.ex:819`) | Driven 2026-07-22 (minted user): move 200, history/event/audit OK — **but moved book stays on SOURCE browse, absent from TARGET** (`move_book/3:278` updates `bookshelf_id`, never `shelf_id`; browse reads via physical shelf since #151) | 🟡 partial | **build in-scope (plan Phase 1)**: `move_book/3` reassigns `shelf_id` to a destination-bookshelf shelf + browse-level regression tests. Do NOT E2E-green until fixed. |
+| US-1.6.2 — Abandon a Book Back to AntiLibrary | Same move mechanism, `{bookshelf: "antilibrary"}` | Driven 2026-07-22: 200 but reading_pile still count=1, antilibrary count=0 — same shelf_id defect | 🟡 partial | **fixed by Phase 1** (same defect). |
+| US-1.6.3 — Record Multiple Reads | Two `move` calls; history via `op.bookshelf_placement_history`; wear via `spine_data/1` | Driven 2026-07-22: library→reading_pile→library both 200; **2 history rows observed**; end state correct | ✅ implemented | — (outbound hop shares the Phase-1 fix; end-state correct) |
+| US-1.6.4 — Remove a Book from the Collection | `DELETE /placements/:id` → `Shelving.remove_book/2` | Driven 2026-07-22: 204; `removed_at` set; `op.books` row intact; gone from listing | ✅ implemented | — |
+| US-1.6.5 — Empty Shelf States | `BookshelfController.show` → `get_bookshelf_shelves/2` count=0; five empty strings in built app.js | Driven 2026-07-22 (fresh minted user): all 5 bookshelves 200 count=0; E2E asserts wording **unguarded** vs zero-placement `empty-shelves` suite user (`bookshelf.spec.ts:319+`, `looking-for-home.spec.ts:20`) | ✅ implemented | — (baseline punch #18 resolved by #112) |
 | US-1.6.6 — Track Reading Progress | `PUT /placements/:id/progress` → `update_progress` + `Shelving.update_reading_progress/3` built; `reading_status`/`current_page` cols exist. **Frontend orphaned**: `Components.PlacementCard` mounted nowhere, no `Api.updateProgress`; `placement.reading_started/completed` unregistered in `Events.Registry`; no page-count ceiling | ❌ not driven (no UI wired) | 🟡 partial | **build in-scope**: mount progress UI in ReadingPile/BookDetail + wire `Api.updateProgress`, register events, add page ≤ total guard (see US-1.6.6 Implementation Status). Do NOT E2E-green until built. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
@@ -568,6 +568,13 @@ are partially blocked on feature-code fixes.
 - [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
 - [ ] `just verify` passes
+- [ ] **DoD additions (planning sufficiency check, 2026-07-22):**
+  - [ ] The move shelf_id defect (US-1.6.1/1.6.2 blocking finding) is fixed with browse-level regression tests at unit AND E2E layers — evidence: live drive shows the moved book on the target browse and absent from the source
+  - [ ] US-1.6.6: page-count ceiling enforced (`current_page` cannot exceed the edition's page count where known; unknown-count behaviour decided + recorded) — evidence: ExUnit test names + run output
+  - [ ] US-1.6.6: `placement.reading_started`/`reading_completed` registered in `Events.Registry` with a decided handler set (decision recorded) — evidence: registry diff + firing test
+  - [ ] Regenerated audit marks payload-shape cells `n/a (PayloadContract)` with rationale (emit-time validation + coverage test) rather than per-US payload tests
+  - [ ] `just run just ci` green on the branch before the PR (integration gate — `just verify` alone is insufficient per project memory)
+  - [ ] `gdpr-review` lens run at review on the phases touching events/endpoints/dbt — expected n/a-with-rationale, stated not skipped
 
 ## Dependencies
 - Seeded books with placements on various shelves
