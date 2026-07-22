@@ -84,6 +84,10 @@ plans/*-state-complete.json
 # Test upload artifacts
 apps/core/priv/static/uploads/
 e2e/test-results
+# E2E live-drive artifacts (screenshots, DOM/computed-style captures). Bulky and
+# transient; regenerated per drive. Specific captures cited as DoD evidence were
+# committed BEFORE this rule and stay tracked — gitignore does not untrack them.
+e2e/artifacts/
 apps/core/cover/
 frontend/test-results
 frontend/public/elm.js
