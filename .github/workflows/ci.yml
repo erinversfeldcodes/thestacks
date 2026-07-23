@@ -1045,12 +1045,14 @@ jobs:
           CORE_URL="https://${PREVIEW_CORE_APP}.fly.dev"
           HOST="${PREVIEW_CORE_APP}.fly.dev"
           NEON_BRANCH="${PREVIEW_NEON_BRANCH}"
-          echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
-          echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
           # GRAFANA_URL is consumed by the main E2E step so dashboards.spec runs
           # (renders live panels) INSIDE the suite instead of skipping on
           # !GRAFANA_URL (Issue #269 workstream 2). Deterministic preview host.
-          echo "GRAFANA_URL=https://${PREVIEW_GRAFANA_APP}.fly.dev" >> "$GITHUB_ENV"
+          {
+            echo "CORE_URL=${CORE_URL}"
+            echo "NEON_BRANCH=${NEON_BRANCH}"
+            echo "GRAFANA_URL=https://${PREVIEW_GRAFANA_APP}.fly.dev"
+          } >> "$GITHUB_ENV"
           IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
           if [[ -z "${IPV4}" ]]; then
             echo "FAIL: no A record for ${HOST}"
