@@ -161,8 +161,7 @@ defmodule Stacks.Feeds do
   end
 
   defp build_atom_xml(bookshelf, placements) do
-    user = bookshelf.user
-    display_name = user.display_name || user.email
+    display_name = feed_display_name(bookshelf.user)
 
     updated =
       placements
@@ -238,6 +237,23 @@ defmodule Stacks.Feeds do
   defp isbn_link(isbn) do
     "\n    <link rel=\"related\" href=\"https://openlibrary.org/isbn/#{isbn}\" />"
   end
+
+  # The public-facing name shown in a feed's <title> and <author>. A feed is a
+  # crawlable public artifact, so it must NEVER contain the owner's email (GDPR
+  # personal data, #283). Fallback ladder: chosen display_name → claimed handle
+  # (always present — op.users.handle is NOT NULL and app-assigned on every
+  # insert) → a neutral label as a defensive backstop for a blank handle. Blank
+  # strings are treated as absent so an empty value never renders as the name.
+  defp feed_display_name(user) do
+    cond do
+      present?(user.display_name) -> user.display_name
+      present?(user.handle) -> user.handle
+      true -> "A Stacks reader"
+    end
+  end
+
+  defp present?(nil), do: false
+  defp present?(value) when is_binary(value), do: String.trim(value) != ""
 
   defp humanize_bookshelf(name) do
     name

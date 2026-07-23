@@ -93,6 +93,69 @@ defmodule Stacks.FeedsTest do
       assert String.contains?(xml, "&lt;")
     end
 
+    # A public Atom document is crawled and cached by RSS readers, so the owner's
+    # email must never appear anywhere in it (title/author/entries). These three
+    # tests pin the fallback ladder: display_name → handle → neutral label.
+    test "never leaks the owner email in feed XML when display_name and handle are blank (#283)" do
+      # op.users.handle is NOT NULL (backfilled + app-assigned on every insert),
+      # so the only reachable "no name" shape is a blank handle — the defensive
+      # backstop the neutral label exists for.
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: ""
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+      assert String.contains?(xml, "A Stacks reader")
+    end
+
+    test "falls back to the claimed handle when display_name is nil (#283)" do
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      assert String.contains?(xml, "shadow_reader")
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+    end
+
+    test "uses display_name when present and never the email (#283)" do
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: "Erin",
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      assert String.contains?(xml, "Erin")
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+    end
+
     test "a cache-write failure still serves the fresh render (cache is an optimization)" do
       user = insert(:user, display_name: "Erin")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -125,6 +188,29 @@ defmodule Stacks.FeedsTest do
       assert row
       assert row.atom_xml == xml
       assert row.etag == etag
+    end
+
+    test "persists email-free cache XML for a nil-display-name user (#283 self-heal)" do
+      # The migration busts pre-fix rows; regeneration must then refill the cache
+      # with email-free XML so a subsequent hit never re-serves the email.
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, _xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      row = Repo.get_by(FeedCacheEntry, bookshelf_id: bookshelf.id)
+      assert row
+      refute String.contains?(row.atom_xml, "owner-secret@example.com")
+      refute String.contains?(row.atom_xml, "@")
+      assert String.contains?(row.atom_xml, "shadow_reader")
     end
 
     test "returns {:error, :not_found} for a nonexistent bookshelf" do
