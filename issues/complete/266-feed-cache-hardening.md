@@ -60,11 +60,11 @@ n/a — the feed cache is built (#264); this hardens error paths.
 | others | no | n/a |
 
 ## Definition of Done
-- [ ] Cache-write failure serves the fresh feed (or graceful error), no 500/crash; `@spec`s accurate — evidence: controller + worker tests
-- [ ] `op.feed_cache` has a single `bookshelf_id` index (generator suppresses the redundant one, or drop migration) — evidence: migration/schema + `proto.sync --check` green
-- [ ] Dead `Feeds.generate_atom/2` removed (or folded into the shared builder); its assertions migrated to `fetch_feed/2`/`regenerate/2` — evidence: diff + green feeds tests
-- [ ] `just verify` passes — evidence: command→output
-- [ ] Test audit GREEN — evidence: table
+- [x] Cache-write failure serves the fresh feed (or graceful error), no 500/crash; `@spec`s accurate — evidence: tests-first (8 pre-impl failures incl. controller 500 + worker crash); fetch_feed serves fresh XML on failed write, RegenerateFeedJob retries via {:error, {:cache_write_failed, _}}; feed suite 128/0, dialyzer 0 (commit db749f86)
+- [x] `op.feed_cache` has a single `bookshelf_id` index (generator suppresses the redundant one, or drop migration) — evidence: BOTH — generator suppresses when a single-column index covers the FK (control test proves other tables unchanged) + drop migration 20260723120000 (CONCURRENTLY, squawk-safe); pg_indexes shows one index; `mix proto.sync --check` exit 0; fresh-DB gate ALL PASS 2026-07-23 (2851/0, dbt 64+237)
+- [x] Dead `Feeds.generate_atom/2` removed; its 6 assertions migrated onto `fetch_feed/2` — evidence: diff db749f86 + feeds tests green
+- [x] `just verify` passes — evidence: fresh-DB gate (drop→migrate→seeds→mix test 2851/0→dbt 64/64+237/237→checkpoint) ALL PASS 2026-07-23; lint-elixir exit 0
+- [x] Test audit GREEN — evidence: every changed behaviour test-covered (upsert-failure paths at controller+worker+context, index singularity via migration test, generator control test); no ❌/⚠️ cells remain
 
 ## Dependencies
 Follow-up from #119 epic (child #264). Non-blocking for the #119 PR.
