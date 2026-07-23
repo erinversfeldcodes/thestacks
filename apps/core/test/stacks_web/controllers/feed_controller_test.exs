@@ -3,7 +3,8 @@ defmodule StacksWeb.FeedControllerTest do
   Tests for GET /api/feeds/:user_id/:bookshelf_name.
   """
 
-  use CoreWeb.ConnCase, async: true
+  # async: false — mutates the global :feed_cache_writer env seam (see FeedsTest).
+  use CoreWeb.ConnCase, async: false
 
   import Ecto.Query
   import Stacks.Factory

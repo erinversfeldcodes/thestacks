@@ -1,7 +1,8 @@
 defmodule Stacks.Workers.RegenerateFeedJobTest do
   @moduledoc "Tests for Stacks.Workers.RegenerateFeedJob."
 
-  use Core.DataCase, async: true
+  # async: false — mutates the global :feed_cache_writer env seam (see FeedsTest).
+  use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query

@@ -3,7 +3,10 @@ defmodule Stacks.FeedsTest do
   Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
-  use Core.DataCase, async: true
+  # async: false — these tests swap the GLOBAL :feed_cache_writer application-env
+  # seam (Application.put_env); running async lets the override leak into (and be
+  # reset under) concurrent tests that exercise the cache write path.
+  use Core.DataCase, async: false
 
   import Ecto.Query
   import Stacks.Factory
