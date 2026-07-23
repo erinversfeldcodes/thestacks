@@ -49,10 +49,6 @@ interface CatalogueBook {
   pageCount: number | null;
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 async function catalogueBooks(
   request: APIRequestContext
 ): Promise<CatalogueBook[]> {
@@ -103,11 +99,16 @@ function shelfSpine(page: Page, bookId: string): Locator {
   return page.locator(`#spine-${bookId}`);
 }
 
-/** The book spine on the Reading Pile, matched by its accessible name. */
+/**
+ * The book spine on the Reading Pile, matched by its accessible name. A
+ * substring match on the literal `Book: <title> by` anchors the title between
+ * the label's two fixed fragments — no RegExp construction (semgrep
+ * detect-non-literal-regexp), same selectivity.
+ */
 function pileSpine(page: Page, title: string): Locator {
   return page
     .locator(".book-pile")
-    .getByLabel(new RegExp("^Book: " + escapeRegex(title) + " by"));
+    .getByLabel(`Book: ${title} by`, { exact: false });
 }
 
 /**
