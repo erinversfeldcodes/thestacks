@@ -47,10 +47,10 @@ feed fetched live contains no email anywhere in the XML.
 | E2E | optional | live feed fetch asserting no email for a nil-name user |
 
 ## Definition of Done
-- [ ] No email in any generated feed XML (all fallback paths) — evidence: tests + live fetch
-- [ ] Stale cached feeds handled — evidence: migration/regeneration or cited TTL rationale
-- [ ] `gdpr-review` lens run — evidence: findings or clean statement
-- [ ] `just verify` passes
+- [x] No email in any generated feed XML (all fallback paths) — evidence: `feed_display_name/1` ladder (display_name → handle → "A Stacks reader") at feeds.ex; 4 new tests incl. no-@-anywhere assertions (feeds suite 19/0); live drive 2026-07-23: fresh render for a nil-display-name minted user shows the handle, zero email/@ in the XML (commit f0b4d011)
+- [x] Stale cached feeds handled — evidence: data-only migration 20260723130000 deletes cached rows matching an email pattern (idempotent; safe because #266 made cache misses serve-fresh + refill); fresh-DB gate ALL PASS with it (2855/0); no TTL exists so deletion was required, rationale in the migration moduledoc
+- [x] `gdpr-review` lens run — evidence: public-surface PII removal (email out of crawlable Atom XML); no new personal data, endpoints, or event payloads introduced; feed_cache erasure reachability unchanged (bookshelf FK on_delete: :delete_all); the handle rendered instead is the user's chosen public identifier
+- [x] `just verify` passes — evidence: fresh-DB gate 2026-07-23 (clean-rebuilt _build, drop→migrate→seeds→mix test 2855/0) + lint-elixir exit 0
 
 ## Dependencies
 Builds on #266 (this branch). Related: #264 (origin).
