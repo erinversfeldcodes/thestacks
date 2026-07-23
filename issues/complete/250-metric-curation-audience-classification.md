@@ -51,13 +51,32 @@ These are aggregate, non-PII, non-de-anonymisable, so they are `:public` per the
   surfaces themselves are out of scope for this issue.
 
 ## Definition of Done
-- [ ] Audience registry implemented; all 49 families explicitly `:public`; unclassified defaults
-      to not-public (fail-closed), proven by a test.
-- [ ] `just verify` green; no metric instrumentation removed.
-- [ ] Feeds the allowlist-rename phase (`@allowlist`) and the completeness-gate phase (completeness gate).
+- [x] Audience registry implemented; all 49 families explicitly `:public`; unclassified defaults
+      to not-public (fail-closed), proven by a test. — `Core.PromEx.MetricAudience`
+      (`metric_audience.ex:47-115`, `@audience` map = 49 `:public` entries); `audience/1` fail-closed
+      via `Map.get(@audience, family, :unclassified)`; proof `metric_audience_test.exs:33` ("fail-closed:
+      an unknown/future metric is NOT public until explicitly promoted") + `:21` (every registered family
+      classified) + `:39` (all current `:public`). All green — targeted run 59 tests / 0 failures 2026-07-23.
+- [x] `just verify` green; no metric instrumentation removed. — no `:telemetry.execute` sites removed
+      (registry is additive); full-branch `just verify` GREEN on the merged `feat/wave2-observability`
+      stack 2026-07-17 (epic #249); targeted firing/drift/completeness suites re-run GREEN 2026-07-23.
+- [x] Feeds the allowlist-rename phase (`@allowlist`) and the completeness-gate phase (completeness gate).
+      — consumed by `Stacks.Transparency` (`transparency.ex:77` `@allowlist`, `allowlist_queries/0:188`;
+      cross-checked by `metric_audience_test.exs:66` "every metric on the public transparency allowlist is
+      classified `:public`") and by `Core.PromEx.DashboardCompletenessTest` (`dashboard_completeness_test.exs:63`,
+      measured ⊆ displayed gate reads `MetricAudience.audience/1`).
 
 ## Dependencies
 Parent #249. Blocks the allowlist-rename phase, the transparency-repoint phase, the completeness-gate phase. Grounded by the #249 metric audit.
 
 ## Agent Assignment
 elixir-agent.
+
+## Progress Notes
+- **Verified absorbed by #249's shipped stack, close-out audit 2026-07-23.** The fail-closed audience
+  registry is live: `Core.PromEx.MetricAudience` (`metric_audience.ex`) classifies all 49 registered
+  families `:public`; `audience/1` returns `:unclassified` (not public) for any unlisted family. Proven
+  fail-closed by `metric_audience_test.exs:33` and enforced measured⊆classified by `:21`. Consumed by
+  the `@allowlist` boundary (`transparency.ex`) and the global completeness gate
+  (`dashboard_completeness_test.exs`). Targeted suite GREEN 2026-07-23 (59 tests / 0 failures across the
+  discovery/audience/drift/completeness files). No instrumentation removed. **CLOSE-READY.**

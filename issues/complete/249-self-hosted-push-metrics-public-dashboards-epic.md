@@ -158,3 +158,28 @@ asserts non-empty — no "eyeball it" step is acceptable. Two layers:
 
 ## Agent Assignment
 - infra/deploy (P3/P5), elixir (P1/P2/P4/P6), platform/test (P7).
+
+## Progress Notes
+- **Verified absorbed / shipped, close-out audit 2026-07-23.** One artifact spot-checked per phase:
+  - **P1 audience gate** — `Core.PromEx.MetricAudience` (`metric_audience.ex`), fail-closed, proven by
+    `metric_audience_test.exs:33` (= issue #250, CLOSE-READY).
+  - **P2 `@allowlist` rename** — `transparency.ex:77` `@allowlist` + `allowlist_keys/0:181`,
+    `:not_allowlisted:200`.
+  - **P3 VictoriaMetrics deploy** — `deploy/fly.victoriametrics.toml` present.
+  - **P4 in-BEAM pusher** — `Core.PromEx.MetricsPusher` (`apps/core/lib/core/prom_ex/metrics_pusher.ex`).
+  - **P5 self-hosted public Grafana** — `deploy/fly.grafana.toml` + `deploy/grafana/provisioning/datasources`.
+  - **P6 transparency repoint** — `Stacks.Transparency.Prometheus` (`transparency/prometheus.ex` +
+    `prometheus_client.ex`).
+  - **P7 completeness gate** — `DashboardCompletenessTest` (`dashboard_completeness_test.exs`, global
+    measured ⊆ displayed) + `just render-gate` (`scripts/dashboard-render-gate.sh`).
+- **Six dashboards present** in `apps/core/priv/grafana/`: `auth_security`, `discovery`,
+  `gdpr_data_rights`, `moderation_agegate`, `platform_ops`, `visibility_social`.
+- **Far-end signal:** the automated live render-gate (`e2e/tests/dashboards.spec.ts`, gated on `GRAFANA_URL`)
+  is **not reachable from this workspace** — no `GRAFANA_URL` in `.env`, so I could not evaluate every panel
+  against the deployed VM from here. The `just render-gate` structural/synthetic gate exists but (per the
+  completion-audit posture) proves PromQL well-formedness on synthesized data, not real emission. Strongest
+  real-data evidence available here: the push pipeline is LIVE in prod since 2026-07-17 (project memory,
+  ADR-021); the emission-gate + firing tests prove the app emits every family on the real path; child issues
+  #239/#240/#250 are CLOSE-READY. **The one item I could not personally re-drive from this workspace is the
+  end-to-end panel render against the deployed VM/Grafana** — cited via prod-live pipeline + CI's env-gated
+  `dashboards.spec.ts`, not observed live in this audit.
