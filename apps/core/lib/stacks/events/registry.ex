@@ -51,8 +51,14 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
+    # placement.removed (Issue #116 punch #14b): feeds AND a warehouse refresh.
+    # A removal decrements mart_community_read_count (an incremental table
+    # filtering removed_at is null); created/moved already refresh it via
+    # DbtRefreshHandler, so removed — which changes the same numbers — is wired
+    # the same way. See Stacks.Workers.DbtRefreshHandler @model_mapping.
     "placement.removed" => [
-      Stacks.Feeds.Handlers.PlacementHandler
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
     ],
     # placement.reread (US-1.6.3): emitted by Shelving.reread_book/2. Registered
     # with an EMPTY handler set — matching the reading-lifecycle events below and

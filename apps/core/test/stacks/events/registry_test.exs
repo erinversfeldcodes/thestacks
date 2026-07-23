@@ -53,6 +53,18 @@ defmodule Stacks.Events.RegistryTest do
       assert Registry.handlers_for("placement.reread") == []
       assert "placement.reread" in Registry.all_event_types()
     end
+
+    # Issue #116 punch #14b: placement.removed subscribes BOTH the feed handler
+    # and DbtRefreshHandler. The dbt handler was added because a removal
+    # decrements mart_community_read_count (an incremental table); created/moved
+    # already refresh it, so removed is wired the same way. Pins the exact set
+    # and order — would fail if the registry drifted back to feed-only.
+    test "placement.removed subscribes the feed handler and the dbt refresh handler" do
+      assert Registry.handlers_for("placement.removed") == [
+               Stacks.Feeds.Handlers.PlacementHandler,
+               Stacks.Workers.DbtRefreshHandler
+             ]
+    end
   end
 
   describe "all_event_types/0" do

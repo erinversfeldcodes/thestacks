@@ -523,9 +523,22 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        book_id: %{ecto_type: :binary_id},
-        from_bookshelf: %{ecto_type: :binary_id},
-        to_bookshelf: %{ecto_type: :binary_id}
+        # Issue #116 punch #13: warehouse referential-integrity tests for the
+        # move-history model. These columns store bookshelf/book UUIDs
+        # (Shelving.do_move_book/3 writes from_bookshelf.id / to_bookshelf.id /
+        # placement.book_id) but carry NO database FK — the table is an
+        # append-only audit trail, deliberately decoupled from op-schema
+        # lifecycle so a bookshelf/book delete never cascades away its history.
+        # That makes these dbt relationships tests the ONLY orphan check on the
+        # history model. `ecto_type: :binary_id` (not belongs_to) keeps it FK-free.
+        # dbt's built-in relationships test filters `where <col> is not null`, so
+        # any future null-source rows won't false-fail.
+        book_id: %{ecto_type: :binary_id, dbt_tests: [{:relationships, "stg_books"}]},
+        from_bookshelf: %{
+          ecto_type: :binary_id,
+          dbt_tests: [{:relationships, "stg_bookshelves"}]
+        },
+        to_bookshelf: %{ecto_type: :binary_id, dbt_tests: [{:relationships, "stg_bookshelves"}]}
       }
     },
 

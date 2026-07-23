@@ -280,10 +280,22 @@ models:
           - unique
       - name: book_id
         description: Book id.
+        tests:
+          - relationships:
+              to: ref('stg_books')
+              field: id
       - name: from_bookshelf
         description: From bookshelf.
+        tests:
+          - relationships:
+              to: ref('stg_bookshelves')
+              field: id
       - name: to_bookshelf
         description: To bookshelf.
+        tests:
+          - relationships:
+              to: ref('stg_bookshelves')
+              field: id
       - name: moved_at
         description: Moved at.
 

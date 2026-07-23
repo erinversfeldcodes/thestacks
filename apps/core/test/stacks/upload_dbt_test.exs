@@ -213,6 +213,20 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
+    # Issue #116 punch #14b: a placement removal decrements the community read
+    # count (mart_community_read_count filters removed_at is null), so it must
+    # trigger the same refresh as created/moved. Mirrors the moved test above.
+    @tag stories: ["US-1.6.4"], suite: :dbt
+    test "placement.removed enqueues community read count refresh" do
+      event = build_event("placement.removed")
+      assert :ok = DbtRefreshHandler.handle_event(event)
+
+      assert_enqueued(
+        worker: DbtRefreshJob,
+        args: %{models: ["mart_community_read_count"]}
+      )
+    end
+
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "image.resolved does not enqueue a dbt refresh job" do
       event = build_event("image.resolved")
