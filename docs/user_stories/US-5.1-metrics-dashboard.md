@@ -1,5 +1,13 @@
 # US-5.1 — View the Metrics Dashboard
 
+> **SUPERSEDED (Issue #267).** The in-app `/admin/metrics` operational-metrics dashboard
+> described below has been **removed** and replaced by the Grafana observability stack
+> (ADR-021, #236–240). `Page.Admin.Metrics`, `Stacks.Admin.Metrics`, `StacksWeb.MetricsController`,
+> and the `/api/metrics*` routes no longer exist. The source-health slice survives as
+> `StacksWeb.SourceAdminController.source_health/2` (`GET /api/admin/source-health`) feeding the
+> scraper-health page (US-2.2.2). This document is retained as prior art for the future
+> personal-insights dashboards (#268); do not treat it as describing a live surface.
+
 ## 1. User Story
 
 > **As a** user, **I want to** view a transparent operational dashboard **so that** I can see exactly how The Stacks is running, what it costs, and whether all systems are healthy.

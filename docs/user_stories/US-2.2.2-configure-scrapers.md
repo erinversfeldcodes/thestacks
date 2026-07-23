@@ -33,10 +33,10 @@ The user creates or edits a TOML configuration file in the designated scrapers d
 
 ## 3. API Calls
 
-### `GET /api/metrics/source-health`
-- **Auth**: Required (owner role)
-- **Pipeline**: `:api` -> `:authenticated` -> `:require_owner`
-- **Controller**: `StacksWeb.MetricsController.source_health/2`
+### `GET /api/admin/source-health`
+- **Auth**: Required (MFA-verified admin session)
+- **Pipeline**: `:api` -> `:admin` -> `:rate_limit_admin`
+- **Controller**: `StacksWeb.SourceAdminController.source_health/2` (relocated from the removed `MetricsController` by #267)
 - **Request body**: N/A (GET)
 - **Response (success)**: `{ data: [{ name, source_type, status, consecutive_failures, last_success, last_failure }] }` — HTTP 200
 - **Response (error)**: HTTP 401/403 for auth/role failures
@@ -140,7 +140,7 @@ N/A
 
 ### Init
 - **`initPage` branch**: Calls `Api.getSourceHealth token SourceHealthReceived`
-- **API calls on init**: `GET /api/metrics/source-health`
+- **API calls on init**: `GET /api/admin/source-health`
 - **Initial model state**: `{ sourceHealth = Loading }`
 
 ### Update cycle
@@ -175,7 +175,7 @@ N/A
 - **Price scrape success rate per store**: critical for new scraper configs — percentage of scrapes returning valid prices vs parse failures (bad CSS selectors, changed page layouts)
 - **Source discovery yield**: newly configured stores should produce price data within one batch cycle (cron-dependent)
 - **Time to first price**: elapsed time from inserting a new `op.bookstores` row to the first `price_snapshot` appearing for that store
-- **Health dashboard load time**: `GET /api/metrics/source-health` response latency — single API call, typically <100ms for small source counts
+- **Health dashboard load time**: `GET /api/admin/source-health` response latency — single API call, typically <100ms for small source counts
 
 ---
 

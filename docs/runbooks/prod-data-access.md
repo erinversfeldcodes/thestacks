@@ -57,10 +57,7 @@ Available endpoints (all admin-authenticated; data endpoints under `/api/admin`,
 | `GET /api/admin/platform_stats` | Platform-wide aggregate stats |
 | `GET /api/admin/gdpr_export?user_id=` | Export all data for a user |
 | `POST /api/admin/gdpr_erase` | Erase a user (requires `reason`) |
-| `GET /api/metrics` | Admin metrics dashboard |
-| `GET /api/metrics/quality-trends` | Data quality trend sparklines |
-| `GET /api/metrics/source-health` | Per-source health status |
-| `GET /api/metrics/enrichment-gaps` | Enrichment gap counts |
+| `GET /api/admin/source-health` | Per-source health status (relocated from the removed `/api/metrics/source-health` in #267; the in-app metrics dashboard and its other `/api/metrics*` routes were removed — ops metrics live in Grafana) |
 | `GET /api/admin/sources` | List discovered sources |
 | `PUT /api/admin/sources/:id/approve` | Approve a source |
 | `PUT /api/admin/sources/:id/reject` | Reject a source |

@@ -167,7 +167,7 @@ N/A — review data is currently served directly from the database. No explicit 
 - **Model**: `mart_enrichment_gaps` (view)
 - **Trigger**: Indirectly refreshed when review data changes
 - **Materialisation**: View — joins `int_book_detail_view` with `int_review_sentiment` to identify books with `missing_reviews`
-- **Consumer**: `GET /api/metrics/enrichment-gaps`
+- **Consumer**: the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (in-app metrics dashboard superseded by Grafana); the `mart_enrichment_gaps` mart is retained for the Grafana observability surface
 
 ---
 

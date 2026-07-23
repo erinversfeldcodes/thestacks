@@ -318,7 +318,7 @@ GenServer-based sliding window rate limiter, inspired by Fliekflow's multi-tier 
 | `PUT /api/settings/password` | 3/min | Brute-force prevention |
 | `GET /api/search/platform` | 30/min | Heavier than local search — queries across users |
 | `POST /api/opt-out` | 5/min | Unauthenticated — abuse risk |
-| `GET /api/metrics` | 60/min | Public but cacheable |
+| `GET /api/transparency/metrics` | 60/min | Public but cacheable — curated #241 transparency subset (the in-app `/api/metrics` dashboard was removed in #267) |
 | `GET /feed/*` | 60/min | RSS readers can be aggressive |
 
 ### CORS
