@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
-import { mintSession, injectSession } from "./helpers";
+import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 
 /**
  * Issue #116 Phase 5 — the reading-journey lifecycle, driven in a real browser
@@ -348,8 +348,11 @@ test.describe("Reading journey (#116)", () => {
     // Need a book with a KNOWN page count so the ceiling is enforceable and the
     // "p. X / Y" line can render.
     const paged = books.find((b) => b.pageCount !== null && b.pageCount >= 10);
-    test.skip(
-      paged === undefined,
+    // Seed guarantee (#280): on a full-seed stack (E2E_EXPECT_FULL_SEEDS=1) the
+    // absence of any book with a known page count is a seed regression and must
+    // fail hard, not skip; elsewhere (prod-shaped/thin targets) skip loudly.
+    assertSeedOrSkip(
+      paged !== undefined,
       "needs a catalogue book with a primary-edition page count >= 10"
     );
     if (!paged) return;

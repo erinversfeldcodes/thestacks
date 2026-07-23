@@ -2,11 +2,9 @@ import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import {
   ensureBookOnShelf,
-  E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
-  signInViaForm,
+  mintOrSkip,
+  injectSession,
 } from "./helpers";
 
 /**
@@ -46,27 +44,15 @@ test.describe.configure({ mode: "serial" });
 const SHELF = "library";
 
 /**
- * Register + confirm a throwaway user, then sign in through the form so `page`
- * holds a live session. Absorbs transient 429s on the shared `:auth` bucket and
- * test.skips when the confirmation-token helper is off (STACKS_E2E_TEST_HELPERS).
+ * Mint an isolated, confirmed throwaway user via POST /api/test/session
+ * (Issue #280) and inject its session so `page` holds a live session — outside
+ * the `:auth` rate bucket, so this non-auth-testing spec no longer competes with
+ * the parallel suite. `test.skip`s cleanly when the helper is off
+ * (STACKS_E2E_TEST_HELPERS).
  */
-async function signInFreshUser(page: Page, request: APIRequestContext): Promise<void> {
-  const email = uniqueEmail("e2e-placement");
-  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  for (let attempt = 1; attempt <= 4 && !reg.ok() && reg.status() === 429; attempt++) {
-    await new Promise((r) => setTimeout(r, 2000 * attempt));
-    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  }
-  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  test.skip(
-    token === null,
-    "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-  );
-  const confirm = await request.get(`/api/auth/confirm/${token}`);
-  expect(confirm.ok()).toBeTruthy();
-  await signInViaForm(page, email, E2E_PASSWORD);
+async function landAsFreshUser(page: Page, request: APIRequestContext): Promise<void> {
+  const session = await mintOrSkip(request, { email: uniqueEmail("e2e-placement") });
+  await injectSession(page, session);
 }
 
 // Ceiling helper copy — from Types.Visibility.ceilingHelperText. Uses a curly
@@ -144,7 +130,7 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     page,
     request,
   }) => {
-    await signInFreshUser(page, request);
+    await landAsFreshUser(page, request);
     // Precondition: tighten the shelf ceiling to Members(platform) so that the
     // more-permissive "Public" option must be greyed out and the ceiling helper
     // text appears. A public shelf greys nothing, so no helper text would show.
@@ -183,7 +169,7 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     page,
     request,
   }) => {
-    await signInFreshUser(page, request);
+    await landAsFreshUser(page, request);
     const overlay = await openFirstBookOverlay(page, SHELF);
     const select = overlay.getByTestId("placement-visibility-select");
     await expect(select).toBeVisible();
@@ -204,7 +190,7 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     page,
     request,
   }) => {
-    await signInFreshUser(page, request);
+    await landAsFreshUser(page, request);
     // Set the shelf to the most permissive VALID bookshelf visibility so both
     // the "owner" and "platform" placement options this test uses are selectable.
     // (Bookshelves are owner/group/platform — "public" is a placement-only tier,

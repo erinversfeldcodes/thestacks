@@ -3,8 +3,7 @@ import {
   suiteAuthFile,
   E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
+  mintOrSkip,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -401,32 +400,16 @@ test.describe("Settings — Password change (isolated)", () => {
     request,
   }) => {
     // Mint a fresh throwaway user so a successful change revokes ONLY this user's
-    // own session, never the shared suite token.
-    const email = uniqueEmail("e2e-settings-pw");
-    const reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-    test.skip(reg.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(reg.ok()).toBeTruthy();
-
-    const token = await fetchConfirmationToken(request, email);
-    test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    await request.get(`/api/auth/confirm/${token}`);
-
-    // Log in via the API to obtain THIS user's own JWT. Skip only on 502 — a
-    // genuine Argon2 OOM capacity flake on the small preview machine (Issue #166).
-    // A 403 here would mean the just-confirmed throwaway user is still unconfirmed
-    // (an email-confirm regression) — that must FAIL loudly, not skip.
-    const login = await request.post("/api/auth/login", {
-      data: { email, password: E2E_PASSWORD },
+    // own session, never the shared suite token. Minting (POST /api/test/session,
+    // Issue #280) is outside the `:auth` bucket and returns a confirmed user with
+    // its own JWT whose password is E2E_PASSWORD — replacing the
+    // register→confirm→login dance that used to draw on the shared budget.
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-settings-pw"),
     });
-    test.skip(login.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(login.ok()).toBeTruthy();
-    const authToken = (await login.json()).token as string;
 
     const resp = await request.put("/api/settings/password", {
-      headers: { Authorization: `Bearer ${authToken}` },
+      headers: { Authorization: `Bearer ${session.token}` },
       data: { current_password: E2E_PASSWORD, new_password: E2E_PASSWORD },
     });
     test.skip(resp.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");

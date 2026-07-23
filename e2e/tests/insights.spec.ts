@@ -1,11 +1,8 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
 import {
-  E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
-  signInViaForm,
+  mintOrSkip,
+  injectSession,
   ensureBookOnLibrary,
 } from "./helpers";
 
@@ -23,47 +20,24 @@ import {
  *     ?reveal_risk=true;
  *   - the route is auth-guarded (unauthenticated → login page).
  *
- * The throwaway-user fixture (register → confirm → sign in → place a book)
- * mirrors audit-log.spec.ts: it suppresses the onboarding overlay and gives the
- * derivations real own-data to work from.
+ * The throwaway-user fixture mints an isolated, confirmed user via
+ * POST /api/test/session (Issue #280) and injects the session — outside the
+ * `:auth` rate bucket, so this non-auth-testing spec no longer competes with the
+ * parallel suite for the shared 60/60s budget. Injecting a placement-free user
+ * still triggers the onboarding overlay, so a book is placed to suppress it and
+ * give the derivations real own-data. Skips cleanly where the helper is off.
  */
-async function registerAndConfirm(
-  request: APIRequestContext,
-  prefix: string
-): Promise<{ email: string; token: string | null }> {
-  const email = uniqueEmail(prefix);
-
-  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  for (
-    let attempt = 1;
-    attempt <= 4 && !reg.ok() && reg.status() === 429;
-    attempt++
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  }
-  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return { email, token: null };
-
-  const confirm = await request.get(`/api/auth/confirm/${token}`);
-  expect(confirm.ok()).toBeTruthy();
-  return { email, token };
-}
 
 test.describe("Personal inference view (/me/insights)", () => {
   test("authed own-only: renders the sections and consent-gates the risk illustrations", async ({
     page,
     request,
   }) => {
-    const { email, token } = await registerAndConfirm(request, "e2e-insights");
-    test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-insights"),
+    });
 
-    await signInViaForm(page, email, E2E_PASSWORD);
+    await injectSession(page, session);
     await ensureBookOnLibrary(page);
 
     await page.goto("/me/insights");

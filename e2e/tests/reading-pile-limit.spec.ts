@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { mintSession, injectSession } from "./helpers";
+import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 
 /**
  * Issue #276 — the 50-book Reading Pile cap is enforced at the write path.
@@ -70,8 +70,11 @@ test.describe("Reading Pile 50-book limit (#276)", () => {
     if (!session) return;
 
     const bookIds = await catalogueBookIds(request);
-    test.skip(
-      bookIds.length < PILE_CAP + 1,
+    // Seed guarantee (#280): on a full-seed stack (E2E_EXPECT_FULL_SEEDS=1) a
+    // catalogue too thin to stage a 51st placement is a seed regression, not a
+    // reason to skip; elsewhere (prod-shaped/thin targets) skip loudly.
+    assertSeedOrSkip(
+      bookIds.length >= PILE_CAP + 1,
       `needs ${PILE_CAP + 1} catalogue books to stage a full pile, found ${bookIds.length}`
     );
 
