@@ -1043,7 +1043,14 @@ ASSET_HASH="$(date +%s)-$(git rev-parse --short HEAD)"
 # runs. Prod keeps its default HA behaviour — the flag is preview-only.
 CORE_HA_FLAG=()
 if [[ "$PROD_MODE" -eq 0 ]]; then
-    CORE_HA_FLAG=(--ha=false)
+    # Also give the preview core 1 GB (prod stays on its toml default).
+    # Issue #269 stability finding: under full-suite E2E load the 512 MB
+    # preview VM dies on password-endpoint Argon2 spikes (~64 MB per hash on
+    # top of the loaded app) — the app 502s mid-run and takes unrelated specs
+    # with it. The #166 NimblePool bounds Argon2 CONCURRENCY, but one hash on
+    # a loaded 512 MB machine is still enough to OOM. Previews auto-stop when
+    # idle, so the cost delta is per-run only.
+    CORE_HA_FLAG=(--ha=false --vm-memory 1024)
 fi
 _core_deploy_once() {
     (cd "$REPO_ROOT" && fly deploy \
