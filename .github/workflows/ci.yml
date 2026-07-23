@@ -1047,6 +1047,10 @@ jobs:
           NEON_BRANCH="${PREVIEW_NEON_BRANCH}"
           echo "CORE_URL=${CORE_URL}" >> "$GITHUB_ENV"
           echo "NEON_BRANCH=${NEON_BRANCH}" >> "$GITHUB_ENV"
+          # GRAFANA_URL is consumed by the main E2E step so dashboards.spec runs
+          # (renders live panels) INSIDE the suite instead of skipping on
+          # !GRAFANA_URL (Issue #269 workstream 2). Deterministic preview host.
+          echo "GRAFANA_URL=https://${PREVIEW_GRAFANA_APP}.fly.dev" >> "$GITHUB_ENV"
           IPV4="$(dig +short A "${HOST}" | grep -E '^[0-9.]+$' | head -1)"
           if [[ -z "${IPV4}" ]]; then
             echo "FAIL: no A record for ${HOST}"
@@ -1085,6 +1089,29 @@ jobs:
             fi
           done
           wait
+          # Deterministic POST-path readiness (Issue #269 stability finding #2).
+          # The parallel bursts above wake the machine, but a boundary cold-start
+          # can still leave the first login POST 502ing while fly-proxy finishes
+          # the wake — and auth.setup.ts's first action is a login POST. Poll
+          # /api/auth/login until it returns a non-502 (200/401 both mean the app
+          # served the request) so the setup project doesn't race the wake.
+          login_warm=0
+          for _ in {1..20}; do
+            code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+              -X POST "${CORE_URL}/api/auth/login" \
+              -H "Content-Type: application/json" \
+              -d '{"email":"warmup@thestacks.test","password":"warmup"}' 2>/dev/null || true)"
+            if [[ -n "${code}" && "${code}" != "502" && "${code}" != "000" ]]; then
+              echo "Login POST path warm (HTTP ${code})."
+              login_warm=1
+              break
+            fi
+            echo "Login POST not warm yet (HTTP ${code:-none}) — retrying in 3s..."
+            sleep 3
+          done
+          if [[ "${login_warm}" != 1 ]]; then
+            echo "::warning::login POST path never returned non-502 in warm-up — test-e2e.sh will re-warm and Playwright retries setup"
+          fi
           sleep 2
       # Pre-flight check: verify Open Library can resolve the ISBNs the upload
       # suite depends on. If OL is down or rate-limiting when this deploy
@@ -1093,12 +1120,60 @@ jobs:
       # and gives the operator an actionable error.
       - name: Preflight — external resolver health
         run: bash scripts/preflight-resolver-health.sh
+      - name: Wait for Grafana readiness (observability specs run in-suite)
+        # dashboards.spec now runs INSIDE the main E2E (GRAFANA_URL wired) instead
+        # of a separate post-drive step, so give the preview Grafana time to come
+        # up before the suite hits it (Issue #269 workstream 2), reducing render
+        # flakiness while the datasource settles. The core metrics pusher (15s
+        # interval) has already run several cycles by now; the observability
+        # specs' own retry budgets cover the remaining push→flush→query lag, so no
+        # VM-sample poll is needed here.
+        #
+        # Deliberately NON-fatal: blocking the whole suite on Grafana would turn a
+        # 6-spec observability gap into ~190 abandoned specs ("did not run") — the
+        # exact anti-goal of this issue. If Grafana is genuinely down, dashboards.spec
+        # fails IN the suite (surfaced, not silently skipped); the rest still run.
+        run: |
+          ok=0
+          for _ in $(seq 1 20); do
+            if curl -sf -o /dev/null --max-time 10 "${GRAFANA_URL}/api/health"; then
+              ok=1
+              break
+            fi
+            echo "Grafana ${GRAFANA_URL} not ready yet — retrying in 5s..."
+            sleep 5
+          done
+          if [[ "${ok}" != 1 ]]; then
+            echo "::warning::preview Grafana ${GRAFANA_URL} not reachable after ~100s — dashboards.spec will surface it as a failure in-suite rather than skip"
+          else
+            echo "Grafana reachable at ${GRAFANA_URL}"
+          fi
       - name: Run E2E against deployed stack
         # E2E_EXPECT_LIVE_METRICS=1: the preview has the self-hosted VictoriaMetrics
         # wired and the core pusher delivering samples, so the transparency page's
         # LIVE section must render real panels (ADR-021 / #255) — transparency.spec
         # enforces it with a retry budget for push/flush/cache lag.
-        run: CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+        # E2E_EXPECT_FULL_SEEDS=1: the preview carries the full dev-fixture seed, so
+        # an insufficient-seed skip (assertSeedOrSkip) is a seed regression, not a
+        # reason to skip — turn it into a hard failure (#280 enforcement switch,
+        # wiring left to #269).
+        # GRAFANA_URL: makes dashboards.spec render live panels in-suite instead of
+        # skipping on !GRAFANA_URL (#269 workstream 2).
+        run: |
+          # Keep-alive: hold the single 512MB preview machine awake for the whole
+          # E2E window. auto_stop_machines=true naps the VM after ~a minute idle;
+          # a quiet gap between projects (e.g. the serial upload project's ramp)
+          # could otherwise let it sleep mid-run and abandon in-flight specs
+          # ("did not run", Issue #269 stability finding #3). Backgrounded, killed
+          # on exit — E2E-scoped, no effect on prod or the shared fly.core.toml.
+          ( while true; do
+              curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 || true
+              sleep 20
+            done ) &
+          KEEPALIVE_PID=$!
+          trap 'kill "${KEEPALIVE_PID}" 2>/dev/null || true' EXIT
+          CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 E2E_EXPECT_FULL_SEEDS=1 \
+            GRAFANA_URL="${GRAFANA_URL}" BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Dashboard emission gate (preview VictoriaMetrics)
         # Emission-fidelity layer (ADR-021 / #253/#256). After the E2E drive, the core
         # app has pushed its PromEx metrics to the ephemeral preview VM
@@ -1137,25 +1212,12 @@ jobs:
           set -e
           kill "$PROXY" 2>/dev/null || true
           exit $rc
-      - name: Grafana dashboards render (preview browser check)
-        # View-layer proof (ADR-021 / #254). Load each #236–240 dashboard in the preview
-        # Grafana (deployed by deploy-stack.sh, pointed at the preview VM) and assert it
-        # renders: no panel in a datasource/query error state, and the happy-path
-        # dashboards paint live data. Runs AFTER the E2E drive so data exists; browsers +
-        # node deps are already installed by the E2E step above. Non-fatal if the preview
-        # Grafana didn't come up (its deploy is non-fatal).
-        if: ${{ !cancelled() }}
-        run: |
-          source scripts/lib/preview-names.sh
-          derive_preview_names "${GITHUB_HEAD_REF:-preview}"
-          GRAFANA_URL="https://${PREVIEW_GRAFANA_APP}.fly.dev"
-          if ! curl -sf -o /dev/null --max-time 20 "${GRAFANA_URL}/api/health"; then
-            echo "::warning::preview Grafana ${GRAFANA_URL} unreachable — skipping dashboard render check"
-            exit 0
-          fi
-          cd e2e
-          GRAFANA_URL="${GRAFANA_URL}" npx playwright test tests/dashboards.spec.ts \
-            --project=chromium --no-deps --reporter=line
+      # NOTE (Issue #269): the former "Grafana dashboards render (preview browser
+      # check)" step was removed. dashboards.spec.ts now runs INSIDE the main E2E
+      # (the "Run E2E against deployed stack" step exports GRAFANA_URL), so it is
+      # counted in the E2E summary as passed rather than skipped there and
+      # re-run redundantly here. The VM-side emission gate above still hard-checks
+      # per-dashboard metric families independently.
       - name: Smoke — circuit breakers
         if: always()
         run: |

@@ -25,6 +25,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Pre-flight: fail fast on reintroduced vacuous assertion guards (Issue #275).
+# The CI `e2e` path filter covers `e2e/**`, so this catches guard reintroduction
+# on e2e-only PRs that don't trigger the frontend lint-elm job.
+bash "$REPO_ROOT/scripts/check-e2e-vacuous-guards.sh"
+
 # Load local .env for dev secrets (CLOAK_KEY, SECRET_KEY_BASE, etc.) if running outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
@@ -100,6 +105,32 @@ warm_remote_preview() {
     fi
     echo "==> Remote mode: warming ${BASE_URL}/api/health before setup..."
     wait_for_health "${BASE_URL}/api/health" "Preview" 60
+
+    # A passing GET /api/health does NOT prove the POST path is warm. On a
+    # boundary cold-start the machine can answer health while the first login
+    # POST still 502s as fly-proxy finishes waking it (Issue #269 stability
+    # finding #2 — a plain health warm was insufficient). auth.setup.ts's very
+    # first action is a login POST, so warm THAT path here: poll
+    # /api/auth/login until it returns any non-502 status (200 or 401 both mean
+    # the app actually served the request) so the setup project never races the
+    # wake. Bogus credentials are fine — a 401 proves the POST path is up.
+    echo "==> Remote mode: warming the login POST path (${BASE_URL}/api/auth/login)..."
+    local deadline=$(( $(date +%s) + 60 ))
+    local code=""
+    while [[ $(date +%s) -lt $deadline ]]; do
+        code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+            -X POST "${BASE_URL}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"warmup@thestacks.test","password":"warmup"}' 2>/dev/null || true)"
+        if [[ -n "$code" && "$code" != "502" && "$code" != "000" ]]; then
+            echo "  Login POST path warm (HTTP ${code})."
+            return 0
+        fi
+        echo "  Login POST not warm yet (HTTP ${code:-none}) — retrying in 3s..."
+        sleep 3
+    done
+    echo "  WARNING: login POST path still returning ${code:-no response} after 60s —" >&2
+    echo "           proceeding; globalSetup re-checks health and Playwright retries the setup project." >&2
 }
 
 # ── Install E2E deps if needed ─────────────────────────────────────────────────

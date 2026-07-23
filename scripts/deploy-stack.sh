@@ -852,6 +852,30 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
         || echo "    (STACKS_E2E_TEST_HELPERS not present — nothing to unset)"
 fi
 
+# ── Preview mail hermeticity (Issue #269) ────────────────────────────────────
+# The mail E2E specs (confirm-email / password-reset) read the in-memory
+# Swoosh.Adapters.Local mailbox via /api/test/sent-emails; that mailbox is only
+# populated when the Local adapter is active. runtime.exs switches to the Resend
+# adapter whenever EMAIL_PROVIDER=resend + RESEND_API_KEY are present, which
+# leaves the Local mailbox empty and forces those specs to skip
+# (mailbox_readable:false → emails === null).
+#
+# The main `fly secrets set` above only STAGES RESEND_API_KEY/EMAIL_PROVIDER when
+# RESEND_API_KEY is non-empty (the `${RESEND_API_KEY:+...}` expansion) — it never
+# clears them. But the preview core app is REUSED, never destroyed between
+# deploys, so a value set by an earlier `preview-real-email`-labelled run would
+# LINGER on a later unlabelled run and silently keep Resend active. When this run
+# is NOT opting into real email (RESEND_API_KEY empty), explicitly unset both
+# secrets so the preview deterministically falls back to the Local mailbox and
+# the mail specs run instead of skip. Staged with the deploy below; preview only
+# (prod never enables the readable mailbox or the test helpers).
+if [[ "$PROD_MODE" -eq 0 && -z "${RESEND_API_KEY:-}" ]]; then
+    echo ""
+    echo "==> Ensuring Resend is unset on ${CORE_APP} (preview uses Swoosh Local mailbox for E2E)..."
+    fly secrets unset RESEND_API_KEY EMAIL_PROVIDER --app "${CORE_APP}" --stage 2>/dev/null \
+        || echo "    (RESEND_API_KEY/EMAIL_PROVIDER not present — nothing to unset)"
+fi
+
 # ── DATABASE_URL assertion (prod only, P2 #9) ────────────────────────────────
 # On a brand-new prod app no DATABASE_URL is configured yet, and
 # `${NEON_CONNECTION_URI:+...}` above means we only set it from a preview
@@ -1009,12 +1033,25 @@ ASSET_HASH="$(date +%s)-$(git rev-parse --short HEAD)"
 # cycle is cheap compared to a wholesale stack rebuild on the next
 # push. Hard-fails after two attempts so a genuinely-broken build
 # still surfaces.
+# Single-machine previews (Issue #269 stability finding #1). A default
+# `fly deploy` provisions an HA standby alongside the primary; on the preview
+# that second machine sat STOPPED with a failing check, and fly-proxy
+# intermittently routed to it → 502 clusters that abandoned in-flight specs
+# ("did not run"). Deploy the preview core with `--ha=false` so exactly one
+# machine exists and every request routes to a healthy node. Preview app names
+# are run-unique (PREVIEW_SUFFIX = "ci"+run_id), so no standby lingers across
+# runs. Prod keeps its default HA behaviour — the flag is preview-only.
+CORE_HA_FLAG=()
+if [[ "$PROD_MODE" -eq 0 ]]; then
+    CORE_HA_FLAG=(--ha=false)
+fi
 _core_deploy_once() {
     (cd "$REPO_ROOT" && fly deploy \
         --app "${CORE_APP}" \
         --config "${REPO_ROOT}/deploy/fly.core.toml" \
         --image-label "pr-${SANITISED}" \
         --depot=false \
+        ${CORE_HA_FLAG[@]+"${CORE_HA_FLAG[@]}"} \
         --build-arg "ASSET_HASH=${ASSET_HASH}")
 }
 if ! deploy_with_retry "core" _core_deploy_once; then
