@@ -323,16 +323,24 @@ test.describe("Upload pipeline", () => {
       const identified = page.getByTestId("upload-identified");
       const verify = page.getByTestId("upload-verify");
       const error = page.getByTestId("upload-error");
+      // The real vision pipeline reaches exactly ONE of three mutually-exclusive
+      // terminal states — multi-book identified, single-book verify, or error.
+      // This first assertion always fires (some terminal state must appear); the
+      // conditionals below then branch on which one, and EVERY branch asserts:
+      // error → throw, identified → the five-book checks, else → verify content.
+      // So the conditionality is a genuine either/or, never a silent pass.
       await expect(identified.or(verify).or(error)).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
-      // If error appeared, fail with a useful message
+      // If error appeared, fail with a useful message.
+      // vacuous-guard-check: allow — fail-fast branch of the always-asserted either/or above; absence is handled by the identified/verify branches.
       if ((await error.count()) > 0) {
         const errorText = await error.textContent();
         throw new Error(`Upload pipeline failed: ${errorText}`);
       }
 
       // If the multi-book identified view rendered, verify all five books.
+      // vacuous-guard-check: allow — genuine either/or; the else branch asserts the single-book verify view, so a state is always asserted.
       if ((await identified.count()) > 0) {
         await expect(identified).toContainText("Kite Runner");
         await expect(identified).toContainText("Hosseini");

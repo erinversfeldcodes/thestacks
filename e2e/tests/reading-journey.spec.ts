@@ -223,7 +223,7 @@ test.describe("Reading journey (#116)", () => {
     if (!session) return;
 
     const books = await catalogueBooks(request);
-    test.skip(books.length < 1, "needs at least 1 catalogue book");
+    assertSeedOrSkip(books.length >= 1, "needs at least 1 catalogue book");
     const book = books[0];
 
     expect(await apiPlace(request, session.token, "wishlist", book.id)).toBe(201);
@@ -250,7 +250,7 @@ test.describe("Reading journey (#116)", () => {
     if (!session) return;
 
     const books = await catalogueBooks(request);
-    test.skip(books.length < 1, "needs at least 1 catalogue book");
+    assertSeedOrSkip(books.length >= 1, "needs at least 1 catalogue book");
     const book = books[0];
 
     expect(await apiPlace(request, session.token, "reading_pile", book.id)).toBe(
@@ -277,7 +277,7 @@ test.describe("Reading journey (#116)", () => {
     if (!session) return;
 
     const books = await catalogueBooks(request);
-    test.skip(books.length < 1, "needs at least 1 catalogue book");
+    assertSeedOrSkip(books.length >= 1, "needs at least 1 catalogue book");
     const book = books[0];
 
     expect(await apiPlace(request, session.token, "wishlist", book.id)).toBe(201);
@@ -314,7 +314,7 @@ test.describe("Reading journey (#116)", () => {
     if (!session) return;
 
     const books = await catalogueBooks(request);
-    test.skip(books.length < 1, "needs at least 1 catalogue book");
+    assertSeedOrSkip(books.length >= 1, "needs at least 1 catalogue book");
     const book = books[0];
 
     expect(await apiPlace(request, session.token, "library", book.id)).toBe(201);
