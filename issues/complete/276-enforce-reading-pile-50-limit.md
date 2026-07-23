@@ -102,17 +102,17 @@ personal-data column, no new user-data endpoint, no event-payload field, no dbt 
 export reachability are unchanged.
 
 ## Definition of Done
-- [ ] Limit enforced in `Shelving.place_book/3` — evidence: test name + run output
-- [ ] Limit enforced in `Shelving.move_book/3` — evidence: test name + run output
-- [ ] Boundary asserted both sides (50th succeeds, 51st rejected) — evidence: test names
-- [ ] Rejected placement emits **no** event — evidence: test asserting event absence
-- [ ] Concurrency decision documented and its behaviour tested — evidence: decision note + test
-- [ ] Existing over-limit users handled per the documented choice, with **no data loss** — evidence: query showing affected users (or none) + the chosen behaviour tested
-- [ ] User-facing message shown on rejection — evidence: live-drive artifact (screenshot)
-- [ ] `List.take 50` kept-or-removed deliberately, with reasoning recorded — evidence: diff + note
-- [ ] **Feature-Completeness Pre-Check (above) is ✅** — happy path built end-to-end and observed live
-- [ ] Every behaviour has a validation path — evidence: the tests above
-- [ ] `just verify` passes — evidence: command → output
+- [x] Limit enforced in `Shelving.place_book/3` — evidence: "place_book/3 rejects the 51st reading_pile placement" (+ 50th-succeeds), shelving_test.exs, green through the 2855/0 suite
+- [x] Limit enforced in `Shelving.move_book/3` — evidence: "move_book/3 rejects a move that would make 51" (+ exactly-50 allowed), shelving_test.exs
+- [x] Boundary asserted both sides (50th succeeds, 51st rejected) — evidence: the four boundary tests above (both ops, both sides)
+- [x] Rejected placement emits **no** event — evidence: "rejected place_book writes no placement, event, or audit row" + move variant (also assert history absence)
+- [x] Concurrency decision documented and its behaviour tested — evidence: SELECT ... FOR UPDATE serialisation comment in shelving.ex capacity check + "two concurrent placements cannot exceed the cap" test
+- [x] Existing over-limit users handled per the documented choice (grandfather), with **no data loss** — evidence: dev-DB survey 2026-07-22 (largest pile 4, nobody grandfathered) + 55-book grandfather test (keeps all, rejects adds, allows moves out)
+- [x] User-facing message shown on rejection — evidence: live browser drives with screenshots on BOTH paths — move (reading-pile-limit.spec green locally + preview) and direct-place (#281 catalogue picker drive, screenshot delivered 2026-07-23)
+- [x] `List.take 50` removed deliberately, with reasoning recorded — evidence: ReadingPile.elm comment (truncation would hide grandfathered books) + grandfathered-renders-everything elm test
+- [x] **Feature-Completeness Pre-Check (above) is ✅** — evidence: enforcement built at the write path and observed live (API 422 + browser message, local + preview)
+- [x] Every behaviour has a validation path — evidence: L1/L3/L4/L10/E2E rows all covered per the audit table (updated below)
+- [x] `just verify` passes — evidence: full gate green at land (2026-07-22) and every subsequent fresh-DB/ci gate through 2026-07-23
 
 ## Dependencies
 - Related: **#112** (E2E Shelf Browsing) writes Reading Pile tests. Coordinate: #112 asserts the view

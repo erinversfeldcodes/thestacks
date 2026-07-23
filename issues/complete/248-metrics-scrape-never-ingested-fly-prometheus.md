@@ -117,6 +117,11 @@ CANNOT be disambiguated purely read-only from outside 6PN. Next diagnostic step
 | 1–10, 13 (app/US layers) | no | n/a — infra scrape plumbing, no app/user-story surface |
 
 ## Definition of Done
+> **CLOSED AS SUPERSEDED (2026-07-23), boxes intentionally unchecked.** The scrape approach this
+> DoD describes was abandoned by ADR-021: the Fly-managed-Prometheus scrape can never reach a
+> scale-to-zero machine, so the fix became the self-hosted **push** pipeline delivered by #249
+> (VictoriaMetrics + remote_write + anonymous public Grafana), which dissolved this issue. The
+> items below are retained as the historical record of the scrape-era plan.
 - [ ] Root cause confirmed live: machine warm ⇒ `up=1` and `stacks_*` samples appear
       in Fly Prometheus (or the secondary endpoint issue is identified and fixed).
 - [ ] Chosen fix applied to `deploy/fly.core.toml` (+ preview parity in `deploy-stack.sh`).
