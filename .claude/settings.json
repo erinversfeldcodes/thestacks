@@ -25,5 +25,13 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(fly logs *)",
+      "Bash(gh run watch *)",
+      "Bash(actionlint *)",
+      "mcp__Neon__describe_project"
+    ]
   }
 }

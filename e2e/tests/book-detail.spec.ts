@@ -40,52 +40,55 @@ test.describe("Book Detail overlay — layout and structure", () => {
 
   test("All sections visible when book loads", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
-    const bookDetail = overlay.locator(".book-detail");
-    if ((await bookDetail.count()) > 0) {
-      await expect(
-        overlay.locator(".book-detail__section-title", { hasText: "About" })
-      ).toBeVisible();
-      await expect(
-        overlay.locator(".book-detail__section-title", {
-          hasText: "What People Think",
-        })
-      ).toBeVisible();
-      await expect(
-        overlay.locator(".book-detail__section-title", {
-          hasText: "Where to Buy",
-        })
-      ).toBeVisible();
-      await expect(
-        overlay.locator(".book-detail__section-title", {
-          hasText: "The Author",
-        })
-      ).toBeVisible();
-      await expect(
-        overlay.locator(".book-detail__section-title", {
-          hasText: "My Writing",
-        })
-      ).toBeVisible();
-    }
+    // The seeded book always loads, so .book-detail is always present — wait for
+    // it to render, then assert every section unconditionally (a prior
+    // `if (count > 0)` guard here passed vacuously if the book never loaded).
+    await expect(overlay.locator(".book-detail")).toBeVisible({ timeout: 10000 });
+    await expect(
+      overlay.locator(".book-detail__section-title", { hasText: "About" })
+    ).toBeVisible();
+    await expect(
+      overlay.locator(".book-detail__section-title", {
+        hasText: "What People Think",
+      })
+    ).toBeVisible();
+    await expect(
+      overlay.locator(".book-detail__section-title", {
+        hasText: "Where to Buy",
+      })
+    ).toBeVisible();
+    await expect(
+      overlay.locator(".book-detail__section-title", {
+        hasText: "The Author",
+      })
+    ).toBeVisible();
+    await expect(
+      overlay.locator(".book-detail__section-title", {
+        hasText: "My Writing",
+      })
+    ).toBeVisible();
   });
 
   test("Format picker buttons are interactive", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
+    // The book is placed on the Library shelf (openBookDetailOverlay ensures
+    // this), so "Formats on My Shelf" always renders its three format buttons.
     const formatBtn = overlay.locator(".format-picker__btn").first();
-    if ((await formatBtn.count()) > 0) {
-      await formatBtn.click();
-      await expect(formatBtn).toHaveClass(/format-picker__btn--selected/);
-    }
+    await expect(formatBtn).toBeVisible({ timeout: 10000 });
+    await formatBtn.click();
+    await expect(formatBtn).toHaveClass(/format-picker__btn--selected/);
   });
 
   test("Move to Shelf dropdown works", async ({ page }) => {
     const overlay = await openBookDetailOverlay(page);
+    // A placed book always offers the "Choose Bookshelf" mover, so assert it is
+    // present and drive it (was a vacuous `if (count > 0)` guard).
     const chooseBtnLocator = overlay.locator("button", {
       hasText: "Choose Bookshelf",
     });
-    if ((await chooseBtnLocator.count()) > 0) {
-      await chooseBtnLocator.click();
-      await expect(overlay.locator(".shelf-mover")).toBeVisible();
-    }
+    await expect(chooseBtnLocator).toBeVisible({ timeout: 10000 });
+    await chooseBtnLocator.click();
+    await expect(overlay.locator(".shelf-mover")).toBeVisible();
   });
 
   test("Overlay entry animation present on open", async ({ page }) => {

@@ -62,13 +62,14 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
+    // The seed catalogue always carries subjects (Philosophy has 9 books), so
+    // the subject-select always renders — assert it, don't guard on it.
     const subjectSelect = page.locator(".catalogue__subject-select");
-    if ((await subjectSelect.count()) > 0) {
-      await subjectSelect.selectOption("Philosophy");
-      await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
-      const count = await page.locator(".catalogue__card").count();
-      expect(count).toBeGreaterThan(0);
-    }
+    await expect(subjectSelect).toBeVisible({ timeout: 10000 });
+    await subjectSelect.selectOption("Philosophy");
+    await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
+    const count = await page.locator(".catalogue__card").count();
+    expect(count).toBeGreaterThan(0);
   });
 
   test("sort selector changes order", async ({ page }) => {
@@ -96,18 +97,21 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
+    // The seed catalogue holds 169 books (default per_page=24 → 8 pages), so
+    // pagination and a "Next" button always render on page 1. Assert both and
+    // drive the page change (was a nested pair of vacuous `if (count > 0)`
+    // guards that passed even if pagination had vanished entirely).
     const pagination = page.locator(".catalogue__pagination");
-    if ((await pagination.count()) > 0) {
-      const pageInfo = page.locator(".catalogue__page-info");
-      await expect(pageInfo).toContainText("Page 1");
+    await expect(pagination).toBeVisible({ timeout: 10000 });
 
-      const nextBtn = page.locator("button", { hasText: "Next" });
-      if ((await nextBtn.count()) > 0) {
-        await nextBtn.click();
-        await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
-        await expect(pageInfo).toContainText("Page 2");
-      }
-    }
+    const pageInfo = page.locator(".catalogue__page-info");
+    await expect(pageInfo).toContainText("Page 1");
+
+    const nextBtn = page.locator("button", { hasText: "Next" });
+    await expect(nextBtn).toBeVisible({ timeout: 10000 });
+    await nextBtn.click();
+    await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
+    await expect(pageInfo).toContainText("Page 2");
   });
 
   test("clicking a card opens the book detail overlay", async ({ page }) => {

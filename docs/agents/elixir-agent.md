@@ -32,7 +32,7 @@ Develop and maintain the Phoenix/Elixir core: API endpoints, Oban job workers, e
 - `BookController`, `BookshelfController`, `BookshelfPlacementController`, `ShelfController`, `SearchController`
 - `PartnerController`, `PartnerRegistrationController`, `PartnerInventoryController`, `PartnerEventController` (flat namespace — no `PartnerAPI.` prefix)
 - `AuthController`, `AdminController`, `AdminAuthController`, `OnboardingController`
-- `GDPRController`, `MetricsController`, `FeedController`, `UploadController`, `UserSettingsController`
+- `GDPRController`, `FeedController`, `UploadController`, `UserSettingsController`
 - `BlogController`, `CommentController`, `GroupController`, `GroupFeedController`, `GroupMemberController`, `SocialController`
 - `ListingController`, `ThirdSpaceController`, `VisibilityGrantController`, `EmailVerificationController`, `OptOutController`, `CatalogueController`, `CostController`, `BookAvailabilityController`, `SourceAdminController`, `InternalController`
 

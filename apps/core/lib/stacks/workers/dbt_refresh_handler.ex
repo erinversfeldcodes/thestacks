@@ -17,7 +17,25 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     "blog.post_updated" => ["int_blog_engagement", "mart_blog_activity"],
     "blog.post_deleted" => ["int_blog_engagement", "mart_blog_activity"],
     "placement.created" => ["mart_community_read_count", "mart_platform_searchable"],
-    "placement.moved" => ["mart_community_read_count"]
+    "placement.moved" => ["mart_community_read_count"],
+    # Issue #116 punch #14b: a removal (Shelving.remove_book/2 soft-deletes by
+    # stamping removed_at) decrements a book's community read count.
+    # mart_community_read_count is an INCREMENTAL table (not a view) whose body
+    # filters `where removed_at is null`, so without a trigger the count stays
+    # stale until the next scheduled dbt run. created/moved already refresh this
+    # mart; removed changing the same numbers must too. The mart's incremental
+    # predicate keys on updated_at, which remove_book's Multi.update bumps, so a
+    # triggered run recomputes the affected book. Only mart_community_read_count
+    # is mapped (mirroring moved): mart_platform_searchable derives from
+    # int_book_detail_view, which does not reference placements, and books
+    # survive removal — searchability is unaffected. Last-placement removal is
+    # handled by the mart's tombstone semantics (issues/279): the model
+    # aggregates over ALL placements and counts active ones via a FILTER, so a
+    # book whose LAST active placement is removed enters the incremental batch
+    # (remove_book bumps updated_at) and recomputes to a read_count = 0 row,
+    # which delete+insert uses to replace the stale non-zero row — drop-to-zero
+    # no longer requires a --full-refresh.
+    "placement.removed" => ["mart_community_read_count"]
   }
 
   @impl true

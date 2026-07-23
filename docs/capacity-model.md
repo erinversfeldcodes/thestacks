@@ -64,7 +64,7 @@ Latency targets are P50/P95/P99 at the Phoenix controller level (not including n
 | `POST /api/auth/login` | 100ms | 200ms | 500ms | Argon2 hashing is intentionally slow. Cannot be optimised. |
 | `POST /api/auth/register` | 150ms | 300ms | 600ms | Argon2 hash + email send enqueue. |
 | `PUT /api/placements/:id/move` | 20ms | 75ms | 150ms | Simple update + history insert. |
-| `GET /api/metrics` | 50ms | 200ms | 500ms | Reads from pre-computed dbt mart. Cacheable. |
+| `GET /api/admin/source-health` | 50ms | 100ms | 200ms | Per-source health (relocated from the removed `/api/metrics` in #267; the in-app metrics dashboard is superseded by Grafana). |
 | `GET /feed/:bookshelf` | 30ms | 100ms | 200ms | RSS feed generation from shelf data. |
 
 **Note — authenticated-request overhead (Issue #124, ADR 016):** every

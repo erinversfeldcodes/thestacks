@@ -214,6 +214,23 @@ defmodule Stacks.ShelvingShelfTest do
       assert {:error, :unauthorized} =
                Shelving.move_placement_to_shelf(placement.id, shelf_b.id, other_user.id)
     end
+
+    test "returns :not_found for a missing placement", %{user: user, shelf_b: shelf_b} do
+      assert {:error, :not_found} =
+               Shelving.move_placement_to_shelf(Ecto.UUID.generate(), shelf_b.id, user.id)
+    end
+
+    test "returns :not_found for a missing target shelf", %{
+      user: user,
+      bookshelf: bookshelf,
+      shelf_a: shelf_a
+    } do
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
+
+      assert {:error, :not_found} =
+               Shelving.move_placement_to_shelf(placement.id, Ecto.UUID.generate(), user.id)
+    end
   end
 
   # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import path from "path";
+import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
@@ -304,6 +305,74 @@ export function extractLink(email: SentEmail, pattern: RegExp): string | null {
   return match ? match[0] : null;
 }
 
+// ── Session-mint helper (Issue #192) ───────────────────────────────────────
+
+export interface MintedSession {
+  email: string;
+  token: string;
+  userId: string;
+  displayName: string;
+}
+
+/**
+ * Mint a fresh, CONFIRMED user with a ready-to-use session token in one call
+ * via the POST /api/test/session helper (STACKS_E2E_TEST_HELPERS=1 only).
+ * Unlike register→confirm→login, this does NOT consume the shared `:auth`
+ * rate bucket (60/60s per IP), so parallel fresh-user specs cannot 429 each
+ * other. The server enforces a hard `.test`-domain allowlist; the minted
+ * user's password is E2E_PASSWORD if a spec later needs the real login form.
+ *
+ * Returns `null` when the helper is unavailable (flag off) — callers should
+ * `test.skip(session === null, ...)`, matching fetchConfirmationToken.
+ */
+export async function mintSession(
+  request: APIRequestContext,
+  opts: { email?: string; displayName?: string } = {}
+): Promise<MintedSession | null> {
+  const resp = await request.post("/api/test/session", {
+    data: {
+      ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.displayName ? { display_name: opts.displayName } : {}),
+    },
+  });
+  if (resp.status() === 404) return null;
+  if (resp.status() !== 201) {
+    throw new Error(`session-mint helper returned HTTP ${resp.status()}`);
+  }
+  const body = await resp.json();
+  return {
+    email: body.email as string,
+    token: body.token as string,
+    userId: body.user_id as string,
+    displayName: body.display_name as string,
+  };
+}
+
+/**
+ * Land the browser authenticated as a minted user by injecting the session
+ * into localStorage under "stacks-auth" — the exact shape the Elm saveAuth
+ * port writes and auth.setup.ts injects. The NEXT page.goto() boots the SPA
+ * with the session present, skipping the login form and door animation.
+ */
+export async function injectSession(
+  page: Page,
+  session: MintedSession
+): Promise<void> {
+  // Navigate to the app origin first so localStorage is writable for it.
+  await page.goto("/");
+  await page.evaluate(
+    (auth) => {
+      localStorage.setItem("stacks-auth", JSON.stringify(auth));
+    },
+    {
+      token: session.token,
+      userId: session.userId,
+      email: session.email,
+      displayName: session.displayName,
+    }
+  );
+}
+
 /**
  * Sign in through the login form and wait for the post-login redirect.
  * Mirrors the flow the real user takes (fill → submit → door transition).
@@ -318,4 +387,48 @@ export async function signInViaForm(
   await page.fill('input[id="password"]', password);
   await page.getByTestId("login-submit").click();
   await page.waitForURL("**/antilibrary", { timeout: 15000 });
+}
+
+/** Shared skip reason when the session-mint helper is unavailable (flag off). */
+export const SESSION_HELPER_SKIP =
+  "POST /api/test/session unavailable (STACKS_E2E_TEST_HELPERS off)";
+
+/**
+ * mintSession + `test.skip` guard in one call, for specs that mint one or more
+ * fresh users where registration/confirmation is NOT the subject (Issue #280).
+ * When the helper endpoint is unavailable (prod-shaped targets), `test.skip`
+ * aborts the test cleanly BEFORE this returns, so callers get a guaranteed
+ * non-null session with no null check — the same clean-skip contract as the
+ * inline `mintSession` + `test.skip` pattern in reading-journey/gdpr, minus the
+ * `:auth`-bucket cost of the register→confirm→login dance it replaces.
+ */
+export async function mintOrSkip(
+  request: APIRequestContext,
+  opts: { email?: string; displayName?: string } = {}
+): Promise<MintedSession> {
+  const session = await mintSession(request, opts);
+  test.skip(session === null, SESSION_HELPER_SKIP);
+  // `test.skip` throws when the condition holds, so this line is only reached
+  // with a real (non-null) session.
+  return session as MintedSession;
+}
+
+/**
+ * Seed-data guarantee gate (Issue #280, PE P3-5). A spec that needs specific
+ * seeded catalogue data (e.g. ≥51 books for the reading-pile cap, or a book
+ * with page_count ≥ 10 for the progress journey) normally skips loudly when the
+ * target lacks it — correct for prod-shaped or thin targets. But a stack that
+ * SHOULD carry the full dev-fixture seed silently skipping forever hides a seed
+ * regression. Set `E2E_EXPECT_FULL_SEEDS=1` (the preview/CI E2E step) to turn an
+ * insufficient-seed skip into a HARD FAILURE. Mirrors the `E2E_EXPECT_LIVE_METRICS`
+ * enforcement gate in transparency.spec.ts.
+ *
+ * @param sufficient  true when the required seed data is present.
+ */
+export function assertSeedOrSkip(sufficient: boolean, message: string): void {
+  if (process.env.E2E_EXPECT_FULL_SEEDS === "1") {
+    expect(sufficient, `E2E_EXPECT_FULL_SEEDS=1 but ${message}`).toBe(true);
+  } else {
+    test.skip(!sufficient, message);
+  }
 }

@@ -20,7 +20,6 @@ import SimulatedEffect.Task
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
 import Types.Book exposing (bookDecoder)
-import Types.Placement exposing (placementDecoder)
 
 
 suite : Test
@@ -144,7 +143,7 @@ catalogueEffects msg model maybeToken =
                         , body =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "book_id", Encode.string bookId ) ])
-                        , expect = SimulatedEffect.Http.expectJson (Catalogue.PlaceBookCompleted shelfName bookId) (Decode.field "placement" placementDecoder)
+                        , expect = SimulatedEffect.Http.expectStringResponse (Catalogue.PlaceBookCompleted shelfName bookId) Api.placeResponseToResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }

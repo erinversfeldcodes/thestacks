@@ -10,9 +10,11 @@ module Page.BookDetail exposing
     )
 
 import Api
+import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.AuthorCard as AuthorCard
 import Components.FormatPicker exposing (formatPicker)
+import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
@@ -23,8 +25,9 @@ import Html.Events exposing (on, onClick, onInput, targetValue)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
+import Task
 import Types.Book exposing (Book, Edition, authorName)
-import Types.Placement exposing (Format, Placement)
+import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility exposing (Visibility)
 import Util.TestId exposing (testId)
@@ -48,7 +51,7 @@ type alias Model =
     , currentBookshelf : String
     , selectedBookshelf : String
     , selectedFormats : List Format
-    , moveState : RemoteData Http.Error ()
+    , moveState : RemoteData Api.MoveError ()
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
@@ -65,6 +68,12 @@ type alias Model =
     , previousVisibility : Visibility
     , shelfCeiling : Visibility
     , visibilityState : RemoteData Http.Error ()
+
+    -- Reading progress (US-1.6.6). The card is mounted only when the placement
+    -- sits on a readable bookshelf (reading_pile, library).
+    , progressCard : Maybe Card.Model
+    , progressSaveState : RemoteData Api.ProgressError ()
+    , finishedReadPrompt : Bool
     }
 
 
@@ -81,9 +90,9 @@ type Msg
     | CloseBookshelfMover
     | SelectBookshelf String
     | ConfirmMove
-    | MoveCompleted (Result Http.Error ())
+    | MoveCompleted (Result Api.MoveError ())
     | ConfirmPlace
-    | PlaceCompleted String (Result Http.Error Placement)
+    | PlaceCompleted String (Result Api.PlaceError Placement)
     | OpenRemoveModal
     | CloseRemoveModal
     | ConfirmRemove
@@ -95,6 +104,11 @@ type Msg
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
     | PlacementVisibilitySelected String
     | PlacementVisibilityUpdated (Result Http.Error String)
+    | ProgressCardMsg Card.Msg
+    | ProgressSaved (Result Api.ProgressError Api.Progress)
+    | RecordReadRequested
+    | FinishedReadDismissed
+    | ProgressFocusReturned
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -130,6 +144,9 @@ init bookId maybeToken maybePreviousRoute =
       , previousVisibility = Visibility.Platform
       , shelfCeiling = Visibility.Public
       , visibilityState = NotAsked
+      , progressCard = Nothing
+      , progressSaveState = NotAsked
+      , finishedReadPrompt = False
       }
     , Cmd.batch [ bookCmd, availabilityCmd ]
     )
@@ -231,6 +248,26 @@ update msg model maybeToken =
                             response.bookshelfVisibility
                                 |> Maybe.andThen Visibility.fromString
                                 |> Maybe.withDefault Visibility.Public
+
+                        progressCard =
+                            case response.placement of
+                                Just placement ->
+                                    -- Reading progress is a readable-bookshelf
+                                    -- affordance (Reading Pile, Library) only.
+                                    -- Embed the loaded book so the card's
+                                    -- progress line can show "/ {page count}"
+                                    -- (the book-detail placement payload does
+                                    -- not embed the book itself).
+                                    if bookshelf == "reading_pile" || bookshelf == "library" then
+                                        -- Hide the card's own title: the book
+                                        -- identity is already the page context.
+                                        Just (Card.hideTitle (Card.init { placement | book = Just response.book }))
+
+                                    else
+                                        Nothing
+
+                                Nothing ->
+                                    Nothing
                     in
                     ( { model
                         | book = Success response.book
@@ -242,6 +279,7 @@ update msg model maybeToken =
                         , placementVisibility = placementVisibility
                         , previousVisibility = placementVisibility
                         , shelfCeiling = shelfCeiling
+                        , progressCard = progressCard
                       }
                     , Cmd.none
                     , NoOut
@@ -318,12 +356,15 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err err ->
+                Err Api.ReadingPileFull ->
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+
+                Err (Api.MoveHttpError err) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         ConfirmPlace ->
             case ( model.book, maybeToken ) of
@@ -350,12 +391,20 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err err ->
+                Err Api.PlaceReadingPileFull ->
+                    -- #281: the place path can hit the same reading-pile cap the
+                    -- move path does. Reuse the move path's ReadingPileFull so
+                    -- viewMoveState renders the specific full-pile copy.
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+
+                Err (Api.PlaceHttpError err) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure err }, Cmd.none, NoOut )
+                        -- Wrap the transport error so the place path shares
+                        -- moveState (and its generic copy) with the move path.
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
             ( { model | removeModalOpen = True }, Cmd.none, NoOut )
@@ -468,7 +517,121 @@ update msg model maybeToken =
                         , NoOut
                         )
 
+        ProgressCardMsg cardMsg ->
+            case model.progressCard of
+                Just card ->
+                    let
+                        ( newCard, out ) =
+                            Card.update cardMsg card
+                    in
+                    case ( out, maybeToken ) of
+                        ( Card.ProgressUpdateRequested, Just token ) ->
+                            ( { model | progressCard = Just newCard, progressSaveState = Loading }
+                            , Api.updateProgress newCard.placement.id
+                                { readingStatus = readingStatusToString newCard.draftStatus
+                                , currentPage = String.toInt newCard.draftPage
+                                }
+                                token
+                                ProgressSaved
+                            , NoOut
+                            )
 
+                        ( Card.EditClosed, _ ) ->
+                            -- Form closed by Cancel: return focus to the badge.
+                            ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
+
+                        _ ->
+                            ( { model | progressCard = Just newCard }, Cmd.none, NoOut )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        ProgressSaved result ->
+            case result of
+                Ok progress ->
+                    ( { model
+                        | placement = Maybe.map (\p -> Api.foldProgress p progress) model.placement
+
+                        -- Fold from the CARD's placement (which carries the
+                        -- embedded book) so the "/ {page count}" total survives.
+                        -- Card.init closes the form on success.
+                        , progressCard =
+                            Maybe.map (\c -> Card.init (Api.foldProgress c.placement progress)) model.progressCard
+                        , progressSaveState = Success ()
+
+                        -- The "record this read?" bridge is a Reading Pile
+                        -- affordance only — never offer a library→library move.
+                        , finishedReadPrompt =
+                            (progress.readingStatus == Just Completed && model.currentBookshelf == "reading_pile")
+                                || model.finishedReadPrompt
+                      }
+                    , focusProgressBadgeFromModel model
+                    , NoOut
+                    )
+
+                Err (Api.ProgressRequestFailed err) ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model
+                            | progressCard = Maybe.map Card.stopSaving model.progressCard
+                            , progressSaveState = Failure (Api.ProgressRequestFailed err)
+                          }
+                        , Cmd.none
+                        , NoOut
+                        )
+
+                Err other ->
+                    -- Keep the form open (draft preserved) so the reader can fix it.
+                    ( { model
+                        | progressCard = Maybe.map Card.stopSaving model.progressCard
+                        , progressSaveState = Failure other
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+        ProgressFocusReturned ->
+            ( model, Cmd.none, NoOut )
+
+        RecordReadRequested ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    -- Reuse the existing move mechanism (US-1.6.3): send the
+                    -- finished book to the Library. MoveCompleted folds the new
+                    -- bookshelf name from selectedBookshelf, so pin it here.
+                    ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
+                    , Api.moveBook placement.id "library" token MoveCompleted
+                    , NoOut
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        FinishedReadDismissed ->
+            ( { model | finishedReadPrompt = False }, Cmd.none, NoOut )
+
+
+focusProgressBadge : Card.Model -> Cmd Msg
+focusProgressBadge card =
+    Browser.Dom.focus (Card.badgeDomId card.placement)
+        |> Task.attempt (\_ -> ProgressFocusReturned)
+
+
+focusProgressBadgeFromModel : Model -> Cmd Msg
+focusProgressBadgeFromModel model =
+    case model.progressCard of
+        Just card ->
+            focusProgressBadge card
+
+        Nothing ->
+            Cmd.none
+
+
+{-| Fold the reading-progress fields returned by the API into the placement,
+so the badge and progress line re-render in place.
+-}
 view : Model -> Html Msg
 view model =
     let
@@ -529,7 +692,8 @@ viewBook model book =
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
-                        [ viewFormatsOnShelf model
+                        [ viewProgressSection model
+                        , viewFormatsOnShelf model
                         , viewVisibilityControl model
                         , viewShelfActions model
                         , viewDangerZone model
@@ -688,6 +852,67 @@ viewEditionDetails edition =
                     ++ (edition |> Maybe.map .isbn |> Maybe.withDefault "—")
                 )
             ]
+        ]
+
+
+{-| "Reading Progress" — the mounted PlacementCard (status badge + inline edit)
+plus the save state and the "record this read?" bridge prompt. Rendered only
+when the placement sits on a readable bookshelf (progressCard is Just).
+-}
+viewProgressSection : Model -> Html Msg
+viewProgressSection model =
+    case model.progressCard of
+        Just card ->
+            section
+                [ class "book-detail__section book-detail__progress"
+                , attribute "role" "region"
+                , attribute "aria-labelledby" "section-progress"
+                ]
+                [ h3 [ class "book-detail__section-title", id "section-progress" ] [ text "Reading Progress" ]
+                , Html.map ProgressCardMsg (Card.view card)
+                , viewProgressSaveState model.progressSaveState
+                , if model.finishedReadPrompt then
+                    viewFinishedReadPrompt
+
+                  else
+                    text ""
+                ]
+
+        Nothing ->
+            text ""
+
+
+viewProgressSaveState : RemoteData Api.ProgressError () -> Html Msg
+viewProgressSaveState state =
+    case state of
+        Failure err ->
+            p
+                [ class "book-detail__status book-detail__status--error"
+                , attribute "role" "alert"
+                , id "progress-error"
+                , testId "progress-error"
+                ]
+                [ text (Api.progressErrorMessage err) ]
+
+        _ ->
+            text ""
+
+
+viewFinishedReadPrompt : Html Msg
+viewFinishedReadPrompt =
+    div [ class "book-detail__finished-prompt", testId "finished-read-prompt" ]
+        [ p [] [ text "Move to your Library and record this read?" ]
+        , button
+            [ class "btn btn--primary btn--sm"
+            , onClick RecordReadRequested
+            , testId "record-read-btn"
+            ]
+            [ text "Move to Library" ]
+        , button
+            [ class "btn btn--ghost btn--sm"
+            , onClick FinishedReadDismissed
+            ]
+            [ text "Not now" ]
         ]
 
 
@@ -946,7 +1171,7 @@ viewShelfActions model =
         ]
 
 
-viewMoveState : RemoteData Http.Error () -> Html Msg
+viewMoveState : RemoteData Api.MoveError () -> Html Msg
 viewMoveState state =
     case state of
         NotAsked ->
@@ -960,7 +1185,16 @@ viewMoveState state =
             div [ class "book-detail__status book-detail__status--success" ]
                 [ text "Moved successfully." ]
 
-        Failure _ ->
+        Failure Api.ReadingPileFull ->
+            -- #276: the write path rejected the move because the reading
+            -- pile is at its 50-book cap. Distinct from a transport failure.
+            div
+                [ class "book-detail__status book-detail__status--error"
+                , testId "reading-pile-full-msg"
+                ]
+                [ text "Your reading pile is full — finish or remove a book before adding another." ]
+
+        Failure (Api.MoveHttpError _) ->
             div [ class "book-detail__status book-detail__status--error" ]
                 [ text "Failed to move book. Please try again." ]
 

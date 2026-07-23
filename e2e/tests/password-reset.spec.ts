@@ -1,36 +1,27 @@
 import { test, expect } from "@playwright/test";
 import {
   extractLink,
-  fetchConfirmationToken,
   fetchSentEmails,
-  registerViaApi,
+  mintOrSkip,
   signInViaForm,
   uniqueEmail,
 } from "./helpers";
 
-// Register a user and confirm their email so they can sign in afterwards.
-async function registerAndConfirm(
-  request: import("@playwright/test").APIRequestContext,
-  email: string,
-  password: string
-): Promise<boolean> {
-  const reg = await registerViaApi(request, { email, password });
-  expect(reg.ok()).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return false;
-  await request.get(`/api/auth/confirm/${token}`);
-  return true;
-}
+/**
+ * The subject here is password RESET, not registration — so the throwaway user
+ * each test resets is minted via POST /api/test/session (Issue #280), outside
+ * the `:auth` rate bucket, rather than through the register→confirm dance. The
+ * reset flow proper (forgot form → emailed link → new password → sign in) stays
+ * a real end-to-end journey. `mintOrSkip` skips cleanly where the helper is off.
+ */
 
 test.describe("Password reset", () => {
   test("the forgot-password form opens in the login card and sends a reset email", async ({
     page,
     request,
   }) => {
-    const email = uniqueEmail("e2e-forgot");
-    const ready = await registerAndConfirm(request, email, "old-password-1");
-    test.skip(!ready, "requires STACKS_E2E_TEST_HELPERS=1");
+    const session = await mintOrSkip(request, { email: uniqueEmail("e2e-forgot") });
+    const email = session.email;
 
     // Clicking "Forgot your password?" swaps the login card into its
     // reset-password mode in place (no navigation) — the form is part of the
@@ -63,12 +54,9 @@ test.describe("Password reset", () => {
     page,
     request,
   }) => {
-    const email = uniqueEmail("e2e-reset");
-    const oldPassword = "old-password-1";
+    const session = await mintOrSkip(request, { email: uniqueEmail("e2e-reset") });
+    const email = session.email;
     const newPassword = "brand-new-password-2";
-
-    const ready = await registerAndConfirm(request, email, oldPassword);
-    test.skip(!ready, "requires STACKS_E2E_TEST_HELPERS=1");
 
     // 1. Request the reset.
     await page.goto("/forgot-password");

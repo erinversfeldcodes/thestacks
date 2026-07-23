@@ -12,9 +12,14 @@ defmodule StacksWeb.TestHelperController do
 
   use CoreWeb, :controller
 
+  import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
+
   alias Stacks.Accounts
+  alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
   alias Swoosh.Adapters.Local.Storage.Memory
+
+  require Logger
 
   # Reserved test TLD (RFC 6761) used for ALL E2E/test accounts:
   #   - suite users:       e2e-<slug>@thestacks.test   (seeds.exs / helpers.ts suiteEmail)
@@ -146,6 +151,107 @@ defmodule StacksWeb.TestHelperController do
     do: AgeVerification.record_verification(user, "e2e_test_helper", nil)
 
   defp apply_verification(user, false), do: AgeVerification.revoke(user)
+
+  # Shared, non-secret password for minted E2E users — matches E2E_PASSWORD in
+  # e2e/tests/helpers.ts so a spec can still drive the real login form for a
+  # minted account when it needs to.
+  @mint_password "e2e-password"
+
+  @doc """
+  POST /api/test/session  body: {"email": <optional>, "display_name": <optional>}
+
+  Provisions a fresh, CONFIRMED user and returns a ready-to-use session token
+  in one call (Issue #192), so E2E specs can mint isolated throwaway users
+  without going through `/auth/register` + `/auth/login` — both of which sit
+  in the `:auth` rate bucket shared across the whole parallel suite.
+
+  The token is minted via the exact same path `AuthController.login` uses
+  (`Guardian.encode_and_sign/2` with a fresh `family_id` claim +
+  `Accounts.open_token_family/1`, failing closed if the family row does not
+  persist), so it is indistinguishable from a real login session token.
+
+  Security posture: this endpoint MINTS AUTHENTICATION. Besides the
+  `STACKS_E2E_TEST_HELPERS` router gate (404 when off), the email — supplied
+  or defaulted — MUST be in the reserved `.test` E2E domain; anything else is
+  a plain 404 and no user is created. A real, deliverable address can never be
+  in the `.test` TLD, so a session can never be minted for a real account,
+  even on a public preview with the flag on.
+
+  Responds `201 {"email", "token", "user_id", "display_name"}` on success and
+  `422 {"errors": ...}` when the user cannot be created (e.g. email taken).
+  """
+  def mint_session(conn, params) do
+    email = Map.get(params, "email") || generated_mint_email()
+    display_name = Map.get(params, "display_name", "E2E Minted User")
+
+    with true <- e2e_test_email?(email),
+         {:ok, user} <-
+           Accounts.register(%{
+             "email" => email,
+             "password" => @mint_password,
+             "display_name" => display_name
+           }),
+         {:ok, user} <- Accounts.mark_confirmed(user) do
+      issue_session(conn, user)
+    else
+      false ->
+        not_found(conn)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  # Unique default address in the reserved E2E domain — mirrors uniqueEmail()
+  # in e2e/tests/helpers.ts so minted users are recognisable in preview data.
+  defp generated_mint_email do
+    "e2e-mint-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}@thestacks.test"
+  end
+
+  # Same mint path as AuthController.login (Issue #179, Phase 2a): the
+  # family_id is generated BEFORE minting so it is embedded as a claim, and the
+  # token family row must persist or the token is revoked (fail closed) —
+  # preserving the invariant that every live access token has a family.
+  defp issue_session(conn, user) do
+    fid = Ecto.UUID.generate()
+    {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
+
+    family_attrs = %{
+      family_id: fid,
+      user_id: user.id,
+      current_jti: claims["jti"],
+      session_started_at: DateTime.from_unix!(claims["sst"])
+    }
+
+    case Accounts.open_token_family(family_attrs) do
+      {:ok, _family} ->
+        conn
+        |> put_status(:created)
+        |> json(%{
+          email: user.email,
+          token: token,
+          user_id: user.id,
+          display_name: user.display_name
+        })
+
+      {:error, reason} ->
+        Logger.error("open_token_family failed on E2E session mint: #{inspect(reason)}")
+        revoke_minted_token(token)
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "internal_error"})
+    end
+  end
+
+  defp revoke_minted_token(token) do
+    case Guardian.revoke(token) do
+      {:ok, _claims} -> :ok
+      error -> Logger.warning("Guardian.revoke failed on mint fail-close: #{inspect(error)}")
+    end
+  end
 
   # Scope the endpoint to E2E/test-domain emails only. Case-insensitive to match
   # `Accounts.get_user_by_email/1`. Uses a strict domain-suffix match so

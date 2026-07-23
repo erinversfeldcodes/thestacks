@@ -2,8 +2,10 @@ module Types.Placement exposing
     ( Format(..)
     , Placement
     , ReadingStatus(..)
+    , parseReadingStatus
     , placementDecoder
     , placementSummaryDecoder
+    , readingStatusToString
     )
 
 import Json.Decode as Decode exposing (Decoder)
@@ -79,6 +81,25 @@ parseReadingStatus s =
 
         _ ->
             Nothing
+
+
+{-| The wire value for a reading status — the inverse of `parseReadingStatus`.
+Used when building the `PUT /api/placements/:id/progress` request body.
+-}
+readingStatusToString : ReadingStatus -> String
+readingStatusToString status =
+    case status of
+        ToRead ->
+            "to_read"
+
+        Reading ->
+            "reading"
+
+        Completed ->
+            "completed"
+
+        Abandoned ->
+            "abandoned"
 
 
 

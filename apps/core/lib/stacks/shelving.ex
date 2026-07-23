@@ -18,6 +18,7 @@ defmodule Stacks.Shelving do
   alias Ecto.Multi
   alias Stacks.Accounts.User
   alias Stacks.Audit
+  alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
@@ -32,6 +33,12 @@ defmodule Stacks.Shelving do
 
   # ── Placement changeset constants ──────────────────────────────────
   @valid_reading_statuses ~w(to_read reading completed abandoned)
+
+  # ── Reading-pile capacity (#276) ───────────────────────────────────
+  # The single source of truth for the 50-book Reading Pile cap. The Elm
+  # view must never re-derive or truncate to this number — enforcement
+  # lives here, at the write path.
+  @reading_pile_limit 50
 
   @placement_optional_fields [
     :position,
@@ -184,11 +191,20 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
+  Returns the maximum number of active placements allowed on a `reading_pile`
+  bookshelf (#276). Defined once here — the write path enforces it; views must
+  not truncate to it.
+  """
+  @spec reading_pile_limit() :: pos_integer()
+  def reading_pile_limit, do: @reading_pile_limit
+
+  @doc """
   Places a book on a bookshelf for a user. Creates the bookshelf if it doesn't exist.
-  Returns `{:ok, placement}` or `{:error, changeset}`.
+  Returns `{:ok, placement}`, `{:error, changeset}`, or `{:error, :reading_pile_full}`
+  when the placement would take the reading pile past #{@reading_pile_limit} books.
   """
   @spec place_book(binary(), binary(), String.t()) ::
-          {:ok, Placement.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
   def place_book(user_id, book_id, bookshelf_name) do
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
@@ -196,6 +212,9 @@ defmodule Stacks.Shelving do
     visibility_tier = lookup_book_visibility_tier(book_id)
 
     Multi.new()
+    |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
+      check_reading_pile_capacity(repo, bookshelf)
+    end)
     |> Multi.insert(
       :placement,
       placement_changeset(%Placement{}, %{
@@ -236,58 +255,102 @@ defmodule Stacks.Shelving do
   @doc """
   Moves a book placement to a new bookshelf. Verifies ownership.
   Creates a PlacementHistory record. Uses Ecto.Multi for atomicity.
+  A move into a full reading pile fails with
+  `{:error, :reading_pile_capacity, :reading_pile_full, _}`.
   """
   @spec move_book(binary(), binary(), String.t()) ::
-          {:ok, map()} | {:error, :unauthorized} | {:error, atom(), term(), map()}
+          {:ok, map()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, atom(), term(), map()}
   def move_book(placement_id, user_id, to_bookshelf_name) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
-    if placement.bookshelf.user_id != user_id do
-      {:error, :unauthorized}
-    else
-      from_bookshelf = placement.bookshelf
-      from_bookshelf_name = from_bookshelf.name
-      to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
 
-      Multi.new()
-      |> Multi.update(
-        :placement,
-        placement_changeset(placement, %{bookshelf_id: to_bookshelf.id})
-      )
-      |> Multi.insert(:history, fn _ ->
-        placement_history_changeset(%PlacementHistory{}, %{
-          book_id: placement.book_id,
-          from_bookshelf: from_bookshelf.id,
-          to_bookshelf: to_bookshelf.id,
-          moved_at: DateTime.utc_now()
-        })
-      end)
-      |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
-        Events.emit_safe(%{
-          event_type: "placement.moved",
-          aggregate_type: "placement",
-          aggregate_id: p.id,
-          payload: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
-        })
+        cond do
+          placement.bookshelf.user_id != user_id ->
+            {:error, :unauthorized}
 
-        {:ok, p}
-      end)
-      |> Multi.run(:audit, fn _repo, %{placement: p} ->
-        Audit.log(user_id, "placement.moved",
-          resource_type: "placement",
-          resource_id: p.id,
-          metadata: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
-        )
-      end)
-      |> Repo.transaction()
+          placement.bookshelf.name == to_bookshelf_name ->
+            # Same-bookshelf "move" is a no-op success. A user has at most one
+            # bookshelf per name, so an equal name means the same bookshelf. The
+            # Elm mover already excludes the current bookshelf, so this path is
+            # only reachable defensively (direct API/context call). Return the
+            # placement UNCHANGED — no PlacementHistory row, no `placement.moved`
+            # event, no audit entry, and (critically) WITHOUT the shelf_id reset
+            # the Multi below would perform, which would yank a book off a
+            # non-default shelf onto position 0 on a self-move. Shaped as
+            # `{:ok, %{placement: _}}` to match the Multi result the controller
+            # unwraps.
+            {:ok, %{placement: placement}}
+
+          true ->
+            do_move_book(placement, user_id, to_bookshelf_name)
+        end
     end
+  end
+
+  defp do_move_book(placement, user_id, to_bookshelf_name) do
+    from_bookshelf = placement.bookshelf
+    from_bookshelf_name = from_bookshelf.name
+    to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
+    # Browse lists placements through their physical shelf (op.shelves, #151),
+    # so a move must re-home the placement onto a shelf of the DESTINATION
+    # bookshelf — otherwise it stays visible on the source and never on the
+    # target. Mirrors the creation-time assignment in place_book/3 and
+    # reread_book/2: get-or-create the destination's default (position 0)
+    # shelf. Resolved outside the Multi exactly as place_book/3 does; on a
+    # capacity rejection the destination is a full reading_pile that already
+    # owns its default shelf, so this is a no-op read and no write precedes
+    # the rejection.
+    to_shelf = get_or_create_default_shelf(to_bookshelf.id)
+
+    Multi.new()
+    |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
+      check_move_capacity(repo, from_bookshelf, to_bookshelf)
+    end)
+    |> Multi.update(
+      :placement,
+      placement_changeset(placement, %{bookshelf_id: to_bookshelf.id, shelf_id: to_shelf.id})
+    )
+    |> Multi.insert(:history, fn _ ->
+      placement_history_changeset(%PlacementHistory{}, %{
+        book_id: placement.book_id,
+        from_bookshelf: from_bookshelf.id,
+        to_bookshelf: to_bookshelf.id,
+        moved_at: DateTime.utc_now()
+      })
+    end)
+    |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
+      Events.emit_safe(%{
+        event_type: "placement.moved",
+        aggregate_type: "placement",
+        aggregate_id: p.id,
+        payload: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
+      })
+
+      {:ok, p}
+    end)
+    |> Multi.run(:audit, fn _repo, %{placement: p} ->
+      Audit.log(user_id, "placement.moved",
+        resource_type: "placement",
+        resource_id: p.id,
+        metadata: %{from_bookshelf: from_bookshelf_name, to_bookshelf: to_bookshelf_name}
+      )
+    end)
+    |> Repo.transaction()
   end
 
   @doc """
   Moves a book to the "looking_for_home" bookshelf (abandon flow).
   """
   @spec abandon_book(binary(), binary()) ::
-          {:ok, map()} | {:error, :unauthorized} | {:error, atom(), term(), map()}
+          {:ok, map()}
+          | {:error, :unauthorized | :not_found}
+          | {:error, atom(), term(), map()}
   def abandon_book(placement_id, user_id) do
     move_book(placement_id, user_id, "looking_for_home")
   end
@@ -298,10 +361,26 @@ defmodule Stacks.Shelving do
   PlacementHistory record capturing the move from the original bookshelf to
   the library bookshelf.
   """
-  @spec reread_book(binary()) :: {:ok, Placement.t()} | {:error, Ecto.Changeset.t()}
-  def reread_book(placement_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
-    user_id = placement.bookshelf.user_id
+  @spec reread_book(binary(), binary()) ::
+          {:ok, Placement.t()}
+          | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
+  def reread_book(placement_id, user_id) do
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
+
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
+
+        if placement.bookshelf.user_id != user_id do
+          {:error, :unauthorized}
+        else
+          do_reread_book(placement, user_id)
+        end
+    end
+  end
+
+  defp do_reread_book(placement, user_id) do
     original_bookshelf_id = placement.bookshelf.id
     library_bookshelf = get_or_create_bookshelf(user_id, "library")
     default_shelf = get_or_create_default_shelf(library_bookshelf.id)
@@ -353,10 +432,20 @@ defmodule Stacks.Shelving do
   Emits an event and logs an audit entry.
   """
   @spec remove_book(binary(), binary()) ::
-          {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()}
+          | {:error, :not_found | :unauthorized}
+          | {:error, Ecto.Changeset.t()}
   def remove_book(placement_id, user_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
+      placement ->
+        do_remove_book(Repo.preload(placement, :bookshelf), user_id)
+    end
+  end
+
+  defp do_remove_book(placement, user_id) do
     if placement.bookshelf.user_id != user_id do
       {:error, :unauthorized}
     else
@@ -398,16 +487,24 @@ defmodule Stacks.Shelving do
   Deprecated: prefer `Books.merge_edition/2` for new code. Kept for Elm frontend compatibility.
   """
   @spec update_placement_formats(binary(), binary(), [String.t()]) ::
-          {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()}
+          | {:error, :not_found | :unauthorized}
+          | {:error, Ecto.Changeset.t()}
   def update_placement_formats(placement_id, user_id, formats) when is_list(formats) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
-    if placement.bookshelf.user_id != user_id do
-      {:error, :unauthorized}
-    else
-      placement
-      |> placement_changeset(%{formats: formats})
-      |> Repo.update()
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
+
+        if placement.bookshelf.user_id != user_id do
+          {:error, :unauthorized}
+        else
+          placement
+          |> placement_changeset(%{formats: formats})
+          |> Repo.update()
+        end
     end
   end
 
@@ -612,8 +709,10 @@ defmodule Stacks.Shelving do
   def update_reading_progress(placement_id, user_id, attrs) do
     placement =
       case Repo.get(Placement, placement_id) do
+        # Preload the book's editions too: the page-count ceiling (below) lives
+        # on the primary edition, not the placement, so we resolve it here.
         nil -> nil
-        p -> Repo.preload(p, :bookshelf)
+        p -> Repo.preload(p, [:bookshelf, book: :editions])
       end
 
     case placement do
@@ -648,8 +747,15 @@ defmodule Stacks.Shelving do
       |> maybe_set_started_at(is_first_reading)
       |> maybe_set_finished_at(is_completing)
 
+    page_ceiling = placement_page_count(placement)
+
     Multi.new()
-    |> Multi.update(:placement, reading_progress_changeset(placement, progress_attrs))
+    |> Multi.update(
+      :placement,
+      placement
+      |> reading_progress_changeset(progress_attrs)
+      |> maybe_validate_page_ceiling(page_ceiling)
+    )
     |> Multi.run(:emit_events, fn _repo, %{placement: updated} ->
       emit_reading_events(updated, is_first_reading, is_completing)
     end)
@@ -660,6 +766,28 @@ defmodule Stacks.Shelving do
       {:error, _, reason, _} -> {:error, reason}
     end
   end
+
+  # Reading progress may not exceed the book's primary-edition page count when
+  # that count is KNOWN. Page count lives on the edition, not the placement, so
+  # the ceiling is enforced at the context layer (here) rather than in
+  # `reading_progress_changeset/2`, which has no access to the book. When the
+  # page count is unknown (no edition, or an edition with a null/zero
+  # page_count) NO ceiling is applied — a reader is never blocked on missing
+  # catalogue metadata (permissive by design).
+  defp placement_page_count(%Placement{book: %Book{} = book}) do
+    case Books.primary_edition(book) do
+      %{page_count: pc} when is_integer(pc) and pc > 0 -> pc
+      _ -> nil
+    end
+  end
+
+  defp placement_page_count(_placement), do: nil
+
+  defp maybe_validate_page_ceiling(changeset, page_count) when is_integer(page_count) do
+    validate_number(changeset, :current_page, less_than_or_equal_to: page_count)
+  end
+
+  defp maybe_validate_page_ceiling(changeset, _page_count), do: changeset
 
   defp emit_reading_events(placement, is_first_reading, is_completing) do
     if is_first_reading do
@@ -772,22 +900,26 @@ defmodule Stacks.Shelving do
 
   @doc "Moves a placement to a different shelf within the same bookshelf."
   @spec move_placement_to_shelf(binary(), binary(), binary()) ::
-          {:ok, Placement.t()} | {:error, :unauthorized | :wrong_bookshelf}
+          {:ok, Placement.t()} | {:error, :not_found | :unauthorized | :wrong_bookshelf}
   def move_placement_to_shelf(placement_id, shelf_id, user_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
-    shelf = Repo.get!(Shelf, shelf_id)
+    with placement when not is_nil(placement) <- Repo.get(Placement, placement_id),
+         shelf when not is_nil(shelf) <- Repo.get(Shelf, shelf_id) do
+      placement = Repo.preload(placement, :bookshelf)
 
-    cond do
-      placement.bookshelf.user_id != user_id ->
-        {:error, :unauthorized}
+      cond do
+        placement.bookshelf.user_id != user_id ->
+          {:error, :unauthorized}
 
-      shelf.bookshelf_id != placement.bookshelf_id ->
-        {:error, :wrong_bookshelf}
+        shelf.bookshelf_id != placement.bookshelf_id ->
+          {:error, :wrong_bookshelf}
 
-      true ->
-        placement
-        |> placement_changeset(%{shelf_id: shelf_id})
-        |> Repo.update()
+        true ->
+          placement
+          |> placement_changeset(%{shelf_id: shelf_id})
+          |> Repo.update()
+      end
+    else
+      nil -> {:error, :not_found}
     end
   end
 
@@ -814,10 +946,20 @@ defmodule Stacks.Shelving do
     )
   end
 
-  defp shelf_changeset(shelf, attrs) do
+  @doc """
+  Changeset for creating a shelf. Declares the `(bookshelf_id, position)` unique
+  constraint (DB index `shelves_bookshelf_id_position_index`, migration
+  20260330130609) so a duplicate insert surfaces as `{:error, changeset}` instead
+  of raising `Ecto.ConstraintError`. `get_or_create_default_shelf/1` depends on
+  this: its race fallback (`{:error, _} -> get_by!`) only fires when the losing
+  concurrent insert returns an error tuple rather than raising.
+  """
+  @spec shelf_changeset(Shelf.t(), map()) :: Ecto.Changeset.t()
+  def shelf_changeset(shelf, attrs) do
     shelf
     |> cast(attrs, [:bookshelf_id, :position, :created_at])
     |> validate_required([:bookshelf_id, :position])
+    |> unique_constraint([:bookshelf_id, :position])
     |> put_created_at()
   end
 
@@ -909,6 +1051,50 @@ defmodule Stacks.Shelving do
       _ -> nil
     end
   end
+
+  # Enforces the reading-pile cap (#276) inside the write transaction.
+  #
+  # Concurrency decision: a count-check inside the Ecto.Multi transaction,
+  # preceded by `SELECT ... FOR UPDATE` on the bookshelf row. A bare count
+  # could race — under READ COMMITTED two concurrent placements could each
+  # count 49 and both insert, ending at 51. Locking the user's single
+  # reading_pile bookshelf row serializes placements into that pile: the
+  # second transaction blocks on the lock until the first commits, then its
+  # count sees the true total and rejects. A DB CHECK constraint cannot
+  # express a cross-row count, and a trigger would duplicate this domain rule
+  # in SQL; per-user pile writes are far too infrequent for row-lock
+  # serialization to matter for throughput.
+  #
+  # Grandfather decision: the check asks "would this ADD exceed the cap"
+  # (>= limit before inserting), so piles that already exceed 50 keep every
+  # book — no data loss, no hiding — but accept no new placements until they
+  # drop below the limit. (Dev-DB survey 2026-07-22: largest pile was 4, so
+  # no user is currently grandfathered.)
+  defp check_reading_pile_capacity(repo, %Bookshelf{name: "reading_pile", id: bookshelf_id}) do
+    repo.one(from(b in Bookshelf, where: b.id == ^bookshelf_id, lock: "FOR UPDATE"))
+
+    active_count =
+      repo.aggregate(
+        from(p in Placement, where: p.bookshelf_id == ^bookshelf_id and is_nil(p.removed_at)),
+        :count
+      )
+
+    if active_count >= @reading_pile_limit do
+      {:error, :reading_pile_full}
+    else
+      {:ok, active_count}
+    end
+  end
+
+  defp check_reading_pile_capacity(_repo, %Bookshelf{}), do: {:ok, :not_limited}
+
+  # Only cross-bookshelf moves reach here: `move_book/3` short-circuits a
+  # same-bookshelf "move" to a no-op success before `do_move_book/3` (and thus
+  # this check) ever runs. So the cap is evaluated purely against the
+  # destination — a same-bookshelf reorganisation of a full (or grandfathered
+  # over-limit) pile never trips it because it never gets this far.
+  defp check_move_capacity(repo, _from_bookshelf, to_bookshelf),
+    do: check_reading_pile_capacity(repo, to_bookshelf)
 
   defp get_or_create_bookshelf(user_id, bookshelf_name) do
     case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do

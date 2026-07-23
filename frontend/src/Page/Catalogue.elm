@@ -48,7 +48,7 @@ type alias Model =
     , debounceCount : Int
     , userPlacements : RemoteData Http.Error (List PlacementSummary)
     , shelfPickerBookId : Maybe String
-    , placeBookState : RemoteData Http.Error ()
+    , placeBookState : RemoteData Api.PlaceError ()
     , collectionFilter : CollectionFilter
     , isAuthenticated : Bool
     }
@@ -68,7 +68,7 @@ type Msg
     | CloseShelfPicker
     | PlaceOnShelf String String
     | CollectionFilterChanged CollectionFilter
-    | PlaceBookCompleted String String (Result Http.Error Placement)
+    | PlaceBookCompleted String String (Result Api.PlaceError Placement)
 
 
 type OutMsg
@@ -259,12 +259,15 @@ update msg model maybeToken =
                     in
                     ( { model | placeBookState = NotAsked, userPlacements = updatedPlacements }, Cmd.none, NoOut )
 
-                Err err ->
+                Err Api.PlaceReadingPileFull ->
+                    ( { model | placeBookState = Failure Api.PlaceReadingPileFull }, Cmd.none, NoOut )
+
+                Err (Api.PlaceHttpError err) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | placeBookState = Failure Http.NetworkError }, Cmd.none, NoOut )
+                        ( { model | placeBookState = Failure (Api.PlaceHttpError err) }, Cmd.none, NoOut )
 
 
 fetchCatalogue : Model -> Cmd Msg
@@ -294,8 +297,28 @@ view model =
         , p [ class "catalogue__subtitle" ]
             [ text "Browse and discover books in the collection." ]
         , viewControls model
+        , viewPlaceError model.placeBookState
         , viewContent model
         ]
+
+
+{-| #281: the direct-place path can hit the reading-pile cap. Surface the
+specific full-pile copy (shared with the move/upload paths) as a page-level
+notice; transport failures stay silent here, as before.
+-}
+viewPlaceError : RemoteData Api.PlaceError () -> Html Msg
+viewPlaceError state =
+    case state of
+        Failure Api.PlaceReadingPileFull ->
+            p
+                [ class "catalogue__error error"
+                , attribute "role" "alert"
+                , testId "reading-pile-full-msg"
+                ]
+                [ text "Your reading pile is full — finish or remove a book before adding another." ]
+
+        _ ->
+            text ""
 
 
 viewControls : Model -> Html Msg

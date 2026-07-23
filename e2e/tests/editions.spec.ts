@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-import { suiteAuthFile } from "./helpers";
+import { suiteAuthFile, assertSeedOrSkip } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("editions") });
 
@@ -25,14 +25,15 @@ async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise
   await page.goto("/catalogue");
   await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-  // Find and click the card link for this specific book
+  // Find and click the card link for this specific book. `bookId` comes from
+  // findMultiEditionBookId, which reads the same default-sorted catalogue the
+  // page renders, so the target card is always on the first page. Assert its
+  // presence rather than silently falling back to the first card — that
+  // fallback would open the WRONG (possibly single-edition) book and make the
+  // caller's edition assertions vacuous.
   const cardLink = page.locator(`.catalogue__card-link[href="/books/${bookId}"], .catalogue__card-link[data-book-id="${bookId}"]`).first();
-  if (await cardLink.count() > 0) {
-    await cardLink.click();
-  } else {
-    // Fallback: click the first card link
-    await page.locator(".catalogue__card-link").first().click();
-  }
+  await expect(cardLink).toBeVisible({ timeout: 10000 });
+  await cardLink.click();
 
   // Wait for the overlay to appear
   await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
@@ -73,7 +74,7 @@ test.describe("Book Detail — Editions", () => {
     page,
   }) => {
     const bookId = await findMultiEditionBookId(page);
-    test.skip(!bookId, "No multi-edition books in seed data");
+    assertSeedOrSkip(!!bookId, "No multi-edition books in seed data");
     await openBookOverlayFromCatalogue(page, bookId!);
 
     const overlay = page.locator('[role="dialog"]');
@@ -84,7 +85,7 @@ test.describe("Book Detail — Editions", () => {
 
   test("edition selector has all editions listed", async ({ page }) => {
     const bookId = await findMultiEditionBookId(page);
-    test.skip(!bookId, "No multi-edition books in seed data");
+    assertSeedOrSkip(!!bookId, "No multi-edition books in seed data");
     await openBookOverlayFromCatalogue(page, bookId!);
 
     const overlay = page.locator('[role="dialog"]');
@@ -102,7 +103,7 @@ test.describe("Book Detail — Editions", () => {
     page,
   }) => {
     const bookId = await findMultiEditionBookId(page);
-    test.skip(!bookId, "No multi-edition books in seed data");
+    assertSeedOrSkip(!!bookId, "No multi-edition books in seed data");
     await openBookOverlayFromCatalogue(page, bookId!);
 
     const overlay = page.locator('[role="dialog"]');
@@ -132,7 +133,7 @@ test.describe("Book Detail — Editions", () => {
       const book = data.books.find((b: any) => b.edition_count === 1);
       return book?.id ?? null;
     });
-    test.skip(!singleBookId, "No single-edition books in seed data");
+    assertSeedOrSkip(!!singleBookId, "No single-edition books in seed data");
 
     await openBookOverlayFromCatalogue(page, singleBookId!);
 
@@ -144,7 +145,7 @@ test.describe("Book Detail — Editions", () => {
 
   test("edition details section shows metadata", async ({ page }) => {
     const bookId = await findMultiEditionBookId(page);
-    test.skip(!bookId, "No multi-edition books in seed data");
+    assertSeedOrSkip(!!bookId, "No multi-edition books in seed data");
     await openBookOverlayFromCatalogue(page, bookId!);
 
     const overlay = page.locator('[role="dialog"]');
@@ -156,7 +157,7 @@ test.describe("Book Detail — Editions", () => {
 test.describe("Book Detail — Formats on My Shelf", () => {
   test("formats section visible when book is on a shelf", async ({ page }) => {
     const placedBookId = await findPlacedBookId(page);
-    test.skip(!placedBookId, "No placed books on library shelf");
+    assertSeedOrSkip(!!placedBookId, "No placed books on library shelf");
 
     await openPlacedBookOverlay(page);
 
@@ -172,7 +173,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
     page,
   }) => {
     const placedBookId = await findPlacedBookId(page);
-    test.skip(!placedBookId, "No placed books on library shelf");
+    assertSeedOrSkip(!!placedBookId, "No placed books on library shelf");
 
     await openPlacedBookOverlay(page);
 
@@ -189,7 +190,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
 
   test("toggling a format changes its selected state", async ({ page }) => {
     const placedBookId = await findPlacedBookId(page);
-    test.skip(!placedBookId, "No placed books on library shelf");
+    assertSeedOrSkip(!!placedBookId, "No placed books on library shelf");
 
     await openPlacedBookOverlay(page);
 
@@ -219,7 +220,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
       const book = catData.books.find((b: any) => !placedIds.has(b.id));
       return book?.id ?? null;
     });
-    test.skip(!unplacedBookId, "All books are placed");
+    assertSeedOrSkip(!!unplacedBookId, "All books are placed");
 
     await openBookOverlayFromCatalogue(page, unplacedBookId!);
 

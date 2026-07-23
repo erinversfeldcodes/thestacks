@@ -1,12 +1,9 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
 import {
-  E2E_PASSWORD,
   suiteAuthFile,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
-  signInViaForm,
+  mintOrSkip,
+  injectSession,
   ensureBookOnLibrary,
 } from "./helpers";
 
@@ -23,8 +20,9 @@ import {
  *   - the "renders entries" case owns a THROWAWAY user (single-owner fixture) and
  *     places a book, which both suppresses the onboarding overlay AND writes a
  *     deterministic `placement.created` audit entry to assert against;
- *   - registration is on the shared `:auth` rate bucket, so a transient 429 is
- *     absorbed with a bounded backoff-retry;
+ *   - the user is minted via POST /api/test/session (Issue #280) rather than the
+ *     register→confirm→login dance, so this non-auth-testing spec no longer draws
+ *     on the shared `:auth` rate bucket;
  *   - the helper endpoint is gated behind STACKS_E2E_TEST_HELPERS=1, so the
  *     throwaway case test.skips cleanly when it is unavailable.
  */
@@ -34,16 +32,15 @@ test.describe("Settings — Audit Log (live entries)", () => {
     page,
     request,
   }) => {
-    const { email, token } = await registerAndConfirm(request, "e2e-auditlog");
-    test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-auditlog"),
+    });
 
-    // Sign in and place a book: suppresses the onboarding overlay (a placement-
-    // free user gets a global modal whose backdrop eats clicks everywhere) and
-    // writes a `placement.created` audit entry (Shelving.place_book → Audit.log).
-    await signInViaForm(page, email, E2E_PASSWORD);
+    // Inject the session and place a book: suppresses the onboarding overlay (a
+    // placement-free user gets a global modal whose backdrop eats clicks
+    // everywhere) and writes a `placement.created` audit entry
+    // (Shelving.place_book → Audit.log).
+    await injectSession(page, session);
     await ensureBookOnLibrary(page);
 
     await page.goto("/settings/audit-log");
@@ -138,35 +135,3 @@ test.describe("Settings — Audit Log (empty & error states)", () => {
     await expect(page.locator(".audit-log__table")).toHaveCount(0);
   });
 });
-
-/**
- * Register a throwaway user via the API and confirm its email through the
- * test-helper token. Returns the email and confirmation token (null when the
- * helper endpoint is unavailable, so the caller can test.skip). `/api/auth/register`
- * is on the shared `:auth` rate bucket (60/60s per IP), so a transient 429 burst
- * is absorbed with a bounded backoff-retry. Mirrors gdpr.spec.ts.
- */
-async function registerAndConfirm(
-  request: APIRequestContext,
-  prefix: string
-): Promise<{ email: string; token: string | null }> {
-  const email = uniqueEmail(prefix);
-
-  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  for (
-    let attempt = 1;
-    attempt <= 4 && !reg.ok() && reg.status() === 429;
-    attempt++
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  }
-  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return { email, token: null };
-
-  const confirm = await request.get(`/api/auth/confirm/${token}`);
-  expect(confirm.ok()).toBeTruthy();
-  return { email, token };
-}

@@ -67,7 +67,7 @@ type alias Model =
     -- Verification step state machine
     , step : UploadStep
     , selectedShelf : String
-    , placementState : RemoteData Http.Error Placement
+    , placementState : RemoteData Api.PlaceError Placement
 
     -- User "adults only" (age-gate raise) toggle for the book being placed.
     -- When True, ConfirmPlacement also fires the raise-only user age-gate
@@ -135,7 +135,7 @@ type Msg
     | ShelfSelected String
     | ToggleAdultsOnly
     | ConfirmPlacement
-    | PlacementCompleted (Result Http.Error Placement)
+    | PlacementCompleted (Result Api.PlaceError Placement)
     | AgeGateSet (Result Http.Error ())
     | IsbnLookupResult (Result Http.Error BookDetailResponse)
     | GoToShelf String
@@ -659,12 +659,15 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                ( Err err, _ ) ->
+                ( Err Api.PlaceReadingPileFull, _ ) ->
+                    ( { model | placementState = Failure Api.PlaceReadingPileFull }, Cmd.none, NoOut )
+
+                ( Err (Api.PlaceHttpError err), _ ) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | placementState = Failure err }, Cmd.none, NoOut )
+                        ( { model | placementState = Failure (Api.PlaceHttpError err) }, Cmd.none, NoOut )
 
                 _ ->
                     ( model, Cmd.none, NoOut )
@@ -1052,7 +1055,17 @@ viewChoosingShelf model book =
                     , p [] [ text "Adding to shelf..." ]
                     ]
 
-            Failure _ ->
+            Failure Api.PlaceReadingPileFull ->
+                div [ class "upload-shelf-picker__error", testId "reading-pile-full-msg" ]
+                    [ p [] [ text "Your reading pile is full — finish or remove a book before adding another." ]
+                    , button
+                        [ class "btn btn--primary"
+                        , onClick ConfirmPlacement
+                        ]
+                        [ text ("Add to " ++ shelfLabel model.selectedShelf) ]
+                    ]
+
+            Failure (Api.PlaceHttpError _) ->
                 div [ class "upload-shelf-picker__error" ]
                     [ p [] [ text "Failed to add book. Please try again." ]
                     , button

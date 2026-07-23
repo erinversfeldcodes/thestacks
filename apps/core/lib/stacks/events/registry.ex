@@ -51,9 +51,36 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
+    # placement.removed (Issue #116 punch #14b): feeds AND a warehouse refresh.
+    # A removal decrements mart_community_read_count (an incremental table
+    # filtering removed_at is null); created/moved already refresh it via
+    # DbtRefreshHandler, so removed — which changes the same numbers — is wired
+    # the same way. See Stacks.Workers.DbtRefreshHandler @model_mapping.
     "placement.removed" => [
-      Stacks.Feeds.Handlers.PlacementHandler
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
     ],
+    # placement.reread (US-1.6.3): emitted by Shelving.reread_book/2. Registered
+    # with an EMPTY handler set — matching the reading-lifecycle events below and
+    # PRESERVING this event's pre-existing no-handler behaviour (it was never
+    # wired to PlacementHandler/DbtRefreshHandler). stg_bookshelf_placements is a
+    # dbt view (the fresh library placement a re-read creates is reflected live),
+    # and no mart consumes re-read counts today, so no handler is warranted.
+    # Registering with `[]` keeps it in the all_event_types/0 catalog for
+    # replay/diagnostics without inventing a phantom handler. Surfacing re-reads
+    # in the activity feed would be a deliberate future change, tracked separately.
+    "placement.reread" => [],
+    # Reading-lifecycle events (US-1.6.6), emitted by
+    # Shelving.update_reading_progress/3. Registered with an EMPTY handler set
+    # deliberately: `stg_bookshelf_placements` is a dbt `view` (it always
+    # reflects the live reading_status/current_page — nothing to refresh), and
+    # no mart consumes reading progress today, so a DbtRefreshHandler would map
+    # to no models and enqueue a no-op job. Registering with `[]` keeps the
+    # registry the complete catalog of emitted event types (surfaced by
+    # `all_event_types/0` for replay/diagnostics) without inventing a phantom
+    # handler. Add a handler here if/when a reading-analytics mart lands.
+    "placement.reading_started" => [],
+    "placement.reading_completed" => [],
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],

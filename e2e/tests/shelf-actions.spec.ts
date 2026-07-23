@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
+import { suiteAuthFile, ensureBookOnLibrary, assertSeedOrSkip } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("shelf-actions") });
 
@@ -69,9 +69,16 @@ test.describe("Shelf actions — add book from catalogue", () => {
     // Count initial badges
     const initialBadges = await page.locator(".catalogue__card-badge").count();
 
-    // Find an "Add to Shelf" button (only appears on unplaced books)
+    // Find an "Add to Shelf" button (only appears on unplaced books). A seed
+    // gate rather than a silent guard: with E2E_EXPECT_FULL_SEEDS=1 (preview/CI)
+    // the absence of an unplaced book on the first page is a HARD FAILURE — the
+    // full dev-fixture seed always leaves this suite user with unplaced books —
+    // while a prod-shaped/thin target skips loudly instead of passing vacuously.
     const addButton = page.locator(".catalogue__card-add").first();
-    test.skip((await addButton.count()) === 0, "No unplaced books visible in catalogue");
+    assertSeedOrSkip(
+      (await addButton.count()) > 0,
+      "No unplaced books visible in catalogue"
+    );
 
     // Click "Add to Shelf" to open the picker
     await addButton.click();
@@ -145,7 +152,10 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
       return null;
     });
 
-    test.skip(unplacedHref === null, "No unplaced books visible in catalogue");
+    assertSeedOrSkip(
+      unplacedHref !== null,
+      "No unplaced books visible in catalogue"
+    );
 
     await page
       .locator(`.catalogue__card-link[href="${unplacedHref}"]`)

@@ -67,18 +67,18 @@ n/a — no user stories (pure E2E harness work).
 ## Test Audit
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| API + auth guard (helper returns a valid session; 404 when flag off; rejects non-`.test` email) | yes | ❌ needs an ExUnit controller test mirroring `test_helper_controller_test.exs` (→ ✅ when done) |
-| E2E harness (a spec authenticates via the minted token and drives a page) | yes | ❌ `gdpr.spec.ts` migrated + green on a live preview (→ ✅ when done) |
+| API + auth guard (helper returns a valid session; 404 when flag off; rejects non-`.test` email) | yes | ✅ 8 tests, 29/0 file run (2026-07-22) |
+| E2E harness (a spec authenticates via the minted token and drives a page) | yes | ✅ gdpr.spec.ts migrated; green locally + on every 2026-07-23 preview run |
 | 1–13 (app/US layers) | no | n/a — no user-facing feature; test-infrastructure only |
 
 ## Definition of Done
-- [ ] `POST /api/test/session` implemented under `:e2e_helper` + `STACKS_E2E_TEST_HELPERS` guard; 404 when off
-- [ ] Returns a valid session token for a freshly-created, confirmed `.test` user; hard domain allowlist
-- [ ] ExUnit controller test (happy path + flag-off 404 + non-`.test` rejection)
-- [ ] `mintSession` helper in `e2e/tests/helpers.ts`; `gdpr.spec.ts` migrated off register+login
-- [ ] `gdpr.spec.ts` green on a live preview with the `:auth`-bucket contention gone
-- [ ] Standards compliance verified (`just verify` passes)
-- [ ] Test audit (above) is GREEN — 0 ❌, 0 ⚠️
+- [x] `POST /api/test/session` implemented under `:e2e_helper` + `STACKS_E2E_TEST_HELPERS` guard; 404 when off — evidence: test_helper_controller.ex mint_session/2 (login-identical Guardian mint incl. token-family fail-close); flag-off 404 tests
+- [x] Returns a valid session token for a freshly-created, confirmed `.test` user; hard domain allowlist — evidence: token drives GET /api/placements/mine -> 200 in tests; lookalike-domain rejection test; AuthTokenFamily row asserted
+- [x] ExUnit controller test (happy path + flag-off 404 + non-`.test` rejection) — evidence: 8 tests in test_helper_controller_test.exs, 29/0 file run; failing-first (4 assertion failures pre-impl)
+- [x] `mintSession` helper in `e2e/tests/helpers.ts`; `gdpr.spec.ts` migrated off register+login — evidence: helpers.ts mintSession/injectSession; gdpr.spec.ts fully migrated, 429-retry dance removed
+- [x] `gdpr.spec.ts` green on a live preview with the `:auth`-bucket contention gone — evidence: green in every preview run 2026-07-23 incl. the 230/0/0 record run; zero 429s across consecutive full runs (#280's double-run gate)
+- [x] Standards compliance verified (`just verify` passes) — evidence: full suite 2778/0 at land (2026-07-22); subsequent fresh-DB gates and just ci green through 2026-07-23
+- [x] Test audit (above) is GREEN — 0 ❌, 0 ⚠️ — evidence: both audit rows resolved (ExUnit 29/0; live-preview green), verdicts updated in the table above
 
 ## Dependencies
 None — extends the existing `TestHelperController` / `:e2e_helper` infrastructure.

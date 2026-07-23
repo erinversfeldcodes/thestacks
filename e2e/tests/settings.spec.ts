@@ -3,11 +3,40 @@ import {
   suiteAuthFile,
   E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
+  mintOrSkip,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
+
+/**
+ * The password path hashes with Argon2, serialised through a bounded NimblePool
+ * (Issue #166, shipped: apps/core/lib/stacks/accounts/argon_pool.ex). Under
+ * saturation the API now returns 503 + Retry-After: 5 — NOT the old preview-VM
+ * OOM 502 that a `test.skip(status === 502)` guard used to swallow (a guard that
+ * made the test unable to fail). Honour the shipped back-pressure contract
+ * instead of skipping: retry a small, bounded number of times, waiting the
+ * server-advised delay, then let the caller assert the REAL expectation. A
+ * persistent 503 is a genuine failure the suite must surface, never a skip.
+ */
+async function retryOn503<T>(
+  call: () => Promise<T>,
+  statusOf: (r: T) => number,
+  {
+    maxAttempts = 3,
+    retryAfterMs = 5000,
+  }: { maxAttempts?: number; retryAfterMs?: number } = {}
+): Promise<T> {
+  let result = await call();
+  for (
+    let attempt = 1;
+    attempt < maxAttempts && statusOf(result) === 503;
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    result = await call();
+  }
+  return result;
+}
 
 test.describe("Settings — Privacy & Consent", () => {
   test("consent page loads with title and toggle", async ({ page }) => {
@@ -306,16 +335,14 @@ test.describe("Settings — Profile & Account API", () => {
   test("PUT /api/settings/password rejects wrong current password", async ({
     page,
   }) => {
-    const { status, data } = await apiCall(
-      page,
-      "PUT",
-      "/api/settings/password",
-      {
-        current_password: "definitely-wrong-password",
-        new_password: "new-password-123",
-      }
+    const { status, data } = await retryOn503(
+      () =>
+        apiCall(page, "PUT", "/api/settings/password", {
+          current_password: "definitely-wrong-password",
+          new_password: "new-password-123",
+        }),
+      (r) => r.status
     );
-    test.skip(status === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
     expect(status).toBe(422);
     expect((data as any).error).toBe("invalid_current_password");
   });
@@ -323,11 +350,14 @@ test.describe("Settings — Profile & Account API", () => {
   test("PUT /api/settings/password rejects new password shorter than 8 characters", async ({
     page,
   }) => {
-    const { status } = await apiCall(page, "PUT", "/api/settings/password", {
-      current_password: E2E_PASSWORD,
-      new_password: "short",
-    });
-    test.skip(status === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
+    const { status } = await retryOn503(
+      () =>
+        apiCall(page, "PUT", "/api/settings/password", {
+          current_password: E2E_PASSWORD,
+          new_password: "short",
+        }),
+      (r) => r.status
+    );
     expect(status).toBe(422);
   });
 
@@ -401,35 +431,22 @@ test.describe("Settings — Password change (isolated)", () => {
     request,
   }) => {
     // Mint a fresh throwaway user so a successful change revokes ONLY this user's
-    // own session, never the shared suite token.
-    const email = uniqueEmail("e2e-settings-pw");
-    const reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-    test.skip(reg.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(reg.ok()).toBeTruthy();
+    // own session, never the shared suite token. Minting (POST /api/test/session,
+    // Issue #280) is outside the `:auth` bucket and returns a confirmed user with
+    // its own JWT whose password is E2E_PASSWORD — replacing the
+    // register→confirm→login dance that used to draw on the shared budget.
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-settings-pw"),
+    });
 
-    const token = await fetchConfirmationToken(request, email);
-    test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+    const resp = await retryOn503(
+      () =>
+        request.put("/api/settings/password", {
+          headers: { Authorization: `Bearer ${session.token}` },
+          data: { current_password: E2E_PASSWORD, new_password: E2E_PASSWORD },
+        }),
+      (r) => r.status()
     );
-    await request.get(`/api/auth/confirm/${token}`);
-
-    // Log in via the API to obtain THIS user's own JWT. Skip only on 502 — a
-    // genuine Argon2 OOM capacity flake on the small preview machine (Issue #166).
-    // A 403 here would mean the just-confirmed throwaway user is still unconfirmed
-    // (an email-confirm regression) — that must FAIL loudly, not skip.
-    const login = await request.post("/api/auth/login", {
-      data: { email, password: E2E_PASSWORD },
-    });
-    test.skip(login.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
-    expect(login.ok()).toBeTruthy();
-    const authToken = (await login.json()).token as string;
-
-    const resp = await request.put("/api/settings/password", {
-      headers: { Authorization: `Bearer ${authToken}` },
-      data: { current_password: E2E_PASSWORD, new_password: E2E_PASSWORD },
-    });
-    test.skip(resp.status() === 502, "Preview machine OOM under concurrent Argon2 load (Issue #166)");
     expect(resp.status()).toBe(200);
   });
 });

@@ -133,6 +133,48 @@ Tests the full Elm app (Model-Update-View) without a browser. Simulates user int
 ### 10. Playwright E2E
 Real browser tests for concerns elm-program-test can't cover: file uploads, CSS rendering, animations. Minimal — only what requires a real browser.
 
+#### Vacuous assertion guards (banned — Issue #275)
+Never wrap an E2E assertion in a presence guard on its own target:
+
+```ts
+// ✗ BANNED — passes when the element is ABSENT, so it can never fail
+if ((await locator.count()) > 0) {
+  await expect(locator).toBeVisible();
+}
+test.skip((await addButton.count()) === 0, "no button"); // a skip is not a pass
+test.skip(status === 502, "preview OOM");                 // fail-open on a server error
+```
+
+The `status === 5xx` variant is the same defect: a skip that fires on a server
+error makes the test unable to fail. Never swallow a 5xx — assert the real
+expectation, and where the server documents back-pressure (Issue #166: the
+Argon2 path returns **503 + Retry-After**), honour that contract with a bounded
+retry (`retryOn503` in `settings.spec.ts`), then assert. Prefer `assertSeedOrSkip`
+(`helpers.ts`) over a bare `test.skip` for seed-data preconditions: it hard-fails
+under `E2E_EXPECT_FULL_SEEDS=1` (preview/CI) while still skipping loudly on
+prod-shaped targets.
+
+Such a guard reports green when a regression removes the element entirely, and
+can even conceal a wrong selector (a test that was never correct). Instead:
+
+- **Vestigial guard** (the element is always there given deterministic seed
+  data) → delete the guard and assert unconditionally. Make the data
+  deterministic with a seed/setup helper (`ensureBookOnShelf`, `mintSession`,
+  `assertSeedOrSkip`) if it is not.
+- **Genuine either/or** (mutually-exclusive terminal states where *every* branch
+  still asserts something) → keep the conditional, but add a marker comment on
+  the guard line or the line directly above it, stating why it is optional:
+
+```ts
+// vacuous-guard-check: allow — genuine either/or; the else branch asserts the verify view.
+if ((await identified.count()) > 0) { /* … */ } else { /* … asserts … */ }
+```
+
+Enforced mechanically by `scripts/check-e2e-vacuous-guards.sh`, wired into
+`scripts/lint-elm.sh` (the `just ci` elm group and the CI lint-elm job) and as a
+pre-flight in `scripts/test-e2e.sh`. Every de-guarded assertion must be proven
+non-vacuous — demonstrate it FAILS when its target selector is broken.
+
 ### 11. Visual Regression (Optional)
 Screenshot comparisons for shelf rendering, spine sizing, cork board layout. Separate approval flow. Not blocking CI.
 

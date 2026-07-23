@@ -1,6 +1,8 @@
 module TestHelpers exposing
-    ( ReadingPileTestModel
+    ( BookDetailTestModel
+    , ReadingPileTestModel
     , bookDetailProgram
+    , bookDetailProgramWithOut
     , bookshelfProgram
     , libraryProgram
     , loginProgram
@@ -40,6 +42,7 @@ import Dict
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Navigation.Route exposing (Route)
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.ReadingPile as ReadingPile
@@ -52,7 +55,7 @@ import SimulatedEffect.Http
 import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
-import Types.Placement exposing (Placement, placementDecoder)
+import Types.Placement exposing (Placement, placementDecoder, readingStatusToString)
 import Types.RemoteData
 import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
@@ -266,6 +269,16 @@ encodePlacement placement =
                     Nothing ->
                         []
                )
+            ++ (case placement.readingStatus of
+                    Just status ->
+                        [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
+
+                    Nothing ->
+                        []
+               )
+            ++ encodeMaybe "current_page" Encode.int placement.currentPage
+            ++ encodeMaybe "started_at" Encode.string placement.startedAt
+            ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
         )
 
 
@@ -553,6 +566,16 @@ simulateBookDetailResponseWithPlacement bookId book placement =
                             Nothing ->
                                 []
                        )
+                    ++ (case placement.readingStatus of
+                            Just status ->
+                                [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
+
+                            Nothing ->
+                                []
+                       )
+                    ++ encodeMaybe "current_page" Encode.int placement.currentPage
+                    ++ encodeMaybe "started_at" Encode.string placement.startedAt
+                    ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
                 )
 
         json =
@@ -797,7 +820,7 @@ uploadEffects msg model maybeToken =
                                 , body =
                                     SimulatedEffect.Http.jsonBody
                                         (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                                , expect = SimulatedEffect.Http.expectJson Upload.PlacementCompleted (Decode.field "placement" placementDecoder)
+                                , expect = SimulatedEffect.Http.expectStringResponse Upload.PlacementCompleted Api.placeResponseToResult
                                 , timeout = Nothing
                                 , tracker = Nothing
                                 }
@@ -994,7 +1017,12 @@ bookDetailEffects msg model maybeToken =
                         , body =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
-                        , expect = SimulatedEffect.Http.expectWhatever BookDetail.MoveCompleted
+                        , expect =
+                            -- Mirrors Api.expectMove: the 422 reading_pile_full
+                            -- body must reach MoveCompleted as its own error.
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.MoveCompleted
+                                Api.moveResponseToResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1028,7 +1056,49 @@ bookDetailEffects msg model maybeToken =
                         , body =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                        , expect = SimulatedEffect.Http.expectJson (BookDetail.PlaceCompleted model.selectedBookshelf) (Decode.field "placement" placementDecoder)
+                        , expect = SimulatedEffect.Http.expectStringResponse (BookDetail.PlaceCompleted model.selectedBookshelf) Api.placeResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.ProgressCardMsg _ ->
+            -- `model` is the post-update model. A Loading progressSaveState means
+            -- the card emitted ProgressUpdateRequested and a PUT should be issued.
+            case ( model.placement, maybeToken, model.progressSaveState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/progress"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.ProgressSaved
+                                Api.progressResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.RecordReadRequested ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placement.id ++ "/move"
+                        , body =
+                            SimulatedEffect.Http.jsonBody
+                                (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                BookDetail.MoveCompleted
+                                Api.moveResponseToResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1072,7 +1142,17 @@ decodeBookDetailResponse : Decode.Decoder BookDetailResponse
 decodeBookDetailResponse =
     Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        (Decode.maybe (Decode.field "placement" placementDecoder))
+        -- Mirror production `Api.bookDetailResponseDecoder`: the proto-generated
+        -- placementDecoder decodes JSON null to a default struct (every field
+        -- `oneOf [ field, succeed default ]`), so `Decode.maybe` alone yields a
+        -- phantom `Just {id = ""}` for an unplaced book — hiding the
+        -- "Add to Collection" (place) path the real decoder reaches via
+        -- `Decode.nullable`. Match production so null → Nothing.
+        (Decode.oneOf
+            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
@@ -1258,10 +1338,61 @@ readingPileProgram maybeToken =
                     ( newPage, _, out ) =
                         ReadingPile.update msg model.page
                 in
-                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+                ( { page = newPage, lastOut = out }, readingPileEffects msg newPage maybeToken )
         , view = \model -> ReadingPile.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Translate Reading Pile page Cmds into SimulatedEffects.
+
+Mirrors `ReadingPile.update`'s progress + record-read paths: a `CardMsg` that
+left `saveState = Loading` issues the `PUT /progress`; `RecordReadRequested`
+issues the `PUT /move` to the library. The request bodies are placeholders —
+tests supply the response, and the expect mapping (reused from `Api`) is what
+routes it back into the page.
+
+-}
+readingPileEffects : ReadingPile.Msg -> ReadingPile.Model -> Maybe String -> SimulatedEffect ReadingPile.Msg
+readingPileEffects msg newPage maybeToken =
+    case ( msg, maybeToken ) of
+        ( ReadingPile.CardMsg placementId _, Just token ) ->
+            case newPage.saveState of
+                Types.RemoteData.Loading ->
+                    SimulatedEffect.Http.request
+                        { method = "PUT"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placementId ++ "/progress"
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectStringResponse
+                                (ReadingPile.ProgressSaved placementId)
+                                Api.progressResponseToResult
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        ( ReadingPile.RecordReadRequested placementId, Just token ) ->
+            SimulatedEffect.Http.request
+                { method = "PUT"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/placements/" ++ placementId ++ "/move"
+                , body =
+                    SimulatedEffect.Http.jsonBody
+                        (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
+                , expect =
+                    SimulatedEffect.Http.expectStringResponse
+                        (ReadingPile.RecordReadDone placementId)
+                        Api.moveResponseToResult
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        _ ->
+            SimulatedEffect.Cmd.none
 
 
 {-| Translate the Reading Pile init Cmd into a SimulatedEffect.
@@ -1507,5 +1638,47 @@ bookDetailProgram bookId maybeToken =
                 in
                 ( newModel, bookDetailEffects msg newModel maybeToken )
         , view = BookDetail.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Harness model that records the most recent BookDetail `OutMsg` alongside the
+page model. `Page.BookDetail.update` returns a third `OutMsg` element that the
+page itself cannot observe — `Main` consumes it. Recording it (as
+`ReadingPileTestModel` does for the Reading Pile) lets a program test assert the
+navigation intent a confirmed remove produces (`NavigateTo previousRoute`)
+rather than only the rendered model change.
+-}
+type alias BookDetailTestModel =
+    { page : BookDetail.Model
+    , lastOut : BookDetail.OutMsg
+    }
+
+
+{-| A BookDetail harness identical to `bookDetailProgram` except that it records
+the page's `OutMsg`. `bookDetailProgram` discards it; this one keeps the latest
+one so a test can observe `NavigateTo previousRoute` from a confirmed remove.
+Takes the previous route so the navigation target is a concrete, asserted value.
+-}
+bookDetailProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        BookDetail.init bookId maybeToken maybePreviousRoute
+                in
+                ( { page = model, lastOut = BookDetail.NoOut }
+                , bookDetailInitEffects bookId maybeToken
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, out ) =
+                        BookDetail.update msg model.page maybeToken
+                in
+                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+        , view = \model -> BookDetail.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity

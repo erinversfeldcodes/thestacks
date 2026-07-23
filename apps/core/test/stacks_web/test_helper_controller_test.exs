@@ -333,6 +333,113 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
+  # ── POST /api/test/session (Issue #192 — mint a confirmed session) ─────────
+  #
+  # This endpoint MINTS AUTHENTICATION, so the security-critical properties are
+  # the same as the other helpers (404 whenever the flag is not exactly "1")
+  # plus a hard `.test`-domain allowlist on user creation: it must be
+  # impossible to mint a session for a real (non-test-TLD) account, even on a
+  # public preview where the flag is on.
+  describe "POST /api/test/session with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "mints a confirmed user whose token authenticates a real request", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{})
+
+      assert %{"email" => email, "token" => token} = json_response(conn, 201)
+      assert String.ends_with?(email, "@thestacks.test")
+      assert is_binary(token) and token != ""
+
+      user = Stacks.Accounts.get_user_by_email(email)
+      assert user, "minted user must exist as an ordinary op.users row"
+      assert user.email_confirmed == true
+
+      # The token must be a REAL session token minted via the same path as
+      # AuthController.login — including the refresh-token family invariant
+      # (Issue #179: every live access token is tracked by exactly one family).
+      assert Core.Repo.get_by(Stacks.Accounts.AuthTokenFamily, user_id: user.id)
+
+      # Proof the token authenticates: drive an :authenticated route with it.
+      authed =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> get("/api/placements/mine")
+
+      assert json_response(authed, 200)
+    end
+
+    test "each call mints a distinct user (unique default email)", %{conn: conn} do
+      first = json_response(post(conn, "/api/test/session", %{}), 201)
+      second = json_response(post(build_conn(), "/api/test/session", %{}), 201)
+
+      assert first["email"] != second["email"]
+    end
+
+    test "honours explicit email and display_name", %{conn: conn} do
+      conn =
+        post(conn, "/api/test/session", %{
+          email: "e2e-mint-explicit@thestacks.test",
+          display_name: "Minted Explicitly"
+        })
+
+      assert %{"email" => "e2e-mint-explicit@thestacks.test"} = json_response(conn, 201)
+
+      user = Stacks.Accounts.get_user_by_email("e2e-mint-explicit@thestacks.test")
+      assert user.display_name == "Minted Explicitly"
+      assert user.email_confirmed == true
+    end
+
+    test "returns 404 and creates NO user for a non-test-domain email", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{email: "real-person@gmail.com"})
+
+      assert conn.status == 404
+      refute conn.resp_body =~ "token"
+      assert Stacks.Accounts.get_user_by_email("real-person@gmail.com") == nil
+    end
+
+    test "returns 404 for a lookalike domain (thestacks.test.evil.com)", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{email: "victim@thestacks.test.evil.com"})
+
+      assert conn.status == 404
+      assert Stacks.Accounts.get_user_by_email("victim@thestacks.test.evil.com") == nil
+    end
+
+    test "returns 422 when the email is already taken", %{conn: conn} do
+      insert(:user, email: "e2e-mint-taken@thestacks.test")
+
+      conn = post(conn, "/api/test/session", %{email: "e2e-mint-taken@thestacks.test"})
+
+      assert %{"errors" => _} = json_response(conn, 422)
+    end
+  end
+
+  describe "POST /api/test/session with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404 and mints nothing", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{email: "e2e-mint-off@thestacks.test"})
+
+      assert conn.status == 404
+      refute conn.resp_body =~ "token"
+      assert Stacks.Accounts.get_user_by_email("e2e-mint-off@thestacks.test") == nil
+    end
+
+    test "returns 404 even when the flag is present but not exactly \"1\"", %{conn: conn} do
+      System.put_env(@flag, "true")
+
+      conn = post(conn, "/api/test/session", %{email: "e2e-mint-notone@thestacks.test"})
+
+      assert conn.status == 404
+      assert Stacks.Accounts.get_user_by_email("e2e-mint-notone@thestacks.test") == nil
+    end
+  end
+
   # ── Rate limiting (flag ON) ─────────────────────────────────────────────────
   #
   # On a public preview the endpoint is reachable, so it must be rate-limited

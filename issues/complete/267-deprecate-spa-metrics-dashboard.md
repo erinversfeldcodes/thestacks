@@ -77,7 +77,7 @@ consumes it. Deleting it would have broken a live page (violating this issue's o
 - [x] Docs + user stories updated (US-5.1.1 superseded by Grafana; host-page dependents flagged) — evidence: `docs/{user-stories,implementation-mapping,technical-architecture}.md` diff
 - [x] `just verify` passes (no dangling refs, no unused-code warnings) — evidence: exit 0 (elixir 2749/0, elm 864/0, dbt 64+231, credo/dialyzer/elm-review clean)
 - [x] Test audit GREEN — evidence: removal + relocation tests green; L1/L10 cells ✅
-- [ ] Residual cleanup (non-blocking, tracked): stale "consumer MetricsController" comments in `dbt/models/marts/schema.yml`; now-unused `MetricsDashboard`/`QualityTrends`/`EnrichmentGaps` messages in `admin.proto` (additive, harmless) — de-scoped to future cleanup, not gating the epic PR
+- [x] Residual cleanup — docs stragglers fixed 2026-07-23 (commit ddd6752a: US-2.2.2 repointed to the relocated GET /api/admin/source-health, US-5.1 SUPERSEDED banner, US-15.2.1 nav corrected, US-2.1.1/2.2.1 mart-consumer notes, prod-data-access runbook rows, capacity-model + technical-architecture rate-limit row, elixir-agent registry); zero dangling code refs re-proven (grep AdminMetrics/getMetrics/MetricsController/Stacks.Admin.Metrics = 0 across lib/test/frontend/e2e); live-driven: /admin/metrics renders NotFound, nav has no Metrics link, /api/metrics falls to the SPA catch-all (2026-07-23). The admin.proto unused messages remain additive/harmless by design (proto field numbers are forever; removal is deliberately out of scope)
 
 ## Dependencies
 Part of the #119 epic (lands on `feat/119-e2e`). Enables the #119 reshape (US-5.1 → Grafana surface).

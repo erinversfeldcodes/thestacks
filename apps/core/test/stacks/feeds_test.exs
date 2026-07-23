@@ -3,13 +3,36 @@ defmodule Stacks.FeedsTest do
   Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
-  use Core.DataCase, async: true
+  # async: false — these tests swap the GLOBAL :feed_cache_writer application-env
+  # seam (Application.put_env); running async lets the override leak into (and be
+  # reset under) concurrent tests that exercise the cache write path.
+  use Core.DataCase, async: false
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Feeds
+  alias Stacks.Feeds.FeedCacheEntry
 
-  describe "generate_atom/2" do
+  # A cache writer that always fails, mirroring the `{:error, changeset}` shape
+  # `put_cache/3` returns on a real FK/constraint violation. Injected via the
+  # `:feed_cache_writer` application env seam.
+  defp failing_writer do
+    changeset =
+      %FeedCacheEntry{}
+      |> Ecto.Changeset.change(%{})
+      |> Ecto.Changeset.add_error(:bookshelf_id, "forced write failure")
+
+    fn _bookshelf_id, _xml, _etag -> {:error, changeset} end
+  end
+
+  defp inject_failing_writer do
+    Application.put_env(:core, :feed_cache_writer, failing_writer())
+    on_exit(fn -> Application.delete_env(:core, :feed_cache_writer) end)
+  end
+
+  describe "fetch_feed/2" do
     test "returns {:ok, xml, etag} for a platform-visible bookshelf" do
       user = insert(:user, display_name: "Erin")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -18,7 +41,7 @@ defmodule Stacks.FeedsTest do
       _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, etag} = Feeds.generate_atom(user.id, "library")
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
 
       assert is_binary(xml)
       assert is_binary(etag)
@@ -32,28 +55,28 @@ defmodule Stacks.FeedsTest do
     end
 
     test "returns {:error, :not_found} for nonexistent bookshelf" do
-      assert {:error, :not_found} = Feeds.generate_atom(Ecto.UUID.generate(), "library")
+      assert {:error, :not_found} = Feeds.fetch_feed(Ecto.UUID.generate(), "library")
     end
 
     test "returns {:error, :not_public} for owner-visibility bookshelf" do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
-      assert {:error, :not_public} = Feeds.generate_atom(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
     end
 
     test "returns {:error, :not_public} for group-visibility bookshelf" do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
 
-      assert {:error, :not_public} = Feeds.generate_atom(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
     end
 
     test "returns valid XML with empty bookshelf" do
       user = insert(:user, display_name: "Test User")
       _bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
 
-      assert {:ok, xml, _etag} = Feeds.generate_atom(user.id, "wishlist")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist")
       assert String.contains?(xml, "<feed xmlns=")
       assert String.contains?(xml, "Test User")
       refute String.contains?(xml, "<entry>")
@@ -65,9 +88,161 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "Tom & Jerry <Adventures>")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.generate_atom(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
       assert String.contains?(xml, "&amp;")
       assert String.contains?(xml, "&lt;")
+    end
+
+    # A public Atom document is crawled and cached by RSS readers, so the owner's
+    # email must never appear anywhere in it (title/author/entries). These three
+    # tests pin the fallback ladder: display_name → handle → neutral label.
+    test "never leaks the owner email in feed XML when display_name and handle are blank (#283)" do
+      # op.users.handle is NOT NULL (backfilled + app-assigned on every insert),
+      # so the only reachable "no name" shape is a blank handle — the defensive
+      # backstop the neutral label exists for.
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: ""
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+      assert String.contains?(xml, "A Stacks reader")
+    end
+
+    test "falls back to the claimed handle when display_name is nil (#283)" do
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      assert String.contains?(xml, "shadow_reader")
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+    end
+
+    test "uses display_name when present and never the email (#283)" do
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: "Erin",
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+
+      assert String.contains?(xml, "Erin")
+      refute String.contains?(xml, "owner-secret@example.com")
+      refute String.contains?(xml, "@")
+    end
+
+    test "a cache-write failure still serves the fresh render (cache is an optimization)" do
+      user = insert(:user, display_name: "Erin")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      inject_failing_writer()
+
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
+      assert String.contains?(xml, "The Secret History")
+      assert is_binary(etag)
+
+      # The write failed, so no row was persisted — proving the render was
+      # served despite the cache miss-fill failing.
+      assert [] = Repo.all(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf.id)
+    end
+  end
+
+  describe "regenerate/2" do
+    test "returns {:ok, xml, etag} and upserts the cache row for a platform bookshelf" do
+      user = insert(:user, display_name: "Erin")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, etag} = Feeds.regenerate(user.id, "library")
+      assert String.contains?(xml, "The Secret History")
+
+      row = Repo.get_by(FeedCacheEntry, bookshelf_id: bookshelf.id)
+      assert row
+      assert row.atom_xml == xml
+      assert row.etag == etag
+    end
+
+    test "persists email-free cache XML for a nil-display-name user (#283 self-heal)" do
+      # The migration busts pre-fix rows; regeneration must then refill the cache
+      # with email-free XML so a subsequent hit never re-serves the email.
+      user =
+        insert(:user,
+          email: "owner-secret@example.com",
+          display_name: nil,
+          handle: "shadow_reader"
+        )
+
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, _xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      row = Repo.get_by(FeedCacheEntry, bookshelf_id: bookshelf.id)
+      assert row
+      refute String.contains?(row.atom_xml, "owner-secret@example.com")
+      refute String.contains?(row.atom_xml, "@")
+      assert String.contains?(row.atom_xml, "shadow_reader")
+    end
+
+    test "returns {:error, :not_found} for a nonexistent bookshelf" do
+      assert {:error, :not_found} = Feeds.regenerate(Ecto.UUID.generate(), "library")
+    end
+
+    test "returns {:error, :not_public} for an owner-visibility bookshelf" do
+      user = insert(:user)
+      _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      assert {:error, :not_public} = Feeds.regenerate(user.id, "library")
+    end
+
+    test "surfaces {:error, {:cache_write_failed, changeset}} when the cache write fails" do
+      user = insert(:user)
+      _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      inject_failing_writer()
+
+      assert {:error, {:cache_write_failed, %Ecto.Changeset{}}} =
+               Feeds.regenerate(user.id, "library")
+    end
+  end
+
+  describe "put_cache/3" do
+    test "returns {:error, %Ecto.Changeset{}} on an FK violation rather than raising" do
+      # A bookshelf_id with no matching op.bookshelves row violates the FK.
+      # The changeset must translate that into an error tuple, not a raise.
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Feeds.put_cache(Ecto.UUID.generate(), "<feed/>", "etag")
+
+      refute changeset.valid?
     end
   end
 
@@ -84,6 +259,26 @@ defmodule Stacks.FeedsTest do
       etag1 = Feeds.compute_etag("<feed>one</feed>")
       etag2 = Feeds.compute_etag("<feed>two</feed>")
       refute etag1 == etag2
+    end
+  end
+
+  describe "op.feed_cache schema" do
+    test "has exactly one index on bookshelf_id (the unique index; no redundant FK index)" do
+      %{rows: rows} =
+        Repo.query!(
+          """
+          SELECT indexname
+          FROM pg_indexes
+          WHERE schemaname = 'op'
+            AND tablename = 'feed_cache'
+            AND indexdef ILIKE '%(bookshelf_id)%'
+          ORDER BY indexname
+          """,
+          []
+        )
+
+      names = List.flatten(rows)
+      assert names == ["feed_cache_bookshelf_id_unique_index"]
     end
   end
 end

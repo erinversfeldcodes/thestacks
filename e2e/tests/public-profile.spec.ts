@@ -1,15 +1,12 @@
 import { test, expect } from "@playwright/test";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 import {
-  E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
-  signInViaForm,
+  mintOrSkip,
+  injectSession,
   ensureBookOnLibrary,
   apiCallFromPage,
 } from "./helpers";
-import type { Page } from "@playwright/test";
 
 /**
  * Browser E2E for the public-profile epic (#210) — the reader-facing half of the
@@ -25,25 +22,27 @@ import type { Page } from "@playwright/test";
  *   Ghost gate                — an unknown/ghost handle is "Reader not found"
  *                               (indistinguishable from absent, by design).
  *
- * WHY throwaway users (not the shared seeded suite users): this test MUTATES
- * profile/bookshelf visibility and handle. It owns two single-purpose fixtures:
- *   - OWNER (B): registered via API, loosened to a discoverable "public"
- *     profile with a claimed handle, a platform-visible "library" (one placed
- *     book) and an owner-only "wishlist". B never touches the browser — API only.
- *   - VIEWER (A): registered + confirmed, then drives the browser as a second
- *     signed-in reader.
+ * WHY throwaway users (not the shared seeded suite users): these tests MUTATE
+ * profile/bookshelf visibility and handle. Each owns single-purpose fixtures,
+ * e.g.:
+ *   - OWNER (B): a discoverable "public" profile with a claimed handle, a
+ *     platform-visible "library" (one placed book) and an owner-only "wishlist".
+ *     B never touches the browser — API only.
+ *   - VIEWER (A): drives the browser as a second signed-in reader.
  *
- * Both require the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)
- * and `test.skip` cleanly without it, matching gdpr/onboarding/privacy-block.
+ * Every fixture is minted via POST /api/test/session (Issue #280) — one call
+ * that creates a confirmed user AND returns its session token/user id, OUTSIDE
+ * the `:auth` rate bucket. This replaces the register→confirmation-token→confirm
+ * →login dance (and its 429-backoff): the parallel suite shares the `:auth`
+ * budget (60/60s per IP), and this spec's back-to-back fresh-user creation under
+ * #116's consolidated preview gate was the proven 429 source (PE P2-1). Browser
+ * fixtures inject the minted session directly; API-only fixtures use the token.
+ * `mintOrSkip` skips cleanly where the helper is unavailable, matching
+ * gdpr/reading-journey.
  *
  * A brand-new viewer is placement-free, so the GLOBAL onboarding overlay
  * intercepts pointer events everywhere; `ensureBookOnLibrary` places a book to
  * clear it, and we assert the overlay is gone before interacting.
- *
- * `/api/auth/{register,login,confirm}` share the `:auth` rate bucket (60/60s per
- * IP, shared across the parallel suite), so every auth call is wrapped in a
- * bounded 429-backoff and the whole journey is a SINGLE round-trip test to keep
- * `:auth` traffic low.
  */
 
 // Deterministic seed ISBNs (see apps/core/priv/repo/seeds.exs). Pinning the
@@ -59,12 +58,11 @@ test.describe("Public profiles — view, browse & discover (live browser journey
   }) => {
     // ── OWNER (B) — API only ──────────────────────────────────────────────
     const ownerName = `E2E Reader ${Math.floor(Math.random() * 1_000_000)}`;
-    const owner = await registerAndConfirm(request, "e2e-profile-owner", ownerName);
-    test.skip(
-      owner.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    const owner = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-profile-owner"),
+      displayName: ownerName,
+    });
+    const ownerAuth = owner.token;
 
     // A fresh user defaults to profile_visibility "owner" (a ghost). Loosen to
     // "platform" so another signed-in reader can discover and view the profile.
@@ -133,8 +131,10 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setBookshelfVisibility(request, ownerAuth, "wishlist", "owner");
 
     // ── VIEWER (A) — browser ──────────────────────────────────────────────
-    const viewer = await registerAndConfirm(request, "e2e-profile-viewer");
-    await signInViaForm(page, viewer.email, E2E_PASSWORD);
+    const viewer = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-profile-viewer"),
+    });
+    await injectSession(page, viewer);
     await ensureBookOnLibrary(page);
 
     // ── US-10.5.2 — the profile hub shows identity + visible shelves only ──
@@ -243,12 +243,10 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     request,
   }) => {
     // A discoverable owner.
-    const owner = await registerAndConfirm(request, "e2e-profile-blocktarget");
-    test.skip(
-      owner.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    const owner = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-profile-blocktarget"),
+    });
+    const ownerAuth = owner.token;
     await expectOk(
       request.put("/api/settings/profile_visibility", {
         headers: { Authorization: `Bearer ${ownerAuth}` },
@@ -264,19 +262,14 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       }),
       "set handle"
     );
-    const ownerId = (
-      await (
-        await expectOk(
-          request.get("/api/auth/me", { headers: { Authorization: `Bearer ${ownerAuth}` } }),
-          "owner /me"
-        )
-      ).json()
-    ).user.id;
+    const ownerId = owner.userId;
 
     // A viewer who blocks the owner must no longer resolve them — and the 404 is
     // indistinguishable from an absent user (never 403). Block is bidirectional.
-    const viewer = await registerAndConfirm(request, "e2e-profile-blocker");
-    const viewerAuth = await loginViaApi(request, viewer.email, E2E_PASSWORD);
+    const viewer = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-profile-blocker"),
+    });
+    const viewerAuth = viewer.token;
     await expectOk(
       request.post(`/api/users/${ownerId}/block`, {
         headers: { Authorization: `Bearer ${viewerAuth}` },
@@ -307,12 +300,11 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     // Public owner (B) — discoverable, with a PUBLIC library holding one public,
     // non-age-gated spine so an anon viewer has something to render.
     const publicName = `E2E Public ${Math.floor(Math.random() * 1_000_000)}`;
-    const pub = await registerAndConfirm(request, "e2e-anon-public", publicName);
-    test.skip(
-      pub.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    const pubAuth = await loginViaApi(request, pub.email, E2E_PASSWORD);
+    const pub = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-anon-public"),
+      displayName: publicName,
+    });
+    const pubAuth = pub.token;
     await setProfileVisibility(request, pubAuth, "public");
     const pubHandle = await claimHandle(request, pubAuth, "e2e_public");
     const [visibleBookId] = await resolveCatalogueIds(request, pubAuth, [VISIBLE_ISBN]);
@@ -321,8 +313,10 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setPlacementVisibility(request, pubAuth, pubPlacementId, "public");
 
     // Platform owner (C) — signed-in-only; an anon viewer must NOT resolve it.
-    const plat = await registerAndConfirm(request, "e2e-anon-platform");
-    const platAuth = await loginViaApi(request, plat.email, E2E_PASSWORD);
+    const plat = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-anon-platform"),
+    });
+    const platAuth = plat.token;
     await setProfileVisibility(request, platAuth, "platform");
     const platHandle = await claimHandle(request, platAuth, "e2e_platform");
 
@@ -360,23 +354,23 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     page,
     request,
   }) => {
-    const owner = await registerAndConfirm(request, "e2e-blockhub-owner");
-    test.skip(
-      owner.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    const owner = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-blockhub-owner"),
+    });
+    const ownerAuth = owner.token;
     await setProfileVisibility(request, ownerAuth, "public");
     const ownerHandle = await claimHandle(request, ownerAuth, "e2e_blockhub");
-    const ownerId = await meId(request, ownerAuth);
+    const ownerId = owner.userId;
 
     // Viewer blocks the owner, then drives the browser to the owner's hub.
-    const viewer = await registerAndConfirm(request, "e2e-blockhub-viewer");
-    await signInViaForm(page, viewer.email, E2E_PASSWORD);
+    const viewer = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-blockhub-viewer"),
+    });
+    await injectSession(page, viewer);
     await ensureBookOnLibrary(page);
     await expectOk(
       request.post(`/api/users/${ownerId}/block`, {
-        headers: { Authorization: `Bearer ${await pageToken(page)}` },
+        headers: { Authorization: `Bearer ${viewer.token}` },
       }),
       "block owner"
     );
@@ -396,13 +390,11 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     page,
     request,
   }) => {
-    const owner = await registerAndConfirm(request, "e2e-viewas-owner");
-    test.skip(
-      owner.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    await signInViaForm(page, owner.email, E2E_PASSWORD);
-    const ownerAuth = await pageToken(page);
+    const owner = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-viewas-owner"),
+    });
+    await injectSession(page, owner);
+    const ownerAuth = owner.token;
 
     // A PUBLIC library (reachable by anon) holding a single PLATFORM placement
     // (signed-in-only). Profile is public so the public shelf is within the
@@ -442,12 +434,10 @@ test.describe("Public profiles — view, browse & discover (live browser journey
   test("an active looking_for_home listing punches through for a signed-in viewer, not for anon", async ({
     request,
   }) => {
-    const owner = await registerAndConfirm(request, "e2e-mkt-owner");
-    test.skip(
-      owner.token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
-    );
-    const ownerAuth = await loginViaApi(request, owner.email, E2E_PASSWORD);
+    const owner = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-mkt-owner"),
+    });
+    const ownerAuth = owner.token;
     await setProfileVisibility(request, ownerAuth, "public");
     const ownerHandle = await claimHandle(request, ownerAuth, "e2e_mkt");
 
@@ -461,8 +451,10 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     const shelfPath = `/api/u/${ownerHandle}/bookshelves/looking_for_home`;
 
     // Before listing: owner-rung placement is hidden from a signed-in viewer.
-    const viewer = await registerAndConfirm(request, "e2e-mkt-viewer");
-    const viewerAuth = await loginViaApi(request, viewer.email, E2E_PASSWORD);
+    const viewer = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-mkt-viewer"),
+    });
+    const viewerAuth = viewer.token;
     const beforeAuthed = { Authorization: `Bearer ${viewerAuth}` };
     const before = await expectOk(request.get(shelfPath, { headers: beforeAuthed }), "pre-listing");
     expect((await before.json()).count, "owner-rung placement hidden before listing").toBe(0);
@@ -500,48 +492,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     expect(ids, "the active listing surfaces in the public browse").toContain(listingId);
   });
 });
-
-/**
- * Register a throwaway user via the API and confirm its email through the
- * test-helper token. Returns the email and confirmation token (null when the
- * helper endpoint is unavailable, so the caller can `test.skip`). `/register` is
- * under the shared `:auth` bucket, so a transient 429 is absorbed with backoff.
- */
-async function registerAndConfirm(
-  request: APIRequestContext,
-  prefix: string,
-  displayName?: string
-): Promise<{ email: string; token: string | null }> {
-  const email = uniqueEmail(prefix);
-
-  const reg = await withAuthBackoff(() =>
-    registerViaApi(request, { email, password: E2E_PASSWORD, displayName })
-  );
-  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return { email, token: null };
-
-  const confirm = await withAuthBackoff(() =>
-    request.get(`/api/auth/confirm/${token}`)
-  );
-  expect(confirm.ok()).toBeTruthy();
-  return { email, token };
-}
-
-/** Log a confirmed user in via the API and return the bearer token. */
-async function loginViaApi(
-  request: APIRequestContext,
-  email: string,
-  password: string
-): Promise<string> {
-  const resp = await withAuthBackoff(() =>
-    request.post("/api/auth/login", { data: { email, password } })
-  );
-  expect(resp.ok(), `login failed with HTTP ${resp.status()}`).toBeTruthy();
-  const body = await resp.json();
-  return body.token as string;
-}
 
 /**
  * Resolve catalogue book ids for the given seed ISBNs, in order. The catalogue
@@ -681,22 +631,6 @@ async function claimHandle(
   return ((await resp.json()).handle as string) ?? handle;
 }
 
-/** Resolve the authenticated user's id via /api/auth/me. */
-async function meId(request: APIRequestContext, authToken: string): Promise<string> {
-  const resp = await expectOk(
-    request.get("/api/auth/me", { headers: { Authorization: `Bearer ${authToken}` } }),
-    "/me"
-  );
-  return (await resp.json()).user.id as string;
-}
-
-/** Read the bearer token the SPA stored in localStorage for the signed-in session. */
-async function pageToken(page: Page): Promise<string> {
-  return (
-    await page.evaluate(() => JSON.parse(localStorage.getItem("stacks-auth") || "{}"))
-  ).token as string;
-}
-
 /** Await a request, assert it succeeded, and return the response. */
 async function expectOk(
   pending: Promise<APIResponse>,
@@ -704,21 +638,5 @@ async function expectOk(
 ): Promise<APIResponse> {
   const resp = await pending;
   expect(resp.ok(), `${label} failed: HTTP ${resp.status()}`).toBeTruthy();
-  return resp;
-}
-
-/**
- * Run an `:auth`-bucket request with a bounded 429 backoff. The bucket is
- * 60/60s per IP shared across the parallel suite, so a burst can transiently
- * 429; retry up to 4 times with a linear backoff before giving up.
- */
-async function withAuthBackoff(
-  fn: () => Promise<APIResponse>
-): Promise<APIResponse> {
-  let resp = await fn();
-  for (let attempt = 1; attempt <= 4 && !resp.ok() && resp.status() === 429; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-    resp = await fn();
-  }
   return resp;
 }

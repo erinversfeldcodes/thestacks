@@ -173,7 +173,7 @@ N/A — price data served directly from the database.
 - **Model**: `mart_enrichment_gaps` (view)
 - **Trigger**: Indirectly refreshed when price data changes
 - **Materialisation**: View — identifies books with `missing_prices`
-- **Consumer**: `GET /api/metrics/enrichment-gaps`
+- **Consumer**: the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (in-app metrics dashboard superseded by Grafana); the `mart_enrichment_gaps` mart is retained for the Grafana observability surface
 
 ---
 

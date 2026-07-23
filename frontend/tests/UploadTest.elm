@@ -498,9 +498,9 @@ suite =
                             { init_ | step = ChoosingShelf dummyBook }
 
                         ( model, _, _ ) =
-                            Upload.update (PlacementCompleted (Err Http.NetworkError)) choosing Nothing
+                            Upload.update (PlacementCompleted (Err (Api.PlaceHttpError Http.NetworkError))) choosing Nothing
                     in
-                    model.placementState |> Expect.equal (Failure Http.NetworkError)
+                    model.placementState |> Expect.equal (Failure (Api.PlaceHttpError Http.NetworkError))
             ]
         , describe "Reset"
             [ -- US-1.1.1 | Suite 10: Elm

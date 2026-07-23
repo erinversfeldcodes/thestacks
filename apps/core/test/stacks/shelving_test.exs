@@ -5,6 +5,7 @@ defmodule Stacks.ShelvingTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Ecto.Adapters.SQL.Sandbox
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
@@ -139,6 +140,304 @@ defmodule Stacks.ShelvingTest do
 
       assert event_count("placement.moved") == before_count + 1
     end
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.move_book(placement.id, other_user.id, "wishlist")
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.move_book(Ecto.UUID.generate(), user.id, "wishlist")
+    end
+
+    test "history row records to_bookshelf as the destination bookshelf id", %{
+      user: user,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      assert {:ok, %{history: history}} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      wishlist = Repo.get_by!(Bookshelf, user_id: user.id, name: "wishlist")
+      assert history.from_bookshelf == bookshelf.id
+      assert history.to_bookshelf == wishlist.id
+    end
+
+    test "writes an audit-log entry for the move (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.moved")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert audit_count("placement.moved") == before_count + 1
+
+      row = latest_audit_row("placement.moved")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.moved and ONLY that (no created/removed delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      removed_before = event_count("placement.removed")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.removed") == removed_before
+    end
+  end
+
+  describe "move_book/3 — same-bookshelf move is a no-op success (Fix B)" do
+    test "returns {:ok, placement} and writes no history, event, or audit row" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:ok, %{placement: returned}} = Shelving.move_book(placement.id, user.id, "library")
+      assert returned.id == placement.id
+
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+
+    test "does not reset a non-default shelf assignment to position 0" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      bookshelf = Repo.get_by!(Bookshelf, user_id: user.id, name: "library")
+
+      # Move the placement onto a second (non-position-0) shelf of the SAME
+      # bookshelf, then perform a same-bookshelf move: the no-op must NOT yank it
+      # back to the position-0 default shelf (which the old Multi path did).
+      {:ok, shelf2} = Shelving.create_shelf(bookshelf.id, user.id)
+      {:ok, on_shelf2} = Shelving.move_placement_to_shelf(placement.id, shelf2.id, user.id)
+      assert on_shelf2.shelf_id == shelf2.id
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "library")
+
+      reloaded = Repo.get!(Placement, placement.id)
+      assert reloaded.shelf_id == shelf2.id
+    end
+  end
+
+  describe "move_book/3 — atomicity / rollback" do
+    test "a step failure rolls back the placement update, history, event, and audit" do
+      # Force a deterministic mid-Multi failure: the placement UPDATE hits the
+      # partial unique index (one active placement per book+bookshelf) because the
+      # same book is already active on the destination. The whole transaction must
+      # roll back — the source placement stays put and nothing else is written.
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, source} = Shelving.place_book(user.id, book.id, "wishlist")
+      {:ok, _blocker} = Shelving.place_book(user.id, book.id, "antilibrary")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :placement, %Ecto.Changeset{}, _changes} =
+               Shelving.move_book(source.id, user.id, "antilibrary")
+
+      unmoved = Repo.get!(Placement, source.id) |> Repo.preload(:bookshelf)
+      assert unmoved.bookshelf.name == "wishlist"
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+  end
+
+  describe "move_book/3 — shelf reassignment and browse visibility" do
+    test "the moved placement's shelf belongs to the destination bookshelf" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "antilibrary")
+
+      moved = Repo.get!(Placement, placement.id) |> Repo.preload(shelf: :bookshelf)
+      assert moved.shelf != nil
+      assert moved.shelf.bookshelf.name == "antilibrary"
+      assert moved.shelf.bookshelf.user_id == user.id
+    end
+
+    test "get_bookshelf_shelves lists the book on the TARGET and not the SOURCE after a move" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
+
+      # Sanity: the book starts on the source browse.
+      assert book.id in browse_book_ids(user.id, "wishlist")
+
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "antilibrary")
+
+      assert book.id in browse_book_ids(user.id, "antilibrary")
+      refute book.id in browse_book_ids(user.id, "wishlist")
+    end
+  end
+
+  describe "reading pile 50-item limit (#276)" do
+    test "place_book/3 allows the 50th reading_pile placement" do
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      book = insert(:book)
+
+      assert {:ok, placement} = Shelving.place_book(user.id, book.id, "reading_pile")
+      assert placement.book_id == book.id
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "place_book/3 rejects the 51st reading_pile placement" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "move_book/3 allows a move that makes exactly 50" do
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "move_book/3 rejects a move that would make 51" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      assert {:error, :reading_pile_capacity, :reading_pile_full, _} =
+               Shelving.move_book(placement.id, user.id, "reading_pile")
+
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "rejected place_book writes no placement, event, or audit row" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      events_before = event_count("placement.created")
+      audits_before = audit_count("placement.created")
+
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      assert active_pile_count(user.id) == 50
+      assert event_count("placement.created") == events_before
+      assert audit_count("placement.created") == audits_before
+    end
+
+    test "rejected move_book leaves the placement and writes no history, event, or audit row" do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      library = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: library, book: insert(:book))
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :reading_pile_capacity, :reading_pile_full, _} =
+               Shelving.move_book(placement.id, user.id, "reading_pile")
+
+      unmoved = Repo.get!(Placement, placement.id)
+      assert unmoved.bookshelf_id == library.id
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+
+    test "the limit applies to reading_pile only" do
+      user = insert(:user)
+      library = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: library)
+
+      for _ <- 1..50 do
+        insert(:placement, bookshelf: library, shelf: shelf, book: insert(:book))
+      end
+
+      book = insert(:book)
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+    end
+
+    test "grandfathered over-limit piles keep their books and can still move books out" do
+      user = insert(:user)
+      pile = fill_reading_pile(user, 55)
+      book = insert(:book)
+
+      # No new placement while over the limit...
+      assert {:error, :reading_pile_full} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      # ...but every existing book is intact (no data loss)...
+      assert active_pile_count(user.id) == 55
+
+      # ...and moving a book OUT of the pile still works.
+      out_placement =
+        Placement
+        |> where([p], p.bookshelf_id == ^pile.id and is_nil(p.removed_at))
+        |> limit(1)
+        |> Repo.one!()
+
+      assert {:ok, %{placement: _}} = Shelving.move_book(out_placement.id, user.id, "library")
+      assert active_pile_count(user.id) == 54
+    end
+
+    test "moving within a full reading pile is not blocked" do
+      user = insert(:user)
+      pile = fill_reading_pile(user, 50)
+
+      placement =
+        Placement
+        |> where([p], p.bookshelf_id == ^pile.id and is_nil(p.removed_at))
+        |> limit(1)
+        |> Repo.one!()
+
+      # A same-bookshelf "move" does not add a book, so the cap must not fire.
+      assert {:ok, %{placement: _}} = Shelving.move_book(placement.id, user.id, "reading_pile")
+      assert active_pile_count(user.id) == 50
+    end
+
+    test "two concurrent placements cannot exceed the cap" do
+      # NOTE: under the SQL sandbox both tasks share the test's DB connection,
+      # so their transactions serialize here regardless of the FOR UPDATE lock.
+      # This test proves the end-to-end invariant (never > 50); the
+      # cross-connection race itself is closed by the documented
+      # SELECT ... FOR UPDATE on the bookshelf row in the capacity check.
+      user = insert(:user)
+      fill_reading_pile(user, 49)
+      owner = self()
+
+      results =
+        [insert(:book), insert(:book)]
+        |> Enum.map(fn book ->
+          Task.async(fn ->
+            Sandbox.allow(Repo, owner, self())
+            Shelving.place_book(user.id, book.id, "reading_pile")
+          end)
+        end)
+        |> Task.await_many()
+
+      assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(results, &match?({:error, :reading_pile_full}, &1)) == 1
+      assert active_pile_count(user.id) == 50
+    end
   end
 
   describe "remove_book/2" do
@@ -147,6 +446,10 @@ defmodule Stacks.ShelvingTest do
     test "sets removed_at on the placement", %{user: user, placement: placement} do
       assert {:ok, removed} = Shelving.remove_book(placement.id, user.id)
       assert removed.removed_at != nil
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.remove_book(Ecto.UUID.generate(), user.id)
     end
 
     test "placement no longer appears in bookshelf listing after removal", %{
@@ -166,9 +469,53 @@ defmodule Stacks.ShelvingTest do
 
       assert event_count("placement.removed") == before_count + 1
     end
+
+    test "writes an audit-log entry for the removal (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.removed")
+
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert audit_count("placement.removed") == before_count + 1
+
+      row = latest_audit_row("placement.removed")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.removed and ONLY that (no created/moved delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      moved_before = event_count("placement.moved")
+
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.moved") == moved_before
+    end
+
+    test "the underlying op.books record survives the soft-delete", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      # Placement is soft-deleted (removed_at set, row present)...
+      soft_deleted = Repo.get!(Placement, placement.id)
+      assert soft_deleted.removed_at != nil
+
+      # ...but the book row is untouched (remove is not a hard delete of the book).
+      assert Repo.get(Stacks.Books.Book, book.id) != nil
+    end
   end
 
-  describe "reread_book/1" do
+  describe "reread_book/2" do
     setup do
       user = insert(:user)
       # Use a non-library bookshelf so reread can create a fresh library placement
@@ -179,15 +526,15 @@ defmodule Stacks.ShelvingTest do
     end
 
     test "creates a new placement on the library bookshelf", %{user: user, placement: placement} do
-      assert {:ok, new_placement} = Shelving.reread_book(placement.id)
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
       assert new_placement.book_id == placement.book_id
 
       library_bookshelf = Repo.get_by(Bookshelf, user_id: user.id, name: "library")
       assert new_placement.bookshelf_id == library_bookshelf.id
     end
 
-    test "new placement is separate from the original", %{placement: placement} do
-      assert {:ok, new_placement} = Shelving.reread_book(placement.id)
+    test "new placement is separate from the original", %{user: user, placement: placement} do
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
       refute new_placement.id == placement.id
     end
 
@@ -196,7 +543,7 @@ defmodule Stacks.ShelvingTest do
       bookshelf: bookshelf,
       placement: placement
     } do
-      assert {:ok, _new_placement} = Shelving.reread_book(placement.id)
+      assert {:ok, _new_placement} = Shelving.reread_book(placement.id, user.id)
 
       library_bookshelf = Repo.get_by(Bookshelf, user_id: user.id, name: "library")
 
@@ -210,12 +557,54 @@ defmodule Stacks.ShelvingTest do
       assert history != nil
     end
 
-    test "emits placement.reread event", %{placement: placement} do
+    test "emits placement.reread event", %{user: user, placement: placement} do
       before_count = event_count("placement.reread")
 
-      Shelving.reread_book(placement.id)
+      Shelving.reread_book(placement.id, user.id)
 
       assert event_count("placement.reread") == before_count + 1
+    end
+
+    test "writes an audit-log entry for the re-read (:audit Multi step)", %{
+      user: user,
+      placement: placement
+    } do
+      before_count = audit_count("placement.reread")
+
+      assert {:ok, new_placement} = Shelving.reread_book(placement.id, user.id)
+
+      assert audit_count("placement.reread") == before_count + 1
+
+      # The :audit step logs the NEW library placement do_reread_book/2 creates
+      # (resource_id: p.id, where p is the inserted placement), not the original.
+      row = latest_audit_row("placement.reread")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(new_placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    test "emits placement.reread and ONLY that (no created/moved/removed delta)", %{
+      user: user,
+      placement: placement
+    } do
+      created_before = event_count("placement.created")
+      moved_before = event_count("placement.moved")
+      removed_before = event_count("placement.removed")
+
+      assert {:ok, _} = Shelving.reread_book(placement.id, user.id)
+
+      assert event_count("placement.created") == created_before
+      assert event_count("placement.moved") == moved_before
+      assert event_count("placement.removed") == removed_before
+    end
+
+    test "returns :unauthorized when the user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+      assert {:error, :unauthorized} = Shelving.reread_book(placement.id, other_user.id)
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.reread_book(Ecto.UUID.generate(), user.id)
     end
   end
 
@@ -233,6 +622,62 @@ defmodule Stacks.ShelvingTest do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.abandon_book(placement.id, other_user.id)
     end
+
+    test "abandon_book surfaces the book on the looking_for_home browse and off the source" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      assert {:ok, _} = Shelving.abandon_book(placement.id, user.id)
+
+      assert book.id in browse_book_ids(user.id, "looking_for_home")
+      refute book.id in browse_book_ids(user.id, "reading_pile")
+    end
+
+    test "a step failure rolls back the abandon (no history, event, or audit, placement unmoved)" do
+      # abandon_book delegates to move_book(_, _, "looking_for_home"); force the
+      # same deterministic update-step failure via the active-placement unique
+      # index (the book is already active on looking_for_home).
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, source} = Shelving.place_book(user.id, book.id, "reading_pile")
+      {:ok, _blocker} = Shelving.place_book(user.id, book.id, "looking_for_home")
+
+      events_before = event_count("placement.moved")
+      audits_before = audit_count("placement.moved")
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      assert {:error, :placement, %Ecto.Changeset{}, _changes} =
+               Shelving.abandon_book(source.id, user.id)
+
+      unmoved = Repo.get!(Placement, source.id) |> Repo.preload(:bookshelf)
+      assert unmoved.bookshelf.name == "reading_pile"
+      assert event_count("placement.moved") == events_before
+      assert audit_count("placement.moved") == audits_before
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+  end
+
+  describe "shelf_changeset/2 — unique (bookshelf_id, position) constraint (Fix A)" do
+    test "a duplicate (bookshelf_id, position) insert returns {:error, changeset}, not a raise" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      # First shelf at position 0.
+      insert(:shelf, bookshelf: bookshelf, position: 0)
+
+      # A second insert at the same (bookshelf_id, position) must surface the DB
+      # partial-unique index as a changeset error. Without the declared
+      # unique_constraint, Repo.insert RAISES Ecto.ConstraintError — which is
+      # exactly what breaks get_or_create_default_shelf/1's `{:error, _} -> get_by!`
+      # race fallback.
+      result =
+        %Stacks.Shelving.Shelf{}
+        |> Shelving.shelf_changeset(%{bookshelf_id: bookshelf.id, position: 0})
+        |> Repo.insert()
+
+      assert {:error, %Ecto.Changeset{} = changeset} = result
+      assert %{bookshelf_id: [_]} = errors_on(changeset)
+    end
   end
 
   describe "remove_book/2 — unauthorized" do
@@ -241,6 +686,29 @@ defmodule Stacks.ShelvingTest do
     test "returns :unauthorized when user does not own the placement", %{placement: placement} do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.remove_book(placement.id, other_user.id)
+    end
+  end
+
+  describe "update_placement_formats/3" do
+    setup :setup_user_bookshelf_book
+
+    test "updates the formats list for an owned placement", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_placement_formats(placement.id, user.id, ["hardcover"])
+
+      assert updated.formats == ["hardcover"]
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} =
+               Shelving.update_placement_formats(Ecto.UUID.generate(), user.id, ["hardcover"])
+    end
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.update_placement_formats(placement.id, other_user.id, ["hardcover"])
     end
   end
 
@@ -611,6 +1079,52 @@ defmodule Stacks.ShelvingTest do
       assert %{reading_status: [_]} = errors_on(changeset)
     end
 
+    test "rejects current_page above the known primary-edition page count", %{user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:error, changeset} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 999_999
+               })
+
+      assert %{current_page: [_]} = errors_on(changeset)
+    end
+
+    test "accepts current_page equal to the known page count (boundary)", %{user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 112
+               })
+
+      assert updated.current_page == 112
+    end
+
+    test "permits any current_page when the page count is unknown", %{
+      user: user,
+      placement: placement
+    } do
+      # The setup book has no edition, so the primary-edition page count is
+      # unknown. The ceiling is permissive in that case — a reader is never
+      # blocked on missing catalogue metadata.
+      assert {:ok, updated} =
+               Shelving.update_reading_progress(placement.id, user.id, %{
+                 reading_status: "reading",
+                 current_page: 999_999
+               })
+
+      assert updated.current_page == 999_999
+    end
+
     test "emits placement.reading_started event on first reading transition", %{
       user: user,
       placement: placement
@@ -774,6 +1288,65 @@ defmodule Stacks.ShelvingTest do
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
+      :count
+    )
+  end
+
+  defp audit_count(action) do
+    Repo.aggregate(
+      from(a in "audit_log", prefix: "audit", where: a.action == ^action),
+      :count
+    )
+  end
+
+  # Newest audit row for an action, with its target columns. audit_log stores
+  # user_id/resource_id as DUMPED binary UUIDs (Audit.log/3 → encode_uuid), so
+  # callers compare against Ecto.UUID.dump!/1. Pins that a regression logging the
+  # right action with a nil/wrong resource_id/resource_type/user_id would fail.
+  defp latest_audit_row(action) do
+    Repo.one(
+      from(a in "audit_log",
+        prefix: "audit",
+        where: a.action == ^action,
+        order_by: [desc: a.occurred_at],
+        limit: 1,
+        select: %{rt: a.resource_type, rid: a.resource_id, uid: a.user_id}
+      )
+    )
+  end
+
+  # Fills the user's reading_pile bookshelf with `count` active placements,
+  # inserted directly (bypassing place_book) so over-limit grandfather
+  # scenarios can be staged. Returns the bookshelf.
+  defp fill_reading_pile(user, count) when count >= 1 do
+    bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+    shelf = insert(:shelf, bookshelf: bookshelf)
+
+    for _ <- 1..count do
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: insert(:book))
+    end
+
+    bookshelf
+  end
+
+  # Returns the book_ids visible on a bookshelf's browse — i.e. reached through
+  # its PHYSICAL shelves (op.shelves, #151), exactly as get_bookshelf_shelves/2
+  # feeds the browse UI. A placement whose shelf_id points at the source
+  # bookshelf after a move is invisible here even though bookshelf_id updated.
+  defp browse_book_ids(user_id, bookshelf_name) do
+    user_id
+    |> Shelving.get_bookshelf_shelves(bookshelf_name)
+    |> Enum.flat_map(& &1.placements)
+    |> Enum.map(& &1.book_id)
+  end
+
+  defp active_pile_count(user_id) do
+    Repo.aggregate(
+      from(p in Placement,
+        join: b in Bookshelf,
+        on: p.bookshelf_id == b.id,
+        where: b.user_id == ^user_id and b.name == "reading_pile" and is_nil(p.removed_at)
+      ),
       :count
     )
   end

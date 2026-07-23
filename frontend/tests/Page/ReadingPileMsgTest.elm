@@ -20,6 +20,10 @@ loadingModel =
     { books = Loading
     , showAgeGate = False
     , selectedBookId = Nothing
+    , token = Nothing
+    , cards = []
+    , saveState = NotAsked
+    , finishedPrompt = Nothing
     }
 
 

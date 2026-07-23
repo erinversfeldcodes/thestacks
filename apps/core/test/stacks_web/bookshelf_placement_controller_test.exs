@@ -8,13 +8,28 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
   use CoreWeb.ConnCase, async: true
 
+  import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Accounts.Guardian
+  alias Stacks.Shelving
+  alias Stacks.Shelving.PlacementHistory
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
+  end
+
+  # Book ids reachable on a bookshelf's browse — i.e. through its physical
+  # shelves (op.shelves, #151), exactly as BookshelfController.show feeds the UI.
+  # A placement whose shelf_id was not re-homed on a move is invisible here even
+  # if bookshelf_id updated, so this is the true browse-level assertion.
+  defp browse_book_ids(user_id, bookshelf_name) do
+    user_id
+    |> Shelving.get_bookshelf_shelves(bookshelf_name)
+    |> Enum.flat_map(& &1.placements)
+    |> Enum.map(& &1.book_id)
   end
 
   # ---------------------------------------------------------------------------
@@ -128,6 +143,19 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       conn = post(conn, "/api/bookshelves/library/placements", %{book_id: book.id})
       assert json_response(conn, 401)
     end
+
+    test "returns 422 with reading_pile_full code when the pile is at the 50 cap", %{conn: conn} do
+      user = insert(:user)
+      fill_reading_pile(user, 50)
+      book = insert(:book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/bookshelves/reading_pile/placements", %{book_id: book.id})
+
+      assert %{"error" => "reading_pile_full"} = json_response(conn, 422)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -188,6 +216,135 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       conn = put(conn, "/api/placements/#{placement.id}/move", %{bookshelf: "wishlist"})
       assert json_response(conn, 401)
     end
+
+    test "returns 422 with reading_pile_full code when moving into a full pile", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      fill_reading_pile(user, 50)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "reading_pile"})
+
+      assert %{"error" => "reading_pile_full"} = json_response(conn, 422)
+    end
+
+    test "returns 404 for a nonexistent placement id", %{conn: conn, user: user} do
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{Ecto.UUID.generate()}/move", %{bookshelf: "wishlist"})
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
+
+    test "returns 422 for an invalid bookshelf name", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "banana"})
+
+      assert %{"error" => "invalid bookshelf name"} = json_response(conn, 422)
+    end
+
+    test "accepts all five bookshelf names as move targets", %{conn: conn} do
+      for target <- ~w(library antilibrary wishlist reading_pile looking_for_home) do
+        user = insert(:user)
+        book = insert(:book)
+        # Seed via place_book so the placement has a real shelf; a fresh user's
+        # reading_pile is empty, so the 50-cap never trips on a single move.
+        {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
+
+        moved =
+          conn
+          |> auth_conn(user)
+          |> put("/api/placements/#{placement.id}/move", %{bookshelf: target})
+
+        assert %{"placement" => _} = json_response(moved, 200)
+      end
+    end
+
+    test "moving to the current bookshelf is a 200 no-op that writes no history", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      history_before = Repo.aggregate(PlacementHistory, :count)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "library"})
+
+      assert %{"placement" => moved} = json_response(conn, 200)
+      assert moved["id"] == placement.id
+      assert Repo.aggregate(PlacementHistory, :count) == history_before
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Abandon transition (US-1.6.2) — reuses PUT /move with {bookshelf: antilibrary}
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/placements/:id/move — abandon transition (US-1.6.2)" do
+    test "moving a reading_pile placement to antilibrary lands it on the antilibrary browse", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "reading_pile")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/move", %{bookshelf: "antilibrary"})
+
+      assert %{"placement" => _} = json_response(conn, 200)
+
+      assert book.id in browse_book_ids(user.id, "antilibrary")
+      refute book.id in browse_book_ids(user.id, "reading_pile")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Re-read via two sequential moves (US-1.6.3, punch #3)
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/placements/:id/move — re-read round-trip (US-1.6.3)" do
+    # Decision (punch #3): the re-read journey is modelled as two sequential move
+    # calls (library → reading_pile → library), NOT a dedicated endpoint.
+    # Shelving.reread_book/2 stays context-only (its own describe in ShelvingTest
+    # covers the direct API). Each move writes one PlacementHistory row, so a
+    # round-trip yields exactly two.
+    test "a library→reading_pile→library round-trip writes two history rows and ends in library",
+         %{
+           conn: conn
+         } do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      authed = auth_conn(conn, user)
+
+      out = put(authed, "/api/placements/#{placement.id}/move", %{bookshelf: "reading_pile"})
+      assert json_response(out, 200)
+
+      back = put(authed, "/api/placements/#{placement.id}/move", %{bookshelf: "library"})
+      assert json_response(back, 200)
+
+      history_count =
+        Repo.aggregate(from(h in PlacementHistory, where: h.book_id == ^book.id), :count)
+
+      assert history_count == 2
+      assert book.id in browse_book_ids(user.id, "library")
+      refute book.id in browse_book_ids(user.id, "reading_pile")
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -242,6 +399,23 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     test "returns 401 when not authenticated", %{conn: conn, placement: placement} do
       conn = delete(conn, "/api/placements/#{placement.id}")
       assert json_response(conn, 401)
+    end
+
+    test "DELETE on an already-removed placement is an idempotent 204 no-op", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      authed = auth_conn(conn, user)
+
+      first = delete(authed, "/api/placements/#{placement.id}")
+      assert response(first, 204)
+
+      # The soft-deleted row still exists, so a repeat DELETE re-finds it, passes
+      # ownership, re-stamps removed_at, and returns 204 again — idempotent, not
+      # a 404 or an error.
+      second = delete(authed, "/api/placements/#{placement.id}")
+      assert response(second, 204)
     end
   end
 
@@ -309,6 +483,13 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     test "returns 401 when not authenticated", %{conn: _conn, placement: placement} do
       conn = build_conn() |> put("/api/placements/#{placement.id}/formats", %{formats: []})
       assert json_response(conn, 401)
+    end
+
+    test "returns 404 for a nonexistent placement id", %{conn: conn} do
+      conn =
+        put(conn, "/api/placements/#{Ecto.UUID.generate()}/formats", %{formats: ["hardcover"]})
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
     end
   end
 
@@ -451,5 +632,34 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
       assert json_response(conn, 401)
     end
+
+    test "returns 422 with a current_page field error when the page exceeds the book's page count",
+         %{conn: conn, user: user} do
+      book = insert(:book)
+      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      conn =
+        put(conn, "/api/placements/#{placement.id}/progress", %{
+          reading_status: "reading",
+          current_page: 999_999
+        })
+
+      assert %{"errors" => %{"current_page" => [_ | _]}} = json_response(conn, 422)
+    end
+  end
+
+  # Fills the user's reading_pile bookshelf with `count` active placements,
+  # inserted directly so the 50-cap (#276) boundary can be staged.
+  defp fill_reading_pile(user, count) when count >= 1 do
+    bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
+    shelf = insert(:shelf, bookshelf: bookshelf)
+
+    for _ <- 1..count do
+      insert(:placement, bookshelf: bookshelf, shelf: shelf, book: insert(:book))
+    end
+
+    bookshelf
   end
 end

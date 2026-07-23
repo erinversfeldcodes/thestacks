@@ -8,17 +8,20 @@ module Page.Bookshelf.ReadingPile exposing
     )
 
 import Api
+import Browser.Dom
 import Components.AgeGate exposing (ageGate)
+import Components.PlacementCard as Card
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, button, div, p, text)
-import Html.Attributes exposing (attribute, class, style)
+import Html.Attributes exposing (attribute, class, id, style)
 import Html.Events exposing (onClick, onMouseEnter, stopPropagationOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers exposing (pickTexture)
+import Task
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
-import Types.Placement exposing (Placement)
+import Types.Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (Shelf)
 import Util.TestId exposing (testId)
@@ -28,6 +31,10 @@ type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
     , selectedBookId : Maybe String
+    , token : Maybe String
+    , cards : List Card.Model
+    , saveState : RemoteData Api.ProgressError ()
+    , finishedPrompt : Maybe String
     }
 
 
@@ -43,6 +50,12 @@ type Msg
     | BookHovered String
     | BookClicked Book
     | Deselect
+    | CardMsg String Card.Msg
+    | ProgressSaved String (Result Api.ProgressError Api.Progress)
+    | RecordReadRequested String
+    | RecordReadDone String (Result Api.MoveError ())
+    | FinishedPromptDismissed
+    | FocusReturned
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -58,7 +71,16 @@ init maybeToken =
                 Nothing ->
                     Cmd.none
     in
-    ( { books = Loading, showAgeGate = False, selectedBookId = Nothing }, cmd )
+    ( { books = Loading
+      , showAgeGate = False
+      , selectedBookId = Nothing
+      , token = maybeToken
+      , cards = []
+      , saveState = NotAsked
+      , finishedPrompt = Nothing
+      }
+    , cmd
+    )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -67,7 +89,11 @@ update msg model =
         BooksLoaded result ->
             case result of
                 Ok shelves ->
-                    ( { model | books = Success (List.concatMap .placements shelves) }, Cmd.none, NoOut )
+                    let
+                        placements =
+                            List.concatMap .placements shelves
+                    in
+                    ( { model | books = Success placements, cards = List.map Card.init placements }, Cmd.none, NoOut )
 
                 Err (Http.BadStatus 403) ->
                     ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
@@ -94,6 +120,155 @@ update msg model =
 
         Deselect ->
             ( { model | selectedBookId = Nothing }, Cmd.none, NoOut )
+
+        CardMsg placementId cardMsg ->
+            let
+                ( updatedCards, outMsgs ) =
+                    model.cards
+                        |> List.map
+                            (\c ->
+                                if c.placement.id == placementId then
+                                    Card.update cardMsg c
+
+                                else
+                                    ( c, Card.NoOut )
+                            )
+                        |> List.unzip
+
+                requestedCard =
+                    updatedCards
+                        |> List.filter (\c -> c.placement.id == placementId)
+                        |> List.head
+            in
+            if List.member Card.ProgressUpdateRequested outMsgs then
+                case ( requestedCard, model.token ) of
+                    ( Just c, Just token ) ->
+                        ( { model | cards = updatedCards, saveState = Loading }
+                        , Api.updateProgress c.placement.id
+                            { readingStatus = readingStatusToString c.draftStatus
+                            , currentPage = String.toInt c.draftPage
+                            }
+                            token
+                            (ProgressSaved c.placement.id)
+                        , NoOut
+                        )
+
+                    _ ->
+                        ( { model | cards = updatedCards }, Cmd.none, NoOut )
+
+            else if List.member Card.EditClosed outMsgs then
+                -- Form closed by Cancel: return focus to the card's status badge.
+                ( { model | cards = updatedCards }, focusBadge placementId, NoOut )
+
+            else
+                ( { model | cards = updatedCards }, Cmd.none, NoOut )
+
+        ProgressSaved placementId result ->
+            case result of
+                Ok progress ->
+                    let
+                        newCards =
+                            List.map
+                                (\c ->
+                                    if c.placement.id == placementId then
+                                        Card.init (Api.foldProgress c.placement progress)
+
+                                    else
+                                        c
+                                )
+                                model.cards
+
+                        prompt =
+                            if progress.readingStatus == Just Completed then
+                                Just placementId
+
+                            else
+                                model.finishedPrompt
+                    in
+                    -- Success closes the form (card re-init); return focus to the badge.
+                    ( { model | cards = newCards, saveState = Success (), finishedPrompt = prompt }
+                    , focusBadge placementId
+                    , NoOut
+                    )
+
+                Err (Api.ProgressRequestFailed err) ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Cmd.none, NoOut )
+
+                Err other ->
+                    -- Keep the form open (draft preserved) so the reader can fix it.
+                    ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Cmd.none, NoOut )
+
+        RecordReadRequested placementId ->
+            case model.token of
+                Just token ->
+                    ( model, Api.moveBook placementId "library" token (RecordReadDone placementId), NoOut )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        RecordReadDone placementId result ->
+            case result of
+                Ok _ ->
+                    ( { model
+                        | cards = List.filter (\c -> c.placement.id /= placementId) model.cards
+                        , books = removeFromBooks placementId model.books
+                        , finishedPrompt = Nothing
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err (Api.MoveHttpError err) ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+
+                Err Api.ReadingPileFull ->
+                    ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+
+        FinishedPromptDismissed ->
+            ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+
+        FocusReturned ->
+            ( model, Cmd.none, NoOut )
+
+
+focusBadge : String -> Cmd Msg
+focusBadge placementId =
+    Browser.Dom.focus ("reading-status-badge-" ++ placementId)
+        |> Task.attempt (\_ -> FocusReturned)
+
+
+{-| Clear the in-flight save flag on the matching card, keeping its edit form
+open and its draft intact so a failed save can be corrected and retried.
+-}
+clearSaving : String -> List Card.Model -> List Card.Model
+clearSaving placementId cards =
+    List.map
+        (\c ->
+            if c.placement.id == placementId then
+                Card.stopSaving c
+
+            else
+                c
+        )
+        cards
+
+
+removeFromBooks : String -> RemoteData Http.Error (List Placement) -> RemoteData Http.Error (List Placement)
+removeFromBooks placementId books =
+    case books of
+        Success placements ->
+            Success (List.filter (\p -> p.id /= placementId) placements)
+
+        other ->
+            other
 
 
 view : Model -> Html Msg
@@ -145,15 +320,83 @@ view model =
                             , div [ class "armchair__leg armchair__leg--br" ] []
                             ]
                         ]
+                    , viewProgressPanel model
                     ]
             ]
         ]
 
 
+{-| The reading-progress panel: one PlacementCard per book on the pile (status
+badge + inline edit), plus any save error and the "record this read?" bridge
+prompt raised when a book is marked Finished.
+-}
+viewProgressPanel : Model -> Html Msg
+viewProgressPanel model =
+    if List.isEmpty model.cards then
+        text ""
+
+    else
+        div [ class "reading-pile__progress", testId "reading-progress-panel" ]
+            (List.map viewCard model.cards
+                ++ [ viewSaveState model.saveState
+                   , viewFinishedPrompt model.finishedPrompt
+                   ]
+            )
+
+
+viewCard : Card.Model -> Html Msg
+viewCard card =
+    Html.map (CardMsg card.placement.id) (Card.view card)
+
+
+viewSaveState : RemoteData Api.ProgressError () -> Html Msg
+viewSaveState state =
+    case state of
+        Failure err ->
+            p
+                [ class "error"
+                , attribute "role" "alert"
+                , id "progress-error"
+                , testId "progress-error"
+                ]
+                [ text (Api.progressErrorMessage err) ]
+
+        _ ->
+            text ""
+
+
+viewFinishedPrompt : Maybe String -> Html Msg
+viewFinishedPrompt maybeId =
+    case maybeId of
+        Just placementId ->
+            div [ class "reading-pile__finished-prompt", testId "finished-read-prompt" ]
+                [ p [] [ text "Move to your Library and record this read?" ]
+                , button
+                    [ class "btn btn--primary"
+                    , onClick (RecordReadRequested placementId)
+                    , testId "record-read-btn"
+                    ]
+                    [ text "Move to Library" ]
+                , button
+                    [ class "btn btn--ghost"
+                    , onClick FinishedPromptDismissed
+                    ]
+                    [ text "Not now" ]
+                ]
+
+        Nothing ->
+            text ""
+
+
 viewBookPile : Maybe String -> List Placement -> Html Msg
 viewBookPile selectedBookId placements =
+    -- #276: no `List.take 50` here — deliberately removed. The 50-book cap is
+    -- enforced at the write path (Stacks.Shelving.reading_pile_limit/0), and
+    -- piles that already exceeded it are grandfathered: every book they hold
+    -- must render. A view-layer truncation would silently hide those books,
+    -- which was the original defect.
     div [ class "book-pile", attribute "role" "list" ]
-        (List.indexedMap (viewPiledBook selectedBookId) (List.take 50 placements))
+        (List.indexedMap (viewPiledBook selectedBookId) placements)
 
 
 viewPiledBook : Maybe String -> Int -> Placement -> Html Msg

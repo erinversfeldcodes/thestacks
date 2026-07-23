@@ -590,6 +590,44 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "GRANT SELECT ON op.source_health_checks TO stacks_dbt"
     end
 
+    test "suppresses the auto FK index when a single-column index already covers it" do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
+      feed_cache = Enum.find(manifest.tables, &(&1.table_name == "feed_cache"))
+
+      fields =
+        Descriptor.extract_fields(descriptor, feed_cache.proto_file, feed_cache.proto_message)
+
+      output = MigrationGenerator.generate_create_table(feed_cache, fields, "20260320000004")
+
+      # The explicit unique index (upsert conflict target) is kept.
+      assert output =~ "feed_cache_bookshelf_id_unique_index"
+      # The redundant auto FK index on the same single column is suppressed —
+      # a unique index on `[:bookshelf_id]` already covers FK lookups.
+      refute output =~ ~s|create index(:feed_cache, [:bookshelf_id]|
+    end
+
+    test "still emits the auto FK index when no single-column index covers the column" do
+      # post_comments has references_table overrides for post_id + author_id and
+      # no explicit index, so the auto FK indexes must still be emitted — the
+      # suppression is scoped to columns an explicit single-column index covers.
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
+      post_comments = Enum.find(manifest.tables, &(&1.table_name == "post_comments"))
+
+      fields =
+        Descriptor.extract_fields(
+          descriptor,
+          post_comments.proto_file,
+          post_comments.proto_message
+        )
+
+      output = MigrationGenerator.generate_create_table(post_comments, fields, "20260320000005")
+
+      assert output =~ ~s|create index(:post_comments, [:author_id]|
+      assert output =~ ~s|create index(:post_comments, [:post_id]|
+    end
+
     test "generates ADD COLUMN migration" do
       field = %{
         name: "new_field",

@@ -1,7 +1,9 @@
 # Issue #240: Platform/ops dashboard + trusted-client-IP metric
 
-> **Wave 2 of the #231 observability initiative — DEFERRED.** Do not start until the current
-> #118 + #231 epic ships its PR.
+> **Wave 2 of the #231 observability initiative — SHIPPED (absorbed by #249's stack).** The
+> platform/ops dashboard and the trusted-client-IP metric landed on the merged
+> `feat/wave2-observability` stack. Close-out audit 2026-07-23 (see Progress Notes). The prior
+> "DEFERRED — do not start" banner is stale.
 
 ## Summary
 The platform-health metrics are wired (rate-limit rejections by bucket, event emission/handler-errors,
@@ -82,7 +84,26 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); ra
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); excluded-spec families via firing tests.
 
 ## Dependencies
-#176/#206, circuit-breakers (merged). **Deferred: start after the current #118+#231 PR.**
+#176/#206, circuit-breakers (merged). Absorbed by #249's shipped `feat/wave2-observability` stack.
 
 ## Agent Assignment
 elixir-agent (dashboard + trusted-IP metric + tests). Reviewer: elixir-reviewer + platform-reviewer.
+
+## Progress Notes
+- **Verified absorbed by #249's shipped stack, close-out audit 2026-07-23.** Dashboard — `platform_ops.json`
+  panels the five existing families plus the new one: `stacks_rate_limit_rejected_count_total`,
+  `stacks_events_{emitted,handler_invoked,handler_error}_count_total` +
+  `stacks_events_dispatch_duration_milliseconds_bucket`, `stacks_fuse_state_state`,
+  `stacks_repo_query_duration_milliseconds_bucket` + `stacks_router_dispatch_stop_duration_milliseconds_bucket`,
+  `stacks_upload_terminal_count_total`, and `stacks_rate_limit_client_ip_count_total`. Trusted-IP metric —
+  emit `rate_limiter.ex:212` (`[:stacks, :rate_limit, :client_ip]`, bounded `source:` atom, no IP value),
+  registered `plugins/stacks.ex`; firing test `rate_limiter_test.exs:310-364` asserts
+  `source: :trusted_proxy` / `:remote_ip` and no IP in metadata — GREEN 2026-07-23. Drift/completeness —
+  `platform_ops_drift_test.exs` + `dashboard_completeness_test.exs` GREEN.
+- **Far-end signal:** the live Grafana render-gate (`e2e/tests/dashboards.spec.ts`, gated on `GRAFANA_URL`)
+  is **not reachable from this workspace** (no `GRAFANA_URL` in `.env`). Strongest available far-end
+  evidence: the ADR-021 push pipeline (VictoriaMetrics + Grafana) is LIVE in prod since 2026-07-17; per the
+  Test Audit 8/10 families were seen in VM after the preview E2E drive; the 2 undriven families
+  (`rate_limit_rejected`, `upload_terminal`) come from the rate-limit + upload/Modal specs excluded from the
+  preview drive and are covered by firing tests. **CLOSE-READY** (no open gaps; excluded-spec families and
+  far-end render verified by firing tests + prod-live pipeline, not re-driven from here).

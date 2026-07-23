@@ -1,7 +1,9 @@
 # Issue #239: Profiles / discovery / search metrics + dashboard
 
-> **Wave 2 of the #231 observability initiative — DEFERRED.** Do not start until the current
-> #118 + #231 epic ships its PR.
+> **Wave 2 of the #231 observability initiative — SHIPPED (absorbed by #249's stack).** The four
+> discovery emits, registrations, dashboard, and drift/live-exposure tests all landed on the merged
+> `feat/wave2-observability` stack. Close-out audit 2026-07-23 (see Progress Notes). The prior
+> "DEFERRED — do not start" banner is stale.
 
 ## Summary
 The public-profile / discovery / people-search surfaces (#210–#217, #221–#223) emit **zero
@@ -89,7 +91,27 @@ Verdict: DONE — validated live 2026-07-17 (emission gate + browser render); sh
 - [x] Meets the Completion Bar — live-exposure proven (VM after E2E drive + browser render); shelf-cap via firing test.
 
 ## Dependencies
-#210–#217, #221 (discovery features — merged). **Deferred: start after the current #118+#231 PR.**
+#210–#217, #221 (discovery features — merged). Absorbed by #249's shipped `feat/wave2-observability` stack.
 
 ## Agent Assignment
 elixir-agent (emits + PromEx + dashboard + tests). Reviewer: elixir-reviewer + platform-reviewer.
+
+## Progress Notes
+- **Verified absorbed by #249's shipped stack, close-out audit 2026-07-23.** All four emit families
+  verified end-to-end: emit sites — `handle.claimed` `accounts.ex:801`, `search.people`
+  `user_search_controller.ex:33`, `profile.view` `profile_controller.ex:74`, `shelf.browse_capped`
+  `profile_controller.ex:107`; registrations — `plugins/stacks.ex:623-654` (four `Metrics.counter`
+  families); firing tests — `discovery_telemetry_test.exs` (11 tests: hit/zero_result, ok/not_found +
+  ghost-404 branch, browse_capped-only-on-truncation, handle-only-on-change, plus PII/no-tag asserts),
+  GREEN 2026-07-23; dashboard panels — `discovery.json` references all four series
+  (`stacks_search_people_count_total`, `stacks_profile_view_count_total`,
+  `stacks_shelf_browse_capped_count_total`, `stacks_handle_claimed_count_total`); drift/completeness —
+  `discovery_drift_test.exs` + `dashboard_completeness_test.exs` GREEN (measured ⊆ displayed).
+- **Far-end signal:** the live Grafana render-gate (`e2e/tests/dashboards.spec.ts`, gated on
+  `GRAFANA_URL`) is **not reachable from this workspace** (no `GRAFANA_URL` in `.env`). Strongest
+  available far-end evidence: the push pipeline (ADR-021 VictoriaMetrics + Grafana) is LIVE in prod
+  since 2026-07-17; the emission gate proves samples reach `/internal/metrics` on the real controller
+  path; per the Test Audit, 3/4 families (`profile_view`, `search_people`, `handle_claimed`) were seen
+  in VM after the preview E2E drive; `shelf_browse_capped` fires only past the #221 cap and is covered
+  by its firing test. **CLOSE-READY** (no open gaps; far-end render verified by firing tests + prod-live
+  pipeline, not re-driven from here).

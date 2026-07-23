@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
-  E2E_PASSWORD,
   uniqueEmail,
-  registerViaApi,
-  fetchConfirmationToken,
-  signInViaForm,
+  mintSession,
+  injectSession,
   ensureBookOnLibrary,
+  type MintedSession,
 } from "./helpers";
 
 /**
@@ -27,8 +26,13 @@ import {
  * clicks everywhere, incl. settings); placing a book satisfies the onboarding
  * check before we drive the UI.
  *
- * Both require the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)
- * and test.skip cleanly without it, matching onboarding.spec / confirm-email.spec.
+ * Users are minted via POST /api/test/session (Issue #192) — one call that
+ * creates a confirmed user AND returns its session token, outside the `:auth`
+ * rate bucket. This replaces the register→confirmation-token→confirm→login
+ * dance (and its 429-backoff retry): the whole parallel suite shares the
+ * `:auth` budget (60/60s per IP), so fresh-user specs were flaky under load.
+ * Requires STACKS_E2E_TEST_HELPERS=1; tests skip cleanly without it, matching
+ * onboarding.spec / confirm-email.spec.
  */
 
 test.describe("GDPR — Export & Delete (live browser journeys)", () => {
@@ -36,13 +40,16 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     page,
     request,
   }) => {
-    const { email, token } = await registerAndConfirm(request, "e2e-gdpr-export");
+    const session = await mintSession(request, {
+      email: uniqueEmail("e2e-gdpr-export"),
+    });
     test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+      session === null,
+      "requires the /api/test/session helper (STACKS_E2E_TEST_HELPERS=1)"
     );
+    if (!session) return;
 
-    await signInAndSuppressOnboarding(page, email);
+    await landAuthenticated(page, session);
     await page.goto("/settings/privacy");
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
@@ -61,16 +68,21 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     page,
     request,
   }) => {
-    const { email, token } = await registerAndConfirm(request, "e2e-gdpr-delete");
+    const session = await mintSession(request, {
+      email: uniqueEmail("e2e-gdpr-delete"),
+    });
     test.skip(
-      token === null,
-      "requires the /api/test/confirmation-token helper (STACKS_E2E_TEST_HELPERS=1)"
+      session === null,
+      "requires the /api/test/session helper (STACKS_E2E_TEST_HELPERS=1)"
     );
+    if (!session) return;
 
-    await signInAndSuppressOnboarding(page, email);
+    await landAuthenticated(page, session);
 
     // Capture the live session token BEFORE deletion so we can prove the session
     // is actually invalidated afterwards (localStorage is cleared on logout).
+    // Read it back from localStorage (rather than trusting session.token) to
+    // prove the page really carries the injected session.
     const authToken = await page.evaluate(
       () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
     );
@@ -130,42 +142,17 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 });
 
 /**
- * Register a throwaway user via the API and confirm its email through the
- * test-helper token. Returns the email and the confirmation token (null when the
- * helper endpoint is unavailable, so the caller can test.skip).
- *
- * `/api/auth/register` is under the `:auth` rate bucket (60/60s per IP), shared
- * across the whole parallel suite, so a transient 429 burst is absorbed with a
- * bounded backoff-retry rather than failing the test outright.
+ * Land the browser authenticated as the minted user and suppress the
+ * onboarding overlay. A placement-free user gets the global onboarding modal,
+ * whose backdrop intercepts pointer events on every page (including settings);
+ * placing a book satisfies the onboarding check so the overlay stays hidden
+ * across reloads. (Minted users are placement-free, same as freshly-registered
+ * ones, so this handling is unchanged from the register+login version.)
  */
-async function registerAndConfirm(
-  request: APIRequestContext,
-  prefix: string
-): Promise<{ email: string; token: string | null }> {
-  const email = uniqueEmail(prefix);
-
-  let reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  for (let attempt = 1; attempt <= 4 && !reg.ok() && reg.status() === 429; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-    reg = await registerViaApi(request, { email, password: E2E_PASSWORD });
-  }
-  expect(reg.ok(), `register failed with HTTP ${reg.status()}`).toBeTruthy();
-
-  const token = await fetchConfirmationToken(request, email);
-  if (token === null) return { email, token: null };
-
-  const confirm = await request.get(`/api/auth/confirm/${token}`);
-  expect(confirm.ok()).toBeTruthy();
-  return { email, token };
-}
-
-/**
- * Sign the fresh user in and suppress the onboarding overlay. A placement-free
- * user gets the global onboarding modal, whose backdrop intercepts pointer
- * events on every page (including settings); placing a book satisfies the
- * onboarding check so the overlay stays hidden across reloads.
- */
-async function signInAndSuppressOnboarding(page: Page, email: string): Promise<void> {
-  await signInViaForm(page, email, E2E_PASSWORD);
+async function landAuthenticated(
+  page: Page,
+  session: MintedSession
+): Promise<void> {
+  await injectSession(page, session);
   await ensureBookOnLibrary(page);
 }

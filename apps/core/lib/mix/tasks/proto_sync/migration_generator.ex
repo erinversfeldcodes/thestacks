@@ -224,10 +224,20 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
 
   defp index_block(table) do
     overrides = Map.get(table, :field_overrides, %{})
+    explicit_indexes = Map.get(table, :indexes, [])
+
+    # Columns already served by an explicit single-column index. The auto FK
+    # index on such a column would be an exact duplicate (a single-column
+    # unique index — the upsert conflict target — fully covers FK lookups), so
+    # suppress it. Composite indexes are left alone: their leading column is a
+    # separate optimization decision, not an exact cover (Issue #266).
+    fk_columns_with_index =
+      for %{columns: [col]} <- explicit_indexes, into: MapSet.new(), do: col
 
     fk_lines =
       overrides
       |> Enum.filter(fn {_, override} -> Map.has_key?(override, :references_table) end)
+      |> Enum.reject(fn {field_name, _} -> MapSet.member?(fk_columns_with_index, field_name) end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
         # Foreign-key indexes are always non-unique, named implicitly by Ecto.
@@ -237,8 +247,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       end)
 
     explicit_lines =
-      table
-      |> Map.get(:indexes, [])
+      explicit_indexes
       |> Enum.map_join("\n", &format_index_line(&1, table))
 
     all_lines = [fk_lines, explicit_lines] |> Enum.reject(&(&1 == "")) |> Enum.join("\n")

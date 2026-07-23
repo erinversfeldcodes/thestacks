@@ -52,6 +52,9 @@ bookDetailInit =
     , previousVisibility = Types.Visibility.Platform
     , shelfCeiling = Types.Visibility.Public
     , visibilityState = NotAsked
+    , progressCard = Nothing
+    , progressSaveState = NotAsked
+    , finishedReadPrompt = False
     }
 
 
