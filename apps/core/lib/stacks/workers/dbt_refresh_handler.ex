@@ -28,11 +28,13 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     # triggered run recomputes the affected book. Only mart_community_read_count
     # is mapped (mirroring moved): mart_platform_searchable derives from
     # int_book_detail_view, which does not reference placements, and books
-    # survive removal — searchability is unaffected. KNOWN LIMITATION: when a
-    # book's LAST active placement is removed the recompute yields no row for
-    # that book_id, so the delete+insert incremental strategy leaves the prior
-    # non-zero row (drop-to-zero needs a --full-refresh); pre-existing, tracked
-    # in issues/279-mart-read-count-drop-to-zero-staleness.md, not fixed here.
+    # survive removal — searchability is unaffected. Last-placement removal is
+    # handled by the mart's tombstone semantics (issues/279): the model
+    # aggregates over ALL placements and counts active ones via a FILTER, so a
+    # book whose LAST active placement is removed enters the incremental batch
+    # (remove_book bumps updated_at) and recomputes to a read_count = 0 row,
+    # which delete+insert uses to replace the stale non-zero row — drop-to-zero
+    # no longer requires a --full-refresh.
     "placement.removed" => ["mart_community_read_count"]
   }
 
