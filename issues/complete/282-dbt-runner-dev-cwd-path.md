@@ -47,9 +47,9 @@ n/a — dev tooling defect.
 | others | no | n/a |
 
 ## Definition of Done
-- [ ] dbt_dir resolves correctly from any cwd — evidence: live-drive log without `Could not cd`
-- [ ] Regression guard — evidence: test/doctor check
-- [ ] `just verify` passes
+- [x] dbt_dir resolves correctly from any cwd — evidence: module-__DIR__-anchored default (commit f99d6c5f); repo-root live drive: placement event -> DbtRefreshJob 'selective refresh complete', dbt PASS=2, zero `Could not cd`
+- [x] Regression guard — evidence: `Core.DbtRunnerConfigTest` resolves from a neutral cwd and asserts dbt_project.yml presence; demonstrated red against the old default, green after
+- [x] `just verify` passes — evidence: final `just ci` all groups PASS; dockle local caveat only
 
 ## Dependencies
 None. Sibling of #278 (same defect class).

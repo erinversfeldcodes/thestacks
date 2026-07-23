@@ -58,10 +58,10 @@ n/a — hardening of shipped features (each behaviour exists; this aligns edges)
 | others | no | n/a |
 
 ## Definition of Done
-- [ ] All placement ops return `{:error, :not_found}` (no context-layer raises) — evidence: tests
-- [ ] `primary_edition/1` deterministic with test — evidence: test name + output
-- [ ] Full-pile message on the direct-place path — evidence: elm test + live-drive artifact
-- [ ] `just verify` passes
+- [x] All placement ops return `{:error, :not_found}` (no context-layer raises) — evidence: remove_book/update_placement_formats/move_placement_to_shelf converted tests-first (8 pre-impl failures captured); controller 404s asserted; full suite 2840/0 (commit 0daf4583)
+- [x] `primary_edition/1` deterministic with test — evidence: is_primary desc + created_at/id tiebreak in both clauses; 3 tests (query repeatability, in-memory order-independence, explicit-primary-wins) in books_test.exs, green in 2840/0
+- [x] Full-pile message on the direct-place path — evidence: Api.PlaceError + all 3 placeBook consumers; elm-program tests (963/0); live-drive screenshot delivered (catalogue picker -> Reading Pile at 50 -> message rendered, 2026-07-23)
+- [x] `just verify` passes — evidence: final `just ci` all groups PASS; dockle local caveat only
 
 ## Dependencies
 Follows #116 (this branch). Item 3 relates to #276 (shipped).

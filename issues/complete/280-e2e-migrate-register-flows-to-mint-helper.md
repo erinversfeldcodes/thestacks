@@ -53,10 +53,10 @@ n/a — test-infrastructure. The helper exists and is proven (#192, #116 Phase 5
 | 1–13 app layers | no | n/a — no app surface changed |
 
 ## Definition of Done
-- [ ] All non-auth-testing fresh-user specs use mintSession — evidence: grep + diff
-- [ ] Two consecutive full preview chromium runs, zero auth-bucket failures — evidence: run outputs
-- [ ] Seed-data guarantee for pile-cap and progress specs — evidence: assertion or seed diff
-- [ ] `just verify` passes
+- [x] All non-auth-testing fresh-user specs use mintSession — evidence: 8 specs migrated / 5 keeps classified (commit 6a8a4304, net -219 lines); local run 42 passed / 2 legitimate pre-existing mailbox skips
+- [x] Two consecutive full preview chromium runs, zero auth-bucket failures — evidence: runs A (218 passed) + B (217 passed) back-to-back 2026-07-23, `grep -c '429|login failed'` = 0 across both; residual rotating failures are preview-VM 502/timeout class, each green in the sibling run, documented in #269
+- [x] Seed-data guarantee for pile-cap and progress specs — evidence: `assertSeedOrSkip` env-gated hard-fail (`E2E_EXPECT_FULL_SEEDS=1`), proven in both polarities locally and enforced on the preview runs
+- [x] `just verify` passes — evidence: final `just ci` all groups PASS (incl. semgrep 0 findings over the migrated specs); dockle local caveat only
 
 ## Dependencies
 - #192 (helper, shipped). Coordinate with #269 (zero-skips CI E2E).

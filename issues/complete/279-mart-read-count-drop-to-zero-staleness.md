@@ -67,10 +67,10 @@ Whichever lands: keep the singular test green under incremental maintenance, and
 | 1–13 others | no | n/a — no app-code surface expected |
 
 ## Definition of Done
-- [ ] Last-placement removal reflected in `mart_community_read_count` on the next incremental run — evidence: test + a live-triggered observation
-- [ ] `test_mart_community_read_count_excludes_removed` passes under incremental maintenance — evidence: dbt test run after an incremental cycle exercising the case
-- [ ] `dbt_refresh_handler.ex` KNOWN LIMITATION comment updated — evidence: diff
-- [ ] `just verify` passes — evidence: output
+- [x] Last-placement removal reflected in `mart_community_read_count` on the next incremental run — evidence: FILTER-based tombstone rewrite; dev-DB incremental cycle observed 1→0 (and restored 0→1) via `dbt run --select mart_community_read_count` with NO --full-refresh (2026-07-23)
+- [x] `test_mart_community_read_count_excludes_removed` passes under incremental maintenance — evidence: post-cycle `dbt test --select ...` 5/5 PASS; full `dbt test` 237/237
+- [x] `dbt_refresh_handler.ex` KNOWN LIMITATION comment updated — evidence: diff in be6dcc80 (tombstone behaviour described)
+- [x] `just verify` passes — evidence: final `just ci` on the settled tree 2026-07-23: all groups PASS (elixir 2840/0, dbt run+test+checkpoint) except the documented dockle-needs-local-Docker caveat
 
 ## Dependencies
 - Follows #116 Phase 6 (`placement.removed` → DbtRefreshHandler wiring).
