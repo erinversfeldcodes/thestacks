@@ -16,32 +16,6 @@ defmodule Stacks.Feeds do
   @atom_ns "http://www.w3.org/2005/Atom"
 
   @doc """
-  Generates an Atom 1.0 XML feed for the given user's bookshelf.
-
-  Only bookshelves with `visibility: "platform"` are eligible.
-  Returns `{:ok, xml_string, etag}` on success, or `{:error, reason}` on failure.
-
-  The ETag is an MD5 hash of the generated XML, hex-encoded in lowercase.
-  """
-  @spec generate_atom(binary(), String.t()) ::
-          {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
-  def generate_atom(user_id, bookshelf_name) do
-    case Shelving.get_bookshelf(user_id, bookshelf_name) do
-      nil ->
-        {:error, :not_found}
-
-      %{visibility: visibility} when visibility != "platform" ->
-        {:error, :not_public}
-
-      bookshelf ->
-        placements = Shelving.get_bookshelf_books(user_id, bookshelf_name)
-        xml = build_atom_xml(bookshelf, placements)
-        etag = compute_etag(xml)
-        {:ok, xml, etag}
-    end
-  end
-
-  @doc """
   Computes an ETag string from XML content.
 
   Uses MD5 hashing, hex-encoded in lowercase.
@@ -60,6 +34,10 @@ defmodule Stacks.Feeds do
   result. Because the stored etag is the pure MD5 of the stored XML, a `304`
   holds identically across a cache hit and a miss-fill.
 
+  The cache is an optimization, not a correctness dependency: if the miss-fill
+  write fails, the freshly-rendered XML is still served (the failure is logged),
+  so a public read never 500s on a cache-write error.
+
   Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
   """
   @spec fetch_feed(binary(), String.t()) ::
@@ -68,7 +46,7 @@ defmodule Stacks.Feeds do
     with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
       case get_cached(bookshelf.id) do
         {:ok, xml, etag} -> {:ok, xml, etag}
-        :miss -> render_and_cache(bookshelf)
+        :miss -> render_and_serve(bookshelf)
       end
     end
   end
@@ -82,13 +60,24 @@ defmodule Stacks.Feeds do
   surface `{:error, :not_public}` / `{:error, :not_found}` for the caller to
   translate into skip/cancel.
 
-  Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
+  Because filling the cache *is* the job here (unlike the read path), a failed
+  cache write surfaces as `{:error, {:cache_write_failed, changeset}}` so the
+  worker can retry rather than silently dropping the update.
+
+  Returns `{:ok, xml, etag}` or
+  `{:error, :not_found | :not_public | {:cache_write_failed, Ecto.Changeset.t()}}`.
   """
   @spec regenerate(binary(), String.t()) ::
-          {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
+          {:ok, String.t(), String.t()}
+          | {:error, :not_found | :not_public | {:cache_write_failed, Ecto.Changeset.t()}}
   def regenerate(user_id, bookshelf_name) do
     with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
-      render_and_cache(bookshelf)
+      {xml, etag} = render_feed(bookshelf)
+
+      case cache_writer().(bookshelf.id, xml, etag) do
+        {:ok, _entry} -> {:ok, xml, etag}
+        {:error, changeset} -> {:error, {:cache_write_failed, changeset}}
+      end
     end
   end
 
@@ -109,13 +98,19 @@ defmodule Stacks.Feeds do
   Upserts the `op.feed_cache` row for a bookshelf (one row per bookshelf).
 
   Conflicts on the unique `bookshelf_id` index replace the XML, etag, and
-  `updated_at` only. Returns `{:ok, entry}` or `{:error, changeset}`.
+  `updated_at` only. The changeset declares the `bookshelf_id` foreign-key
+  constraint, so a missing parent bookshelf (e.g. deleted between resolve and
+  write) returns `{:error, changeset}` rather than raising `Ecto.ConstraintError`.
+
+  Returns `{:ok, entry}` or `{:error, changeset}`.
   """
   @spec put_cache(binary(), String.t(), String.t()) ::
           {:ok, FeedCacheEntry.t()} | {:error, Ecto.Changeset.t()}
   def put_cache(bookshelf_id, xml, etag) do
-    Repo.insert(
-      %FeedCacheEntry{bookshelf_id: bookshelf_id, atom_xml: xml, etag: etag},
+    %FeedCacheEntry{}
+    |> Ecto.Changeset.change(bookshelf_id: bookshelf_id, atom_xml: xml, etag: etag)
+    |> Ecto.Changeset.foreign_key_constraint(:bookshelf_id)
+    |> Repo.insert(
       on_conflict: {:replace, [:atom_xml, :etag, :updated_at]},
       conflict_target: :bookshelf_id
     )
@@ -131,15 +126,38 @@ defmodule Stacks.Feeds do
     end
   end
 
-  defp render_and_cache(bookshelf) do
+  # Read-path miss-fill: render, attempt to fill the cache, and serve the fresh
+  # XML regardless of whether the write succeeds. The cache is an optimization,
+  # so a write failure is logged and swallowed rather than surfaced as an error.
+  defp render_and_serve(bookshelf) do
+    {xml, etag} = render_feed(bookshelf)
+
+    case cache_writer().(bookshelf.id, xml, etag) do
+      {:ok, _entry} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning(
+          "Feeds: feed_cache write failed for bookshelf=#{bookshelf.id}, serving fresh render: " <>
+            inspect(changeset.errors)
+        )
+    end
+
+    {:ok, xml, etag}
+  end
+
+  defp render_feed(bookshelf) do
     placements = Shelving.get_bookshelf_books(bookshelf.user_id, bookshelf.name)
     xml = build_atom_xml(bookshelf, placements)
     etag = compute_etag(xml)
+    {xml, etag}
+  end
 
-    case put_cache(bookshelf.id, xml, etag) do
-      {:ok, _entry} -> {:ok, xml, etag}
-      {:error, changeset} -> {:error, changeset}
-    end
+  # The cache writer is injectable (defaulting to `put_cache/3`) so tests can
+  # force a write failure deterministically — mirrors the `:*_client` seams
+  # used elsewhere in the core app.
+  defp cache_writer do
+    Application.get_env(:core, :feed_cache_writer, &put_cache/3)
   end
 
   defp build_atom_xml(bookshelf, placements) do

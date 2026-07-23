@@ -45,6 +45,15 @@ defmodule Stacks.Workers.RegenerateFeedJob do
         )
 
         {:cancel, "bookshelf not found"}
+
+      {:error, {:cache_write_failed, changeset}} ->
+        Logger.error(
+          "RegenerateFeedJob: feed_cache write failed for user=#{user_id} bookshelf=#{bookshelf_name}: #{inspect(changeset.errors)}"
+        )
+
+        # Filling the cache is the whole point of this job — surface the failure
+        # so Oban retries (max_attempts: 3) rather than dropping the update.
+        {:error, "feed cache write failed"}
     end
   end
 

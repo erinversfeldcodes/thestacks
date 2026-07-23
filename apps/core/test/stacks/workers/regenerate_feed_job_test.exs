@@ -101,6 +101,34 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
   end
 
   # ---------------------------------------------------------------------------
+  # perform/1 — cache write failure (Issue #266)
+  # ---------------------------------------------------------------------------
+
+  describe "perform/1 — cache write failure" do
+    test "returns {:error, _} so Oban retries when the cache write fails" do
+      user = insert(:user, profile_visibility: "platform")
+      _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      changeset =
+        %FeedCacheEntry{}
+        |> Ecto.Changeset.change(%{})
+        |> Ecto.Changeset.add_error(:bookshelf_id, "forced write failure")
+
+      Application.put_env(:core, :feed_cache_writer, fn _id, _xml, _etag ->
+        {:error, changeset}
+      end)
+
+      on_exit(fn -> Application.delete_env(:core, :feed_cache_writer) end)
+
+      assert {:error, _reason} =
+               perform_job(RegenerateFeedJob, %{
+                 "user_id" => user.id,
+                 "bookshelf_name" => "library"
+               })
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # perform/1 — non-existent user
   # ---------------------------------------------------------------------------
 

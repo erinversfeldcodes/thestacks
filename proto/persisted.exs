@@ -165,11 +165,11 @@
       migration_exists: true,
       dbt_grant: false,
       skip_dbt: true,
-      # NB: the generator auto-emits a non-unique FK index named
-      # `feed_cache_bookshelf_id_index` for the `references_table` override
-      # below, so the explicit unique index MUST use a distinct name to avoid a
-      # duplicate-relation collision. The unique index is the upsert conflict
-      # target (`ON CONFLICT (bookshelf_id)`).
+      # This single-column unique index on `bookshelf_id` is the upsert conflict
+      # target (`ON CONFLICT (bookshelf_id)`). Because it exactly covers the
+      # `references_table` FK column below, the generator suppresses the
+      # otherwise auto-emitted non-unique FK index (see MigrationGenerator
+      # `index_block/1`) — so only this one index is created (Issue #266).
       indexes: [
         %{
           name: "feed_cache_bookshelf_id_unique_index",

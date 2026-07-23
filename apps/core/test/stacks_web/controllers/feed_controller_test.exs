@@ -150,4 +150,44 @@ defmodule StacksWeb.FeedControllerTest do
       assert served_etag == ~s("#{row.etag}")
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Cache-write failure must not 500 the public endpoint (Issue #266)
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/feeds — cache write failure" do
+    test "still serves the fresh feed with a 200 (no 500) when the cache write fails",
+         %{conn: conn} do
+      user = insert(:user, display_name: "Erin")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      # Force the cache miss-fill to fail via the injected writer seam.
+      changeset =
+        %FeedCacheEntry{}
+        |> Ecto.Changeset.change(%{})
+        |> Ecto.Changeset.add_error(:bookshelf_id, "forced write failure")
+
+      Application.put_env(:core, :feed_cache_writer, fn _id, _xml, _etag ->
+        {:error, changeset}
+      end)
+
+      on_exit(fn -> Application.delete_env(:core, :feed_cache_writer) end)
+
+      conn = get(conn, "/api/feeds/#{user.id}/library")
+
+      assert conn.status == 200
+      assert String.contains?(conn.resp_body, "The Secret History")
+      assert {"content-type", content_type} = List.keyfind(conn.resp_headers, "content-type", 0)
+      assert String.contains?(content_type, "application/atom+xml")
+
+      # The write failed, so no cache row was persisted — the render was served
+      # directly, proving the cache is an optimization, not a hard dependency.
+      assert Repo.aggregate(
+               from(fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf.id),
+               :count
+             ) == 0
+    end
+  end
 end
